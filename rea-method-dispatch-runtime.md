@@ -1,8 +1,5 @@
 # Rea method dispatch runtime investigation
 
-Summary:
-- Qualified calls now compile to direct calls (Class_method(this, ...)) and work in disassembly.
-- A runtime stack underflow occurs at program start when executing method_calls.
 
 Next steps:
 - Ensure annotateTypes sets receiver expression types in statement contexts before compileStatement type checks.

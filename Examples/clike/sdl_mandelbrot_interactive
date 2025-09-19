@@ -8,7 +8,7 @@ const int Width = 1200;
 const int Height = 900;
 const int MaxIterations = 200;
 const int BytesPerPixel = 4;
-const int ScreenUpdateInterval = 16;
+const int ScreenUpdateInterval = 1; /* update every row for responsiveness */
 const double ZoomFactor = 2.0;
 const int ThreadCount = 4;
 const int ButtonLeft = 1;
@@ -34,10 +34,12 @@ double imFactor;
 int textureID;
 int rowMutex;
 int quitMutex;
+int abortMutex;
 int quit = 0;
 int redraw = 1;
 int prevButtons = 0;
 int clickButton = 0, clickX = 0, clickY = 0;
+int abortRender = 0;
 
 #ifdef SDL_ENABLED
 int getQuit() {
@@ -52,6 +54,33 @@ void setQuit(int v) {
     lock(quitMutex);
     quit = v;
     unlock(quitMutex);
+}
+
+int getAbortRender() {
+    int a;
+    lock(abortMutex);
+    a = abortRender;
+    unlock(abortMutex);
+    return a;
+}
+
+void setAbortRender(int v) {
+    lock(abortMutex);
+    abortRender = v;
+    unlock(abortMutex);
+}
+
+int tryInitFont(str path, int fontSize) {
+    /*
+     * getenv() in the VM returns an empty string when the variable is not
+     * present.  Comparing the string directly against NULL triggers a runtime
+     * type error because strings cannot be compared with NIL in CLike.  Treat
+     * an empty string as "not available" instead.
+     */
+    if (strlen(path) == 0) return 0;
+    if (!fileexists(path)) return 0;
+    inittextsystem(path, fontSize);
+    return 1;
 }
 
 /*
@@ -107,10 +136,10 @@ void computeRows(int startY, int endY) {
     int row[Width], x, y, n, R, G, B, idx;
     double c_im;
     for (y = startY; y <= endY && !getQuit(); y++) {
+        if (getAbortRender()) break;
         c_im = maxIm - y * imFactor;
         mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
-        lock(rowMutex);
         for (x = 0; x < Width; x++) {
             n = row[x];
             if (n == MaxIterations) { R = G = B = 0; }
@@ -125,6 +154,7 @@ void computeRows(int startY, int endY) {
             pixelData[idx + 3] = 255;
             idx += BytesPerPixel;
         }
+        lock(rowMutex);
         rowDone[y] = 1;
         unlock(rowMutex);
     }
@@ -139,20 +169,41 @@ void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 int main() {
 #ifdef SDL_ENABLED
     int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
+    int textReady;
+    const int fontSize = 18;
+    str envFontPath;
+    double reStep, imStep, centerRe, centerIm, zoomScale, newWidth, newHeight;
+    int keyCode;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
+    textReady = 0;
+    envFontPath = getenv("PSCAL_FONT_PATH");
+    if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/share/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/usr/local/share/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("/Library/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("../fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) textReady = tryInitFont("../../fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
+    if (!textReady) {
+        printf("Warning: Unable to locate Roboto font. Text rendering disabled.\n");
+    }
     textureID = createtexture(Width, Height);
     if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
     cleardevice(); updatescreen();
 
     rowMutex = mutex();
     quitMutex = mutex();
+    abortMutex = mutex();
 
     while (!getQuit()) {
         pollMouse();
 
         if (redraw) {
+            setAbortRender(0);
             maxIm = minIm + (maxRe - minRe) * Height / Width;
             reFactor = (maxRe - minRe) / (Width - 1);
             imFactor = (maxIm - minIm) / (Height - 1);
@@ -180,47 +231,57 @@ int main() {
 
             y = 0;
             while (y < Height && !getQuit()) {
-                int done, update;
+                if (getAbortRender()) break;
+                int done = 0;
+                int update = 0;
                 lock(rowMutex);
-                done = rowDone[y];
-                /*
-                 * "done" is stored as an integer in rowDone[y].  The logical
-                 * operators in CLike require both operands to be of the same
-                 * type (either both integers or both booleans).  The expression
-                 * on the right-hand side produces a boolean result, so we
-                 * explicitly compare "done" against zero to convert it to a
-                 * boolean before using the && operator.  This avoids a runtime
-                 * type error when mixing INTEGER and BOOLEAN values.
-                 */
-                update = ((done != 0) && (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1)) ? 1 : 0;
-                if (update)
-                    updatetexture(textureID, pixelData);
-                if (done)
-                    y++;
+                if (rowDone[y]) {
+                    done = 1;
+                    if (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1) {
+                        update = 1;
+                    }
+                }
                 unlock(rowMutex);
 
+                if (done)
+                    y++;
+
                 if (update) {
+                    /* Upload pixels after releasing rowMutex so worker threads stay busy. */
+                    updatetexture(textureID, pixelData);
                     cleardevice();
                     rendercopy(textureID);
                     updatescreen();
                 }
                 if (keypressed()) {
-                    char c = readkey();
-                    if (toupper(c) == 'Q') setQuit(1);
+                    keyCode = readkey();
+                    if (keyCode == 'q' || keyCode == 'Q') setQuit(1);
                 }
                 if (!done || update)
                     pollMouse();
+                if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
+                    setAbortRender(1);
+                    break;
+                }
             }
 
             for (i = 0; i < ThreadCount; i++)
                 join tid[i];
 
-            if (!getQuit()) {
-                updatetexture(textureID, pixelData);
-                cleardevice();
-                rendercopy(textureID);
-                updatescreen();
-                redraw = 0;
+            {
+                int aborted = getAbortRender();
+                setAbortRender(0);
+
+                if (!getQuit() && !aborted) {
+                    updatetexture(textureID, pixelData);
+                    cleardevice();
+                    rendercopy(textureID);
+                    if (textReady) {
+                        outtextxy(8, 8, "Rendering...");
+                    }
+                    updatescreen();
+                    redraw = 0;
+                }
             }
         }
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
@@ -250,29 +311,29 @@ int main() {
         }
 
         if (clickButton == ButtonLeft || clickButton == ButtonRight) {
-            /* Map pixel -> complex plane using current factors (center of pixel) */
-            double centerRe = minRe + (clickX + 0.5) * reFactor;
-            double centerIm = maxIm - (clickY + 0.5) * imFactor;
-            double widthRe  = (maxRe - minRe);
-            double heightIm = (maxIm - minIm);
+            /* Map pixel -> complex plane using current ranges (center of pixel). */
+            reStep = (maxRe - minRe) / (Width - 1);
+            imStep = (maxIm - minIm) / (Height - 1);
+            centerRe = minRe + (clickX + 0.5) * reStep;
+            centerIm = maxIm - (clickY + 0.5) * imStep;
+            zoomScale = (clickButton == ButtonLeft)
+                           ? (1.0 / ZoomFactor)
+                           : ZoomFactor;
+            newWidth = (maxRe - minRe) * zoomScale;
+            newHeight = (maxIm - minIm) * zoomScale;
 
-            printf("DBG zoom: button=%s click=(%d,%d) reFactor=%0.9f imFactor=%0.9f\n",
-                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY, reFactor, imFactor);
+            printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
+                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
+                   reStep, imStep);
             printf("DBG zoom: before minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
-            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f widthRe=%0.9f heightIm=%0.9f\n",
-                   centerRe, centerIm, widthRe, heightIm);
+            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f newWidth=%0.9f newHeight=%0.9f scale=%0.9f\n",
+                   centerRe, centerIm, newWidth, newHeight, zoomScale);
 
-            if (clickButton == ButtonLeft) {
-                widthRe  /= ZoomFactor;
-                heightIm /= ZoomFactor;
-            } else {
-                widthRe  *= ZoomFactor;
-                heightIm *= ZoomFactor;
-            }
-            minRe = centerRe - widthRe / 2.0;
-            maxRe = centerRe + widthRe / 2.0;
-            minIm = centerIm - heightIm / 2.0;
+            minRe = centerRe - newWidth / 2.0;
+            maxRe = centerRe + newWidth / 2.0;
+            minIm = centerIm - newHeight / 2.0;
+            maxIm = centerIm + newHeight / 2.0;
             printf("DBG zoom: after  minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
                    minRe, maxRe, minIm, maxIm);
 
@@ -281,6 +342,9 @@ int main() {
         }
     }
     destroytexture(textureID);
+    if (textReady) {
+        quittextsystem();
+    }
     closegraph();
     return 0;
 #else

@@ -19,16 +19,12 @@
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
+#include "vm/string_sentinels.h"
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
-
-// Special sentinel values used in pointer.base_type_node to signal
-// non-standard dereference behavior in GET_INDIRECT.
-#define STRING_CHAR_PTR_SENTINEL   ((AST*)0xDEADBEEF)
-#define STRING_LENGTH_SENTINEL     ((AST*)0xFEEDBEEF)
 
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
@@ -104,6 +100,7 @@ static void* threadStart(void* arg) {
     frame->return_address = NULL;
     frame->slots = vm->stack;
     frame->function_symbol = proc_symbol;
+    frame->slotCount = 0;
     frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
     frame->upvalues = NULL;
@@ -122,6 +119,7 @@ static void* threadStart(void* arg) {
     // If the callee expects parameters, push the provided start_arg as the first argument.
     // Push up to the number of expected parameters; coerce basic types as needed.
     int expected = proc_symbol && proc_symbol->type_def ? proc_symbol->type_def->child_count : argc;
+    int pushed_args = 0;
     for (int i = 0; i < expected && i < argc && i < 8; i++) {
         Value v = local_args[i];
         if (proc_symbol && proc_symbol->type_def) {
@@ -135,10 +133,17 @@ static void* threadStart(void* arg) {
             }
         }
         push(vm, v);
+        pushed_args++;
     }
 
     for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
         push(vm, makeNil());
+    }
+
+    if (proc_symbol) {
+        frame->slotCount = (uint16_t)(pushed_args + proc_symbol->locals_count);
+    } else {
+        frame->slotCount = (uint16_t)pushed_args;
     }
 
     interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
@@ -650,6 +655,22 @@ void runtimeError(VM* vm, const char* format, ...) {
     // ... (rest of runtimeError function, calls EXIT_FAILURE_HANDLER()) ...
 }
 
+static Value copyValueForStack(const Value* src) {
+    if (!src) {
+        return makeNil();
+    }
+
+    if (src->type == TYPE_MEMORYSTREAM) {
+        Value alias = *src;
+        if (alias.mstream) {
+            retainMStream(alias.mstream);
+        }
+        return alias;
+    }
+
+    return makeCopyOfValue(src);
+}
+
 static void push(VM* vm, Value value) { // Using your original name 'push'
     if (vm->stackTop - vm->stack >= VM_STACK_MAX) {
         runtimeError(vm, "VM Error: Stack overflow.");
@@ -776,6 +797,13 @@ static Value vmHostPrintf(VM* vm) {
                 i++;
             } else if (arg_index < arg_count) {
                 size_t j = i + 1;
+                // Parse minimal flags: support '0' for zero-padding
+                bool zero_pad = false;
+                while (j < flen) {
+                    if (fmt[j] == '0') { zero_pad = true; j++; continue; }
+                    // Ignore other flags for now ('-', '+', ' ', '#')
+                    break;
+                }
                 int width = 0;
                 int precision = -1;
                 while (j < flen && isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
@@ -807,14 +835,14 @@ static Value vmHostPrintf(VM* vm) {
                             u = (unsigned long long)AS_INTEGER(v);
                         }
                         bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
-                        if (precision >= 0 && width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
-                        else if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
-                        else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
-                        else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
+                if (precision >= 0 && width > 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
+                else if (precision >= 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
+                else if (width > 0)
+                    snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
+                else
+                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
 
                         // Cast to the correct type expected by the format length modifier
                         if (is_unsigned) {
@@ -862,7 +890,7 @@ static Value vmHostPrintf(VM* vm) {
                         else if (precision >= 0)
                             snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
                         else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%s%c", width, lenmod, spec);
+                            snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
                         else
                             snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
 
@@ -1043,7 +1071,7 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
             return INTERPRET_RUNTIME_ERROR;
         }
         Value returnValue = pop(vm);
-        safeReturnValue = makeCopyOfValue(&returnValue);
+        safeReturnValue = copyValueForStack(&returnValue);
         freeValue(&returnValue);
     }
 
@@ -1053,6 +1081,7 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
 
     vm->ip = currentFrame->return_address;
     vm->stackTop = currentFrame->slots;
+    currentFrame->slotCount = 0;
 
     if (currentFrame->upvalues) {
         free(currentFrame->upvalues);
@@ -1366,6 +1395,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         baseFrame->return_address = NULL;
         baseFrame->slots = vm->stack;
         baseFrame->function_symbol = NULL;
+        baseFrame->slotCount = 0;
         baseFrame->locals_count = 0;
         baseFrame->upvalue_count = 0;
         baseFrame->upvalues = NULL;
@@ -1395,12 +1425,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         /* String/char concatenation for ADD */ \
         if (current_instruction_code == ADD) { \
             while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
-                Value tmp = makeCopyOfValue(a_val_popped.ptr_val); \
+                Value tmp = copyValueForStack(a_val_popped.ptr_val); \
                 freeValue(&a_val_popped); \
                 a_val_popped = tmp; \
             } \
             while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
-                Value tmp = makeCopyOfValue(b_val_popped.ptr_val); \
+                Value tmp = copyValueForStack(b_val_popped.ptr_val); \
                 freeValue(&b_val_popped); \
                 b_val_popped = tmp; \
             } \
@@ -1622,7 +1652,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             }
             case CONSTANT: {
                 Value constant = READ_CONSTANT();
-                push(vm, makeCopyOfValue(&constant));
+                push(vm, copyValueForStack(&constant));
                 break;
             }
                 
@@ -1632,7 +1662,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Constant index %u out of bounds for CONSTANT16.", idx);
                    return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&vm->chunk->constants[idx]));
+                push(vm, copyValueForStack(&vm->chunk->constants[idx]));
                 break;
             }
 
@@ -1739,9 +1769,12 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case GET_LOCAL_ADDRESS: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots); // args + locals
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makePointer(&frame->slots[slot], NULL));
@@ -1814,7 +1847,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     runtimeError(vm, "VM Error: Stack underflow (dup from empty stack).");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&vm->stackTop[-1]));
+                push(vm, copyValueForStack(&vm->stackTop[-1]));
                 break;
             }
             case AND:
@@ -2129,6 +2162,34 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                                 runtimeError(vm, "VM Error: Unexpected enum comparison opcode %d.", instruction_val);
                                 freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                         }
+                    }
+                    comparison_succeeded = true;
+                }
+                // Memory stream and NIL comparison
+                else if ((a_val.type == TYPE_MEMORYSTREAM || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_MEMORYSTREAM || b_val.type == TYPE_NIL)) {
+                    MStream* ms_a = (a_val.type == TYPE_MEMORYSTREAM) ? a_val.mstream : NULL;
+                    MStream* ms_b = (b_val.type == TYPE_MEMORYSTREAM) ? b_val.mstream : NULL;
+                    bool streams_equal = false;
+                    if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
+                        streams_equal = true;
+                    } else if (a_val.type == TYPE_NIL) {
+                        streams_equal = (ms_b == NULL);
+                    } else if (b_val.type == TYPE_NIL) {
+                        streams_equal = (ms_a == NULL);
+                    } else {
+                        streams_equal = (ms_a == ms_b);
+                    }
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(streams_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!streams_equal);
+                    } else {
+                        runtimeError(vm,
+                                     "Runtime Error: Invalid operator for memory stream comparison. Only '=' and '<>' are allowed. Got opcode %d.",
+                                     instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
                 }
@@ -2723,7 +2784,7 @@ comparison_error_label:
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    push(vm, makeCopyOfValue(target_lvalue_ptr));
+                    push(vm, copyValueForStack(target_lvalue_ptr));
                 }
                 freeValue(&pointer_val);
                 break;
@@ -2803,7 +2864,7 @@ comparison_error_label:
                 if (vm->vmConstGlobalSymbols) {
                     sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
                     if (sym && sym->value) {
-                        push(vm, makeCopyOfValue(sym->value));
+                        push(vm, copyValueForStack(sym->value));
                         break;
                     }
                 }
@@ -2816,7 +2877,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makeCopyOfValue(sym->value));
+                push(vm, copyValueForStack(sym->value));
                 break;
             }
             case GET_GLOBAL16: {
@@ -2836,7 +2897,7 @@ comparison_error_label:
                 if (vm->vmConstGlobalSymbols) {
                     sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
                     if (sym && sym->value) {
-                        push(vm, makeCopyOfValue(sym->value));
+                        push(vm, copyValueForStack(sym->value));
                         break;
                     }
                 }
@@ -2849,7 +2910,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makeCopyOfValue(sym->value));
+                push(vm, copyValueForStack(sym->value));
                 break;
             }
             case SET_GLOBAL: {
@@ -2925,20 +2986,26 @@ comparison_error_label:
             case GET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(&frame->slots[slot]));
+                push(vm, copyValueForStack(&frame->slots[slot]));
                 break;
             }
             case SET_LOCAL: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
-                size_t frame_window = (size_t)(vm->stackTop - frame->slots);
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
                 if (slot >= frame_window) {
-                    runtimeError(vm, "VM Error: Local slot index %u out of range (frame window=%zu).", slot, frame_window);
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value* target_slot = &frame->slots[slot];
@@ -3026,7 +3093,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Upvalue index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeCopyOfValue(frame->upvalues[slot]));
+                push(vm, copyValueForStack(frame->upvalues[slot]));
                 break;
             }
             case SET_UPVALUE: {
@@ -3439,11 +3506,15 @@ comparison_error_label:
                     // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
-                            // The actual Value structs are on the stack and will be overwritten,
-                            // but we need to free any heap data they point to (like strings).
-                            freeValue(&args[i]);
+                        if (args[i].type == TYPE_POINTER) {
+                            // Pointer arguments reference caller-managed memory; do not dereference here.
+                            continue;
                         }
+
+                        // Arrays are copied when arguments are evaluated, so the VM owns the
+                        // temporary buffer on the stack.  Free it now to avoid leaking large
+                        // allocations (e.g., texture pixel buffers) on every builtin call.
+                        freeValue(&args[i]);
                     }
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
@@ -3456,9 +3527,10 @@ comparison_error_label:
                     // Cleanup stack even on error, preserving caller-owned arrays/pointers
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type != TYPE_ARRAY && args[i].type != TYPE_POINTER) {
-                            freeValue(&args[i]);
+                        if (args[i].type == TYPE_POINTER) {
+                            continue;
                         }
+                        freeValue(&args[i]);
                     }
                     return INTERPRET_RUNTIME_ERROR;
                 }
@@ -3492,6 +3564,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3553,6 +3626,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3582,6 +3657,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3642,6 +3718,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3691,6 +3769,7 @@ comparison_error_label:
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity - 1;
                 frame->vtable = vtable_arr;
+                frame->slotCount = 0;
 
                 Symbol* method_symbol = NULL;
                 const char* className = NULL;
@@ -3757,6 +3836,8 @@ comparison_error_label:
                     push(vm, makeNil());
                 }
 
+                frame->slotCount = (uint16_t)(declared_arity + 1 + method_symbol->locals_count);
+
                 vm->ip = vm->chunk->code + target_address;
                 break;
             }
@@ -3787,6 +3868,7 @@ comparison_error_label:
                 CallFrame* frame = &vm->frames[vm->frameCount++];
                 frame->return_address = vm->ip;
                 frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
 
                 Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
                 if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
@@ -3844,6 +3926,8 @@ comparison_error_label:
                 for (int i = 0; i < proc_symbol->locals_count; i++) {
                     push(vm, makeNil());
                 }
+
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
 
                 vm->ip = vm->chunk->code + target_address;
 

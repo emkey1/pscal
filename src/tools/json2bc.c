@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 
 #include "tools/ast_json_loader.h"
@@ -10,6 +11,7 @@
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
+#include "core/cache.h"
 #include "core/utils.h"
 
 int gParamCount = 0;
@@ -42,6 +44,59 @@ static void initSymbolSystemMinimal(void) {
     current_procedure_table = procedure_table;
 }
 
+static void predeclare_procedures(AST* node) {
+    if (!node) return;
+
+    // Create procedure/function symbols in the global procedure_table so that
+    // calls can be resolved and implementations compiled. Store a DEEP COPY of
+    // the declaration AST in sym->type_def as expected by freeProcedureTable().
+    if ((node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) &&
+        node->token && node->token->value) {
+        Symbol* sym = (Symbol*)malloc(sizeof(Symbol));
+        if (sym) {
+            memset(sym, 0, sizeof(Symbol));
+            sym->name = strdup(node->token->value);
+            if (!sym->name) { free(sym); sym = NULL; }
+        }
+        if (sym) {
+            // Normalize to lowercase for lookups
+            for (char* p = sym->name; *p; ++p) *p = (char)tolower((unsigned char)*p);
+            sym->type = (node->type == AST_FUNCTION_DECL) ? node->var_type : TYPE_VOID;
+
+            // Deep copy of the declaration; compiler and cleanup expect ownership
+            sym->type_def = copyAST(node);
+            if (!sym->type_def) {
+                free(sym->name);
+                free(sym);
+            } else {
+                // Basic metadata; arity from parameter groups if present
+                sym->arity = sym->type_def->child_count;
+                sym->is_inline = sym->type_def->is_inline;
+                sym->bytecode_address = -1;
+                sym->locals_count = 0;
+                sym->value = NULL;       // routines have no value payload
+                sym->is_alias = false;
+                sym->is_const = false;
+                sym->is_local_var = false;
+                sym->slot_index = -1;
+                sym->is_defined = true;  // definition present in this translation unit
+
+                // Ensure types are annotated on the copied decl for downstream use
+                annotateTypes(sym->type_def, NULL, sym->type_def);
+
+                hashTableInsert(procedure_table, sym);
+            }
+        }
+    }
+
+    if (node->left) predeclare_procedures(node->left);
+    if (node->right) predeclare_procedures(node->right);
+    if (node->extra) predeclare_procedures(node->extra);
+    for (int i = 0; i < node->child_count; i++) {
+        predeclare_procedures(node->children[i]);
+    }
+}
+
 int main(int argc, char** argv) {
     int dump_bc = 0, dump_only = 0;
     const char* in_path = NULL;
@@ -69,10 +124,21 @@ int main(int argc, char** argv) {
 
     AST* root = loadASTFromJSON(json);
     free(json);
-    if (!root) { fprintf(stderr, "Failed to parse AST JSON.\n"); return EXIT_FAILURE; }
+    if (!root) { fprintf(stderr, "Failed to parse AST JSON.\n");
+        // Best-effort: avoid leaving a stale or partial output file on failure.
+        if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
+        return EXIT_FAILURE; }
 
     initSymbolSystemMinimal();
     registerAllBuiltins();
+
+    // Frontends that dump AST JSON (like clike) typically represent function bodies
+    // as a single COMPOUND block without a separate declarations section. Enable
+    // dynamic-locals so the compiler discovers local variables declared inside
+    // the body and assigns them slots before use.
+    compilerEnableDynamicLocals(1);
+
+    predeclare_procedures(root);
 
     BytecodeChunk chunk; initBytecodeChunk(&chunk);
     bool ok = compileASTToBytecode(root, &chunk);
@@ -85,6 +151,7 @@ int main(int argc, char** argv) {
         freeTypeTable();
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+        if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
         return EXIT_FAILURE;
     }
 
@@ -102,19 +169,28 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Write raw bytecode to output
-    FILE* out = stdout;
+    // Write bytecode to output, preserving metadata so the VM can load it.
     if (out_path && strcmp(out_path, "-") != 0) {
-        out = fopen(out_path, "wb");
-        if (!out) { perror("open output"); freeBytecodeChunk(&chunk); freeAST(root); return EXIT_FAILURE; }
-    }
-    if (chunk.count > 0 && chunk.code) {
-        size_t written = fwrite(chunk.code, 1, (size_t)chunk.count, out);
-        if (written != (size_t)chunk.count) {
-            fprintf(stderr, "Short write: wrote %zu of %d bytes.\n", written, chunk.count);
+        if (!saveBytecodeToFile(out_path, in_path ? in_path : "<stdin>", &chunk)) {
+            fprintf(stderr, "Failed to write bytecode to %s\n", out_path);
+            freeBytecodeChunk(&chunk);
+            freeAST(root);
+            freeProcedureTable();
+            freeTypeTableASTNodes();
+            freeTypeTable();
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            return EXIT_FAILURE;
+        }
+    } else {
+        FILE* out = stdout;
+        if (chunk.count > 0 && chunk.code) {
+            size_t written = fwrite(chunk.code, 1, (size_t)chunk.count, out);
+            if (written != (size_t)chunk.count) {
+                fprintf(stderr, "Short write: wrote %zu of %d bytes.\n", written, chunk.count);
+            }
         }
     }
-    if (out != stdout) fclose(out);
 
     freeBytecodeChunk(&chunk);
     freeAST(root);

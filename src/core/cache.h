@@ -10,6 +10,7 @@ bool loadBytecodeFromCache(const char* source_path,
                            int dep_count,
                            BytecodeChunk* chunk);
 void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk);
+bool saveBytecodeToFile(const char* file_path, const char* source_path, const BytecodeChunk* chunk);
 bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk);
 
 // Build the canonical path for the cache file corresponding to a source path.

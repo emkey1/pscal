@@ -212,6 +212,7 @@ fi
 
 rm -rf "$tmp_home" "$src_dir"
 echo
+echo
 
 # Cache invalidation test when the Pascal binary is newer than the cache
 echo "---- CacheBinaryStalenessTest ----"

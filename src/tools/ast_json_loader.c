@@ -157,7 +157,7 @@ static AST* parse_ast_object(J* j) {
     int by_ref = 0, is_inline = 0, is_global_scope = 0;
     int i_val = 0;
     // Children to set after creating node
-    AST* left = NULL; AST* right = NULL; AST* extra = NULL;
+    AST* left = NULL; AST* right = NULL; AST* extra = NULL; AST* third = NULL;
     AST* program_name_node = NULL; AST* main_block = NULL;
     List* unit_list = NULL;
     // temp vectors for children
@@ -254,6 +254,9 @@ static AST* parse_ast_object(J* j) {
             program_name_node = parse_ast_node(j);
         } else if (strcmp(key, "main_block") == 0) {
             main_block = parse_ast_node(j);
+        } else if (strcmp(key, "third") == 0) {
+            // Some frontends emit a 'third' pointer (e.g., ternary). Treat it like 'extra'.
+            if (parse_null(j)) third = NULL; else third = parse_ast_node(j);
         } else if (strcmp(key, "uses_clauses") == 0) {
             if (!expect(j, '[')) { free(key); free(kids); return NULL; }
             while (1) {
@@ -300,6 +303,17 @@ static AST* parse_ast_object(J* j) {
         (void)expect(j, ',');
     }
 
+    // Some front ends (e.g. the C-like one) serialize function declarations
+    // with the function body stored in the "right" field rather than "extra"
+    // (which is what the Pascal compiler expects).  This leads to missing
+    // bodies during bytecode compilation and, in older builds, crashes.  Detect
+    // this layout and normalize it by moving the body to `extra` if needed.
+    if (node_type == AST_FUNCTION_DECL && extra == NULL && right &&
+        right->type == AST_COMPOUND) {
+        extra = right;
+        right = NULL;
+    }
+
     AST* node = newASTNode(node_type, tok);
     if (tok) { freeToken(tok); tok = NULL; }
     if (vtype != TYPE_UNKNOWN) setTypeAST(node, vtype);
@@ -314,14 +328,92 @@ static AST* parse_ast_object(J* j) {
     if (left) setLeft(node, left);
     if (right) setRight(node, right);
     if (extra) setExtra(node, extra);
+    if (!extra && third) setExtra(node, third);
     if (node->type == AST_BLOCK) {
         if (decls) set_child_index(node, 0, decls);
         if (body) set_child_index(node, 1, body);
+    }
+    // Normalize single-name VAR_DECL nodes (as produced by clike) to the
+    // Pascal shape: names as children, type on right. When token holds the
+    // declared identifier and there are no children yet, create a child node
+    // for the name and clear the VAR_DECL's own token to avoid confusion.
+    if (node->type == AST_VAR_DECL && node->token && node->child_count == 0) {
+        Token* nameTok = newToken(node->token->type,
+                                  node->token->value ? node->token->value : NULL,
+                                  node->token->line,
+                                  node->token->column);
+        AST* nameNode = newASTNode(AST_VARIABLE, nameTok);
+        if (nameTok) freeToken(nameTok);
+        addChild(node, nameNode);
+        // The node's 'right' already points to a type node when present in input.
+        freeToken(node->token);
+        node->token = NULL;
     }
     for (int i = 0; i < kids_count; i++) {
         addChild(node, kids[i]);
     }
     free(kids);
+
+    // Normalize cross-frontend differences:
+    // - clike uses 'exit([code])' to terminate the program; map it to the VM's
+    //   'halt' builtin so an optional exit code is supported. This avoids the
+    //   Pascal compiler's 'exit' semantics (function-exit) and related errors.
+    if (node->type == AST_PROCEDURE_CALL && node->token && node->token->value) {
+        if (strcasecmp(node->token->value, "exit") == 0) {
+            free(node->token->value);
+            node->token->value = strdup("halt");
+        }
+    }
+
+    // Ensure string literal contents use actual characters, not backslash escapes.
+    // Some producers double-escape within JSON; defensively unescape here.
+    if (node->type == AST_STRING && node->token && node->token->value) {
+        char* s = node->token->value;
+        char* w = s; // write index
+        for (char* r = s; *r; ++r) {
+            if (*r == '\\') {
+                r++;
+                if (!*r) break;
+                switch (*r) {
+                    case 'n': *w++ = '\n'; break;
+                    case 'r': *w++ = '\r'; break;
+                    case 't': *w++ = '\t'; break;
+                    case 'b': *w++ = '\b'; break;
+                    case 'f': *w++ = '\f'; break;
+                    case '"': *w++ = '"'; break;
+                    case '\\': *w++ = '\\'; break;
+                    case 'u': {
+                        // Basic \uXXXX handling (BMP only). If malformed, write literally.
+                        int h1 = hexval(*(r+1));
+                        int h2 = hexval(*(r+2));
+                        int h3 = hexval(*(r+3));
+                        int h4 = hexval(*(r+4));
+                        if (h1>=0 && h2>=0 && h3>=0 && h4>=0) {
+                            unsigned code = (h1<<12)|(h2<<8)|(h3<<4)|h4;
+                            r += 4;
+                            if (code < 0x80) { *w++ = (char)code; }
+                            else if (code < 0x800) { *w++ = (char)(0xC0 | (code>>6)); *w++ = (char)(0x80 | (code & 0x3F)); }
+                            else { *w++ = (char)(0xE0 | (code>>12)); *w++ = (char)(0x80 | ((code>>6)&0x3F)); *w++ = (char)(0x80 | (code&0x3F)); }
+                        } else {
+                            // Write literally if malformed
+                            *w++ = '\\';
+                            *w++ = 'u';
+                        }
+                        break;
+                    }
+                    default:
+                        // Unknown escape; keep as-is (drop backslash)
+                        *w++ = *r;
+                        break;
+                }
+            } else {
+                *w++ = *r;
+            }
+        }
+        *w = '\0';
+        // Update stored length if any users rely on token length
+        node->token->length = (int)strlen(node->token->value);
+    }
     return node;
 }
 
@@ -338,5 +430,44 @@ AST* loadASTFromJSON(const char* json_text) {
     J j = { json_text, 0, strlen(json_text) };
     skip_ws(&j);
     AST* root = parse_ast_node(&j);
+    if (root && root->type == AST_PROGRAM && !root->right && root->child_count > 0) {
+        AST* decls = newASTNode(AST_COMPOUND, NULL);
+        decls->children = root->children;
+        decls->child_count = root->child_count;
+        decls->child_capacity = root->child_count;
+        for (int i = 0; i < decls->child_count; i++) {
+            if (decls->children[i]) {
+                decls->children[i]->parent = decls;
+            }
+        }
+        root->children = NULL;
+        root->child_count = 0;
+        root->child_capacity = 0;
+
+        int hasMain = 0;
+        for (int i = 0; i < decls->child_count; i++) {
+            AST* c = decls->children[i];
+            if (c && (c->type == AST_FUNCTION_DECL || c->type == AST_PROCEDURE_DECL) &&
+                c->token && c->token->value && strcmp(c->token->value, "main") == 0) {
+                hasMain = 1;
+                break;
+            }
+        }
+
+        AST* body = newASTNode(AST_COMPOUND, NULL);
+        if (hasMain) {
+            Token* mainTok = newToken(TOKEN_IDENTIFIER, "main", 0, 0);
+            AST* call = newASTNode(AST_PROCEDURE_CALL, mainTok);
+            freeToken(mainTok);
+            addChild(body, call);
+        }
+
+        AST* block = newASTNode(AST_BLOCK, NULL);
+        block->is_global_scope = true;
+        addChild(block, decls);
+        addChild(block, body);
+        root->right = block;
+        block->parent = root;
+    }
     return root;
 }

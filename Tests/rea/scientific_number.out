@@ -1,0 +1,108 @@
+{
+
+  "node_type": "PROGRAM",
+  "var_type_annotated": "VOID",
+  "main_block": 
+  {
+
+    "node_type": "BLOCK",
+    "var_type_annotated": "VOID",
+    "is_global_scope": false,
+    "declarations": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID",
+      "children": [
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "REAL",
+          "left": 
+          {
+
+            "node_type": "NUMBER",
+            "token": {
+                "type": "REAL_CONST",
+                "value": "1e9"
+            },
+            "var_type_annotated": "REAL",
+            "i_val": 0
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "float"
+            },
+            "var_type_annotated": "REAL"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "big"
+              },
+              "var_type_annotated": "REAL"
+            }
+          ]
+        },
+        {
+
+          "node_type": "VAR_DECL",
+          "var_type_annotated": "REAL",
+          "left": 
+          {
+
+            "node_type": "NUMBER",
+            "token": {
+                "type": "REAL_CONST",
+                "value": "2.5e-3"
+            },
+            "var_type_annotated": "REAL",
+            "i_val": 0
+          }
+,
+          "right": 
+          {
+
+            "node_type": "TYPE_IDENTIFIER",
+            "token": {
+                "type": "IDENTIFIER",
+                "value": "float"
+            },
+            "var_type_annotated": "REAL"
+          }
+,
+          "children": [
+            {
+
+              "node_type": "VARIABLE",
+              "token": {
+                  "type": "IDENTIFIER",
+                  "value": "small"
+              },
+              "var_type_annotated": "REAL"
+            }
+          ]
+        }
+      ]
+    }
+,
+    "body": 
+    {
+
+      "node_type": "COMPOUND",
+      "var_type_annotated": "VOID"
+    }
+
+  }
+
+}
+

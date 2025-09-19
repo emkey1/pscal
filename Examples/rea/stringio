@@ -3,25 +3,25 @@
 // operations using writeln and printf.
 
 int main() {
-// Test string literals and concatenation
-str greeting = "Hello, ";
-str recipient = "world!";
-str fullMessage = greeting + recipient;
-writeln("Concatenated string: ", fullMessage);
+  // Test string literals and concatenation
+  str greeting = "Hello, ";
+  str recipient = "world!";
+  str fullMessage = greeting + recipient;
+  writeln("Concatenated string: ", fullMessage);
 
-// Test escape sequences
-str formattedMessage = "This is a new line.\nThis is a tab:\tHello!";
-writeln("\n--- Escape Sequence Test ---");
-writeln(formattedMessage);
+  // Test escape sequences
+  str formattedMessage = "This is a new line.\nThis is a tab:\tHello!";
+  writeln("\n--- Escape Sequence Test ---");
+  writeln(formattedMessage);
 
-// Test `printf` with a simple format string
-writeln("\n--- Printf Test ---");
-int integerValue = 123;
-float floatValue = 45.67;
-// Assuming `printf` handles format specifiers like in C.
-// The VM would need to support these.
-printf("The integer is %d and the float is %.2f\n", integerValue, floatValue);
+  // Test `printf` with a simple format string
+  writeln("\n--- Printf Test ---");
+  int integerValue = 123;
+  float floatValue = 45.67;
 
-return 0;
+  // Assuming `printf` handles format specifiers like in C.
+  // The VM would need to support these.
+  printf("The integer is %d and the float is %.2f\n", integerValue, floatValue);
 
+  return 0;
 }

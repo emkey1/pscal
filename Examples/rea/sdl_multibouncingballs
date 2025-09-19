@@ -198,5 +198,5 @@ class BallsApp {
 }
 
 BallsApp app = new BallsApp();
-BallsApp_run(app);
+app.run();
 

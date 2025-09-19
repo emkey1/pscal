@@ -103,6 +103,7 @@ START: High(byte): PASS
 START: Inc(Byte): PASS
 START: Dec(Byte, 5): PASS
 START: Assign Integer to Byte: PASS
+START: Byte(511): PASS
 
 --- Testing WORD ---
 START: Word Assign 0: PASS

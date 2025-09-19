@@ -12,6 +12,9 @@ CONST
   StatusUpdateInterval = 20; // Print status every 20 rows
   ScreenUpdateInterval = 1;  // Refresh SDL window every row
   MandelBytesPerPixel = 4;
+  RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
+  SystemFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  DefaultFontSize = 18;
 
 TYPE
   PixelBuffer = ARRAY[0..(WindowWidth * WindowHeight * MandelBytesPerPixel) - 1] OF Byte;
@@ -39,6 +42,8 @@ VAR
   BufferBaseIdx : Integer;
 
   PercentDone : Integer;
+  TextSystemInitialized : Boolean;
+  SelectedFontPath : String;
 
 BEGIN
   MinRe := -2.0;
@@ -53,7 +58,27 @@ BEGIN
   WriteLn('-----------------------------------------------------');
   // You could add a Delay(1000) here if you want users to definitely see the message
 
+  TextSystemInitialized := False;
+  SelectedFontPath := '';
+
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
+
+  IF FileExists(SystemFontPath) THEN
+    SelectedFontPath := SystemFontPath
+  ELSE IF FileExists(RepoFontPath) THEN
+    SelectedFontPath := RepoFontPath;
+
+  IF SelectedFontPath <> '' THEN
+  BEGIN
+    InitTextSystem(SelectedFontPath, DefaultFontSize);
+    TextSystemInitialized := True;
+    WriteLn('Initialized SDL text system with font: ', SelectedFontPath);
+  END
+  ELSE
+  BEGIN
+    WriteLn('Warning: Unable to locate a font file for SDL text rendering.');
+    WriteLn('SDL status text will be disabled for this session.');
+  END;
   MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
   IF MandelTextureID < 0 THEN
   BEGIN
@@ -101,20 +126,20 @@ BEGIN
 
       IF Iteration = MaxIterations THEN
       BEGIN
-        R := 0; G := 0; B := 0;
+        R := Byte(0); G := Byte(0); B := Byte(0);
       END
       ELSE
       BEGIN
-        R := (Iteration * 5) MOD 256;
-        G := (Iteration * 7 + 85) MOD 256;
-        B := (Iteration * 11 + 170) MOD 256;
+        R := Byte((Iteration * 5) MOD 256);
+        G := Byte((Iteration * 7 + 85) MOD 256);
+        B := Byte((Iteration * 11 + 170) MOD 256);
       END;
 
       BufferBaseIdx := (Py * ViewPixelWidth + Px) * MandelBytesPerPixel;
       PixelData[BufferBaseIdx + 0] := R;
       PixelData[BufferBaseIdx + 1] := G;
       PixelData[BufferBaseIdx + 2] := B;
-      PixelData[BufferBaseIdx + 3] := 255;
+      PixelData[BufferBaseIdx + 3] := Byte(255);
     END; // END FOR Px
 
     // Status Update Logic
@@ -135,6 +160,8 @@ BEGIN
       UpdateTexture(MandelTextureID, PixelData);
       ClearDevice;
       RenderCopy(MandelTextureID);
+      IF TextSystemInitialized THEN
+        OutTextXY(8, 8, 'Rendering...');
       UpdateScreen;
       GraphLoop(0);
     END;
@@ -153,5 +180,7 @@ BEGIN
   ReadKey;
 
   DestroyTexture(MandelTextureID);
+  IF TextSystemInitialized THEN
+    QuitTextSystem;
   CloseGraph;
 END.

@@ -200,13 +200,36 @@ Numeric builtins preserve integer types when all inputs are integral. In particu
 
 ## SDL graphics and audio
 
-These built-ins are available when Pscal is built with SDL support.
+These built-ins are available when Pscal is built with SDL support and can be
+imported from each front end (Pascal, CLike, and Rea).
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
 | initgraph | (width: Integer, height: Integer) | void | Initialize graphics. |
+| initgraph3d | (width: Integer, height: Integer, title: String, depthBits: Integer, stencilBits: Integer) | void | Initialize an OpenGL-backed SDL window with the requested depth and stencil buffer sizes. |
 | closegraph | () | void | Close graphics. |
+| closegraph3d | () | void | Close the OpenGL window and delete its context. |
 | graphloop | () | void | Poll events and delay. |
+| glbegin | (mode: String\|Integer) | void | Begin an immediate-mode primitive using the named GLenum (for example `"triangles"` or `"quads"`). |
+| glclear | (mask: Integer = GL_COLOR_BUFFER_BIT \| GL_DEPTH_BUFFER_BIT) | void | Clear buffers with `glClear`; defaults to color and depth. |
+| glclearcolor | (r: Real, g: Real, b: Real, a: Real) | void | Set the RGBA clear color. |
+| glcleardepth | (depth: Real) | void | Set the depth buffer clear value (clamped to 0..1). |
+| glcolor3f | (r: Real, g: Real, b: Real) | void | Set the current vertex color (components are clamped to 0..1). |
+| gldepthtest | (enable: Boolean) | void | Enable or disable depth testing. |
+| glend | () | void | End the current immediate-mode primitive. |
+| glloadidentity | () | void | Replace the current matrix with the identity matrix. |
+| glmatrixmode | (mode: String\|Integer) | void | Select the active matrix stack (`"projection"`, `"modelview"`, `"texture"`, or a raw GLenum). |
+| glpopmatrix | () | void | Pop the top matrix from the current stack. |
+| glpushmatrix | () | void | Push a copy of the current matrix onto the stack. |
+| glrotatef | (angle: Real, x: Real, y: Real, z: Real) | void | Apply a rotation (degrees) about the supplied axis. |
+| glscalef | (x: Real, y: Real, z: Real) | void | Apply a non-uniform scale to the current matrix. |
+| glfrustum | (left: Real, right: Real, bottom: Real, top: Real, near: Real, far: Real) | void | Configure a perspective frustum using `glFrustum`. |
+| glperspective | (fovY: Real, aspect: Real, near: Real, far: Real) | void | Convenience helper that computes a symmetric frustum from a field of view and aspect ratio. |
+| glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
+| glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
+| gltranslatef | (x: Real, y: Real, z: Real) | void | Apply a translation to the current matrix. |
+| glvertex3f | (x: Real, y: Real, z: Real) | void | Emit a vertex for the active primitive. |
+| glviewport | (x: Integer, y: Integer, width: Integer, height: Integer) | void | Configure the OpenGL viewport rectangle. |
 | updatescreen | () | void | Present renderer. |
 | cleardevice | () | void | Clear renderer. |
 | setcolor | (color: Integer) | void | Set drawing color. |
@@ -240,12 +263,56 @@ These built-ins are available when Pscal is built with SDL support.
 | loadsound | (file: String) | Sound | Load sound file. |
 | freesound | (sound: Sound) | void | Free a loaded sound. |
 | playsound | (sound: Sound) | void | Play sound. |
+| stopallsounds | () | void | Halt all playing sounds immediately. |
 | issoundplaying | (sound: Sound) | Boolean | Query if sound playing. |
-| inittextsystem | () | void | Initialize text subsystem. |
+| inittextsystem | (fontPath: String, fontSize: Integer) | void | Initialize text subsystem with a TTF font. |
 | quittextsystem | () | void | Shut down text subsystem. |
 | getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
+| iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
+
+### Basic OpenGL render loop
+
+```pascal
+program SwapDemo;
+var
+  frame: Integer;
+begin
+  InitGraph3D(640, 480, 'Swap Demo', 24, 8);
+  GLViewport(0, 0, 640, 480);
+  GLClearDepth(1.0);
+  GLDepthTest(true);
+  GLSetSwapInterval(1); { enable vsync }
+
+  for frame := 0 to 599 do
+  begin
+    GLClearColor(0.1, 0.1, 0.15, 1.0);
+    GLClear();
+
+    GLMatrixMode('modelview');
+    GLLoadIdentity();
+    GLRotatef(frame * 0.5, 0.0, 1.0, 0.0);
+
+    GLBegin('triangles');
+      GLColor3f(1.0, 0.0, 0.0);
+      GLVertex3f(0.0, 0.5, 0.0);
+      GLColor3f(0.0, 1.0, 0.0);
+      GLVertex3f(-0.5, -0.5, 0.0);
+      GLColor3f(0.0, 0.0, 1.0);
+      GLVertex3f(0.5, -0.5, 0.0);
+    GLEnd();
+
+    if frame = 300 then
+      GLSetSwapInterval(0); { drop vsync after five seconds }
+
+    GLSwapWindow();
+    GraphLoop(1);          { keep SDL responsive without busy waiting }
+  end;
+
+  CloseGraph3D;
+end.
+```
 
 ## Examples
 

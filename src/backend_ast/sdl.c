@@ -18,9 +18,14 @@
 #include "sdl.h" // This header includes SDL/SDL_ttf headers
 #include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
+#include <ctype.h>
+#include <string.h>
+#include <strings.h>
+
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;
 SDL_Renderer* gSdlRenderer = NULL;
+SDL_GLContext gSdlGLContext = NULL;
 SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
 bool gSdlInitialized = false;
 int gSdlWidth = 0;
@@ -33,12 +38,154 @@ int gSdlTextureHeights[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
+static SDL_Scancode resolveScancodeFromName(const char* name) {
+    if (!name) {
+        return SDL_SCANCODE_UNKNOWN;
+    }
+
+    char compact[64];
+    size_t srcLen = strlen(name);
+    if (srcLen >= sizeof(compact)) {
+        srcLen = sizeof(compact) - 1;
+    }
+    size_t compactLen = 0;
+    for (size_t i = 0; i < srcLen && compactLen < sizeof(compact) - 1; ++i) {
+        char ch = name[i];
+        if (ch != ' ' && ch != '_' && ch != '-') {
+            compact[compactLen++] = (char)tolower((unsigned char)ch);
+        }
+    }
+    compact[compactLen] = '\0';
+
+    if (strcmp(compact, "lshift") == 0 || strcmp(compact, "leftshift") == 0) {
+        return SDL_SCANCODE_LSHIFT;
+    }
+    if (strcmp(compact, "rshift") == 0 || strcmp(compact, "rightshift") == 0) {
+        return SDL_SCANCODE_RSHIFT;
+    }
+    if (strcmp(compact, "shift") == 0) {
+        return SDL_SCANCODE_LSHIFT;
+    }
+    if (strcmp(compact, "space") == 0) {
+        return SDL_SCANCODE_SPACE;
+    }
+    if (strcmp(compact, "escape") == 0 || strcmp(compact, "esc") == 0) {
+        return SDL_SCANCODE_ESCAPE;
+    }
+    if (strcmp(compact, "enter") == 0 || strcmp(compact, "return") == 0) {
+        return SDL_SCANCODE_RETURN;
+    }
+
+    char normalized[64];
+    size_t normLen = srcLen;
+    if (normLen >= sizeof(normalized)) {
+        normLen = sizeof(normalized) - 1;
+    }
+    for (size_t i = 0; i < normLen; ++i) {
+        char ch = name[i];
+        if (ch == '_' || ch == '-') {
+            normalized[i] = ' ';
+        } else {
+            normalized[i] = ch;
+        }
+    }
+    normalized[normLen] = '\0';
+
+    if (normLen == 1) {
+        char letter[2];
+        letter[0] = (char)toupper((unsigned char)normalized[0]);
+        letter[1] = '\0';
+        SDL_Keycode keycode = SDL_GetKeyFromName(letter);
+        if (keycode != SDLK_UNKNOWN) {
+            SDL_Scancode sc = SDL_GetScancodeFromKey(keycode);
+            if (sc != SDL_SCANCODE_UNKNOWN) {
+                return sc;
+            }
+        }
+    }
+
+    SDL_Keycode keycode = SDL_GetKeyFromName(normalized);
+    if (keycode != SDLK_UNKNOWN) {
+        SDL_Scancode sc = SDL_GetScancodeFromKey(keycode);
+        if (sc != SDL_SCANCODE_UNKNOWN) {
+            return sc;
+        }
+    }
+
+    return SDL_GetScancodeFromName(normalized);
+}
+
+static SDL_Scancode resolveScancodeFromValue(Value arg, bool* out_ok) {
+    if (out_ok) {
+        *out_ok = false;
+    }
+
+    if (arg.type == TYPE_STRING && arg.s_val != NULL) {
+        SDL_Scancode sc = resolveScancodeFromName(arg.s_val);
+        if (sc != SDL_SCANCODE_UNKNOWN && out_ok) {
+            *out_ok = true;
+        }
+        return sc;
+    }
+
+    if (IS_INTLIKE(arg)) {
+        long long raw = AS_INTEGER(arg);
+        if (raw >= 0 && raw < SDL_NUM_SCANCODES) {
+            if (out_ok) {
+                *out_ok = true;
+            }
+            return (SDL_Scancode)raw;
+        }
+
+        SDL_Scancode sc = SDL_GetScancodeFromKey((SDL_Keycode)raw);
+        if (sc != SDL_SCANCODE_UNKNOWN) {
+            if (out_ok) {
+                *out_ok = true;
+            }
+            return sc;
+        }
+        return SDL_SCANCODE_UNKNOWN;
+    }
+
+    return SDL_SCANCODE_UNKNOWN;
+}
+
 void initializeTextureSystem(void) {
     for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
         gSdlTextures[i] = NULL;
         gSdlTextureWidths[i] = 0;
         gSdlTextureHeights[i] = 0;
     }
+}
+
+void cleanupSdlWindowResources(void) {
+    if (gSdlGLContext) {
+        SDL_GL_DeleteContext(gSdlGLContext);
+        gSdlGLContext = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_GL_DeleteContext successful.\n");
+        #endif
+    }
+    if (gSdlRenderer) {
+        SDL_DestroyRenderer(gSdlRenderer);
+        gSdlRenderer = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyRenderer successful.\n");
+        #endif
+    }
+    if (gSdlWindow) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        #ifdef DEBUG
+        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
+        #endif
+    }
+    gSdlWidth = 0;
+    gSdlHeight = 0;
+    gSdlCurrentColor.r = 255;
+    gSdlCurrentColor.g = 255;
+    gSdlCurrentColor.b = 255;
+    gSdlCurrentColor.a = 255;
 }
 
 // Helper to find a free texture slot or return an error ID
@@ -119,20 +266,7 @@ void sdlCleanupAtExit(void) {
         }
     }
  */
-    if (gSdlRenderer) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyRenderer successful.\n");
-        #endif
-    }
-    if (gSdlWindow) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_DestroyWindow successful.\n");
-        #endif
-    }
+    cleanupSdlWindowResources();
     if (gSdlInitialized) {
         SDL_Quit();
         gSdlInitialized = false;
@@ -164,10 +298,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     }
 
-    if (gSdlWindow || gSdlRenderer) {
-        if(gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-        if(gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
-    }
+    cleanupSdlWindowResources();
 
     int width = (int)AS_INTEGER(args[0]);
     int height = (int)AS_INTEGER(args[1]);
@@ -194,8 +325,9 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    gSdlGLContext = NULL;
     initializeTextureSystem();
-    
+
     SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderPresent(gSdlRenderer);
@@ -206,14 +338,13 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
-    
+
     return makeVoid();
 }
 
 Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
-    if (gSdlRenderer) { SDL_DestroyRenderer(gSdlRenderer); gSdlRenderer = NULL; }
-    if (gSdlWindow) { SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL; }
+    cleanupSdlWindowResources();
     return makeVoid();
 }
 
@@ -984,6 +1115,33 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_SetRenderTarget(gSdlRenderer, targetTexture);
     return makeVoid();
+}
+
+Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "IsKeyDown expects exactly 1 argument (string name or key code).");
+        return makeBoolean(false);
+    }
+    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+        runtimeError(vm, "Graphics mode not initialized before IsKeyDown.");
+        return makeBoolean(false);
+    }
+
+    bool ok = false;
+    SDL_Scancode sc = resolveScancodeFromValue(args[0], &ok);
+    if (!ok || sc == SDL_SCANCODE_UNKNOWN || sc < 0 || sc >= SDL_NUM_SCANCODES) {
+        runtimeError(vm, "IsKeyDown argument did not resolve to a valid SDL scancode.");
+        return makeBoolean(false);
+    }
+
+    SDL_PumpEvents();
+    const Uint8* state = SDL_GetKeyboardState(NULL);
+    if (!state) {
+        runtimeError(vm, "SDL_GetKeyboardState returned NULL.");
+        return makeBoolean(false);
+    }
+
+    return makeBoolean(state[sc] != 0);
 }
 
 Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {

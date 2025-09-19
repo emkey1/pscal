@@ -33,6 +33,8 @@ List *inserted_global_names = NULL;
 #define PROGRAM_VERSION "undefined.version_DEV"
 #endif
 
+static int s_vm_trace_head = 0;
+
 const char *PASCAL_USAGE =
     "Usage: pascal <options> <source_file> [program_parameters...]\n"
     "   Options:\n"
@@ -40,6 +42,7 @@ const char *PASCAL_USAGE =
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
+    "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
 void initSymbolSystem(void) {
@@ -52,6 +55,9 @@ void initSymbolSystem(void) {
         EXIT_FAILURE_HANDLER();
     }
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
+
+    insertGlobalSymbol("TextAttr", TYPE_BYTE, NULL);
+    syncTextAttrSymbol();
 
     constGlobalSymbols = createHashTable();
     if (!constGlobalSymbols) {
@@ -79,7 +85,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
     
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
-    
+#ifdef SDL
+    registerSdlGlBuiltins();
+#endif
+
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
     fflush(stderr);
@@ -153,7 +162,8 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 VM vm;
                 initVM(&vm);
                 // Inline trace toggle via source comment: {trace on} / {trace off}
-                if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
+                if (s_vm_trace_head > 0) vm.trace_head_instructions = s_vm_trace_head;
+                else if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
                 InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                 freeVM(&vm);
                 globalSymbols = NULL;
@@ -231,7 +241,16 @@ static void flushCapturedStderrAtExit(void) {
         rewind(tmp);
         char buf[4096]; size_t n;
         while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
-            (void)write(STDERR_FILENO, buf, n);
+            size_t total = 0;
+            while (total < n) {
+                ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                if (w <= 0) {
+                    total = n; // force exit outer loop on error
+                    break;
+                }
+                total += (size_t)w;
+            }
+            if (total < n) break;
         }
         fclose(tmp);
     }
@@ -266,6 +285,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
+            s_vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PASCAL_USAGE);
@@ -384,7 +405,16 @@ int main(int argc, char *argv[]) {
             if (result != EXIT_SUCCESS || has_cached || has_non_ws) {
                 rewind(s_stderr_tmp);
                 while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
-                    (void)write(STDERR_FILENO, buf, n);
+                    size_t total = 0;
+                    while (total < n) {
+                        ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                        if (w <= 0) {
+                            total = n;
+                            break;
+                        }
+                        total += (size_t)w;
+                    }
+                    if (total < n) break;
                 }
             }
             fclose(s_stderr_tmp);

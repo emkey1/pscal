@@ -2,24 +2,29 @@
 == Disassembly: Tests/rea/method_this_assign.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    3 JUMP               11 (to 0014)
+0000    0 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007    3 JUMP               11 (to 0021)
 
---- Function point_setx (at 0003) ---
-0003    4 GET_LOCAL           1 (slot)
-0005    | GET_LOCAL           0 (slot)
-0007    | GET_FIELD_OFFSET    2 (index)
-0009    | SWAP
-0010    | SET_INDIRECT
-0011    3 GET_LOCAL           2 (slot)
-0013    | RETURN
-0014    0 CONSTANT            0 'Value type ARRAY'
-0016    | DEFINE_GLOBAL    NameIdx:1   'point_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
-0026    | SET_GLOBAL          1 'point_vtable'
-0028    | HALT
+--- Function point.setx (at 0010) ---
+0010    4 GET_LOCAL           1 (slot)
+0012    | GET_LOCAL           0 (slot)
+0014    | GET_FIELD_OFFSET    2 (index)
+0016    | SWAP
+0017    | SET_INDIRECT
+0018    3 GET_LOCAL           2 (slot)
+0020    | RETURN
+0021    0 CONSTANT            3 'Value type ARRAY'
+0023    | DEFINE_GLOBAL    NameIdx:4   'point_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0033    | SET_GLOBAL          4 'point_vtable'
+0035    | HALT
 == End Disassembly: Tests/rea/method_this_assign.rea ==
 
-Constants (4):\n  0000: Value type ARRAY
-  0001: STR   "point_vtable"
-  0002: INT   0
-  0003: STR   "integer"
+Constants (7):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: Value type ARRAY
+  0004: STR   "point_vtable"
+  0005: INT   0
+  0006: STR   "integer"
 

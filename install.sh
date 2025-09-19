@@ -36,7 +36,7 @@ if [ -d "lib/rea" ]; then
 fi
 
 # Install misc library if present
-mkdir -p /usr/local/misc
+mkdir -p /usr/local/pscal/misc
 if [ -d "lib/misc" ]; then
     cp -r lib/misc/* /usr/local/pscal/misc
 fi
@@ -50,7 +50,7 @@ mkdir -p /usr/local/pscal/etc
 cp -r etc/* /usr/local/pscal/etc
 
 # Set group to executable for any installed binaries
-for bin in clike clike-repl dascal pascal pscalvm rea; do
+for bin in clike clike-repl dascal pascal pscalvm rea pscaljson2bc pscald; do
     if [ -f "/usr/local/bin/$bin" ]; then
         chmod go+x "/usr/local/bin/$bin"
     fi

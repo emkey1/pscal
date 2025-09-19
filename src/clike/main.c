@@ -35,7 +35,8 @@ static const char *CLIKE_USAGE =
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-"     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n";
+"     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n"
+"     --vm-trace-head=N          Trace first N VM instructions (also enabled by 'trace on' in source).\n";
 
 static char* resolveImportPath(const char* orig_path) {
     FILE *f = fopen(orig_path, "rb");
@@ -67,6 +68,7 @@ int main(int argc, char **argv) {
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int vm_trace_head = 0;
     const char *path = NULL;
     int clike_params_start = 0;
 
@@ -83,6 +85,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
+            vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], CLIKE_USAGE);
             return EXIT_FAILURE;
@@ -270,7 +274,9 @@ int main(int argc, char **argv) {
 
     VM vm; initVM(&vm);
     // Inline trace toggle via comment: /* trace on */ or // trace on
-    if ((pre_src && strstr(pre_src, "trace on")) || (src && strstr(src, "trace on"))) {
+    if (vm_trace_head > 0) {
+        vm.trace_head_instructions = vm_trace_head;
+    } else if ((pre_src && strstr(pre_src, "trace on")) || (src && strstr(src, "trace on"))) {
         vm.trace_head_instructions = 16;
     }
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);

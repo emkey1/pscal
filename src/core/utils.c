@@ -211,7 +211,29 @@ MStream *createMStream(void) {
     ms->buffer = NULL;
     ms->size = 0;
     ms->capacity = 0;
+    ms->refcount = 1;
     return ms;
+}
+
+void retainMStream(MStream* ms) {
+    if (!ms) return;
+    if (ms->refcount < INT_MAX) {
+        ms->refcount++;
+    }
+}
+
+void releaseMStream(MStream* ms) {
+    if (!ms) return;
+    if (ms->refcount > 0) {
+        ms->refcount--;
+    }
+    if (ms->refcount <= 0) {
+        if (ms->buffer) {
+            free(ms->buffer);
+            ms->buffer = NULL;
+        }
+        free(ms);
+    }
 }
 
 FieldValue *copyRecord(FieldValue *orig) {
@@ -896,6 +918,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_POINTER:
             v.ptr_val = NULL;
             break;
+        case TYPE_NIL:
+            return makeNil();
         case TYPE_VOID:
             break;
         default:
@@ -1192,21 +1216,12 @@ void freeValue(Value *v) {
         case TYPE_MEMORYSTREAM:
               if (v->mstream) {
 #ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] Freeing MStream structure and its buffer for Value* %p. MStream* %p, Buffer* %p\n",
-                          (void*)v, (void*)v->mstream, (void*)(v->mstream ? v->mstream->buffer : NULL));
+                  fprintf(stderr, "[DEBUG freeValue] Releasing MStream for Value* %p. MStream* %p (refcount=%d)\n",
+                          (void*)v, (void*)v->mstream, v->mstream->refcount);
                   fflush(stderr);
 #endif
-                  if (v->mstream->buffer) {
-                      free(v->mstream->buffer);
-                      v->mstream->buffer = NULL;
-                  }
-                  free(v->mstream);
+                  releaseMStream(v->mstream);
                   v->mstream = NULL;
-              } else {
-#ifdef DEBUG
-                  fprintf(stderr, "[DEBUG freeValue] MStream pointer is NULL for Value* %p, nothing to free.\n", (void*)v);
-                  fflush(stderr);
-#endif
               }
               break;
         case TYPE_SET: // Added case for freeing set values
@@ -1345,46 +1360,111 @@ bool isUnitDocumented(const char *unit_name) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    // 1. Determine the library search path in a safe, writable buffer.
-    char lib_path[PATH_MAX];
+    const char *default_install_dir = "/usr/local/pscal/pascal/lib";
+    const char *relative_fallbacks[] = {
+        "./lib/pascal",
+        "../lib/pascal",
+        "../../lib/pascal"
+    };
+    const size_t relative_count = sizeof(relative_fallbacks) / sizeof(relative_fallbacks[0]);
+
+    const char *candidates[2 + sizeof(relative_fallbacks) / sizeof(relative_fallbacks[0])];
+    size_t candidate_count = 0;
+
     const char *env_path = getenv("PASCAL_LIB_DIR");
-
-    if (env_path != NULL && *env_path != '\0') {
-        // An override path was provided, so use it.
-        strncpy(lib_path, env_path, PATH_MAX - 1);
-        lib_path[PATH_MAX - 1] = '\0'; // Ensure null-termination
-    } else {
-        // Fall back to the default hard-coded path.
-        strncpy(lib_path, "/usr/local/pscal/pascal/lib", PATH_MAX - 1);
-        lib_path[PATH_MAX - 1] = '\0';
+    if (env_path && *env_path) {
+        candidates[candidate_count++] = env_path;
     }
 
-    // 2. Check if the resolved library directory actually exists.
-    struct stat dir_info;
-    if (stat(lib_path, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
-        fprintf(stderr, "Error: Pascal library directory not found. Searched path: %s\n", lib_path);
-        EXIT_FAILURE_HANDLER();
+    candidates[candidate_count++] = default_install_dir;
+    for (size_t i = 0; i < relative_count; ++i) {
+        candidates[candidate_count++] = relative_fallbacks[i];
     }
 
-    // 3. Allocate enough space for the full file path.
-    //    (path + '/' + unit_name + ".pl" + null)
-    size_t required_len = strlen(lib_path) + 1 + strlen(unit_name) + 3 + 1;
-    char *file_name = malloc(required_len);
-    if (!file_name) {
+    size_t error_buf_size = (PATH_MAX + 64) * candidate_count;
+    char *error_buf = malloc(error_buf_size);
+    if (!error_buf) {
         fprintf(stderr, "Memory allocation error in findUnitFile\n");
         EXIT_FAILURE_HANDLER();
     }
+    error_buf[0] = '\0';
+    size_t error_len = 0;
 
-    // 4. Compose the full path using the resolved base path.
-    snprintf(file_name, required_len, "%s/%s.pl", lib_path, unit_name);
+    for (size_t i = 0; i < candidate_count; ++i) {
+        const char *base_dir = candidates[i];
+        if (!base_dir || !*base_dir) {
+            continue;
+        }
 
-    // 5. Check if the file exists and return it, otherwise clean up.
-    if (access(file_name, F_OK) == 0) {
-        return file_name; // Success: Caller takes ownership and must free() this memory.
+        struct stat dir_info;
+        if (stat(base_dir, &dir_info) != 0 || !S_ISDIR(dir_info.st_mode)) {
+            char status[PATH_MAX + 64];
+            int written = snprintf(status, sizeof(status), "  - %s (directory not found)\n", base_dir);
+            if (written > 0) {
+                size_t copy_len = (size_t)written;
+                if (error_len + copy_len >= error_buf_size) {
+                    if (error_len + 1 >= error_buf_size) {
+                        copy_len = 0;
+                    } else {
+                        copy_len = error_buf_size - error_len - 1;
+                    }
+                }
+                if (copy_len > 0) {
+                    memcpy(error_buf + error_len, status, copy_len);
+                    error_len += copy_len;
+                    error_buf[error_len] = '\0';
+                }
+            }
+            continue;
+        }
+
+        size_t dir_len = strlen(base_dir);
+        size_t required_len = dir_len + 1 + strlen(unit_name) + 3 + 1;
+        char *file_name = malloc(required_len);
+        if (!file_name) {
+            free(error_buf);
+            fprintf(stderr, "Memory allocation error in findUnitFile\n");
+            EXIT_FAILURE_HANDLER();
+        }
+
+        if (dir_len > 0 && base_dir[dir_len - 1] == '/') {
+            snprintf(file_name, required_len, "%s%s.pl", base_dir, unit_name);
+        } else {
+            snprintf(file_name, required_len, "%s/%s.pl", base_dir, unit_name);
+        }
+
+        if (access(file_name, F_OK) == 0) {
+            free(error_buf);
+            return file_name;
+        }
+
+        char status[PATH_MAX + 64];
+        int written = snprintf(status, sizeof(status), "  - %s (missing %s.pl)\n", base_dir, unit_name);
+        if (written > 0) {
+            size_t copy_len = (size_t)written;
+            if (error_len + copy_len >= error_buf_size) {
+                if (error_len + 1 >= error_buf_size) {
+                    copy_len = 0;
+                } else {
+                    copy_len = error_buf_size - error_len - 1;
+                }
+            }
+            if (copy_len > 0) {
+                memcpy(error_buf + error_len, status, copy_len);
+                error_len += copy_len;
+                error_buf[error_len] = '\0';
+            }
+        }
+
+        free(file_name);
     }
 
-    free(file_name);
-    return NULL; // Not found.
+    fprintf(stderr, "Error: Pascal unit '%s' not found. Searched paths:\n%s",
+            unit_name,
+            error_len > 0 ? error_buf : "  (no search paths available)\n");
+    free(error_buf);
+    EXIT_FAILURE_HANDLER();
+    return NULL;
 }
 
 void linkUnit(AST *unit_ast, int recursion_depth) {
@@ -1516,6 +1596,7 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                 toLowerString(qualified_lower);
 
                 Symbol* qualified_proc_symbol = hashTableLookup(procedure_table, qualified_lower);
+                qualified_proc_symbol = resolveSymbolAlias(qualified_proc_symbol);
                 if (qualified_proc_symbol && qualified_proc_symbol->type_def &&
                     qualified_proc_symbol->type_def != (AST*)0x1) {
 
@@ -1995,10 +2076,12 @@ Value makeCopyOfValue(const Value *src) {
                     fprintf(stderr, "Memory allocation failed in makeCopyOfValue (mstream)\n");
                     EXIT_FAILURE_HANDLER();
                 }
+                v.mstream->buffer = NULL;
                 v.mstream->size = src->mstream->size;
+                v.mstream->capacity = 0;
+                v.mstream->refcount = 1;
                 if (src->mstream->buffer && src->mstream->size >= 0) {
                     size_t copy_size = (size_t)src->mstream->size + 1;
-                    v.mstream->capacity = copy_size;
                     v.mstream->buffer = malloc(copy_size);
                     if (!v.mstream->buffer) {
                         free(v.mstream);
@@ -2006,11 +2089,9 @@ Value makeCopyOfValue(const Value *src) {
                         EXIT_FAILURE_HANDLER();
                     }
                     memcpy(v.mstream->buffer, src->mstream->buffer, copy_size);
-                } else {
-                    v.mstream->buffer = NULL;
-                    v.mstream->capacity = 0;
+                    v.mstream->capacity = (int)copy_size;
                 }
-                }
+            }
             break;
         case TYPE_SET:
             v.set_val.set_values = NULL;
@@ -2213,12 +2294,15 @@ int map16BgColorToAnsi(int pscalColorCode) {
 }
 
 bool applyCurrentTextAttributes(FILE* stream) {
+    bool stream_is_stdout = (stream == stdout);
     bool is_default_state = (gCurrentTextColor == 7 && gCurrentTextBackground == 0 &&
                              !gCurrentTextBold && !gCurrentTextUnderline &&
                              !gCurrentTextBlink && !gCurrentColorIsExt &&
                              !gCurrentBgIsExt);
 
-    if (is_default_state) return false;
+    if (is_default_state && (!stream_is_stdout || !gConsoleAttrDirty)) {
+        return false;
+    }
 
     char escape_sequence[64] = "\x1B[";
     char code_str[64];
@@ -2255,9 +2339,67 @@ bool applyCurrentTextAttributes(FILE* stream) {
     strcat(escape_sequence, code_str);
     strcat(escape_sequence, "m");
     fprintf(stream, "%s", escape_sequence);
+    if (stream_is_stdout) {
+        gConsoleAttrDirty = false;
+    }
     return true;
 }
 
 void resetTextAttributes(FILE* stream) {
     fprintf(stream, "\x1B[0m");
+    if (stream == stdout) {
+        gConsoleAttrDirty = true;
+    }
+}
+
+static Symbol* lookupTextAttrSymbol(void) {
+    if (!globalSymbols) {
+        return NULL;
+    }
+    return hashTableLookup(globalSymbols, "textattr");
+}
+
+uint8_t computeCurrentTextAttr(void) {
+    uint8_t fg = (uint8_t)(gCurrentTextColor & 0x0F);
+
+    if (gCurrentTextBold && fg < 8) {
+        fg |= 0x08;
+    }
+
+    uint8_t bg = (uint8_t)(gCurrentTextBackground & 0x07);
+
+    uint8_t attr = (uint8_t)((bg << 4) | (fg & 0x0F));
+    if (gCurrentTextBlink) {
+        attr |= 0x80;
+    }
+    return attr;
+}
+
+void syncTextAttrSymbol(void) {
+    Symbol* sym = lookupTextAttrSymbol();
+    if (!sym || !sym->value) {
+        return;
+    }
+    sym->value->type = TYPE_BYTE;
+    SET_INT_VALUE(sym->value, computeCurrentTextAttr());
+}
+
+void markTextAttrDirty(void) {
+    gConsoleAttrDirty = true;
+}
+
+void setCurrentTextAttrFromByte(uint8_t attr) {
+    uint8_t fg = (uint8_t)(attr & 0x0F);
+    uint8_t bg = (uint8_t)((attr >> 4) & 0x07);
+    bool blink = (attr & 0x80) != 0;
+
+    gCurrentTextColor = fg;
+    gCurrentTextBold = (fg & 0x08) != 0;
+    gCurrentColorIsExt = false;
+    gCurrentTextBackground = bg;
+    gCurrentBgIsExt = false;
+    gCurrentTextBlink = blink;
+
+    markTextAttrDirty();
+    syncTextAttrSymbol();
 }

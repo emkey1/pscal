@@ -26,6 +26,7 @@ build/bin/clike Examples/Clike/<program>
    library search path.
 - `sdl_multibouncingballs` – SDL multi bouncing balls demo ported from Pascal.
 - `sdl_mandelbrot_interactive` – SDL Mandelbrot renderer using the MandelbrotRow builtin; left click to zoom in, right click to zoom out.
+- `sdl_smoke` – Rotating 3D cube demo that exercises the OpenGL helpers (requires building with SDL support).
 - `sdl_getmousestate` – SDL demo printing mouse coordinates and button states.
 - `show_pid` – Uses an extended builtin function to show the process ID
 - `sort_string` – Shows how to copy and sort a string via a `str*` parameter

@@ -189,11 +189,49 @@ static void collectClasses(AST *node) {
     }
 }
 
+static void ensureSelfParam(AST *node, const char *cls) {
+    if (!node || !cls) return;
+    bool hasSelf = false;
+    if (node->child_count > 0) {
+        AST *param = node->children[0];
+        if (param && param->type == AST_VAR_DECL) {
+            AST *ptype = param->right;
+            while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
+                ptype = ptype->right;
+            }
+            if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value &&
+                strcasecmp(ptype->token->value, cls) == 0) {
+                hasSelf = true;
+            }
+        }
+    }
+    if (hasSelf) return;
+
+    Token *selfTok = newToken(TOKEN_IDENTIFIER, "myself", node->token ? node->token->line : 0, 0);
+    Token *clsTok = newToken(TOKEN_IDENTIFIER, cls, node->token ? node->token->line : 0, 0);
+    AST *typeRef = newASTNode(AST_TYPE_REFERENCE, clsTok);
+    setTypeAST(typeRef, TYPE_RECORD);
+    AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+    setRight(ptrType, typeRef);
+    setTypeAST(ptrType, TYPE_POINTER);
+    AST *varDecl = newASTNode(AST_VAR_DECL, selfTok);
+    setRight(varDecl, ptrType);
+    setTypeAST(varDecl, TYPE_POINTER);
+
+    addChild(node, NULL);
+    for (int i = node->child_count - 1; i > 0; i--) {
+        node->children[i] = node->children[i - 1];
+        if (node->children[i]) node->children[i]->parent = node;
+    }
+    node->children[0] = varDecl;
+    varDecl->parent = node;
+}
+
 static void collectMethods(AST *node) {
     if (!node) return;
     if ((node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) && node->token && node->token->value) {
         const char *fullname = node->token->value;
-        const char *us = strchr(fullname, '_');
+        const char *us = strchr(fullname, '.');
         if (us) {
             size_t cls_len = (size_t)(us - fullname);
             char *cls = (char *)malloc(cls_len + 1);
@@ -206,6 +244,7 @@ static void collectMethods(AST *node) {
                     fprintf(stderr, "Method '%s' defined for unknown class '%s'\n", mname, cls);
                     pascal_semantic_error_count++;
                 } else {
+                    ensureSelfParam(node, cls);
                     char *lname = lowerDup(mname);
                     if (!lname) {
                         free(cls);
@@ -224,12 +263,184 @@ static void collectMethods(AST *node) {
                             sym->value = v;
                             sym->type_def = node; /* reference for signature */
                             hashTableInsert(ci->methods, sym);
+                            char lowerName[MAX_SYMBOL_LENGTH];
+                            lowerCopy(fullname, lowerName);
+                            if (!lookupProcedure(lowerName)) {
+                                Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                if (ps) {
+                                    ps->name = strdup(lowerName);
+                                    /*
+                                     * Store a deep copy of the AST node in the global procedure
+                                     * table.  freeProcedureTable() assumes ownership of
+                                     * type_def entries and will call freeAST on them during
+                                     * teardown; using the original node would result in a
+                                     * double free when the program AST is cleaned up separately.
+                                     */
+                                    ps->type_def = copyAST(node);
+                                    hashTableInsert(procedure_table, ps);
+                                }
+                            }
                         } else {
                             free(sym); free(v); free(lname);
                         }
                     }
                 }
                 free(cls);
+            }
+        } else if (node->parent && node->parent->type == AST_COMPOUND) {
+            /* Handle un-mangled methods; examine first parameter for class type */
+            AST *param = (node->child_count > 0) ? node->children[0] : NULL;
+            if (!param) {
+                /* Some parsers emit an explicit 'myself' VAR_DECL as a sibling
+                 * preceding the procedure declaration instead of a child.  If we
+                 * detect that pattern, adopt the VAR_DECL as the method's first
+                 * parameter so method collection and later argument checks work
+                 * as expected.
+                 */
+                AST *parent = node->parent;
+                for (int i = 0; i < parent->child_count; i++) {
+                    if (parent->children[i] != node) continue;
+                    for (int j = i - 1; j >= 0; j--) {
+                        AST *prev = parent->children[j];
+                        if (!prev || prev->type != AST_VAR_DECL) continue;
+                        AST *decl_var = (prev->child_count > 0) ? prev->children[0] : NULL;
+                        const char *decl_name = (decl_var && decl_var->token) ? decl_var->token->value : NULL;
+                        if (!decl_name || strcasecmp(decl_name, "myself") != 0) continue;
+
+                        addChild(node, prev);
+                        for (int k = j; k < parent->child_count - 1; k++) {
+                            parent->children[k] = parent->children[k + 1];
+                        }
+                        parent->child_count--;
+                        param = node->children[0];
+                        break;
+                    }
+                    break;
+                }
+            }
+            if (param && param->type == AST_VAR_DECL) {
+                AST *ptype = param->right;
+                while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
+                    ptype = ptype->right;
+                }
+                if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value) {
+                    const char *cls = ptype->token->value;
+                    ClassInfo *ci = lookupClass(cls);
+                    if (ci) {
+                        size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
+                        char *mangled = (char *)malloc(ln);
+                        if (mangled) {
+                            snprintf(mangled, ln, "%s.%s", cls, fullname);
+                            free(node->token->value);
+                            node->token->value = mangled;
+                            node->token->length = strlen(mangled);
+                            fullname = node->token->value;
+                        }
+                        ensureSelfParam(node, cls);
+                        // Assign method index for implicitly declared methods
+                        int method_index = 0;
+                        if (ci->methods) {
+                            for (int mb = 0; mb < HASHTABLE_SIZE; mb++) {
+                                for (Symbol *ms = ci->methods->buckets[mb]; ms; ms = ms->next) {
+                                    method_index++;
+                                }
+                            }
+                        }
+                        node->is_virtual = true;
+                        node->i_val = method_index;
+                        char *lname = lowerDup(fullname + strlen(cls) + 1);
+                        if (lname) {
+                            if (hashTableLookup(ci->methods, lname)) {
+                                fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
+                                pascal_semantic_error_count++;
+                                free(lname);
+                            } else {
+                                Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
+                                Value *v = (Value *)calloc(1, sizeof(Value));
+                                if (sym && v) {
+                                    sym->name = lname;
+                                    v->ptr_val = (Value *)node;
+                                    sym->value = v;
+                                    sym->type_def = node;
+                                    hashTableInsert(ci->methods, sym);
+                                    char lowerName[MAX_SYMBOL_LENGTH];
+                                    lowerCopy(fullname, lowerName);
+                                    Symbol *existing = lookupProcedure(lowerName);
+                                    if (!existing) {
+                                        Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                        if (ps) {
+                                            ps->name = strdup(lowerName);
+                                            ps->type_def = node;
+                                            hashTableInsert(procedure_table, ps);
+                                            existing = ps;
+                                        }
+                                    } else {
+                                        existing->type_def = node;
+                                    }
+                                    // Ensure bare method name aliases to the mangled symbol
+                                    if (existing) {
+                                        Symbol *alias = lookupProcedure(lname);
+                                        if (alias) {
+                                            alias->is_alias = true;
+                                            alias->real_symbol = existing;
+                                        }
+                                    }
+                                } else {
+                                    free(sym); free(v); free(lname);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (node->parent && node->parent->type == AST_RECORD_TYPE) {
+            AST *typeDecl = node->parent;
+            while (typeDecl && typeDecl->type != AST_TYPE_DECL) typeDecl = typeDecl->parent;
+            const char *cls = (typeDecl && typeDecl->token) ? typeDecl->token->value : NULL;
+            if (cls) {
+                ClassInfo *ci = lookupClass(cls);
+                if (ci) {
+                    size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
+                    char *mangled = (char *)malloc(ln);
+                    if (mangled) {
+                        snprintf(mangled, ln, "%s.%s", cls, fullname);
+                        free(node->token->value);
+                        node->token->value = mangled;
+                        node->token->length = strlen(mangled);
+                        fullname = node->token->value;
+                    }
+                    ensureSelfParam(node, cls);
+                    char *lname = lowerDup(fullname + strlen(cls) + 1);
+                    if (lname) {
+                        if (hashTableLookup(ci->methods, lname)) {
+                            fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
+                            pascal_semantic_error_count++;
+                            free(lname);
+                        } else {
+                            Symbol *sym = (Symbol *)calloc(1, sizeof(Symbol));
+                            Value *v = (Value *)calloc(1, sizeof(Value));
+                            if (sym && v) {
+                                sym->name = lname;
+                                v->ptr_val = (Value *)node;
+                                sym->value = v;
+                                sym->type_def = node;
+                                hashTableInsert(ci->methods, sym);
+                                char lowerName[MAX_SYMBOL_LENGTH];
+                                lowerCopy(fullname, lowerName);
+                                if (!lookupProcedure(lowerName)) {
+                                    Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
+                                    if (ps) {
+                                        ps->name = strdup(lowerName);
+                                        ps->type_def = node;
+                                        hashTableInsert(procedure_table, ps);
+                                    }
+                                }
+                            } else {
+                                free(sym); free(v); free(lname);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -317,6 +528,71 @@ static void checkOverrides(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/*  Inherited method alias insertion                                        */
+/* ------------------------------------------------------------------------- */
+
+static void addInheritedMethodAliases(void) {
+    if (!class_table || !procedure_table) return;
+
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        Symbol *s = class_table->buckets[i];
+        while (s) {
+            ClassInfo *ci = s->value ? (ClassInfo *)s->value->ptr_val : NULL;
+            if (ci && ci->parent) {
+                ClassInfo *p = ci->parent;
+                while (p) {
+                    for (int j = 0; j < HASHTABLE_SIZE; j++) {
+                        Symbol *m = p->methods ? p->methods->buckets[j] : NULL;
+                        while (m) {
+                            /* Skip if subclass defines/overrides this method */
+                            if (!hashTableLookup(ci->methods, m->name)) {
+                                char classLower[MAX_SYMBOL_LENGTH];
+                                lowerCopy(ci->name, classLower);
+                                char aliasName[MAX_SYMBOL_LENGTH * 2];
+                                snprintf(aliasName, sizeof(aliasName), "%s.%s", classLower, m->name);
+                                if (!hashTableLookup(procedure_table, aliasName)) {
+                                    /* Find parent's fully qualified symbol */
+                                    char parentLower[MAX_SYMBOL_LENGTH];
+                                    lowerCopy(p->name, parentLower);
+                                    char targetName[MAX_SYMBOL_LENGTH * 2];
+                                    snprintf(targetName, sizeof(targetName), "%s.%s", parentLower, m->name);
+                                    Symbol *target = hashTableLookup(procedure_table, targetName);
+                                    target = resolveSymbolAlias(target);
+                                    if (target) {
+                                        Symbol *alias = (Symbol *)calloc(1, sizeof(Symbol));
+                                        if (alias) {
+                                            alias->name = strdup(aliasName);
+                                            alias->is_alias = true;
+                                            alias->real_symbol = target;
+                                            alias->type = target->type;
+                                            alias->type_def = target->type_def ? copyAST(target->type_def) : NULL;
+                                            if (alias->type_def && alias->type_def->token) {
+                                                size_t ln = strlen(ci->name) + 1 + strlen(m->name) + 1;
+                                                char *full = (char *)malloc(ln);
+                                                if (full) {
+                                                    snprintf(full, ln, "%s.%s", ci->name, m->name);
+                                                    free(alias->type_def->token->value);
+                                                    alias->type_def->token->value = full;
+                                                    alias->type_def->token->length = (int)strlen(full);
+                                                }
+                                            }
+                                            hashTableInsert(procedure_table, alias);
+                                        }
+                                    }
+                                }
+                            }
+                            m = m->next;
+                        }
+                    }
+                    p = p->parent;
+                }
+            }
+            s = s->next;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /*  Field/method usage checks                                                */
 /* ------------------------------------------------------------------------- */
 
@@ -351,6 +627,17 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
     switch (expr->type) {
     case AST_VARIABLE: {
         if (!expr->token || !expr->token->value) return NULL;
+        /*
+         * The current object reference can appear as the implicit
+         * parameter "myself".  If semantic lookup fails, fall back to
+         * the class currently being validated so that expressions like
+         * `my.field` or `my.method()` resolve correctly.
+         */
+        if (currentClass && expr->token && expr->token->value &&
+            (strcasecmp(expr->token->value, "myself") == 0 ||
+             strcasecmp(expr->token->value, "my") == 0)) {
+            return currentClass->name;
+        }
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
         if (!decl && currentClass) {
             Symbol *fs = lookupField(currentClass, expr->token->value);
@@ -409,7 +696,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     ClassInfo *clsContext = currentClass;
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
         const char *fullname = node->token ? node->token->value : NULL;
-        const char *us = fullname ? strchr(fullname, '_') : NULL;
+        const char *us = fullname ? strchr(fullname, '.') : NULL;
         if (us) {
             size_t len = (size_t)(us - fullname);
             char buf[MAX_SYMBOL_LENGTH];
@@ -423,7 +710,15 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
-        /* Implicit field access rewriting disabled; rely on explicit 'myself'. */
+        /* Preserve explicit syntax while still annotating variables with their
+         * declared types so later analyses (e.g. array element access) can
+         * determine the base type.
+         */
+        AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+        if (decl && decl->right) {
+            node->type_def = decl->right;
+            node->var_type = decl->right->var_type;
+        }
     }
 
     if (node->type == AST_FIELD_ACCESS) {
@@ -503,14 +798,31 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
+        if (!node->left && node->token && node->token->value && node->i_val == 0) {
+            const char *us = strchr(node->token->value, '_');
+            if (us) {
+                size_t cls_len = (size_t)(us - node->token->value);
+                char cls[MAX_SYMBOL_LENGTH];
+                if (cls_len < sizeof(cls)) {
+                    memcpy(cls, node->token->value, cls_len);
+                    cls[cls_len] = '\0';
+                    if (lookupClass(cls)) {
+                        fprintf(stderr,
+                                "Legacy method call '%s' is no longer supported; use instance.%s() instead\n",
+                                node->token->value, us + 1);
+                        pascal_semantic_error_count++;
+                    }
+                }
+            }
+        }
         if (node->i_val == 1) {
             /* super constructor/method call already has implicit 'myself' */
-            if (node->token && node->token->value && !strchr(node->token->value, '_')) {
+            if (node->token && node->token->value && !strchr(node->token->value, '.')) {
                 const char *pname = node->token->value;
                 size_t ln = strlen(pname) + 1 + strlen(pname) + 1;
                 char *m = (char*)malloc(ln);
                 if (m) {
-                    snprintf(m, ln, "%s_%s", pname, pname);
+                    snprintf(m, ln, "%s.%s", pname, pname);
                     free(node->token->value);
                     node->token->value = m;
                     node->token->length = strlen(m);
@@ -521,27 +833,44 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             const char *name = node->token ? node->token->value : NULL;
             if (cls && name) {
                 const char *method = name;
-                const char *us = strchr(name, '_');
+                const char *us = strchr(name, '.');
                 bool already = false;
                 if (us && strncasecmp(name, cls, (size_t)(us - name)) == 0) {
                     method = us + 1;
                     already = true;
                 }
                 ClassInfo *ci = lookupClass(cls);
-                if (ci && lookupMethod(ci, method)) {
-                    if (!already) {
+                if (ci) {
+                    Symbol *ms = lookupMethod(ci, method);
+                    if (!already && (ms || cls)) {
                         size_t ln = strlen(cls) + 1 + strlen(name) + 1;
                         char *m = (char*)malloc(ln);
                         if (m) {
-                            snprintf(m, ln, "%s_%s", cls, name);
+                            snprintf(m, ln, "%s.%s", cls, name);
                             free(node->token->value);
                             node->token->value = m;
                             node->token->length = strlen(m);
                         }
                     }
-                } else if (ci && !lookupMethod(ci, method)) {
-                    fprintf(stderr, "Unknown method '%s' for class '%s'\n", method, cls);
-                    pascal_semantic_error_count++;
+                }
+            }
+            if (node->child_count > 0 && node->children[0] &&
+                node->children[0]->type == AST_VARIABLE &&
+                node->children[0]->token && node->children[0]->token->value &&
+                (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                 strcasecmp(node->children[0]->token->value, "my") == 0)) {
+                /*
+                 * The parser places the receiver both as `left` and as the first
+                 * child argument.  Using the same node in both locations leads to
+                 * double-free errors when the AST is destroyed.  Instead of
+                 * discarding the child (which would make the argument list empty),
+                 * keep a separate copy so the call still receives the receiver as
+                 * its first argument.
+                 */
+                AST *recv_copy = copyAST(node->left);
+                if (recv_copy) {
+                    node->children[0] = recv_copy;
+                    recv_copy->parent = node;
                 }
             }
         } else if (currentClass && node->token) {
@@ -561,7 +890,8 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 if (node->child_count > 0 && node->children[0] &&
                     node->children[0]->type == AST_VARIABLE &&
                     node->children[0]->token && node->children[0]->token->value &&
-                    strcasecmp(node->children[0]->token->value, "myself") == 0) {
+                    (strcasecmp(node->children[0]->token->value, "myself") == 0 ||
+                     strcasecmp(node->children[0]->token->value, "my") == 0)) {
                     firstIsMyself = true;
                 }
 
@@ -598,9 +928,33 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 baseType = NULL;
             }
         }
-        if (baseType) {
-            node->var_type = baseType->var_type;
-            node->type_def = copyAST(baseType);
+        if (!baseType) {
+            const char *cls = resolveExprClass(node->left, clsContext);
+            if (cls) {
+                Token *tok = newToken(TOKEN_IDENTIFIER, cls,
+                                       node->token ? node->token->line : 0, 0);
+                AST *typeRef = newASTNode(AST_TYPE_REFERENCE, tok);
+                setTypeAST(typeRef, TYPE_RECORD);
+                AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+                setRight(ptrType, typeRef);
+                setTypeAST(ptrType, TYPE_POINTER);
+                node->type_def = ptrType;
+            }
+            setTypeAST(node, TYPE_POINTER);
+            return;
+        }
+        AST *elemType = copyAST(baseType);
+        setTypeAST(node, baseType->var_type);
+        if (node->var_type == TYPE_RECORD || node->var_type == TYPE_VOID ||
+            node->var_type == TYPE_UNKNOWN || baseType->type == AST_TYPE_REFERENCE ||
+            baseType->type == AST_RECORD_TYPE) {
+            AST *ptrType = newASTNode(AST_POINTER_TYPE, NULL);
+            setRight(ptrType, elemType);
+            setTypeAST(ptrType, TYPE_POINTER);
+            node->type_def = ptrType;
+            setTypeAST(node, TYPE_POINTER);
+        } else {
+            node->type_def = elemType;
         }
         return;
     }
@@ -622,6 +976,7 @@ void reaPerformSemanticAnalysis(AST *root) {
     collectMethods(root);
     linkParents();
     checkOverrides();
+    addInheritedMethodAliases();
     validateNodeInternal(root, NULL);
     freeClassTable();
 }

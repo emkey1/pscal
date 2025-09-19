@@ -26,6 +26,7 @@ void audioInitSystem(void);
 int audioLoadSound(const char* filename);
 void audioPlaySound(int soundID);
 void audioFreeSound(int soundID);
+void audioStopAllSounds(void);
 void audioQuitSystem(void);
 
 // AST-based built-ins
@@ -35,6 +36,7 @@ Value vmBuiltinInitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinLoadsound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPlaysound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFreesound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinStopallsounds(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuitsoundsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinIssoundplaying(struct VM_s* vm, int arg_count, Value* args);
 

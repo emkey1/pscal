@@ -11,18 +11,6 @@ const
   GAME_WIDTH = 60;
   GAME_HEIGHT = 25;
 
-  // Color constants
-  Black        = 0;
-  Blue         = 1;
-  Green        = 2;
-  Cyan         = 3;
-  Red          = 4;
-  LightGray    = 7;
-  LightGreen   = 10;
-  LightRed     = 12;
-  Yellow       = 14;
-  White        = 15;
-
 type
   TDiceArray = array[1..NUM_DICE] of integer;
   TKeepArray = array[1..NUM_DICE] of boolean;
@@ -50,31 +38,37 @@ var
   scoreStr: string[4];
   k: integer;
   hOffset, vOffset: integer; // Offsets for centering the game
+  originalForeground, originalBackground: byte;
+  originalBlink: boolean;
 
 // --- Custom Screen Clearing Procedure ---
 // This is a more reliable way to clear the screen with a specific background color.
 procedure ClearScreenWithColor(bgColor: byte);
 var
-  y, x: integer;
-  blankLine: string;
+  currentAttr: byte;
+  currentForeground: byte;
+  hadBlink: boolean;
 begin
-//  TextBackground(bgColor);
-//  blankLine := '';
-  // Create a string of spaces that matches the screen width
-//  for x := 1 to ScreenCols do
-//  begin
-//    blankLine := blankLine + ' ';
-//  end;
+  currentAttr := TextAttr;
+  currentForeground := currentAttr and $0F;
+  hadBlink := (currentAttr and $80) <> 0;
 
-  // Print the blank line on every row
-//  for y := 1 to ScreenRows do
-//  begin
-//    GotoXY(1, y);
-//    Write(blankLine);
-//  end;
-//  GotoXY(1, 1); // Move cursor to top-left after clearing
+  TextBackground(bgColor);
+  TextColor(currentForeground);
+  if hadBlink then
+    TextAttr := TextAttr or $80
+  else
+    TextAttr := TextAttr and $7F;
+
   ClrScr;
-  writeln('\e]11;#000000\a');
+
+  TextColor(currentForeground);
+  TextBackground(bgColor);
+  if hadBlink then
+    TextAttr := TextAttr or $80
+  else
+    TextAttr := TextAttr and $7F;
+  GotoXY(1, 1); // Move cursor to top-left after clearing
 end;
 
 // --- CRT Helper Procedures (Now with Centering) ---
@@ -542,6 +536,10 @@ begin
   if hOffset < 0 then hOffset := 0;
   if vOffset < 0 then vOffset := 0;
 
+  originalForeground := TextAttr and $0F;
+  originalBackground := (TextAttr and $70) shr 4;
+  originalBlink := (TextAttr and $80) <> 0;
+
   repeat
     ClearScreenWithColor(Black);
     HideCursor;
@@ -625,6 +623,13 @@ begin
     until userChoice in ['Y', 'N'];
   until userChoice = 'N';
 
+  TextColor(originalForeground);
+  TextBackground(originalBackground);
+  if originalBlink then
+    TextAttr := TextAttr or $80
+  else
+    TextAttr := TextAttr and $7F;
+  ClrScr;
   GotoXY(1, ScreenRows);
   ShowCursor;
 end.

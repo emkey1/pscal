@@ -2,39 +2,44 @@
 == Disassembly: Tests/rea/switch_stmt.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 DEFINE_GLOBAL    NameIdx:0   'x' Type:INT64 ('int')
-0005    | CONSTANT            2 '2'
-0007    | SET_GLOBAL          0 'x'
-0009    2 GET_GLOBAL          0 'x'
-0011    | DUP
-0012    3 CONSTANT            3 '1'
-0014    2 EQUAL
-0015    | JUMP_IF_FALSE      12 (to 0030)
-0018    | POP
-0019    4 CONSTANT            3 '1'
-0021    | CONSTANT            3 '1'
-0023    | CALL_BUILTIN         4 'write' (2 args)
-0027    2 JUMP               28 (to 0058)
-0030    | DUP
-0031    6 CONSTANT            2 '2'
-0033    2 EQUAL
-0034    | JUMP_IF_FALSE      12 (to 0049)
-0037    | POP
-0038    7 CONSTANT            3 '1'
-0040    | CONSTANT            2 '2'
-0042    | CALL_BUILTIN         4 'write' (2 args)
-0046    2 JUMP                9 (to 0058)
-0049    | POP
-0050   10 CONSTANT            3 '1'
-0052    | CONSTANT            5 '3'
-0054    | CALL_BUILTIN         4 'write' (2 args)
-0058    0 HALT
+0000    0 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007    1 DEFINE_GLOBAL    NameIdx:3   'x' Type:INT64 ('int')
+0012    | CONSTANT            5 '2'
+0014    | SET_GLOBAL          3 'x'
+0016    2 GET_GLOBAL          3 'x'
+0018    | DUP
+0019    3 CONSTANT            6 '1'
+0021    2 EQUAL
+0022    | JUMP_IF_FALSE      12 (to 0037)
+0025    | POP
+0026    4 CONSTANT            6 '1'
+0028    | CONSTANT            6 '1'
+0030    | CALL_BUILTIN         7 'write' (2 args)
+0034    2 JUMP               28 (to 0065)
+0037    | DUP
+0038    6 CONSTANT            5 '2'
+0040    2 EQUAL
+0041    | JUMP_IF_FALSE      12 (to 0056)
+0044    | POP
+0045    7 CONSTANT            6 '1'
+0047    | CONSTANT            5 '2'
+0049    | CALL_BUILTIN         7 'write' (2 args)
+0053    2 JUMP                9 (to 0065)
+0056    | POP
+0057   10 CONSTANT            6 '1'
+0059    | CONSTANT            8 '3'
+0061    | CALL_BUILTIN         7 'write' (2 args)
+0065    0 HALT
 == End Disassembly: Tests/rea/switch_stmt.rea ==
 
-Constants (6):\n  0000: STR   "x"
-  0001: STR   "int"
-  0002: INT   2
-  0003: INT   1
-  0004: STR   "write"
-  0005: INT   3
+Constants (9):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: STR   "x"
+  0004: STR   "int"
+  0005: INT   2
+  0006: INT   1
+  0007: STR   "write"
+  0008: INT   3
 

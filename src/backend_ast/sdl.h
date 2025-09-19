@@ -20,6 +20,7 @@ struct VM_s;
 // SDL Globals
 extern SDL_Window* gSdlWindow;
 extern SDL_Renderer* gSdlRenderer;
+extern SDL_GLContext gSdlGLContext;
 extern SDL_Color gSdlCurrentColor;
 extern bool gSdlInitialized;
 extern int gSdlWidth;
@@ -36,13 +37,16 @@ extern bool gSdlImageInitialized;
 // System Functions
 void initializeSdlSystems(void);
 void initializeTextureSystem(void);
+void cleanupSdlWindowResources(void);
 void sdlCleanupAtExit(void);
 
 // AST-based built-in handlers
 
 // VM-native built-in handlers
 Value vmBuiltinInitgraph(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinInitgraph3d(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinClosegraph(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinClosegraph3d(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFillrect(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpdatescreen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args);
@@ -60,6 +64,8 @@ Value vmBuiltinSetalphablend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRendertexttotexture(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFillcircle(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGraphloop(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlsetswapinterval(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlswapwindow(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPutpixel(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCreatetargettexture(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCreatetexture(struct VM_s* vm, int arg_count, Value* args);
@@ -75,6 +81,7 @@ Value vmBuiltinRendercopyex(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetrendertarget(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPollkey(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinIskeydown(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWaitkeyevent(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args);
 

@@ -81,6 +81,8 @@ include_directories(
 )
 
 # ---- Dependencies ----
+set(PSCAL_OPENGL_TARGET "")
+
 if(SDL)
     find_package(PkgConfig REQUIRED)
 
@@ -109,6 +111,15 @@ if(SDL)
     message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
     message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
     message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+
+    find_package(OpenGL REQUIRED)
+    if(TARGET OpenGL::GL)
+        set(PSCAL_OPENGL_TARGET OpenGL::GL)
+    elseif(TARGET OpenGL::OpenGL)
+        set(PSCAL_OPENGL_TARGET OpenGL::OpenGL)
+    elseif(OPENGL_LIBRARIES)
+        set(PSCAL_OPENGL_TARGET ${OPENGL_LIBRARIES})
+    endif()
 endif()
 
 # --- CURL (two-path strategy) ---
@@ -163,6 +174,8 @@ set(PSCAL_SOURCES
 if(SDL)
     list(APPEND PSCAL_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -218,6 +231,11 @@ function(add_pscal_executable target_name)
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
         list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND TARGET_LINK_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND TARGET_LINK_LIBS ${OPENGL_LIBRARIES})
+        endif()
     endif()
 
     # CURL
@@ -319,6 +337,8 @@ list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 if(SDL)
     list(APPEND CLIKE_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -372,6 +392,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND CLIKE_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND CLIKE_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES CLIKE_SDL_LIBS)
     target_link_libraries(clike PRIVATE ${CLIKE_SDL_LIBS})
     target_compile_definitions(clike PRIVATE SDL)
@@ -417,6 +442,8 @@ list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 if(SDL)
     list(APPEND REA_SOURCES
         src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
 endif()
@@ -457,6 +484,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND REA_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND REA_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES REA_SDL_LIBS)
     target_link_libraries(rea PRIVATE ${REA_SDL_LIBS})
     target_compile_definitions(rea PRIVATE SDL)
@@ -482,6 +514,7 @@ add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tes
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
 add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
 set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
+add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
 
 # ---- AST JSON to Bytecode tool ----
 set(JSON2BC_SOURCES
@@ -492,11 +525,12 @@ set(JSON2BC_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/sdl.c src/backend_ast/audio.c
+    src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c
     src/Pascal/globals.c
 )
+list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 add_executable(pscaljson2bc ${JSON2BC_SOURCES})
 if(TARGET CURL::libcurl)
     target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)
@@ -529,6 +563,11 @@ if(SDL)
         ${PC_SDL2_MIXER_LDFLAGS_OTHER}
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND JSON2BC_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND JSON2BC_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
     list(REMOVE_DUPLICATES JSON2BC_SDL_LIBS)
     target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
     target_compile_definitions(pscaljson2bc PRIVATE SDL)
@@ -536,3 +575,15 @@ endif()
 
 # Install the JSON→Bytecode tool alongside other binaries
 install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# ---- Optional shell completions ----
+option(PSCAL_INSTALL_COMPLETIONS "Install shell completion scripts for pscaljson2bc" ON)
+if(PSCAL_INSTALL_COMPLETIONS)
+    # Bash completion (standard location). Rename to the program name without extension
+    install(FILES tools/completions/pscaljson2bc.bash
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/bash-completion/completions"
+            RENAME pscaljson2bc)
+    # Zsh completion (site-functions). Ensure the filename begins with an underscore
+    install(FILES tools/completions/_pscaljson2bc
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/zsh/site-functions")
+endif()

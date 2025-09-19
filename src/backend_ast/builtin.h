@@ -164,6 +164,11 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
 int isBuiltin(const char *name);
 BuiltinRoutineType getBuiltinType(const char *name);
 
+#ifdef SDL
+/* SDL/OpenGL helpers exposed to the various front ends. */
+void registerSdlGlBuiltins(void);
+#endif
+
 /* Register all built-in routines with the compiler/VM registry. */
 void registerAllBuiltins(void);
 

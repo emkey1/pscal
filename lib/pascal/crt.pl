@@ -24,6 +24,9 @@ const
   White        = 15;
   Blink        = 128;
 
+var
+  TextAttr: byte;
+
 type
   TOSType = (osUnknown, osLinux, osMac);
 

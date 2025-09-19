@@ -9,16 +9,19 @@
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "compiler/compiler.h"
+#include "vm/string_sentinels.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 typedef struct {
     char *name;
     int name_idx;   // constant pool index for the variable name
     VarType type;
+    VarType elemType;
 } GlobalVar;
 
 static GlobalVar globalVars[256];
@@ -143,23 +146,31 @@ static int addLocal(FuncContext* ctx, const char* name, VarType type, int isArra
     return ctx->localCount - 1;
 }
 
-static void registerGlobal(const char* name, VarType type, int name_idx) {
+static GlobalVar* findGlobalEntry(const char* name) {
+    for (int i = 0; i < globalVarCount; ++i) {
+        if (strcmp(globalVars[i].name, name) == 0) {
+            return &globalVars[i];
+        }
+    }
+    return NULL;
+}
+
+static void registerGlobal(const char* name, VarType type, VarType elemType, int name_idx) {
     if (globalVarCount >= (int)(sizeof(globalVars)/sizeof(globalVars[0]))) {
         fprintf(stderr, "CLike codegen error: too many globals (limit %zu)\n",
                 sizeof(globalVars)/sizeof(globalVars[0]));
         return;
     }
-    globalVars[globalVarCount].name = strdup(name);
-    globalVars[globalVarCount].type = type;
-    globalVars[globalVarCount].name_idx = name_idx;
-    globalVarCount++;
+    GlobalVar* entry = &globalVars[globalVarCount++];
+    entry->name = strdup(name);
+    entry->type = type;
+    entry->elemType = elemType;
+    entry->name_idx = name_idx;
 }
 
 static int resolveGlobal(const char* name) {
-    for (int i = 0; i < globalVarCount; i++) {
-        if (strcmp(globalVars[i].name, name) == 0) return globalVars[i].name_idx;
-    }
-    return -1;
+    GlobalVar* entry = findGlobalEntry(name);
+    return entry ? entry->name_idx : -1;
 }
 
 // Return the constant-pool index of the global's name string. If the global
@@ -172,6 +183,76 @@ static int getGlobalNameConstIndex(BytecodeChunk* chunk, const char* name) {
     return addStringConstant(chunk, name);
 }
 
+static int resolveLocal(FuncContext* ctx, const char* name); // forward declaration for helpers
+
+static int isCharPointerLocal(FuncContext* ctx, int idx) {
+    if (!ctx) return 0;
+    if (idx < 0 || idx >= ctx->localCount) return 0;
+    LocalVar* local = &ctx->locals[idx];
+    return local->type == TYPE_POINTER && local->elemType == TYPE_CHAR;
+}
+
+static int identifierIsCharPointer(ASTNodeClike* ident, FuncContext* ctx) {
+    if (!ident || ident->type != TCAST_IDENTIFIER) return 0;
+    char* name = tokenToCString(ident->token);
+    int isCharPtr = 0;
+    if (ctx) {
+        int idx = resolveLocal(ctx, name);
+        if (idx >= 0) {
+            isCharPtr = isCharPointerLocal(ctx, idx);
+        } else {
+            GlobalVar* entry = findGlobalEntry(name);
+            if (entry && entry->type == TYPE_POINTER && entry->elemType == TYPE_CHAR) {
+                isCharPtr = 1;
+            }
+        }
+    } else {
+        GlobalVar* entry = findGlobalEntry(name);
+        if (entry && entry->type == TYPE_POINTER && entry->elemType == TYPE_CHAR) {
+            isCharPtr = 1;
+        }
+    }
+    free(name);
+    return isCharPtr;
+}
+
+static int shouldEmitStringAsCharPointer(ASTNodeClike* node, FuncContext* ctx) {
+    if (!node || node->type != TCAST_STRING) return 0;
+    ASTNodeClike* parent = node->parent;
+    if (!parent) return 0;
+
+    if (parent->type == TCAST_VAR_DECL && parent->left == node) {
+        return parent->var_type == TYPE_POINTER && parent->element_type == TYPE_CHAR;
+    }
+
+    if (parent->type == TCAST_ASSIGN && parent->right == node) {
+        ASTNodeClike* lhs = parent->left;
+        if (!lhs) return 0;
+        if (lhs->type == TCAST_IDENTIFIER) {
+            return identifierIsCharPointer(lhs, ctx);
+        }
+        if (lhs->var_type == TYPE_POINTER && lhs->element_type == TYPE_CHAR) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void emitCharPointerConstant(ASTNodeClike* node, BytecodeChunk* chunk) {
+    if (!node || !chunk) return;
+    char* raw = tokenStringToCString(node->token);
+    Value strVal = makeString(raw);
+    free(raw);
+    int strIdx = addConstantToChunk(chunk, &strVal);
+    freeValue(&strVal);
+    Value ptrVal = makePointer(chunk->constants[strIdx].s_val, STRING_CHAR_PTR_SENTINEL);
+    int ptrIdx = addConstantToChunk(chunk, &ptrVal);
+    freeValue(&ptrVal);
+    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
+    writeBytecodeChunk(chunk, (uint8_t)ptrIdx, node->token.line);
+}
+
 static int resolveLocal(FuncContext* ctx, const char* name) {
     for (int i = ctx->localCount - 1; i >= 0; i--) {
         if (strcmp(ctx->locals[i].name, name) == 0) return ctx->locals[i].index;
@@ -180,6 +261,7 @@ static int resolveLocal(FuncContext* ctx, const char* name) {
 }
 
 static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
+static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx, bool resultUsed);
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx);
 static void collectLocals(ASTNodeClike *node, FuncContext* ctx);
 static int countLocalDecls(ASTNodeClike *node);
@@ -284,24 +366,33 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             if (node->left) compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, THREAD_JOIN, node->token.line);
             break;
-        case TCAST_EXPR_STMT:
-            if (node->left) {
-                compileExpression(node->left, chunk, ctx);
-                bool needPop = true;
-                if (node->left->type == TCAST_CALL) {
-                    char* name = tokenToCString(node->left->token);
-                    Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
-                    BuiltinRoutineType btype = getBuiltinType(name);
-                    if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
-                        needPop = false;
-                    }
-                    free(name);
-                }
-                if (needPop) {
-                    writeBytecodeChunk(chunk, POP, node->token.line);
+        case TCAST_EXPR_STMT: {
+            ASTNodeClike* expr = node->left;
+            if (!expr) break;
+            if (expr->type == TCAST_ASSIGN) {
+                ASTNodeClike* lhs = expr->left;
+                if (lhs && lhs->type == TCAST_IDENTIFIER) {
+                    compileExpressionWithResult(expr, chunk, ctx, false);
+                    break;
                 }
             }
+            compileExpression(expr, chunk, ctx);
+            bool needPop = true;
+            if (expr->type == TCAST_CALL) {
+                char* name = tokenToCString(expr->token);
+                Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
+                BuiltinRoutineType btype = getBuiltinType(name);
+                if ((sym && sym->type == TYPE_VOID) || btype == BUILTIN_TYPE_PROCEDURE) {
+                    needPop = false;
+                }
+                free(name);
+            }
+            if (needPop) {
+                writeBytecodeChunk(chunk, POP, node->token.line);
+            }
             break;
+        }
         case TCAST_IF: {
             compileExpression(node->left, chunk, ctx);
             writeBytecodeChunk(chunk, JUMP_IF_FALSE, node->token.line);
@@ -629,7 +720,7 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
     if (!node) return;
     char* name = tokenToCString(node->token);
     int name_idx = addStringConstant(chunk, name);
-    registerGlobal(name, node->var_type, name_idx);
+    registerGlobal(name, node->var_type, node->element_type, name_idx);
     if (name_idx < 256) {
         writeBytecodeChunk(chunk, DEFINE_GLOBAL, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)name_idx, node->token.line);
@@ -683,6 +774,9 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
     free(name);
 }
 static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx) {
+    compileExpressionWithResult(node, chunk, ctx, true);
+}
+static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk, FuncContext* ctx, bool resultUsed) {
     if (!node) return;
     switch (node->type) {
         case TCAST_NUMBER: {
@@ -710,13 +804,17 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             break;
         }
         case TCAST_STRING: {
-            char* s = tokenStringToCString(node->token);
-            Value v = makeString(s);
-            free(s);
-            int idx = addConstantToChunk(chunk, &v);
-            freeValue(&v);
-            writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            if (shouldEmitStringAsCharPointer(node, ctx)) {
+                emitCharPointerConstant(node, chunk);
+            } else {
+                char* s = tokenStringToCString(node->token);
+                Value v = makeString(s);
+                free(s);
+                int idx = addConstantToChunk(chunk, &v);
+                freeValue(&v);
+                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            }
             break;
         }
         case TCAST_BINOP: {
@@ -855,6 +953,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                 char* name = tokenToCString(node->left->token);
                 // If it's a known function, emit its bytecode address as an integer constant.
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 if (sym) {
                     Value addr; memset(&addr, 0, sizeof(Value));
                     addr.type = TYPE_INT32;
@@ -882,7 +981,9 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     char* name = tokenToCString(node->left->token);
                     int idx = resolveLocal(ctx, name);
                     compileExpression(node->right, chunk, ctx);
-                    writeBytecodeChunk(chunk, DUP, node->token.line);
+                    if (resultUsed) {
+                        writeBytecodeChunk(chunk, DUP, node->token.line);
+                    }
                     if (idx >= 0) {
                         writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
                         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -991,6 +1092,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
             if (call && call->type == TCAST_CALL) {
                 char *name = tokenToCString(call->token);
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 if (sym) {
                     /*
                      * When a function with local variables is spawned directly,
@@ -1257,6 +1359,7 @@ static void compileExpression(ASTNodeClike *node, BytecodeChunk *chunk, FuncCont
                     compileExpression(node->children[i], chunk, ctx);
                 }
                 Symbol* sym = procedure_table ? hashTableLookup(procedure_table, name) : NULL;
+                sym = resolveSymbolAlias(sym);
                 int nameIndex = addStringConstant(chunk, name);
                 if (sym) {
                     writeBytecodeChunk(chunk, CALL, node->token.line);
@@ -1303,7 +1406,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
         for (int i = 0; i < func->left->child_count; i++) {
             ASTNodeClike* p = func->left->children[i];
             char* name = tokenToCString(p->token);
-            addLocal(&ctx, name, p->var_type, 0, 0, NULL, TYPE_UNKNOWN);
+            addLocal(&ctx, name, p->var_type, 0, 0, NULL, p->element_type);
             free(name);
             ctx.paramCount++;
         }
@@ -1334,6 +1437,7 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
      */
     toLowerString(fname);
     Symbol* sym = hashTableLookup(procedure_table, fname);
+    sym = resolveSymbolAlias(sym);
     if (!sym) {
         sym = malloc(sizeof(Symbol));
         memset(sym, 0, sizeof(Symbol));
@@ -1402,6 +1506,7 @@ static void patchForwardCalls(BytecodeChunk *chunk) {
                     lookup[sizeof(lookup) - 1] = '\0';
                     toLowerString(lookup);
                     Symbol *sym = hashTableLookup(procedure_table, lookup);
+                    sym = resolveSymbolAlias(sym);
                     if (sym && sym->is_defined) {
                         patchShort(chunk, offset + 3,
                                    (uint16_t)sym->bytecode_address);
@@ -1533,6 +1638,7 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
         compileFunction(decl, chunk);
         if (strcmp(name, "main") == 0) {
             Symbol* sym = (Symbol*)hashTableLookup(procedure_table, name);
+            sym = resolveSymbolAlias(sym);
             mainAddress = sym->bytecode_address;
             mainArity = sym->arity;
         }

@@ -46,6 +46,16 @@ class MandelbrotApp {
     myself.minIm = -1.2;
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot (ext)");
+    string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+    if (fileexists(systemFontPath)) {
+      inittextsystem(systemFontPath, 18);
+    } else if (fileexists(repoFontPath1)) {
+      inittextsystem(repoFontPath1, 18);
+    } else {
+      inittextsystem(repoFontPath2, 18);
+    }
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
     myself.quit = false;
@@ -81,7 +91,6 @@ class MandelbrotApp {
       c_im = myself.maxIm - y * myself.imFactor;
       mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
       idx = y * myself.Width * myself.BytesPerPixel;
-      lock(myself.rowMutex);
       for (x = 0; x < myself.Width; x = x + 1) {
         n = row[x];
         if (n == myself.MaxIterations) { R = G = B = 0; }
@@ -92,6 +101,7 @@ class MandelbrotApp {
         myself.pixels[idx + 3] = char(255);
         idx = idx + myself.BytesPerPixel;
       }
+      lock(myself.rowMutex);
       myself.rowDone[y] = true;
       unlock(myself.rowMutex);
     }
@@ -112,7 +122,7 @@ class MandelbrotApp {
   void startCompute() {
     int i;
     int y;
-    for (i = 0; i < myself.Width * myself.Height * myself.BytesPerPixel; i = i + 1) { myself.pixels[i] = char(0); }
+    // Avoid clearing the entire pixel buffer at once; rows will overwrite their regions.
     myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     myself.reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
     myself.imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
@@ -130,7 +140,7 @@ class MandelbrotApp {
     }
 
     for (i = 0; i < myself.ThreadCount; i = i + 1) {
-      myself.tids[i] = spawn MandelbrotApp_computeRowsWorker(myself, i);
+      myself.tids[i] = spawn myself.computeRowsWorker(i);
     }
     myself.computing = true;
   }
@@ -163,17 +173,17 @@ class MandelbrotApp {
     shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
     if (shouldUpdate) {
       updatetexture(myself.textureID, myself.pixels);
-      cleardevice(); rendercopy(myself.textureID); updatescreen();
+      cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
       myself.lastUpdatedRows = doneCount;
     }
     // Finalize when all rows are done or cancelled
     if ((doneCount == myself.Height) || myself.getCancel()) {
       if (doneCount > myself.lastUpdatedRows) {
         updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
         myself.lastUpdatedRows = doneCount;
       }
-      MandelbrotApp_finishThreads(myself);
+      myself.finishThreads();
       myself.computing = false;
       myself.lastUpdatedRows = 0;
     }
@@ -220,10 +230,10 @@ class MandelbrotApp {
       if (winH != myself.Height) { y = (y * myself.Height) / winH; if (y >= myself.Height) y = myself.Height - 1; }
     }
     if ((b & myself.ButtonLeft) != 0 && (myself.prevButtons & myself.ButtonLeft) == 0) {
-      MandelbrotApp_zoom(myself, x, y, 1.0 / myself.ZoomFactor);
+      myself.zoom(x, y, 1.0 / myself.ZoomFactor);
       changed = true;
     } else if ((b & myself.ButtonRight) != 0 && (myself.prevButtons & myself.ButtonRight) == 0) {
-      MandelbrotApp_zoom(myself, x, y, myself.ZoomFactor);
+      myself.zoom(x, y, myself.ZoomFactor);
       changed = true;
     }
     myself.prevButtons = b;
@@ -231,23 +241,23 @@ class MandelbrotApp {
   }
 
   void run() {
-    MandelbrotApp_init(myself);
+    myself.init();
     bool needRender = true;
     while (!myself.getQuit()) {
       if (needRender && !myself.computing) {
-        MandelbrotApp_startCompute(myself);
+        myself.startCompute();
         needRender = false;
       }
-      MandelbrotApp_pollCompute(myself);
+      myself.pollCompute();
       delay(1);
-      if (MandelbrotApp_handleInput(myself)) {
-        MandelbrotApp_setCancel(myself, true);
+      if (myself.handleInput()) {
+        myself.setCancel(true);
         if (myself.computing) {
           int i;
           for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
           myself.computing = false;
         }
-        MandelbrotApp_setCancel(myself, false);
+        myself.setCancel(false);
         needRender = true;
         updatetexture(myself.textureID, myself.pixels);
         cleardevice(); rendercopy(myself.textureID); updatescreen();
@@ -258,9 +268,10 @@ class MandelbrotApp {
       for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
     }
     destroytexture(myself.textureID);
+    quittextsystem();
     closegraph();
   }
 }
 
 MandelbrotApp app = new MandelbrotApp();
-MandelbrotApp_run(app);
+app.run();

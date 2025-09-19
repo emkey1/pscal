@@ -4,6 +4,8 @@
 #include <math.h>
 #include <ctype.h>
 #include <strings.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h" // For isBuiltin
@@ -104,6 +106,9 @@ static bool compiling_global_var_init = false;
 // their vtable pointers immediately.
 static int global_init_new_depth = 0;
 
+static bool compiler_defined_myself_global = false;
+static int compiler_myself_global_name_idx = -1;
+
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
     int index = addConstantToChunk(chunk, &val);
@@ -144,6 +149,31 @@ static int addBooleanConstant(BytecodeChunk* chunk, bool boolValue) {
     int index = addConstantToChunk(chunk, &val);
     // No freeValue needed for simple boolean types.
     return index;
+}
+
+static int ensureMyselfGlobalNameIndex(BytecodeChunk* chunk) {
+    if (compiler_myself_global_name_idx < 0) {
+        compiler_myself_global_name_idx = addStringConstant(chunk, "myself");
+    }
+    return compiler_myself_global_name_idx;
+}
+
+static void ensureMyselfGlobalDefined(BytecodeChunk* chunk, int line) {
+    if (compiler_defined_myself_global) return;
+    int myself_idx = ensureMyselfGlobalNameIndex(chunk);
+    emitConstant(chunk, addNilConstant(chunk), line);
+    emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, myself_idx, line);
+    // Declare the implicit "myself" variable as a generic pointer with a
+    // placeholder type name.  The VM's DEFINE_GLOBAL handler expects every
+    // global definition to include the declared VarType and an associated
+    // type-name constant index.  Previously we omitted these operands, which
+    // caused the VM to misinterpret the bytecode stream for the first
+    // statement following the implicit declaration (often a WRITELN), leading
+    // to stack underflows at runtime.
+    writeBytecodeChunk(chunk, (uint8_t)TYPE_POINTER, line);
+    int pointer_type_name_idx = addStringConstant(chunk, "");
+    emitConstantIndex16(chunk, pointer_type_name_idx, line);
+    compiler_defined_myself_global = true;
 }
 
 // Determine if a variable declaration node resides in the true global scope.
@@ -213,13 +243,13 @@ static void emitVTables(BytecodeChunk* chunk) {
         Symbol* sym = procedure_table->buckets[b];
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-            if (base && base->type_def && base->type_def->is_virtual && base->name) {
-                const char* us = strchr(base->name, '_');
-                if (us) {
-                    size_t cls_len = (size_t)(us - base->name);
+            if (base && base->type_def && base->type_def->is_virtual && sym->name) {
+                const char* dot = strchr(sym->name, '.');
+                if (dot) {
+                    size_t cls_len = (size_t)(dot - sym->name);
                     char cls[256];
                     if (cls_len < sizeof(cls)) {
-                        memcpy(cls, base->name, cls_len);
+                        memcpy(cls, sym->name, cls_len);
                         cls[cls_len] = '\0';
                         int idx = -1;
                         for (int i = 0; i < table_count; i++) {
@@ -310,6 +340,101 @@ static int intTypeRank(VarType t) {
         default:
             return 0;
     }
+}
+
+static bool isUnsignedIntVarType(VarType t) {
+    switch (t) {
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool constantFitsInIntType(AST* expr, VarType targetType) {
+    if (!expr || !isIntlikeType(targetType)) return false;
+
+    Value const_val = evaluateCompileTimeValue(expr);
+    bool fits = false;
+
+    if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+        freeValue(&const_val);
+        return false;
+    }
+
+    bool hasOrdinal = false;
+    long long sval = 0;
+    unsigned long long uval = 0;
+    bool value_is_unsigned = false;
+
+    if (const_val.type == TYPE_ENUM) {
+        sval = const_val.enum_val.ordinal;
+        uval = (unsigned long long)const_val.enum_val.ordinal;
+        hasOrdinal = true;
+        value_is_unsigned = (const_val.enum_val.ordinal >= 0);
+    } else if (isIntlikeType(const_val.type)) {
+        sval = const_val.i_val;
+        uval = const_val.u_val;
+        hasOrdinal = true;
+        value_is_unsigned = isUnsignedIntVarType(const_val.type) ||
+                            const_val.type == TYPE_BOOLEAN ||
+                            const_val.type == TYPE_CHAR;
+    }
+
+    if (!hasOrdinal) {
+        freeValue(&const_val);
+        return false;
+    }
+
+    switch (targetType) {
+        case TYPE_BOOLEAN:
+            fits = (sval == 0 || sval == 1);
+            break;
+        case TYPE_CHAR:
+            fits = (sval >= 0 && uval <= UCHAR_MAX);
+            break;
+        case TYPE_INT8:
+            fits = (sval >= INT8_MIN && sval <= INT8_MAX);
+            break;
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT8_MAX);
+            break;
+        case TYPE_INT16:
+            fits = (sval >= INT16_MIN && sval <= INT16_MAX);
+            break;
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT16_MAX);
+            break;
+        case TYPE_INT32:
+            fits = (sval >= INT32_MIN && sval <= INT32_MAX);
+            break;
+        case TYPE_UINT32:
+            fits = ((value_is_unsigned || sval >= 0) && uval <= UINT32_MAX);
+            break;
+        case TYPE_INT64:
+            if (value_is_unsigned && uval > (unsigned long long)LLONG_MAX) {
+                fits = false;
+            } else {
+                fits = (sval >= LLONG_MIN && sval <= LLONG_MAX);
+            }
+            break;
+        case TYPE_UINT64:
+            fits = (value_is_unsigned || sval >= 0);
+            break;
+        default:
+            fits = false;
+            break;
+    }
+
+    freeValue(&const_val);
+    return fits;
 }
 
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
@@ -530,7 +655,8 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
     if (expr->type == AST_VARIABLE && expr->token && expr->token->value &&
-        strcasecmp(expr->token->value, "myself") == 0 &&
+        (strcasecmp(expr->token->value, "myself") == 0 ||
+         strcasecmp(expr->token->value, "my") == 0) &&
         current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
         return current_class_record_type;
     }
@@ -572,9 +698,9 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         } else if (current_function_compiler && current_function_compiler->function_symbol &&
                    current_function_compiler->function_symbol->name) {
             const char* fname = current_function_compiler->function_symbol->name;
-            const char* us = strchr(fname, '_');
-            if (us) {
-                size_t len = (size_t)(us - fname);
+            const char* dot = strchr(fname, '.');
+            if (dot) {
+                size_t len = (size_t)(dot - fname);
                 char cls[MAX_SYMBOL_LENGTH];
                 if (len >= sizeof(cls)) len = sizeof(cls) - 1;
                 memcpy(cls, fname, len);
@@ -623,7 +749,7 @@ static bool recordTypeHasVTable(AST* recordType) {
         while (sym) {
             Symbol* base = sym->is_alias ? sym->real_symbol : sym;
             if (base && base->name && base->type_def && base->type_def->is_virtual &&
-                strncasecmp(base->name, name, len) == 0 && base->name[len] == '_') {
+                strncasecmp(base->name, name, len) == 0 && base->name[len] == '.') {
                 AST* func = base->type_def;
                 if (func->child_count > 0) {
                     AST* firstParam = func->children[0];
@@ -1574,7 +1700,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if ((!recType || recType->type != AST_RECORD_TYPE) &&
                 node->left && node->left->type == AST_VARIABLE &&
                 node->left->token && node->left->token->value &&
-                strcasecmp(node->left->token->value, "myself") == 0) {
+                (strcasecmp(node->left->token->value, "myself") == 0 ||
+                 strcasecmp(node->left->token->value, "my") == 0)) {
                 if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
                     recType = current_class_record_type;
                 }
@@ -1582,9 +1709,9 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     current_function_compiler && current_function_compiler->function_symbol &&
                     current_function_compiler->function_symbol->name) {
                     const char* fname = current_function_compiler->function_symbol->name;
-                    const char* us = strchr(fname, '_');
-                    if (us) {
-                        size_t len = (size_t)(us - fname);
+                    const char* dot = strchr(fname, '.');
+                    if (dot) {
+                        size_t len = (size_t)(dot - fname);
                         char cls[MAX_SYMBOL_LENGTH];
                         if (len >= sizeof(cls)) len = sizeof(cls) - 1;
                         memcpy(cls, fname, len);
@@ -1604,7 +1731,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
             if (fieldOffset < 0 && recType && node->left && node->left->type == AST_VARIABLE &&
                 node->left->token && node->left->token->value &&
-                strcasecmp(node->left->token->value, "myself") == 0) {
+                (strcasecmp(node->left->token->value, "myself") == 0 ||
+                 strcasecmp(node->left->token->value, "my") == 0)) {
                 // Fallback: case-insensitive search through class fields
                 int offset = 0;
                 if (recType->extra && recType->extra->token && recType->extra->token->value) {
@@ -1755,7 +1883,11 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     compilerGlobalCount = 0;
     compiler_had_error = false;
     current_function_compiler = NULL;
-    
+    compiler_defined_myself_global = false;
+    compiler_myself_global_name_idx = -1;
+
+    ensureMyselfGlobalDefined(outputChunk, rootNode ? getLine(rootNode) : 0);
+
     current_procedure_table = procedure_table;
 
     if (rootNode->type == AST_PROGRAM) {
@@ -2355,9 +2487,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     AST* saved_class_record_type = current_class_record_type;
     current_class_const_table = NULL;
     current_class_record_type = NULL;
-    const char* us_pos = strchr(func_name, '_');
-    if (us_pos) {
-        size_t cls_len = (size_t)(us_pos - func_name);
+    const char* dot_pos = strchr(func_name, '.');
+    if (dot_pos) {
+        size_t cls_len = (size_t)(dot_pos - func_name);
         if (cls_len < MAX_SYMBOL_LENGTH) {
             char cls_name[MAX_SYMBOL_LENGTH];
             strncpy(cls_name, func_name, cls_len);
@@ -2404,18 +2536,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     proc_symbol->is_defined = true;
     fc.function_symbol = proc_symbol;
     proc_symbol->enclosing = fc.enclosing ? fc.enclosing->function_symbol : NULL;
-
-    if (current_procedure_table != procedure_table) {
-        if (!hashTableLookup(procedure_table, proc_symbol->name)) {
-            Symbol* alias = malloc(sizeof(Symbol));
-            *alias = *proc_symbol;
-            alias->name = strdup(proc_symbol->name);
-            alias->is_alias = true;
-            alias->real_symbol = proc_symbol;
-            alias->next = NULL;
-            hashTableInsert(procedure_table, alias);
-        }
-    }
 
     // Step 1: Add parameters to the local scope FIRST.
     if (func_decl_node->children) {
@@ -3007,7 +3127,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
                 int lrank = intTypeRank(lvalue->var_type);
                 int rrank = intTypeRank(rvalue->var_type);
-                if (rrank > lrank) {
+                if (rrank > lrank && !constantFitsInIntType(rvalue, lvalue->var_type)) {
                     fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
                             line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
                 }
@@ -3176,6 +3296,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_PROCEDURE_CALL: {
             const char* calleeName = node->token->value;
+            bool usesReceiverGlobal = false;
 
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* proc_symbol_lookup = NULL;
@@ -3202,8 +3323,40 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             if (proc_symbol && proc_symbol->is_alias) {
                 proc_symbol = proc_symbol->real_symbol;
             }
+            if (proc_symbol && proc_symbol->name) {
+                calleeName = proc_symbol->name;   // ensure emitted call uses canonical lowercase
+            }
+
+            if (!proc_symbol) {
+                const char* dot = strrchr(callee_lower, '.');
+                if (dot && *(dot + 1)) {
+                    Symbol* alt = lookupProcedure(dot + 1);
+                    if (alt && alt->is_alias) {
+                        alt = alt->real_symbol;
+                    }
+                    if (alt) {
+                        proc_symbol = alt;
+                        if (proc_symbol->name) {
+                            calleeName = proc_symbol->name;
+                        } else {
+                            calleeName = dot + 1;
+                        }
+                        if (node->child_count > 0) {
+                            usesReceiverGlobal = true;
+                        }
+                    }
+                }
+            }
+
+            // Ensure the target procedure is compiled so its address is available
+            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def) {
+                compileDefinedFunction(proc_symbol->type_def, chunk,
+                                      getLine(proc_symbol->type_def));
+            }
 
             bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+
+            int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
 #ifdef FRONTEND_REA
             // Fallback: receiver-aware method call mangle (Rea-only)
@@ -3218,23 +3371,40 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     // Prefer explicit type identifier token value
                     if (tdef->type == AST_TYPE_IDENTIFIER || tdef->type == AST_VARIABLE) {
                         cls_name = tdef->token->value;
-                    } else if (recv->token && recv->token->value && strcasecmp(recv->token->value, "myself") == 0 && current_function_compiler && current_function_compiler->function_symbol) {
-                        // Derive from current function name 'Class_method' if available
+                    } else if (recv->token && recv->token->value &&
+                               (strcasecmp(recv->token->value, "myself") == 0 ||
+                                strcasecmp(recv->token->value, "my") == 0) &&
+                               current_function_compiler && current_function_compiler->function_symbol) {
+                        // Derive from current function name 'Class.method' if available
                         const char* fname = current_function_compiler->function_symbol->name;
-                        const char* us = fname ? strchr(fname, '_') : NULL;
+                        const char* dot = fname ? strchr(fname, '.') : NULL;
                         static char buf[256];
-                        if (fname && us && (us - fname) < (int)sizeof(buf)) {
-                            size_t n = (size_t)(us - fname);
+                        if (fname && dot && (dot - fname) < (int)sizeof(buf)) {
+                            size_t n = (size_t)(dot - fname);
                             memcpy(buf, fname, n); buf[n] = '\0';
                             cls_name = buf;
                         }
                     }
                 }
                 if (cls_name && calleeName) {
+                    size_t cls_len = strlen(cls_name);
+                    size_t callee_len = strlen(calleeName);
+                    bool alreadyQualified = false;
+                    if (callee_len > cls_len &&
+                        strncasecmp(calleeName, cls_name, cls_len) == 0 &&
+                        calleeName[cls_len] == '.') {
+                        alreadyQualified = true;
+                    }
+
+                    const char* lookup_name = calleeName;
                     char mangled[MAX_SYMBOL_LENGTH * 2 + 2];
-                    snprintf(mangled, sizeof(mangled), "%s_%s", cls_name, calleeName);
+                    if (!alreadyQualified) {
+                        snprintf(mangled, sizeof(mangled), "%s.%s", cls_name, calleeName);
+                        lookup_name = mangled;
+                    }
+
                     char mangled_lower[MAX_SYMBOL_LENGTH * 2 + 2];
-                    strncpy(mangled_lower, mangled, sizeof(mangled_lower) - 1);
+                    strncpy(mangled_lower, lookup_name, sizeof(mangled_lower) - 1);
                     mangled_lower[sizeof(mangled_lower) - 1] = '\0';
                     toLowerString(mangled_lower);
                     Symbol* m = lookupProcedure(mangled_lower);
@@ -3299,37 +3469,54 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
             bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol;
 
+            int arg_start = receiver_offset;
+            int arg_count = node->child_count - receiver_offset;
+            if (arg_count < 0) arg_count = 0;
+
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
                 bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
                 bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                if (expected == 0 && arg_count > 0) {
+                    int idx = arg_start;
+                    if (idx < node->child_count) {
+                        AST* maybe_self = node->children[idx];
+                        if (maybe_self && maybe_self->type == AST_VARIABLE &&
+                            maybe_self->token && maybe_self->token->value &&
+                            (strcasecmp(maybe_self->token->value, "myself") == 0 ||
+                             strcasecmp(maybe_self->token->value, "my") == 0)) {
+                            arg_start = idx + 1;
+                            arg_count--;
+                        }
+                    }
+                }
                 if (is_inc_dec) {
-                    if (!(node->child_count == 1 || node->child_count == 2)) {
+                    if (!(arg_count == 1 || arg_count == 2)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
-                                line, calleeName, node->child_count);
+                                line, calleeName, arg_count);
                         compiler_had_error = true;
                         param_mismatch = true;
                     }
                 } else if (is_halt) {
-                    if (!(node->child_count == 0 || node->child_count == 1)) {
+                    if (!(arg_count == 0 || arg_count == 1)) {
                         fprintf(stderr, "L%d: Compiler Error: '%s' expects 0 or 1 argument(s) but %d were provided.\n",
-                                line, calleeName, node->child_count);
+                                line, calleeName, arg_count);
                         compiler_had_error = true;
                         param_mismatch = true;
                     }
-                } else if (node->child_count != expected) {
+                } else if (arg_count != expected) {
                     fprintf(stderr, "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
-                            line, calleeName, expected, node->child_count);
+                            line, calleeName, expected, arg_count);
                     compiler_had_error = true;
                     param_mismatch = true;
                 }
 
-                if (!param_mismatch) {
-                    for (int i = 0; i < node->child_count; i++) {
-                        AST* param_node = proc_symbol->type_def->children[i];
-                        AST* arg_node = node->children[i];
-                        if (!param_node || !arg_node) continue;
+            if (!param_mismatch) {
+                for (int i = 0; i < arg_count; i++) {
+                    AST* param_node = proc_symbol->type_def->children[i];
+                    AST* arg_node = node->children[i + arg_start];
+                    if (!param_node || !arg_node) continue;
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
@@ -3402,6 +3589,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
+            int call_arg_count = node->child_count - receiver_offset;
+            if (call_arg_count < 0) call_arg_count = 0;
+
             // Inline routine bodies directly when possible.
             if (proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_inline) {
                 compileInlineRoutine(proc_symbol, node, chunk, line, false);
@@ -3440,18 +3630,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // (Argument compilation logic remains the same...)
-            for (int i = 0; i < node->child_count; i++) {
+            if (usesReceiverGlobal && node->child_count > 0) {
+                int myself_idx = ensureMyselfGlobalNameIndex(chunk);
+                AST* recv_node = node->children[0];
+                compileRValue(recv_node, chunk, getLine(recv_node));
+                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
+            }
+
+            for (int i = receiver_offset; i < node->child_count; i++) {
                 AST* arg_node = node->children[i];
+                int param_index = i - receiver_offset;
                 bool is_var_param = false;
-                if (is_read_proc && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) {
+                if (is_read_proc && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) {
                     is_var_param = true;
                 }
                 else if (calleeName && (
-                    (i == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
-                    (strcasecmp(calleeName, "readln") == 0 && (i > 0 || (i == 0 && arg_node->var_type != TYPE_FILE))) ||
+                    (param_index == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
+                    (strcasecmp(calleeName, "readln") == 0 && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
-                    (strcasecmp(calleeName, "gettextsize") == 0 && i > 0) || // Width and Height are VAR
-                    (strcasecmp(calleeName, "str") == 0 && i == 1) ||
+                    (strcasecmp(calleeName, "gettextsize") == 0 && param_index > 0) || // Width and Height are VAR
+                    (strcasecmp(calleeName, "str") == 0 && param_index == 1) ||
                     /* Date/time routines return values via VAR parameters */
                     (strcasecmp(calleeName, "dosgetdate") == 0) ||
                     (strcasecmp(calleeName, "dosgettime") == 0) ||
@@ -3459,12 +3657,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "gettime") == 0) ||
                     /* MandelbrotRow returns results via the sixth VAR parameter */
                     ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
-                      strcasecmp(calleeName, "MandelbrotRow") == 0) && i == 5)
+                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5)
                 )) {
                     is_var_param = true;
                 }
-                else if (proc_symbol && proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
-                    AST* param_node = proc_symbol->type_def->children[i];
+                else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
+                    AST* param_node = proc_symbol->type_def->children[param_index];
                     if (param_node && param_node->by_ref) {
                         is_var_param = true;
                     }
@@ -3504,7 +3702,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         int nameIndex = addStringConstant(chunk, normalized_name);
                         writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
-                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                        writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                         if (type == BUILTIN_TYPE_FUNCTION) {
                             writeBytecodeChunk(chunk, POP, line);
                         }
@@ -3525,7 +3723,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 } else {
                     emitShort(chunk, 0xFFFF, line);
                 }
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
 
                 // This logic for user-defined functions is already correct.
                 if (proc_symbol->type != TYPE_VOID) {
@@ -3568,7 +3766,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     tmpVar.token = node->token; // reference only; compileRValue copies token if needed
                     compileRValue(&tmpVar, chunk, line);
                     writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                 }
             }
             break;
@@ -3948,7 +4146,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
                 int lrank = intTypeRank(lvalue->var_type);
                 int rrank = intTypeRank(rvalue->var_type);
-                if (rrank > lrank) {
+                if (rrank > lrank && !constantFitsInIntType(rvalue, lvalue->var_type)) {
                     fprintf(stderr, "L%d: Compiler warning: assigning %s to %s may lose precision.\n",
                             line, varTypeToString(rvalue->var_type), varTypeToString(lvalue->var_type));
                 }
@@ -4111,6 +4309,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             const char* functionName = NULL;
             bool isCallQualified = false;
+            bool usesReceiverGlobal = false;
 
             if (node->left &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
@@ -4127,9 +4326,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             // If this is a qualified call like receiver.method(...), attempt to
-            // mangle to ClassName_method by inspecting the receiver's static type.
+            // mangle to ClassName.method by inspecting the receiver's static type.
             char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
-            if (isCallQualified && node->left) {
+            if (isCallQualified && node->left && functionName) {
                 const char* cls_name = NULL;
                 AST* type_ref = node->left->type_def;
                 if (type_ref) {
@@ -4144,8 +4343,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     }
                 }
                 if (cls_name) {
-                    snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s_%s", cls_name, functionName);
-                    functionName = mangled_name_buf;
+                    size_t cls_len = strlen(cls_name);
+                    size_t fn_len = strlen(functionName);
+                    bool alreadyQualified = false;
+                    if (fn_len > cls_len &&
+                        strncasecmp(functionName, cls_name, cls_len) == 0 &&
+                        functionName[cls_len] == '.') {
+                        alreadyQualified = true;
+                    }
+                    if (!alreadyQualified) {
+                        snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s.%s", cls_name, functionName);
+                        functionName = mangled_name_buf;
+                    }
                 }
             }
 
@@ -4250,8 +4459,34 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (func_symbol && func_symbol->is_alias) {
                 func_symbol = func_symbol->real_symbol;
             }
+            if (func_symbol && func_symbol->name) {
+                functionName = func_symbol->name;   // ensure emitted call uses canonical lowercase
+            }
+
+            if (!func_symbol) {
+                const char* dot = strrchr(func_name_lower, '.');
+                if (dot && *(dot + 1)) {
+                    Symbol* alt = lookupProcedure(dot + 1);
+                    if (alt && alt->is_alias) {
+                        alt = alt->real_symbol;
+                    }
+                    if (alt) {
+                        func_symbol = alt;
+                        if (func_symbol->name) {
+                            functionName = func_symbol->name;
+                        } else {
+                            functionName = dot + 1;
+                        }
+                        if (node->child_count > 0) {
+                            usesReceiverGlobal = true;
+                        }
+                    }
+                }
+            }
 
             bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+
+            int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
@@ -4294,26 +4529,87 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
-                if (node->child_count == 1 && node->children[0]->type == AST_VARIABLE) {
-                    AST* type_arg_node = node->children[0];
-                    int typeNameIndex = addStringConstant(chunk, type_arg_node->token->value);
-                    emitConstant(chunk, typeNameIndex, line);
+                // Accept either a type identifier (AST_VARIABLE), a type reference,
+                // or an expression whose static var_type is known. Push the type name
+                // as a string for the VM builtin to resolve.
+                if (node->child_count == 1) {
+                    AST* arg0 = node->children[0];
+                    DBG_PRINTF("[dbg low/high] arg0 type=%s token=%s vtype=%s\n",
+                               astTypeToString(arg0->type),
+                               (arg0->token && arg0->token->value) ? arg0->token->value : "<null>",
+                               varTypeToString(arg0->var_type));
+                    const char* tname = NULL;
+                    char buf[32];
+                    if (arg0->type == AST_VARIABLE && arg0->token && arg0->token->value) {
+                        // Prefer resolving through the type table so we can pass a typed Value
+                        AST* td = lookupType(arg0->token->value);
+                        if (td) {
+                            VarType tv = td->var_type;
+                            if (tv == TYPE_INTEGER) tv = TYPE_INT32; // normalize
+                            if (tv == TYPE_REAL) tv = TYPE_DOUBLE;
+                            if (tv == TYPE_INT32 || tv == TYPE_DOUBLE || tv == TYPE_FLOAT ||
+                                tv == TYPE_CHAR  || tv == TYPE_BOOLEAN || tv == TYPE_BYTE || tv == TYPE_WORD) {
+                                Value av; memset(&av, 0, sizeof(Value)); av.type = tv;
+                                int cidx = addConstantToChunk(chunk, &av);
+                                emitConstant(chunk, cidx, line);
+                                tname = NULL; // Already emitted typed argument
+                            } else {
+                                tname = arg0->token->value;
+                            }
+                        } else {
+                            tname = arg0->token->value;
+                        }
+                    } else if ((arg0->type == AST_TYPE_REFERENCE || arg0->type == AST_PROCEDURE_CALL) && arg0->token && arg0->token->value) {
+                        tname = arg0->token->value;
+                    } else if (arg0->var_type != TYPE_UNKNOWN && arg0->var_type != TYPE_VOID) {
+                        // Map known VarType to Pascal type name expected by VM builtin
+                        switch (arg0->var_type) {
+                            case TYPE_INT32:
+                                tname = "integer"; break;
+                            case TYPE_DOUBLE:
+                                tname = "real"; break;
+                            case TYPE_FLOAT:
+                                tname = "float"; break;
+                            case TYPE_CHAR:
+                                tname = "char"; break;
+                            case TYPE_BOOLEAN:
+                                tname = "boolean"; break;
+                            case TYPE_BYTE:
+                                tname = "byte"; break;
+                            case TYPE_WORD:
+                                tname = "word"; break;
+                            default:
+                                // Fallback to varTypeToString; VM builtin may not recognize it.
+                                snprintf(buf, sizeof(buf), "%s", varTypeToString(arg0->var_type));
+                                tname = buf;
+                                break;
+                        }
+                    }
+                    if (tname) {
+                        int typeNameIndex = addStringConstant(chunk, tname);
+                        emitConstant(chunk, typeNameIndex, line);
+                    } else {
+                        // Fallback to integer if we cannot determine the type identifier
+                        int typeNameIndex = addStringConstant(chunk, "integer");
+                        emitConstant(chunk, typeNameIndex, line);
+                    }
                 } else {
-                    fprintf(stderr, "L%d: Compiler error: Argument to '%s' must be a single type identifier.\n", line, functionName);
-                    compiler_had_error = true;
+                    int typeNameIndex = addStringConstant(chunk, "integer");
+                    emitConstant(chunk, typeNameIndex, line);
                 }
             } else {
-                for (int i = 0; i < node->child_count; i++) {
+                for (int i = receiver_offset; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     if (!arg_node) continue;
-                    
+
+                    int param_index = i - receiver_offset;
                     bool is_var_param = false;
-                    if (func_symbol && func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                        AST* param_node = func_symbol->type_def->children[i];
+                    if (func_symbol && func_symbol->type_def && param_index < func_symbol->type_def->child_count) {
+                        AST* param_node = func_symbol->type_def->children[param_index];
                         if (param_node && param_node->by_ref) {
                             is_var_param = true;
                         }
-                    } else if (functionName && i == 0 && strcasecmp(functionName, "eof") == 0) {
+                    } else if (functionName && param_index == 0 && strcasecmp(functionName, "eof") == 0) {
                         // Built-in EOF takes its file parameter by reference
                         is_var_param = true;
                     }
@@ -4326,12 +4622,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
+            int call_arg_count = node->child_count - receiver_offset;
+            if (call_arg_count < 0) call_arg_count = 0;
+
+            if (usesReceiverGlobal && node->child_count > 0) {
+                int myself_idx = ensureMyselfGlobalNameIndex(chunk);
+                AST* recv_node = node->children[0];
+                compileRValue(recv_node, chunk, getLine(recv_node));
+                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
+            }
+
             if (!func_symbol && isBuiltin(functionName)) {
                 BuiltinRoutineType type = getBuiltinType(functionName);
                 if (type == BUILTIN_TYPE_PROCEDURE) {
                     fprintf(stderr, "L%d: Compiler Error: Built-in procedure '%s' cannot be used as a function in an expression.\n", line, functionName);
                     compiler_had_error = true;
-                    for(uint8_t i = 0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
+                    for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                     emitConstant(chunk, addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
                     char normalized_name[MAX_SYMBOL_LENGTH];
@@ -4341,7 +4647,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     int nameIndex = addStringConstant(chunk, normalized_name);
                     writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                     emitShort(chunk, (uint16_t)nameIndex, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                 } else {
                     // Fallback to indirect function pointer call: use variable's value as address.
                     AST tmpVar; memset(&tmpVar, 0, sizeof(AST));
@@ -4349,7 +4655,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     // Arguments are already compiled (above) and on the stack; now push callee address
                     compileRValue(&tmpVar, chunk, line);
                     writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                 }
             } else {
                 char original_display_name[MAX_SYMBOL_LENGTH * 2 + 2];
@@ -4365,24 +4671,24 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
                 
                 if (func_symbol) {
-                    
+
                     if (func_symbol->type == TYPE_VOID) {
                         fprintf(stderr, "L%d: Compiler Error: Procedure '%s' cannot be used as a function.\n", line, original_display_name);
                         compiler_had_error = true;
-                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
+                        for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
                     } else if ((strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)
-                               ? !(node->child_count == 1 || node->child_count == 2)
-                               : (func_symbol->arity != node->child_count)) {
+                               ? !(call_arg_count == 1 || call_arg_count == 2)
+                               : (func_symbol->arity != call_arg_count)) {
                         if (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0) {
                             fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
-                                    line, original_display_name, node->child_count);
+                                    line, original_display_name, call_arg_count);
                         } else {
                             fprintf(stderr, "L%d: Compiler Error: Function '%s' expects %d arguments, got %d.\n",
-                                    line, original_display_name, func_symbol->arity, node->child_count);
+                                    line, original_display_name, func_symbol->arity, call_arg_count);
                         }
                         compiler_had_error = true;
-                        for(uint8_t i=0; i < node->child_count; ++i) writeBytecodeChunk(chunk, POP, line);
+                        for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
                     } else {
                         int nameIndex = addStringConstant(chunk, functionName);
@@ -4394,7 +4700,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         } else {
                             emitShort(chunk, 0xFFFF, line);
                         }
-                        writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                        writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                     }
                 } else {
                     // Fallback to indirect function pointer call: push callee address and perform indirect call
@@ -4402,7 +4708,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     tmpVar.type = AST_VARIABLE; tmpVar.token = node->token;
                     compileRValue(&tmpVar, chunk, line);
                     writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                 }
             }
             break;
@@ -4487,9 +4793,7 @@ void finalizeBytecode(BytecodeChunk* chunk) {
                 // Directly search the global procedure table instead of relying on
                 // lookupProcedure(), which depends on current_procedure_table.
                 Symbol* symbol_to_patch = hashTableLookup(procedure_table, lookup_name);
-                if (symbol_to_patch && symbol_to_patch->is_alias) {
-                    symbol_to_patch = symbol_to_patch->real_symbol;
-                }
+                symbol_to_patch = resolveSymbolAlias(symbol_to_patch);
 
                 if (symbol_to_patch && symbol_to_patch->is_defined) {
                     // Patch the address in place. The address occupies bytes offset+3 and offset+4.

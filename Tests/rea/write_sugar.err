@@ -2,19 +2,24 @@
 == Disassembly: Tests/rea/write_sugar.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    1 CONSTANT            0 '1'
-0002    | CONSTANT            1 'A'
-0004    | CONSTANT            0 '1'
-0006    | CALL_BUILTIN         2 'write' (3 args)
-0010    2 CONSTANT            3 '0'
-0012    | CONSTANT            4 'B'
-0014    | CALL_BUILTIN         2 'write' (2 args)
-0018    0 HALT
+0000    0 CONSTANT            1 'nil'
+0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
+0007    1 CONSTANT            3 '1'
+0009    | CONSTANT            4 'A'
+0011    | CONSTANT            3 '1'
+0013    | CALL_BUILTIN         5 'write' (3 args)
+0017    2 CONSTANT            6 '0'
+0019    | CONSTANT            7 'B'
+0021    | CALL_BUILTIN         5 'write' (2 args)
+0025    0 HALT
 == End Disassembly: Tests/rea/write_sugar.rea ==
 
-Constants (5):\n  0000: INT   1
-  0001: CHAR  'A'
-  0002: STR   "write"
-  0003: INT   0
-  0004: CHAR  'B'
+Constants (8):\n  0000: STR   "myself"
+  0001: NIL
+  0002: STR   ""
+  0003: INT   1
+  0004: CHAR  'A'
+  0005: STR   "write"
+  0006: INT   0
+  0007: CHAR  'B'
 

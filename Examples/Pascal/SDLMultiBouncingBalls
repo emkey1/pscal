@@ -54,9 +54,9 @@ BEGIN
     END;
 
 
-    Balls[k].r := Random(206) + 50;
-    Balls[k].g := Random(206) + 50;
-    Balls[k].b := Random(206) + 50;
+    Balls[k].r := Byte(Random(206) + 50);
+    Balls[k].g := Byte(Random(206) + 50);
+    Balls[k].b := Byte(Random(206) + 50);
     Balls[k].mass := Balls[k].radius * Balls[k].radius * 1.0; // Mass proportional to area (roughly)
     Balls[k].active := True;
   END;

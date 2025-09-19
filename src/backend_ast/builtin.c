@@ -5,6 +5,7 @@
 #ifdef SDL
 #include "backend_ast/sdl.h"
 #include "backend_ast/audio.h"
+#include "backend_ast/gl.h"
 #endif
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
@@ -127,6 +128,28 @@ static Value vmBuiltinToChar(VM* vm, int arg_count, Value* args) {
     return makeChar((int)c);
 }
 
+static Value vmBuiltinToByte(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "byte(x) expects 1 argument.");
+        return makeByte(0);
+    }
+    Value v = args[0];
+    unsigned char b = 0;
+    if (isRealType(v.type)) {
+        long double d = AS_REAL(v);
+        b = (unsigned char)((long long)d);
+    } else if (IS_INTLIKE(v)) {
+        b = (unsigned char)AS_INTEGER(v);
+    } else if (v.type == TYPE_BOOLEAN) {
+        b = v.i_val ? 1 : 0;
+    } else if (v.type == TYPE_CHAR) {
+        b = (unsigned char)v.c_val;
+    } else {
+        b = 0;
+    }
+    return makeByte(b);
+}
+
 static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "bool(x) expects 1 argument.");
@@ -191,6 +214,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"blinktext", vmBuiltinBlinktext},
     {"boldtext", vmBuiltinBoldtext},
     {"bool", vmBuiltinToBool},
+    {"byte", vmBuiltinToByte},
     {"bytecodeversion", vmBuiltinBytecodeVersion},
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
@@ -203,6 +227,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"close", vmBuiltinClose},
 #ifdef SDL
     {"closegraph", vmBuiltinClosegraph},
+    {"closegraph3d", vmBuiltinClosegraph3d},
 #endif
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
@@ -265,6 +290,26 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
     {"gettextsize", vmBuiltinGettextsize},
     {"getticks", vmBuiltinGetticks},
+    {"glbegin", vmBuiltinGlbegin},
+    {"glclear", vmBuiltinGlclear},
+    {"glclearcolor", vmBuiltinGlclearcolor},
+    {"glcleardepth", vmBuiltinGlcleardepth},
+    {"glcolor3f", vmBuiltinGlcolor3f},
+    {"gldepthtest", vmBuiltinGldepthtest},
+    {"glend", vmBuiltinGlend},
+    {"glfrustum", vmBuiltinGlfrustum},
+    {"glloadidentity", vmBuiltinGlloadidentity},
+    {"glmatrixmode", vmBuiltinGlmatrixmode},
+    {"glpopmatrix", vmBuiltinGlpopmatrix},
+    {"glpushmatrix", vmBuiltinGlpushmatrix},
+    {"glrotatef", vmBuiltinGlrotatef},
+    {"glscalef", vmBuiltinGlscalef},
+    {"glperspective", vmBuiltinGlperspective},
+    {"glsetswapinterval", vmBuiltinGlsetswapinterval},
+    {"glswapwindow", vmBuiltinGlswapwindow},
+    {"gltranslatef", vmBuiltinGltranslatef},
+    {"glvertex3f", vmBuiltinGlvertex3f},
+    {"glviewport", vmBuiltinGlviewport},
 #endif
     {"gettime", vmBuiltinDosGettime},
 #ifdef SDL
@@ -278,6 +323,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"inc", vmBuiltinInc},
 #ifdef SDL
     {"initgraph", vmBuiltinInitgraph},
+    {"initgraph3d", vmBuiltinInitgraph3d},
 #endif
 #ifdef SDL
     {"initsoundsystem", vmBuiltinInitsoundsystem},
@@ -321,7 +367,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"paramstr", vmBuiltinParamstr},
 #ifdef SDL
     {"playsound", vmBuiltinPlaysound},
+    {"stopallsounds", vmBuiltinStopallsounds},
     {"pollkey", vmBuiltinPollkey},
+    {"iskeydown", vmBuiltinIskeydown},
 #endif
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
@@ -448,10 +496,6 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
     num_extra_vm_builtins++;
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
-
-/* Weak hook that external modules can override to register additional
- * built-ins.  The default implementation does nothing. */
-__attribute__((weak)) void registerExtendedBuiltins(void) {}
 
 // This function now comes AFTER the table and comparison function it uses.
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
@@ -1529,6 +1573,10 @@ Value vmBuiltinTextcolor(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)(colorCode % 16);
     gCurrentTextBold = (colorCode >= 8 && colorCode <= 15);
     gCurrentColorIsExt = false;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1539,6 +1587,10 @@ Value vmBuiltinTextbackground(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)(AS_INTEGER(args[0]) % 8);
     gCurrentBgIsExt = false;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
@@ -1549,6 +1601,10 @@ Value vmBuiltinTextcolore(VM* vm, int arg_count, Value* args) {
     gCurrentTextColor = (int)AS_INTEGER(args[0]);
     gCurrentTextBold = false;
     gCurrentColorIsExt = true;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1559,6 +1615,10 @@ Value vmBuiltinTextbackgrounde(VM* vm, int arg_count, Value* args) {
     }
     gCurrentTextBackground = (int)AS_INTEGER(args[0]);
     gCurrentBgIsExt = true;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1569,6 +1629,10 @@ Value vmBuiltinBoldtext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBold = true;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1579,6 +1643,7 @@ Value vmBuiltinUnderlinetext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextUnderline = true;
+    markTextAttrDirty();
     return makeVoid();
 }
 
@@ -1589,6 +1654,10 @@ Value vmBuiltinBlinktext(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBlink = true;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1599,6 +1668,11 @@ Value vmBuiltinLowvideo(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     gCurrentTextBold = false;
+    gCurrentTextColor &= 0x07;
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1617,6 +1691,10 @@ Value vmBuiltinNormvideo(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -1730,6 +1808,10 @@ Value vmBuiltinNormalcolors(VM* vm, int arg_count, Value* args) {
     gCurrentTextBlink = false;
     printf("\x1B[0m");
     fflush(stdout);
+
+    markTextAttrDirty();
+
+    syncTextAttrSymbol();
     return makeVoid();
 }
 
@@ -3300,14 +3382,11 @@ Value vmBuiltinMstreamcreate(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "MStreamCreate expects no arguments.");
         return makeVoid();
     }
-    MStream *ms = malloc(sizeof(MStream));
+    MStream *ms = createMStream();
     if (!ms) {
         runtimeError(vm, "Memory allocation error for MStream structure in MStreamCreate.");
         return makeVoid();
     }
-    ms->buffer = NULL;
-    ms->size = 0;
-    ms->capacity = 0;
     return makeMStream(ms);
 }
 
@@ -3438,11 +3517,7 @@ Value vmBuiltinMstreamfree(VM* vm, int arg_count, Value* args) {
     MStream* ms = ms_value_ptr->mstream;
 
     if (ms) { // Only free if MStream struct itself exists
-        if (ms->buffer) {
-            free(ms->buffer);
-            ms->buffer = NULL;
-        }
-        free(ms); // Free the MStream struct
+        releaseMStream(ms);
         ms_value_ptr->mstream = NULL; // Crucial: Set the MStream pointer in the variable's Value struct to NULL
     }
     // If ms was NULL, it's a no-op, which is fine.
@@ -3673,9 +3748,63 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
+#ifdef SDL
+static const char *const sdl_gl_builtin_names[] = {
+    "GLBegin",
+    "GLClear",
+    "GLClearColor",
+    "GLClearDepth",
+    "GLColor3f",
+    "GLDepthTest",
+    "GLEnd",
+    "GLFrustum",
+    "GLLoadIdentity",
+    "GLMatrixMode",
+    "GLPopMatrix",
+    "GLPushMatrix",
+    "GLRotatef",
+    "GLScalef",
+    "GLSetSwapInterval",
+    "GLSwapWindow",
+    "GLTranslatef",
+    "GLPerspective",
+    "GLVertex3f",
+    "GLViewport",
+};
+
+void registerSdlGlBuiltins(void) {
+    for (size_t i = 0; i < sizeof(sdl_gl_builtin_names) / sizeof(sdl_gl_builtin_names[0]); ++i) {
+        registerBuiltinFunction(sdl_gl_builtin_names[i], AST_PROCEDURE_DECL, NULL);
+    }
+}
+#endif
+
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
+    /*
+     * Core numeric conversion helpers.  These mirror the small "C-like"
+     * casting helpers exposed by several front ends (Rea, CLike, etc.).
+     * Historically each front end registered these manually which made the
+     * setup fragile—forgetting to do so caused the compiler to fall back to
+     * emitting indirect calls and the VM would later report missing globals
+     * such as "float".  Register them here so every front end shares the
+     * same canonical metadata and the compiler can always resolve their
+     * routine types.
+     */
+    registerBuiltinFunction("int",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("float",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("char",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("bool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("byte",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("toint",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tofloat",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tochar",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("tobyte",   AST_FUNCTION_DECL, NULL);
+
     /* Graphics stubs (usable even without SDL) */
     registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
@@ -3689,6 +3818,7 @@ void registerAllBuiltins(void) {
 
 #ifdef SDL
     /* Additional SDL graphics and sound built-ins */
+    registerBuiltinFunction("CloseGraph3D", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
@@ -3702,6 +3832,8 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
+    registerSdlGlBuiltins();
+    registerBuiltinFunction("InitGraph3D", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);
@@ -3709,7 +3841,9 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("StopAllSounds", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("IsKeyDown", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);
@@ -3768,6 +3902,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("Byte", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Ceil", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
@@ -3918,5 +4053,6 @@ void registerAllBuiltins(void) {
     registerVmBuiltin("tofloat",  vmBuiltinToFloat);
     registerVmBuiltin("tochar",   vmBuiltinToChar);
     registerVmBuiltin("tobool",   vmBuiltinToBool);
+    registerVmBuiltin("tobyte",   vmBuiltinToByte);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }

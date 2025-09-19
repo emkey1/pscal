@@ -50,7 +50,7 @@ floating-point types as the default for new development.
 | `float` | `TYPE_DOUBLE` | 64-bit floating-point number. |
 | `float32` | `TYPE_FLOAT` | 32-bit floating-point number. |
 | `long double` | `TYPE_LONG_DOUBLE` | Extended precision floating-point number. |
-| `str` | `TYPE_STRING` | Dynamic-length string. |
+| `str` or `string` | `TYPE_STRING` | Dynamic-length string. |
 | `bool` | `TYPE_BOOLEAN` | Boolean values (`true` and `false`). |
 | `void` | `TYPE_VOID` | Absence of value (for procedures). |
 

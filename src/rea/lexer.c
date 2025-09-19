@@ -135,6 +135,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "switch", 6) == 0) return REA_TOKEN_SWITCH;
             if (strncmp(start, "double", 6) == 0) return REA_TOKEN_FLOAT;
             if (strncmp(start, "myself", 6) == 0) return REA_TOKEN_MYSELF;
+            if (strncmp(start, "string", 6) == 0) return REA_TOKEN_STR;
             break;
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
@@ -257,6 +258,18 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         if (peek(lexer) == '.' && isDigit(peekNext(lexer))) {
             advance(lexer);
             while (isDigit(peek(lexer))) advance(lexer);
+        }
+        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+            size_t exponent_start = lexer->pos;
+            advance(lexer);
+            if (peek(lexer) == '+' || peek(lexer) == '-') {
+                advance(lexer);
+            }
+            if (isDigit(peek(lexer))) {
+                while (isDigit(peek(lexer))) advance(lexer);
+            } else {
+                lexer->pos = exponent_start;
+            }
         }
         return makeToken(lexer, REA_TOKEN_NUMBER, start);
     }

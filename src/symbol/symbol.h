@@ -93,5 +93,6 @@ void nullifyPointerAliasesByAddrValue(HashTable* table, uintptr_t disposedAddrVa
 HashTable *pushProcedureTable(void);
 void popProcedureTable(bool free_table);
 Symbol *lookupProcedure(const char *name);
+Symbol *resolveSymbolAlias(Symbol *sym);
 
 #endif // symbol_h

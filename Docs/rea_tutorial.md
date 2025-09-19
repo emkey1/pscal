@@ -292,11 +292,11 @@ and draws the scene each frame, and exits when the `Q` key is pressed.
 ### Program entry point
 ```rea
 BallsApp app = new BallsApp();
-BallsApp_run(app);
+app.run();
 ```
 Creates the `BallsApp` instance and invokes its `run` method.
 
-**Syntax notes:** Top‑level code allocates a class with `new` and calls its method using the generated `ClassName_method(instance)` form.
+**Syntax notes:** Top-level code allocates a class with `new` and invokes methods using `object.method()` syntax.
 
 ## Next steps
 

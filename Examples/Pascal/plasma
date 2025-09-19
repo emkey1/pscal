@@ -61,7 +61,7 @@ BEGIN
       ELSE IF finalVal > 255 THEN
         ColorIndex := 255
       ELSE
-        ColorIndex := Trunc(finalVal); // Assign truncated integer to byte
+        ColorIndex := byte(Trunc(finalVal)); // Assign truncated integer to byte
 
       // Avoid color 0 if background is 0 (use dark grey instead)
       IF (ColorIndex = 0) and (DefaultBgColor = 0) THEN

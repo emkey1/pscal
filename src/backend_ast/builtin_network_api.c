@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <curl/curl.h>
 #include <pthread.h>
 #ifdef _WIN32
@@ -23,6 +24,7 @@
 #include "Pascal/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "vm/string_sentinels.h"
 
 #ifdef _WIN32
 static void ensure_winsock(void) {
@@ -37,6 +39,91 @@ static void ensure_winsock(void) {
 
 static int g_socket_last_error = 0;
 static char g_socket_last_error_msg[256];
+
+typedef struct SocketInfo_s {
+    int fd;
+    int family;
+    int socktype;
+    struct SocketInfo_s* next;
+} SocketInfo;
+
+static SocketInfo* g_socket_info_list = NULL;
+
+static int valueIsStringLike(const Value* value) {
+    if (!value) return 0;
+    if (value->type == TYPE_STRING) return 1;
+    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+    return 0;
+}
+
+static const char* valueToCStringLike(const Value* value) {
+    if (!value) return NULL;
+    if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
+    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        return (const char*)value->ptr_val;
+    }
+    return NULL;
+}
+
+static int valueIsNullCharPointer(const Value* value) {
+    return value && value->type == TYPE_POINTER &&
+           value->base_type_node == STRING_CHAR_PTR_SENTINEL && value->ptr_val == NULL;
+}
+
+static void registerSocketInfo(int fd, int family, int socktype) {
+    SocketInfo* info = (SocketInfo*)malloc(sizeof(SocketInfo));
+    if (!info) {
+        // Allocation failure should not abort socket creation; fall back to
+        // treating the socket as IPv4-only in lookups.
+        return;
+    }
+    info->fd = fd;
+    info->family = family;
+    info->socktype = socktype;
+    info->next = g_socket_info_list;
+    g_socket_info_list = info;
+}
+
+static void unregisterSocketInfo(int fd) {
+    SocketInfo* prev = NULL;
+    SocketInfo* cur = g_socket_info_list;
+    while (cur) {
+        if (cur->fd == fd) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                g_socket_info_list = cur->next;
+            }
+            free(cur);
+            return;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+}
+
+static int lookupSocketInfo(int fd, int* family_out, int* socktype_out) {
+    for (SocketInfo* cur = g_socket_info_list; cur; cur = cur->next) {
+        if (cur->fd == fd) {
+            if (family_out) *family_out = cur->family;
+            if (socktype_out) *socktype_out = cur->socktype;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+#ifdef AF_INET6
+static void mapIpv4ToIpv6(const struct sockaddr_in* in4, struct sockaddr_in6* out6) {
+    memset(out6, 0, sizeof(*out6));
+    out6->sin6_family = AF_INET6;
+    out6->sin6_port = in4->sin_port;
+    unsigned char* addr_bytes = (unsigned char*)&out6->sin6_addr;
+    addr_bytes[10] = 0xff;
+    addr_bytes[11] = 0xff;
+    memcpy(addr_bytes + 12, &in4->sin_addr, sizeof(in4->sin_addr));
+}
+#endif
 
 static int mapSocketError(int err) {
 #ifdef _WIN32
@@ -69,12 +156,368 @@ static void setSocketError(int err) {
 #endif
 }
 
+static void setSocketAddrInfoError(int err) {
+#ifdef _WIN32
+    switch (err) {
+#ifdef EAI_AGAIN
+        case EAI_AGAIN:
+#endif
+#ifdef WSATRY_AGAIN
+        case WSATRY_AGAIN:
+#endif
+            g_socket_last_error = 3; // temporary failure
+            break;
+#ifdef EAI_NONAME
+        case EAI_NONAME:
+#endif
+#ifdef EAI_NODATA
+        case EAI_NODATA:
+#endif
+        case WSAHOST_NOT_FOUND:
+        case WSANO_DATA:
+            g_socket_last_error = 5; // host not found
+            break;
+        default:
+            g_socket_last_error = 1;
+            break;
+    }
+    const char* msg = gai_strerrorA(err);
+    if (!msg) msg = "name resolution failure";
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", msg);
+#else
+    switch (err) {
+#ifdef EAI_AGAIN
+        case EAI_AGAIN:
+            g_socket_last_error = 3; // try again later
+            break;
+#endif
+#ifdef EAI_NONAME
+        case EAI_NONAME:
+#endif
+#ifdef EAI_NODATA
+        case EAI_NODATA:
+#endif
+            g_socket_last_error = 5; // host not found
+            break;
+        default:
+            g_socket_last_error = 1;
+            break;
+    }
+    const char* msg = gai_strerror(err);
+    if (!msg) msg = "name resolution failure";
+    snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", msg);
+#endif
+}
+
 static void sleep_ms(long ms) {
 #ifdef _WIN32
     Sleep(ms);
 #else
     usleep(ms * 1000);
 #endif
+}
+
+typedef struct DataUrlPayload_s {
+    unsigned char* data;
+    size_t length;
+    char* content_type;
+} DataUrlPayload;
+
+static void dataUrlPayloadFree(DataUrlPayload* payload) {
+    if (!payload) return;
+    if (payload->data) {
+        free(payload->data);
+        payload->data = NULL;
+    }
+    if (payload->content_type) {
+        free(payload->content_type);
+        payload->content_type = NULL;
+    }
+    payload->length = 0;
+}
+
+static int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (char)tolower((unsigned char)c);
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static int decodePercentEncoded(const char* input, size_t len, unsigned char** out, size_t* out_len) {
+    if (!out || !out_len) return -1;
+    *out = NULL;
+    *out_len = 0;
+    size_t capacity = len + 1;
+    if (capacity == 0) capacity = 1;
+    unsigned char* buffer = (unsigned char*)malloc(capacity);
+    if (!buffer) return -1;
+    size_t pos = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == '%') {
+            if (i + 2 >= len) {
+                free(buffer);
+                return -2;
+            }
+            int hi = hexValue(input[i + 1]);
+            int lo = hexValue(input[i + 2]);
+            if (hi < 0 || lo < 0) {
+                free(buffer);
+                return -2;
+            }
+            buffer[pos++] = (unsigned char)((hi << 4) | lo);
+            i += 2;
+        } else {
+            buffer[pos++] = c;
+        }
+    }
+    buffer[pos] = '\0';
+    *out = buffer;
+    *out_len = pos;
+    return 0;
+}
+
+static int base64Value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+' || c == '-') return 62;
+    if (c == '/' || c == '_') return 63;
+    return -1;
+}
+
+static int base64DecodeBuffer(const char* input, size_t len, unsigned char** out, size_t* out_len) {
+    if (!out || !out_len) return -1;
+    *out = NULL;
+    *out_len = 0;
+    char* clean = (char*)malloc(len + 1);
+    if (!clean) return -1;
+    size_t clean_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') continue;
+        clean[clean_len++] = (char)c;
+    }
+    clean[clean_len] = '\0';
+    if (clean_len == 0) {
+        unsigned char* buffer = (unsigned char*)malloc(1);
+        if (!buffer) {
+            free(clean);
+            return -1;
+        }
+        buffer[0] = '\0';
+        *out = buffer;
+        *out_len = 0;
+        free(clean);
+        return 0;
+    }
+    if (clean_len % 4 != 0) {
+        free(clean);
+        return -2;
+    }
+    size_t out_cap = ((clean_len + 3) / 4) * 3 + 1;
+    unsigned char* buffer = (unsigned char*)malloc(out_cap);
+    if (!buffer) {
+        free(clean);
+        return -1;
+    }
+    size_t pos = 0;
+    for (size_t i = 0; i < clean_len; i += 4) {
+        char c0 = clean[i];
+        char c1 = clean[i + 1];
+        char c2 = clean[i + 2];
+        char c3 = clean[i + 3];
+        int v0 = base64Value(c0);
+        int v1 = base64Value(c1);
+        if (v0 < 0 || v1 < 0) {
+            free(buffer);
+            free(clean);
+            return -3;
+        }
+        int v2 = (c2 == '=') ? -2 : base64Value(c2);
+        int v3 = (c3 == '=') ? -2 : base64Value(c3);
+        if ((v2 < 0 && v2 != -2) || (v3 < 0 && v3 != -2)) {
+            free(buffer);
+            free(clean);
+            return -3;
+        }
+        buffer[pos++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+        if (v2 == -2) {
+            if (v3 != -2 || i + 4 != clean_len) {
+                free(buffer);
+                free(clean);
+                return -3;
+            }
+            break;
+        }
+        buffer[pos++] = (unsigned char)(((v1 & 0xF) << 4) | (v2 >> 2));
+        if (v3 == -2) {
+            if (i + 4 != clean_len) {
+                free(buffer);
+                free(clean);
+                return -3;
+            }
+            break;
+        }
+        buffer[pos++] = (unsigned char)(((v2 & 0x3) << 6) | v3);
+    }
+    buffer[pos] = '\0';
+    *out = buffer;
+    *out_len = pos;
+    free(clean);
+    return 0;
+}
+
+static int parseDataUrl(const char* url, DataUrlPayload* payload, char** err_out) {
+    if (!payload) return -1;
+    if (err_out) *err_out = NULL;
+    payload->data = NULL;
+    payload->length = 0;
+    payload->content_type = NULL;
+    if (!url) {
+        if (err_out) *err_out = strdup("invalid data URL");
+        return -1;
+    }
+    if (strncasecmp(url, "data:", 5) != 0) {
+        if (err_out) *err_out = strdup("invalid data URL");
+        return -1;
+    }
+    const char* comma = strchr(url + 5, ',');
+    if (!comma) {
+        if (err_out) *err_out = strdup("invalid data URL (missing comma)");
+        return -1;
+    }
+    size_t meta_len = (size_t)(comma - (url + 5));
+    size_t data_len = strlen(comma + 1);
+    char* metadata = NULL;
+    if (meta_len > 0) {
+        metadata = (char*)malloc(meta_len + 1);
+        if (!metadata) {
+            if (err_out) *err_out = strdup("out of memory");
+            return -1;
+        }
+        memcpy(metadata, url + 5, meta_len);
+        metadata[meta_len] = '\0';
+    }
+
+    int base64_flag = 0;
+    char* content_type_buf = NULL;
+    int mediatype_set = 0;
+    if (metadata) {
+        char* cursor = metadata;
+        while (1) {
+            char* next = strchr(cursor, ';');
+            if (next) *next = '\0';
+            if (*cursor) {
+                if (strcasecmp(cursor, "base64") == 0) {
+                    base64_flag = 1;
+                } else if (!mediatype_set && strchr(cursor, '/')) {
+                    size_t token_len = strlen(cursor);
+                    content_type_buf = (char*)malloc(token_len + 1);
+                    if (!content_type_buf) {
+                        if (err_out) *err_out = strdup("out of memory");
+                        free(metadata);
+                        return -1;
+                    }
+                    memcpy(content_type_buf, cursor, token_len + 1);
+                    mediatype_set = 1;
+                } else {
+                    if (!mediatype_set) {
+                        const char* def_media = "text/plain";
+                        size_t def_len = strlen(def_media);
+                        content_type_buf = (char*)malloc(def_len + 1);
+                        if (!content_type_buf) {
+                            if (err_out) *err_out = strdup("out of memory");
+                            free(metadata);
+                            return -1;
+                        }
+                        memcpy(content_type_buf, def_media, def_len + 1);
+                        mediatype_set = 1;
+                    }
+                    size_t old_len = strlen(content_type_buf);
+                    size_t token_len = strlen(cursor);
+                    char* newbuf = (char*)realloc(content_type_buf, old_len + 1 + token_len + 1);
+                    if (!newbuf) {
+                        if (err_out) *err_out = strdup("out of memory");
+                        free(metadata);
+                        free(content_type_buf);
+                        return -1;
+                    }
+                    newbuf[old_len] = ';';
+                    memcpy(newbuf + old_len + 1, cursor, token_len + 1);
+                    content_type_buf = newbuf;
+                }
+            }
+            if (!next) break;
+            cursor = next + 1;
+        }
+    }
+    if (!mediatype_set) {
+        const char* def_ct = "text/plain;charset=US-ASCII";
+        content_type_buf = strdup(def_ct);
+        if (!content_type_buf) {
+            if (err_out) *err_out = strdup("out of memory");
+            if (metadata) free(metadata);
+            return -1;
+        }
+        mediatype_set = 1;
+    }
+
+    unsigned char* percent_buf = NULL;
+    size_t percent_len = 0;
+    unsigned char* final_buf = NULL;
+    size_t final_len = 0;
+    int rc;
+    const char* data_part = comma + 1;
+
+    if (base64_flag) {
+        rc = decodePercentEncoded(data_part, data_len, &percent_buf, &percent_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid percent-encoding in data URL");
+            goto fail;
+        }
+        rc = base64DecodeBuffer((const char*)percent_buf, percent_len, &final_buf, &final_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid base64 content in data URL");
+            goto fail;
+        }
+    } else {
+        rc = decodePercentEncoded(data_part, data_len, &final_buf, &final_len);
+        if (rc == -1) {
+            if (err_out) *err_out = strdup("out of memory");
+            goto fail;
+        } else if (rc != 0) {
+            if (err_out) *err_out = strdup("invalid percent-encoding in data URL");
+            goto fail;
+        }
+    }
+
+    if (percent_buf) {
+        free(percent_buf);
+        percent_buf = NULL;
+    }
+
+    payload->data = final_buf;
+    payload->length = final_len;
+    payload->content_type = content_type_buf;
+    if (metadata) free(metadata);
+    return 0;
+
+fail:
+    if (metadata) free(metadata);
+    if (content_type_buf) free(content_type_buf);
+    if (percent_buf) free(percent_buf);
+    if (final_buf) free(final_buf);
+    if (err_out && !*err_out) {
+        *err_out = strdup("invalid data URL");
+    }
+    return -1;
 }
 
 /* Callback for libcurl: writes received data into a MStream */
@@ -552,6 +995,83 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_status = 200;
         return makeInt(200);
     }
+    else if (url && strncasecmp(url, "data:", 5) == 0) {
+        if (s->last_headers) { free(s->last_headers); s->last_headers = NULL; }
+        if (s->last_error_msg) { free(s->last_error_msg); s->last_error_msg = NULL; }
+        s->last_error_code = 0;
+
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(url, &payload, &err_msg) != 0) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = err_msg ? err_msg : strdup("invalid data URL");
+            if (!s->last_error_msg) s->last_error_msg = strdup("invalid data URL");
+            runtimeError(vm, "httpRequest: %s", s->last_error_msg ? s->last_error_msg : "invalid data URL");
+            dataUrlPayloadFree(&payload);
+            return makeInt(-1);
+        }
+
+        size_t required = payload.length + 1;
+        if (required == 0) required = 1;
+        if (args[4].mstream->capacity < (int)required || !args[4].mstream->buffer) {
+            unsigned char* newbuf = (unsigned char*)realloc(args[4].mstream->buffer, required);
+            if (!newbuf) {
+                dataUrlPayloadFree(&payload);
+                if (err_msg) free(err_msg);
+                s->last_error_code = 2;
+                s->last_error_msg = strdup("out of memory");
+                runtimeError(vm, "httpRequest: out of memory handling data URL");
+                return makeInt(-1);
+            }
+            args[4].mstream->buffer = newbuf;
+            args[4].mstream->capacity = (int)required;
+        }
+        if (!args[4].mstream->buffer) {
+            dataUrlPayloadFree(&payload);
+            if (err_msg) free(err_msg);
+            s->last_error_code = 2;
+            s->last_error_msg = strdup("out of memory");
+            runtimeError(vm, "httpRequest: out of memory handling data URL");
+            return makeInt(-1);
+        }
+
+        if (payload.length > 0) {
+            memcpy(args[4].mstream->buffer, payload.data, payload.length);
+        }
+        args[4].mstream->size = (int)payload.length;
+        args[4].mstream->buffer[payload.length] = '\0';
+
+        if (s->out_file && s->out_file[0]) {
+            FILE* of = fopen(s->out_file, "wb");
+            if (of) {
+                if (payload.length > 0) fwrite(payload.data, 1, payload.length, of);
+                fclose(of);
+            } else {
+                if (s->last_error_msg) free(s->last_error_msg);
+                s->last_error_msg = strdup("cannot open out_file");
+                s->last_error_code = 2;
+            }
+        }
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) {
+                snprintf(s->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+
+        s->last_status = 200;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
+        return makeInt(200);
+    }
 
     // Prepare CURL easy handle
     curl_easy_reset(s->curl);
@@ -881,6 +1401,48 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
         }
         s->last_status = 200;
         return makeInt(200);
+    } else if (url && strncasecmp(url, "data:", 5) == 0) {
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(url, &payload, &err_msg) != 0) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = err_msg ? err_msg : strdup("invalid data URL");
+            if (!s->last_error_msg) s->last_error_msg = strdup("invalid data URL");
+            runtimeError(vm, "httpRequestToFile: %s", s->last_error_msg ? s->last_error_msg : "invalid data URL");
+            dataUrlPayloadFree(&payload);
+            return makeInt(-1);
+        }
+
+        FILE* out = fopen(out_path, "wb");
+        if (!out) {
+            s->last_error_code = 2;
+            if (s->last_error_msg) free(s->last_error_msg);
+            s->last_error_msg = strdup("cannot open out file");
+            runtimeError(vm, "httpRequestToFile: cannot open out file '%s'", out_path);
+            dataUrlPayloadFree(&payload);
+            if (err_msg) free(err_msg);
+            return makeInt(-1);
+        }
+        if (payload.length > 0) fwrite(payload.data, 1, payload.length, out);
+        fclose(out);
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            s->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (s->last_headers) {
+                snprintf(s->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+        s->last_status = 200;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
+        return makeInt(200);
     }
 
     // Network path
@@ -1125,14 +1687,14 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     }
 
     // Initialize response stream
-    MStream *response_stream = malloc(sizeof(MStream));
+    MStream *response_stream = createMStream();
     if (!response_stream) {
         runtimeError(vm, "apiSend: Memory allocation error for response stream structure.");
         return makeVoid();
     }
     response_stream->buffer = malloc(16); // Initial small buffer
     if (!response_stream->buffer) {
-        free(response_stream);
+        releaseMStream(response_stream);
         runtimeError(vm, "apiSend: Memory allocation error for response stream buffer.");
         return makeVoid();
     }
@@ -1143,8 +1705,7 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     CURL *curl = curl_easy_init();
     if (!curl) {
         runtimeError(vm, "apiSend: curl initialization failed.");
-        free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
 
@@ -1174,14 +1735,12 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     if (res != CURLE_OK) {
         runtimeError(vm, "apiSend: curl_easy_perform() failed: %s", curl_easy_strerror(res));
         // Free response_stream here as it's an error condition
-        if (response_stream->buffer) free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
     if (http_code >= 400) {
         runtimeError(vm, "apiSend: HTTP request failed with code %ld. Response (partial):\n%s", http_code, response_stream->buffer ? (char*)response_stream->buffer : "(empty)");
-        if (response_stream->buffer) free(response_stream->buffer);
-        free(response_stream);
+        releaseMStream(response_stream);
         return makeVoid();
     }
 
@@ -1220,17 +1779,34 @@ Value vmBuiltinSocketLastError(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinSocketCreate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "socketCreate expects 1 integer argument (0=TCP,1=UDP).");
+    if (arg_count < 1 || arg_count > 2 || !IS_INTLIKE(args[0]) ||
+        (arg_count == 2 && !IS_INTLIKE(args[1]))) {
+        runtimeError(vm, "socketCreate expects (type[, family]).");
         return makeInt(-1);
     }
     int type = (int)AS_INTEGER(args[0]);
+    int family = AF_INET;
+    if (arg_count == 2) {
+        int fam_arg = (int)AS_INTEGER(args[1]);
+        if (fam_arg == AF_INET || fam_arg == 0 || fam_arg == 4) {
+            family = AF_INET;
+        }
+#ifdef AF_INET6
+        else if (fam_arg == AF_INET6 || fam_arg == 6) {
+            family = AF_INET6;
+        }
+#endif
+        else {
+            runtimeError(vm, "socketCreate family must be 4 (IPv4) or 6 (IPv6).");
+            return makeInt(-1);
+        }
+    }
 #ifdef _WIN32
     ensure_winsock();
 #endif
     int socktype = (type == 1) ? SOCK_DGRAM : SOCK_STREAM;
     int proto = (type == 1) ? IPPROTO_UDP : IPPROTO_TCP;
-    int s = (int)socket(AF_INET, socktype, proto);
+    int s = (int)socket(family, socktype, proto);
     if (s < 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1239,6 +1815,20 @@ Value vmBuiltinSocketCreate(VM* vm, int arg_count, Value* args) {
 #endif
         return makeInt(-1);
     }
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+#ifdef IPV6_V6ONLY
+#ifdef _WIN32
+        DWORD off = 0;
+        setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&off, sizeof(off));
+#else
+        int off = 0;
+        setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+#endif
+#endif
+    }
+#endif
+    registerSocketInfo(s, family, socktype);
     g_socket_last_error = 0;
     return makeInt(s);
 }
@@ -1257,43 +1847,137 @@ Value vmBuiltinSocketClose(VM* vm, int arg_count, Value* args) {
     if (r != 0) setSocketError(errno);
 #endif
     if (r != 0) return makeInt(-1);
+    unregisterSocketInfo(s);
     g_socket_last_error = 0;
     return makeInt(0);
 }
 
 Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !valueIsStringLike(&args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "socketConnect expects (socket, host, port).");
         return makeInt(-1);
     }
+    if (valueIsNullCharPointer(&args[1])) {
+        runtimeError(vm, "socketConnect host pointer is NULL.");
+        return makeInt(-1);
+    }
     int s = (int)AS_INTEGER(args[0]);
-    const char* host = args[1].s_val;
+    const char* host = valueToCStringLike(&args[1]);
+    if (!host) host = "";
     int port = (int)AS_INTEGER(args[2]);
     char portstr[16]; snprintf(portstr, sizeof(portstr), "%d", port);
+    int family = AF_INET;
+    int socktype = SOCK_STREAM;
+    lookupSocketInfo(s, &family, &socktype);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM; // default
-    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
-#else
-        setSocketError(errno);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = socktype;
+#ifdef AI_ADDRCONFIG
+    hints.ai_flags |= AI_ADDRCONFIG;
 #endif
+    int gai_err = getaddrinfo(host, portstr, &hints, &res);
+    if (gai_err != 0) {
         if (res) freeaddrinfo(res);
+        setSocketAddrInfoError(gai_err);
         return makeInt(-1);
     }
-    int r = connect(s, res->ai_addr, res->ai_addrlen);
-    if (r != 0) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
+    if (!res) {
+#ifdef EAI_FAIL
+        setSocketAddrInfoError(EAI_FAIL);
 #else
-        setSocketError(errno);
+        setSocketAddrInfoError(-1);
 #endif
-        freeaddrinfo(res);
         return makeInt(-1);
+    }
+
+    int connected = 0;
+    int attempted = 0;
+    int last_err = 0;
+    for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
+        if (!rp->ai_addr) continue;
+        if (family == AF_INET) {
+            if (rp->ai_family != AF_INET) continue;
+            attempted = 1;
+#ifdef _WIN32
+            if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+            if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+                connected = 1;
+                break;
+            }
+        }
+#ifdef AF_INET6
+        else if (family == AF_INET6) {
+            if (rp->ai_family == AF_INET6) {
+                attempted = 1;
+#ifdef _WIN32
+                if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+                if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+                    connected = 1;
+                    break;
+                }
+            } else if (rp->ai_family == AF_INET) {
+                struct sockaddr_in6 mapped;
+                mapIpv4ToIpv6((struct sockaddr_in*)rp->ai_addr, &mapped);
+                attempted = 1;
+#ifdef _WIN32
+                if (connect(s, (struct sockaddr*)&mapped, sizeof(mapped)) == 0) {
+#else
+                if (connect(s, (struct sockaddr*)&mapped, (socklen_t)sizeof(mapped)) == 0) {
+#endif
+                    connected = 1;
+                    break;
+                }
+            } else {
+                continue;
+            }
+        }
+#endif
+        else {
+            attempted = 1;
+#ifdef _WIN32
+            if (connect(s, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+#else
+            if (connect(s, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0) {
+#endif
+                connected = 1;
+                break;
+            }
+        }
+#ifdef _WIN32
+        last_err = WSAGetLastError();
+#else
+        last_err = errno;
+#endif
     }
     freeaddrinfo(res);
+    if (!connected) {
+        if (!attempted) {
+#if defined(EAI_NONAME)
+            setSocketAddrInfoError(EAI_NONAME);
+#elif defined(EAI_NODATA)
+            setSocketAddrInfoError(EAI_NODATA);
+#elif defined(_WIN32)
+            setSocketAddrInfoError(WSAHOST_NOT_FOUND);
+#else
+            setSocketError(errno != 0 ? errno : ENOENT);
+#endif
+        } else {
+            if (last_err == 0) {
+#ifdef _WIN32
+                last_err = WSAECONNREFUSED;
+#else
+                last_err = ECONNREFUSED;
+#endif
+            }
+            setSocketError(last_err);
+        }
+        return makeInt(-1);
+    }
     g_socket_last_error = 0;
     return makeInt(0);
 }
@@ -1305,12 +1989,27 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
     }
     int s = (int)AS_INTEGER(args[0]);
     int port = (int)AS_INTEGER(args[1]);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons((unsigned short)port);
-    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    int family = AF_INET;
+    lookupSocketInfo(s, &family, NULL);
+    int r = -1;
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+        struct sockaddr_in6 addr6;
+        memset(&addr6, 0, sizeof(addr6));
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_port = htons((unsigned short)port);
+        addr6.sin6_addr = in6addr_any;
+        r = bind(s, (struct sockaddr*)&addr6, sizeof(addr6));
+    } else
+#endif
+    {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons((unsigned short)port);
+        r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
+    }
     if (r != 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1325,27 +2024,62 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
 
 // socketBindAddr(socket, host:string, port:int)
 Value vmBuiltinSocketBindAddr(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING || !IS_INTLIKE(args[2])) {
+    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !valueIsStringLike(&args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "socketBindAddr expects (socket:int, host:string, port:int).");
         return makeInt(-1);
     }
     int s = (int)AS_INTEGER(args[0]);
-    const char* host = args[1].s_val ? args[1].s_val : "127.0.0.1";
+    const char* host = valueToCStringLike(&args[1]);
+    if (!host) host = "127.0.0.1";
     int port = (int)AS_INTEGER(args[2]);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((unsigned short)port);
-    int p = inet_pton(AF_INET, host, &addr.sin_addr);
-    if (p != 1) {
+    int family = AF_INET;
+    lookupSocketInfo(s, &family, NULL);
+    int r = -1;
+#ifdef AF_INET6
+    if (family == AF_INET6) {
+        struct sockaddr_in6 addr6;
+        memset(&addr6, 0, sizeof(addr6));
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_port = htons((unsigned short)port);
+        if (!host || !*host) {
+            addr6.sin6_addr = in6addr_any;
+        } else if (inet_pton(AF_INET6, host, &addr6.sin6_addr) != 1) {
+            struct in_addr addr4;
+            if (inet_pton(AF_INET, host, &addr4) == 1) {
+                struct sockaddr_in tmp4;
+                memset(&tmp4, 0, sizeof(tmp4));
+                tmp4.sin_family = AF_INET;
+                tmp4.sin_port = htons((unsigned short)port);
+                tmp4.sin_addr = addr4;
+                mapIpv4ToIpv6(&tmp4, &addr6);
+            } else {
 #ifdef _WIN32
-        setSocketError(WSAEINVAL);
+                setSocketError(WSAEINVAL);
 #else
-        setSocketError(EINVAL);
+                setSocketError(EINVAL);
 #endif
-        return makeInt(-1);
+                return makeInt(-1);
+            }
+        }
+        r = bind(s, (struct sockaddr*)&addr6, sizeof(addr6));
+    } else
+#endif
+    {
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((unsigned short)port);
+        int p = inet_pton(AF_INET, host, &addr.sin_addr);
+        if (p != 1) {
+#ifdef _WIN32
+            setSocketError(WSAEINVAL);
+#else
+            setSocketError(EINVAL);
+#endif
+            return makeInt(-1);
+        }
+        r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
     }
-    int r = bind(s, (struct sockaddr*)&addr, sizeof(addr));
     if (r != 0) {
 #ifdef _WIN32
         setSocketError(WSAGetLastError());
@@ -1384,6 +2118,9 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     int s = (int)AS_INTEGER(args[0]);
+    int parent_family = AF_INET;
+    int parent_type = SOCK_STREAM;
+    lookupSocketInfo(s, &parent_family, &parent_type);
     int r = (int)accept(s, NULL, NULL);
     if (r < 0) {
 #ifdef _WIN32
@@ -1393,6 +2130,7 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
 #endif
         return makeInt(-1);
     }
+    registerSocketInfo(r, parent_family, parent_type);
     g_socket_last_error = 0;
     return makeInt(r);
 }
@@ -1405,9 +2143,13 @@ Value vmBuiltinSocketSend(VM* vm, int arg_count, Value* args) {
     int s = (int)AS_INTEGER(args[0]);
     const char* data = NULL;
     size_t len = 0;
-    if (args[1].type == TYPE_STRING && args[1].s_val) {
-        data = args[1].s_val;
-        len = strlen(data);
+    if (valueIsStringLike(&args[1])) {
+        if (valueIsNullCharPointer(&args[1])) {
+            runtimeError(vm, "socketSend data pointer is NULL.");
+            return makeInt(-1);
+        }
+        data = valueToCStringLike(&args[1]);
+        len = data ? strlen(data) : 0;
     } else if (args[1].type == TYPE_MEMORYSTREAM && args[1].mstream) {
         data = (const char*)args[1].mstream->buffer;
         len = args[1].mstream->size;
@@ -1437,10 +2179,13 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
     int s = (int)AS_INTEGER(args[0]);
     int maxlen = (int)AS_INTEGER(args[1]);
     if (maxlen <= 0) maxlen = 4096;
-    MStream* ms = malloc(sizeof(MStream));
+    MStream* ms = createMStream();
     if (!ms) return makeMStream(NULL);
     ms->buffer = malloc(maxlen+1);
-    if (!ms->buffer) { free(ms); return makeMStream(NULL); }
+    if (!ms->buffer) {
+        releaseMStream(ms);
+        return makeMStream(NULL);
+    }
     int n = (int)recv(s, ms->buffer, maxlen, 0);
     if (n < 0) {
 #ifdef _WIN32
@@ -1449,7 +2194,8 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
 #else
         if (errno != EWOULDBLOCK && errno != EAGAIN) setSocketError(errno); else g_socket_last_error = 0;
 #endif
-        free(ms->buffer); free(ms); return makeMStream(NULL);
+        releaseMStream(ms);
+        return makeMStream(NULL);
     }
     ms->size = n;
     ms->buffer[n] = '\0';
@@ -1524,23 +2270,51 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #endif
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     int e = getaddrinfo(host, NULL, &hints, &res);
-    if (e != 0 || !res) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
-#else
-        setSocketError(errno);
-#endif
+    if (e != 0) {
         if (res) freeaddrinfo(res);
+        setSocketAddrInfoError(e);
         return makeString("");
     }
-    char buf[INET_ADDRSTRLEN];
-    struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
-    const char* ip = inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof(buf));
+    if (!res) {
+#ifdef EAI_FAIL
+        setSocketAddrInfoError(EAI_FAIL);
+#else
+        setSocketAddrInfoError(-1);
+#endif
+        return makeString("");
+    }
+    struct addrinfo* first_v4 = NULL;
+    struct addrinfo* first_v6 = NULL;
+    for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
+        if (!rp->ai_addr) continue;
+        if (!first_v4 && rp->ai_family == AF_INET) first_v4 = rp;
+#ifdef AF_INET6
+        if (!first_v6 && rp->ai_family == AF_INET6) first_v6 = rp;
+#endif
+    }
+    char buf[INET6_ADDRSTRLEN];
+    const char* ip = NULL;
+    if (first_v4) {
+        struct sockaddr_in* addr4 = (struct sockaddr_in*)first_v4->ai_addr;
+        ip = inet_ntop(AF_INET, &addr4->sin_addr, buf, sizeof(buf));
+    }
+#ifdef AF_INET6
+    else if (first_v6) {
+        struct sockaddr_in6* addr6 = (struct sockaddr_in6*)first_v6->ai_addr;
+        ip = inet_ntop(AF_INET6, &addr6->sin6_addr, buf, sizeof(buf));
+    }
+#endif
     freeaddrinfo(res);
     if (!ip) {
-        setSocketError(errno);
+#ifdef EAI_NONAME
+        setSocketAddrInfoError(EAI_NONAME);
+#elif defined(_WIN32)
+        setSocketError(WSAHOST_NOT_FOUND);
+#else
+        setSocketError(errno != 0 ? errno : ENOENT);
+#endif
         return makeString("");
     }
     g_socket_last_error = 0;
@@ -1654,7 +2428,7 @@ static void* httpAsyncThread(void* arg) {
         return NULL;
     }
     // Set up output mstream
-    job->result = (MStream*)malloc(sizeof(MStream));
+    job->result = createMStream();
     if (!job->result) {
         job->status = -1;
         job->error = strdup("malloc failed");
@@ -1663,7 +2437,8 @@ static void* httpAsyncThread(void* arg) {
     }
     job->result->buffer = (unsigned char*)malloc(16);
     if (!job->result->buffer) {
-        free(job->result); job->result = NULL;
+        releaseMStream(job->result);
+        job->result = NULL;
         job->status = -1; job->error = strdup("malloc failed"); job->done = 1; return NULL;
     }
     job->result->buffer[0] = '\0'; job->result->size = 0; job->result->capacity = 16;
@@ -1702,6 +2477,73 @@ static void* httpAsyncThread(void* arg) {
         int hdrlen = snprintf(hdr, sizeof(hdr), "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n", total, content_type);
         if (hdrlen > 0) { job->last_headers = strndup(hdr, (size_t)hdrlen); }
         job->status = 200;
+        job->done = 1;
+        return NULL;
+    } else if (job->url && strncasecmp(job->url, "data:", 5) == 0) {
+        DataUrlPayload payload = {0};
+        char* err_msg = NULL;
+        if (parseDataUrl(job->url, &payload, &err_msg) != 0) {
+            const char* msg = err_msg ? err_msg : "invalid data URL";
+            job->status = -1;
+            job->last_error_code = 2;
+            job->error = strdup(msg);
+            job->last_error_msg = strdup(msg);
+            if (err_msg) free(err_msg);
+            dataUrlPayloadFree(&payload);
+            job->done = 1;
+            return NULL;
+        }
+
+        size_t required = payload.length + 1;
+        if (required == 0) required = 1;
+        if (job->result->capacity < (int)required || !job->result->buffer) {
+            unsigned char* newbuf = (unsigned char*)realloc(job->result->buffer, required);
+            if (!newbuf) {
+                const char* msg = "out of memory";
+                job->status = -1;
+                job->last_error_code = 2;
+                job->error = strdup(msg);
+                job->last_error_msg = strdup(msg);
+                dataUrlPayloadFree(&payload);
+                if (err_msg) free(err_msg);
+                job->done = 1;
+                return NULL;
+            }
+            job->result->buffer = newbuf;
+            job->result->capacity = (int)required;
+        }
+        if (payload.length > 0) {
+            memcpy(job->result->buffer, payload.data, payload.length);
+        }
+        job->result->size = (int)payload.length;
+        job->result->buffer[payload.length] = '\0';
+
+        if (job->out_file && job->out_file[0]) {
+            FILE* of = fopen(job->out_file, "wb");
+            if (of) {
+                if (payload.length > 0) fwrite(payload.data, 1, payload.length, of);
+                fclose(of);
+            }
+        }
+
+        const char* content_type = payload.content_type ? payload.content_type : "text/plain;charset=US-ASCII";
+        int hdrlen = snprintf(NULL, 0,
+                              "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                              payload.length, content_type);
+        if (hdrlen >= 0) {
+            job->last_headers = (char*)malloc((size_t)hdrlen + 1);
+            if (job->last_headers) {
+                snprintf(job->last_headers, (size_t)hdrlen + 1,
+                         "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n",
+                         payload.length, content_type);
+            }
+        }
+        job->status = 200;
+        job->last_error_code = 0;
+        job->dl_now = (long long)payload.length;
+        job->dl_total = (long long)payload.length;
+        dataUrlPayloadFree(&payload);
+        if (err_msg) free(err_msg);
         job->done = 1;
         return NULL;
     }

@@ -175,6 +175,8 @@ void dumpSymbolTable(void);
 void dumpSymbol(Symbol *sym);
 
 MStream *createMStream(void);
+void retainMStream(MStream* ms);
+void releaseMStream(MStream* ms);
 FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
@@ -239,6 +241,12 @@ int map16FgColorToAnsi(int pscalColorCode, bool isBold);
 int map16BgColorToAnsi(int pscalColorCode);
 bool applyCurrentTextAttributes(FILE* stream);
 void resetTextAttributes(FILE* stream);
+uint8_t computeCurrentTextAttr(void);
+void syncTextAttrSymbol(void);
+
+void markTextAttrDirty(void);
+
+void setCurrentTextAttrFromByte(uint8_t attr);
 
 // Arrays
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def);

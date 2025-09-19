@@ -1,6 +1,8 @@
 #!/usr/bin/env pascal
 program PlayWaveFile;
 
+uses CRT;
+
 {
   This program plays a specified WAV audio file.
   The filename must be provided as the first command-line argument
@@ -14,9 +16,55 @@ program PlayWaveFile;
 }
 
 var
-  WaveFileName : String;    // Variable to store the filename from the command line
-  SoundID : Integer;        // Variable to hold the ID of the loaded sound
-  // DelayDurationMs : Integer; // No longer needed for fixed delay
+  WaveFileName : String;        // Variable to store the filename from the command line
+  SoundID : Integer;            // Variable to hold the ID of the loaded sound
+  QuitRequested : Boolean;      // Flag to track if the user asked to quit early
+  PlaybackFinished : Boolean;   // Flag set by the background playback thread when it exits
+  PlaybackCompleted : Boolean;  // Tracks whether the sound played to completion
+  PlaybackThreadID : Integer;   // Handle for the background playback thread
+  InputChar : Char;             // Stores the last key pressed by the user when polling
+
+procedure SoundPlaybackThread;
+begin
+  PlaySound(SoundID);
+  writeln('PlaySound called (background thread).');
+
+  while True do
+  begin
+    if QuitRequested then
+      break;
+
+    if not IsSoundPlaying() then
+    begin
+      PlaybackCompleted := True;
+      break;
+    end;
+
+    Delay(10);
+  end;
+
+  if (not PlaybackCompleted) and (not IsSoundPlaying()) then
+  begin
+    PlaybackCompleted := True;
+  end;
+
+  PlaybackFinished := True;
+end;
+
+procedure WaitForPlaybackToStopBeforeCleanup;
+begin
+  if not IsSoundPlaying() then
+    exit;
+
+  writeln('Waiting for sound playback to stop before cleanup...');
+
+  while IsSoundPlaying() do
+  begin
+    Delay(10);
+  end;
+
+  writeln('Playback stopped.');
+end;
 
 
 begin
@@ -54,27 +102,110 @@ begin
   begin
     writeln('Sound loaded successfully. Assigned SoundID: ', SoundID);
 
-    // Play the sound once
+    // Prepare to play the sound once on a background thread while the main
+    // thread remains responsive to keyboard input.
     writeln('Playing sound...');
-    PlaySound(SoundID);
-    writeln('PlaySound called.');
+    QuitRequested := False;
+    PlaybackFinished := False;
+    PlaybackCompleted := False;
 
-    // <<< MODIFICATION START >>>
-    // Wait until the sound finishes playing by checking if any channel is still active.
-    writeln('Waiting for sound to finish playing...');
-    // The loop continues as long as IsSoundPlaying() returns True.
-    while IsSoundPlaying() do
+    PlaybackThreadID := CreateThread(@SoundPlaybackThread);
+
+    if PlaybackThreadID = -1 then
     begin
-      // Add a small delay to prevent the loop from consuming 100% CPU (busy-waiting).
-      Delay(10); // Wait for 10 milliseconds before checking again
-    end;
-    writeln('Sound finished playing.');
-    // <<< MODIFICATION END >>>
+      writeln('Warning: Unable to start playback thread. Falling back to single-threaded playback.');
+      PlaySound(SoundID);
+      writeln('PlaySound called.');
+      writeln('Press Q to quit playback early.');
 
-    // Free the loaded sound from memory when done.
-    writeln('Freeing sound...');
-    FreeSound(SoundID);
-    writeln('Sound freed.');
+      while IsSoundPlaying() do
+      begin
+        if KeyPressed then
+        begin
+          InputChar := ReadKey;
+
+          if UpCase(InputChar) = 'Q' then
+          begin
+            QuitRequested := True;
+            writeln('Q pressed. Stopping playback early.');
+            StopAllSounds;
+            break;
+          end;
+        end;
+
+        // Add a small delay to prevent the loop from consuming 100% CPU (busy-waiting).
+        Delay(10);
+      end;
+
+      if (not QuitRequested) and (not IsSoundPlaying()) then
+      begin
+        PlaybackCompleted := True;
+      end;
+
+      PlaybackFinished := True;
+    end
+    else
+    begin
+      writeln('Playback thread started. Press Q to quit playback early.');
+
+      while not PlaybackFinished do
+      begin
+        if KeyPressed then
+        begin
+          InputChar := ReadKey;
+
+          if UpCase(InputChar) = 'Q' then
+          begin
+            QuitRequested := True;
+            writeln('Q pressed. Requesting playback thread to stop...');
+            StopAllSounds;
+            break;
+          end;
+        end;
+
+        if PlaybackFinished then
+          break;
+
+        Delay(10);
+      end;
+
+      if QuitRequested then
+      begin
+        writeln('Waiting for playback thread to stop...');
+      end;
+
+      WaitForThread(PlaybackThreadID);
+
+      if (not QuitRequested) and (not PlaybackCompleted) and (not IsSoundPlaying()) then
+      begin
+        PlaybackCompleted := True;
+      end;
+    end;
+
+    WaitForPlaybackToStopBeforeCleanup;
+
+    if QuitRequested and (not PlaybackCompleted) then
+    begin
+      writeln('Playback interrupted by user.');
+    end
+    else
+    begin
+      writeln('Sound finished playing.');
+    end;
+
+    if QuitRequested then
+    begin
+      writeln('Playback interrupted by user.');
+    end
+    else
+    begin
+      writeln('Sound finished playing.');
+
+      // Free the loaded sound from memory when done.
+      writeln('Freeing sound...');
+      FreeSound(SoundID);
+      writeln('Sound freed.');
+    end;
   end; // end if/else checking SoundID
 
   // Shut down the Sound System.
