@@ -1,0 +1,529 @@
+#!/usr/bin/env pascal
+program PerformanceBenchmark;
+
+const
+  MATRIX_SIZE = 30;
+  MATRIX_ROUNDS = 8;
+  SORT_SIZE = 2500;
+  STRING_ITERATIONS = 2000;
+  RECORD_COUNT = 400;
+  LIST_SIZE = 25000;
+  PRIME_LIMIT = 18000;
+  SET_ITERATIONS = 8000;
+  FILE_PATH = '/tmp/pscal_performance_dataset.txt';
+
+  RNG_MOD = 32749;
+  RNG_MULT = 125;
+  RNG_INC = 279;
+
+  SALARY_BASE = 30000.0;
+  SALARY_STEP = 137.5;
+
+  MAX_NAME_SUFFIX = 7;
+  CHECKSUM_MOD = 1000000007;
+
+type
+  TMatrix = array[1..MATRIX_SIZE, 1..MATRIX_SIZE] of real;
+  TIntArray = array[1..SORT_SIZE] of integer;
+
+  TPerson = record
+    id: integer;
+    name: string;
+    age: integer;
+    salary: real;
+  end;
+  TPersonArray = array[1..RECORD_COUNT] of TPerson;
+
+  TColor = (clRed, clGreen, clBlue, clYellow, clCyan, clMagenta);
+  TColorSet = set of TColor;
+
+  PNode = ^TNode;
+  TNode = record
+    value: integer;
+    next: PNode;
+  end;
+
+var
+  rngState: longint;
+
+procedure InitializeRng(seed: longint);
+begin
+  rngState := seed mod RNG_MOD;
+  if rngState < 0 then
+    rngState := -rngState;
+end;
+
+function NextRandom: longint;
+begin
+  rngState := (rngState * RNG_MULT + RNG_INC) mod RNG_MOD;
+  NextRandom := rngState;
+end;
+
+function NextRandomRange(maxValue: integer): integer;
+var
+  raw: longint;
+begin
+  if maxValue <= 0 then
+  begin
+    NextRandomRange := 0;
+    exit;
+  end;
+  raw := NextRandom * 1024 + NextRandom;
+  NextRandomRange := raw mod maxValue;
+end;
+
+function Fibonacci(n: integer): longint;
+begin
+  if n <= 1 then
+    Fibonacci := n
+  else
+    Fibonacci := Fibonacci(n - 1) + Fibonacci(n - 2);
+end;
+
+function Factorial(n: integer): longint;
+begin
+  if n <= 1 then
+    Factorial := 1
+  else
+    Factorial := n * Factorial(n - 1);
+end;
+
+procedure FillMatrix(var m: TMatrix; base: real);
+var
+  i, j: integer;
+  angle: real;
+begin
+  for i := 1 to MATRIX_SIZE do
+    for j := 1 to MATRIX_SIZE do
+    begin
+      angle := base + (i * 0.07) + (j * 0.013);
+      m[i, j] := sin(angle) * cos(angle * 0.5) + ((i * j) mod 17) * 0.01;
+    end;
+end;
+
+procedure MultiplyMatrices(const a, b: TMatrix; var result: TMatrix);
+var
+  i, j, k: integer;
+  sum: real;
+begin
+  for i := 1 to MATRIX_SIZE do
+    for j := 1 to MATRIX_SIZE do
+    begin
+      sum := 0.0;
+      for k := 1 to MATRIX_SIZE do
+        sum := sum + a[i, k] * b[k, j];
+      result[i, j] := sum;
+    end;
+end;
+
+procedure ScaleMatrix(var m: TMatrix; factor: real);
+var
+  i, j: integer;
+begin
+  for i := 1 to MATRIX_SIZE do
+    for j := 1 to MATRIX_SIZE do
+      m[i, j] := m[i, j] * factor;
+end;
+
+function RunMatrixBenchmark(var a, b, c: TMatrix): real;
+var
+  round, i, j: integer;
+  accum: real;
+begin
+  accum := 0.0;
+  for round := 1 to MATRIX_ROUNDS do
+  begin
+    MultiplyMatrices(a, b, c);
+    ScaleMatrix(c, 0.5);
+    MultiplyMatrices(c, a, b);
+    ScaleMatrix(b, 0.5);
+    MultiplyMatrices(b, c, a);
+    ScaleMatrix(a, 0.5);
+  end;
+
+  for i := 1 to MATRIX_SIZE do
+    for j := 1 to MATRIX_SIZE do
+      accum := accum + abs(a[i, j]) + abs(b[i, j]) + abs(c[i, j]);
+
+  RunMatrixBenchmark := accum;
+end;
+
+procedure FillNumbers(var arr: TIntArray);
+var
+  i, baseValue, tweak: integer;
+begin
+  for i := 1 to SORT_SIZE do
+  begin
+    baseValue := NextRandomRange(100000) - 50000;
+    tweak := abs(NextRandomRange(1000) - 500);
+    if (i mod 5) = 0 then
+      baseValue := -baseValue;
+    arr[i] := baseValue + tweak + i;
+  end;
+end;
+
+procedure QuickSort(var arr: TIntArray; low, high: integer);
+var
+  i, j, pivot, temp: integer;
+begin
+  i := low;
+  j := high;
+  pivot := arr[(low + high) div 2];
+  repeat
+    while arr[i] < pivot do
+      i := i + 1;
+    while arr[j] > pivot do
+      j := j - 1;
+    if i <= j then
+    begin
+      temp := arr[i];
+      arr[i] := arr[j];
+      arr[j] := temp;
+      i := i + 1;
+      j := j - 1;
+    end;
+  until i > j;
+
+  if low < j then
+    QuickSort(arr, low, j);
+  if i < high then
+    QuickSort(arr, i, high);
+end;
+
+function RunSortingBenchmark(var arr: TIntArray): longint;
+var
+  i: integer;
+  checksum: longint;
+begin
+  QuickSort(arr, 1, SORT_SIZE);
+  checksum := 0;
+  for i := 1 to SORT_SIZE do
+  begin
+    checksum := checksum + arr[i] * i;
+    checksum := checksum mod CHECKSUM_MOD;
+    if checksum < 0 then
+      checksum := checksum + CHECKSUM_MOD;
+  end;
+  RunSortingBenchmark := checksum;
+end;
+
+function IntToString(n: integer): string;
+var
+  digits: string;
+  digit: integer;
+begin
+  if n = 0 then
+  begin
+    IntToString := '0';
+    exit;
+  end;
+
+  if n < 0 then
+  begin
+    IntToString := '-' + IntToString(-n);
+    exit;
+  end;
+
+  digits := '';
+  while n > 0 do
+  begin
+    digit := n mod 10;
+    digits := chr(ord('0') + digit) + digits;
+    n := n div 10;
+  end;
+  IntToString := digits;
+end;
+
+procedure BuildPeople(var people: TPersonArray);
+var
+  i: integer;
+begin
+  for i := 1 to RECORD_COUNT do
+  begin
+    people[i].id := i;
+    people[i].name := 'Person ' + IntToString(i);
+    people[i].age := 18 + (i mod 43);
+    people[i].salary := SALARY_BASE + (i * SALARY_STEP);
+  end;
+end;
+
+function ProcessPeople(var people: TPersonArray): real;
+var
+  i, classification: integer;
+  bucket: array[0..4] of integer;
+  totalSalary: real;
+begin
+  for i := 0 to 4 do
+    bucket[i] := 0;
+
+  totalSalary := 0.0;
+
+  for i := 1 to RECORD_COUNT do
+  begin
+    with people[i] do
+    begin
+      totalSalary := totalSalary + salary;
+      classification := age mod 5;
+      bucket[classification] := bucket[classification] + 1;
+
+      case classification of
+        0: name := 'Senior-' + name;
+        1: name := name + '-Mentor';
+        2: if length(name) > 0 then
+             name := copy(name, 1, length(name) - 1) + '*'
+           else
+             name := '*';
+        3: if length(name) > 1 then
+             name := copy(name, 2, length(name))
+           else
+             name := name + '#';
+      else
+        name := name + IntToString(id mod MAX_NAME_SUFFIX);
+      end;
+
+      if pos('Person', name) = 0 then
+        name := 'Person' + name;
+    end;
+  end;
+
+  ProcessPeople := (totalSalary / RECORD_COUNT) + bucket[0] + bucket[1] * 0.1 +
+                   bucket[2] * 0.2 + bucket[3] * 0.3 + bucket[4] * 0.4;
+end;
+
+function ManipulateStrings(iterations: integer): longint;
+var
+  base, temp: string;
+  i, idx: integer;
+begin
+  base := 'pscal benchmark seed';
+  ManipulateStrings := 0;
+
+  for i := 1 to iterations do
+  begin
+    temp := copy(base, 1, (i mod length(base)) + 1);
+    temp := temp + chr(ord('A') + (i mod 26));
+    base := temp + base;
+
+    if length(base) > 120 then
+      delete(base, 10, 5);
+
+    idx := 1;
+    repeat
+      if (idx < length(base)) and (base[idx] = base[idx + 1]) then
+        delete(base, idx, 1)
+      else
+        idx := idx + 1;
+    until idx >= length(base);
+
+    ManipulateStrings := ManipulateStrings + ord(base[(i mod length(base)) + 1]);
+  end;
+end;
+
+function RunSetBenchmark(iterations: integer): integer;
+var
+  colors: TColorSet;
+  round: integer;
+  color: TColor;
+begin
+  colors := [];
+  RunSetBenchmark := 0;
+
+  for round := 1 to iterations do
+  begin
+    case round mod 6 of
+      0: color := clRed;
+      1: color := clGreen;
+      2: color := clBlue;
+      3: color := clYellow;
+      4: color := clCyan;
+    else
+      color := clMagenta;
+    end;
+
+    if (round mod 2) = 0 then
+      colors := colors + [color]
+    else
+      colors := colors - [color];
+
+    if color in colors then
+      RunSetBenchmark := RunSetBenchmark + ord(color) + 1
+    else
+      RunSetBenchmark := RunSetBenchmark - ord(color);
+
+    if (round mod 11) = 0 then
+      colors := colors + [clRed, clBlue];
+    if (round mod 13) = 0 then
+      colors := colors - [clGreen];
+  end;
+
+  for color := clRed to clMagenta do
+    if color in colors then
+      RunSetBenchmark := RunSetBenchmark + ord(color);
+
+  if clBlue in colors then
+    RunSetBenchmark := RunSetBenchmark + 50;
+  if clRed in colors then
+    RunSetBenchmark := RunSetBenchmark + 25;
+end;
+
+procedure RunPrimeSieve(limit: integer; var count: integer; var checksum: longint);
+var
+  sieve: array[0..PRIME_LIMIT] of boolean;
+  i, j, rootLimit: integer;
+begin
+  if limit > PRIME_LIMIT then
+    limit := PRIME_LIMIT;
+
+  for i := 0 to limit do
+    sieve[i] := true;
+  sieve[0] := false;
+  sieve[1] := false;
+
+  rootLimit := trunc(sqrt(limit));
+  for i := 2 to rootLimit do
+    if sieve[i] then
+    begin
+      j := i * i;
+      while j <= limit do
+      begin
+        sieve[j] := false;
+        j := j + i;
+      end;
+    end;
+
+  count := 0;
+  checksum := 0;
+  for i := 2 to limit do
+    if sieve[i] then
+    begin
+      count := count + 1;
+      checksum := checksum + i;
+    end;
+end;
+
+function RunLinkedList(count: integer): longint;
+var
+  head, node, nextNode: PNode;
+  i: integer;
+  total: longint;
+begin
+  head := nil;
+  total := 0;
+
+  for i := 1 to count do
+  begin
+    new(node);
+    node^.value := (NextRandomRange(2000) - 1000) + (i mod 97);
+    node^.next := head;
+    head := node;
+  end;
+
+  node := head;
+  while node <> nil do
+  begin
+    total := total + node^.value;
+    node := node^.next;
+  end;
+
+  node := head;
+  while node <> nil do
+  begin
+    nextNode := node^.next;
+    dispose(node);
+    node := nextNode;
+  end;
+
+  RunLinkedList := total;
+end;
+
+function RunFileIOBenchmark(const fileName: string; const data: TIntArray): longint;
+var
+  f: text;
+  i, value: integer;
+  checksum: longint;
+begin
+  assign(f, fileName);
+  rewrite(f);
+  for i := 1 to SORT_SIZE do
+    writeln(f, data[i]);
+  close(f);
+
+  assign(f, fileName);
+  reset(f);
+  checksum := 0;
+  while not eof(f) do
+  begin
+    readln(f, value);
+    checksum := checksum + value;
+  end;
+  close(f);
+
+  RunFileIOBenchmark := checksum;
+end;
+
+function RunRecursiveMath: longint;
+var
+  i: integer;
+  total: longint;
+begin
+  total := 0;
+  for i := 1 to 12 do
+  begin
+    total := total + Fibonacci(18 + (i mod 5) * 2);
+    total := total + Factorial(10 + (i mod 3));
+  end;
+  RunRecursiveMath := total;
+end;
+
+var
+  matrixA, matrixB, matrixC: TMatrix;
+  numbers: TIntArray;
+  people: TPersonArray;
+  matrixScore: real;
+  sortChecksum: longint;
+  stringScore: longint;
+  setScore: integer;
+  primeCount: integer;
+  primeChecksum: longint;
+  recordScore: real;
+  fibScore: longint;
+  listChecksum: longint;
+  fileChecksum: longint;
+  combined: real;
+begin
+  writeln('--- PSCAL VM Performance Benchmark ---');
+  InitializeRng(12345);
+
+  FillMatrix(matrixA, 0.75);
+  FillMatrix(matrixB, 1.25);
+  matrixScore := RunMatrixBenchmark(matrixA, matrixB, matrixC);
+
+  FillNumbers(numbers);
+  sortChecksum := RunSortingBenchmark(numbers);
+
+  BuildPeople(people);
+  recordScore := ProcessPeople(people);
+
+  stringScore := ManipulateStrings(STRING_ITERATIONS);
+  setScore := RunSetBenchmark(SET_ITERATIONS);
+
+  RunPrimeSieve(PRIME_LIMIT, primeCount, primeChecksum);
+  fibScore := RunRecursiveMath;
+
+  listChecksum := RunLinkedList(LIST_SIZE);
+  fileChecksum := RunFileIOBenchmark(FILE_PATH, numbers);
+
+  combined := matrixScore + recordScore + setScore + primeCount + primeChecksum +
+              fibScore + listChecksum + fileChecksum + stringScore + sortChecksum;
+
+  writeln('Matrix checksum: ', matrixScore:0:4);
+  writeln('Sorting checksum: ', sortChecksum);
+  writeln('String workload checksum: ', stringScore);
+  writeln('Set operations score: ', setScore);
+  writeln('Prime count: ', primeCount, ' checksum: ', primeChecksum);
+  writeln('Record processing metric: ', recordScore:0:4);
+  writeln('Recursive workload checksum: ', fibScore);
+  writeln('Linked list checksum: ', listChecksum);
+  writeln('File I/O checksum: ', fileChecksum);
+  writeln('Combined benchmark digest: ', combined:0:4);
+end.
