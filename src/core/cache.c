@@ -445,6 +445,273 @@ static bool readValue(FILE* f, Value* out) {
     return true;
 }
 
+typedef struct {
+    Symbol* symbol;
+    char* parent_name;
+} EnclosingFixup;
+
+static Symbol* findProcedureSymbolDeep(HashTable* table, const char* name) {
+    if (!table || !name) return NULL;
+    Symbol* sym = hashTableLookup(table, name);
+    if (sym) {
+        return resolveSymbolAlias(sym);
+    }
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        for (Symbol* iter = table->buckets[i]; iter; iter = iter->next) {
+            if (iter->type_def && iter->type_def->symbol_table) {
+                HashTable* nested = (HashTable*)iter->type_def->symbol_table;
+                Symbol* found = findProcedureSymbolDeep(nested, name);
+                if (found) {
+                    return resolveSymbolAlias(found);
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+static void countProceduresRecursive(HashTable* table, int* count) {
+    if (!table || !count) return;
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        for (Symbol* sym = table->buckets[i]; sym; sym = sym->next) {
+            if (!sym || sym->is_alias) continue;
+            (*count)++;
+            if (sym->type_def && sym->type_def->symbol_table) {
+                HashTable* nested = (HashTable*)sym->type_def->symbol_table;
+                countProceduresRecursive(nested, count);
+            }
+        }
+    }
+}
+
+static bool writeProcedureEntriesRecursive(FILE* f, HashTable* table) {
+    if (!table) return true;
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        for (Symbol* sym = table->buckets[i]; sym; sym = sym->next) {
+            if (!sym || sym->is_alias) continue;
+            int name_len = (int)strlen(sym->name);
+            if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) return false;
+            if (fwrite(sym->name, 1, name_len, f) != (size_t)name_len) return false;
+            if (fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f) != 1) return false;
+            if (fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f) != 1) return false;
+            if (fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f) != 1) return false;
+            if (fwrite(&sym->type, sizeof(sym->type), 1, f) != 1) return false;
+            if (fwrite(&sym->arity, sizeof(sym->arity), 1, f) != 1) return false;
+            Symbol* enclosing = resolveSymbolAlias(sym->enclosing);
+            uint8_t has_enclosing = (enclosing && enclosing->name) ? 1 : 0;
+            if (fwrite(&has_enclosing, sizeof(has_enclosing), 1, f) != 1) return false;
+            if (has_enclosing) {
+                int parent_len = (int)strlen(enclosing->name);
+                if (fwrite(&parent_len, sizeof(parent_len), 1, f) != 1) return false;
+                if (fwrite(enclosing->name, 1, parent_len, f) != (size_t)parent_len) return false;
+            }
+            for (int uv = 0; uv < sym->upvalue_count; uv++) {
+                uint8_t idx = sym->upvalues[uv].index;
+                uint8_t isLocal = sym->upvalues[uv].isLocal ? 1 : 0;
+                uint8_t isRef = sym->upvalues[uv].is_ref ? 1 : 0;
+                if (fwrite(&idx, sizeof(idx), 1, f) != 1) return false;
+                if (fwrite(&isLocal, sizeof(isLocal), 1, f) != 1) return false;
+                if (fwrite(&isRef, sizeof(isRef), 1, f) != 1) return false;
+            }
+            if (sym->type_def && sym->type_def->symbol_table) {
+                HashTable* nested = (HashTable*)sym->type_def->symbol_table;
+                if (!writeProcedureEntriesRecursive(f, nested)) return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool appendEnclosingFixup(EnclosingFixup** fixups,
+                                 int* count,
+                                 int* capacity,
+                                 Symbol* sym,
+                                 char* parent_name) {
+    if (!fixups || !count || !capacity || !sym) return false;
+    if (*count == *capacity) {
+        int new_cap = (*capacity == 0) ? 8 : (*capacity * 2);
+        EnclosingFixup* new_arr = (EnclosingFixup*)realloc(*fixups, (size_t)new_cap * sizeof(EnclosingFixup));
+        if (!new_arr) {
+            return false;
+        }
+        *fixups = new_arr;
+        *capacity = new_cap;
+    }
+    (*fixups)[*count].symbol = sym;
+    (*fixups)[*count].parent_name = parent_name;
+    (*count)++;
+    return true;
+}
+
+static bool loadProceduresFromStream(FILE* f, int proc_count) {
+    EnclosingFixup* fixups = NULL;
+    int fixup_count = 0;
+    int fixup_capacity = 0;
+    bool ok = true;
+
+    for (int i = 0; ok && i < proc_count; ++i) {
+        int name_len = 0;
+        if (fread(&name_len, sizeof(name_len), 1, f) != 1 || name_len < 0) {
+            ok = false;
+            break;
+        }
+        char* name = (char*)malloc((size_t)name_len + 1);
+        if (!name) {
+            ok = false;
+            break;
+        }
+        if (name_len > 0 && fread(name, 1, (size_t)name_len, f) != (size_t)name_len) {
+            free(name);
+            ok = false;
+            break;
+        }
+        name[name_len] = '\0';
+
+        int addr = 0;
+        uint8_t locals = 0;
+        uint8_t upvals = 0;
+        VarType type;
+        if (fread(&addr, sizeof(addr), 1, f) != 1 ||
+            fread(&locals, sizeof(locals), 1, f) != 1 ||
+            fread(&upvals, sizeof(upvals), 1, f) != 1 ||
+            fread(&type, sizeof(type), 1, f) != 1) {
+            free(name);
+            ok = false;
+            break;
+        }
+
+        uint8_t arity = 0;
+        if (fread(&arity, sizeof(arity), 1, f) != 1) {
+            free(name);
+            ok = false;
+            break;
+        }
+
+        uint8_t has_enclosing = 0;
+        if (fread(&has_enclosing, sizeof(has_enclosing), 1, f) != 1) {
+            free(name);
+            ok = false;
+            break;
+        }
+
+        char* enclosing_name = NULL;
+        if (has_enclosing) {
+            int parent_len = 0;
+            if (fread(&parent_len, sizeof(parent_len), 1, f) != 1 || parent_len < 0) {
+                free(name);
+                ok = false;
+                break;
+            }
+            enclosing_name = (char*)malloc((size_t)parent_len + 1);
+            if (!enclosing_name) {
+                free(name);
+                ok = false;
+                break;
+            }
+            if (parent_len > 0 && fread(enclosing_name, 1, (size_t)parent_len, f) != (size_t)parent_len) {
+                free(name);
+                free(enclosing_name);
+                ok = false;
+                break;
+            }
+            enclosing_name[parent_len] = '\0';
+        }
+
+        Symbol* sym = findProcedureSymbolDeep(procedure_table, name);
+        if (sym && sym->is_alias && sym->real_symbol) {
+            sym = sym->real_symbol;
+        }
+        if (!sym) {
+            sym = (Symbol*)calloc(1, sizeof(Symbol));
+            if (!sym) {
+                free(name);
+                if (enclosing_name) free(enclosing_name);
+                ok = false;
+                break;
+            }
+            sym->name = strdup(name);
+            if (!sym->name) {
+                free(sym);
+                free(name);
+                if (enclosing_name) free(enclosing_name);
+                ok = false;
+                break;
+            }
+            toLowerString(sym->name);
+            sym->value = NULL;
+            sym->is_alias = false;
+            sym->is_local_var = false;
+            sym->is_const = false;
+            sym->is_inline = false;
+            sym->type_def = NULL;
+            sym->next = NULL;
+            sym->real_symbol = NULL;
+            sym->enclosing = NULL;
+            hashTableInsert(procedure_table, sym);
+        }
+
+        sym->bytecode_address = addr;
+        sym->locals_count = locals;
+        sym->upvalue_count = upvals;
+        sym->type = type;
+        sym->arity = arity;
+        sym->is_defined = true;
+        sym->enclosing = NULL;
+
+        bool upvalues_ok = true;
+        for (int uv = 0; uv < upvals; uv++) {
+            uint8_t idx = 0, isLocal = 0, isRef = 0;
+            if (fread(&idx, sizeof(idx), 1, f) != 1 ||
+                fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
+                fread(&isRef, sizeof(isRef), 1, f) != 1) {
+                upvalues_ok = false;
+                break;
+            }
+            sym->upvalues[uv].index = idx;
+            sym->upvalues[uv].isLocal = (bool)isLocal;
+            sym->upvalues[uv].is_ref = (bool)isRef;
+        }
+
+        if (!upvalues_ok) {
+            if (enclosing_name) free(enclosing_name);
+            free(name);
+            ok = false;
+            break;
+        }
+
+        if (has_enclosing) {
+            if (!appendEnclosingFixup(&fixups, &fixup_count, &fixup_capacity, sym, enclosing_name)) {
+                free(enclosing_name);
+                free(name);
+                ok = false;
+                break;
+            }
+        } else if (enclosing_name) {
+            free(enclosing_name);
+        }
+
+        free(name);
+    }
+
+    if (ok) {
+        for (int i = 0; i < fixup_count; ++i) {
+            Symbol* parent = findProcedureSymbolDeep(procedure_table, fixups[i].parent_name);
+            if (parent && parent->is_alias && parent->real_symbol) {
+                parent = parent->real_symbol;
+            }
+            fixups[i].symbol->enclosing = parent;
+            free(fixups[i].parent_name);
+        }
+    } else {
+        for (int i = 0; i < fixup_count; ++i) {
+            free(fixups[i].parent_name);
+        }
+    }
+
+    free(fixups);
+    return ok;
+}
+
 bool loadBytecodeFromCache(const char* source_path,
                            const char* frontend_path,
                            const char** dependencies,
@@ -534,104 +801,49 @@ bool loadBytecodeFromCache(const char* source_path,
                                 if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
                             }
                             if (ok) {
-                                int proc_count = 0;
-                                if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
-                                    for (int i = 0; i < proc_count; ++i) {
+                                int stored_proc_count = 0;
+                                if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
+                                    if (stored_proc_count < 0) {
+                                        int proc_count = -stored_proc_count - 1;
+                                        if (!loadProceduresFromStream(f, proc_count)) {
+                                            ok = false;
+                                        }
+                                    } else {
+                                        ok = false;
+                                        unlink(cache_path);
+                                    }
+                                } else {
+                                    ok = false;
+                                }
+                            }
+
+                            if (ok) {
+                                int const_sym_count = 0;
+                                if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
+                                    for (int i = 0; i < const_sym_count; ++i) {
                                         int name_len = 0;
                                         if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
                                         char* name = (char*)malloc(name_len + 1);
                                         if (!name) { ok = false; break; }
-                                        if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
-                                        name[name_len] = '\0';
-                                        int addr = 0; uint8_t locals = 0, upvals = 0; VarType type;
-                                        if (fread(&addr, sizeof(addr), 1, f) != 1 ||
-                                            fread(&locals, sizeof(locals), 1, f) != 1 ||
-                                            fread(&upvals, sizeof(upvals), 1, f) != 1 ||
-                                            fread(&type, sizeof(type), 1, f) != 1) {
+                                        if (fread(name, 1, name_len, f) != (size_t)name_len) {
                                             free(name); ok = false; break; }
-                                        // Standalone VM runs start without a populated procedure table.
-                                        // Recreate entries from the bytecode when they're absent.
-                                        Symbol* sym = lookupProcedure(name);
-                                        if (sym) {
-                                            sym->bytecode_address = addr;
-                                            sym->locals_count = locals;
-                                            sym->upvalue_count = upvals;
-                                            sym->type = type;
-                                            sym->is_defined = true;
-                                        } else {
-                                            sym = (Symbol*)calloc(1, sizeof(Symbol));
-                                            if (!sym) {
-                                                free(name);
-                                                ok = false;
-                                                break;
-                                            }
-                                            sym->name = strdup(name);
-                                            if (!sym->name) {
-                                                free(sym);
-                                                free(name);
-                                                ok = false;
-                                                break;
-                                            }
-                                            toLowerString(sym->name);
-                                            sym->bytecode_address = addr;
-                                            sym->locals_count = locals;
-                                            sym->upvalue_count = upvals;
-                                            sym->type = type;
-                                            sym->is_defined = true;
-                                            sym->is_alias = false;
-                                            sym->is_local_var = false;
-                                            sym->is_const = false;
-                                            sym->real_symbol = NULL;
-                                            hashTableInsert(procedure_table, sym);
-                                        }
+                                        name[name_len] = '\0';
+                                        VarType type;
+                                        if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
 
-                                        for (int uv = 0; uv < upvals; uv++) {
-                                            uint8_t idx = 0, isLocal = 0, isRef = 0;
-                                            if (fread(&idx, sizeof(idx), 1, f) != 1 ||
-                                                fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
-                                                fread(&isRef, sizeof(isRef), 1, f) != 1) {
-                                                ok = false;
-                                                break;
-                                            }
-                                            sym->upvalues[uv].index = idx;
-                                            sym->upvalues[uv].isLocal = (bool)isLocal;
-                                            sym->upvalues[uv].is_ref = (bool)isRef;
+                                        Value val = {0};
+
+                                        if (!readValue(f, &val)) { free(name); ok = false; break; }
+                                        insertGlobalSymbol(name, type, NULL);
+                                        Symbol* sym = lookupGlobalSymbol(name);
+                                        if (sym && sym->value) {
+                                            freeValue(sym->value);
+                                            *(sym->value) = val;
+                                            sym->is_const = true;
+                                        } else {
+                                            freeValue(&val);
                                         }
                                         free(name);
-                                        if (!ok) break;
-                                    }
-
-                                    if (ok) {
-                                        int const_sym_count = 0;
-                                        if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
-                                            for (int i = 0; i < const_sym_count; ++i) {
-                                                int name_len = 0;
-                                                if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
-                                                char* name = (char*)malloc(name_len + 1);
-                                                if (!name) { ok = false; break; }
-                                                if (fread(name, 1, name_len, f) != (size_t)name_len) {
-                                                    free(name); ok = false; break; }
-                                                name[name_len] = '\0';
-                                                VarType type;
-                                                if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
-
-                                                Value val = {0};
-
-                                                if (!readValue(f, &val)) { free(name); ok = false; break; }
-                                                insertGlobalSymbol(name, type, NULL);
-                                                Symbol* sym = lookupGlobalSymbol(name);
-                                                if (sym && sym->value) {
-                                                    freeValue(sym->value);
-                                                    *(sym->value) = val;
-                                                    sym->is_const = true;
-                                                } else {
-                                                    freeValue(&val);
-                                                }
-                                                free(name);
-                                            }
-                                        } else {
-                                            ok = false;
-                                        }
                                     }
                                 } else {
                                     ok = false;
@@ -705,124 +917,66 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                             if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
                         }
                         if (ok) {
-                            int proc_count = 0;
-                            if (fread(&proc_count, sizeof(proc_count), 1, f) == 1) {
-                                for (int i = 0; i < proc_count; ++i) {
+                            int stored_proc_count = 0;
+                            if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
+                                if (stored_proc_count < 0) {
+                                    int proc_count = -stored_proc_count - 1;
+                                    if (!loadProceduresFromStream(f, proc_count)) {
+                                        ok = false;
+                                    }
+                                } else {
+                                    ok = false;
+                                }
+                            } else {
+                                ok = false;
+                            }
+                        }
+                        if (ok) {
+                            int const_sym_count = 0;
+                            if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
+                                for (int i = 0; i < const_sym_count; ++i) {
+                                    int name_len = 0;
+                                    if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
+                                    char* name = (char*)malloc(name_len + 1);
+                                    if (!name) { ok = false; break; }
+                                    if (fread(name, 1, name_len, f) != (size_t)name_len) {
+                                        free(name); ok = false; break; }
+                                    name[name_len] = '\0';
+                                    VarType type;
+                                    if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
+
+                                    Value val = {0};
+                                    if (!readValue(f, &val)) { free(name); ok = false; break; }
+                                    insertGlobalSymbol(name, type, NULL);
+                                    Symbol* sym = lookupGlobalSymbol(name);
+                                    if (sym && sym->value) {
+                                        freeValue(sym->value);
+                                        *(sym->value) = val;
+                                        sym->is_const = true;
+                                    } else {
+                                        freeValue(&val);
+                                    }
+                                    free(name);
+                                }
+                            } else {
+                                ok = false;
+                            }
+                        }
+                        if (ok) {
+                            int type_count = 0;
+                            if (fread(&type_count, sizeof(type_count), 1, f) == 1) {
+                                for (int i = 0; i < type_count; ++i) {
                                     int name_len = 0;
                                     if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
                                     char* name = (char*)malloc(name_len + 1);
                                     if (!name) { ok = false; break; }
                                     if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
                                     name[name_len] = '\0';
-                                    int addr = 0; uint8_t locals = 0, upvals = 0; VarType type;
-                                    if (fread(&addr, sizeof(addr), 1, f) != 1 ||
-                                        fread(&locals, sizeof(locals), 1, f) != 1 ||
-                                        fread(&upvals, sizeof(upvals), 1, f) != 1 ||
-                                        fread(&type, sizeof(type), 1, f) != 1) {
-                                        free(name); ok = false; break; }
-                                    // When loading raw bytecode the procedure table may be empty,
-                                    // so recreate any missing entries from the serialized metadata.
-                                    Symbol* sym = lookupProcedure(name);
-                                    if (sym) {
-                                        sym->bytecode_address = addr;
-                                        sym->locals_count = locals;
-                                        sym->upvalue_count = upvals;
-                                        sym->type = type;
-                                        sym->is_defined = true;
-                                    } else {
-                                        sym = (Symbol*)malloc(sizeof(Symbol));
-                                        if (!sym) {
-                                            free(name);
-                                            ok = false;
-                                            break;
-                                        }
-                                        memset(sym, 0, sizeof(Symbol));
-                                        sym->name = strdup(name);
-                                        if (!sym->name) {
-                                            free(sym);
-                                            free(name);
-                                            ok = false;
-                                            break;
-                                        }
-                                        toLowerString(sym->name);
-                                        sym->bytecode_address = addr;
-                                        sym->locals_count = locals;
-                                        sym->upvalue_count = upvals;
-                                        sym->type = type;
-                                        sym->is_defined = true;
-                                        sym->is_alias = false;
-                                        sym->is_local_var = false;
-                                        sym->is_const = false;
-                                        sym->real_symbol = NULL;
-                                        hashTableInsert(procedure_table, sym);
-                                    }
-
-                                    for (int uv = 0; uv < upvals; uv++) {
-                                        uint8_t idx = 0, isLocal = 0, isRef = 0;
-                                        if (fread(&idx, sizeof(idx), 1, f) != 1 ||
-                                            fread(&isLocal, sizeof(isLocal), 1, f) != 1 ||
-                                            fread(&isRef, sizeof(isRef), 1, f) != 1) {
-                                            ok = false;
-                                            break;
-                                        }
-                                        sym->upvalues[uv].index = idx;
-                                        sym->upvalues[uv].isLocal = (bool)isLocal;
-                                        sym->upvalues[uv].is_ref = (bool)isRef;
-                                    }
+                                    AST* type_ast = readAst(f);
+                                    if (!type_ast) { free(name); ok = false; break; }
+                                    insertType(name, type_ast);
+                                    freeAST(type_ast);
                                     free(name);
-                                    if (!ok) break;
-                                }
-
-                                if (ok) {
-                                    int const_sym_count = 0;
-                                    if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
-                                        for (int i = 0; i < const_sym_count; ++i) {
-                                            int name_len = 0;
-                                            if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
-                                            char* name = (char*)malloc(name_len + 1);
-                                            if (!name) { ok = false; break; }
-                                            if (fread(name, 1, name_len, f) != (size_t)name_len) {
-                                                free(name); ok = false; break; }
-                                            name[name_len] = '\0';
-                                            VarType type;
-                                            if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
-
-                                            Value val = {0};
-                                            if (!readValue(f, &val)) { free(name); ok = false; break; }
-                                            insertGlobalSymbol(name, type, NULL);
-                                            Symbol* sym = lookupGlobalSymbol(name);
-                                            if (sym && sym->value) {
-                                                freeValue(sym->value);
-                                                *(sym->value) = val;
-                                                sym->is_const = true;
-                                            } else {
-                                                freeValue(&val);
-                                            }
-                                            free(name);
-                                        }
-                                    } else {
-                                        ok = false;
-                                    }
-                                }
-                                if (ok) {
-                                    int type_count = 0;
-                                    if (fread(&type_count, sizeof(type_count), 1, f) == 1) {
-                                        for (int i = 0; i < type_count; ++i) {
-                                            int name_len = 0;
-                                            if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
-                                            char* name = (char*)malloc(name_len + 1);
-                                            if (!name) { ok = false; break; }
-                                            if (fread(name, 1, name_len, f) != (size_t)name_len) { free(name); ok = false; break; }
-                                            name[name_len] = '\0';
-                                            AST* type_ast = readAst(f);
-                                            if (!type_ast) { free(name); ok = false; break; }
-                                            insertType(name, type_ast);
-                                            freeAST(type_ast);
-                                            free(name);
-                                        }
-                                    } else {
-                                        ok = false;
-                                    }
                                 }
                             } else {
                                 ok = false;
@@ -863,35 +1017,11 @@ static bool serializeBytecodeChunk(FILE* f, const char* source_path, const Bytec
         if (!writeValue(f, &chunk->constants[i])) { return false; }
     }
     int proc_count = 0;
-    if (procedure_table) {
-        for (int i = 0; i < HASHTABLE_SIZE; i++) {
-            for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
-                if (sym->is_alias) continue; // Skip alias entries
-                proc_count++;
-            }
-        }
-    }
-    fwrite(&proc_count, sizeof(proc_count), 1, f);
-    if (procedure_table) {
-        for (int i = 0; i < HASHTABLE_SIZE; i++) {
-            for (Symbol* sym = procedure_table->buckets[i]; sym; sym = sym->next) {
-                if (sym->is_alias) continue; // Only serialize real procedures
-                int name_len = (int)strlen(sym->name);
-                fwrite(&name_len, sizeof(name_len), 1, f);
-                fwrite(sym->name, 1, name_len, f);
-                fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f);
-                fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f);
-                fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f);
-                fwrite(&sym->type, sizeof(sym->type), 1, f);
-                for (int uv = 0; uv < sym->upvalue_count; uv++) {
-                    fwrite(&sym->upvalues[uv].index, sizeof(uint8_t), 1, f);
-                    uint8_t isLocal = sym->upvalues[uv].isLocal ? 1 : 0;
-                    uint8_t isRef = sym->upvalues[uv].is_ref ? 1 : 0;
-                    fwrite(&isLocal, sizeof(uint8_t), 1, f);
-                    fwrite(&isRef, sizeof(uint8_t), 1, f);
-                }
-            }
-        }
+    countProceduresRecursive(procedure_table, &proc_count);
+    int stored_proc_count = -(proc_count + 1);
+    fwrite(&stored_proc_count, sizeof(stored_proc_count), 1, f);
+    if (!writeProcedureEntriesRecursive(f, procedure_table)) {
+        return false;
     }
 
     int const_sym_count = 0;
