@@ -252,6 +252,7 @@ var
   i, classification: integer;
   bucket: array[0..4] of integer;
   totalSalary: real;
+  currentName: string;
 begin
   for i := 0 to 4 do
     bucket[i] := 0;
@@ -260,30 +261,31 @@ begin
 
   for i := 1 to RECORD_COUNT do
   begin
-    with people[i] do
-    begin
-      totalSalary := totalSalary + salary;
-      classification := age mod 5;
-      bucket[classification] := bucket[classification] + 1;
+    totalSalary := totalSalary + people[i].salary;
+    classification := people[i].age mod 5;
+    bucket[classification] := bucket[classification] + 1;
 
-      case classification of
-        0: name := 'Senior-' + name;
-        1: name := name + '-Mentor';
-        2: if length(name) > 0 then
-             name := copy(name, 1, length(name) - 1) + '*'
-           else
-             name := '*';
-        3: if length(name) > 1 then
-             name := copy(name, 2, length(name))
-           else
-             name := name + '#';
-      else
-        name := name + IntToString(id mod MAX_NAME_SUFFIX);
-      end;
+    currentName := people[i].name;
 
-      if pos('Person', name) = 0 then
-        name := 'Person' + name;
+    case classification of
+      0: currentName := 'Senior-' + currentName;
+      1: currentName := currentName + '-Mentor';
+      2: if length(currentName) > 0 then
+           currentName := copy(currentName, 1, length(currentName) - 1) + '*'
+         else
+           currentName := '*';
+      3: if length(currentName) > 1 then
+           currentName := copy(currentName, 2, length(currentName))
+         else
+           currentName := currentName + '#';
+    else
+      currentName := currentName + IntToString(people[i].id mod MAX_NAME_SUFFIX);
     end;
+
+    if pos('Person', currentName) = 0 then
+      currentName := 'Person' + currentName;
+
+    people[i].name := currentName;
   end;
 
   ProcessPeople := (totalSalary / RECORD_COUNT) + bucket[0] + bucket[1] * 0.1 +
