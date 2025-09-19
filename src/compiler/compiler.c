@@ -1618,6 +1618,105 @@ static bool constIsClassMember(AST* node) {
     return false;
 }
 
+static bool pushFieldBaseAndResolveOffset(AST* node, BytecodeChunk* chunk, int line, int* outFieldOffset) {
+    if (!node || node->type != AST_FIELD_ACCESS) {
+        fprintf(stderr, "L%d: Compiler error: Invalid field access expression.\n", line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    AST* base = node->left;
+    if (!base) {
+        fprintf(stderr, "L%d: Compiler error: Field access missing base expression.\n", line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    if (base->var_type == TYPE_POINTER) {
+        compileRValue(base, chunk, getLine(base));
+    } else {
+        compileLValue(base, chunk, getLine(base));
+    }
+
+    AST* recType = getRecordTypeFromExpr(base);
+    if ((!recType || recType->type != AST_RECORD_TYPE) &&
+        base->type == AST_VARIABLE && base->token && base->token->value &&
+        (strcasecmp(base->token->value, "myself") == 0 ||
+         strcasecmp(base->token->value, "my") == 0)) {
+        if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
+            recType = current_class_record_type;
+        }
+        if ((!recType || recType->type != AST_RECORD_TYPE) &&
+            current_function_compiler && current_function_compiler->function_symbol &&
+            current_function_compiler->function_symbol->name) {
+            const char* fname = current_function_compiler->function_symbol->name;
+            const char* dot = strchr(fname, '.');
+            if (dot) {
+                size_t len = (size_t)(dot - fname);
+                char cls[MAX_SYMBOL_LENGTH];
+                if (len >= sizeof(cls)) len = sizeof(cls) - 1;
+                memcpy(cls, fname, len);
+                cls[len] = '\0';
+                for (size_t i = 0; i < len; i++) cls[i] = (char)tolower(cls[i]);
+                recType = lookupType(cls);
+                recType = resolveTypeAlias(recType);
+                if (recType && recType->type == AST_TYPE_DECL && recType->left) {
+                    recType = recType->left;
+                }
+            }
+        }
+        if (!recType || recType->type != AST_RECORD_TYPE) {
+            recType = findRecordTypeByFieldName(node->token ? node->token->value : NULL);
+        }
+    }
+
+    int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
+    if (fieldOffset < 0 && recType && base->type == AST_VARIABLE &&
+        base->token && base->token->value &&
+        (strcasecmp(base->token->value, "myself") == 0 ||
+         strcasecmp(base->token->value, "my") == 0)) {
+        int offset = 0;
+        if (recType->extra && recType->extra->token && recType->extra->token->value) {
+            AST* parent = lookupType(recType->extra->token->value);
+            offset = getRecordFieldCount(parent);
+        }
+        for (int i = 0; fieldOffset < 0 && recType && i < recType->child_count; i++) {
+            AST* decl = recType->children[i];
+            if (!decl) continue;
+            if (decl->type == AST_VAR_DECL) {
+                for (int j = 0; j < decl->child_count; j++) {
+                    AST* var = decl->children[j];
+                    if (var && var->token && node->token && node->token->value &&
+                        strcasecmp(var->token->value, node->token->value) == 0) {
+                        fieldOffset = offset;
+                        break;
+                    }
+                    offset++;
+                }
+            } else if (decl->token) {
+                if (node->token && node->token->value &&
+                    strcasecmp(decl->token->value, node->token->value) == 0) {
+                    fieldOffset = offset;
+                    break;
+                }
+                offset++;
+            }
+        }
+    }
+
+    if (recordTypeHasVTable(recType)) fieldOffset++;
+
+    if (fieldOffset < 0) {
+        fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
+                node->token ? node->token->value : "<null>");
+        compiler_had_error = true;
+        return false;
+    }
+
+    if (outFieldOffset) *outFieldOffset = fieldOffset;
+    return true;
+}
+
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -1703,7 +1802,6 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
-            // Constants defined in a record cannot have their address taken.
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
                 if (const_ptr) {
@@ -1715,84 +1813,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            // Base expression might be a record value or a pointer to a record.
-            if (node->left && node->left->var_type == TYPE_POINTER) {
-                compileRValue(node->left, chunk, getLine(node->left));
-            } else {
-                compileLValue(node->left, chunk, getLine(node->left));
-            }
-
-            AST* recType = getRecordTypeFromExpr(node->left);
-            if ((!recType || recType->type != AST_RECORD_TYPE) &&
-                node->left && node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
-                (strcasecmp(node->left->token->value, "myself") == 0 ||
-                 strcasecmp(node->left->token->value, "my") == 0)) {
-                if (!recType && current_class_record_type && current_class_record_type->type == AST_RECORD_TYPE) {
-                    recType = current_class_record_type;
-                }
-                if ((!recType || recType->type != AST_RECORD_TYPE) &&
-                    current_function_compiler && current_function_compiler->function_symbol &&
-                    current_function_compiler->function_symbol->name) {
-                    const char* fname = current_function_compiler->function_symbol->name;
-                    const char* dot = strchr(fname, '.');
-                    if (dot) {
-                        size_t len = (size_t)(dot - fname);
-                        char cls[MAX_SYMBOL_LENGTH];
-                        if (len >= sizeof(cls)) len = sizeof(cls) - 1;
-                        memcpy(cls, fname, len);
-                        cls[len] = '\0';
-                        for (size_t i = 0; i < len; i++) cls[i] = (char)tolower(cls[i]);
-                        recType = lookupType(cls);
-                        recType = resolveTypeAlias(recType);
-                        if (recType && recType->type == AST_TYPE_DECL && recType->left) {
-                            recType = recType->left;
-                        }
-                    }
-                }
-                if (!recType || recType->type != AST_RECORD_TYPE) {
-                    recType = findRecordTypeByFieldName(node->token ? node->token->value : NULL);
-                }
-            }
-            int fieldOffset = getRecordFieldOffset(recType, node->token ? node->token->value : NULL);
-            if (fieldOffset < 0 && recType && node->left && node->left->type == AST_VARIABLE &&
-                node->left->token && node->left->token->value &&
-                (strcasecmp(node->left->token->value, "myself") == 0 ||
-                 strcasecmp(node->left->token->value, "my") == 0)) {
-                // Fallback: case-insensitive search through class fields
-                int offset = 0;
-                if (recType->extra && recType->extra->token && recType->extra->token->value) {
-                    AST* parent = lookupType(recType->extra->token->value);
-                    offset = getRecordFieldCount(parent);
-                }
-                for (int i = 0; fieldOffset < 0 && i < recType->child_count; i++) {
-                    AST* decl = recType->children[i];
-                    if (!decl) continue;
-                    if (decl->type == AST_VAR_DECL) {
-                        for (int j = 0; j < decl->child_count; j++) {
-                            AST* var = decl->children[j];
-                            if (var && var->token && node->token && node->token->value &&
-                                strcasecmp(var->token->value, node->token->value) == 0) {
-                                fieldOffset = offset;
-                                break;
-                            }
-                            offset++;
-                        }
-                    } else if (decl->token) {
-                        if (node->token && node->token->value &&
-                            strcasecmp(decl->token->value, node->token->value) == 0) {
-                            fieldOffset = offset;
-                            break;
-                        }
-                        offset++;
-                    }
-                }
-            }
-            if (recordTypeHasVTable(recType)) fieldOffset++;
-            if (fieldOffset < 0) {
-                fprintf(stderr, "L%d: Compiler error: Unknown field '%s'.\n", line,
-                        node->token ? node->token->value : "<null>");
-                compiler_had_error = true;
+            int fieldOffset = -1;
+            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset)) {
                 break;
             }
 
@@ -4198,9 +4220,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     break;
                 }
             }
-            // Otherwise, load the field address and then fetch its value.
-            compileLValue(node, chunk, getLine(node));
-            writeBytecodeChunk(chunk, GET_INDIRECT, line);
+            int fieldOffset = -1;
+            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset)) {
+                break;
+            }
+
+            if (fieldOffset <= 0xFF) {
+                writeBytecodeChunk(chunk, LOAD_FIELD_VALUE, line);
+                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+            } else {
+                writeBytecodeChunk(chunk, LOAD_FIELD_VALUE16, line);
+                emitShort(chunk, (uint16_t)fieldOffset, line);
+            }
             break;
         }
         case AST_ARRAY_ACCESS: {
@@ -4212,9 +4243,30 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            // Default behavior for actual arrays: get address, then get value.
-            compileLValue(node, chunk, getLine(node));
-            writeBytecodeChunk(chunk, GET_INDIRECT, line);
+            for (int i = 0; i < node->child_count; i++) {
+                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+            }
+
+            AST* base = node->left;
+            if (!base) {
+                fprintf(stderr, "L%d: Compiler error: Array access missing base expression.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+
+            switch (base->type) {
+                case AST_VARIABLE:
+                case AST_FIELD_ACCESS:
+                case AST_ARRAY_ACCESS:
+                case AST_DEREFERENCE:
+                    compileLValue(base, chunk, getLine(base));
+                    break;
+                default:
+                    compileRValue(base, chunk, getLine(base));
+                    break;
+            }
+            writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE, line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
         }
         case AST_ASSIGN: {

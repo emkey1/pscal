@@ -74,7 +74,10 @@ typedef enum {
 
     GET_FIELD_ADDRESS,
     GET_FIELD_ADDRESS16,
+    LOAD_FIELD_VALUE_BY_NAME,   // Pops base record/pointer, looks up field by name (1-byte const index) and pushes its value
+    LOAD_FIELD_VALUE_BY_NAME16, // Pops base record/pointer, looks up field by name (2-byte const index) and pushes its value
     GET_ELEMENT_ADDRESS,
+    LOAD_ELEMENT_VALUE,  // Pops array/pointer after its indices and pushes a copy of the addressed element's value
     GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     SET_INDIRECT,
     GET_INDIRECT,
@@ -93,6 +96,8 @@ typedef enum {
     // field.
     GET_FIELD_OFFSET,   // Operand: 1-byte field index
     GET_FIELD_OFFSET16, // Operand: 2-byte field index
+    LOAD_FIELD_VALUE,   // Pops the base record/pointer and pushes a copy of the field value (1-byte offset)
+    LOAD_FIELD_VALUE16, // Pops the base record/pointer and pushes a copy of the field value (2-byte offset)
 
     // For now, built-ins might be handled specially, or we can add a generic call
     CALL_BUILTIN,  // Placeholder for calling built-in functions

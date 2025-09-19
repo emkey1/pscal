@@ -1,0 +1,2 @@
+int a[3];
+int value = a[1];
