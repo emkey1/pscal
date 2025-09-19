@@ -153,6 +153,8 @@ static AST *parseComparison(ReaParser *p);
 static AST *parseAdditive(ReaParser *p);
 static AST *parseTerm(ReaParser *p);
 static AST *parseFactor(ReaParser *p);
+static AST *parseBitwiseAnd(ReaParser *p);
+static AST *parseBitwiseXor(ReaParser *p);
 static AST *parseLogicalAnd(ReaParser *p);
 static AST *parseLogicalOr(ReaParser *p);
 static AST *parseStatement(ReaParser *p);
@@ -1130,6 +1132,35 @@ static AST *parseBitwiseAnd(ReaParser *p) {
     return node;
 }
 
+static AST *parseBitwiseXor(ReaParser *p) {
+    AST *node = parseBitwiseAnd(p);
+    if (!node) return NULL;
+    while (p->current.type == REA_TOKEN_XOR) {
+        ReaToken op = p->current;
+        reaAdvance(p);
+        AST *right = parseBitwiseAnd(p);
+        if (!right) return NULL;
+        const char *lexeme = (strncmp(op.start, "xor", op.length) == 0) ? "xor" : "^";
+        Token *tok = newToken(TOKEN_XOR, lexeme, op.line, 0);
+        AST *bin = newASTNode(AST_BINARY_OP, tok);
+        setLeft(bin, node);
+        setRight(bin, right);
+        VarType lt = node->var_type;
+        VarType rt = right->var_type;
+        VarType res;
+        if (lt == TYPE_BOOLEAN && rt == TYPE_BOOLEAN) {
+            res = TYPE_BOOLEAN;
+        } else if (lt == TYPE_INT64 || rt == TYPE_INT64) {
+            res = TYPE_INT64;
+        } else {
+            res = TYPE_INT32;
+        }
+        setTypeAST(bin, res);
+        node = bin;
+    }
+    return node;
+}
+
 static AST *parseAssignment(ReaParser *p) {
     // Highest precedence: handle assignment right-associatively
     AST *left = parseLogicalOr(p);
@@ -1159,12 +1190,12 @@ static AST *parseExpression(ReaParser *p) {
 }
 
 static AST *parseLogicalAnd(ReaParser *p) {
-    AST *node = parseBitwiseAnd(p);
+    AST *node = parseBitwiseXor(p);
     if (!node) return NULL;
     while (p->current.type == REA_TOKEN_AND_AND) {
         ReaToken op = p->current;
         reaAdvance(p);
-        AST *right = parseBitwiseAnd(p);
+        AST *right = parseBitwiseXor(p);
         if (!right) return NULL;
         Token *tok = newToken(TOKEN_AND, "&&", op.line, 0);
         AST *bin = newASTNode(AST_BINARY_OP, tok);
