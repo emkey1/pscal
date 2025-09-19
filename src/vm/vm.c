@@ -696,6 +696,52 @@ static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
     return NULL;
 }
 
+static Symbol* resolveProcedureAlias(Symbol* symbol) {
+    if (symbol && symbol->is_alias && symbol->real_symbol) {
+        return symbol->real_symbol;
+    }
+    return symbol;
+}
+
+static bool procedureVisibleFromFrames(VM* vm, Symbol* symbol) {
+    if (!symbol) return false;
+    if (!symbol->enclosing) return true;
+    if (!vm) return false;
+
+    for (int fi = vm->frameCount - 1; fi >= 0; fi--) {
+        Symbol* frame_symbol = vm->frames[fi].function_symbol;
+        while (frame_symbol) {
+            if (frame_symbol == symbol->enclosing) {
+                return true;
+            }
+            frame_symbol = frame_symbol->enclosing;
+        }
+    }
+    return false;
+}
+
+static Symbol* findProcedureByName(HashTable* table, const char* lookup_name, VM* vm) {
+    if (!table || !lookup_name) return NULL;
+
+    Symbol* sym = resolveProcedureAlias(hashTableLookup(table, lookup_name));
+    if (sym && procedureVisibleFromFrames(vm, sym)) {
+        return sym;
+    }
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (Symbol* entry = table->buckets[i]; entry; entry = entry->next) {
+            if (entry->type_def && entry->type_def->symbol_table) {
+                Symbol* nested = findProcedureByName((HashTable*)entry->type_def->symbol_table, lookup_name, vm);
+                if (nested) {
+                    return nested;
+                }
+            }
+        }
+    }
+
+    return NULL;
+}
+
 static Value pop(VM* vm) {
     if (vm->stackTop == vm->stack) {
         runtimeError(vm, "VM Error: Stack underflow (pop from empty stack).");
@@ -3675,11 +3721,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* proc_symbol = hashTableLookup(vm->procedureTable, lookup_name);
-                if (proc_symbol && proc_symbol->is_alias && proc_symbol->real_symbol) {
-                    proc_symbol = proc_symbol->real_symbol;
-                }
-
+                Symbol* proc_symbol = findProcedureByName(vm->procedureTable, lookup_name, vm);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: Procedure '%s' not found for CALL_USER_PROC.", proc_name);
                     return INTERPRET_RUNTIME_ERROR;
