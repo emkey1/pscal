@@ -191,10 +191,19 @@ begin
       writeln('Sound finished playing.');
     end;
 
-    // Free the loaded sound from memory when done.
-    writeln('Freeing sound...');
-    FreeSound(SoundID);
-    writeln('Sound freed.');
+    if QuitRequested then
+    begin
+      writeln('Playback interrupted by user.');
+    end
+    else
+    begin
+      writeln('Sound finished playing.');
+
+      // Free the loaded sound from memory when done.
+      writeln('Freeing sound...');
+      FreeSound(SoundID);
+      writeln('Sound freed.');
+    end;
   end; // end if/else checking SoundID
 
   // Shut down the Sound System.
