@@ -14,7 +14,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs1 (at 0035) ---
 0035    5 CONSTANT            9 '1'
 0037    | CONSTANT           10 'R1'
-0039    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0039    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0045    6 CONSTANT           12 'true'
 0047    | SET_LOCAL           0 (slot)
 0049    3 GET_LOCAL           0 (slot)
@@ -24,7 +24,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs0 (at 0055) ---
 0055   11 CONSTANT            9 '1'
 0057    | CONSTANT           13 'R0'
-0059    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0059    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0065   12 CONSTANT           14 'false'
 0067    | SET_LOCAL           0 (slot)
 0069    9 GET_LOCAL           0 (slot)
@@ -38,11 +38,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0087    | JUMP_IF_FALSE      13 (to 0103)
 0090    | CONSTANT            9 '1'
 0092    | CONSTANT           18 'A triggered'
-0094    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0094    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0100    | JUMP               10 (to 0113)
 0103    | CONSTANT            9 '1'
 0105    | CONSTANT           19 'A skipped'
-0107    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0107    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0113   19 CONSTANT           20 'true'
 0115    | JUMP_IF_FALSE       5 (to 0123)
 0118    | CONSTANT           21 'true'
@@ -52,11 +52,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0128    | JUMP_IF_FALSE      13 (to 0144)
 0131    | CONSTANT            9 '1'
 0133    | CONSTANT           22 'B taken'
-0135    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0135    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0141    | JUMP               10 (to 0154)
 0144    | CONSTANT            9 '1'
 0146    | CONSTANT           23 'B skipped'
-0148    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0148    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0154   21 CONSTANT           24 'false'
 0156    | JUMP_IF_FALSE       8 (to 0167)
 0159    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
@@ -108,7 +108,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0273    | CONSTANT           37 ' '
 0275    | GET_GLOBAL          8 'r4'
 0277    | CALL_BUILTIN        36 'ord' (1 args)
-0281    | CALL_BUILTIN_PROC   176 'write' (11 args)
+0281    | CALL_BUILTIN_PROC   123 'write' (11 args)
 0287    1 HALT
 == End Disassembly: Pascal/ShortCircuitTest ==
 
