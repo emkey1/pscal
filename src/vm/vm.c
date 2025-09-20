@@ -144,10 +144,19 @@ static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char*
         return false;
     }
 
-    if (!IS_INTLIKE(*slot)) {
+    bool is_enum_slot = (slot->type == TYPE_ENUM);
+    if (!is_enum_slot && !IS_INTLIKE(*slot)) {
         runtimeError(vm, "VM Error: %s requires an ordinal local, got %s.",
                      opcode_name, varTypeToString(slot->type));
         return false;
+    }
+
+    if (is_enum_slot) {
+        long long new_ord = (long long)slot->enum_val.ordinal + delta;
+        slot->enum_val.ordinal = (int)new_ord;
+        slot->i_val = (long long)slot->enum_val.ordinal;
+        slot->u_val = (unsigned long long)slot->enum_val.ordinal;
+        return true;
     }
 
     long long new_val = AS_INTEGER(*slot) + delta;
