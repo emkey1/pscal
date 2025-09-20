@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
 #ifdef SDL
 #include <SDL2/SDL.h>
@@ -34,6 +35,24 @@ List *inserted_global_names = NULL;
 #endif
 
 static int s_vm_trace_head = 0;
+
+static bool bufferContainsCachedMessage(const char *buf, size_t len) {
+    static const char cached_msg[] = "Loaded cached byte code";
+    const size_t needle_len = sizeof(cached_msg) - 1;
+
+    if (needle_len == 0 || len < needle_len) {
+        return false;
+    }
+
+    const size_t search_limit = len - needle_len + 1;
+    for (size_t i = 0; i < search_limit; ++i) {
+        if (buf[i] == cached_msg[0] && memcmp(buf + i, cached_msg, needle_len) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 const char *PASCAL_USAGE =
     "Usage: pascal <options> <source_file> [program_parameters...]\n"
@@ -396,8 +415,8 @@ int main(int argc, char *argv[]) {
                     char c = buf[i];
                     if (!(c == ' ' || c == '\t' || c == '\r' || c == '\n')) { has_non_ws = 1; break; }
                 }
-                if (!has_cached) {
-                    if (memmem(buf, n, "Loaded cached byte code", 24) != NULL) has_cached = 1;
+                if (!has_cached && bufferContainsCachedMessage(buf, n)) {
+                    has_cached = 1;
                 }
                 if (has_non_ws && has_cached) break;
             }
