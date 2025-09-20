@@ -2248,7 +2248,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
         for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
             for (Symbol* sym = procedure_table->buckets[bucket]; sym; sym = sym->next) {
                 Symbol* target = resolveSymbolAlias(sym);
-                if (!target || !target->is_defined) continue;
+                if (!target || target != sym || !target->is_defined) continue;
                 int old_address = target->bytecode_address;
                 if (old_address < 0 || old_address > original_count) continue;
                 int mapped = offset_map[old_address];
