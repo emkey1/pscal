@@ -8,6 +8,14 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+static inline bool isIdentifierStartChar(unsigned char c) {
+    return (c == '_') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static inline bool isIdentifierChar(unsigned char c) {
+    return isIdentifierStartChar(c) || (c >= '0' && c <= '9');
+}
+
 static void clearBuiltinOverrideDirective(Lexer *lexer) {
     if (!lexer) {
         return;
@@ -213,7 +221,7 @@ void initLexer(Lexer *lexer, const char *text) {
 }
 
 void skipWhitespace(Lexer *lexer) {
-    while (lexer->current_char != '\0' && isspace(lexer->current_char)) {
+    while (lexer->current_char != '\0' && isspace((unsigned char)lexer->current_char)) {
         advance(lexer);
     }
 }
@@ -338,7 +346,7 @@ Token *identifier(Lexer *lexer) {
     int token_line = lexer->line;
     int token_column = lexer->column;
 
-    while (lexer->current_char && (isalnum((unsigned char)lexer->current_char) || lexer->current_char == '_'))
+    while (lexer->current_char && isIdentifierChar((unsigned char)lexer->current_char))
         advance(lexer);
     size_t len = lexer->pos - start;
     char *id_str = malloc(len + 1);
@@ -638,7 +646,7 @@ Token *getNextToken(Lexer *lexer) {
 
 
         // Handle Identifiers and Keywords
-        if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {
+        if (isIdentifierStartChar((unsigned char)lexer->current_char)) {
 #ifdef DEBUG
             fprintf(stderr, "LEXER_DEBUG: getNextToken(return identifier)\n"); fflush(stderr);
 #endif
