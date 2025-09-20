@@ -1164,6 +1164,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
     vm->exit_requested = false;
+    vm->current_builtin_name = NULL;
 
     vm->threadCount = 1; // main thread occupies index 0
     for (int i = 0; i < VM_MAX_THREADS; i++) {
@@ -4109,8 +4110,18 @@ comparison_error_label:
 
                 bool needs_lock = (lookup_name[0] != '\0') ? builtinUsesGlobalStructures(lookup_name) : false;
                 if (needs_lock) pthread_mutex_lock(&globals_mutex);
+
+                const char* context_name = effective_name;
+                if (!context_name) {
+                    context_name = (lookup_name[0] != '\0') ? lookup_name : builtin_name;
+                }
+                const char* previous_builtin_name = vm->current_builtin_name;
+                vm->current_builtin_name = context_name;
+
                 Value result = handler(vm, arg_count, args);
+
                 if (needs_lock) pthread_mutex_unlock(&globals_mutex);
+                vm->current_builtin_name = previous_builtin_name;
 
                 vm->stackTop -= arg_count;
                 for (int i = 0; i < arg_count; i++) {
@@ -4159,8 +4170,15 @@ comparison_error_label:
                 if (handler) {
                     bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
                     if (needs_lock) pthread_mutex_lock(&globals_mutex);
+
+                    const char* context_name = builtin_name_original_case ? builtin_name_original_case : builtin_name_lower;
+                    const char* previous_builtin_name = vm->current_builtin_name;
+                    vm->current_builtin_name = context_name;
+
                     Value result = handler(vm, arg_count, args);
+
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
+                    vm->current_builtin_name = previous_builtin_name;
 
                     // Pop arguments from the stack and free their contents when safe.
                     // Arrays and pointers reference caller-managed memory, so avoid freeing
