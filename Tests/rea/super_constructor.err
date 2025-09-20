@@ -29,7 +29,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0047    4 CONSTANT            8 '1'
 0049    | GET_GLOBAL          3 'c'
 0051    | LOAD_FIELD_VALUE    1 (index)
-0053    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0053    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0059    0 HALT
 == End Disassembly: Tests/rea/super_constructor.rea ==
 
