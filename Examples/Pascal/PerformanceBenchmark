@@ -2,14 +2,15 @@
 program PerformanceBenchmark;
 
 const
-  MATRIX_SIZE = 30;
-  MATRIX_ROUNDS = 8;
-  SORT_SIZE = 2500;
-  STRING_ITERATIONS = 2000;
-  RECORD_COUNT = 400;
-  LIST_SIZE = 25000;
-  PRIME_LIMIT = 18000;
-  SET_ITERATIONS = 8000;
+  // Workload sizes tuned to exercise the VM for a noticeably longer duration.
+  MATRIX_SIZE = 64;
+  MATRIX_ROUNDS = 16;
+  SORT_SIZE = 8000;
+  STRING_ITERATIONS = 12000;
+  RECORD_COUNT = 1600;
+  LIST_SIZE = 150000;
+  PRIME_LIMIT = 60000;
+  SET_ITERATIONS = 48000;
   FILE_PATH = '/tmp/pscal_performance_dataset.txt';
 
   RNG_MOD = 32749;
@@ -567,9 +568,9 @@ var
   total: longint;
 begin
   total := 0;
-  for i := 1 to 12 do
+  for i := 1 to 18 do
   begin
-    total := total + Fibonacci(18 + (i mod 5) * 2);
+    total := total + Fibonacci(20 + (i mod 5) * 2);
     total := total + Factorial(10 + (i mod 3));
   end;
   RunRecursiveMath := total;
