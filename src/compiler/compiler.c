@@ -1988,6 +1988,134 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
     return true;
 }
 
+static bool readConstantInt(BytecodeChunk* chunk, int index, long long* out_value) {
+    if (!chunk || index < 0 || index >= chunk->constants_count) {
+        return false;
+    }
+
+    Value const_val = chunk->constants[index];
+    if (!IS_INTLIKE(const_val)) {
+        return false;
+    }
+
+    if (out_value) {
+        *out_value = AS_INTEGER(const_val);
+    }
+    return true;
+}
+
+static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
+    if (!chunk || chunk->count <= 0 || !chunk->code) {
+        return;
+    }
+
+    const int original_count = chunk->count;
+    uint8_t* original_code = chunk->code;
+    int* original_lines = chunk->lines;
+
+    uint8_t* optimized_code = (uint8_t*)malloc((size_t)original_count);
+    int* optimized_lines = (int*)malloc((size_t)original_count * sizeof(int));
+    if (!optimized_code || !optimized_lines) {
+        free(optimized_code);
+        free(optimized_lines);
+        return;
+    }
+
+    int read_index = 0;
+    int write_index = 0;
+    bool changed = false;
+
+    while (read_index < original_count) {
+        uint8_t opcode = original_code[read_index];
+
+        if (opcode == GET_LOCAL) {
+            if (read_index + 6 < original_count) {
+                uint8_t slot = original_code[read_index + 1];
+                int const_offset = read_index + 2;
+                uint8_t const_opcode = original_code[const_offset];
+                int constant_length = 0;
+                int constant_index = -1;
+
+                if (const_opcode == CONSTANT) {
+                    if (const_offset + 1 < original_count) {
+                        constant_index = original_code[const_offset + 1];
+                        constant_length = 2;
+                    }
+                } else if (const_opcode == CONSTANT16) {
+                    if (const_offset + 2 < original_count) {
+                        constant_index = (original_code[const_offset + 1] << 8) |
+                                         original_code[const_offset + 2];
+                        constant_length = 3;
+                    }
+                }
+
+                if (constant_length > 0) {
+                    int arithmetic_offset = const_offset + constant_length;
+                    if (arithmetic_offset < original_count) {
+                        uint8_t arithmetic_opcode = original_code[arithmetic_offset];
+                        if ((arithmetic_opcode == ADD || arithmetic_opcode == SUBTRACT) &&
+                            arithmetic_offset + 2 < original_count &&
+                            original_code[arithmetic_offset + 1] == SET_LOCAL &&
+                            original_code[arithmetic_offset + 2] == slot) {
+
+                            long long constant_value = 0;
+                            if (readConstantInt(chunk, constant_index, &constant_value)) {
+                                uint8_t replacement = 0;
+                                if (arithmetic_opcode == ADD) {
+                                    if (constant_value == 1) replacement = INC_LOCAL;
+                                    else if (constant_value == -1) replacement = DEC_LOCAL;
+                                } else {
+                                    if (constant_value == 1) replacement = DEC_LOCAL;
+                                    else if (constant_value == -1) replacement = INC_LOCAL;
+                                }
+
+                                if (replacement != 0) {
+                                    optimized_code[write_index] = replacement;
+                                    optimized_lines[write_index++] = original_lines
+                                        ? original_lines[read_index] : 0;
+                                    optimized_code[write_index] = slot;
+                                    optimized_lines[write_index++] = original_lines
+                                        ? original_lines[read_index] : 0;
+                                    read_index += 2 + constant_length + 1 + 2;
+                                    changed = true;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        int instruction_length = getInstructionLength(chunk, read_index);
+        if (instruction_length <= 0) instruction_length = 1;
+        for (int i = 0; i < instruction_length && (read_index + i) < original_count; i++) {
+            optimized_code[write_index] = original_code[read_index + i];
+            optimized_lines[write_index] = original_lines ? original_lines[read_index + i] : 0;
+            write_index++;
+        }
+        read_index += instruction_length;
+    }
+
+    if (!changed) {
+        free(optimized_code);
+        free(optimized_lines);
+        return;
+    }
+
+    uint8_t* resized_code = (uint8_t*)realloc(optimized_code, (size_t)write_index);
+    if (resized_code) optimized_code = resized_code;
+    int* resized_lines = (int*)realloc(optimized_lines, (size_t)write_index * sizeof(int));
+    if (resized_lines) optimized_lines = resized_lines;
+
+    free(chunk->code);
+    free(chunk->lines);
+    chunk->code = optimized_code;
+    chunk->lines = optimized_lines;
+    chunk->count = write_index;
+    chunk->capacity = write_index;
+}
+
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
@@ -2024,6 +2152,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     if (!compiler_had_error) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
+        applyPeepholeOptimizations(outputChunk);
     }
     return !compiler_had_error;
 }
