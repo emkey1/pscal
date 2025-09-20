@@ -8,6 +8,76 @@ CLIKE_ARGS=(--no-cache)
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
+wait_for_ready_file() {
+  local ready_file="$1"
+  local timeout="$2"
+  python3 - "$ready_file" "$timeout" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+timeout = float(sys.argv[2])
+deadline = time.monotonic() + timeout
+while time.monotonic() < deadline:
+    if os.path.exists(path):
+        sys.exit(0)
+    time.sleep(0.05)
+sys.exit(1)
+PY
+}
+
+stop_server() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return
+  fi
+  if ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" 2>/dev/null || true
+    return
+  fi
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      return
+    fi
+    if ps -p "$pid" -o stat= 2>/dev/null | grep -q '^Z'; then
+      wait "$pid" 2>/dev/null || true
+      return
+    fi
+    sleep 0.05
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
   if [ "${RUN_SDL:-0}" != "1" ]; then
@@ -84,13 +154,23 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   server_pid=""
   server_script="$SCRIPT_DIR/clike/$test_name.net"
+  server_ready_file=""
   if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
-    python3 "$server_script" &
+    server_ready_file=$(mktemp)
+    rm -f "$server_ready_file"
+    PSCAL_NET_READY_FILE="$server_ready_file" python3 "$server_script" &
     server_pid=$!
     # Detach the server process from job control so terminating it later does
     # not emit noisy "Terminated" messages that interfere with test output.
     disown "$server_pid" 2>/dev/null || true
-    sleep 1
+    if ! wait_for_ready_file "$server_ready_file" 5; then
+      echo "Failed to start server for $test_name" >&2
+      EXIT_CODE=1
+      if [ -n "$server_pid" ]; then
+        stop_server "$server_pid"
+        server_pid=""
+      fi
+    fi
   fi
 
   set +e
@@ -147,10 +227,11 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   fi
 
   if [ -n "$server_pid" ]; then
-    kill "$server_pid" 2>/dev/null || true
-    sleep 0.2
-    kill -9 "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
+    stop_server "$server_pid"
+    server_pid=""
+  fi
+  if [ -n "${server_ready_file:-}" ]; then
+    rm -f "$server_ready_file"
   fi
 
   if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
@@ -170,13 +251,12 @@ int main() {
     return 0;
 }
 EOF
-sleep 1
+shift_mtime "$src_dir/CacheTest.cl" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" CacheTest.cl > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" CacheTest.cl > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
@@ -202,14 +282,13 @@ int main() {
     return 0;
 }
 EOF
-sleep 1
+shift_mtime "$src_dir/BinaryTest.cl" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" BinaryTest.cl > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$CLIKE_BIN"
+  shift_mtime "$CLIKE_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" BinaryTest.cl > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
