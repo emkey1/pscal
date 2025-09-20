@@ -35,14 +35,15 @@ static int compiler_dynamic_locals = 0;
 typedef struct {
     int constant_index;
     int original_address;
+    int element_index;
 } AddressConstantEntry;
 
 static AddressConstantEntry* address_constant_entries = NULL;
 static int address_constant_count = 0;
 static int address_constant_capacity = 0;
 
-static void recordAddressConstant(int constant_index, int address) {
-    if (constant_index < 0) return;
+static void recordAddressConstantEntry(int constant_index, int element_index, int address) {
+    if (constant_index < 0 || address < 0) return;
     if (address_constant_count >= address_constant_capacity) {
         int new_capacity = address_constant_capacity < 8 ? 8 : address_constant_capacity * 2;
         AddressConstantEntry* resized = (AddressConstantEntry*)realloc(address_constant_entries,
@@ -55,7 +56,16 @@ static void recordAddressConstant(int constant_index, int address) {
     }
     address_constant_entries[address_constant_count].constant_index = constant_index;
     address_constant_entries[address_constant_count].original_address = address;
+    address_constant_entries[address_constant_count].element_index = element_index;
     address_constant_count++;
+}
+
+static void recordAddressConstant(int constant_index, int address) {
+    recordAddressConstantEntry(constant_index, -1, address);
+}
+
+static void recordArrayAddressConstant(int constant_index, int element_index, int address) {
+    recordAddressConstantEntry(constant_index, element_index, address);
 }
 
 static void resetAddressConstantTracking(void) {
@@ -351,6 +361,12 @@ static void emitVTables(BytecodeChunk* chunk) {
             arr.array_val[j] = makeInt(addr == NO_VTABLE_ENTRY ? 0 : addr);
         }
         int cidx = addConstantToChunk(chunk, &arr);
+        for (int j = 0; j < vt->method_count; j++) {
+            int addr = vt->addrs[j];
+            if (addr != NO_VTABLE_ENTRY) {
+                recordArrayAddressConstant(cidx, j, addr);
+            }
+        }
         freeValue(&arr);
         emitConstant(chunk, cidx, 0);
         char gname[512];
@@ -2559,9 +2575,23 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
         if (old_address > original_count) old_address = original_count;
         int mapped = offset_map[old_address];
         if (mapped < 0) mapped = offset_map[original_count];
-        Value* val = &chunk->constants[const_index];
-        val->i_val = (long long)mapped;
-        val->u_val = (unsigned long long)mapped;
+
+        int element_index = address_constant_entries[i].element_index;
+        if (element_index >= 0) {
+            Value* array_const = &chunk->constants[const_index];
+            if (array_const->type == TYPE_ARRAY && array_const->array_val) {
+                int total = calculateArrayTotalSize(array_const);
+                if (element_index >= 0 && element_index < total) {
+                    Value* elem = &array_const->array_val[element_index];
+                    SET_INT_VALUE(elem, mapped);
+                    elem->type = TYPE_INT32;
+                }
+            }
+        } else {
+            Value* val = &chunk->constants[const_index];
+            val->i_val = (long long)mapped;
+            val->u_val = (unsigned long long)mapped;
+        }
     }
 
     free(offset_map);
