@@ -6,6 +6,32 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
 PASCAL_ARGS=(--no-cache)
 
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
 if [ ! -x "$PASCAL_BIN" ]; then
   echo "pascal binary not found at $PASCAL_BIN" >&2
   exit 1
@@ -168,7 +194,7 @@ end.
 EOF
 
 # Ensure the cache entry's timestamp exceeds the source file's mtime.
-sleep 1
+shift_mtime "$src_file" -5
 
 # First run to populate the cache
 set +e
@@ -178,7 +204,6 @@ set -e
 
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
   # Second run should use the cache
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out_cache" 2> "$tmp_home/err_cache")
   status_cache=$?
@@ -252,14 +277,13 @@ end.
 EOF
 
 # Ensure cache timestamp precedes binary update
-sleep 1
+shift_mtime "$src_dir/BinaryTest" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$PASCAL_BIN"
+  shift_mtime "$PASCAL_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?

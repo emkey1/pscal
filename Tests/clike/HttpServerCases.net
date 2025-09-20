@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class Handler(BaseHTTPRequestHandler):
@@ -19,4 +20,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 if __name__ == '__main__':
-    HTTPServer(('127.0.0.1', 8081), Handler).serve_forever()
+    ready_file = os.environ.get('PSCAL_NET_READY_FILE')
+    server = HTTPServer(('127.0.0.1', 8081), Handler)
+    if ready_file:
+        try:
+            with open(ready_file, 'w', encoding='utf-8') as f:
+                f.write('ready\n')
+        except OSError:
+            pass
+    server.serve_forever()

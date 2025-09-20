@@ -12,6 +12,32 @@ REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
 # Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
@@ -153,13 +179,12 @@ src_dir=$(mktemp -d)
 cat > "$src_dir/CacheTest.rea" <<'EOF'
 writeln("first");
 EOF
-sleep 1
+shift_mtime "$src_dir/CacheTest.rea" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
@@ -182,14 +207,13 @@ src_dir=$(mktemp -d)
 cat > "$src_dir/BinaryTest.rea" <<'EOF'
 writeln("first");
 EOF
-sleep 1
+shift_mtime "$src_dir/BinaryTest.rea" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$REA_BIN"
+  shift_mtime "$REA_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
