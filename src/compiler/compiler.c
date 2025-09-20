@@ -2082,6 +2082,64 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     while (read_index < original_count) {
         uint8_t opcode = original_code[read_index];
 
+        if (opcode == CONSTANT || opcode == CONSTANT16) {
+            int constant_length = (opcode == CONSTANT) ? 2 : 3;
+            int constant_index = -1;
+            if (opcode == CONSTANT) {
+                if (read_index + 1 < original_count) {
+                    constant_index = original_code[read_index + 1];
+                }
+            } else {
+                if (read_index + 2 < original_count) {
+                    constant_index = (original_code[read_index + 1] << 8) |
+                                     original_code[read_index + 2];
+                }
+            }
+
+            int call_offset = read_index + constant_length;
+            if (constant_index >= 0 && call_offset + 3 < original_count &&
+                original_code[call_offset] == CALL_BUILTIN) {
+                int builtin_name_idx = (original_code[call_offset + 1] << 8) |
+                                        original_code[call_offset + 2];
+                uint8_t arg_count = original_code[call_offset + 3];
+                if (arg_count == 1 &&
+                    builtin_name_idx >= 0 &&
+                    builtin_name_idx < chunk->constants_count &&
+                    constant_index < chunk->constants_count) {
+                    Value* builtin_name_val = &chunk->constants[builtin_name_idx];
+                    if (builtin_name_val->type == TYPE_STRING &&
+                        builtin_name_val->s_val &&
+                        strcasecmp(builtin_name_val->s_val, "byte") == 0) {
+                        Value const_val = chunk->constants[constant_index];
+                        if (isIntlikeType(const_val.type) &&
+                            const_val.type != TYPE_BOOLEAN &&
+                            const_val.type != TYPE_CHAR) {
+                            long long iv = AS_INTEGER(const_val);
+                            if (iv >= 0 && iv <= 255) {
+                                int replacement_start = write_index;
+                                for (int i = 0; i < constant_length &&
+                                                (read_index + i) < original_count; ++i) {
+                                    optimized_code[write_index] = original_code[read_index + i];
+                                    optimized_lines[write_index] = original_lines
+                                        ? original_lines[read_index + i] : 0;
+                                    offset_map[read_index + i] = write_index;
+                                    write_index++;
+                                }
+                                for (int i = 0; i < 4; ++i) {
+                                    offset_map[call_offset + i] = (write_index > 0)
+                                        ? (write_index - 1)
+                                        : replacement_start;
+                                }
+                                read_index += constant_length + 4;
+                                changed = true;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (opcode == GET_LOCAL) {
             if (read_index + 6 < original_count) {
                 uint8_t slot = original_code[read_index + 1];
@@ -2107,10 +2165,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                     int arithmetic_offset = const_offset + constant_length;
                     if (arithmetic_offset < original_count) {
                         uint8_t arithmetic_opcode = original_code[arithmetic_offset];
-                        if ((arithmetic_opcode == ADD || arithmetic_opcode == SUBTRACT) &&
-                            arithmetic_offset + 2 < original_count &&
-                            original_code[arithmetic_offset + 1] == SET_LOCAL &&
-                            original_code[arithmetic_offset + 2] == slot) {
+                        if (arithmetic_opcode == ADD || arithmetic_opcode == SUBTRACT) {
 
                             long long constant_value = 0;
                             if (readConstantInt(chunk, constant_index, &constant_value)) {
@@ -2123,21 +2178,52 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                                     else if (constant_value == -1) replacement = INC_LOCAL;
                                 }
 
-                                if (replacement != 0) {
-                                    int sequence_length = 2 + constant_length + 1 + 2;
-                                    int replacement_start = write_index;
-                                    optimized_code[write_index] = replacement;
-                                    optimized_lines[write_index++] = original_lines
-                                        ? original_lines[read_index] : 0;
-                                    optimized_code[write_index] = slot;
-                                    optimized_lines[write_index++] = original_lines
-                                        ? original_lines[read_index] : 0;
-                                    for (int i = 0; i < sequence_length && (read_index + i) < original_count; ++i) {
-                                        offset_map[read_index + i] = replacement_start;
+                                int store_offset = arithmetic_offset + 1;
+                                if (replacement != 0 && store_offset < original_count) {
+                                    bool handled = false;
+                                    if (original_code[store_offset] == SET_LOCAL &&
+                                        store_offset + 1 < original_count &&
+                                        original_code[store_offset + 1] == slot) {
+                                        int sequence_length = 2 + constant_length + 1 + 2;
+                                        int replacement_start = write_index;
+                                        optimized_code[write_index] = replacement;
+                                        optimized_lines[write_index++] = original_lines
+                                            ? original_lines[read_index] : 0;
+                                        optimized_code[write_index] = slot;
+                                        optimized_lines[write_index++] = original_lines
+                                            ? original_lines[read_index] : 0;
+                                        for (int i = 0; i < sequence_length &&
+                                                (read_index + i) < original_count; ++i) {
+                                            offset_map[read_index + i] = replacement_start;
+                                        }
+                                        read_index += sequence_length;
+                                        changed = true;
+                                        handled = true;
+                                    } else if (original_code[store_offset] == GET_LOCAL_ADDRESS &&
+                                               store_offset + 3 < original_count &&
+                                               original_code[store_offset + 1] == slot &&
+                                               original_code[store_offset + 2] == SWAP &&
+                                               original_code[store_offset + 3] == SET_INDIRECT) {
+                                        int sequence_length = 2 + constant_length + 1 + 4;
+                                        int replacement_start = write_index;
+                                        optimized_code[write_index] = replacement;
+                                        optimized_lines[write_index++] = original_lines
+                                            ? original_lines[read_index] : 0;
+                                        optimized_code[write_index] = slot;
+                                        optimized_lines[write_index++] = original_lines
+                                            ? original_lines[read_index] : 0;
+                                        for (int i = 0; i < sequence_length &&
+                                                (read_index + i) < original_count; ++i) {
+                                            offset_map[read_index + i] = replacement_start;
+                                        }
+                                        read_index += sequence_length;
+                                        changed = true;
+                                        handled = true;
                                     }
-                                    read_index += sequence_length;
-                                    changed = true;
-                                    continue;
+
+                                    if (handled) {
+                                        continue;
+                                    }
                                 }
                             }
                         }
