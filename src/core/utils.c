@@ -2140,8 +2140,9 @@ int computeFlatOffset(Value *array, int *indices) {
     for (int i = array->dimensions - 1; i >= 0; i--) {
         // Bounds check for the current dimension
         if (indices[i] < array->lower_bounds[i] || indices[i] > array->upper_bounds[i]) {
-            fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %d.\n",
-                    indices[i], array->lower_bounds[i], array->upper_bounds[i], i + 1);
+            fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %lld.\n",
+                    indices[i], array->lower_bounds[i], array->upper_bounds[i],
+                    (long long)i + 1);
             EXIT_FAILURE_HANDLER();
         }
         
