@@ -382,7 +382,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
 #ifdef SDL
     {"putpixel", vmBuiltinPutpixel},
 #endif
-    {"quitrequested", vmBuiltinQuitrequested},
+    {"write", vmBuiltinWrite}, // Preserve legacy builtin id for write
 #ifdef SDL
     {"quitsoundsystem", vmBuiltinQuitsoundsystem},
     {"quittextsystem", vmBuiltinQuittextsystem},
@@ -460,7 +460,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
-    {"write", vmBuiltinWrite},
+    {"quitrequested", vmBuiltinQuitrequested},
     {"to be filled", NULL}
 };
 
