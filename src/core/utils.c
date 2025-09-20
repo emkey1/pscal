@@ -2301,7 +2301,18 @@ bool applyCurrentTextAttributes(FILE* stream) {
                              !gCurrentTextBlink && !gCurrentColorIsExt &&
                              !gCurrentBgIsExt);
 
-    if (is_default_state && (!stream_is_stdout || !gConsoleAttrDirty)) {
+    if (is_default_state) {
+        if (!stream_is_stdout || !gConsoleAttrDirty) {
+            return false;
+        }
+        if (gConsoleAttrDirtyFromReset) {
+            gConsoleAttrDirty = false;
+            gConsoleAttrDirtyFromReset = false;
+            return false;
+        }
+    }
+
+    if (stream_is_stdout && !gConsoleAttrDirty) {
         return false;
     }
 
@@ -2342,6 +2353,7 @@ bool applyCurrentTextAttributes(FILE* stream) {
     fprintf(stream, "%s", escape_sequence);
     if (stream_is_stdout) {
         gConsoleAttrDirty = false;
+        gConsoleAttrDirtyFromReset = false;
     }
     return true;
 }
@@ -2350,6 +2362,7 @@ void resetTextAttributes(FILE* stream) {
     fprintf(stream, "\x1B[0m");
     if (stream == stdout) {
         gConsoleAttrDirty = true;
+        gConsoleAttrDirtyFromReset = true;
     }
 }
 
@@ -2387,6 +2400,7 @@ void syncTextAttrSymbol(void) {
 
 void markTextAttrDirty(void) {
     gConsoleAttrDirty = true;
+    gConsoleAttrDirtyFromReset = false;
 }
 
 void setCurrentTextAttrFromByte(uint8_t attr) {

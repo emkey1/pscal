@@ -55,6 +55,7 @@ extern bool gCurrentBgIsExt;
 extern bool gCurrentTextUnderline;
 extern bool gCurrentTextBlink;
 extern bool gConsoleAttrDirty;
+extern bool gConsoleAttrDirtyFromReset;
 extern int gWindowLeft;
 extern int gWindowTop;
 extern int gWindowRight;
