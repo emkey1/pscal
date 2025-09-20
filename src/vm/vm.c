@@ -1338,6 +1338,10 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
     sym->is_inline = false;
     sym->next = NULL;
     sym->enclosing = NULL;
+    sym->real_symbol = NULL;
+    sym->bytecode_address = -1;
+    sym->arity = 0;
+    sym->locals_count = 0;
     sym->upvalue_count = 0;
     return sym;
 }
@@ -1426,6 +1430,10 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->is_inline = false;
             sym->next = NULL;
             sym->enclosing = NULL;
+            sym->real_symbol = NULL;
+            sym->bytecode_address = -1;
+            sym->arity = 0;
+            sym->locals_count = 0;
             sym->upvalue_count = 0;
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {

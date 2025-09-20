@@ -54,7 +54,7 @@ typedef struct {
                                 // Note: Storing Symbol* is one way; alternatively, CALL could carry locals_count,
                                 // or RETURN could be generic if stack is always reset to frame->slots.
     uint16_t slotCount;         // Total slots (arguments + locals) reserved for this frame
-    uint8_t locals_count;       // Number of local variables (excluding params)
+    uint16_t locals_count;      // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
     bool discard_result_on_return; // If true, drop any function result on return
