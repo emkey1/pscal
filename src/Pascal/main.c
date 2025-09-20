@@ -36,21 +36,39 @@ List *inserted_global_names = NULL;
 
 static int s_vm_trace_head = 0;
 
-static bool bufferContainsCachedMessage(const char *buf, size_t len) {
+typedef struct {
+    size_t partial_match_len;
+} CachedMessageScannerState;
+
+static bool bufferContainsCachedMessage(const char *buf, size_t len, CachedMessageScannerState *state) {
     static const char cached_msg[] = "Loaded cached byte code";
     const size_t needle_len = sizeof(cached_msg) - 1;
 
-    if (needle_len == 0 || len < needle_len) {
+    if (!state || needle_len == 0) {
         return false;
     }
 
-    const size_t search_limit = len - needle_len + 1;
-    for (size_t i = 0; i < search_limit; ++i) {
-        if (buf[i] == cached_msg[0] && memcmp(buf + i, cached_msg, needle_len) == 0) {
-            return true;
+    size_t matched = state->partial_match_len;
+
+    for (size_t i = 0; i < len; ++i) {
+        const char c = buf[i];
+
+        while (matched > 0 && c != cached_msg[matched]) {
+            matched = 0;
+        }
+
+        if (c == cached_msg[matched]) {
+            matched++;
+            if (matched == needle_len) {
+                state->partial_match_len = 0;
+                return true;
+            }
+        } else {
+            matched = 0;
         }
     }
 
+    state->partial_match_len = matched;
     return false;
 }
 
@@ -410,12 +428,13 @@ int main(int argc, char *argv[]) {
             rewind(s_stderr_tmp);
             // Scan buffer for non-whitespace or cached message
             int has_non_ws = 0, has_cached = 0; char buf[4096]; size_t n;
+            CachedMessageScannerState cached_scan = {0};
             while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
                 for (size_t i = 0; i < n; i++) {
                     char c = buf[i];
                     if (!(c == ' ' || c == '\t' || c == '\r' || c == '\n')) { has_non_ws = 1; break; }
                 }
-                if (!has_cached && bufferContainsCachedMessage(buf, n)) {
+                if (!has_cached && bufferContainsCachedMessage(buf, n, &cached_scan)) {
                     has_cached = 1;
                 }
                 if (has_non_ws && has_cached) break;
