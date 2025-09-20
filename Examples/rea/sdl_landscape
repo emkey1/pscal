@@ -6,6 +6,8 @@
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
 const int TerrainSize = 128;
+const int VertexStride = TerrainSize + 1;
+const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
 const int NoiseOctaves = 5;
 const float HeightScale = 32.0;
@@ -74,16 +76,18 @@ int extractSeedFromArgs(int fallback) {
 }
 
 class TerrainField {
-  float heights[(TerrainSize + 1) * (TerrainSize + 1)];
+  float heights[VertexCount];
   float minHeight;
   float maxHeight;
+  float normalizationScale;
   int seed;
 
   void TerrainField() {
     my.seed = 0;
     my.minHeight = 0.0;
     my.maxHeight = 0.0;
-    int total = (TerrainSize + 1) * (TerrainSize + 1);
+    my.normalizationScale = 0.0;
+    int total = VertexCount;
     int i = 0;
     while (i < total) {
       my.heights[i] = 0.0;
@@ -156,8 +160,15 @@ class TerrainField {
       }
       z = z + 1;
     }
-    if (my.minHeight == my.maxHeight) {
+    float span = my.maxHeight - my.minHeight;
+    if (span <= 0.0001) {
       my.maxHeight = my.minHeight + 0.001;
+      span = my.maxHeight - my.minHeight;
+    }
+    if (span <= 0.0001) {
+      my.normalizationScale = 0.0;
+    } else {
+      my.normalizationScale = 1.0 / span;
     }
   }
 
@@ -169,10 +180,13 @@ class TerrainField {
     return my.heights[my.index(x, z)];
   }
 
+  float heightByFlatIndex(int idx) {
+    return my.heights[idx];
+  }
+
   float normalized(float h) {
-    float span = my.maxHeight - my.minHeight;
-    if (span <= 0.0001) return 0.0;
-    float t = (h - my.minHeight) / span;
+    if (my.normalizationScale <= 0.0) return 0.0;
+    float t = (h - my.minHeight) * my.normalizationScale;
     if (t < 0.0) t = 0.0;
     if (t > 1.0) t = 1.0;
     return t;
@@ -214,11 +228,19 @@ class LandscapeDemo {
   int lastMouseX;
   int lastMouseY;
   bool hasMouseSample;
+  float vertexHeights[VertexCount];
+  float vertexColorR[VertexCount];
+  float vertexColorG[VertexCount];
+  float vertexColorB[VertexCount];
+  float worldXCoords[VertexStride];
+  float worldZCoords[VertexStride];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
+    my.precomputeWorldCoordinates();
     my.field.build(initialSeed);
+    my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
@@ -229,6 +251,57 @@ class LandscapeDemo {
     my.lastMouseX = 0;
     my.lastMouseY = 0;
     my.hasMouseSample = false;
+  }
+
+  void precomputeWorldCoordinates() {
+    float half = TerrainSize * 0.5;
+    int i = 0;
+    while (i < VertexStride) {
+      float world = (i - half) * TileScale;
+      my.worldXCoords[i] = world;
+      my.worldZCoords[i] = world;
+      i = i + 1;
+    }
+  }
+
+  void updateVertexData() {
+    int idx = 0;
+    while (idx < VertexCount) {
+      float h = my.field.heightByFlatIndex(idx);
+      my.vertexHeights[idx] = h;
+      float t = my.field.normalized(h);
+      float r;
+      float g;
+      float b;
+      if (t < 0.35) {
+        float w = t / 0.35;
+        r = 0.0;
+        g = 0.28 + 0.35 * w;
+        b = 0.45 + 0.4 * w;
+      } else if (t < 0.6) {
+        float w = (t - 0.35) / 0.25;
+        r = 0.15 + 0.25 * w;
+        g = 0.42 + 0.35 * w;
+        b = 0.18 + 0.08 * w;
+      } else if (t < 0.85) {
+        float w = (t - 0.6) / 0.25;
+        r = 0.52 + 0.2 * w;
+        g = 0.40 + 0.18 * w;
+        b = 0.30 + 0.15 * w;
+      } else {
+        float w = (t - 0.85) / 0.15;
+        if (w < 0.0) w = 0.0;
+        if (w > 1.0) w = 1.0;
+        float c = 0.82 + 0.18 * w;
+        r = c;
+        g = c;
+        b = c;
+      }
+      my.vertexColorR[idx] = r;
+      my.vertexColorG[idx] = g;
+      my.vertexColorB[idx] = b;
+      idx = idx + 1;
+    }
   }
 
   void initGraphics() {
@@ -250,6 +323,7 @@ class LandscapeDemo {
   void regenerate(int newSeed) {
     my.seed = newSeed;
     my.field.build(newSeed);
+    my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
@@ -275,51 +349,23 @@ class LandscapeDemo {
     }
   }
 
-  void applyColor(float h) {
-    float t = my.field.normalized(h);
-    if (t < 0.35) {
-      float w = t / 0.35;
-      float r = 0.0;
-      float g = 0.28 + 0.35 * w;
-      float b = 0.45 + 0.4 * w;
-      GLColor3f(r, g, b);
-    } else if (t < 0.6) {
-      float w = (t - 0.35) / 0.25;
-      float r = 0.15 + 0.25 * w;
-      float g = 0.42 + 0.35 * w;
-      float b = 0.18 + 0.08 * w;
-      GLColor3f(r, g, b);
-    } else if (t < 0.85) {
-      float w = (t - 0.6) / 0.25;
-      float r = 0.52 + 0.2 * w;
-      float g = 0.40 + 0.18 * w;
-      float b = 0.30 + 0.15 * w;
-      GLColor3f(r, g, b);
-    } else {
-      float w = (t - 0.85) / 0.15;
-      if (w < 0.0) w = 0.0;
-      if (w > 1.0) w = 1.0;
-      float c = 0.82 + 0.18 * w;
-      GLColor3f(c, c, c);
-    }
-  }
-
   void drawTerrain() {
-    float half = TerrainSize * 0.5;
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
+      float worldZ0 = my.worldZCoords[z];
+      float worldZ1 = my.worldZCoords[z + 1];
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
       int x = 0;
       while (x <= TerrainSize) {
-        float h0 = my.field.rawHeight(x, z);
-        float h1 = my.field.rawHeight(x, z + 1);
-        float worldX = (x - half) * TileScale;
-        float worldZ0 = (z - half) * TileScale;
-        float worldZ1 = ((z + 1) - half) * TileScale;
-        my.applyColor(h0);
-        GLVertex3f(worldX, h0, worldZ0);
-        my.applyColor(h1);
-        GLVertex3f(worldX, h1, worldZ1);
+        int idx0 = rowIndex + x;
+        int idx1 = nextRowIndex + x;
+        float worldX = my.worldXCoords[x];
+        GLColor3f(my.vertexColorR[idx0], my.vertexColorG[idx0], my.vertexColorB[idx0]);
+        GLVertex3f(worldX, my.vertexHeights[idx0], worldZ0);
+        GLColor3f(my.vertexColorR[idx1], my.vertexColorG[idx1], my.vertexColorB[idx1]);
+        GLVertex3f(worldX, my.vertexHeights[idx1], worldZ1);
         x = x + 1;
       }
       GLEnd();
