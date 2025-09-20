@@ -19,6 +19,6 @@ static Value vmBuiltinHasExtBuiltin(struct VM_s *vm, int arg_count,
 }
 
 void registerHasExtBuiltin(void) {
-  registerBuiltinFunction("HasExtBuiltin", AST_FUNCTION_DECL, NULL);
-  registerVmBuiltin("hasextbuiltin", vmBuiltinHasExtBuiltin);
+  registerVmBuiltin("hasextbuiltin", vmBuiltinHasExtBuiltin,
+                    BUILTIN_TYPE_FUNCTION, "HasExtBuiltin");
 }

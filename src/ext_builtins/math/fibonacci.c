@@ -55,6 +55,6 @@ static Value vmBuiltinFibonacci(struct VM_s* vm, int arg_count, Value* args) {
 }
 
 void registerFibonacciBuiltin(void) {
-    registerBuiltinFunction("Fibonacci", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("fibonacci", vmBuiltinFibonacci);
+    registerVmBuiltin("fibonacci", vmBuiltinFibonacci,
+                      BUILTIN_TYPE_FUNCTION, "Fibonacci");
 }
