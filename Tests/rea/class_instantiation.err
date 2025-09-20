@@ -9,7 +9,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0014    | SET_GLOBAL          3 'd'
 0016    3 CONSTANT            5 '1'
 0018    | CONSTANT            5 '1'
-0020    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0020    | CALL_BUILTIN_PROC   123 'write' (2 args)
 0026    0 HALT
 == End Disassembly: Tests/rea/class_instantiation.rea ==
 
