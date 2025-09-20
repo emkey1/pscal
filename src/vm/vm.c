@@ -636,7 +636,8 @@ void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
-    fprintf(stderr, "Stack Size: %ld, Frame Count: %d\n", vm->stackTop - vm->stack, vm->frameCount);
+    ptrdiff_t stack_size = vm->stackTop - vm->stack;
+    fprintf(stderr, "Stack Size: %td, Frame Count: %d\n", stack_size, vm->frameCount);
     fprintf(stderr, "Stack Contents (bottom to top):\n");
     vmDumpStackInternal(vm, true);
     fprintf(stderr, "--------------------------\n");
@@ -647,8 +648,9 @@ void vmDumpStackInfo(VM* vm) {
     long current_offset = vm->ip - vm->chunk->code;
     int line = (current_offset > 0 && current_offset <= vm->chunk->count) ? vm->chunk->lines[current_offset - 1] : 0;
 
-    fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %ld, Frame Count: %d\n",
-            current_offset, line, vm->stackTop - vm->stack, vm->frameCount);
+    ptrdiff_t stack_size = vm->stackTop - vm->stack;
+    fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %td, Frame Count: %d\n",
+            current_offset, line, stack_size, vm->frameCount);
 
     // Disassemble and print the current instruction
     if (current_offset < vm->chunk->count) {
@@ -4851,10 +4853,12 @@ comparison_error_label:
 
                 if (isRealType(raw_val.type)) {
                     long double rv = AS_REAL(raw_val);
+                    int width_int = width;
                     if (precision >= 0) {
-                        snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, rv);
+                        snprintf(buf, sizeof(buf), "%*.*Lf", width_int, precision, rv);
                     } else {
-                        snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, rv);
+                        snprintf(buf, sizeof(buf), "%*.*LE", width_int,
+                                 (int)PASCAL_DEFAULT_FLOAT_PRECISION, rv);
                     }
                 } else if (raw_val.type == TYPE_CHAR) {
                     snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);

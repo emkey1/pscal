@@ -792,7 +792,10 @@ resolved_field: ;
                                                  AST* ft = fparams->children[j];
                                                  AST* at = adecl->children[j];
                                                  if (ft && at && ft->var_type != at->var_type) {
-                                                     fprintf(stderr, "Type error: proc pointer param %d type mismatch for '%s' (expected %s, got %s).\n", j+1, aname, varTypeToString(ft->var_type), varTypeToString(at->var_type));
+                                                    fprintf(stderr, "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                                                            (long long)j + 1, aname,
+                                                            varTypeToString(ft->var_type),
+                                                            varTypeToString(at->var_type));
                                                      pascal_semantic_error_count++;
                                                      break;
                                                  }
@@ -1024,8 +1027,9 @@ resolved_field: ;
                                         VarType dt = dparam->var_type;
                                         VarType tt = tparam->var_type;
                                         if (dt != tt) {
-                                            fprintf(stderr, "Type error: proc pointer param %d type mismatch for '%s' (expected %s, got %s).\n",
-                                                    i+1, pname, varTypeToString(tt), varTypeToString(dt));
+                                            fprintf(stderr, "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                                                    (long long)i + 1, pname,
+                                                    varTypeToString(tt), varTypeToString(dt));
                                             pascal_semantic_error_count++;
                                             break;
                                         }

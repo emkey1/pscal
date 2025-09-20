@@ -4218,40 +4218,40 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
                             if (param_actual && arg_actual) {
                                 if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
-                                    fprintf(stderr,
-                                            "L%d: Compiler Error: argument %d to '%s' expects an array but got %s.\n",
-                                            line, i + 1, calleeName,
-                                            varTypeToString(arg_actual->var_type));
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects an array but got %s.\n",
+                                        line, (long long)i + 1, calleeName,
+                                        varTypeToString(arg_actual->var_type));
                                 } else if (param_actual->var_type != TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
-                                    fprintf(stderr,
-                                            "L%d: Compiler Error: argument %d to '%s' expects %s but got an array.\n",
-                                            line, i + 1, calleeName,
-                                            varTypeToString(param_actual->var_type));
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects %s but got an array.\n",
+                                        line, (long long)i + 1, calleeName,
+                                        varTypeToString(param_actual->var_type));
                                 } else if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
                                     AST* param_elem = resolveTypeAlias(param_actual->right);
                                     AST* arg_elem   = resolveTypeAlias(arg_actual->right);
                                     const char* exp_str = param_elem ? varTypeToString(param_elem->var_type) : "UNKNOWN";
                                     const char* got_str = arg_elem ? varTypeToString(arg_elem->var_type) : "UNKNOWN";
-                                    fprintf(stderr,
-                                            "L%d: Compiler Error: argument %d to '%s' expects type ARRAY OF %s but got ARRAY OF %s.\n",
-                                            line, i + 1, calleeName,
-                                            exp_str,
-                                            got_str);
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects type ARRAY OF %s but got ARRAY OF %s.\n",
+                                        line, (long long)i + 1, calleeName,
+                                        exp_str,
+                                        got_str);
                                 } else {
-                                    fprintf(stderr,
-                                            "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
-                                            line, i + 1, calleeName,
-                                            varTypeToString(param_actual->var_type),
-                                            varTypeToString(arg_actual->var_type));
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                        line, (long long)i + 1, calleeName,
+                                        varTypeToString(param_actual->var_type),
+                                        varTypeToString(arg_actual->var_type));
                                 }
                             } else {
                                 VarType expected_vt = param_actual ? param_actual->var_type : param_type->var_type;
                                 VarType actual_vt   = arg_actual ? arg_actual->var_type : arg_node->var_type;
-                                fprintf(stderr,
-                                        "L%d: Compiler Error: argument %d to '%s' expects type %s but got %s.\n",
-                                        line, i + 1, calleeName,
-                                        varTypeToString(expected_vt),
-                                        varTypeToString(actual_vt));
+                            fprintf(stderr,
+                                    "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                    line, (long long)i + 1, calleeName,
+                                    varTypeToString(expected_vt),
+                                    varTypeToString(actual_vt));
                             }
                             compiler_had_error = true;
                             param_mismatch = true;
@@ -4264,8 +4264,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                               arg_node->type == AST_DEREFERENCE);
                             if (!is_lvalue) {
                                 fprintf(stderr,
-                                        "L%d: Compiler Error: argument %d to '%s' must be a variable (VAR parameter).\n",
-                                        line, i + 1, calleeName);
+                                        "L%d: Compiler Error: argument %lld to '%s' must be a variable (VAR parameter).\n",
+                                        line, (long long)i + 1, calleeName);
                                 compiler_had_error = true;
                                 param_mismatch = true;
                                 break;
@@ -5398,7 +5398,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     if (node->left && node->left->token && node->left->token->value) {
                         receiver_name = node->left->token->value;
                     }
-                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s", MAX_SYMBOL_LENGTH - 1, receiver_name, MAX_SYMBOL_LENGTH - 1, functionName);
+                    int max_symbol_segment = MAX_SYMBOL_LENGTH - 1;
+                    snprintf(original_display_name, sizeof(original_display_name), "%.*s.%.*s",
+                             max_symbol_segment, receiver_name,
+                             max_symbol_segment, functionName);
                 } else {
                     strncpy(original_display_name, functionName, sizeof(original_display_name)-1);
                     original_display_name[sizeof(original_display_name)-1] = '\0';
