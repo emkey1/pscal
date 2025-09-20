@@ -142,6 +142,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case SET_GLOBAL:
         case GET_LOCAL:
         case SET_LOCAL:
+        case INC_LOCAL:
+        case DEC_LOCAL:
         case GET_GLOBAL_ADDRESS:
         case GET_LOCAL_ADDRESS:
         case GET_UPVALUE:
@@ -565,6 +567,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case SET_LOCAL: {
             uint8_t slot = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (slot)\n", "SET_LOCAL", slot);
+            return offset + 2;
+        }
+        case INC_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (slot)\n", "INC_LOCAL", slot);
+            return offset + 2;
+        }
+        case DEC_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (slot)\n", "DEC_LOCAL", slot);
             return offset + 2;
         }
         case GET_UPVALUE: {

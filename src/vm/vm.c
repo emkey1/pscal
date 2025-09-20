@@ -138,6 +138,44 @@ static bool coerceValueToBoolean(const Value* value, bool* out_truth) {
     return false;
 }
 
+static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
+    if (!slot) {
+        runtimeError(vm, "VM Error: %s encountered a null local slot pointer.", opcode_name);
+        return false;
+    }
+
+    if (!IS_INTLIKE(*slot)) {
+        runtimeError(vm, "VM Error: %s requires an ordinal local, got %s.",
+                     opcode_name, varTypeToString(slot->type));
+        return false;
+    }
+
+    long long new_val = AS_INTEGER(*slot) + delta;
+    switch (slot->type) {
+        case TYPE_BOOLEAN:
+            slot->i_val = (new_val != 0);
+            slot->u_val = (unsigned long long)slot->i_val;
+            break;
+        case TYPE_CHAR:
+            slot->c_val = (int)new_val;
+            SET_INT_VALUE(slot, slot->c_val);
+            break;
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+            slot->u_val = (unsigned long long)new_val;
+            slot->i_val = (long long)slot->u_val;
+            break;
+        default:
+            SET_INT_VALUE(slot, new_val);
+            break;
+    }
+    return true;
+}
+
 // --- Class method registration helpers ---
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol) {
     if (!vm || !vm->procedureTable || !className || !methodSymbol) return;
@@ -3405,6 +3443,40 @@ comparison_error_label:
 
                 // Free the temporary value that was popped from the stack.
                 freeValue(&value_from_stack);
+                break;
+            }
+            case INC_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = &frame->slots[slot];
+                if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
+            case DEC_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = &frame->slots[slot];
+                if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 break;
             }
             case GET_UPVALUE: {

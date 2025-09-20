@@ -61,6 +61,8 @@ typedef enum {
 
     GET_LOCAL,     // Get local scoped variables
     SET_LOCAL,     // Set local scoped variables
+    INC_LOCAL,     // Increment a local slot by 1 (peephole optimized helper)
+    DEC_LOCAL,     // Decrement a local slot by 1 (peephole optimized helper)
     INIT_LOCAL_ARRAY, // Initialize local array variable
     INIT_LOCAL_FILE,  // Initialize local file variable
     INIT_LOCAL_POINTER, // Initialize local pointer variable

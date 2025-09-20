@@ -32,6 +32,36 @@ static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
 
+typedef struct {
+    int constant_index;
+    int original_address;
+} AddressConstantEntry;
+
+static AddressConstantEntry* address_constant_entries = NULL;
+static int address_constant_count = 0;
+static int address_constant_capacity = 0;
+
+static void recordAddressConstant(int constant_index, int address) {
+    if (constant_index < 0) return;
+    if (address_constant_count >= address_constant_capacity) {
+        int new_capacity = address_constant_capacity < 8 ? 8 : address_constant_capacity * 2;
+        AddressConstantEntry* resized = (AddressConstantEntry*)realloc(address_constant_entries,
+                                                                      (size_t)new_capacity * sizeof(AddressConstantEntry));
+        if (!resized) {
+            return;
+        }
+        address_constant_entries = resized;
+        address_constant_capacity = new_capacity;
+    }
+    address_constant_entries[address_constant_count].constant_index = constant_index;
+    address_constant_entries[address_constant_count].original_address = address;
+    address_constant_count++;
+}
+
+static void resetAddressConstantTracking(void) {
+    address_constant_count = 0;
+}
+
 void compilerEnableDynamicLocals(int enable) {
     compiler_dynamic_locals = enable ? 1 : 0;
 }
@@ -1988,9 +2018,268 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
     return true;
 }
 
+static bool readConstantInt(BytecodeChunk* chunk, int index, long long* out_value) {
+    if (!chunk || index < 0 || index >= chunk->constants_count) {
+        return false;
+    }
+
+    Value const_val = chunk->constants[index];
+    if (!IS_INTLIKE(const_val)) {
+        return false;
+    }
+
+    if (out_value) {
+        *out_value = AS_INTEGER(const_val);
+    }
+    return true;
+}
+
+static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
+    if (!chunk || chunk->count <= 0 || !chunk->code) {
+        return;
+    }
+
+    const int original_count = chunk->count;
+    uint8_t* original_code = chunk->code;
+    int* original_lines = chunk->lines;
+
+    uint8_t* optimized_code = (uint8_t*)malloc((size_t)original_count);
+    int* optimized_lines = (int*)malloc((size_t)original_count * sizeof(int));
+    int* offset_map = (int*)malloc((size_t)(original_count + 1) * sizeof(int));
+    if (!optimized_code || !optimized_lines || !offset_map) {
+        free(optimized_code);
+        free(optimized_lines);
+        free(offset_map);
+        return;
+    }
+
+    for (int i = 0; i <= original_count; ++i) {
+        offset_map[i] = -1;
+    }
+
+    typedef struct {
+        int original_target;
+        int new_offset;
+    } JumpFixup;
+
+    typedef struct {
+        int operand_offset;
+        int original_address;
+    } AbsoluteFixup;
+
+    JumpFixup* jump_fixes = NULL;
+    int jump_count = 0;
+    int jump_capacity = 0;
+
+    AbsoluteFixup* absolute_fixes = NULL;
+    int absolute_count = 0;
+    int absolute_capacity = 0;
+
+    int read_index = 0;
+    int write_index = 0;
+    bool changed = false;
+
+    while (read_index < original_count) {
+        uint8_t opcode = original_code[read_index];
+
+        if (opcode == GET_LOCAL) {
+            if (read_index + 6 < original_count) {
+                uint8_t slot = original_code[read_index + 1];
+                int const_offset = read_index + 2;
+                uint8_t const_opcode = original_code[const_offset];
+                int constant_length = 0;
+                int constant_index = -1;
+
+                if (const_opcode == CONSTANT) {
+                    if (const_offset + 1 < original_count) {
+                        constant_index = original_code[const_offset + 1];
+                        constant_length = 2;
+                    }
+                } else if (const_opcode == CONSTANT16) {
+                    if (const_offset + 2 < original_count) {
+                        constant_index = (original_code[const_offset + 1] << 8) |
+                                         original_code[const_offset + 2];
+                        constant_length = 3;
+                    }
+                }
+
+                if (constant_length > 0) {
+                    int arithmetic_offset = const_offset + constant_length;
+                    if (arithmetic_offset < original_count) {
+                        uint8_t arithmetic_opcode = original_code[arithmetic_offset];
+                        if ((arithmetic_opcode == ADD || arithmetic_opcode == SUBTRACT) &&
+                            arithmetic_offset + 2 < original_count &&
+                            original_code[arithmetic_offset + 1] == SET_LOCAL &&
+                            original_code[arithmetic_offset + 2] == slot) {
+
+                            long long constant_value = 0;
+                            if (readConstantInt(chunk, constant_index, &constant_value)) {
+                                uint8_t replacement = 0;
+                                if (arithmetic_opcode == ADD) {
+                                    if (constant_value == 1) replacement = INC_LOCAL;
+                                    else if (constant_value == -1) replacement = DEC_LOCAL;
+                                } else {
+                                    if (constant_value == 1) replacement = DEC_LOCAL;
+                                    else if (constant_value == -1) replacement = INC_LOCAL;
+                                }
+
+                                if (replacement != 0) {
+                                    int sequence_length = 2 + constant_length + 1 + 2;
+                                    int replacement_start = write_index;
+                                    optimized_code[write_index] = replacement;
+                                    optimized_lines[write_index++] = original_lines
+                                        ? original_lines[read_index] : 0;
+                                    optimized_code[write_index] = slot;
+                                    optimized_lines[write_index++] = original_lines
+                                        ? original_lines[read_index] : 0;
+                                    for (int i = 0; i < sequence_length && (read_index + i) < original_count; ++i) {
+                                        offset_map[read_index + i] = replacement_start;
+                                    }
+                                    read_index += sequence_length;
+                                    changed = true;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        int instruction_length = getInstructionLength(chunk, read_index);
+        if (instruction_length <= 0) instruction_length = 1;
+
+        if ((opcode == JUMP || opcode == JUMP_IF_FALSE) && read_index + 2 < original_count) {
+            if (jump_count >= jump_capacity) {
+                int new_capacity = jump_capacity < 8 ? 8 : jump_capacity * 2;
+                JumpFixup* resized = (JumpFixup*)realloc(jump_fixes, (size_t)new_capacity * sizeof(JumpFixup));
+                if (!resized) {
+                    free(optimized_code);
+                    free(optimized_lines);
+                    free(offset_map);
+                    free(jump_fixes);
+                    free(absolute_fixes);
+                    return;
+                }
+                jump_fixes = resized;
+                jump_capacity = new_capacity;
+            }
+            int16_t operand = (int16_t)((original_code[read_index + 1] << 8) | original_code[read_index + 2]);
+            jump_fixes[jump_count].original_target = read_index + 3 + operand;
+            jump_fixes[jump_count].new_offset = write_index;
+            jump_count++;
+        } else if (opcode == THREAD_CREATE && read_index + 2 < original_count) {
+            if (absolute_count >= absolute_capacity) {
+                int new_capacity = absolute_capacity < 8 ? 8 : absolute_capacity * 2;
+                AbsoluteFixup* resized = (AbsoluteFixup*)realloc(absolute_fixes, (size_t)new_capacity * sizeof(AbsoluteFixup));
+                if (!resized) {
+                    free(optimized_code);
+                    free(optimized_lines);
+                    free(offset_map);
+                    free(jump_fixes);
+                    free(absolute_fixes);
+                    return;
+                }
+                absolute_fixes = resized;
+                absolute_capacity = new_capacity;
+            }
+            uint16_t original_address = (uint16_t)((original_code[read_index + 1] << 8) |
+                                                    original_code[read_index + 2]);
+            absolute_fixes[absolute_count].operand_offset = write_index + 1;
+            absolute_fixes[absolute_count].original_address = (int)original_address;
+            absolute_count++;
+        }
+
+        for (int i = 0; i < instruction_length && (read_index + i) < original_count; i++) {
+            optimized_code[write_index] = original_code[read_index + i];
+            optimized_lines[write_index] = original_lines ? original_lines[read_index + i] : 0;
+            offset_map[read_index + i] = write_index;
+            write_index++;
+        }
+        read_index += instruction_length;
+    }
+
+    offset_map[original_count] = write_index;
+
+    if (!changed) {
+        free(optimized_code);
+        free(optimized_lines);
+        free(offset_map);
+        free(jump_fixes);
+        free(absolute_fixes);
+        return;
+    }
+
+    for (int i = 0; i < jump_count; ++i) {
+        int original_target = jump_fixes[i].original_target;
+        if (original_target < 0) original_target = 0;
+        if (original_target > original_count) original_target = original_count;
+        int new_target = offset_map[original_target];
+        if (new_target < 0) new_target = offset_map[original_count];
+        int new_offset = jump_fixes[i].new_offset;
+        int new_delta = new_target - (new_offset + 3);
+        optimized_code[new_offset + 1] = (uint8_t)((new_delta >> 8) & 0xFF);
+        optimized_code[new_offset + 2] = (uint8_t)(new_delta & 0xFF);
+    }
+
+    for (int i = 0; i < absolute_count; ++i) {
+        int original_address = absolute_fixes[i].original_address;
+        if (original_address < 0) original_address = 0;
+        if (original_address > original_count) original_address = original_count;
+        int new_address = offset_map[original_address];
+        if (new_address < 0) new_address = offset_map[original_count];
+        optimized_code[absolute_fixes[i].operand_offset] = (uint8_t)((new_address >> 8) & 0xFF);
+        optimized_code[absolute_fixes[i].operand_offset + 1] = (uint8_t)(new_address & 0xFF);
+    }
+
+    uint8_t* resized_code = (uint8_t*)realloc(optimized_code, (size_t)write_index);
+    if (resized_code) optimized_code = resized_code;
+    int* resized_lines = (int*)realloc(optimized_lines, (size_t)write_index * sizeof(int));
+    if (resized_lines) optimized_lines = resized_lines;
+
+    free(chunk->code);
+    free(chunk->lines);
+    chunk->code = optimized_code;
+    chunk->lines = optimized_lines;
+    chunk->count = write_index;
+    chunk->capacity = write_index;
+
+    if (procedure_table) {
+        for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
+            for (Symbol* sym = procedure_table->buckets[bucket]; sym; sym = sym->next) {
+                Symbol* target = resolveSymbolAlias(sym);
+                if (!target || target != sym || !target->is_defined) continue;
+                int old_address = target->bytecode_address;
+                if (old_address < 0 || old_address > original_count) continue;
+                int mapped = offset_map[old_address];
+                if (mapped < 0) mapped = offset_map[original_count];
+                target->bytecode_address = mapped;
+            }
+        }
+    }
+
+    for (int i = 0; i < address_constant_count; ++i) {
+        int const_index = address_constant_entries[i].constant_index;
+        if (const_index < 0 || const_index >= chunk->constants_count) continue;
+        int old_address = address_constant_entries[i].original_address;
+        if (old_address < 0) old_address = 0;
+        if (old_address > original_count) old_address = original_count;
+        int mapped = offset_map[old_address];
+        if (mapped < 0) mapped = offset_map[original_count];
+        Value* val = &chunk->constants[const_index];
+        val->i_val = (long long)mapped;
+        val->u_val = (unsigned long long)mapped;
+    }
+
+    free(offset_map);
+    free(jump_fixes);
+    free(absolute_fixes);
+}
+
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    resetAddressConstantTracking();
     // Initialize debug flag from environment (REA_DEBUG=1 to enable)
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
@@ -2024,6 +2313,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     if (!compiler_had_error) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
+        applyPeepholeOptimizations(outputChunk);
     }
     return !compiler_had_error;
 }
@@ -4085,6 +4375,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (psym) addr = psym->bytecode_address;
             }
             int constIndex = addIntConstant(chunk, addr);
+            recordAddressConstant(constIndex, addr);
             emitConstant(chunk, constIndex, line);
             break;
         }
@@ -4108,7 +4399,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             } else {
                 // Support spawning with multiple arguments (including receiver for methods).
                 // Stack layout for host: [addr, arg0, arg1, ..., argc]
-                emitConstant(chunk, addIntConstant(chunk, proc_symbol->bytecode_address), line);
+                int addrConstIndex = addIntConstant(chunk, proc_symbol->bytecode_address);
+                recordAddressConstant(addrConstIndex, proc_symbol->bytecode_address);
+                emitConstant(chunk, addrConstIndex, line);
                 for (int i = 0; i < call->child_count; i++) {
                     compileRValue(call->children[i], chunk, getLine(call->children[i]));
                 }
