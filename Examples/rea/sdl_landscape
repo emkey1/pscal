@@ -1,7 +1,7 @@
 #!/usr/bin/env rea
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk or rotate the camera with classic WASD controls.
+// the user walk with W/S while steering the camera with the mouse.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
@@ -11,9 +11,11 @@ const int NoiseOctaves = 5;
 const float HeightScale = 32.0;
 const float EyeHeight = 4.5;
 const float MoveSpeed = 18.0;
-const float TurnSpeed = 85.0;
-const float PitchSpeed = 65.0;
 const float MaxPitch = 75.0;
+const float MouseYawSensitivity = 0.20;
+const float MousePitchSensitivity = 0.15;
+const int ScanCodeW = 26; // SDL_SCANCODE_W
+const int ScanCodeS = 22; // SDL_SCANCODE_S
 
 bool hasDigit(str s) {
   int i = 1;
@@ -209,6 +211,9 @@ class LandscapeDemo {
   float pitch;
   int lastTicks;
   bool running;
+  int lastMouseX;
+  int lastMouseY;
+  bool hasMouseSample;
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
@@ -221,6 +226,9 @@ class LandscapeDemo {
     my.pitch = -20.0;
     my.lastTicks = getticks();
     my.running = true;
+    my.lastMouseX = 0;
+    my.lastMouseY = 0;
+    my.hasMouseSample = false;
   }
 
   void initGraphics() {
@@ -229,7 +237,14 @@ class LandscapeDemo {
     GLClearDepth(1.0);
     GLDepthTest(true);
     GLSetSwapInterval(1);
-    writeln("Controls: WASD to move, hold Shift to rotate view. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    getmousestate(mouseX, mouseY, mouseButtons);
+    my.lastMouseX = mouseX;
+    my.lastMouseY = mouseY;
+    my.hasMouseSample = true;
   }
 
   void regenerate(int newSeed) {
@@ -314,38 +329,44 @@ class LandscapeDemo {
 
   void updateCamera(float dt) {
     if (dt > 0.1) dt = 0.1;
-    bool shiftHeld = IsKeyDown("Left Shift") || IsKeyDown("Right Shift");
-    bool forward = IsKeyDown("W") || IsKeyDown("Up");
-    bool backward = IsKeyDown("S") || IsKeyDown("Down");
-    bool left = IsKeyDown("A") || IsKeyDown("Left");
-    bool right = IsKeyDown("D") || IsKeyDown("Right");
-
-    if (shiftHeld) {
-      if (left) my.yaw = my.yaw - TurnSpeed * dt;
-      if (right) my.yaw = my.yaw + TurnSpeed * dt;
-      if (forward) my.pitch = my.pitch + PitchSpeed * dt;
-      if (backward) my.pitch = my.pitch - PitchSpeed * dt;
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    getmousestate(mouseX, mouseY, mouseButtons);
+    if (!my.hasMouseSample) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
     } else {
-      float moveForward = 0.0;
-      float moveSide = 0.0;
-      if (forward) moveForward = moveForward + 1.0;
-      if (backward) moveForward = moveForward - 1.0;
-      if (right) moveSide = moveSide + 1.0;
-      if (left) moveSide = moveSide - 1.0;
-      float len = sqrt(moveForward * moveForward + moveSide * moveSide);
-      if (len > 0.0) {
-        moveForward = moveForward / len;
-        moveSide = moveSide / len;
-        float speed = MoveSpeed * dt;
-        float forwardX = sin(my.yaw);
-        float forwardZ = cos(my.yaw);
-        float rightX = sin(my.yaw + 90.0);
-        float rightZ = cos(my.yaw + 90.0);
-        float deltaX = (forwardX * moveForward + rightX * moveSide) * (speed / TileScale);
-        float deltaZ = (forwardZ * moveForward + rightZ * moveSide) * (speed / TileScale);
-        my.camX = my.camX + deltaX;
-        my.camZ = my.camZ + deltaZ;
+      int deltaX = mouseX - my.lastMouseX;
+      int deltaY = mouseY - my.lastMouseY;
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      if (deltaX != 0 || deltaY != 0) {
+        int maxDeltaX = WindowWidth / 2;
+        int maxDeltaY = WindowHeight / 2;
+        if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
+            deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
+          my.yaw = my.yaw + deltaX * MouseYawSensitivity;
+          my.pitch = my.pitch - deltaY * MousePitchSensitivity;
+        }
       }
+    }
+
+    bool forward = IsKeyDown(ScanCodeW);
+    bool backward = IsKeyDown(ScanCodeS);
+
+    float moveForward = 0.0;
+    if (forward) moveForward = moveForward + 1.0;
+    if (backward) moveForward = moveForward - 1.0;
+    if (moveForward != 0.0) {
+      float speed = MoveSpeed * dt * moveForward;
+      float forwardX = sin(my.yaw);
+      float forwardZ = cos(my.yaw);
+      float deltaX = forwardX * (speed / TileScale);
+      float deltaZ = forwardZ * (speed / TileScale);
+      my.camX = my.camX + deltaX;
+      my.camZ = my.camZ + deltaZ;
     }
 
     if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
