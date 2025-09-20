@@ -7,10 +7,10 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    1 CONSTANT            3 '1'
 0009    | CONSTANT            4 'A'
 0011    | CONSTANT            3 '1'
-0013    | CALL_BUILTIN_PROC   123 'write' (3 args)
+0013    | CALL_BUILTIN_PROC   176 'write' (3 args)
 0019    2 CONSTANT            6 '0'
 0021    | CONSTANT            7 'B'
-0023    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0023    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0029    0 HALT
 == End Disassembly: Tests/rea/write_sugar.rea ==
 

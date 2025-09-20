@@ -49,7 +49,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs_true (at 0120) ---
 0120    2 CONSTANT           21 '1'
 0122    | CONSTANT           22 'R1'
-0124    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0124    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0130    3 CONSTANT           24 'true'
 0132    | RETURN
 0133    1 GET_LOCAL           0 (slot)
@@ -59,7 +59,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs_false (at 0139) ---
 0139    7 CONSTANT           21 '1'
 0141    | CONSTANT           25 'R0'
-0143    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0143    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0149    8 CONSTANT           26 'false'
 0151    | RETURN
 0152    6 GET_LOCAL           0 (slot)
@@ -73,11 +73,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0170    | JUMP_IF_FALSE      13 (to 0186)
 0173   12 CONSTANT           21 '1'
 0175    | CONSTANT           29 'A hit'
-0177    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0177    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0183   11 JUMP               10 (to 0196)
 0186   14 CONSTANT           21 '1'
 0188    | CONSTANT           30 'A skip'
-0190    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0190    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0196   17 CONSTANT           31 'true'
 0198    | JUMP_IF_FALSE       5 (to 0206)
 0201    | CONSTANT           32 'true'
@@ -87,11 +87,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0211    | JUMP_IF_FALSE      13 (to 0227)
 0214   18 CONSTANT           21 '1'
 0216    | CONSTANT           33 'B hit'
-0218    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0218    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0224   17 JUMP               10 (to 0237)
 0227   20 CONSTANT           21 '1'
 0229    | CONSTANT           34 'B skip'
-0231    | CALL_BUILTIN_PROC   123 'write' (2 args)
+0231    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0237   29 CONSTANT           21 '1'
 0239    | CONSTANT           35 'vals:'
 0241    | GET_GLOBAL          3 'r0'
@@ -103,7 +103,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0253    | GET_GLOBAL         14 'r3'
 0255    | CONSTANT           36 ' '
 0257    | GET_GLOBAL         18 'r4'
-0259    | CALL_BUILTIN_PROC   123 'write' (11 args)
+0259    | CALL_BUILTIN_PROC   176 'write' (11 args)
 0265    0 HALT
 == End Disassembly: Tests/rea/short_circuit.rea ==
 
