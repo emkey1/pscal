@@ -109,6 +109,13 @@ void emitShort(BytecodeChunk* chunk, uint16_t value, int line) { // From all.txt
     writeBytecodeChunk(chunk, (uint8_t)(value & 0xFF), line);
 }
 
+void emitInt32(BytecodeChunk* chunk, uint32_t value, int line) {
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 24) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 16) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 8) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)(value & 0xFF), line);
+}
+
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
     if (offset_in_code < 0 || (offset_in_code + 1) >= chunk->count) {
         fprintf(stderr, "Error: patchShort out of bounds. Offset: %d, Chunk count: %d.\n",
@@ -159,6 +166,9 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case GET_CHAR_ADDRESS:
         case INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
+        case GET_ELEMENT_ADDRESS_CONST:
+        case LOAD_ELEMENT_VALUE_CONST:
+            return 5; // opcode + 4-byte flat offset
         case INIT_LOCAL_STRING:
             return 3; // opcode + slot + length
         case INIT_LOCAL_POINTER:
@@ -717,10 +727,26 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "%-16s %4d (dims)\n", "GET_ELEMENT_ADDRESS", dims);
             return offset + 2;
         }
+        case GET_ELEMENT_ADDRESS_CONST: {
+            uint32_t flat = ((uint32_t)chunk->code[offset + 1] << 24) |
+                            ((uint32_t)chunk->code[offset + 2] << 16) |
+                            ((uint32_t)chunk->code[offset + 3] << 8) |
+                            (uint32_t)chunk->code[offset + 4];
+            fprintf(stderr, "%-16s %10u (flat offset)\n", "GET_ELEMENT_ADDRESS_CONST", flat);
+            return offset + 5;
+        }
         case LOAD_ELEMENT_VALUE: {
             uint8_t dims = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (dims)\n", "LOAD_ELEMENT_VALUE", dims);
             return offset + 2;
+        }
+        case LOAD_ELEMENT_VALUE_CONST: {
+            uint32_t flat = ((uint32_t)chunk->code[offset + 1] << 24) |
+                            ((uint32_t)chunk->code[offset + 2] << 16) |
+                            ((uint32_t)chunk->code[offset + 3] << 8) |
+                            (uint32_t)chunk->code[offset + 4];
+            fprintf(stderr, "%-16s %10u (flat offset)\n", "LOAD_ELEMENT_VALUE_CONST", flat);
+            return offset + 5;
         }
         case GET_CHAR_ADDRESS:
             fprintf(stderr, "GET_CHAR_ADDRESS\n"); // <-- ADDED MISSING CASE

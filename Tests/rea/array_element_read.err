@@ -6,14 +6,13 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
 0007    1 DEFINE_GLOBAL    NameIdx:3   'a' Type:ARRAY Dims:1 [0..2] of INT64 ('int')
 0017    2 DEFINE_GLOBAL    NameIdx:7   'value' Type:INT64 ('int')
-0022    | CONSTANT            8 '1'
-0024    | GET_GLOBAL_ADDRESS    3 'a'
-0026    | LOAD_ELEMENT_VALUE    1 (dims)
-0028    | SET_GLOBAL          7 'value'
-0030    0 HALT
+0022    | GET_GLOBAL_ADDRESS    3 'a'
+0024    | LOAD_ELEMENT_VALUE_CONST          1 (flat offset)
+0029    | SET_GLOBAL          7 'value'
+0031    0 HALT
 == End Disassembly: Tests/rea/array_element_read.rea ==
 
-Constants (9):\n  0000: STR   "myself"
+Constants (8):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: STR   "a"
@@ -21,5 +20,4 @@ Constants (9):\n  0000: STR   "myself"
   0005: INT   2
   0006: STR   "int"
   0007: STR   "value"
-  0008: INT   1
 

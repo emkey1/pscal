@@ -79,7 +79,9 @@ typedef enum {
     LOAD_FIELD_VALUE_BY_NAME,   // Pops base record/pointer, looks up field by name (1-byte const index) and pushes its value
     LOAD_FIELD_VALUE_BY_NAME16, // Pops base record/pointer, looks up field by name (2-byte const index) and pushes its value
     GET_ELEMENT_ADDRESS,
+    GET_ELEMENT_ADDRESS_CONST, // Pops an array base and pushes address using a constant flat offset
     LOAD_ELEMENT_VALUE,  // Pops array/pointer after its indices and pushes a copy of the addressed element's value
+    LOAD_ELEMENT_VALUE_CONST, // Pops array/pointer and loads element at constant flat offset
     GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     SET_INDIRECT,
     GET_INDIRECT,
@@ -158,6 +160,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value); // Add a value
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
+void emitInt32(BytecodeChunk* chunk, uint32_t value, int line);
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 int getInstructionLength(BytecodeChunk* chunk, int offset);
 
