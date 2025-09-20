@@ -513,7 +513,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     }
     // --- END SAFETY CHECKS ---
 
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+    if (!gSdlInitialized || !gSdlWindow) {
         runtimeError(vm, "Graphics system not initialized for GetMouseState.");
         return makeVoid();
     }
@@ -1122,7 +1122,7 @@ Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "IsKeyDown expects exactly 1 argument (string name or key code).");
         return makeBoolean(false);
     }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+    if (!gSdlInitialized || !gSdlWindow) {
         runtimeError(vm, "Graphics mode not initialized before IsKeyDown.");
         return makeBoolean(false);
     }
@@ -1149,7 +1149,7 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "PollKey expects 0 arguments.");
         return makeInt(0);
     }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) {
+    if (!gSdlInitialized || !gSdlWindow) {
         runtimeError(vm, "Graphics mode not initialized before PollKey.");
         return makeInt(0);
     }
@@ -1171,7 +1171,7 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
+    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
 
     SDL_Event event;
     int waiting = 1;
