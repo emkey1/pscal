@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
+PASCAL_ARGS=(--no-cache)
 
 if [ ! -x "$PASCAL_BIN" ]; then
   echo "pascal binary not found at $PASCAL_BIN" >&2
@@ -75,7 +76,7 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
     disasm_stdout=$(mktemp)
     disasm_stderr=$(mktemp)
     set +e
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" --dump-bytecode-only "Pascal/$test_name") \
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" --dump-bytecode-only "Pascal/$test_name") \
       > "$disasm_stdout" 2> "$disasm_stderr"
     disasm_status=$?
     set -e
@@ -93,11 +94,11 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
 
   set +e
   if [ "$test_name" = "SDLFeaturesTest" ]; then
-    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
   elif [ -f "$in_file" ]; then
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
   else
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
   fi
   run_status=$?
   set -e

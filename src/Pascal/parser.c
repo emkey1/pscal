@@ -11,6 +11,7 @@
 #include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Define the helper function *only* when DEBUG is enabled
@@ -54,6 +55,25 @@ void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const ch
 AST *parseWriteArgument(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
+
+static void appendDependencyPath(Parser *parser, const char *path) {
+    if (!parser || !parser->dependency_paths || !path || !*path) {
+        return;
+    }
+
+    char *canonical = realpath(path, NULL);
+    const char *to_store = canonical ? canonical : path;
+
+    for (ListNode *node = parser->dependency_paths->head; node; node = node->next) {
+        if (strcmp(node->value, to_store) == 0) {
+            if (canonical) free(canonical);
+            return;
+        }
+    }
+
+    listAppend(parser->dependency_paths, to_store);
+    if (canonical) free(canonical);
+}
 
 AST *declarations(Parser *parser, bool in_interface) {
 #ifdef DEBUG
@@ -563,6 +583,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 continue; // skip missing unit regardless
             }
 
+            appendDependencyPath(parser_for_this_unit, nested_unit_path);
+
             char *unit_source_buffer = NULL;
             FILE *nested_file = fopen(nested_unit_path, "r");
             if (nested_file) {
@@ -593,6 +615,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             Parser nested_parser_instance;
             nested_parser_instance.lexer = &nested_lexer;
             nested_parser_instance.current_token = getNextToken(&nested_lexer);
+            nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -966,6 +989,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     continue; // skip missing unit regardless
                 }
 
+                appendDependencyPath(main_parser, unit_file_path);
+
                 char* unit_source_buffer = NULL;
                 FILE *unit_file = fopen(unit_file_path, "r");
                 if(unit_file) {
@@ -996,7 +1021,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 Parser nested_parser_instance;
                 nested_parser_instance.lexer = &nested_lexer;
                 nested_parser_instance.current_token = getNextToken(&nested_lexer);
-                
+                nested_parser_instance.dependency_paths = main_parser->dependency_paths;
+
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
                 

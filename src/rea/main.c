@@ -143,6 +143,7 @@ static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
         nested_parser_instance.lexer = &nested_lexer;
         nested_parser_instance.current_token = getNextToken(&nested_lexer);
         nested_parser_instance.current_unit_name_context = lower_used_unit_name;
+        nested_parser_instance.dependency_paths = NULL;
 
         AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
 
