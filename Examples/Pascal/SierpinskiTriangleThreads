@@ -7,12 +7,8 @@ const
   MaxLevel = 13;  // Adjust for more/less detail
   CharToDraw = '+';
 
-type
-  Triangle = array[0..5] of integer;
-
 var
-  Params: array[0..2] of Triangle;
-  ThreadIDs: array[0..2] of integer;
+  ThreadID0, ThreadID1, ThreadID2: integer;
   ThreadLevel: integer;
 
 procedure DrawPoint(x, y: integer);
@@ -44,17 +40,17 @@ end;
 
 procedure Thread0;
 begin
-  DrawSierpinski(Params[0][0], Params[0][1], Params[0][2], Params[0][3], Params[0][4], Params[0][5], ThreadLevel);
+  DrawSierpinski(x1, y1, mx1, my1, mx3, my3, ThreadLevel);
 end;
 
 procedure Thread1;
 begin
-  DrawSierpinski(Params[1][0], Params[1][1], Params[1][2], Params[1][3], Params[1][4], Params[1][5], ThreadLevel);
+  DrawSierpinski(mx1, my1, x2, y2, mx2, my2, ThreadLevel);
 end;
 
 procedure Thread2;
 begin
-  DrawSierpinski(Params[2][0], Params[2][1], Params[2][2], Params[2][3], Params[2][4], Params[2][5], ThreadLevel);
+  DrawSierpinski(mx3, my3, mx2, my2, x3, y3, ThreadLevel);
 end;
 
 var
@@ -83,17 +79,13 @@ begin
 
   ThreadLevel := MaxLevel - 1;
 
-  Params[0][0] := x1; Params[0][1] := y1; Params[0][2] := mx1; Params[0][3] := my1; Params[0][4] := mx3; Params[0][5] := my3;
-  Params[1][0] := mx1; Params[1][1] := my1; Params[1][2] := x2; Params[1][3] := y2; Params[1][4] := mx2; Params[1][5] := my2;
-  Params[2][0] := mx3; Params[2][1] := my3; Params[2][2] := mx2; Params[2][3] := my2; Params[2][4] := x3; Params[2][5] := y3;
+  ThreadID0 := spawn Thread0;
+  ThreadID1 := spawn Thread1;
+  ThreadID2 := spawn Thread2;
 
-  ThreadIDs[0] := spawn Thread0;
-  ThreadIDs[1] := spawn Thread1;
-  ThreadIDs[2] := spawn Thread2;
-
-  join ThreadIDs[0];
-  join ThreadIDs[1];
-  join ThreadIDs[2];
+  join ThreadID0;
+  join ThreadID1;
+  join ThreadID2;
 
   GotoXY(1, maxY);
   ShowCursor;
