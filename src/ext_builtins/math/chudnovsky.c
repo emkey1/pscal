@@ -33,6 +33,6 @@ static Value vmBuiltinChudnovsky(struct VM_s* vm, int arg_count, Value* args) {
 }
 
 void registerChudnovskyBuiltin(void) {
-    registerBuiltinFunction("Chudnovsky", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("chudnovsky", vmBuiltinChudnovsky);
+    registerVmBuiltin("chudnovsky", vmBuiltinChudnovsky,
+                      BUILTIN_TYPE_FUNCTION, "Chudnovsky");
 }

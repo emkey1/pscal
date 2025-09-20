@@ -25,7 +25,7 @@ static Value vmBuiltinFileExists(struct VM_s* vm, int arg_count, Value* args) {
 }
 
 void registerFileExistsBuiltin(void) {
-    registerBuiltinFunction("FileExists", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("fileexists", vmBuiltinFileExists);
+    registerVmBuiltin("fileexists", vmBuiltinFileExists,
+                      BUILTIN_TYPE_FUNCTION, "FileExists");
 }
 

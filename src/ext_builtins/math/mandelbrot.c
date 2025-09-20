@@ -80,7 +80,7 @@ static Value vmBuiltinMandelbrotRow(struct VM_s* vm, int arg_count, Value* args)
 }
 
 void registerMandelbrotRowBuiltin(void) {
-    registerBuiltinFunction("MandelbrotRow", AST_PROCEDURE_DECL, NULL);
-    registerVmBuiltin("mandelbrotrow", vmBuiltinMandelbrotRow);
+    registerVmBuiltin("mandelbrotrow", vmBuiltinMandelbrotRow,
+                      BUILTIN_TYPE_PROCEDURE, "MandelbrotRow");
 }
 

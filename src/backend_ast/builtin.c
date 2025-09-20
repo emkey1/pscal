@@ -480,9 +480,19 @@ static void initBuiltinRegistryMutex(void) {
     pthread_mutexattr_destroy(&attr);
 }
 
-void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
+void registerVmBuiltin(const char *name, VmBuiltinFn handler,
+        BuiltinRoutineType type, const char *display_name) {
     if (!name || !handler) return;
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+
+    if (type == BUILTIN_TYPE_FUNCTION || type == BUILTIN_TYPE_PROCEDURE) {
+        const char *reg_name = display_name ? display_name : name;
+        ASTNodeType declType = (type == BUILTIN_TYPE_FUNCTION)
+                                   ? AST_FUNCTION_DECL
+                                   : AST_PROCEDURE_DECL;
+        registerBuiltinFunction(reg_name, declType, NULL);
+    }
+
     pthread_mutex_lock(&builtin_registry_mutex);
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
@@ -4089,11 +4099,11 @@ void registerAllBuiltins(void) {
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
     /* CLike-style cast helper synonyms to avoid keyword collisions */
-    registerVmBuiltin("toint",    vmBuiltinToInt);
-    registerVmBuiltin("todouble", vmBuiltinToDouble);
-    registerVmBuiltin("tofloat",  vmBuiltinToFloat);
-    registerVmBuiltin("tochar",   vmBuiltinToChar);
-    registerVmBuiltin("tobool",   vmBuiltinToBool);
-    registerVmBuiltin("tobyte",   vmBuiltinToByte);
+    registerVmBuiltin("toint",    vmBuiltinToInt,    BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("todouble", vmBuiltinToDouble, BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tofloat",  vmBuiltinToFloat,  BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tochar",   vmBuiltinToChar,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
