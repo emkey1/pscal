@@ -355,9 +355,11 @@ begin
 end;
 
 function ManipulateStrings(iterations: integer): longint;
+const
+  MAX_BASE_LENGTH = 256;
 var
   base, temp: string;
-  i, idx: integer;
+  i, idx, limit: integer;
 begin
   base := 'pscal benchmark seed';
   ManipulateStrings := 0;
@@ -368,16 +370,24 @@ begin
     temp := temp + chr(ord('A') + (i mod 26));
     base := temp + base;
 
+    if length(base) > MAX_BASE_LENGTH then
+      base := copy(base, 1, MAX_BASE_LENGTH);
+
     if length(base) > 120 then
       RemoveSubstring(base, 10, 5);
 
     idx := 1;
-    repeat
-      if (idx < length(base)) and (base[idx] = base[idx + 1]) then
-        RemoveSubstring(base, idx, 1)
+    limit := length(base);
+    while idx < limit do
+    begin
+      if base[idx] = base[idx + 1] then
+      begin
+        RemoveSubstring(base, idx, 1);
+        limit := limit - 1;
+      end
       else
         idx := idx + 1;
-    until idx >= length(base);
+    end;
 
     ManipulateStrings := ManipulateStrings + ord(base[(i mod length(base)) + 1]);
   end;
