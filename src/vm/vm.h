@@ -93,6 +93,7 @@ typedef struct VM_s {
     int frameCount;
 
     bool exit_requested;      // Indicates a builtin requested early exit from the current frame
+    const char* current_builtin_name; // Tracks the name of the builtin currently executing (for diagnostics)
 
     // Threading support
     Thread threads[VM_MAX_THREADS];
