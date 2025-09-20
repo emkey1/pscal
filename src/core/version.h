@@ -1,7 +1,7 @@
 #ifndef PSCAL_VERSION_H
 #define PSCAL_VERSION_H
 
-#define PSCAL_VM_VERSION 6  // Bump for TO_BOOL opcode introduction
+#define PSCAL_VM_VERSION 7  // Bump for expanded locals metadata in cache format
 
 #include <stdint.h>
 

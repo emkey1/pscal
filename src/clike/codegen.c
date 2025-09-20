@@ -1507,7 +1507,10 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
      * discovered by the pre-pass. */
     int needed = ctx.maxLocalCount - ctx.paramCount;
     if (declaredLocals > needed) needed = declaredLocals;
-    sym->locals_count = (uint8_t)needed;
+    if (needed < 0) {
+        needed = 0;
+    }
+    sym->locals_count = (uint16_t)needed;
 
     // Free any remaining local metadata (params are at [0..paramCount-1]).
     for (int i = 0; i < ctx.localCount; i++) {

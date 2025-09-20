@@ -518,7 +518,8 @@ static bool writeProcedureEntriesRecursive(FILE* f, HashTable* table) {
             if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) return false;
             if (fwrite(sym->name, 1, name_len, f) != (size_t)name_len) return false;
             if (fwrite(&sym->bytecode_address, sizeof(sym->bytecode_address), 1, f) != 1) return false;
-            if (fwrite(&sym->locals_count, sizeof(sym->locals_count), 1, f) != 1) return false;
+            uint16_t locals = sym->locals_count;
+            if (fwrite(&locals, sizeof(locals), 1, f) != 1) return false;
             if (fwrite(&sym->upvalue_count, sizeof(sym->upvalue_count), 1, f) != 1) return false;
             if (fwrite(&sym->type, sizeof(sym->type), 1, f) != 1) return false;
             if (fwrite(&sym->arity, sizeof(sym->arity), 1, f) != 1) return false;
@@ -570,7 +571,7 @@ static bool appendEnclosingFixup(EnclosingFixup** fixups,
     return true;
 }
 
-static bool loadProceduresFromStream(FILE* f, int proc_count) {
+static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_version) {
     EnclosingFixup* fixups = NULL;
     int fixup_count = 0;
     int fixup_capacity = 0;
@@ -595,12 +596,32 @@ static bool loadProceduresFromStream(FILE* f, int proc_count) {
         name[name_len] = '\0';
 
         int addr = 0;
-        uint8_t locals = 0;
+        uint16_t locals = 0;
         uint8_t upvals = 0;
         VarType type;
-        if (fread(&addr, sizeof(addr), 1, f) != 1 ||
-            fread(&locals, sizeof(locals), 1, f) != 1 ||
-            fread(&upvals, sizeof(upvals), 1, f) != 1 ||
+        if (fread(&addr, sizeof(addr), 1, f) != 1) {
+            free(name);
+            ok = false;
+            break;
+        }
+
+        if (chunk_version >= 7) {
+            if (fread(&locals, sizeof(locals), 1, f) != 1) {
+                free(name);
+                ok = false;
+                break;
+            }
+        } else {
+            uint8_t locals8 = 0;
+            if (fread(&locals8, sizeof(locals8), 1, f) != 1) {
+                free(name);
+                ok = false;
+                break;
+            }
+            locals = locals8;
+        }
+
+        if (fread(&upvals, sizeof(upvals), 1, f) != 1 ||
             fread(&type, sizeof(type), 1, f) != 1) {
             free(name);
             ok = false;
@@ -850,7 +871,7 @@ bool loadBytecodeFromCache(const char* source_path,
                                 if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
                                     if (stored_proc_count < 0) {
                                         int proc_count = -stored_proc_count - 1;
-                                        if (!loadProceduresFromStream(f, proc_count)) {
+                                        if (!loadProceduresFromStream(f, proc_count, ver)) {
                                             ok = false;
                                         }
                                     } else {
@@ -966,7 +987,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                             if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
                                 if (stored_proc_count < 0) {
                                     int proc_count = -stored_proc_count - 1;
-                                    if (!loadProceduresFromStream(f, proc_count)) {
+                                    if (!loadProceduresFromStream(f, proc_count, ver)) {
                                         ok = false;
                                     }
                                 } else {
