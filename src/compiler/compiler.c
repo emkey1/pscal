@@ -2111,7 +2111,9 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                         builtin_name_val->s_val &&
                         strcasecmp(builtin_name_val->s_val, "byte") == 0) {
                         Value const_val = chunk->constants[constant_index];
-                        if (isIntlikeType(const_val.type)) {
+                        if (isIntlikeType(const_val.type) &&
+                            const_val.type != TYPE_BOOLEAN &&
+                            const_val.type != TYPE_CHAR) {
                             long long iv = AS_INTEGER(const_val);
                             if (iv >= 0 && iv <= 255) {
                                 int replacement_start = write_index;
