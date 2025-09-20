@@ -1635,6 +1635,206 @@ static bool globalVariableExists(const char* name) {
     return false;
 }
 
+typedef struct {
+    long long index;
+    long long lower;
+    long long upper;
+} ConstArrayDimInfo;
+
+typedef struct {
+    AST* base_expr;
+    AST* element_type;
+    long long offset;
+    int dim_count;
+} ConstArrayAccessInfo;
+
+static bool isValidConstArrayBase(AST* expr) {
+    if (!expr) return false;
+    switch (expr->type) {
+        case AST_VARIABLE:
+        case AST_FIELD_ACCESS:
+        case AST_DEREFERENCE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool valueToOrdinal(const Value* value, long long* out) {
+    if (!value || !out) return false;
+    if (isIntlikeType(value->type)) {
+        *out = value->i_val;
+        return true;
+    }
+    if (value->type == TYPE_CHAR) {
+        *out = (unsigned char)value->c_val;
+        return true;
+    }
+    if (value->type == TYPE_BOOLEAN) {
+        *out = value->i_val ? 1 : 0;
+        return true;
+    }
+    if (value->type == TYPE_ENUM) {
+        *out = value->enum_val.ordinal;
+        return true;
+    }
+    return false;
+}
+
+static AST* resolveArrayTypeForExpression(AST* expr) {
+    if (!expr) return NULL;
+
+    AST* type_node = resolveTypeAlias(expr->type_def);
+
+    if (!type_node && expr->type == AST_VARIABLE && expr->token && expr->token->value) {
+        Symbol* sym = lookupLocalSymbol(expr->token->value);
+        if (!sym) sym = lookupGlobalSymbol(expr->token->value);
+        if (sym && sym->type_def) {
+            type_node = resolveTypeAlias(sym->type_def);
+        }
+    }
+
+    while (type_node && type_node->type == AST_POINTER_TYPE) {
+        type_node = resolveTypeAlias(type_node->right);
+    }
+
+    return type_node;
+}
+
+static bool appendConstArrayDim(ConstArrayDimInfo** dims, int* count, int* capacity,
+                                long long index, long long lower, long long upper) {
+    if (!dims || !count || !capacity) return false;
+    if (*count >= *capacity) {
+        int new_capacity = (*capacity < 8) ? 8 : (*capacity * 2);
+        ConstArrayDimInfo* resized = realloc(*dims, (size_t)new_capacity * sizeof(ConstArrayDimInfo));
+        if (!resized) {
+            return false;
+        }
+        *dims = resized;
+        *capacity = new_capacity;
+    }
+    (*dims)[*count].index = index;
+    (*dims)[*count].lower = lower;
+    (*dims)[*count].upper = upper;
+    (*count)++;
+    return true;
+}
+
+static bool computeConstantArrayAccess(AST* node, ConstArrayAccessInfo* info) {
+    if (!node || node->type != AST_ARRAY_ACCESS || !info) return false;
+
+    AST* chain[64];
+    int chain_len = 0;
+    AST* current = node;
+    while (current && current->type == AST_ARRAY_ACCESS) {
+        if (chain_len >= (int)(sizeof(chain) / sizeof(chain[0]))) {
+            return false;
+        }
+        chain[chain_len++] = current;
+        current = current->left;
+    }
+
+    if (chain_len == 0 || !current) {
+        return false;
+    }
+
+    AST* base_expr = current;
+    if (!isValidConstArrayBase(base_expr)) {
+        return false;
+    }
+
+    AST* current_type = resolveArrayTypeForExpression(base_expr);
+    if (!current_type) {
+        return false;
+    }
+
+    ConstArrayDimInfo* dims = NULL;
+    int dims_count = 0;
+    int dims_capacity = 0;
+    bool success = true;
+
+    for (int seg = chain_len - 1; seg >= 0 && success; --seg) {
+        AST* segment = chain[seg];
+        AST* array_type = resolveTypeAlias(current_type);
+        if (!array_type || array_type->type != AST_ARRAY_TYPE) {
+            success = false;
+            break;
+        }
+
+        for (int idx = 0; idx < segment->child_count; ++idx) {
+            AST* idx_expr = segment->children[idx];
+            Value idx_val = evaluateCompileTimeValue(idx_expr);
+            long long idx_num = 0;
+            bool have_index = valueToOrdinal(&idx_val, &idx_num);
+            freeValue(&idx_val);
+            if (!have_index) {
+                success = false;
+                break;
+            }
+
+            if (idx >= array_type->child_count) {
+                success = false;
+                break;
+            }
+
+            AST* subrange = resolveTypeAlias(array_type->children[idx]);
+            if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right) {
+                success = false;
+                break;
+            }
+
+            Value low_v = evaluateCompileTimeValue(subrange->left);
+            Value high_v = evaluateCompileTimeValue(subrange->right);
+            long long lower = 0, upper = -1;
+            bool have_lower = valueToOrdinal(&low_v, &lower);
+            bool have_upper = valueToOrdinal(&high_v, &upper);
+            freeValue(&low_v);
+            freeValue(&high_v);
+            if (!have_lower || !have_upper) {
+                success = false;
+                break;
+            }
+
+            if (idx_num < lower || idx_num > upper) {
+                success = false;
+                break;
+            }
+
+            if (!appendConstArrayDim(&dims, &dims_count, &dims_capacity, idx_num, lower, upper)) {
+                success = false;
+                break;
+            }
+        }
+
+        current_type = resolveTypeAlias(array_type->right);
+    }
+
+    if (!success || dims_count == 0) {
+        free(dims);
+        return false;
+    }
+
+    long long offset = 0;
+    long long multiplier = 1;
+    for (int i = dims_count - 1; i >= 0; --i) {
+        long long span = dims[i].upper - dims[i].lower + 1;
+        offset += (dims[i].index - dims[i].lower) * multiplier;
+        multiplier *= span;
+    }
+
+    free(dims);
+
+    if (offset < 0 || offset > (long long)UINT32_MAX) {
+        return false;
+    }
+
+    info->base_expr = base_expr;
+    info->element_type = current_type;
+    info->offset = offset;
+    info->dim_count = dims_count;
+    return true;
+}
+
 // Returns true if the given const declaration node is nested inside a class
 // definition (represented as a RECORD_TYPE within a TYPE_DECL).
 static bool constIsClassMember(AST* node) {
@@ -1867,6 +2067,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_CHAR_ADDRESS, line); // CORRECT: Pops both, pushes address of the character
                 break; // We are done with this case
             } else {
+                ConstArrayAccessInfo const_info;
+                if (computeConstantArrayAccess(node, &const_info)) {
+                    compileLValue(const_info.base_expr, chunk, getLine(const_info.base_expr));
+                    writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS_CONST, line);
+                    emitInt32(chunk, (uint32_t)const_info.offset, line);
+                    break;
+                }
                 // Standard array access: push the array base address first, followed by
                 // each index expression in declaration order. GET_ELEMENT_ADDRESS expects
                 // to pop the base first, then each index in order.
@@ -4619,6 +4826,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compileRValue(node->left, chunk, getLine(node->left));      // Push the string or char
                 compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index
                 writeBytecodeChunk(chunk, GET_CHAR_FROM_STRING, line); // Use the specialized opcode
+                break;
+            }
+
+            ConstArrayAccessInfo const_info;
+            if (computeConstantArrayAccess(node, &const_info)) {
+                compileLValue(const_info.base_expr, chunk, getLine(const_info.base_expr));
+                writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE_CONST, line);
+                emitInt32(chunk, (uint32_t)const_info.offset, line);
                 break;
             }
 

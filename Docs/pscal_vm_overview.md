@@ -215,9 +215,15 @@ This sequence uses `JUMP_IF_FALSE` to exit the loop and `JUMP` to repeat.
 * **`GET_ELEMENT_ADDRESS`**:
     * **Operands:** 1-byte dimension count.
     * **Action:** Pops an array or pointer to an array, and then pops the indices for each dimension. Pushes a pointer to the specified element's `Value` struct.
+* **`GET_ELEMENT_ADDRESS_CONST`**:
+    * **Operands:** 4-byte flat element offset.
+    * **Action:** Pops an array or pointer to an array and pushes the address of the element at the precomputed flat offset. Bounds must have been validated by the compiler when emitting the instruction.
 * **`LOAD_ELEMENT_VALUE`**:
     * **Operands:** 1-byte dimension count.
     * **Action:** Pops an array (or pointer to an array) and the indices for each dimension, checks bounds, and pushes a copy of the addressed element's value. Handles Pascal strings specially so that `s[0]` yields the length and `s[i]` yields the character value.
+* **`LOAD_ELEMENT_VALUE_CONST`**:
+    * **Operands:** 4-byte flat element offset.
+    * **Action:** Pops an array (or pointer to an array) and pushes a copy of the element at the provided constant flat offset. Intended for accesses whose indices were folded at compile time.
 * **`GET_CHAR_ADDRESS`**:
     * **Operands:** None.
     * **Action:** Pops an index and a pointer to a string. Pushes a pointer to the character at that index within the string.
