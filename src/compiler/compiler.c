@@ -3204,6 +3204,14 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     fc.enclosing = current_function_compiler;
     current_function_compiler = &fc;
 
+    FunctionCompilerState* outer_fc = fc.enclosing;
+    int jump_over_body_operand_offset = -1;
+    if (outer_fc != NULL) {
+        writeBytecodeChunk(chunk, JUMP, line);
+        jump_over_body_operand_offset = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+    }
+
     // --- FIX: Declare all variables at the top of the function ---
     const char* func_name = func_decl_node->token->value;
     int return_value_slot = -1;
@@ -3354,6 +3362,11 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             proc_symbol->upvalues[i].isLocal = fc.upvalues[i].isLocal;
             proc_symbol->upvalues[i].is_ref = fc.upvalues[i].is_ref;
         }
+    }
+
+    if (jump_over_body_operand_offset >= 0) {
+        uint16_t offset_to_skip_body = (uint16_t)(chunk->count - (jump_over_body_operand_offset + 2));
+        patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
     }
 
     for(int i = 0; i < fc.local_count; i++) {

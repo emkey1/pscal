@@ -351,7 +351,9 @@ int main(int argc, char **argv) {
         // Annotate types for the entire program prior to compilation so that
         // qualified method calls can be resolved to their class-mangled routines.
         annotateTypes(program, NULL, program);
+        compilerEnableDynamicLocals(1);
         compilation_ok = compileASTToBytecode(program, &chunk);
+        compilerEnableDynamicLocals(0);
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, &chunk);
