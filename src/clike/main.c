@@ -35,8 +35,9 @@ static const char *CLIKE_USAGE =
     "   Options:\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
-"     --dump-bytecode-only       Dump compiled bytecode and exit (no execution).\n"
-"     --vm-trace-head=N          Trace first N VM instructions (also enabled by 'trace on' in source).\n";
+    "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
+    "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
+    "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n";
 
 static char* resolveImportPath(const char* orig_path) {
     FILE *f = fopen(orig_path, "rb");
@@ -69,6 +70,7 @@ int main(int argc, char **argv) {
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int vm_trace_head = 0;
+    int no_cache_flag = 0;
     const char *path = NULL;
     int clike_params_start = 0;
 
@@ -85,6 +87,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[i], "--no-cache") == 0) {
+            no_cache_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
@@ -203,7 +207,10 @@ int main(int argc, char **argv) {
     }
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    bool used_cache = loadBytecodeFromCache(path, argv[0], (const char**)dep_paths, clike_import_count, &chunk);
+    bool used_cache = false;
+    if (!no_cache_flag) {
+        used_cache = loadBytecodeFromCache(path, argv[0], (const char**)dep_paths, clike_import_count, &chunk);
+    }
     if (dep_paths) {
         for (int i = 0; i < clike_import_count; ++i) free(dep_paths[i]);
         free(dep_paths);

@@ -79,6 +79,7 @@ const char *PASCAL_USAGE =
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
+    "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
@@ -114,7 +115,9 @@ void initSymbolSystem(void) {
 #endif
 }
 
-int runProgram(const char *source, const char *programName, const char *frontend_path, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
+int runProgram(const char *source, const char *programName, const char *frontend_path,
+               int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag,
+               int no_cache_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -146,6 +149,8 @@ int runProgram(const char *source, const char *programName, const char *frontend
     Parser parser;
     parser.lexer = &lexer;
     parser.current_token = getNextToken(&lexer);
+    parser.current_unit_name_context = NULL;
+    parser.dependency_paths = createList();
     GlobalAST = buildProgramAST(&parser, &chunk);
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 
@@ -161,7 +166,33 @@ int runProgram(const char *source, const char *programName, const char *frontend
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, frontend_path, NULL, 0, &chunk);
+            const char **dep_array = NULL;
+            int dep_count = 0;
+            if (parser.dependency_paths) {
+                dep_count = listSize(parser.dependency_paths);
+                if (dep_count > 0) {
+                    dep_array = (const char**)malloc(sizeof(char*) * dep_count);
+                    if (!dep_array) {
+                        fprintf(stderr, "Out of memory while collecting unit dependencies.\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    for (int i = 0; i < dep_count; ++i) {
+                        dep_array[i] = listGet(parser.dependency_paths, i);
+                    }
+                }
+            }
+
+            if (!no_cache_flag) {
+                used_cache = loadBytecodeFromCache(programName, frontend_path, dep_array, dep_count, &chunk);
+            }
+            if (dep_array) {
+                free(dep_array);
+                dep_array = NULL;
+            }
+            if (parser.dependency_paths) {
+                freeList(parser.dependency_paths);
+                parser.dependency_paths = NULL;
+            }
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
@@ -227,6 +258,11 @@ int runProgram(const char *source, const char *programName, const char *frontend
     }
 
     // No local stderr capture/restore here.
+
+    if (parser.dependency_paths) {
+        freeList(parser.dependency_paths);
+        parser.dependency_paths = NULL;
+    }
 
     freeBytecodeChunk(&chunk);
     freeProcedureTable();
@@ -299,6 +335,7 @@ int main(int argc, char *argv[]) {
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int no_cache_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
     int pscal_params_start_index = 0; // Will be set after source file is identified
@@ -322,6 +359,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[i], "--no-cache") == 0) {
+            no_cache_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             s_vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
@@ -418,7 +457,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
+    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag,
+                            dump_bytecode_flag, dump_bytecode_only_flag, no_cache_flag);
 
     // Restore stderr and conditionally replay
     if (capture_stderr) {
