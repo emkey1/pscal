@@ -1,11 +1,11 @@
 #!/usr/bin/env rea
-// Procedural landscape demo for the Rea front end. Generates a deterministic
-// height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk with W/S while steering the camera with the mouse.
+// Object oriented landscape demo for the Rea front end. The demo shows how the
+// new class system can be used to organize SDL/OpenGL programs by splitting the
+// terrain generator, renderer, and camera into dedicated types.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
-const int TerrainSize = 128
+const int TerrainSize = 128;
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const int ThreadCount = 4;
@@ -78,26 +78,110 @@ int extractSeedFromArgs(int fallback) {
   return fallback;
 }
 
-class TerrainField {
+class HeightField {
   float heights[VertexCount];
   float minHeight;
   float maxHeight;
   float normalizationScale;
+
+  void HeightField() {
+    int idx = 0;
+    while (idx < VertexCount) {
+      my.heights[idx] = 0.0;
+      idx = idx + 1;
+    }
+    my.minHeight = 0.0;
+    my.maxHeight = 0.0;
+    my.normalizationScale = 0.0;
+  }
+
+  int index(int x, int z) { return z * VertexStride + x; }
+
+  void resetExtents() {
+    my.minHeight = 1e9;
+    my.maxHeight = -1e9;
+  }
+
+  void updateExtents(float value) {
+    if (value < my.minHeight) my.minHeight = value;
+    if (value > my.maxHeight) my.maxHeight = value;
+  }
+
+  void updateExtentsRange(float minValue, float maxValue) {
+    if (minValue < my.minHeight) my.minHeight = minValue;
+    if (maxValue > my.maxHeight) my.maxHeight = maxValue;
+  }
+
+  void finalizeExtents() {
+    if (my.minHeight > my.maxHeight) {
+      my.minHeight = 0.0;
+      my.maxHeight = 0.0;
+    }
+    float span = my.maxHeight - my.minHeight;
+    if (span <= 0.0001) {
+      my.maxHeight = my.minHeight + 0.001;
+      span = my.maxHeight - my.minHeight;
+    }
+    if (span <= 0.0001) {
+      my.normalizationScale = 0.0;
+    } else {
+      my.normalizationScale = 1.0 / span;
+    }
+  }
+
+  float rawHeight(int x, int z) {
+    if (x < 0) x = 0;
+    if (x > TerrainSize) x = TerrainSize;
+    if (z < 0) z = 0;
+    if (z > TerrainSize) z = TerrainSize;
+    return my.heights[my.index(x, z)];
+  }
+
+  float heightByFlatIndex(int idx) {
+    return my.heights[idx];
+  }
+
+  float normalizedHeight(float h) {
+    if (my.normalizationScale <= 0.0) return 0.0;
+    float t = (h - my.minHeight) * my.normalizationScale;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    return t;
+  }
+
+  float heightAt(float gx, float gz) {
+    if (gx < 0.0) gx = 0.0;
+    if (gx > TerrainSize) gx = TerrainSize;
+    if (gz < 0.0) gz = 0.0;
+    if (gz > TerrainSize) gz = TerrainSize;
+    int x0 = floor(gx);
+    int z0 = floor(gz);
+    int x1 = x0 + 1;
+    int z1 = z0 + 1;
+    if (x1 > TerrainSize) x1 = TerrainSize;
+    if (z1 > TerrainSize) z1 = TerrainSize;
+    float h00 = my.rawHeight(x0, z0);
+    float h10 = my.rawHeight(x1, z0);
+    float h01 = my.rawHeight(x0, z1);
+    float h11 = my.rawHeight(x1, z1);
+    float tx = gx - x0;
+    float tz = gz - z0;
+    float hx0 = h00 + (h10 - h00) * tx;
+    float hx1 = h01 + (h11 - h01) * tx;
+    return hx0 + (hx1 - hx0) * tz;
+  }
+
+  void build(int seed) {}
+}
+
+class FbmHeightField extends HeightField {
   int seed;
   float sliceMin[ThreadCount];
   float sliceMax[ThreadCount];
 
-  void TerrainField() {
+  void FbmHeightField() {
+    super();
     my.seed = 0;
-    my.minHeight = 0.0;
-    my.maxHeight = 0.0;
-    my.normalizationScale = 0.0;
-    int total = VertexCount;
-    int i = 0;
-    while (i < total) {
-      my.heights[i] = 0.0;
-      i = i + 1;
-    }
     int worker = 0;
     while (worker < ThreadCount) {
       my.sliceMin[worker] = 0.0;
@@ -105,8 +189,6 @@ class TerrainField {
       worker = worker + 1;
     }
   }
-
-  int index(int x, int z) { return z * (TerrainSize + 1) + x; }
 
   float baseNoise(int x, int z) {
     int n = x * 374761393 + z * 668265263 + my.seed * 362437;
@@ -174,8 +256,10 @@ class TerrainField {
     my.sliceMax[workerIdx] = localMax;
   }
 
-  void build(int s) {
-    my.seed = s;
+  void build(int newSeed) {
+    my.seed = newSeed;
+    my.resetExtents();
+
     int tids[ThreadCount];
     int worker = 0;
     while (worker < ThreadCount) {
@@ -184,6 +268,7 @@ class TerrainField {
       my.sliceMax[worker] = -1e9;
       worker = worker + 1;
     }
+
     int totalRows = TerrainSize + 1;
     int rowsPerThread = totalRows / ThreadCount;
     int extraRows = totalRows % ThreadCount;
@@ -207,6 +292,7 @@ class TerrainField {
       assigned = assigned + rows;
       worker = worker + 1;
     }
+
     worker = 0;
     while (worker < ThreadCount) {
       if (tids[worker] >= 0) {
@@ -214,113 +300,92 @@ class TerrainField {
       }
       worker = worker + 1;
     }
-    my.minHeight = 1e9;
-    my.maxHeight = -1e9;
+
     worker = 0;
     while (worker < ThreadCount) {
       if (tids[worker] >= 0) {
-        float localMin = my.sliceMin[worker];
-        float localMax = my.sliceMax[worker];
-        if (localMin < my.minHeight) my.minHeight = localMin;
-        if (localMax > my.maxHeight) my.maxHeight = localMax;
+        my.updateExtentsRange(my.sliceMin[worker], my.sliceMax[worker]);
       }
       worker = worker + 1;
     }
-    if (my.minHeight > my.maxHeight) {
-      my.minHeight = 0.0;
-      my.maxHeight = 0.0;
-    }
-    float span = my.maxHeight - my.minHeight;
-    if (span <= 0.0001) {
-      my.maxHeight = my.minHeight + 0.001;
-      span = my.maxHeight - my.minHeight;
-    }
-    if (span <= 0.0001) {
-      my.normalizationScale = 0.0;
-    } else {
-      my.normalizationScale = 1.0 / span;
-    }
-  }
 
-  float rawHeight(int x, int z) {
-    if (x < 0) x = 0;
-    if (x > TerrainSize) x = TerrainSize;
-    if (z < 0) z = 0;
-    if (z > TerrainSize) z = TerrainSize;
-    return my.heights[my.index(x, z)];
-  }
-
-  float heightByFlatIndex(int idx) {
-    return my.heights[idx];
-  }
-
-  float normalized(float h) {
-    if (my.normalizationScale <= 0.0) return 0.0;
-    float t = (h - my.minHeight) * my.normalizationScale;
-    if (t < 0.0) t = 0.0;
-    if (t > 1.0) t = 1.0;
-    return t;
-  }
-
-  float heightAt(float gx, float gz) {
-    if (gx < 0.0) gx = 0.0;
-    if (gx > TerrainSize) gx = TerrainSize;
-    if (gz < 0.0) gz = 0.0;
-    if (gz > TerrainSize) gz = TerrainSize;
-    int x0 = floor(gx);
-    int z0 = floor(gz);
-    int x1 = x0 + 1;
-    int z1 = z0 + 1;
-    if (x1 > TerrainSize) x1 = TerrainSize;
-    if (z1 > TerrainSize) z1 = TerrainSize;
-    float h00 = my.rawHeight(x0, z0);
-    float h10 = my.rawHeight(x1, z0);
-    float h01 = my.rawHeight(x0, z1);
-    float h11 = my.rawHeight(x1, z1);
-    float tx = gx - x0;
-    float tz = gz - z0;
-    float hx0 = h00 + (h10 - h00) * tx;
-    float hx1 = h01 + (h11 - h01) * tx;
-    return hx0 + (hx1 - hx0) * tz;
+    my.finalizeExtents();
   }
 }
 
-class LandscapeDemo {
-  TerrainField field;
-  int seed;
-  float camX;
-  float camZ;
-  float camY;
-  float yaw;
-  float pitch;
-  int lastTicks;
-  bool running;
-  int lastMouseX;
-  int lastMouseY;
-  bool hasMouseSample;
+class ColorRGB {
+  float r;
+  float g;
+  float b;
+
+  void ColorRGB() {
+    my.r = 0.0;
+    my.g = 0.0;
+    my.b = 0.0;
+  }
+
+  void set(float red, float green, float blue) {
+    my.r = red;
+    my.g = green;
+    my.b = blue;
+  }
+}
+
+class TerrainPalette {
+  void TerrainPalette() {}
+
+  void colorForNormalized(float t, ColorRGB result) {
+    float r;
+    float g;
+    float b;
+    if (t < 0.35) {
+      float w = t / 0.35;
+      r = 0.0;
+      g = 0.28 + 0.35 * w;
+      b = 0.45 + 0.4 * w;
+    } else if (t < 0.6) {
+      float w = (t - 0.35) / 0.25;
+      r = 0.15 + 0.25 * w;
+      g = 0.42 + 0.35 * w;
+      b = 0.18 + 0.08 * w;
+    } else if (t < 0.85) {
+      float w = (t - 0.6) / 0.25;
+      r = 0.52 + 0.2 * w;
+      g = 0.40 + 0.18 * w;
+      b = 0.30 + 0.15 * w;
+    } else {
+      float w = (t - 0.85) / 0.15;
+      if (w < 0.0) w = 0.0;
+      if (w > 1.0) w = 1.0;
+      float c = 0.82 + 0.18 * w;
+      r = c;
+      g = c;
+      b = c;
+    }
+    result.set(r, g, b);
+  }
+}
+
+class TerrainMesh {
+  HeightField field;
+  TerrainPalette palette;
   float vertexHeights[VertexCount];
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
   float vertexColorB[VertexCount];
   float worldXCoords[VertexStride];
   float worldZCoords[VertexStride];
+  ColorRGB scratchColor;
 
-  void LandscapeDemo(int initialSeed) {
-    my.field = new TerrainField();
-    my.seed = initialSeed;
+  void TerrainMesh(HeightField source, TerrainPalette pal) {
+    my.field = source;
+    my.palette = pal;
+    my.scratchColor = new ColorRGB();
     my.precomputeWorldCoordinates();
-    my.field.build(initialSeed);
-    my.updateVertexData();
-    my.camX = TerrainSize * 0.5;
-    my.camZ = TerrainSize * 0.5;
-    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
-    my.yaw = 135.0;
-    my.pitch = -20.0;
-    my.lastTicks = getticks();
-    my.running = true;
-    my.lastMouseX = 0;
-    my.lastMouseY = 0;
-    my.hasMouseSample = false;
+  }
+
+  void setField(HeightField source) {
+    my.field = source;
   }
 
   void precomputeWorldCoordinates() {
@@ -334,92 +399,22 @@ class LandscapeDemo {
     }
   }
 
-  void updateVertexData() {
+  void refresh() {
+    if (my.field == nil) return;
     int idx = 0;
     while (idx < VertexCount) {
       float h = my.field.heightByFlatIndex(idx);
       my.vertexHeights[idx] = h;
-      float t = my.field.normalized(h);
-      float r;
-      float g;
-      float b;
-      if (t < 0.35) {
-        float w = t / 0.35;
-        r = 0.0;
-        g = 0.28 + 0.35 * w;
-        b = 0.45 + 0.4 * w;
-      } else if (t < 0.6) {
-        float w = (t - 0.35) / 0.25;
-        r = 0.15 + 0.25 * w;
-        g = 0.42 + 0.35 * w;
-        b = 0.18 + 0.08 * w;
-      } else if (t < 0.85) {
-        float w = (t - 0.6) / 0.25;
-        r = 0.52 + 0.2 * w;
-        g = 0.40 + 0.18 * w;
-        b = 0.30 + 0.15 * w;
-      } else {
-        float w = (t - 0.85) / 0.15;
-        if (w < 0.0) w = 0.0;
-        if (w > 1.0) w = 1.0;
-        float c = 0.82 + 0.18 * w;
-        r = c;
-        g = c;
-        b = c;
-      }
-      my.vertexColorR[idx] = r;
-      my.vertexColorG[idx] = g;
-      my.vertexColorB[idx] = b;
+      float t = my.field.normalizedHeight(h);
+      my.palette.colorForNormalized(t, my.scratchColor);
+      my.vertexColorR[idx] = my.scratchColor.r;
+      my.vertexColorG[idx] = my.scratchColor.g;
+      my.vertexColorB[idx] = my.scratchColor.b;
       idx = idx + 1;
     }
   }
 
-  void initGraphics() {
-    InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
-    GLViewport(0, 0, WindowWidth, WindowHeight);
-    GLClearDepth(1.0);
-    GLDepthTest(true);
-    GLSetSwapInterval(1);
-    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
-    int mouseX = 0;
-    int mouseY = 0;
-    int mouseButtons = 0;
-    getmousestate(mouseX, mouseY, mouseButtons);
-    my.lastMouseX = mouseX;
-    my.lastMouseY = mouseY;
-    my.hasMouseSample = true;
-  }
-
-  void regenerate(int newSeed) {
-    my.seed = newSeed;
-    my.field.build(newSeed);
-    my.updateVertexData();
-    my.camX = TerrainSize * 0.5;
-    my.camZ = TerrainSize * 0.5;
-    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
-    writeln("Generated landscape for seed ", my.seed, ".");
-  }
-
-  void handleDiscreteInput() {
-    int key = pollkey();
-    while (key != 0) {
-      if (key == 'q' || key == 'Q' || key == 27) {
-        my.running = false;
-        return;
-      } else if (key == 'n' || key == 'N') {
-        my.regenerate(my.seed + 1);
-      } else if (key == 'p' || key == 'P') {
-        my.regenerate(my.seed - 1);
-      } else if (key == 'r' || key == 'R') {
-        int tickSeed = getticks();
-        if (tickSeed == 0) tickSeed = my.seed + 7;
-        my.regenerate(tickSeed);
-      }
-      key = pollkey();
-    }
-  }
-
-  void drawTerrain() {
+  void draw() {
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
@@ -442,8 +437,82 @@ class LandscapeDemo {
       z = z + 1;
     }
   }
+}
 
-  void updateCamera(float dt) {
+class FlyCamera {
+  HeightField field;
+  float camX;
+  float camZ;
+  float camY;
+  float yaw;
+  float pitch;
+  int lastMouseX;
+  int lastMouseY;
+  bool hasMouseSample;
+
+  void FlyCamera(HeightField source) {
+    my.field = source;
+    my.camX = TerrainSize * 0.5;
+    my.camZ = TerrainSize * 0.5;
+    my.yaw = 135.0;
+    my.pitch = -20.0;
+    my.camY = 0.0;
+    my.lastMouseX = 0;
+    my.lastMouseY = 0;
+    my.hasMouseSample = false;
+    my.snapToTerrain();
+  }
+
+  void setField(HeightField source) {
+    my.field = source;
+    my.snapToTerrain();
+  }
+
+  void setOrientation(float newYaw, float newPitch) {
+    my.yaw = newYaw;
+    my.pitch = newPitch;
+    my.clampAngles();
+  }
+
+  void primeMouseSample() {
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    getmousestate(mouseX, mouseY, mouseButtons);
+    my.lastMouseX = mouseX;
+    my.lastMouseY = mouseY;
+    my.hasMouseSample = true;
+  }
+
+  void clampAngles() {
+    while (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
+    while (my.yaw < 0.0) my.yaw = my.yaw + 360.0;
+    if (my.pitch > MaxPitch) my.pitch = MaxPitch;
+    if (my.pitch < -MaxPitch) my.pitch = -MaxPitch;
+  }
+
+  void clampPosition() {
+    if (my.camX < 1.0) my.camX = 1.0;
+    if (my.camX > TerrainSize - 1) my.camX = TerrainSize - 1;
+    if (my.camZ < 1.0) my.camZ = 1.0;
+    if (my.camZ > TerrainSize - 1) my.camZ = TerrainSize - 1;
+  }
+
+  void snapToTerrain() {
+    if (my.field == nil) {
+      my.camY = EyeHeight;
+    } else {
+      my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    }
+  }
+
+  void resetToCenter() {
+    my.camX = TerrainSize * 0.5;
+    my.camZ = TerrainSize * 0.5;
+    my.snapToTerrain();
+  }
+
+  void update(float dt) {
     if (dt > 0.1) dt = 0.1;
     int mouseX = 0;
     int mouseY = 0;
@@ -486,20 +555,126 @@ class LandscapeDemo {
       my.camZ = my.camZ + deltaZ;
     }
 
-    if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
-    if (my.yaw < 0.0) my.yaw = my.yaw + 360.0;
-    if (my.pitch > MaxPitch) my.pitch = MaxPitch;
-    if (my.pitch < -MaxPitch) my.pitch = -MaxPitch;
-
-    if (my.camX < 1.0) my.camX = 1.0;
-    if (my.camX > TerrainSize - 1) my.camX = TerrainSize - 1;
-    if (my.camZ < 1.0) my.camZ = 1.0;
-    if (my.camZ > TerrainSize - 1) my.camZ = TerrainSize - 1;
-
-    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.clampAngles();
+    my.clampPosition();
+    my.snapToTerrain();
   }
 
-  void drawFrame() {
+  void applyViewTransform() {
+    GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
+    GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
+    float half = TerrainSize * 0.5;
+    float worldX = (my.camX - half) * TileScale;
+    float worldZ = (my.camZ - half) * TileScale;
+    GLTranslatef(-worldX, -my.camY, -worldZ);
+  }
+}
+
+class GameApp {
+  bool running;
+  int lastTicks;
+
+  void GameApp() {
+    my.running = true;
+    my.lastTicks = 0;
+  }
+
+  void onInitialize() {}
+  void onShutdown() {}
+  void handleInput() {}
+  void update(float dt) {}
+  void render() {}
+
+  void stop() {
+    my.running = false;
+  }
+
+  void run() {
+    my.running = true;
+    my.onInitialize();
+    my.lastTicks = getticks();
+    while (my.running) {
+      my.handleInput();
+      if (!my.running) break;
+      if (QuitRequested()) break;
+      int now = getticks();
+      float dt = (now - my.lastTicks) / 1000.0;
+      my.lastTicks = now;
+      if (dt < 0.0) dt = 0.0;
+      if (dt > 0.2) dt = 0.2;
+      my.update(dt);
+      my.render();
+      GraphLoop(1);
+    }
+    my.onShutdown();
+  }
+}
+
+class LandscapeDemo extends GameApp {
+  FbmHeightField terrain;
+  TerrainPalette palette;
+  TerrainMesh mesh;
+  FlyCamera camera;
+  int seed;
+
+  void LandscapeDemo(int initialSeed) {
+    super();
+    my.seed = initialSeed;
+    my.terrain = new FbmHeightField();
+    my.palette = new TerrainPalette();
+    my.mesh = new TerrainMesh(my.terrain, my.palette);
+    my.camera = new FlyCamera(my.terrain);
+    my.rebuildTerrain(initialSeed);
+  }
+
+  void rebuildTerrain(int newSeed) {
+    my.seed = newSeed;
+    my.terrain.build(newSeed);
+    my.mesh.setField(my.terrain);
+    my.mesh.refresh();
+    my.camera.setField(my.terrain);
+    my.camera.resetToCenter();
+    writeln("Generated landscape for seed ", my.seed, ".");
+  }
+
+  void onInitialize() {
+    InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
+    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLSetSwapInterval(1);
+    writeln("Controls: W/S to move, mouse to look. N/P change seed, R randomizes, Q or Esc exits.");
+    my.camera.primeMouseSample();
+  }
+
+  void onShutdown() {
+    CloseGraph3D();
+  }
+
+  void handleInput() {
+    int key = pollkey();
+    while (key != 0) {
+      if (key == 'q' || key == 'Q' || key == 27) {
+        my.stop();
+        return;
+      } else if (key == 'n' || key == 'N') {
+        my.rebuildTerrain(my.seed + 1);
+      } else if (key == 'p' || key == 'P') {
+        my.rebuildTerrain(my.seed - 1);
+      } else if (key == 'r' || key == 'R') {
+        int tickSeed = getticks();
+        if (tickSeed == 0) tickSeed = my.seed + 7;
+        my.rebuildTerrain(tickSeed);
+      }
+      key = pollkey();
+    }
+  }
+
+  void update(float dt) {
+    my.camera.update(dt);
+  }
+
+  void render() {
     GLClearColor(0.36, 0.55, 0.78, 1.0);
     GLClear();
 
@@ -510,32 +685,10 @@ class LandscapeDemo {
 
     GLMatrixMode("modelview");
     GLLoadIdentity();
-    GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
-    GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
-    float half = TerrainSize * 0.5;
-    float worldX = (my.camX - half) * TileScale;
-    float worldZ = (my.camZ - half) * TileScale;
-    GLTranslatef(-worldX, -my.camY, -worldZ);
+    my.camera.applyViewTransform();
 
-    my.drawTerrain();
+    my.mesh.draw();
     GLSwapWindow();
-  }
-
-  void run() {
-    my.initGraphics();
-    my.lastTicks = getticks();
-    while (my.running) {
-      my.handleDiscreteInput();
-      if (QuitRequested()) break;
-      int now = getticks();
-      float dt = (now - my.lastTicks) / 1000.0;
-      my.lastTicks = now;
-      if (dt < 0.0) dt = 0.0;
-      my.updateCamera(dt);
-      my.drawFrame();
-      GraphLoop(1);
-    }
-    CloseGraph3D();
   }
 }
 
