@@ -144,14 +144,7 @@ static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char*
         return false;
     }
 
-    bool is_enum_slot = (slot->type == TYPE_ENUM);
-    if (!is_enum_slot && !IS_INTLIKE(*slot)) {
-        runtimeError(vm, "VM Error: %s requires an ordinal local, got %s.",
-                     opcode_name, varTypeToString(slot->type));
-        return false;
-    }
-
-    if (is_enum_slot) {
+    if (slot->type == TYPE_ENUM) {
         long long new_ord = (long long)slot->enum_val.ordinal + delta;
         slot->enum_val.ordinal = (int)new_ord;
         slot->i_val = (long long)slot->enum_val.ordinal;
@@ -159,30 +152,61 @@ static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char*
         return true;
     }
 
-    long long new_val = AS_INTEGER(*slot) + delta;
-    switch (slot->type) {
-        case TYPE_BOOLEAN:
-            slot->i_val = (new_val != 0);
-            slot->u_val = (unsigned long long)slot->i_val;
-            break;
-        case TYPE_CHAR:
-            slot->c_val = (int)new_val;
-            SET_INT_VALUE(slot, slot->c_val);
-            break;
-        case TYPE_UINT8:
-        case TYPE_BYTE:
-        case TYPE_UINT16:
-        case TYPE_WORD:
-        case TYPE_UINT32:
-        case TYPE_UINT64:
-            slot->u_val = (unsigned long long)new_val;
-            slot->i_val = (long long)slot->u_val;
-            break;
-        default:
-            SET_INT_VALUE(slot, new_val);
-            break;
+    if (isIntlikeType(slot->type)) {
+        long long new_val = AS_INTEGER(*slot) + delta;
+        switch (slot->type) {
+            case TYPE_BOOLEAN:
+                slot->i_val = (new_val != 0);
+                slot->u_val = (unsigned long long)slot->i_val;
+                break;
+            case TYPE_CHAR:
+                slot->c_val = (int)new_val;
+                SET_INT_VALUE(slot, slot->c_val);
+                break;
+            case TYPE_UINT8:
+            case TYPE_BYTE:
+            case TYPE_UINT16:
+            case TYPE_WORD:
+            case TYPE_UINT32:
+            case TYPE_UINT64:
+                slot->u_val = (unsigned long long)new_val;
+                slot->i_val = (long long)slot->u_val;
+                break;
+            default:
+                SET_INT_VALUE(slot, new_val);
+                break;
+        }
+        return true;
     }
-    return true;
+
+    if (isRealType(slot->type)) {
+        long double current = AS_REAL(*slot);
+        long double updated = current + (long double)delta;
+
+        switch (slot->type) {
+            case TYPE_FLOAT: {
+                float f = (float)updated;
+                SET_REAL_VALUE(slot, f);
+                break;
+            }
+            case TYPE_DOUBLE: {
+                double d = (double)updated;
+                SET_REAL_VALUE(slot, d);
+                break;
+            }
+            case TYPE_LONG_DOUBLE:
+            default:
+                SET_REAL_VALUE(slot, updated);
+                break;
+        }
+        slot->i_val = (long long)updated;
+        slot->u_val = (unsigned long long)slot->i_val;
+        return true;
+    }
+
+    runtimeError(vm, "VM Error: %s requires an ordinal or real local, got %s.",
+                 opcode_name, varTypeToString(slot->type));
+    return false;
 }
 
 // --- Class method registration helpers ---
