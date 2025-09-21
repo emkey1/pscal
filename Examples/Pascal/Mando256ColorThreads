@@ -146,6 +146,8 @@ BEGIN
   Width := ScreenCols;
   Height := ScreenRows;
 
+  ClrScr;
+
   IF ThreadCount <= 0 THEN
   BEGIN
     WriteLn('ThreadCount must be positive.');
