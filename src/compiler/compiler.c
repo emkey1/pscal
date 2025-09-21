@@ -91,6 +91,18 @@ static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int li
 static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
                               int name_idx, int line);
 static bool recordTypeHasVTable(AST* recordType);
+static void queueDeferredGlobalInitializer(AST* var_decl);
+static void emitDeferredGlobalInitializers(BytecodeChunk* chunk);
+static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
+                                       AST* actual_type_def_node,
+                                       BytecodeChunk* chunk);
+static void emitGlobalVarDefinition(AST* var_decl,
+                                    AST* varNameNode,
+                                    AST* type_specifier_node,
+                                    AST* actual_type_def_node,
+                                    BytecodeChunk* chunk,
+                                    bool emit_initializer);
+static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, int line);
 
 typedef struct {
     char* name;
@@ -509,6 +521,110 @@ static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
     emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
 }
 
+static void emitGlobalVarDefinition(AST* var_decl,
+                                    AST* varNameNode,
+                                    AST* type_specifier_node,
+                                    AST* actual_type_def_node,
+                                    BytecodeChunk* chunk,
+                                    bool emit_initializer) {
+    if (!var_decl || !varNameNode || !varNameNode->token) {
+        return;
+    }
+
+    int line = getLine(varNameNode);
+    int var_name_idx = addStringConstant(chunk, varNameNode->token->value);
+    emitDefineGlobal(chunk, var_name_idx, line);
+    writeBytecodeChunk(chunk, (uint8_t)var_decl->var_type, line);
+
+    if (var_decl->var_type == TYPE_ARRAY) {
+        int dimension_count = actual_type_def_node ? actual_type_def_node->child_count : 0;
+        if (dimension_count > 255) {
+            fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", line);
+            compiler_had_error = true;
+            return;
+        }
+        writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
+
+        for (int dim = 0; dim < dimension_count; dim++) {
+            AST* subrange = actual_type_def_node->children[dim];
+            if (subrange && subrange->type == AST_SUBRANGE) {
+                Value lower_b = evaluateCompileTimeValue(subrange->left);
+                Value upper_b = evaluateCompileTimeValue(subrange->right);
+
+                if (IS_INTLIKE(lower_b)) {
+                    emitConstantIndex16(chunk,
+                                        addIntConstant(chunk, AS_INTEGER(lower_b)),
+                                        line);
+                } else {
+                    fprintf(stderr,
+                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                            line);
+                    compiler_had_error = true;
+                }
+                freeValue(&lower_b);
+
+                if (IS_INTLIKE(upper_b)) {
+                    emitConstantIndex16(chunk,
+                                        addIntConstant(chunk, AS_INTEGER(upper_b)),
+                                        line);
+                } else {
+                    fprintf(stderr,
+                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                            line);
+                    compiler_had_error = true;
+                }
+                freeValue(&upper_b);
+
+            } else {
+                fprintf(stderr,
+                        "L%d: Compiler error: Malformed array definition for '%s'.\n",
+                        line,
+                        varNameNode->token->value);
+                compiler_had_error = true;
+                emitShort(chunk, 0, line);
+                emitShort(chunk, 0, line);
+            }
+        }
+
+        AST* elem_type = actual_type_def_node ? actual_type_def_node->right : NULL;
+        writeBytecodeChunk(chunk, (uint8_t)(elem_type ? elem_type->var_type : TYPE_VOID), line);
+        const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), line);
+    } else {
+        const char* type_name = "";
+        if (var_decl->var_type == TYPE_POINTER) {
+            AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
+            if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE && ptr_ast->right && ptr_ast->right->token) {
+                type_name = ptr_ast->right->token->value;
+            }
+        }
+        if (type_name[0] == '\0' && type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+            type_name = type_specifier_node->token->value;
+        } else if (type_name[0] == '\0' && actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
+            type_name = actual_type_def_node->token->value;
+        }
+        emitConstantIndex16(chunk, addStringConstant(chunk, type_name), line);
+
+        if (var_decl->var_type == TYPE_STRING) {
+            int max_len = 0;
+            if (actual_type_def_node && actual_type_def_node->right) {
+                Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
+                if (len_val.type == TYPE_INTEGER) {
+                    max_len = (int)len_val.i_val;
+                }
+                freeValue(&len_val);
+            }
+            emitConstantIndex16(chunk, addIntConstant(chunk, max_len), line);
+        }
+    }
+
+    resolveGlobalVariableIndex(chunk, varNameNode->token->value, line);
+
+    if (emit_initializer && var_decl->left) {
+        emitGlobalInitializerForVar(var_decl, varNameNode, actual_type_def_node, chunk);
+    }
+}
+
 static void emitDeferredGlobalInitializers(BytecodeChunk* chunk) {
     for (int i = 0; i < deferred_global_initializer_count; i++) {
         AST* decl = deferred_global_initializers[i];
@@ -538,7 +654,12 @@ static void emitDeferredGlobalInitializers(BytecodeChunk* chunk) {
         for (int j = 0; j < decl->child_count; j++) {
             AST* varNameNode = decl->children[j];
             if (!varNameNode || !varNameNode->token) continue;
-            emitGlobalInitializerForVar(decl, varNameNode, actual_type_def_node, chunk);
+            emitGlobalVarDefinition(decl,
+                                    varNameNode,
+                                    type_specifier_node,
+                                    actual_type_def_node,
+                                    chunk,
+                                    decl->left != NULL);
         }
     }
     deferred_global_initializer_count = 0;
@@ -1268,11 +1389,6 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
 static void compilePrintf(AST* node, BytecodeChunk* chunk, int line);
-static void queueDeferredGlobalInitializer(AST* var_decl);
-static void emitDeferredGlobalInitializers(BytecodeChunk* chunk);
-static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
-                                       AST* actual_type_def_node,
-                                       BytecodeChunk* chunk);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -2996,114 +3112,26 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (compiler_had_error) {
                         break;
                     }
-                }
-
-                // Now, handle based on the *actual* resolved type definition
-                for (int i = 0; i < node->child_count; i++) {
-                    AST* varNameNode = node->children[i];
-                    if (varNameNode && varNameNode->token) {
-                        int var_name_idx = addStringConstant(chunk, varNameNode->token->value);
-                        emitDefineGlobal(chunk, var_name_idx, getLine(varNameNode));
-                        writeBytecodeChunk(chunk, (uint8_t)node->var_type, getLine(varNameNode)); // The overall type (e.g., TYPE_ARRAY)
-
-                        if (node->var_type == TYPE_ARRAY) {
-                            // This block now correctly handles both inline and aliased arrays.
-                            int dimension_count = actual_type_def_node->child_count;
-                            if (dimension_count > 255) {
-                                fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", getLine(varNameNode));
-                                compiler_had_error = true;
-                                break;
-                            }
-                            writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
-
-                            for (int dim = 0; dim < dimension_count; dim++) {
-                                AST* subrange = actual_type_def_node->children[dim];
-                                if (subrange && subrange->type == AST_SUBRANGE) {
-                                    Value lower_b = evaluateCompileTimeValue(subrange->left);
-                                    Value upper_b = evaluateCompileTimeValue(subrange->right);
-                                    
-                                    // Use the new helper for the lower bound
-                                    if (IS_INTLIKE(lower_b)) {
-                                        emitConstantIndex16(chunk,
-                                            addIntConstant(chunk, AS_INTEGER(lower_b)),
-                                            getLine(varNameNode));
-                                    } else {
-                                        fprintf(stderr,
-                                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
-                                            getLine(varNameNode));
-                                        compiler_had_error = true;
-                                    }
-                                    freeValue(&lower_b);
-
-                                    // Use the new helper for the upper bound
-                                    if (IS_INTLIKE(upper_b)) {
-                                        emitConstantIndex16(chunk,
-                                            addIntConstant(chunk, AS_INTEGER(upper_b)),
-                                            getLine(varNameNode));
-                                    } else {
-                                        fprintf(stderr,
-                                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
-                                            getLine(varNameNode));
-                                        compiler_had_error = true;
-                                    }
-                                    freeValue(&upper_b);
-                                    
-                                } else {
-                                    fprintf(stderr, "L%d: Compiler error: Malformed array definition for '%s'.\n", getLine(varNameNode), varNameNode->token->value);
-                                    compiler_had_error = true;
-                                    emitShort(chunk, 0, getLine(varNameNode));
-                                    emitShort(chunk, 0, getLine(varNameNode));
-                                }
-                            }
-
-                            AST* elem_type = actual_type_def_node->right;
-                            writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
-                            const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                            
-                            writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
-
-                        } else {
-                            // This now correctly handles ALL non-array types, including simple types,
-                            // records, dynamic strings, and fixed-length strings.
-                            const char* type_name = "";
-                            if (node->var_type == TYPE_POINTER) {
-                                AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
-                                if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE && ptr_ast->right && ptr_ast->right->token) {
-                                    type_name = ptr_ast->right->token->value; // emit base type name
-                                }
-                            }
-                            if (type_name[0] == '\0' && type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
-                                type_name = type_specifier_node->token->value;
-                            } else if (type_name[0] == '\0' && actual_type_def_node && actual_type_def_node->token && actual_type_def_node->token->value) {
-                                /*
-                                 * For user-defined enum types the copied type specifier may not carry
-                                 * a token with the enum's name.  Falling back to the resolved type
-                                 * definition guarantees that the enum's identifier is embedded in the
-                                 * bytecode so that DEFINE_GLOBAL can later reconstruct the type.
-                                 */
-                                type_name = actual_type_def_node->token->value;
-                            }
-                            emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
-
-                            if (node->var_type == TYPE_STRING) {
-                                int max_len = 0;
-                                if (actual_type_def_node && actual_type_def_node->right) {
-                                    Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
-                                    if (len_val.type == TYPE_INTEGER) {
-                                        max_len = (int)len_val.i_val;
-                                    }
-                                    freeValue(&len_val);
-                                }
-                                emitConstantIndex16(chunk, addIntConstant(chunk, max_len), getLine(varNameNode));
-                            }
-                        }
-                        resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
-
-                        // Handle optional initializer for global variables
-                        if (!defer_initializer && node->left) {
-                            emitGlobalInitializerForVar(node, varNameNode, actual_type_def_node, chunk);
+                    for (int i = 0; i < node->child_count; i++) {
+                        AST* varNameNode = node->children[i];
+                        if (varNameNode && varNameNode->token) {
+                            resolveGlobalVariableIndex(chunk,
+                                                       varNameNode->token->value,
+                                                       getLine(varNameNode));
                         }
                     }
+                    break;
+                }
+
+                for (int i = 0; i < node->child_count; i++) {
+                    AST* varNameNode = node->children[i];
+                    if (!varNameNode || !varNameNode->token) continue;
+                    emitGlobalVarDefinition(node,
+                                            varNameNode,
+                                            type_specifier_node,
+                                            actual_type_def_node,
+                                            chunk,
+                                            node->left != NULL);
                 }
             } else { // Local variables
                 AST* type_specifier_node = node->right;
