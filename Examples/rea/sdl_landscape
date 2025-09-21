@@ -5,7 +5,7 @@
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
-const int TerrainSize = 256
+const int TerrainSize = 128
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const int ThreadCount = 4;
