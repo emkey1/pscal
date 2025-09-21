@@ -76,6 +76,14 @@ void compilerEnableDynamicLocals(int enable) {
     compiler_dynamic_locals = enable ? 1 : 0;
 }
 
+static bool astNodeIsDescendant(AST* ancestor, AST* node) {
+    if (!ancestor || !node) return false;
+    for (AST* cur = node; cur != NULL; cur = cur->parent) {
+        if (cur == ancestor) return true;
+    }
+    return false;
+}
+
 // Forward declarations for helpers used before definition
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line);
 static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line);
@@ -2049,7 +2057,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     current_function_compiler->function_symbol->type_def) {
                     AST* func_decl = current_function_compiler->function_symbol->type_def;
                     AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
-                    if (decl_in_scope) {
+                    if (decl_in_scope && astNodeIsDescendant(func_decl, decl_in_scope)) {
                         addLocal(current_function_compiler, varName, line, false);
                         local_slot = current_function_compiler->local_count - 1;
                         is_ref = false;
@@ -2057,7 +2065,22 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (local_slot != -1) {
+            bool treat_as_local = (local_slot != -1);
+            if (treat_as_local && current_function_compiler) {
+                int param_count = 0;
+                if (current_function_compiler->function_symbol) {
+                    param_count = current_function_compiler->function_symbol->arity;
+                }
+                bool is_param = (local_slot < param_count);
+                if (!is_param) {
+                    Symbol* local_sym = lookupLocalSymbol(varName);
+                    if (local_sym && !local_sym->is_local_var) {
+                        treat_as_local = false;
+                    }
+                }
+            }
+
+            if (treat_as_local) {
                 // For by-ref locals, the slot holds an address already.
                 if (is_ref) {
                     noteLocalSlotUse(current_function_compiler, local_slot);
@@ -4910,7 +4933,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     current_function_compiler->function_symbol->type_def) {
                     AST* func_decl = current_function_compiler->function_symbol->type_def;
                     AST* decl_in_scope = findDeclarationInScope(varName, func_decl, node);
-                    if (decl_in_scope) {
+                    if (decl_in_scope && astNodeIsDescendant(func_decl, decl_in_scope)) {
                         addLocal(current_function_compiler, varName, line, false);
                         local_slot = current_function_compiler->local_count - 1;
                         is_ref = false;
@@ -4926,7 +4949,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break; // We are done compiling this node.
             }
             
-            if (local_slot != -1) {
+            bool treat_as_local = (local_slot != -1);
+            if (treat_as_local && current_function_compiler) {
+                int param_count = 0;
+                if (current_function_compiler->function_symbol) {
+                    param_count = current_function_compiler->function_symbol->arity;
+                }
+                bool is_param = (local_slot < param_count);
+                if (!is_param) {
+                    Symbol *local_sym = lookupLocalSymbol(varName);
+                    if (local_sym && !local_sym->is_local_var) {
+                        treat_as_local = false;
+                    }
+                }
+            }
+
+            if (treat_as_local) {
                 DBG_PRINTF("[dbg] RV %s -> local[%d] line=%d\n", varName, local_slot, line);
                 noteLocalSlotUse(current_function_compiler, local_slot);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
