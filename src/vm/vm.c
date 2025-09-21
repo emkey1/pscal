@@ -2661,53 +2661,30 @@ comparison_error_label:
             case GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
 
-                // Pop the base operand first so type checking does not
-                // depend on stack offsets.
-                Value operand = pop(vm);
-
-                // Special handling for strings when there is exactly one
-                // index.  We avoid referencing stackTop-2 by working with the
-                // popped operand directly and reusing it if it represents a
-                // string.
-                if (dimension_count == 1 && operand.type == TYPE_POINTER) {
-                    Value* base_val = (Value*)operand.ptr_val;
-                    if (base_val && base_val->type == TYPE_STRING) {
-                        Value index_val = pop(vm);
-                        if (!isIntlikeType(index_val.type)) {
-                            runtimeError(vm, "VM Error: String index must be an integer.");
-                            freeValue(&index_val);
-                            freeValue(&operand);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        long long pscal_index = index_val.i_val;
-                        freeValue(&index_val);
-
-                        size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
-
-                        if (pscal_index == 0) {
-                            // Special case: element 0 returns the string length.
-                            push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
-                            freeValue(&operand);
-                            break; // Exit the case
-                        }
-
-                        if (pscal_index < 0 || (size_t)pscal_index > len) {
-                            runtimeError(vm,
-                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                                         pscal_index, len);
-                            freeValue(&operand);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-
-                        // Push a special pointer to the character's memory location
-                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
-                        freeValue(&operand);
-                        break; // Exit the case
+                bool base_on_top = false;
+                if (vm->stackTop > vm->stack) {
+                    Value top_snapshot = peek(vm, 0);
+                    if (top_snapshot.type == TYPE_POINTER || top_snapshot.type == TYPE_ARRAY) {
+                        base_on_top = true;
                     }
                 }
 
-                int* indices = malloc(sizeof(int) * dimension_count);
-                if (!indices) { runtimeError(vm, "VM Error: Malloc failed for array indices."); freeValue(&operand); return INTERPRET_RUNTIME_ERROR; }
+                int* indices = NULL;
+                if (dimension_count > 0) {
+                    indices = malloc(sizeof(int) * dimension_count);
+                    if (!indices) {
+                        runtimeError(vm, "VM Error: Malloc failed for array indices.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                }
+
+                Value operand = makeNil();
+                bool operand_popped = false;
+
+                if (base_on_top) {
+                    operand = pop(vm);
+                    operand_popped = true;
+                }
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
@@ -2717,13 +2694,56 @@ comparison_error_label:
                         indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
                     } else {
                         runtimeError(vm, "VM Error: Array index must be an integer.");
-                        free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
+                        if (indices) free(indices);
+                        if (operand_popped) freeValue(&operand);
+                        freeValue(&index_val);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
                     freeValue(&index_val);
                 }
 
+                if (!operand_popped) {
+                    operand = pop(vm);
+                    operand_popped = true;
+                }
+
+                // Special handling for strings when there is exactly one index.
+                if (dimension_count == 1 && operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        long long pscal_index = indices ? indices[0] : 0;
+
+                        size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+
+                        if (pscal_index == 0) {
+                            // Special case: element 0 returns the string length.
+                            push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
+                            free(indices);
+                            freeValue(&operand);
+                            break; // Exit the case
+                        }
+
+                        if (pscal_index < 0 || (size_t)pscal_index > len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                                         pscal_index, len);
+                            if (indices) free(indices);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        // Push a special pointer to the character's memory location
+                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
+                        if (indices) free(indices);
+                        freeValue(&operand);
+                        break; // Exit the case
+                    }
+                }
+
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
+                temp_wrapper.lower_bounds = NULL;
+                temp_wrapper.upper_bounds = NULL;
                 bool using_wrapper = false;
 
                 if (operand.type == TYPE_POINTER) {
@@ -2742,7 +2762,7 @@ comparison_error_label:
                             runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
                             if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
                             if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
-                            free(indices);
+                            if (indices) free(indices);
                             freeValue(&operand);
                             return INTERPRET_RUNTIME_ERROR;
                         }
@@ -2760,7 +2780,7 @@ comparison_error_label:
                         using_wrapper = true;
                     } else {
                         runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
-                        free(indices);
+                        if (indices) free(indices);
                         freeValue(&operand);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -2768,13 +2788,13 @@ comparison_error_label:
                     array_val_ptr = &operand;
                 } else {
                     runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
-                    free(indices);
+                    if (indices) free(indices);
                     freeValue(&operand);
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                int offset = computeFlatOffset(array_val_ptr, indices);
-                free(indices);
+                int offset = (dimension_count > 0) ? computeFlatOffset(array_val_ptr, indices) : 0;
+                if (indices) free(indices);
 
                 int total_size = calculateArrayTotalSize(array_val_ptr);
                 if (offset < 0 || offset >= total_size) {
