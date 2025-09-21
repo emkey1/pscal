@@ -213,8 +213,16 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
         case CALL:
             return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
+        case CALL_INDIRECT:
+        case PROC_CALL_INDIRECT:
+        case CALL_HOST:
+            return 2; // opcode + 1-byte operand
+        case CALL_METHOD:
+            return 3; // opcode + method index + arity
         case EXIT:
             return 1;
+        case THREAD_CREATE:
+            return 3; // opcode + 2-byte entry offset
         case DEFINE_GLOBAL: {
             // This instruction has a variable length.
             int current_pos = offset + 1; // Position after the opcode
