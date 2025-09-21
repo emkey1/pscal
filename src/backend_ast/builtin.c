@@ -1169,11 +1169,28 @@ static void vmCreateThreadKey(void) {
     pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
 }
 
+static int vmTcgetattr(int fd, struct termios *term) {
+    int res;
+    do {
+        res = tcgetattr(fd, term);
+    } while (res < 0 && errno == EINTR);
+    return res;
+}
+
+static int vmTcsetattr(int fd, int optional_actions, const struct termios *term) {
+    int res;
+    do {
+        res = tcsetattr(fd, optional_actions, term);
+    } while (res < 0 && errno == EINTR);
+    return res;
+}
+
 static void vmRestoreTerminal(void) {
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_termios_saved && vm_raw_mode) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
-        vm_raw_mode = 0;
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
+            vm_raw_mode = 0;
+        }
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -1188,7 +1205,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     if (!isatty(STDIN_FILENO))
         return -1;
 
-    if (tcgetattr(STDIN_FILENO, &oldt) < 0)
+    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0)
         return -1;
 
     raw = oldt;
@@ -1196,13 +1213,13 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 5; // 0.5s timeout
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         return -1;
     }
 
     if (write(STDOUT_FILENO, query, strlen(query)) == -1) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         return -1;
     }
 
@@ -1224,7 +1241,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     }
     buf[i] = '\0';
 
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 
     char *p = strchr(buf, ';');
     if (!p)
@@ -1315,7 +1332,7 @@ static void vmSetupTermHandlers(void) {
 
     pthread_mutex_lock(&vm_term_mutex);
     if (!vm_termios_saved) {
-        if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
             vm_termios_saved = 1;
         }
     }
@@ -1373,12 +1390,20 @@ static void vmEnableRawMode(void) {
         return;
     }
 
+    if (!vm_termios_saved) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) != 0) {
+            pthread_mutex_unlock(&vm_term_mutex);
+            return;
+        }
+        vm_termios_saved = 1;
+    }
+
     struct termios raw = vm_orig_termios;
     raw.c_lflag &= ~(ICANON | ECHO);
     raw.c_cc[VMIN]  = 1;
     raw.c_cc[VTIME] = 0;
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
     }
     pthread_mutex_unlock(&vm_term_mutex);
@@ -1419,7 +1444,7 @@ static int getCursorPosition(int *row, int *col) {
     }
 
     // --- Save Current Terminal Settings ---
-    if (tcgetattr(STDIN_FILENO, &oldt) < 0) {
+    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
         perror("getCursorPosition: tcgetattr failed");
         return -1; // Critical failure
     }
@@ -1430,11 +1455,11 @@ static int getCursorPosition(int *row, int *col) {
     newt.c_cc[VMIN] = 0;              // Non-blocking read
     newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
         int setup_errno = errno;
         perror("getCursorPosition: tcsetattr (set raw) failed");
         // Attempt to restore original settings even if setting new ones failed
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
         errno = setup_errno; // Restore errno for accurate reporting
         return -1; // Critical failure
     }
@@ -1444,7 +1469,7 @@ static int getCursorPosition(int *row, int *col) {
     if (write(STDOUT_FILENO, dsr_query, strlen(dsr_query)) == -1) {
         int write_errno = errno;
         perror("getCursorPosition: write DSR query failed");
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
         errno = write_errno;
         return -1; // Critical failure
     }
@@ -1480,7 +1505,7 @@ static int getCursorPosition(int *row, int *col) {
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Restore Original Terminal Settings ---
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
         perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
         // Continue processing, but be aware terminal might be left in raw mode
     }
