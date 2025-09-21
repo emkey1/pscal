@@ -12,8 +12,8 @@ CONST
   InsideColorIndex = 16;
   PaletteSize      = 239;
   ThreadCount      = 6;
-  MaxBufferCols    = 10240;
-  MaxBufferRows    = 7680;
+  MaxBufferCols    = 2048;
+  MaxBufferRows    = 1536;
 
 TYPE
   TRowRange = record
