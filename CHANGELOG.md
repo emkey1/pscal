@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.21 – 2025-09-21
+
+Enhancements
+- Bytecode & VM: Added `TO_BOOL`, direct field/array load opcodes (including constant-index forms), and `CALL_BUILTIN_PROC`/`CALL_USER_PROC` so builtin and user procedures carry stable identifiers regardless of SDL support.
+- Languages: Pascal/CLike emit the VM's XOR opcode with constant folding, Rea adds `nil`, and Pascal gained an `override builtin` directive plus ASCII-safe identifier lexing.
+- CLI & Docs: Pascal, CLike, and Rea accept `--no-cache`; documentation covers the new builtin-call flow; a comprehensive `PerformanceBenchmark` example exercises the VM.
+
+Stability and correctness
+- Deferred global initializers until after vtables are emitted, ensuring zero-argument `new` calls and nested `CALL_USER_PROC` invocations wire constructors in source order.
+- Pascal cached-bytecode detection no longer depends on `memmem`, musl builds tokenize identifiers reliably, and direct-load bytecode keeps cached locals metadata intact.
+- Rea preserves method metadata across recompiles, fixes call-frame slot allocation, and regression tests verify the Hangman5 vtable appears before its global constructor.
+- Mutex registries are shared by spawned threads and `INC_LOCAL`/`DEC_LOCAL` now adjust real and enum locals without type errors.
+
+Developer experience
+- Regression runners invoke every front end with `--no-cache`, normalize case-sensitive paths on macOS, and disassemble Hangman5 to guard vtable ordering.
+- The build system probes for AddressSanitizer support before enabling `dascal` instrumentation.
+
+Fixed
+- Prevented console color resets from forcing black backgrounds and restored WordRepository's vtable emission ahead of global constructors.
+
+
+
 ## v2.2 – 2025-09-18
 
 Enhancements
