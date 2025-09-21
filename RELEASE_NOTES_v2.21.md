@@ -3,7 +3,7 @@
 Date: 2025-09-21
 
 ## Highlights
-- Bytecode & VM: Dedicated `TO_BOOL`, direct field/array load instructions, and explicit builtin/user procedure call opcodes make truthiness and dispatch consistent across front ends.
+- Bytecode & VM: Dedicated `TO_BOOL`, direct field/array load instructions, and explicit builtin/user procedure call opcodes make truthiness and dispatch consistent across front ends, plus other internal optimizations to improve performance of the VM.
 - Language front ends: Pascal, CLike, and Rea gain XOR expressions, Rea adds a `nil` literal, and Pascal introduces an `override builtin` directive for intentional overrides.
 - Tooling & Tests: All compilers understand `--no-cache`, regression scripts run cache-free, and a new Pascal PerformanceBenchmark program exercises the VM.
 - Reliability: Deferred global initializer handling keeps constructors, vtables, and mutex registries ordered correctly even under nested `new` calls and spawned threads.
@@ -57,5 +57,4 @@ Date: 2025-09-21
 - `CALL_BUILTIN_PROC`/`CALL_USER_PROC` and direct load instructions must be understood by consumer tools; update custom front ends accordingly.
 
 ## Known Notes
-- Rea remains experimental; selected OO tests stay skipped via `REA_SKIP_TESTS`.
 - SDL graphics tests still need real video/audio drivers; otherwise they run under dummy backends when unset.
