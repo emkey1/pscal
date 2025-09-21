@@ -170,7 +170,57 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   rm -f "$actual_out" "$actual_err"
   echo
   echo
- done
+done
+
+# Ensure the Hangman example compiles cleanly and that the compiler emits
+# the WordRepository vtable before the global HangmanGame constructor runs.
+echo "---- HangmanExample ----"
+hangman_disasm=$(mktemp)
+set +e
+python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/hangman5 \
+  > /dev/null 2> "$hangman_disasm"
+status=$?
+set -e
+perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$hangman_disasm" > "$hangman_disasm.clean"
+mv "$hangman_disasm.clean" "$hangman_disasm"
+perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$hangman_disasm" > "$hangman_disasm.clean"
+mv "$hangman_disasm.clean" "$hangman_disasm"
+if [ $status -ne 0 ]; then
+  echo "Hangman example failed to compile" >&2
+  cat "$hangman_disasm"
+  EXIT_CODE=1
+else
+  if ! python3 - "$hangman_disasm" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text().splitlines()
+def_line = call_line = None
+for idx, line in enumerate(text, 1):
+    if def_line is None and "DEFINE_GLOBAL" in line and "'wordrepository_vtable'" in line:
+        def_line = idx
+    if call_line is None and "CALL_USER_PROC" in line and "'hangmangame'" in line:
+        call_line = idx
+if def_line is None:
+    print("Hangman example missing wordrepository vtable definition", file=sys.stderr)
+    sys.exit(1)
+if call_line is None:
+    print("Hangman example missing hangmangame call", file=sys.stderr)
+    sys.exit(1)
+if def_line > call_line:
+    print(
+        f"wordrepository vtable defined after hangmangame call (def_line={def_line}, call_line={call_line})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+  then
+    EXIT_CODE=1
+  fi
+fi
+rm -f "$hangman_disasm"
+echo
+echo
 
 # Basic cache reuse test for the Rea front end
 echo "---- CacheReuseTest ----"
