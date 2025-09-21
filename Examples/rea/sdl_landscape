@@ -8,6 +8,7 @@ const int WindowHeight = 720;
 const int TerrainSize = 256
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
+const int ThreadCount = 4;
 const float TileScale = 1.2;
 const int NoiseOctaves = 5;
 const float HeightScale = 32.0;
@@ -19,6 +20,7 @@ const float MousePitchSensitivity = 0.15;
 const float DegreesToRadians = 0.017453292519943295;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
+const float BaseFrequency = 0.035;
 
 bool hasDigit(str s) {
   int i = 1;
@@ -82,6 +84,8 @@ class TerrainField {
   float maxHeight;
   float normalizationScale;
   int seed;
+  float sliceMin[ThreadCount];
+  float sliceMax[ThreadCount];
 
   void TerrainField() {
     my.seed = 0;
@@ -93,6 +97,12 @@ class TerrainField {
     while (i < total) {
       my.heights[i] = 0.0;
       i = i + 1;
+    }
+    int worker = 0;
+    while (worker < ThreadCount) {
+      my.sliceMin[worker] = 0.0;
+      my.sliceMax[worker] = 0.0;
+      worker = worker + 1;
     }
   }
 
@@ -141,25 +151,84 @@ class TerrainField {
     return sum / total;
   }
 
-  void build(int s) {
-    my.seed = s;
-    my.minHeight = 1e9;
-    my.maxHeight = -1e9;
-    float baseFrequency = 0.035;
-    int z = 0;
-    while (z <= TerrainSize) {
+  void buildSlice(int startZ, int endZ, int workerIdx) {
+    if (workerIdx < 0 || workerIdx >= ThreadCount) return;
+    float localMin = 1e9;
+    float localMax = -1e9;
+    int z = startZ;
+    while (z <= endZ) {
       int x = 0;
       while (x <= TerrainSize) {
-        float sampleX = (x + s * 0.13) * baseFrequency;
-        float sampleZ = (z + s * 0.29) * baseFrequency;
+        float sampleX = (x + my.seed * 0.13) * BaseFrequency;
+        float sampleZ = (z + my.seed * 0.29) * BaseFrequency;
         float h = my.fbm(sampleX, sampleZ) * HeightScale;
         int idx = my.index(x, z);
         my.heights[idx] = h;
-        if (h < my.minHeight) my.minHeight = h;
-        if (h > my.maxHeight) my.maxHeight = h;
+        if (h < localMin) localMin = h;
+        if (h > localMax) localMax = h;
         x = x + 1;
       }
       z = z + 1;
+    }
+    my.sliceMin[workerIdx] = localMin;
+    my.sliceMax[workerIdx] = localMax;
+  }
+
+  void build(int s) {
+    my.seed = s;
+    int tids[ThreadCount];
+    int worker = 0;
+    while (worker < ThreadCount) {
+      tids[worker] = -1;
+      my.sliceMin[worker] = 1e9;
+      my.sliceMax[worker] = -1e9;
+      worker = worker + 1;
+    }
+    int totalRows = TerrainSize + 1;
+    int rowsPerThread = totalRows / ThreadCount;
+    int extraRows = totalRows % ThreadCount;
+    int assigned = 0;
+    worker = 0;
+    while (worker < ThreadCount) {
+      int rows = rowsPerThread;
+      if (extraRows > 0) {
+        rows = rows + 1;
+        extraRows = extraRows - 1;
+      }
+      int startZ = assigned;
+      int endZ = startZ + rows - 1;
+      if (rows <= 0) {
+        endZ = startZ - 1;
+      }
+      if (endZ > TerrainSize) endZ = TerrainSize;
+      if (startZ <= endZ && startZ <= TerrainSize) {
+        tids[worker] = spawn my.buildSlice(startZ, endZ, worker);
+      }
+      assigned = assigned + rows;
+      worker = worker + 1;
+    }
+    worker = 0;
+    while (worker < ThreadCount) {
+      if (tids[worker] >= 0) {
+        join tids[worker];
+      }
+      worker = worker + 1;
+    }
+    my.minHeight = 1e9;
+    my.maxHeight = -1e9;
+    worker = 0;
+    while (worker < ThreadCount) {
+      if (tids[worker] >= 0) {
+        float localMin = my.sliceMin[worker];
+        float localMax = my.sliceMax[worker];
+        if (localMin < my.minHeight) my.minHeight = localMin;
+        if (localMax > my.maxHeight) my.maxHeight = localMax;
+      }
+      worker = worker + 1;
+    }
+    if (my.minHeight > my.maxHeight) {
+      my.minHeight = 0.0;
+      my.maxHeight = 0.0;
     }
     float span = my.maxHeight - my.minHeight;
     if (span <= 0.0001) {
