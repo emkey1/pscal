@@ -13,24 +13,6 @@ CONST
   MinY = -1.0;
   MaxY = 1.0;
 
-  // Standard Turbo Pascal Color Constants (for readability)
-  Black         = 0;
-  Blue          = 1;
-  Green         = 2;
-  Cyan          = 3;
-  Red           = 4;
-  Magenta       = 5;
-  Brown         = 6;
-  LightGray     = 7;
-  DarkGray      = 8;
-  LightBlue     = 9;
-  LightGreen    = 10;
-  LightCyan     = 11;
-  LightRed      = 12;
-  LightMagenta  = 13;
-  Yellow        = 14;
-  White         = 15;
-
 VAR
   Row, Col     : Integer;
   Width, Height: Integer;
@@ -43,7 +25,7 @@ VAR
   ColorNum     : Integer; // Color index (0-15)
 
 BEGIN
-  // ClrScr; // Optional: Clear screen if implemented
+  ClrScr; // Optional: Clear screen if implemented
 
   Width := ScreenCols;
   Height := ScreenRows;
