@@ -1042,10 +1042,12 @@ void freeProcedureTable(void) {
                 freeAST(current_sym->type_def);
                 current_sym->type_def = NULL;
             }
-            
-            // Note: current_sym->value should be NULL for procedure/function symbols
-            // as they don't have a "value" in the variable sense. If it could be non-NULL,
-            // it would need freeing: if (current_sym->value) { freeValue(current_sym->value); free(current_sym->value); }
+
+            if (current_sym->value) {
+                freeValue(current_sym->value);
+                free(current_sym->value);
+                current_sym->value = NULL;
+            }
 
             free(current_sym); // Free the Symbol struct itself
             
