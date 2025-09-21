@@ -4,30 +4,30 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
-0007    3 DEFINE_GLOBAL    NameIdx:3   'c' Type:POINTER ('Child')
-0012    | ALLOC_OBJECT        3 (fields)
-0014    | DUP
-0015    | CONSTANT            5 '42'
-0017    | CALL_USER_PROC       6 'child' @0038 (2 args)
-0021    | SET_GLOBAL          3 'c'
-0023    1 JUMP                9 (to 0035)
+0007    1 JUMP                9 (to 0019)
 
---- Procedure base.base (at 0026) ---
-0026    | GET_LOCAL           1 (slot)
-0028    | GET_LOCAL           0 (slot)
-0030    | GET_FIELD_OFFSET    1 (index)
-0032    | SWAP
-0033    | SET_INDIRECT
-0034    | RETURN
-0035    2 JUMP                9 (to 0047)
+--- Procedure base.base (at 0010) ---
+0010    | GET_LOCAL           1 (slot)
+0012    | GET_LOCAL           0 (slot)
+0014    | GET_FIELD_OFFSET    1 (index)
+0016    | SWAP
+0017    | SET_INDIRECT
+0018    | RETURN
+0019    2 JUMP                9 (to 0031)
 
---- Procedure child.child (at 0038) ---
-0038    | GET_LOCAL           0 (slot)
-0040    | GET_LOCAL           1 (slot)
-0042    | CALL_USER_PROC       7 'base.base' @0026 (2 args)
-0046    | RETURN
+--- Procedure child.child (at 0022) ---
+0022    | GET_LOCAL           0 (slot)
+0024    | GET_LOCAL           1 (slot)
+0026    | CALL_USER_PROC       3 'base.base' @0010 (2 args)
+0030    | RETURN
+0031    3 DEFINE_GLOBAL    NameIdx:4   'c' Type:POINTER ('Child')
+0036    | ALLOC_OBJECT        3 (fields)
+0038    | DUP
+0039    | CONSTANT            6 '42'
+0041    | CALL_USER_PROC       7 'child' @0022 (2 args)
+0045    | SET_GLOBAL          4 'c'
 0047    4 CONSTANT            8 '1'
-0049    | GET_GLOBAL          3 'c'
+0049    | GET_GLOBAL          4 'c'
 0051    | LOAD_FIELD_VALUE    1 (index)
 0053    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0059    0 HALT
@@ -36,11 +36,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 Constants (10):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
-  0003: STR   "c"
-  0004: STR   "Child"
-  0005: INT   42
-  0006: STR   "child"
-  0007: STR   "base.base"
+  0003: STR   "base.base"
+  0004: STR   "c"
+  0005: STR   "Child"
+  0006: INT   42
+  0007: STR   "child"
   0008: INT   1
   0009: STR   "write"
 

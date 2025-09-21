@@ -2733,15 +2733,40 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             // An AST_BLOCK should have two children: declarations and statements.
             AST* declarations = (node->child_count > 0) ? node->children[0] : NULL;
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
+            bool at_program_level = node->parent && node->parent->type == AST_PROGRAM;
+            AST** deferred_global_vars = NULL;
+            int deferred_global_count = 0;
+            int deferred_global_capacity = 0;
 
             if (declarations && declarations->type == AST_COMPOUND) {
-                // Pass 1: Compile type, constant, and variable declarations from the declaration block.
+                // Pass 1: Compile type and constant declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
-                    if (decl_child &&
-                        (decl_child->type == AST_VAR_DECL || decl_child->type == AST_CONST_DECL || decl_child->type == AST_TYPE_DECL)) {
+                    if (!decl_child) continue;
+                    if (decl_child->type == AST_VAR_DECL) {
+                        if (at_program_level) {
+                            if (deferred_global_count == deferred_global_capacity) {
+                                int new_cap = deferred_global_capacity == 0 ? 4 : deferred_global_capacity * 2;
+                                AST** resized = realloc(deferred_global_vars, sizeof(AST*) * new_cap);
+                                if (!resized) {
+                                    fprintf(stderr, "Compiler error: Out of memory deferring global variables.\n");
+                                    compiler_had_error = true;
+                                    break;
+                                }
+                                deferred_global_vars = resized;
+                                deferred_global_capacity = new_cap;
+                            }
+                            deferred_global_vars[deferred_global_count++] = decl_child;
+                            continue;
+                        }
+                        compileNode(decl_child, chunk, getLine(decl_child));
+                    } else if (decl_child->type == AST_CONST_DECL || decl_child->type == AST_TYPE_DECL) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
+                }
+                if (compiler_had_error) {
+                    free(deferred_global_vars);
+                    break;
                 }
                 // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
@@ -2752,8 +2777,13 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 }
             }
 
-            if (node->parent && node->parent->type == AST_PROGRAM) {
+            if (at_program_level) {
                 emitVTables(chunk);
+                for (int i = 0; i < deferred_global_count; i++) {
+                    if (deferred_global_vars[i]) {
+                        compileNode(deferred_global_vars[i], chunk, getLine(deferred_global_vars[i]));
+                    }
+                }
                 for (int pg = 0; pg < pending_global_vtable_count; pg++) {
                     PendingGlobalVTableInit* p = &pending_global_vtables[pg];
                     int objNameIdx = addStringConstant(chunk, p->var_name);
@@ -2773,7 +2803,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 free(pending_global_vtables);
                 pending_global_vtables = NULL;
                 pending_global_vtable_count = 0;
+            } else {
+                for (int i = 0; i < deferred_global_count; i++) {
+                    if (deferred_global_vars[i]) {
+                        compileNode(deferred_global_vars[i], chunk, getLine(deferred_global_vars[i]));
+                    }
+                }
             }
+            free(deferred_global_vars);
 
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
