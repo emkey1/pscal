@@ -5,7 +5,7 @@
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
-const int TerrainSize = 128;
+const int TerrainSize = 256
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
@@ -394,14 +394,14 @@ class LandscapeDemo {
         int maxDeltaY = WindowHeight / 2;
         if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
             deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
-          my.yaw = my.yaw + deltaX * MouseYawSensitivity;
+          my.yaw = my.yaw - deltaX * MouseYawSensitivity;
           my.pitch = my.pitch - deltaY * MousePitchSensitivity;
         }
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeW);
-    bool backward = IsKeyDown(ScanCodeS);
+    bool forward = IsKeyDown(ScanCodeS);
+    bool backward = IsKeyDown(ScanCodeW);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
