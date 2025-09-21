@@ -2223,7 +2223,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
-            if (node->child_count > 0) {
+            Symbol* ctorSymbol = lookupProcedure(lowerClassName);
+            if (ctorSymbol || node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
@@ -4742,7 +4743,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
-            if (node->child_count > 0) {
+            Symbol* ctorSymbol = lookupProcedure(lowerClassName);
+            if (ctorSymbol || node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
