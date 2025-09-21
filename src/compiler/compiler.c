@@ -5015,16 +5015,23 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ADDR_OF: {
-            // Address-of routines: push procedure bytecode address as integer constant
-            int addr = 0;
-            if (node->left && node->left->token && node->left->token->value) {
+            if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                 const char* pname = node->left->token->value;
                 Symbol* psym = lookupProcedure(pname);
-                if (psym) addr = psym->bytecode_address;
+                if (psym) {
+                    int addr = psym->bytecode_address;
+                    int constIndex = addIntConstant(chunk, addr);
+                    recordAddressConstant(constIndex, addr);
+                    emitConstant(chunk, constIndex, line);
+                    break;
+                }
             }
-            int constIndex = addIntConstant(chunk, addr);
-            recordAddressConstant(constIndex, addr);
-            emitConstant(chunk, constIndex, line);
+            if (!node->left) {
+                fprintf(stderr, "L%d: Compiler error: '@' requires addressable operand.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            compileLValue(node->left, chunk, line);
             break;
         }
         case AST_THREAD_SPAWN: {

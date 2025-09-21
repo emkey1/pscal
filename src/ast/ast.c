@@ -567,19 +567,78 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
     if (node->var_type == TYPE_VOID || node->var_type == TYPE_UNKNOWN) {
         switch(node->type) {
             case AST_ADDR_OF: {
-                // Address-of: ensure left is an identifier referencing a procedure/function
                 node->var_type = TYPE_POINTER;
-                if (node->left && node->left->token && node->left->token->value) {
+                if (!node->left) {
+                    fprintf(stderr, "Compiler Error: '@' missing operand.\n");
+                    pascal_semantic_error_count++;
+                    break;
+                }
+
+                bool operand_is_procedure = false;
+                if (node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                     const char* name = node->left->token->value;
                     Symbol* procSym = lookupProcedure(name);
-                    if (!procSym) {
-                        fprintf(stderr, "L%d: Compiler Error: '@' requires a procedure or function identifier (got '%s').\n",
-                                node->token ? node->token->line : 0, name);
-                        pascal_semantic_error_count++;
+                    if (procSym) {
+                        operand_is_procedure = true;
                     }
-                } else {
-                    fprintf(stderr, "Compiler Error: '@' missing identifier operand.\n");
-                    pascal_semantic_error_count++;
+                }
+
+                if (!operand_is_procedure) {
+                    AST* baseType = node->left->type_def ? resolveTypeAlias(node->left->type_def) : NULL;
+                    if (!baseType) {
+                        const char* builtinName = NULL;
+                        switch (node->left->var_type) {
+                            case TYPE_INT32:
+                                builtinName = "integer";
+                                break;
+                            case TYPE_INT64:
+                                builtinName = "int64";
+                                break;
+                            case TYPE_UINT64:
+                                builtinName = "uint64";
+                                break;
+                            case TYPE_UINT32:
+                                builtinName = "uint32";
+                                break;
+                            case TYPE_DOUBLE:
+                            case TYPE_FLOAT:
+                            case TYPE_LONG_DOUBLE:
+                                builtinName = "real";
+                                break;
+                            case TYPE_BOOLEAN:
+                                builtinName = "boolean";
+                                break;
+                            case TYPE_CHAR:
+                                builtinName = "char";
+                                break;
+                            case TYPE_STRING:
+                                builtinName = "string";
+                                break;
+                            case TYPE_BYTE:
+                                builtinName = "byte";
+                                break;
+                            case TYPE_WORD:
+                                builtinName = "word";
+                                break;
+                            default:
+                                break;
+                        }
+                        if (builtinName) {
+                            AST* looked = lookupType(builtinName);
+                            if (looked) {
+                                baseType = looked;
+                            }
+                        }
+                    }
+
+                    if (baseType) {
+                        AST* ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+                        if (ptrNode) {
+                            setTypeAST(ptrNode, TYPE_POINTER);
+                            setRight(ptrNode, baseType);
+                            node->type_def = ptrNode;
+                        }
+                    }
                 }
                 break;
             }
