@@ -265,20 +265,32 @@ static void collectMethods(AST *node) {
                             hashTableInsert(ci->methods, sym);
                             char lowerName[MAX_SYMBOL_LENGTH];
                             lowerCopy(fullname, lowerName);
-                            if (!lookupProcedure(lowerName)) {
+                            Symbol *existing = lookupProcedure(lowerName);
+                            if (!existing) {
                                 Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
                                 if (ps) {
                                     ps->name = strdup(lowerName);
-                                    /*
-                                     * Store a deep copy of the AST node in the global procedure
-                                     * table.  freeProcedureTable() assumes ownership of
-                                     * type_def entries and will call freeAST on them during
-                                     * teardown; using the original node would result in a
-                                     * double free when the program AST is cleaned up separately.
-                                     */
                                     ps->type_def = copyAST(node);
                                     hashTableInsert(procedure_table, ps);
+                                    existing = ps;
                                 }
+                            } else {
+                                if (existing->value && existing->type_def && existing->type_def != node) {
+                                    freeAST(existing->type_def);
+                                }
+                                existing->type_def = copyAST(node);
+                            }
+                            if (existing) {
+                                Value *pv = existing->value;
+                                if (!pv) {
+                                    pv = (Value *)calloc(1, sizeof(Value));
+                                    existing->value = pv;
+                                }
+                                if (pv) {
+                                    pv->type = TYPE_POINTER;
+                                    pv->ptr_val = (Value *)node;
+                                }
+                                existing->real_symbol = sym;
                             }
                         } else {
                             free(sym); free(v); free(lname);
@@ -620,6 +632,32 @@ static Symbol *lookupMethod(ClassInfo *ci, const char *name) {
         curr = curr->parent;
     }
     return NULL;
+}
+
+static void refreshProcedureMethodCopies(void) {
+    if (!procedure_table) return;
+    for (int i = 0; i < HASHTABLE_SIZE; i++) {
+        Symbol *sym = procedure_table->buckets[i];
+        while (sym) {
+            AST *source = NULL;
+            if (sym->value && sym->value->ptr_val) {
+                source = (AST*)sym->value->ptr_val;
+            } else if (sym->real_symbol && sym->real_symbol->value &&
+                       sym->real_symbol->value->ptr_val) {
+                source = (AST*)sym->real_symbol->value->ptr_val;
+            }
+            if (source) {
+                AST *updated = copyAST(source);
+                if (updated) {
+                    if (sym->value && sym->type_def && sym->type_def != source) {
+                        freeAST(sym->type_def);
+                    }
+                    sym->type_def = updated;
+                }
+            }
+            sym = sym->next;
+        }
+    }
 }
 
 static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
@@ -978,6 +1016,7 @@ void reaPerformSemanticAnalysis(AST *root) {
     checkOverrides();
     addInheritedMethodAliases();
     validateNodeInternal(root, NULL);
+    refreshProcedureMethodCopies();
     freeClassTable();
 }
 
