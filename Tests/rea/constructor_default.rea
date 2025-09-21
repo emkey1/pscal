@@ -1,0 +1,12 @@
+#!/usr/bin/env rea
+
+class Counter {
+  int value;
+  void Counter() { my.value = 42; }
+}
+
+int main() {
+  Counter c = new Counter();
+  writeln("value=", c.value);
+  return 0;
+}
