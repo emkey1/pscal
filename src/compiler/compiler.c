@@ -147,6 +147,11 @@ typedef struct {
 static PendingGlobalVTableInit* pending_global_vtables = NULL;
 static int pending_global_vtable_count = 0;
 
+static bool postpone_global_initializers = false;
+static AST** deferred_global_initializers = NULL;
+static int deferred_global_initializer_count = 0;
+static int deferred_global_initializer_capacity = 0;
+
 // Flag indicating we are compiling a global variable initializer. In that
 // situation vtables have not yet been emitted, so NEW expressions should not
 // attempt to resolve their class vtables immediately.
@@ -397,6 +402,151 @@ static void emitVTables(BytecodeChunk* chunk) {
         free(vt->addrs);
     }
     free(tables);
+}
+
+static int getLine(AST* node);
+static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
+
+static void queueDeferredGlobalInitializer(AST* var_decl) {
+    if (!var_decl) return;
+    for (int i = 0; i < deferred_global_initializer_count; i++) {
+        if (deferred_global_initializers[i] == var_decl) {
+            return;
+        }
+    }
+    if (deferred_global_initializer_count == deferred_global_initializer_capacity) {
+        int new_cap = deferred_global_initializer_capacity == 0 ? 4
+                                                                  : deferred_global_initializer_capacity * 2;
+        AST** resized = realloc(deferred_global_initializers, sizeof(AST*) * new_cap);
+        if (!resized) {
+            fprintf(stderr, "Compiler error: Out of memory deferring global initializers.\n");
+            compiler_had_error = true;
+            return;
+        }
+        deferred_global_initializers = resized;
+        deferred_global_initializer_capacity = new_cap;
+    }
+    deferred_global_initializers[deferred_global_initializer_count++] = var_decl;
+}
+
+static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
+                                       AST* actual_type_def_node,
+                                       BytecodeChunk* chunk) {
+    if (!var_decl || !varNameNode || !varNameNode->token || !varNameNode->token->value) {
+        return;
+    }
+    AST* initializer = var_decl->left;
+    if (!initializer) {
+        return;
+    }
+
+    if (var_decl->var_type == TYPE_ARRAY && initializer->type == AST_ARRAY_LITERAL) {
+        AST* array_type = actual_type_def_node;
+        int dimension_count = array_type ? array_type->child_count : 0;
+        if (dimension_count == 1) {
+            AST* sub = array_type->children[0];
+            Value low_v = evaluateCompileTimeValue(sub->left);
+            Value high_v = evaluateCompileTimeValue(sub->right);
+            int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+            int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+            freeValue(&low_v);
+            freeValue(&high_v);
+            int lb[1] = { low };
+            int ub[1] = { high };
+            AST* elem_type_node = array_type->right;
+            VarType elem_type = elem_type_node ? elem_type_node->var_type : TYPE_VOID;
+            Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+            int total = calculateArrayTotalSize(&arr_val);
+            for (int j = 0; j < total && j < initializer->child_count; j++) {
+                Value ev = evaluateCompileTimeValue(initializer->children[j]);
+                freeValue(&arr_val.array_val[j]);
+                arr_val.array_val[j] = makeCopyOfValue(&ev);
+                freeValue(&ev);
+            }
+            int constIdx = addConstantToChunk(chunk, &arr_val);
+            freeValue(&arr_val);
+            emitConstant(chunk, constIdx, getLine(var_decl));
+        } else {
+            compileRValue(initializer, chunk, getLine(initializer));
+        }
+    } else {
+        bool prev_global_init = compiling_global_var_init;
+        bool set_global_guard = (current_function_compiler == NULL && initializer->type == AST_NEW);
+        if (set_global_guard) compiling_global_var_init = true;
+        compileRValue(initializer, chunk, getLine(initializer));
+        if (set_global_guard) compiling_global_var_init = prev_global_init;
+        if (set_global_guard && initializer->token && initializer->token->value) {
+            char* lower_cls = strdup(initializer->token->value);
+            if (!lower_cls) {
+                fprintf(stderr, "Compiler error: Memory allocation failed for class name.\n");
+                compiler_had_error = true;
+            } else {
+                toLowerString(lower_cls);
+                AST* clsType = lookupType(lower_cls);
+                if (recordTypeHasVTable(clsType)) {
+                    PendingGlobalVTableInit* resized = realloc(
+                        pending_global_vtables,
+                        sizeof(PendingGlobalVTableInit) * (pending_global_vtable_count + 1));
+                    if (!resized) {
+                        fprintf(stderr, "Compiler error: Out of memory queuing global vtable init.\n");
+                        free(lower_cls);
+                        compiler_had_error = true;
+                    } else {
+                        pending_global_vtables = resized;
+                        pending_global_vtables[pending_global_vtable_count].var_name =
+                            strdup(varNameNode->token->value);
+                        pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
+                        pending_global_vtable_count++;
+                    }
+                } else {
+                    free(lower_cls);
+                }
+            }
+        }
+    }
+
+    int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
+    emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
+}
+
+static void emitDeferredGlobalInitializers(BytecodeChunk* chunk) {
+    for (int i = 0; i < deferred_global_initializer_count; i++) {
+        AST* decl = deferred_global_initializers[i];
+        if (!decl) continue;
+        AST* type_specifier_node = decl->right;
+        AST* actual_type_def_node = type_specifier_node;
+        if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+            AST* resolved_node = lookupType(actual_type_def_node->token->value);
+            if (resolved_node) {
+                actual_type_def_node = resolved_node;
+            } else {
+                fprintf(stderr,
+                        "L%d: Compiler error: User-defined type '%s' not found.\n",
+                        getLine(actual_type_def_node),
+                        actual_type_def_node->token ? actual_type_def_node->token->value : "?");
+                compiler_had_error = true;
+                continue;
+            }
+        }
+        if (!actual_type_def_node) {
+            fprintf(stderr,
+                    "L%d: Compiler error: Could not determine type definition for a variable declaration.\n",
+                    getLine(decl));
+            compiler_had_error = true;
+            continue;
+        }
+        for (int j = 0; j < decl->child_count; j++) {
+            AST* varNameNode = decl->children[j];
+            if (!varNameNode || !varNameNode->token) continue;
+            emitGlobalInitializerForVar(decl, varNameNode, actual_type_def_node, chunk);
+        }
+    }
+    deferred_global_initializer_count = 0;
+    if (deferred_global_initializers) {
+        free(deferred_global_initializers);
+        deferred_global_initializers = NULL;
+        deferred_global_initializer_capacity = 0;
+    }
 }
 
 // Return an ordinal ranking for integer-like types so we can detect
@@ -1118,6 +1268,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
 static void compilePrintf(AST* node, BytecodeChunk* chunk, int line);
+static void queueDeferredGlobalInitializer(AST* var_decl);
+static void emitDeferredGlobalInitializers(BytecodeChunk* chunk);
+static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
+                                       AST* actual_type_def_node,
+                                       BytecodeChunk* chunk);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -2698,6 +2853,13 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     current_function_compiler = NULL;
     compiler_defined_myself_global = false;
     compiler_myself_global_name_idx = -1;
+    postpone_global_initializers = false;
+    if (deferred_global_initializers) {
+        free(deferred_global_initializers);
+        deferred_global_initializers = NULL;
+    }
+    deferred_global_initializer_count = 0;
+    deferred_global_initializer_capacity = 0;
 
     ensureMyselfGlobalDefined(outputChunk, rootNode ? getLine(rootNode) : 0);
 
@@ -2734,38 +2896,22 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             AST* declarations = (node->child_count > 0) ? node->children[0] : NULL;
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
             bool at_program_level = node->parent && node->parent->type == AST_PROGRAM;
-            AST** deferred_global_vars = NULL;
-            int deferred_global_count = 0;
-            int deferred_global_capacity = 0;
 
             if (declarations && declarations->type == AST_COMPOUND) {
-                // Pass 1: Compile type and constant declarations from the declaration block.
+                bool saved_postpone = postpone_global_initializers;
+                if (at_program_level) postpone_global_initializers = true;
+                // Pass 1: Compile type, constant, and variable declarations from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (!decl_child) continue;
-                    if (decl_child->type == AST_VAR_DECL) {
-                        if (at_program_level) {
-                            if (deferred_global_count == deferred_global_capacity) {
-                                int new_cap = deferred_global_capacity == 0 ? 4 : deferred_global_capacity * 2;
-                                AST** resized = realloc(deferred_global_vars, sizeof(AST*) * new_cap);
-                                if (!resized) {
-                                    fprintf(stderr, "Compiler error: Out of memory deferring global variables.\n");
-                                    compiler_had_error = true;
-                                    break;
-                                }
-                                deferred_global_vars = resized;
-                                deferred_global_capacity = new_cap;
-                            }
-                            deferred_global_vars[deferred_global_count++] = decl_child;
-                            continue;
-                        }
-                        compileNode(decl_child, chunk, getLine(decl_child));
-                    } else if (decl_child->type == AST_CONST_DECL || decl_child->type == AST_TYPE_DECL) {
+                    if (decl_child->type == AST_VAR_DECL ||
+                        decl_child->type == AST_CONST_DECL ||
+                        decl_child->type == AST_TYPE_DECL) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
+                if (at_program_level) postpone_global_initializers = saved_postpone;
                 if (compiler_had_error) {
-                    free(deferred_global_vars);
                     break;
                 }
                 // Pass 2: Compile routines from the declaration block.
@@ -2779,11 +2925,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
             if (at_program_level) {
                 emitVTables(chunk);
-                for (int i = 0; i < deferred_global_count; i++) {
-                    if (deferred_global_vars[i]) {
-                        compileNode(deferred_global_vars[i], chunk, getLine(deferred_global_vars[i]));
-                    }
-                }
+                emitDeferredGlobalInitializers(chunk);
                 for (int pg = 0; pg < pending_global_vtable_count; pg++) {
                     PendingGlobalVTableInit* p = &pending_global_vtables[pg];
                     int objNameIdx = addStringConstant(chunk, p->var_name);
@@ -2803,14 +2945,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 free(pending_global_vtables);
                 pending_global_vtables = NULL;
                 pending_global_vtable_count = 0;
-            } else {
-                for (int i = 0; i < deferred_global_count; i++) {
-                    if (deferred_global_vars[i]) {
-                        compileNode(deferred_global_vars[i], chunk, getLine(deferred_global_vars[i]));
-                    }
-                }
             }
-            free(deferred_global_vars);
 
             // Pass 3: Compile the main statement block.
             if (statements && statements->type == AST_COMPOUND) {
@@ -2853,6 +2988,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     fprintf(stderr, "L%d: Compiler error: Could not determine type definition for a variable declaration.\n", getLine(node));
                     compiler_had_error = true;
                     break;
+                }
+
+                bool defer_initializer = postpone_global_initializers && node->left;
+                if (defer_initializer) {
+                    queueDeferredGlobalInitializer(node);
+                    if (compiler_had_error) {
+                        break;
+                    }
                 }
 
                 // Now, handle based on the *actual* resolved type definition
@@ -2957,62 +3100,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         resolveGlobalVariableIndex(chunk, varNameNode->token->value, getLine(varNameNode));
 
                         // Handle optional initializer for global variables
-                        if (node->left) {
-                            if (node->var_type == TYPE_ARRAY && node->left->type == AST_ARRAY_LITERAL) {
-                                AST* array_type = actual_type_def_node;
-                                int dimension_count = array_type->child_count;
-                                if (dimension_count == 1) {
-                                    AST* sub = array_type->children[0];
-                                    Value low_v = evaluateCompileTimeValue(sub->left);
-                                    Value high_v = evaluateCompileTimeValue(sub->right);
-                                    int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
-                                    int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
-                                    freeValue(&low_v); freeValue(&high_v);
-                                    int lb[1] = { low };
-                                    int ub[1] = { high };
-                                    AST* elem_type_node = array_type->right;
-                                    VarType elem_type = elem_type_node->var_type;
-                                    Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-                                    int total = calculateArrayTotalSize(&arr_val);
-                                    for (int j = 0; j < total && j < node->left->child_count; j++) {
-                                        Value ev = evaluateCompileTimeValue(node->left->children[j]);
-                                        freeValue(&arr_val.array_val[j]);
-                                        arr_val.array_val[j] = makeCopyOfValue(&ev);
-                                        freeValue(&ev);
-                                    }
-                                    int constIdx = addConstantToChunk(chunk, &arr_val);
-                                    freeValue(&arr_val);
-                                    emitConstant(chunk, constIdx, getLine(node));
-                                } else {
-                                    compileRValue(node->left, chunk, getLine(node->left));
-                                }
-                            } else {
-                                bool prev_global_init = compiling_global_var_init;
-                                bool set_global_guard = (current_function_compiler == NULL &&
-                                                          node->left->type == AST_NEW);
-                                if (set_global_guard) compiling_global_var_init = true;
-                                compileRValue(node->left, chunk, getLine(node->left));
-                                if (set_global_guard) compiling_global_var_init = prev_global_init;
-                                if (set_global_guard && node->left->token && node->left->token->value) {
-                                    char* lower_cls = strdup(node->left->token->value);
-                                    toLowerString(lower_cls);
-                                    AST* clsType = lookupType(lower_cls);
-                                    if (recordTypeHasVTable(clsType)) {
-                                        pending_global_vtables = realloc(
-                                            pending_global_vtables,
-                                            sizeof(PendingGlobalVTableInit) *
-                                                (pending_global_vtable_count + 1));
-                                        pending_global_vtables[pending_global_vtable_count].var_name =
-                                            strdup(varNameNode->token->value);
-                                        pending_global_vtables[pending_global_vtable_count].class_name = lower_cls;
-                                        pending_global_vtable_count++;
-                                    } else {
-                                        free(lower_cls);
-                                    }
-                                }
-                            }
-                            int name_idx_set = addStringConstant(chunk, varNameNode->token->value);
-                            emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, name_idx_set, getLine(varNameNode));
+                        if (!defer_initializer && node->left) {
+                            emitGlobalInitializerForVar(node, varNameNode, actual_type_def_node, chunk);
                         }
                     }
                 }
