@@ -16,6 +16,7 @@ const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.20;
 const float MousePitchSensitivity = 0.15;
+const float DegreesToRadians = 0.017453292519943295;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 
@@ -407,8 +408,9 @@ class LandscapeDemo {
     if (backward) moveForward = moveForward - 1.0;
     if (moveForward != 0.0) {
       float speed = MoveSpeed * dt * moveForward;
-      float forwardX = sin(my.yaw);
-      float forwardZ = cos(my.yaw);
+      float yawRadians = my.yaw * DegreesToRadians;
+      float forwardX = sin(yawRadians);
+      float forwardZ = cos(yawRadians);
       float deltaX = forwardX * (speed / TileScale);
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
