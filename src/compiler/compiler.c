@@ -117,6 +117,8 @@ typedef struct {
 typedef struct FunctionCompilerState {
     CompilerLocal locals[MAX_GLOBALS]; // Re-use MAX_GLOBALS for max locals per function
     int local_count;
+    int max_local_count;
+    int max_slot_used;
     int scope_depth;
     const char* name;
     struct FunctionCompilerState* enclosing;
@@ -1125,6 +1127,8 @@ int compilerConstantCount = 0;
 
 static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->local_count = 0;
+    fc->max_local_count = 0;
+    fc->max_slot_used = 0;
     fc->scope_depth = 0;
     fc->name = NULL;
     fc->enclosing = NULL;
@@ -1255,6 +1259,12 @@ static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool
         return;
     }
     CompilerLocal* local = &fc->locals[fc->local_count++];
+    if (fc->local_count > fc->max_local_count) {
+        fc->max_local_count = fc->local_count;
+    }
+    if (fc->local_count > fc->max_slot_used) {
+        fc->max_slot_used = fc->local_count;
+    }
     local->name = strdup(name);
     local->depth = fc->scope_depth;
     local->is_ref = is_ref;
@@ -1270,6 +1280,51 @@ static int resolveLocal(FunctionCompilerState* fc, const char* name) {
         }
     }
     return -1;
+}
+
+static void noteLocalSlotUse(FunctionCompilerState* fc, int slot) {
+    if (!fc || slot < 0) return;
+    int needed = slot + 1;
+    if (needed > fc->max_slot_used) {
+        fc->max_slot_used = needed;
+    }
+}
+
+static void updateMaxSlotFromBytecode(FunctionCompilerState* fc, BytecodeChunk* chunk,
+                                      int start_offset, int end_offset) {
+    if (!fc || !chunk) return;
+    int offset = start_offset;
+    while (offset < end_offset) {
+        uint8_t opcode = chunk->code[offset];
+        int slot = -1;
+        switch (opcode) {
+            case GET_LOCAL:
+            case SET_LOCAL:
+            case GET_LOCAL_ADDRESS:
+            case INC_LOCAL:
+            case DEC_LOCAL:
+            case INIT_LOCAL_ARRAY:
+            case INIT_LOCAL_FILE:
+            case INIT_LOCAL_POINTER:
+            case INIT_LOCAL_STRING:
+                if (offset + 1 < end_offset) {
+                    slot = chunk->code[offset + 1];
+                }
+                break;
+            default:
+                break;
+        }
+        if (slot >= 0) {
+            if (slot + 1 > fc->max_slot_used) {
+                fc->max_slot_used = slot + 1;
+            }
+        }
+        int instr_len = getInstructionLength(chunk, offset);
+        if (instr_len <= 0) {
+            instr_len = 1;
+        }
+        offset += instr_len;
+    }
 }
 
 static int addUpvalue(FunctionCompilerState* fc, uint8_t index, bool isLocal, bool is_ref) {
@@ -2005,9 +2060,11 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (local_slot != -1) {
                 // For by-ref locals, the slot holds an address already.
                 if (is_ref) {
+                    noteLocalSlotUse(current_function_compiler, local_slot);
                     writeBytecodeChunk(chunk, GET_LOCAL, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 } else {
+                    noteLocalSlotUse(current_function_compiler, local_slot);
                     writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
                     writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 }
@@ -2216,6 +2273,7 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
             if (current_function_compiler->locals[local_slot].is_ref) {
                 return false;
             }
+            noteLocalSlotUse(current_function_compiler, local_slot);
             writeBytecodeChunk(chunk, SET_LOCAL, line);
             writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
             return true;
@@ -2937,6 +2995,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             break;
                         }
 
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_ARRAY, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)dimension_count, getLine(varNameNode));
@@ -2992,13 +3051,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             }
                             freeValue(&len_val);
                         }
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_STRING, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)len, getLine(varNameNode));
                     } else if (node->var_type == TYPE_FILE) {
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     } else if (node->var_type == TYPE_POINTER) {
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
 
@@ -3054,6 +3116,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         } else {
                             compileRValue(node->left, chunk, getLine(node->left));
                         }
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     }
@@ -3205,6 +3268,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     current_function_compiler = &fc;
 
     FunctionCompilerState* outer_fc = fc.enclosing;
+    const char* func_name = func_decl_node->token->value;
     int jump_over_body_operand_offset = -1;
     if (outer_fc != NULL) {
         writeBytecodeChunk(chunk, JUMP, line);
@@ -3213,7 +3277,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
 
     // --- FIX: Declare all variables at the top of the function ---
-    const char* func_name = func_decl_node->token->value;
     int return_value_slot = -1;
     Symbol* proc_symbol = NULL;
     char name_for_lookup[MAX_SYMBOL_LENGTH * 2 + 2];
@@ -3344,11 +3407,73 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
     current_procedure_table = saved_table;
 
+    updateMaxSlotFromBytecode(&fc, chunk, func_bytecode_start_address, chunk->count);
+
+    int func_code_start = func_bytecode_start_address;
+    int func_code_end = chunk->count;
+    int func_code_len = func_code_end - func_code_start;
+    if (func_code_len > 0) {
+        bool* valid_offsets = (bool*)calloc((size_t)func_code_len, sizeof(bool));
+        if (valid_offsets) {
+            int scan_offset = func_code_start;
+            while (scan_offset < func_code_end) {
+                valid_offsets[scan_offset - func_code_start] = true;
+                int instr_len = getInstructionLength(chunk, scan_offset);
+                if (instr_len <= 0) instr_len = 1;
+                scan_offset += instr_len;
+            }
+
+            scan_offset = func_code_start;
+            while (scan_offset < func_code_end) {
+                uint8_t opcode = chunk->code[scan_offset];
+                int instr_len = getInstructionLength(chunk, scan_offset);
+                if (instr_len <= 0) instr_len = 1;
+                bool is_jump = (opcode == JUMP || opcode == JUMP_IF_FALSE);
+                if (is_jump && scan_offset + instr_len <= func_code_end) {
+                    int operand_idx = scan_offset + 1;
+                    int16_t rel = (int16_t)((chunk->code[operand_idx] << 8) | chunk->code[operand_idx + 1]);
+                    int instr_end = scan_offset + instr_len;
+                    int dest = instr_end + rel;
+                    if (dest >= func_code_start && dest < func_code_end) {
+                        if (!valid_offsets[dest - func_code_start]) {
+                            int adjusted = dest;
+                            while (adjusted > func_code_start && !valid_offsets[adjusted - func_code_start]) {
+                                adjusted--;
+                            }
+                            if (!valid_offsets[adjusted - func_code_start]) {
+                                adjusted = dest;
+                                while (adjusted < func_code_end && !valid_offsets[adjusted - func_code_start]) {
+                                    adjusted++;
+                                }
+                            }
+                            if (valid_offsets[adjusted - func_code_start]) {
+                                int16_t new_rel = (int16_t)(adjusted - instr_end);
+                                patchShort(chunk, operand_idx, (uint16_t)new_rel);
+                            }
+                        }
+                    }
+                }
+                scan_offset += instr_len;
+            }
+
+            free(valid_offsets);
+        }
+    }
+
     // Update locals_count in case new locals were declared during body compilation.
-    proc_symbol->locals_count = fc.local_count - proc_symbol->arity;
+    int max_slots = fc.max_local_count;
+    if (fc.max_slot_used > max_slots) {
+        max_slots = fc.max_slot_used;
+    }
+    int effective_locals = max_slots - proc_symbol->arity;
+    if (effective_locals < 0) {
+        effective_locals = 0;
+    }
+    proc_symbol->locals_count = (uint16_t)effective_locals;
 
     // Step 5: Emit the return instruction.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
+        noteLocalSlotUse(&fc, return_value_slot);
         writeBytecodeChunk(chunk, GET_LOCAL, line);
         writeBytecodeChunk(chunk, (uint8_t)return_value_slot, line);
     }
@@ -3421,6 +3546,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             } else {
                 compileRValue(arg_node, chunk, getLine(arg_node));
             }
+            noteLocalSlotUse(current_function_compiler, slot);
             writeBytecodeChunk(chunk, SET_LOCAL, line);
             writeBytecodeChunk(chunk, (uint8_t)slot, line);
         }
@@ -3443,6 +3569,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
 
     if (push_result && decl->type == AST_FUNCTION_DECL) {
         if (result_slot != -1) {
+            noteLocalSlotUse(current_function_compiler, result_slot);
             writeBytecodeChunk(chunk, GET_LOCAL, line);
             writeBytecodeChunk(chunk, (uint8_t)result_slot, line);
         } else {
@@ -3881,6 +4008,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {
+                        noteLocalSlotUse(current_function_compiler, return_slot);
                         writeBytecodeChunk(chunk, SET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
                         // The POP instruction that was here has been removed.
@@ -3932,6 +4060,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // 1. Initial assignment of the loop variable
             compileRValue(start_node, chunk, getLine(start_node));
             if (var_slot != -1) {
+                noteLocalSlotUse(current_function_compiler, var_slot);
                 writeBytecodeChunk(chunk, SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
@@ -3946,6 +4075,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             // 3. The loop condition check
             if (var_slot != -1) {
+                noteLocalSlotUse(current_function_compiler, var_slot);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
@@ -3969,6 +4099,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             loop_stack[loop_depth].continue_target = chunk->count;
             patchContinuesTo(chunk, chunk->count);
             if (var_slot != -1) {
+                noteLocalSlotUse(current_function_compiler, var_slot);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
@@ -3980,6 +4111,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, is_downto ? SUBTRACT : ADD, line);
 
             if (var_slot != -1) {
+                noteLocalSlotUse(current_function_compiler, var_slot);
                 writeBytecodeChunk(chunk, SET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
             } else {
@@ -4421,6 +4553,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     }
                     if (slot != -1) {
+                        noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, GET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)slot, line);
                     }
@@ -4795,6 +4928,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             
             if (local_slot != -1) {
                 DBG_PRINTF("[dbg] RV %s -> local[%d] line=%d\n", varName, local_slot, line);
+                noteLocalSlotUse(current_function_compiler, local_slot);
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
                 writeBytecodeChunk(chunk, (uint8_t)local_slot, line);
                 if (is_ref && node->var_type != TYPE_ARRAY) {
@@ -4941,6 +5075,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {
+                        noteLocalSlotUse(current_function_compiler, return_slot);
                         writeBytecodeChunk(chunk, SET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)return_slot, line);
                     } else {
