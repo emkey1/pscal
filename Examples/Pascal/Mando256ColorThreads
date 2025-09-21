@@ -1,0 +1,183 @@
+#!/usr/bin/env pascal
+PROGRAM Mandelbrot256ColorThreads;
+
+USES Crt;
+
+CONST
+  MaxIter         = 80;
+  EscapeRadiusSq  = 4.0;
+  MinX            = -2.0;
+  MaxX            = 1.0;
+  MinY            = -1.0;
+  MaxY            = 1.0;
+  InsideColorIndex = 16;
+  PaletteSize     = 239;
+  ThreadCount     = 4;
+  MaxBufferCols   = 1024;
+  MaxBufferRows   = 768;
+
+TYPE
+  TRowRange = record
+    StartRow: Integer;
+    EndRow: Integer;
+  end;
+  PRowRange = ^TRowRange;
+
+VAR
+  Width, Height : Integer;
+  ScaleX, ScaleY: Real;
+  DrawChar      : Char;
+  ColorBuffer   : array[1..MaxBufferRows, 1..MaxBufferCols] of Byte;
+  ThreadRanges  : array[0..ThreadCount - 1] of TRowRange;
+  ThreadHandles : array[0..ThreadCount - 1] of Integer;
+
+PROCEDURE ComputeRows(rangePtr: PRowRange);
+VAR
+  Row, Col      : Integer;
+  cx, cy        : Real;
+  zx, zy        : Real;
+  xTemp         : Real;
+  iter          : Integer;
+  ColorIndex    : Byte;
+  startRow, endRow: Integer;
+BEGIN
+  IF rangePtr = NIL THEN
+    EXIT;
+
+  startRow := rangePtr^.StartRow;
+  endRow := rangePtr^.EndRow;
+
+  IF (startRow <= 0) OR (endRow <= 0) OR (endRow < startRow) THEN
+    EXIT;
+
+  FOR Row := startRow TO endRow DO
+  BEGIN
+    cy := MinY + Row * ScaleY;
+    FOR Col := 1 TO Width DO
+    BEGIN
+      cx := MinX + Col * ScaleX;
+      zx := 0.0;
+      zy := 0.0;
+      iter := 0;
+
+      WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+      BEGIN
+        xTemp := zx*zx - zy*zy + cx;
+        zy := 2.0 * zx * zy + cy;
+        zx := xTemp;
+        iter := iter + 1;
+      END;
+
+      IF iter = MaxIter THEN
+        ColorIndex := InsideColorIndex
+      ELSE
+        ColorIndex := Byte(16 + (iter MOD PaletteSize));
+
+      ColorBuffer[Row, Col] := ColorIndex;
+    END;
+  END;
+END;
+
+PROCEDURE SpawnThreads;
+VAR
+  i, rowsPerThread, extraRows, startRow, endRow: Integer;
+  handle: Integer;
+BEGIN
+  rowsPerThread := Height DIV ThreadCount;
+  extraRows := Height MOD ThreadCount;
+  startRow := 1;
+
+  FOR i := 0 TO ThreadCount - 1 DO
+  BEGIN
+    ThreadHandles[i] := -1;
+    IF startRow > Height THEN
+    BEGIN
+      ThreadRanges[i].StartRow := 0;
+      ThreadRanges[i].EndRow := -1;
+    END
+    ELSE
+    BEGIN
+      endRow := startRow + rowsPerThread - 1;
+      IF extraRows > 0 THEN
+      BEGIN
+        endRow := endRow + 1;
+        extraRows := extraRows - 1;
+      END;
+      IF endRow > Height THEN
+        endRow := Height;
+      ThreadRanges[i].StartRow := startRow;
+      ThreadRanges[i].EndRow := endRow;
+      startRow := endRow + 1;
+
+      handle := CreateThread(@ComputeRows, @ThreadRanges[i]);
+      IF handle >= 0 THEN
+        ThreadHandles[i] := handle
+      ELSE
+        ComputeRows(@ThreadRanges[i]);
+    END;
+  END;
+END;
+
+PROCEDURE JoinThreads;
+VAR
+  i: Integer;
+BEGIN
+  FOR i := 0 TO ThreadCount - 1 DO
+    IF ThreadHandles[i] >= 0 THEN
+      WaitForThread(ThreadHandles[i]);
+END;
+
+PROCEDURE DisplayBuffer;
+VAR
+  Row, Col: Integer;
+BEGIN
+  FOR Row := 1 TO Height DO
+  BEGIN
+    GotoXY(1, Row);
+    FOR Col := 1 TO Width DO
+    BEGIN
+      TextColorE(ColorBuffer[Row, Col]);
+      Write(DrawChar);
+    END;
+  END;
+END;
+
+BEGIN
+  Width := ScreenCols;
+  Height := ScreenRows;
+
+  IF ThreadCount <= 0 THEN
+  BEGIN
+    WriteLn('ThreadCount must be positive.');
+    Write('Press any key to exit.');
+    ReadKey;
+    EXIT;
+  END;
+
+  IF (Width > MaxBufferCols) OR (Height > MaxBufferRows) THEN
+  BEGIN
+    WriteLn('Screen size ', Width, 'x', Height, ' exceeds supported buffer dimensions of ', MaxBufferCols, 'x', MaxBufferRows, '.');
+    WriteLn('Please reduce the terminal size and rerun the program.');
+    Write('Press any key to exit.');
+    ReadKey;
+    EXIT;
+  END;
+
+  WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with 256 colors using ', ThreadCount, ' threads...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+  DrawChar := '#';
+
+  SpawnThreads;
+  JoinThreads;
+
+  DisplayBuffer;
+
+  NormVideo;
+  TextColor(LightGray);
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+END.

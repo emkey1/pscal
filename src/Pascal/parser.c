@@ -2998,21 +2998,27 @@ AST *factor(Parser *parser) {
         // Flow continues to end.
 
     } else if (initialTokenType == TOKEN_AT) {
-        // Address-of operator: @Identifier
+        // Address-of operator: @Identifier, @Array[Index], etc.
         Token* atTok = copyToken(initialToken);
         eat(parser, TOKEN_AT);
-        if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
-            errorParser(parser, "Expected identifier after '@'");
+
+        AST* target = NULL;
+        if (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+            target = lvalue(parser);
+        } else {
+            errorParser(parser, "Expected addressable expression after '@'");
             if (atTok) freeToken(atTok);
             return newASTNode(AST_NOOP, NULL);
         }
-        // Create a VARIABLE node for the identifier
-        AST* idNode = newASTNode(AST_VARIABLE, parser->current_token);
-        eat(parser, TOKEN_IDENTIFIER);
-        // Create an ADDR_OF node and attach identifier as left child
+
+        if (!target || target->type == AST_NOOP) {
+            if (atTok) freeToken(atTok);
+            return target ? target : newASTNode(AST_NOOP, NULL);
+        }
+
         AST* addrNode = newASTNode(AST_ADDR_OF, atTok);
         if (atTok) freeToken(atTok);
-        setLeft(addrNode, idNode);
+        setLeft(addrNode, target);
         // Type will be annotated later (typically TYPE_POINTER)
         return addrNode;
 
