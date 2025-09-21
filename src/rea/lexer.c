@@ -103,6 +103,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int", 3) == 0) return REA_TOKEN_INT;
             if (strncmp(start, "str", 3) == 0) return REA_TOKEN_STR;
             if (strncmp(start, "new", 3) == 0) return REA_TOKEN_NEW;
+            if (strncmp(start, "nil", 3) == 0) return REA_TOKEN_NIL;
             if (strncmp(start, "xor", 3) == 0) return REA_TOKEN_XOR;
             break;
         case 4:
@@ -364,6 +365,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_RETURN: return "RETURN";
         case REA_TOKEN_TRUE: return "TRUE";
         case REA_TOKEN_FALSE: return "FALSE";
+        case REA_TOKEN_NIL: return "NIL";
         case REA_TOKEN_CONST: return "CONST";
         case REA_TOKEN_IMPORT: return "IMPORT";
         case REA_TOKEN_SPAWN: return "SPAWN";

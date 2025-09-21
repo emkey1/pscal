@@ -727,6 +727,13 @@ static AST *parseFactor(ReaParser *p) {
         node->i_val = (tt == TOKEN_TRUE) ? 1 : 0;
         reaAdvance(p);
         return node;
+    } else if (p->current.type == REA_TOKEN_NIL) {
+        Token *tok = newToken(TOKEN_NIL, "nil", p->current.line, 0);
+        AST *node = newASTNode(AST_NIL, tok);
+        setTypeAST(node, TYPE_NIL);
+        freeToken(tok);
+        reaAdvance(p);
+        return node;
     } else if (p->current.type == REA_TOKEN_IDENTIFIER || p->current.type == REA_TOKEN_MYSELF) {
         size_t alloc_len = p->current.length;
         if (p->current.type == REA_TOKEN_MYSELF && alloc_len < 7) {
