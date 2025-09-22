@@ -111,4 +111,5 @@ cd Tests; ./run_all_tests
 * Tests/: Regression suite
 
 ## License
-Pscal is released under The Unlicense.
+Pscal is released under the MIT License. PSCAL releases prior to 2.22 were distributed
+under the Unlicense.
