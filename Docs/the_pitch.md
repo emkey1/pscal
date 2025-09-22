@@ -64,7 +64,6 @@ Here is the **JSON dump of the AST** for this example program:
     "type": "IDENTIFIER",
     "value": "int"
   },
-  "var_type_annotated": "UNKNOWN_VAR_TYPE",
   "children": [
     {
       "node_type": "FUNCTION_DECL",
@@ -72,7 +71,7 @@ Here is the **JSON dump of the AST** for this example program:
         "type": "IDENTIFIER",
         "value": "main"
       },
-      "var_type_annotated": "UNKNOWN_VAR_TYPE",
+      "var_type_annotated": "INTEGER",
       "right": 
         {
           "node_type": "COMPOUND",
@@ -80,7 +79,6 @@ Here is the **JSON dump of the AST** for this example program:
             "type": "IDENTIFIER",
             "value": "int"
           },
-          "var_type_annotated": "UNKNOWN_VAR_TYPE",
           "children": [
             {
               "node_type": "VAR_DECL",
@@ -88,7 +86,7 @@ Here is the **JSON dump of the AST** for this example program:
                 "type": "IDENTIFIER",
                 "value": "a"
               },
-              "var_type_annotated": "UNKNOWN_VAR_TYPE",
+              "var_type_annotated": "INTEGER",
               "left": 
                 {
                   "node_type": "NUMBER",
@@ -96,7 +94,7 @@ Here is the **JSON dump of the AST** for this example program:
                     "type": "INTEGER_CONST",
                     "value": "5"
                   },
-                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                  "var_type_annotated": "INTEGER"
                 },
               "right": 
                 {
@@ -105,7 +103,7 @@ Here is the **JSON dump of the AST** for this example program:
                     "type": "IDENTIFIER",
                     "value": "int"
                   },
-                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                  "var_type_annotated": "INTEGER"
                 }
             },
             {
@@ -114,7 +112,6 @@ Here is the **JSON dump of the AST** for this example program:
                 "type": "IDENTIFIER",
                 "value": "exit"
               },
-              "var_type_annotated": "UNKNOWN_VAR_TYPE",
               "left": 
                 {
                   "node_type": "PROCEDURE_CALL",
@@ -122,7 +119,6 @@ Here is the **JSON dump of the AST** for this example program:
                     "type": "IDENTIFIER",
                     "value": "printf"
                   },
-                  "var_type_annotated": "UNKNOWN_VAR_TYPE",
                   "children": [
                     {
                       "node_type": "STRING",
@@ -130,15 +126,14 @@ Here is the **JSON dump of the AST** for this example program:
                         "type": "STRING_CONST",
                         "value": "a = %d\\n"
                       },
-                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                      "var_type_annotated": "STRING"
                     },
                     {
                       "node_type": "VARIABLE",
                       "token": {
                         "type": "IDENTIFIER",
                         "value": "a"
-                      },
-                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                      }
                     }
                   ]
                 }
@@ -149,7 +144,6 @@ Here is the **JSON dump of the AST** for this example program:
                 "type": "RBRACKET",
                 "value": "}"
               },
-              "var_type_annotated": "UNKNOWN_VAR_TYPE",
               "left": 
                 {
                   "node_type": "PROCEDURE_CALL",
@@ -157,7 +151,6 @@ Here is the **JSON dump of the AST** for this example program:
                     "type": "IDENTIFIER",
                     "value": "exit"
                   },
-                  "var_type_annotated": "UNKNOWN_VAR_TYPE",
                   "children": [
                     {
                       "node_type": "NUMBER",
@@ -165,7 +158,7 @@ Here is the **JSON dump of the AST** for this example program:
                         "type": "INTEGER_CONST",
                         "value": "0"
                       },
-                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                      "var_type_annotated": "INTEGER"
                     }
                   ]
                 }
@@ -174,6 +167,7 @@ Here is the **JSON dump of the AST** for this example program:
         }
     }
   ]
+}
 
 --- AST JSON Dump Complete (stderr print)---
 }
@@ -239,5 +233,4 @@ message.md
 8 KB
 
 ---
-
 
