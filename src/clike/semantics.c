@@ -243,6 +243,21 @@ static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("mstreambuffer");
     functions[functionCount].type = TYPE_STRING;
     functionCount++;
+    functions[functionCount].name = strdup("hasextbuiltin");
+    functions[functionCount].type = TYPE_INT32;
+    functionCount++;
+    functions[functionCount].name = strdup("extbuiltincategorycount");
+    functions[functionCount].type = TYPE_INT32;
+    functionCount++;
+    functions[functionCount].name = strdup("extbuiltincategoryname");
+    functions[functionCount].type = TYPE_STRING;
+    functionCount++;
+    functions[functionCount].name = strdup("extbuiltinfunctioncount");
+    functions[functionCount].type = TYPE_INT32;
+    functionCount++;
+    functions[functionCount].name = strdup("extbuiltinfunctionname");
+    functions[functionCount].type = TYPE_STRING;
+    functionCount++;
 }
 
 static VarType getFunctionType(const char *name) {

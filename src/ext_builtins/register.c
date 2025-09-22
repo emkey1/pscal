@@ -4,11 +4,14 @@ void registerMathBuiltins(void);
 void registerStringBuiltins(void);
 void registerSystemBuiltins(void);
 void registerUserBuiltins(void);
+
 void registerYyjsonBuiltins(void);
 void registerHasExtBuiltin(void);
 
+void registerExtBuiltinQueryBuiltins(void);
+
 void registerExtendedBuiltins(void) {
-  registerHasExtBuiltin();
+  registerExtBuiltinQueryBuiltins();
 #ifdef ENABLE_EXT_BUILTIN_MATH
   registerMathBuiltins();
 #endif

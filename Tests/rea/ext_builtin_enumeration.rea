@@ -1,0 +1,42 @@
+int main() {
+  int categoryCount = extbuiltincategorycount();
+  bool ok = true;
+  bool foundSystem = false;
+  bool foundGetPid = false;
+  int i = 0;
+  while (i < categoryCount) {
+    str name = extbuiltincategoryname(i);
+    if (name == "") {
+      ok = false;
+    }
+    int fnCount = extbuiltinfunctioncount(name);
+    int j = 0;
+    while (j < fnCount) {
+      str fnName = extbuiltinfunctionname(name, j);
+      if (fnName == "") {
+        ok = false;
+      }
+      if (name == "system" && fnName == "GetPid") {
+        foundGetPid = true;
+      }
+      j = j + 1;
+    }
+    if (name == "system") {
+      foundSystem = true;
+    }
+    i = i + 1;
+  }
+  if (hasextbuiltin("system", "GetPid")) {
+    if (!(foundSystem && foundGetPid)) {
+      ok = false;
+    }
+  }
+  if (ok) {
+    writeln("ok");
+    return 0;
+  }
+  writeln("fail");
+  return 1;
+}
+
+main();

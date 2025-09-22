@@ -12,6 +12,7 @@ set(PSCAL_EXT_BUILTIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/register.c
     ${CMAKE_CURRENT_SOURCE_DIR}/registry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/query_builtin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/dump.c
 )
 
 # Conditionally add builtin categories

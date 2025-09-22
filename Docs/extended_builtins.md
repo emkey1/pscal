@@ -35,6 +35,64 @@ the following CMake options (all default to `ON`):
 
 The `yyjson` category wraps the bundled [yyjson](https://github.com/ibireme/yyjson) library and exposes helpers for parsing documents, walking objects and arrays, and converting primitive values. Each routine operates on integer handles returned by `YyjsonRead` or the various query helpers; release value handles with `YyjsonFreeValue` and dispose of documents with `YyjsonDocFree` when they are no longer needed.
 
+## Discovering available categories at runtime
+
+Programs can introspect the VM to see which extended built-in categories are
+available and which routines each one provides.  All three front ends expose
+the following helpers:
+
+- `ExtBuiltinCategoryCount()` returns the number of registered categories.
+- `ExtBuiltinCategoryName(index)` returns the name for a zero-based category
+  index.
+- `ExtBuiltinFunctionCount(category)` reports how many functions belong to a
+  category.
+- `ExtBuiltinFunctionName(category, index)` returns the name for a zero-based
+  function index within the given category.
+- `HasExtBuiltin(category, function)` checks for a specific routine.
+
+Pascal uses the Pascal-cased names shown above.  The C-like and Rea front ends
+expose the same helpers with lowercase identifiers (for example,
+`extbuiltincategorycount()`).
+
+Example Pascal snippet that lists the available routines when the category is
+present:
+
+```pascal
+var
+  i, j: integer;
+  cat, fn: string;
+begin
+  for i := 0 to ExtBuiltinCategoryCount() - 1 do
+  begin
+    cat := ExtBuiltinCategoryName(i);
+    writeln('Category: ', cat);
+    for j := 0 to ExtBuiltinFunctionCount(cat) - 1 do
+    begin
+      fn := ExtBuiltinFunctionName(cat, j);
+      writeln('  ', fn);
+    end;
+  end;
+end;
+```
+
+### Command-line discovery
+
+When you need to inspect the VM without writing a program, each front end
+accepts `--dump-ext-builtins` to emit the same inventory. The output uses a
+line-oriented format that is easy for regression harnesses to parse:
+
+```
+$ pascal --dump-ext-builtins
+category system
+function system FileExists
+function system GetPid
+```
+
+The `clike` and `rea` binaries expose the identical option and format, making
+it straightforward to tailor front-end-specific test suites based on the
+compiled VM's capabilities.
+
+
 ## Threading considerations
 
 Extended built-ins execute inside the VM and may be called from multiple
