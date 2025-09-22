@@ -18,25 +18,25 @@ typedef struct {
     JsonHandleKind kind;
     yyjson_doc *doc;
     yyjson_val *val;
+    size_t refcount;
+    int doc_handle;
 } JsonHandleEntry;
 
 static JsonHandleEntry *jsonHandleTable = NULL;
 static size_t jsonHandleCapacity = 0;
 static pthread_mutex_t jsonHandleMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t jsonHandleCond = PTHREAD_COND_INITIALIZER;
 
 static void jsonResetEntry(JsonHandleEntry *entry) {
     if (!entry) return;
     entry->kind = JSON_HANDLE_UNUSED;
     entry->doc = NULL;
     entry->val = NULL;
+    entry->refcount = 0;
+    entry->doc_handle = YYJSON_UNUSED_HANDLE;
 }
 
-static int jsonAllocHandle(JsonHandleKind kind, yyjson_doc *doc, yyjson_val *val) {
-    if ((kind == JSON_HANDLE_DOC && !doc) || (kind == JSON_HANDLE_VAL && (!doc || !val))) {
-        return YYJSON_UNUSED_HANDLE;
-    }
-
-    pthread_mutex_lock(&jsonHandleMutex);
+static size_t jsonFindFreeSlotLocked(void) {
     size_t slot = jsonHandleCapacity;
     for (size_t i = 0; i < jsonHandleCapacity; ++i) {
         if (jsonHandleTable[i].kind == JSON_HANDLE_UNUSED) {
@@ -44,62 +44,190 @@ static int jsonAllocHandle(JsonHandleKind kind, yyjson_doc *doc, yyjson_val *val
             break;
         }
     }
-
     if (slot == jsonHandleCapacity) {
         size_t new_capacity = jsonHandleCapacity ? jsonHandleCapacity * 2 : 16;
         JsonHandleEntry *new_table = realloc(jsonHandleTable, sizeof(JsonHandleEntry) * new_capacity);
         if (!new_table) {
-            pthread_mutex_unlock(&jsonHandleMutex);
-            return YYJSON_UNUSED_HANDLE;
+            return (size_t)-1;
         }
         for (size_t i = jsonHandleCapacity; i < new_capacity; ++i) {
-            new_table[i].kind = JSON_HANDLE_UNUSED;
-            new_table[i].doc = NULL;
-            new_table[i].val = NULL;
+            jsonResetEntry(&new_table[i]);
         }
         jsonHandleTable = new_table;
         slot = jsonHandleCapacity;
         jsonHandleCapacity = new_capacity;
     }
+    return slot;
+}
 
-    jsonHandleTable[slot].kind = kind;
-    jsonHandleTable[slot].doc = doc;
-    jsonHandleTable[slot].val = (kind == JSON_HANDLE_VAL) ? val : NULL;
+static int jsonAllocDocHandle(yyjson_doc *doc) {
+    if (!doc) {
+        return YYJSON_UNUSED_HANDLE;
+    }
+
+    pthread_mutex_lock(&jsonHandleMutex);
+    size_t slot = jsonFindFreeSlotLocked();
+    if (slot == (size_t)-1) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return YYJSON_UNUSED_HANDLE;
+    }
+
+    JsonHandleEntry *entry = &jsonHandleTable[slot];
+    entry->kind = JSON_HANDLE_DOC;
+    entry->doc = doc;
+    entry->val = NULL;
+    entry->refcount = 0;
+    entry->doc_handle = YYJSON_UNUSED_HANDLE;
 
     pthread_mutex_unlock(&jsonHandleMutex);
     return (int)slot;
 }
 
-static yyjson_doc *jsonLookupDoc(int handle) {
-    if (handle < 0) return NULL;
-    pthread_mutex_lock(&jsonHandleMutex);
-    yyjson_doc *doc = NULL;
-    size_t idx = (size_t)handle;
-    if (idx < jsonHandleCapacity) {
-        JsonHandleEntry entry = jsonHandleTable[idx];
-        if (entry.kind == JSON_HANDLE_DOC) {
-            doc = entry.doc;
+static size_t jsonFindDocIndexLocked(yyjson_doc *doc) {
+    for (size_t i = 0; i < jsonHandleCapacity; ++i) {
+        JsonHandleEntry *entry = &jsonHandleTable[i];
+        if (entry->kind == JSON_HANDLE_DOC && entry->doc == doc) {
+            return i;
         }
     }
-    pthread_mutex_unlock(&jsonHandleMutex);
-    return doc;
+    return (size_t)-1;
 }
 
-static bool jsonLookupValue(int handle, yyjson_doc **out_doc, yyjson_val **out_val) {
-    if (handle < 0 || !out_doc || !out_val) return false;
+static int jsonAllocValueHandle(yyjson_doc *doc, yyjson_val *val) {
+    if (!doc || !val) {
+        return YYJSON_UNUSED_HANDLE;
+    }
+
     pthread_mutex_lock(&jsonHandleMutex);
-    bool ok = false;
+    size_t doc_index = jsonFindDocIndexLocked(doc);
+    if (doc_index == (size_t)-1) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return YYJSON_UNUSED_HANDLE;
+    }
+
+    JsonHandleEntry *doc_entry = &jsonHandleTable[doc_index];
+    if (doc_entry->doc == NULL) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return YYJSON_UNUSED_HANDLE;
+    }
+
+    size_t slot = jsonFindFreeSlotLocked();
+    if (slot == (size_t)-1) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return YYJSON_UNUSED_HANDLE;
+    }
+
+    JsonHandleEntry *entry = &jsonHandleTable[slot];
+    entry->kind = JSON_HANDLE_VAL;
+    entry->doc = doc;
+    entry->val = val;
+    entry->refcount = 0;
+    entry->doc_handle = (int)doc_index;
+
+    pthread_mutex_unlock(&jsonHandleMutex);
+    return (int)slot;
+}
+
+static bool jsonAcquireDoc(int handle, yyjson_doc **out_doc) {
+    if (handle < 0 || !out_doc) {
+        return false;
+    }
+
+    pthread_mutex_lock(&jsonHandleMutex);
     size_t idx = (size_t)handle;
+    bool ok = false;
     if (idx < jsonHandleCapacity) {
-        JsonHandleEntry entry = jsonHandleTable[idx];
-        if (entry.kind == JSON_HANDLE_VAL && entry.doc && entry.val) {
-            *out_doc = entry.doc;
-            *out_val = entry.val;
+        JsonHandleEntry *entry = &jsonHandleTable[idx];
+        if (entry->kind == JSON_HANDLE_DOC && entry->doc) {
+            entry->refcount++;
+            *out_doc = entry->doc;
             ok = true;
         }
     }
+    if (!ok) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return false;
+    }
     pthread_mutex_unlock(&jsonHandleMutex);
-    return ok;
+    return true;
+}
+
+static void jsonReleaseDoc(int handle) {
+    if (handle < 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&jsonHandleMutex);
+    size_t idx = (size_t)handle;
+    if (idx < jsonHandleCapacity) {
+        JsonHandleEntry *entry = &jsonHandleTable[idx];
+        if (entry->kind == JSON_HANDLE_DOC && entry->refcount > 0) {
+            entry->refcount--;
+            pthread_cond_broadcast(&jsonHandleCond);
+        }
+    }
+    pthread_mutex_unlock(&jsonHandleMutex);
+}
+
+static bool jsonAcquireValue(int handle, yyjson_doc **out_doc, yyjson_val **out_val, int *out_doc_handle) {
+    if (handle < 0 || !out_doc || !out_val) {
+        return false;
+    }
+
+    pthread_mutex_lock(&jsonHandleMutex);
+    size_t idx = (size_t)handle;
+    bool ok = false;
+    if (idx < jsonHandleCapacity) {
+        JsonHandleEntry *entry = &jsonHandleTable[idx];
+        if (entry->kind == JSON_HANDLE_VAL && entry->doc && entry->val) {
+            int doc_handle = entry->doc_handle;
+            if (doc_handle >= 0 && (size_t)doc_handle < jsonHandleCapacity) {
+                JsonHandleEntry *doc_entry = &jsonHandleTable[doc_handle];
+                if (doc_entry->kind == JSON_HANDLE_DOC && doc_entry->doc == entry->doc) {
+                    if (doc_entry->doc) {
+                        entry->refcount++;
+                        doc_entry->refcount++;
+                        *out_doc = entry->doc;
+                        *out_val = entry->val;
+                        if (out_doc_handle) {
+                            *out_doc_handle = doc_handle;
+                        }
+                        ok = true;
+                    }
+                }
+            }
+        }
+    }
+    if (!ok) {
+        pthread_mutex_unlock(&jsonHandleMutex);
+        return false;
+    }
+    pthread_mutex_unlock(&jsonHandleMutex);
+    return true;
+}
+
+static void jsonReleaseValue(int handle) {
+    if (handle < 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&jsonHandleMutex);
+    size_t idx = (size_t)handle;
+    if (idx < jsonHandleCapacity) {
+        JsonHandleEntry *entry = &jsonHandleTable[idx];
+        if (entry->kind == JSON_HANDLE_VAL && entry->refcount > 0) {
+            entry->refcount--;
+            int doc_handle = entry->doc_handle;
+            if (doc_handle >= 0 && (size_t)doc_handle < jsonHandleCapacity) {
+                JsonHandleEntry *doc_entry = &jsonHandleTable[doc_handle];
+                if (doc_entry->kind == JSON_HANDLE_DOC && doc_entry->refcount > 0) {
+                    doc_entry->refcount--;
+                }
+            }
+            pthread_cond_broadcast(&jsonHandleCond);
+        }
+    }
+    pthread_mutex_unlock(&jsonHandleMutex);
 }
 
 static bool jsonReleaseValueHandle(int handle) {
@@ -110,7 +238,11 @@ static bool jsonReleaseValueHandle(int handle) {
     if (idx < jsonHandleCapacity) {
         JsonHandleEntry *entry = &jsonHandleTable[idx];
         if (entry->kind == JSON_HANDLE_VAL) {
+            while (entry->refcount > 0) {
+                pthread_cond_wait(&jsonHandleCond, &jsonHandleMutex);
+            }
             jsonResetEntry(entry);
+            pthread_cond_broadcast(&jsonHandleCond);
             released = true;
         }
     }
@@ -127,13 +259,22 @@ static yyjson_doc *jsonDetachDocHandle(int handle) {
         JsonHandleEntry *entry = &jsonHandleTable[idx];
         if (entry->kind == JSON_HANDLE_DOC && entry->doc) {
             doc = entry->doc;
-            yyjson_doc *doc_ptr = entry->doc;
-            jsonResetEntry(entry);
+            entry->doc = NULL;
+            while (entry->refcount > 0) {
+                pthread_cond_wait(&jsonHandleCond, &jsonHandleMutex);
+            }
             for (size_t i = 0; i < jsonHandleCapacity; ++i) {
-                if (jsonHandleTable[i].kind == JSON_HANDLE_VAL && jsonHandleTable[i].doc == doc_ptr) {
-                    jsonResetEntry(&jsonHandleTable[i]);
+                JsonHandleEntry *val_entry = &jsonHandleTable[i];
+                if (val_entry->kind == JSON_HANDLE_VAL && val_entry->doc == doc) {
+                    val_entry->doc = NULL;
+                    while (val_entry->refcount > 0) {
+                        pthread_cond_wait(&jsonHandleCond, &jsonHandleMutex);
+                    }
+                    jsonResetEntry(val_entry);
                 }
             }
+            jsonResetEntry(entry);
+            pthread_cond_broadcast(&jsonHandleCond);
         }
     }
     pthread_mutex_unlock(&jsonHandleMutex);
@@ -166,7 +307,7 @@ static Value vmBuiltinYyjsonRead(struct VM_s *vm, int arg_count, Value *args) {
         runtimeError(vm, "YyjsonRead failed at position %zu: %s", err.pos, err.msg ? err.msg : "unknown error");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
-    int handle = jsonAllocHandle(JSON_HANDLE_DOC, doc, NULL);
+    int handle = jsonAllocDocHandle(doc);
     if (handle == YYJSON_UNUSED_HANDLE) {
         yyjson_doc_free(doc);
         runtimeError(vm, "YyjsonRead: unable to allocate document handle.");
@@ -187,7 +328,7 @@ static Value vmBuiltinYyjsonReadFile(struct VM_s *vm, int arg_count, Value *args
         runtimeError(vm, "YyjsonReadFile failed at position %zu: %s", err.pos, err.msg ? err.msg : "unknown error");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
-    int handle = jsonAllocHandle(JSON_HANDLE_DOC, doc, NULL);
+    int handle = jsonAllocDocHandle(doc);
     if (handle == YYJSON_UNUSED_HANDLE) {
         yyjson_doc_free(doc);
         runtimeError(vm, "YyjsonReadFile: unable to allocate document handle.");
@@ -230,22 +371,30 @@ static Value vmBuiltinYyjsonGetRoot(struct VM_s *vm, int arg_count, Value *args)
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
     int handle = (int)AS_INTEGER(args[0]);
-    yyjson_doc *doc = jsonLookupDoc(handle);
-    if (!doc) {
+    yyjson_doc *doc = NULL;
+    if (!jsonAcquireDoc(handle, &doc)) {
         runtimeError(vm, "YyjsonGetRoot received an invalid document handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
+
+    Value result = makeInt(YYJSON_UNUSED_HANDLE);
     yyjson_val *root = yyjson_doc_get_root(doc);
     if (!root) {
         runtimeError(vm, "YyjsonGetRoot: document has no root value.");
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
-    int value_handle = jsonAllocHandle(JSON_HANDLE_VAL, doc, root);
+
+    int value_handle = jsonAllocValueHandle(doc, root);
     if (value_handle == YYJSON_UNUSED_HANDLE) {
         runtimeError(vm, "YyjsonGetRoot: unable to allocate value handle.");
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
-    return makeInt(value_handle);
+
+    result = makeInt(value_handle);
+
+cleanup:
+    jsonReleaseDoc(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetKey(struct VM_s *vm, int arg_count, Value *args) {
@@ -256,24 +405,34 @@ static Value vmBuiltinYyjsonGetKey(struct VM_s *vm, int arg_count, Value *args) 
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetKey received an invalid value handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
+
+    Value result = makeInt(YYJSON_UNUSED_HANDLE);
     if (!yyjson_is_obj(val)) {
         runtimeError(vm, "YyjsonGetKey requires an object value handle.");
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
+
     const char *key = args[1].s_val ? args[1].s_val : "";
     yyjson_val *child = yyjson_obj_get(val, key);
     if (!child) {
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
-    int child_handle = jsonAllocHandle(JSON_HANDLE_VAL, doc, child);
+
+    int child_handle = jsonAllocValueHandle(doc, child);
     if (child_handle == YYJSON_UNUSED_HANDLE) {
         runtimeError(vm, "YyjsonGetKey: unable to allocate value handle.");
+        goto cleanup;
     }
-    return makeInt(child_handle);
+
+    result = makeInt(child_handle);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args) {
@@ -288,23 +447,33 @@ static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args
     }
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetIndex received an invalid value handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
+
+    Value result = makeInt(YYJSON_UNUSED_HANDLE);
     if (!yyjson_is_arr(val)) {
         runtimeError(vm, "YyjsonGetIndex requires an array value handle.");
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
+
     yyjson_val *child = yyjson_arr_get(val, (size_t)index);
     if (!child) {
-        return makeInt(YYJSON_UNUSED_HANDLE);
+        goto cleanup;
     }
-    int child_handle = jsonAllocHandle(JSON_HANDLE_VAL, doc, child);
+
+    int child_handle = jsonAllocValueHandle(doc, child);
     if (child_handle == YYJSON_UNUSED_HANDLE) {
         runtimeError(vm, "YyjsonGetIndex: unable to allocate value handle.");
+        goto cleanup;
     }
-    return makeInt(child_handle);
+
+    result = makeInt(child_handle);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetLength(struct VM_s *vm, int arg_count, Value *args) {
@@ -315,17 +484,26 @@ static Value vmBuiltinYyjsonGetLength(struct VM_s *vm, int arg_count, Value *arg
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetLength received an invalid value handle (%d).", handle);
         return makeInt(-1);
     }
+
+    Value result = makeInt(-1);
     if (yyjson_is_arr(val)) {
-        return makeInt((long long)yyjson_arr_size(val));
-    } else if (yyjson_is_obj(val)) {
-        return makeInt((long long)yyjson_obj_size(val));
+        result = makeInt((long long)yyjson_arr_size(val));
+        goto cleanup;
     }
+    if (yyjson_is_obj(val)) {
+        result = makeInt((long long)yyjson_obj_size(val));
+        goto cleanup;
+    }
+
     runtimeError(vm, "YyjsonGetLength requires an array or object value handle.");
-    return makeInt(-1);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetType(struct VM_s *vm, int arg_count, Value *args) {
@@ -336,11 +514,14 @@ static Value vmBuiltinYyjsonGetType(struct VM_s *vm, int arg_count, Value *args)
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetType received an invalid value handle (%d).", handle);
         return makeString("");
     }
-    return makeString(jsonTypeToString(val));
+
+    Value result = makeString(jsonTypeToString(val));
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetString(struct VM_s *vm, int arg_count, Value *args) {
@@ -351,16 +532,23 @@ static Value vmBuiltinYyjsonGetString(struct VM_s *vm, int arg_count, Value *arg
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetString received an invalid value handle (%d).", handle);
         return makeString("");
     }
+
+    Value result = makeString("");
     if (!yyjson_is_str(val)) {
         runtimeError(vm, "YyjsonGetString requires a string value handle.");
-        return makeString("");
+        goto cleanup;
     }
+
     const char *str = yyjson_get_str(val);
-    return makeString(str ? str : "");
+    result = makeString(str ? str : "");
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *args) {
@@ -371,18 +559,26 @@ static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *arg
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetNumber received an invalid value handle (%d).", handle);
         return makeDouble(0.0);
     }
+
+    Value result = makeDouble(0.0);
     if (yyjson_is_real(val)) {
-        return makeDouble(yyjson_get_real(val));
+        result = makeDouble(yyjson_get_real(val));
+        goto cleanup;
     }
     if (yyjson_is_int(val)) {
-        return makeDouble((double)yyjson_get_sint(val));
+        result = makeDouble((double)yyjson_get_sint(val));
+        goto cleanup;
     }
+
     runtimeError(vm, "YyjsonGetNumber requires a numeric value handle.");
-    return makeDouble(0.0);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetInt(struct VM_s *vm, int arg_count, Value *args) {
@@ -393,15 +589,22 @@ static Value vmBuiltinYyjsonGetInt(struct VM_s *vm, int arg_count, Value *args) 
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetInt received an invalid value handle (%d).", handle);
         return makeInt64(0);
     }
+
+    Value result = makeInt64(0);
     if (!yyjson_is_int(val)) {
         runtimeError(vm, "YyjsonGetInt requires an integer value handle.");
-        return makeInt64(0);
+        goto cleanup;
     }
-    return makeInt64(yyjson_get_sint(val));
+
+    result = makeInt64(yyjson_get_sint(val));
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonGetBool(struct VM_s *vm, int arg_count, Value *args) {
@@ -412,15 +615,22 @@ static Value vmBuiltinYyjsonGetBool(struct VM_s *vm, int arg_count, Value *args)
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonGetBool received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
+
+    Value result = makeInt(0);
     if (!yyjson_is_bool(val)) {
         runtimeError(vm, "YyjsonGetBool requires a boolean value handle.");
-        return makeInt(0);
+        goto cleanup;
     }
-    return makeInt(yyjson_get_bool(val) ? 1 : 0);
+
+    result = makeInt(yyjson_get_bool(val) ? 1 : 0);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
 }
 
 static Value vmBuiltinYyjsonIsNull(struct VM_s *vm, int arg_count, Value *args) {
@@ -431,11 +641,14 @@ static Value vmBuiltinYyjsonIsNull(struct VM_s *vm, int arg_count, Value *args) 
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
-    if (!jsonLookupValue(handle, &doc, &val)) {
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
         runtimeError(vm, "YyjsonIsNull received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
-    return makeInt(yyjson_is_null(val) ? 1 : 0);
+
+    Value result = makeInt(yyjson_is_null(val) ? 1 : 0);
+    jsonReleaseValue(handle);
+    return result;
 }
 
 void registerYyjsonReadBuiltin(void) {
