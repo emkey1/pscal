@@ -15,6 +15,12 @@ typedef struct ArgList {
     size_t capacity;
 } ArgList;
 
+typedef enum ConfigLoadResult {
+    CONFIG_LOAD_SUCCESS = 0,
+    CONFIG_LOAD_NOT_FOUND = 1,
+    CONFIG_LOAD_ERROR = -1
+} ConfigLoadResult;
+
 static void freeArgList(ArgList *list) {
     if (!list) {
         return;
@@ -215,6 +221,93 @@ static char *resolvePath(const char *baseDir, const char *path) {
     return resolved;
 }
 
+static char *joinPath(const char *base, const char *component) {
+    if (!base || !component) {
+        return NULL;
+    }
+
+    size_t baseLength = strlen(base);
+    bool needsSlash = baseLength > 0 && base[baseLength - 1] != '/';
+    size_t totalLength = baseLength + (needsSlash ? 1 : 0) + strlen(component) + 1;
+
+    char *combined = malloc(totalLength);
+    if (!combined) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    if (needsSlash) {
+        snprintf(combined, totalLength, "%s/%s", base, component);
+    } else {
+        snprintf(combined, totalLength, "%s%s", base, component);
+    }
+
+    return combined;
+}
+
+static char *duplicateParentDirectory(const char *path) {
+    if (!path) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char *pathCopy = strdup(path);
+    if (!pathCopy) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    char *parent = dirname(pathCopy);
+    if (!parent) {
+        free(pathCopy);
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char *result = strdup(parent);
+    free(pathCopy);
+
+    if (!result) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    return result;
+}
+
+static char *getDefaultConfigPath(void) {
+    char *sourcePath = realpath(__FILE__, NULL);
+    if (!sourcePath) {
+        sourcePath = strdup(__FILE__);
+        if (!sourcePath) {
+            errno = ENOMEM;
+            return NULL;
+        }
+    }
+
+    char *supportDir = duplicateParentDirectory(sourcePath);
+    free(sourcePath);
+    if (!supportDir) {
+        return NULL;
+    }
+
+    char *projectDir = duplicateParentDirectory(supportDir);
+    free(supportDir);
+    if (!projectDir) {
+        return NULL;
+    }
+
+    char *configPath = joinPath(projectDir, "RunConfiguration.cfg");
+    free(projectDir);
+
+    if (!configPath) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    return configPath;
+}
+
 static int loadConfig(const char *path, const char *baseDir, ArgList *args, char **binaryName, char **workingDir) {
     FILE *file = fopen(path, "r");
     if (!file) {
@@ -279,6 +372,46 @@ static int loadConfig(const char *path, const char *baseDir, ArgList *args, char
 
     fclose(file);
     return status;
+}
+
+static ConfigLoadResult loadConfigFromPath(const char *path, bool warnOnMissing, ArgList *args, char **binaryName, char **workingDir, char **configDir) {
+    if (!path || !*path) {
+        return CONFIG_LOAD_NOT_FOUND;
+    }
+
+    if (access(path, R_OK) != 0) {
+        if (warnOnMissing) {
+            int savedErrno = errno;
+            fprintf(stderr, "[pscal-runner] warning: cannot read configuration file '%s': %s\n", path, strerror(savedErrno));
+        }
+        return CONFIG_LOAD_NOT_FOUND;
+    }
+
+    char *pathCopy = strdup(path);
+    if (!pathCopy) {
+        fprintf(stderr, "[pscal-runner] out of memory\n");
+        return CONFIG_LOAD_ERROR;
+    }
+
+    char *dirName = dirname(pathCopy);
+    char *dirCopy = dirName ? strdup(dirName) : NULL;
+    if (dirName && !dirCopy) {
+        fprintf(stderr, "[pscal-runner] out of memory\n");
+        free(pathCopy);
+        return CONFIG_LOAD_ERROR;
+    }
+
+    if (loadConfig(path, dirCopy, args, binaryName, workingDir) != 0) {
+        free(dirCopy);
+        free(pathCopy);
+        return CONFIG_LOAD_ERROR;
+    }
+
+    free(pathCopy);
+    free(*configDir);
+    *configDir = dirCopy;
+
+    return CONFIG_LOAD_SUCCESS;
 }
 
 static char *getExecutableDirectory(void) {
@@ -366,30 +499,65 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    bool configLoaded = false;
     const char *configPath = getenv("PSCAL_RUN_CONFIG");
     if (configPath && *configPath) {
-        char *configCopy = strdup(configPath);
-        if (!configCopy) {
-            freeArgList(&arguments);
-            free(binaryName);
-            fprintf(stderr, "[pscal-runner] out of memory\n");
-            return EXIT_FAILURE;
-        }
-        char *dirName = dirname(configCopy);
-        if (dirName) {
-            configDir = strdup(dirName);
-        }
-        free(configCopy);
-
-        if (!configDir) {
+        char *envConfigDir = duplicateParentDirectory(configPath);
+        if (!envConfigDir) {
             fprintf(stderr, "[pscal-runner] unable to determine configuration directory\n");
             freeArgList(&arguments);
             free(binaryName);
             return EXIT_FAILURE;
         }
+        free(configDir);
+        configDir = envConfigDir;
 
-        if (access(configPath, R_OK) == 0) {
-            if (loadConfig(configPath, configDir, &arguments, &binaryName, &workingDirectory) != 0) {
+        ConfigLoadResult result = loadConfigFromPath(configPath, true, &arguments, &binaryName, &workingDirectory, &configDir);
+        if (result == CONFIG_LOAD_ERROR) {
+            freeArgList(&arguments);
+            free(binaryName);
+            free(workingDirectory);
+            free(configDir);
+            return EXIT_FAILURE;
+        }
+        if (result == CONFIG_LOAD_SUCCESS) {
+            configLoaded = true;
+        }
+    }
+
+    if (!configLoaded) {
+        const char *projectDir = getenv("PROJECT_DIR");
+        if (projectDir && *projectDir) {
+            char *projectConfigPath = joinPath(projectDir, "RunConfiguration.cfg");
+            if (!projectConfigPath) {
+                fprintf(stderr, "[pscal-runner] out of memory\n");
+                freeArgList(&arguments);
+                free(binaryName);
+                free(workingDirectory);
+                free(configDir);
+                return EXIT_FAILURE;
+            }
+            ConfigLoadResult result = loadConfigFromPath(projectConfigPath, false, &arguments, &binaryName, &workingDirectory, &configDir);
+            free(projectConfigPath);
+            if (result == CONFIG_LOAD_ERROR) {
+                freeArgList(&arguments);
+                free(binaryName);
+                free(workingDirectory);
+                free(configDir);
+                return EXIT_FAILURE;
+            }
+            if (result == CONFIG_LOAD_SUCCESS) {
+                configLoaded = true;
+            }
+        }
+    }
+
+    if (!configLoaded) {
+        errno = 0;
+        char *defaultConfigPath = getDefaultConfigPath();
+        if (!defaultConfigPath) {
+            if (errno == ENOMEM) {
+                fprintf(stderr, "[pscal-runner] out of memory\n");
                 freeArgList(&arguments);
                 free(binaryName);
                 free(workingDirectory);
@@ -397,7 +565,18 @@ int main(void) {
                 return EXIT_FAILURE;
             }
         } else {
-            fprintf(stderr, "[pscal-runner] warning: cannot read configuration file '%s': %s\n", configPath, strerror(errno));
+            ConfigLoadResult result = loadConfigFromPath(defaultConfigPath, false, &arguments, &binaryName, &workingDirectory, &configDir);
+            free(defaultConfigPath);
+            if (result == CONFIG_LOAD_ERROR) {
+                freeArgList(&arguments);
+                free(binaryName);
+                free(workingDirectory);
+                free(configDir);
+                return EXIT_FAILURE;
+            }
+            if (result == CONFIG_LOAD_SUCCESS) {
+                configLoaded = true;
+            }
         }
     }
 
