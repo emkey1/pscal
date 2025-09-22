@@ -8,6 +8,21 @@ CLIKE_ARGS=(--no-cache)
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+USE_TIMEOUT_RUNNER=1
+if [ -r /etc/os-release ]; then
+  if grep -Eiq '^(ID|ID_LIKE)=.*alpine' /etc/os-release; then
+    USE_TIMEOUT_RUNNER=0
+  fi
+fi
+
+run_clike_command() {
+  if [ "$USE_TIMEOUT_RUNNER" = "1" ]; then
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$@"
+  else
+    "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$@"
+  fi
+}
+
 shift_mtime() {
   local path="$1"
   local delta="$2"
@@ -282,7 +297,7 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
     disasm_stdout=$(mktemp)
     disasm_stderr=$(mktemp)
     set +e
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" --dump-bytecode-only "$src" \
+    run_clike_command --dump-bytecode-only "$src" \
       > "$disasm_stdout" 2> "$disasm_stderr"
     disasm_status=$?
     set -e
@@ -335,9 +350,9 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   set +e
   if [ -f "$in_file" ]; then
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
+    run_clike_command "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
   else
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$src" > "$actual_out" 2> "$actual_err"
+    run_clike_command "$src" > "$actual_out" 2> "$actual_err"
   fi
   run_status=$?
   set -e
