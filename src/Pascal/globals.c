@@ -1,5 +1,5 @@
 // globals.c
-// This file defines and initializes the global variables used throughout the Pscal interpreter.
+// This file defines and initializes the global variables used throughout Pascal 
 
 // Include the globals header file, which declares the global variables.
 #include "globals.h"

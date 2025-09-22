@@ -364,7 +364,7 @@ int main(int argc, char *argv[]) {
     int pscal_params_start_index = 0; // Will be set after source file is identified
 
     if (argc == 1) {
-        printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
+        printf("Pascal Version: %s (latest tag: %s)\n",
                pscal_program_version_string(), pscal_git_tag_string());
         printf("%s\n", PASCAL_USAGE);
         return vmExitWithCleanup(EXIT_SUCCESS);
@@ -374,7 +374,7 @@ int main(int argc, char *argv[]) {
     int i = 1;
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
-            printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
+            printf("Pascal Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {

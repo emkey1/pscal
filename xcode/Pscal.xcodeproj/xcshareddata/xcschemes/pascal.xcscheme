@@ -156,12 +156,27 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
+            BlueprintIdentifier = "5E25023744E0C0A65A215CA9"
+            BuildableName = "pascal"
+            BlueprintName = "pascal"
+            ReferencedContainer = "container:Pscal.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
             BlueprintIdentifier = "544FBF16FB3D4707AE577805"
             BuildableName = "pscal-runner"
             BlueprintName = "pscal-runner"
             ReferencedContainer = "container:Pscal.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
+      <CommandLineArguments>
+         <CommandLineArgument
+            argument = ""
+            isEnabled = "YES">
+         </CommandLineArgument>
+      </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "PSCAL_RUN_CONFIG"

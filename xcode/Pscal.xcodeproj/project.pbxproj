@@ -64,18 +64,14 @@
 			isa = PBXBuildFile;
 			fileRef = FF0AC9F44099DF34CDF1D1D9 /* registry.c */;
 		};
-                0E2BAA9E9093241A45DDD3D3 /* sdl.c in Sources */ = {
-                        isa = PBXBuildFile;
-                        fileRef = 6E6DCD8C33E4AEE2ECAEAA9C /* sdl.c */;
-                };
-                0FC5DFC199ED429CB9EF5A85 /* pscal_runner_main.c in Sources */ = {
-                        isa = PBXBuildFile;
-                        fileRef = 93839EE99EBC427291ACFEC8 /* pscal_runner_main.c */;
-                };
-                0EA22292F5C6A5AF1DF1AAB0 /* bytecode.c in Sources */ = {
-                        isa = PBXBuildFile;
-                        fileRef = CFD96FBE09D3B3111F48DAFD /* bytecode.c */;
-                };
+		0E2BAA9E9093241A45DDD3D3 /* sdl.c in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 6E6DCD8C33E4AEE2ECAEAA9C /* sdl.c */;
+		};
+		0EA22292F5C6A5AF1DF1AAB0 /* bytecode.c in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = CFD96FBE09D3B3111F48DAFD /* bytecode.c */;
+		};
 		0F5951154D9C3FFFE133398F /* factorial.c in Sources */ = {
 			isa = PBXBuildFile;
 			fileRef = 949FC2A97B1BB9FC93A87B17 /* factorial.c */;
@@ -1318,62 +1314,41 @@
 			path = "codegen.c";
 			sourceTree = "<group>";
 		};
-                0F9E597B5C71DEC727ABBF1E /* fibonacci.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
-                        path = "fibonacci.c";
-                        sourceTree = "<group>";
-                };
-                1CD772854EBC4ED68EB311FB /* README.md */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = net.daringfireball.markdown;
-                        path = README.md;
-                        sourceTree = "<group>";
-                };
-                1162274A50F69134BA2A8C29 /* symbol.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
+		0F9E597B5C71DEC727ABBF1E /* fibonacci.c */ = {
+			isa = PBXFileReference;
+			fileEncoding = 4;
+			lastKnownFileType = "sourcecode.c.c";
+			path = "fibonacci.c";
+			sourceTree = "<group>";
+		};
+		1162274A50F69134BA2A8C29 /* symbol.c */ = {
+			isa = PBXFileReference;
+			fileEncoding = 4;
+			lastKnownFileType = "sourcecode.c.c";
 			path = "symbol.c";
 			sourceTree = "<group>";
 		};
-                185E4DFFF69A3A7A30D5DC80 /* register.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
-                        path = "register.c";
-                        sourceTree = "<group>";
-                };
-                48C46389DE7846378D0972D0 /* RunConfiguration.cfg */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = text;
-                        path = RunConfiguration.cfg;
-                        sourceTree = "<group>";
-                };
-                1D1F840CC62CEEF0A6CB728B /* clike */ = {
-                        isa = PBXFileReference;
-                        explicitFileType = "compiled.mach-o.executable";
+		185E4DFFF69A3A7A30D5DC80 /* register.c */ = {
+			isa = PBXFileReference;
+			fileEncoding = 4;
+			lastKnownFileType = "sourcecode.c.c";
+			path = "register.c";
+			sourceTree = "<group>";
+		};
+		1D1F840CC62CEEF0A6CB728B /* clike */ = {
+			isa = PBXFileReference;
+			explicitFileType = "compiled.mach-o.executable";
 			includeInIndex = 0;
 			path = clike;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
-                207B501E4DC15EE9C1602A60 /* globals.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
-                        path = "globals.c";
-                        sourceTree = "<group>";
-                };
-                93839EE99EBC427291ACFEC8 /* pscal_runner_main.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
-                        path = pscal_runner_main.c;
-                        sourceTree = "<group>";
-                };
+		207B501E4DC15EE9C1602A60 /* globals.c */ = {
+			isa = PBXFileReference;
+			fileEncoding = 4;
+			lastKnownFileType = "sourcecode.c.c";
+			path = "globals.c";
+			sourceTree = "<group>";
+		};
 		2824C6F8F2CAA5EC4D595B19 /* builtins.c */ = {
 			isa = PBXFileReference;
 			fileEncoding = 4;
@@ -1710,24 +1685,17 @@
 			path = "register.c";
 			sourceTree = "<group>";
 		};
-                E0BB334EC6C0A1BEC70B2E19 /* pscalvm */ = {
-                        isa = PBXFileReference;
-                        explicitFileType = "compiled.mach-o.executable";
-                        includeInIndex = 0;
-                        path = pscalvm;
-                        sourceTree = BUILT_PRODUCTS_DIR;
-                };
-                C2A416220D8D492F982E804F /* pscal-runner */ = {
-                        isa = PBXFileReference;
-                        explicitFileType = "compiled.mach-o.executable";
-                        includeInIndex = 0;
-                        path = "pscal-runner";
-                        sourceTree = BUILT_PRODUCTS_DIR;
-                };
-                E1118C4549247261D05DB300 /* builtin.c */ = {
-                        isa = PBXFileReference;
-                        fileEncoding = 4;
-                        lastKnownFileType = "sourcecode.c.c";
+		E0BB334EC6C0A1BEC70B2E19 /* pscalvm */ = {
+			isa = PBXFileReference;
+			explicitFileType = "compiled.mach-o.executable";
+			includeInIndex = 0;
+			path = pscalvm;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		E1118C4549247261D05DB300 /* builtin.c */ = {
+			isa = PBXFileReference;
+			fileEncoding = 4;
+			lastKnownFileType = "sourcecode.c.c";
 			path = "builtin.c";
 			sourceTree = "<group>";
 		};
@@ -1841,21 +1809,15 @@
 			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-                58864A0DE182F7EEEB26F11B /* Frameworks */ = {
-                        isa = PBXFrameworksBuildPhase;
-                        buildActionMask = 2147483647;
-                        files = ();
-                        runOnlyForDeploymentPostprocessing = 0;
-                };
-                FA2F0D1AD1D64E1691E16895 /* Frameworks */ = {
-                        isa = PBXFrameworksBuildPhase;
-                        buildActionMask = 2147483647;
-                        files = ();
-                        runOnlyForDeploymentPostprocessing = 0;
-                };
-                6F2D0C3EFE7283F122516DD2 /* Frameworks */ = {
-                        isa = PBXFrameworksBuildPhase;
-                        buildActionMask = 2147483647;
+		58864A0DE182F7EEEB26F11B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6F2D0C3EFE7283F122516DD2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2119,65 +2081,57 @@
 				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-                CA5559A16F010BA9E2CCE61F /* Sources */ = {
-                        isa = PBXSourcesBuildPhase;
-                        buildActionMask = 2147483647;
-                        files = (
-                                        2A2E01E646EA87D2460BC9B0 /* json2bc.c in Sources */,
-                                        27664A386800175FF8B2F624 /* ast_json_loader.c in Sources */,
-                                        195901DC5D1757310AE8DFEF /* type_stubs.c in Sources */,
-                                        3C459035607870344EC9388C /* ast.c in Sources */,
-                                        C9937FA6C2B2EEC06569FABF /* utils.c in Sources */,
-                                        4071FF82797F61C4169C1552 /* types.c in Sources */,
-                                        692BA0843A6802A5F9B07055 /* list.c in Sources */,
-                                        46A9F5677E8CFB01BF542B88 /* version.c in Sources */,
-                                        9FACD5368D98138889411DD0 /* cache.c in Sources */,
-                                        CB99A1373D8E130A5D52F823 /* bytecode.c in Sources */,
-                                        BC6EDEA5BC495FB59D4793DB /* compiler.c in Sources */,
-                                        8F3CEB5EA89E56E5EB564BB3 /* builtin.c in Sources */,
-                                        7C8BDA356D6E82DE367D3EEB /* builtin_network_api.c in Sources */,
-                                        0E2BAA9E9093241A45DDD3D3 /* sdl.c in Sources */,
-                                        76CA36C2F91C7BE66EFCFD07 /* sdl3d.c in Sources */,
-                                        60AB903F6E8E743A2D7B5180 /* gl.c in Sources */,
-                                        9510A4C621AA0D54B13AD52F /* audio.c in Sources */,
-                                        0966CA5B2303699DA221DA3E /* symbol.c in Sources */,
-                                        BFCCD6A497F68370ADFA6E92 /* vm.c in Sources */,
-                                        A78A514AC0B4BD4EE35D9082 /* globals.c in Sources */,
-                                        C82614CCFB51752749C9E14D /* register.c in Sources */,
-                                        86D6944EAAB10F84C92A915B /* registry.c in Sources */,
-                                        4393490731674BA69D31E2EB /* query_builtin.c in Sources */,
-                                        5EFC6A3BEE93F2971494291B /* dump.c in Sources */,
-                                        AB5CD8146FB4D524EC8DBE25 /* chudnovsky.c in Sources */,
-                                        AF8A43AD4DB330C28CFDF883 /* factorial.c in Sources */,
-                                        3C551FC81AA558CFE8E7CC12 /* fibonacci.c in Sources */,
-                                        64DA4CA69123905B125F3BA2 /* mandelbrot.c in Sources */,
-                                        61B1D291004D1843062159F0 /* register.c in Sources */,
-                                        FF296AAC4C0ED1779D2DB9EA /* register.c in Sources */,
-                                        E082D3E6663CA702EBBC8082 /* atoi.c in Sources */,
-                                        028AC19E1D814FA1B2AB5E47 /* fileexists.c in Sources */,
-                                        7C837B9CD1BC82ED619D87BA /* getpid.c in Sources */,
-                                        A3E9C9E584F5D6AC222FA33A /* realtimeclock.c in Sources */,
-                                        2493FFC0E366CE07F1238B1B /* swap.c in Sources */,
-                                        5108E50DDECDEB75BAF1CDD8 /* register.c in Sources */,
-                                        31C2DB3C29885B5401D8082E /* yyjson_builtins.c in Sources */,
-                                        4103D858EE91A121809F0900 /* register.c in Sources */,
-                                        046515481DB02BDD5F8A8706 /* sqlite_builtins.c in Sources */,
-                                        68A807126260151CF3B05DB4 /* register.c in Sources */,
-                                        BCC86380A5E06E4EADFAE789 /* yyjson.c in Sources */,
-                                );
-                        runOnlyForDeploymentPostprocessing = 0;
-                };
-                610568986C4443A6998D1879 /* Sources */ = {
-                        isa = PBXSourcesBuildPhase;
-                        buildActionMask = 2147483647;
-                        files = (
-                                        0FC5DFC199ED429CB9EF5A85 /* pscal_runner_main.c in Sources */,
-                                );
-                        runOnlyForDeploymentPostprocessing = 0;
-                };
-                EDB3151DD784CF0721DE7C45 /* Sources */ = {
-                        isa = PBXSourcesBuildPhase;
-                        buildActionMask = 2147483647;
+		CA5559A16F010BA9E2CCE61F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+					2A2E01E646EA87D2460BC9B0 /* json2bc.c in Sources */,
+					27664A386800175FF8B2F624 /* ast_json_loader.c in Sources */,
+					195901DC5D1757310AE8DFEF /* type_stubs.c in Sources */,
+					3C459035607870344EC9388C /* ast.c in Sources */,
+					C9937FA6C2B2EEC06569FABF /* utils.c in Sources */,
+					4071FF82797F61C4169C1552 /* types.c in Sources */,
+					692BA0843A6802A5F9B07055 /* list.c in Sources */,
+					46A9F5677E8CFB01BF542B88 /* version.c in Sources */,
+					9FACD5368D98138889411DD0 /* cache.c in Sources */,
+					CB99A1373D8E130A5D52F823 /* bytecode.c in Sources */,
+					BC6EDEA5BC495FB59D4793DB /* compiler.c in Sources */,
+					8F3CEB5EA89E56E5EB564BB3 /* builtin.c in Sources */,
+					7C8BDA356D6E82DE367D3EEB /* builtin_network_api.c in Sources */,
+					0E2BAA9E9093241A45DDD3D3 /* sdl.c in Sources */,
+					76CA36C2F91C7BE66EFCFD07 /* sdl3d.c in Sources */,
+					60AB903F6E8E743A2D7B5180 /* gl.c in Sources */,
+					9510A4C621AA0D54B13AD52F /* audio.c in Sources */,
+					0966CA5B2303699DA221DA3E /* symbol.c in Sources */,
+					BFCCD6A497F68370ADFA6E92 /* vm.c in Sources */,
+					A78A514AC0B4BD4EE35D9082 /* globals.c in Sources */,
+					C82614CCFB51752749C9E14D /* register.c in Sources */,
+					86D6944EAAB10F84C92A915B /* registry.c in Sources */,
+					4393490731674BA69D31E2EB /* query_builtin.c in Sources */,
+					5EFC6A3BEE93F2971494291B /* dump.c in Sources */,
+					AB5CD8146FB4D524EC8DBE25 /* chudnovsky.c in Sources */,
+					AF8A43AD4DB330C28CFDF883 /* factorial.c in Sources */,
+					3C551FC81AA558CFE8E7CC12 /* fibonacci.c in Sources */,
+					64DA4CA69123905B125F3BA2 /* mandelbrot.c in Sources */,
+					61B1D291004D1843062159F0 /* register.c in Sources */,
+					FF296AAC4C0ED1779D2DB9EA /* register.c in Sources */,
+					E082D3E6663CA702EBBC8082 /* atoi.c in Sources */,
+					028AC19E1D814FA1B2AB5E47 /* fileexists.c in Sources */,
+					7C837B9CD1BC82ED619D87BA /* getpid.c in Sources */,
+					A3E9C9E584F5D6AC222FA33A /* realtimeclock.c in Sources */,
+					2493FFC0E366CE07F1238B1B /* swap.c in Sources */,
+					5108E50DDECDEB75BAF1CDD8 /* register.c in Sources */,
+					31C2DB3C29885B5401D8082E /* yyjson_builtins.c in Sources */,
+					4103D858EE91A121809F0900 /* register.c in Sources */,
+					046515481DB02BDD5F8A8706 /* sqlite_builtins.c in Sources */,
+					68A807126260151CF3B05DB4 /* register.c in Sources */,
+					BCC86380A5E06E4EADFAE789 /* yyjson.c in Sources */,
+				);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EDB3151DD784CF0721DE7C45 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 					A669100B2A0143041694867F /* lexer.c in Sources */,
 					46A1524BC5B4A2C66DB50BB7 /* parser.c in Sources */,
@@ -2377,49 +2331,28 @@
 			path = backend_ast;
 			name = backend_ast;
 		};
-                89733B26D163C0BDF7131316 /* vm */ = {
-                        isa = PBXGroup;
-                        children = (
-                                        62EB0C6A84789FFEB6DA8741 /* vm.c */,
-                                        FE348A219056E82B8E978094 /* vm_main.c */,
-                                );
-                        sourceTree = "<group>";
-                        path = vm;
-                        name = vm;
-                };
-                71EBA11D7EB941BEB294BC62 /* Support */ = {
-                        isa = PBXGroup;
-                        children = (
-                                        93839EE99EBC427291ACFEC8 /* pscal_runner_main.c */,
-                                );
-                        name = Support;
-                        path = Support;
-                        sourceTree = "<group>";
-                };
-                7439FCCCE9B8466FAC7B51EA /* xcode */ = {
-                        isa = PBXGroup;
-                        children = (
-                                        48C46389DE7846378D0972D0 /* RunConfiguration.cfg */,
-                                        1CD772854EBC4ED68EB311FB /* README.md */,
-                                        71EBA11D7EB941BEB294BC62 /* Support */,
-                                );
-                        name = xcode;
-                        path = xcode;
-                        sourceTree = "<group>";
-                };
-                8B60E3824A4B5D0B534EFDAE /* Products */ = {
-                        isa = PBXGroup;
-                        children = (
-                                        1D1F840CC62CEEF0A6CB728B /* clike */,
-                                        EB2C57F0682B5DF0D65C851D /* clike-repl */,
-                                        88FB6D7F8F9A20A50F7FB116 /* dascal */,
-                                        780ED30DC78EA640890E2AC6 /* pascal */,
-                                        80E7B0E79A788C3B481159AB /* pscald */,
-                                        A2EA821998C06580C5BB49AB /* pscaljson2bc */,
-                                        C2A416220D8D492F982E804F /* pscal-runner */,
-                                        E0BB334EC6C0A1BEC70B2E19 /* pscalvm */,
-                                        E534DD049B98C0085343915E /* rea */,
-                                );
+		89733B26D163C0BDF7131316 /* vm */ = {
+			isa = PBXGroup;
+			children = (
+					62EB0C6A84789FFEB6DA8741 /* vm.c */,
+					FE348A219056E82B8E978094 /* vm_main.c */,
+				);
+			sourceTree = "<group>";
+			path = vm;
+			name = vm;
+		};
+		8B60E3824A4B5D0B534EFDAE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+					1D1F840CC62CEEF0A6CB728B /* clike */,
+					EB2C57F0682B5DF0D65C851D /* clike-repl */,
+					88FB6D7F8F9A20A50F7FB116 /* dascal */,
+					780ED30DC78EA640890E2AC6 /* pascal */,
+					80E7B0E79A788C3B481159AB /* pscald */,
+					A2EA821998C06580C5BB49AB /* pscaljson2bc */,
+					E0BB334EC6C0A1BEC70B2E19 /* pscalvm */,
+					E534DD049B98C0085343915E /* rea */,
+				);
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -2463,15 +2396,14 @@
 			path = yyjson;
 			name = yyjson;
 		};
-                9C309F6E02B5B2DFF3C2CA73 /* pscal */ = {
-                        isa = PBXGroup;
-                        children = (
-                                        F183C122B5083933428FF159 /* src */,
-                                        7439FCCCE9B8466FAC7B51EA /* xcode */,
-                                        8B60E3824A4B5D0B534EFDAE /* Products */,
-                                );
-                        sourceTree = "<group>";
-                        path = "..";
+		9C309F6E02B5B2DFF3C2CA73 /* pscal */ = {
+			isa = PBXGroup;
+			children = (
+					F183C122B5083933428FF159 /* src */,
+					8B60E3824A4B5D0B534EFDAE /* Products */,
+				);
+			sourceTree = "<group>";
+			path = "..";
 			name = Pscal;
 		};
 		9F90D12262F2EBCD1CCCA58B /* strings */ = {
@@ -2597,37 +2529,23 @@
 			productReference = 780ED30DC78EA640890E2AC6 /* pascal */;
 			productType = "com.apple.product-type.tool";
 		};
-                82B740F1338F2D1E38BD662A /* pscaljson2bc */ = {
-                        isa = PBXNativeTarget;
-                        buildConfigurationList = 5DBEE9E1FA1AE255134FFAAA /* Build configuration list for PBXNativeTarget "pscaljson2bc" */;
-                        buildPhases = (
-                                        CA5559A16F010BA9E2CCE61F /* Sources */,
-                                        58864A0DE182F7EEEB26F11B /* Frameworks */,
-                                );
-                        buildRules = ();
-                        dependencies = ();
-                        name = pscaljson2bc;
-                        productName = pscaljson2bc;
-                        productReference = A2EA821998C06580C5BB49AB /* pscaljson2bc */;
-                        productType = "com.apple.product-type.tool";
-                };
-                544FBF16FB3D4707AE577805 /* pscal-runner */ = {
-                        isa = PBXNativeTarget;
-                        buildConfigurationList = 9144035172374007A0813F17 /* Build configuration list for PBXNativeTarget "pscal-runner" */;
-                        buildPhases = (
-                                        610568986C4443A6998D1879 /* Sources */,
-                                        FA2F0D1AD1D64E1691E16895 /* Frameworks */,
-                                );
-                        buildRules = ();
-                        dependencies = ();
-                        name = "pscal-runner";
-                        productName = "pscal-runner";
-                        productReference = C2A416220D8D492F982E804F /* pscal-runner */;
-                        productType = "com.apple.product-type.tool";
-                };
-                88B0AF68E103CCC4F85A8070 /* clike */ = {
-                        isa = PBXNativeTarget;
-                        buildConfigurationList = D2F5C1B6765957F555242C9F /* Build configuration list for PBXNativeTarget "clike" */;
+		82B740F1338F2D1E38BD662A /* pscaljson2bc */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5DBEE9E1FA1AE255134FFAAA /* Build configuration list for PBXNativeTarget "pscaljson2bc" */;
+			buildPhases = (
+					CA5559A16F010BA9E2CCE61F /* Sources */,
+					58864A0DE182F7EEEB26F11B /* Frameworks */,
+				);
+			buildRules = ();
+			dependencies = ();
+			name = pscaljson2bc;
+			productName = pscaljson2bc;
+			productReference = A2EA821998C06580C5BB49AB /* pscaljson2bc */;
+			productType = "com.apple.product-type.tool";
+		};
+		88B0AF68E103CCC4F85A8070 /* clike */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2F5C1B6765957F555242C9F /* Build configuration list for PBXNativeTarget "clike" */;
 			buildPhases = (
 					109E48B35D8D9C12215F94AC /* Sources */,
 					8D0F72218F1856A55F38F2C3 /* Frameworks */,
@@ -2729,16 +2647,12 @@
 						CreatedOnToolsVersion = "15.0";
 						ProvisioningStyle = Automatic;
 					};
-                                        82B740F1338F2D1E38BD662A = {
-                                                CreatedOnToolsVersion = "15.0";
-                                                ProvisioningStyle = Automatic;
-                                        };
-                                        544FBF16FB3D4707AE577805 = {
-                                                CreatedOnToolsVersion = "15.0";
-                                                ProvisioningStyle = Automatic;
-                                        };
-                                };
-                        };
+					82B740F1338F2D1E38BD662A = {
+						CreatedOnToolsVersion = "15.0";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
 			buildConfigurationList = 312100B82E481929C53FCB71 /* Build configuration list for PBXProject "Pscal" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
@@ -2751,76 +2665,46 @@
 			productRefGroup = 8B60E3824A4B5D0B534EFDAE /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-                        targets = (
-                                        5E25023744E0C0A65A215CA9 /* pascal */,
-                                        10357B4171CB4A9AD54D88D2 /* pscalvm */,
-                                        D46234A48DF5C07F314CF022 /* dascal */,
-                                        EF0A27A8DC1B4F130FC6CECC /* pscald */,
-                                        88B0AF68E103CCC4F85A8070 /* clike */,
-                                        985BEEC4149D1FE3D8B1FE84 /* clike-repl */,
-                                        CDD43774BFDB2E25DBF71290 /* rea */,
-                                        544FBF16FB3D4707AE577805 /* pscal-runner */,
-                                        82B740F1338F2D1E38BD662A /* pscaljson2bc */,
-                                );
+			targets = (
+					5E25023744E0C0A65A215CA9 /* pascal */,
+					10357B4171CB4A9AD54D88D2 /* pscalvm */,
+					D46234A48DF5C07F314CF022 /* dascal */,
+					EF0A27A8DC1B4F130FC6CECC /* pscald */,
+					88B0AF68E103CCC4F85A8070 /* clike */,
+					985BEEC4149D1FE3D8B1FE84 /* clike-repl */,
+					CDD43774BFDB2E25DBF71290 /* rea */,
+					82B740F1338F2D1E38BD662A /* pscaljson2bc */,
+				);
 		};
-                092247FF457ECF0C36067D0E /* Debug */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
-                                CODE_SIGN_STYLE = Automatic;
-                                CODE_SIGNING_ALLOWED = NO;
-                                DEVELOPMENT_TEAM = "";
-                                ENABLE_BITCODE = NO;
-                                HEADER_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                LIBRARY_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_CFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_LDFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                PRODUCT_NAME = "$(TARGET_NAME)";
-                                GCC_PREPROCESSOR_DEFINITIONS = (
-                                                "$(inherited)",
-                                        );
-                        };
-                        name = Debug;
-                };
-                86DFE7A7FB4946FDA95F3752 /* Debug */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
-                                CLANG_C_LANGUAGE_STANDARD = c11;
-                                CODE_SIGN_STYLE = Automatic;
-                                CODE_SIGNING_ALLOWED = NO;
-                                DEVELOPMENT_TEAM = "";
-                                ENABLE_BITCODE = NO;
-                                GCC_OPTIMIZATION_LEVEL = 0;
-                                GCC_PREPROCESSOR_DEFINITIONS = (
-                                                "$(inherited)",
-                                        );
-                                HEADER_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                LIBRARY_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                MACOSX_DEPLOYMENT_TARGET = "11.0";
-                                OTHER_CFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_LDFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                PRODUCT_NAME = "$(TARGET_NAME)";
-                        };
-                        name = Debug;
-                };
-                28731EA47279F59E5EB00AFD /* Debug */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
+		092247FF457ECF0C36067D0E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				HEADER_SEARCH_PATHS = (
+						"$(inherited)",
+					);
+				LIBRARY_SEARCH_PATHS = (
+						"$(inherited)",
+					);
+				OTHER_CFLAGS = (
+						"$(inherited)",
+					);
+				OTHER_LDFLAGS = (
+						"$(inherited)",
+					);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+						"$(inherited)",
+					);
+			};
+			name = Debug;
+		};
+		28731EA47279F59E5EB00AFD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_C_LANGUAGE_STANDARD = c11;
 				CODE_SIGNING_ALLOWED = NO;
@@ -2833,26 +2717,26 @@
 						"ENABLE_EXT_BUILTIN_USER=1",
 						"ENABLE_EXT_BUILTIN_YYJSON=1",
 						"ENABLE_EXT_BUILTIN_SQLITE=1",
-						"PROGRAM_VERSION=\"20250922.1600_DEV\"",
-						"PSCAL_GIT_TAG=\"untagged\"",
+						"PROGRAM_VERSION=\"20250922.1502_DEV\"",
+						"PSCAL_GIT_TAG=\"v2.2.1\"",
 						"DEBUG=1",
 					);
-                               HEADER_SEARCH_PATHS = (
-                                               "$(PROJECT_DIR)/../src",
-                                               "$(PROJECT_DIR)/../src/**",
-                                               "/Library/Frameworks/SDL2.framework/Headers",
-                                               "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
-                                               "/opt/homebrew/include",
-                                               "/opt/homebrew/include/SDL2",
-                                               "/opt/homebrew/opt/sdl2/include",
-                                               "/opt/homebrew/opt/sdl2/include/SDL2",
-                                               "/usr/local/include",
-                                               "/usr/local/include/SDL2",
-                                               "/usr/local/opt/sdl2/include",
-                                               "/usr/local/opt/sdl2/include/SDL2",
-                                               "/usr/include",
-                                               "/usr/include/SDL2",
-                                       );
+				HEADER_SEARCH_PATHS = (
+						"$(PROJECT_DIR)/../src",
+						"$(PROJECT_DIR)/../src/**",
+						"/Library/Frameworks/SDL2.framework/Headers",
+						"$(HOME)/Library/Frameworks/SDL2.framework/Headers",
+						"/opt/homebrew/include",
+						"/opt/homebrew/include/SDL2",
+						"/opt/homebrew/opt/sdl2/include",
+						"/opt/homebrew/opt/sdl2/include/SDL2",
+						"/usr/local/include",
+						"/usr/local/include/SDL2",
+						"/usr/local/opt/sdl2/include",
+						"/usr/local/opt/sdl2/include/SDL2",
+						"/usr/include",
+						"/usr/include/SDL2",
+					);
 				LIBRARY_SEARCH_PATHS = (
 						"$(inherited)",
 					);
@@ -3118,63 +3002,35 @@
 			};
 			name = Release;
 		};
-                8E6C5F4C8C10F477F2E498AB /* Release */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
-                                CODE_SIGN_STYLE = Automatic;
-                                CODE_SIGNING_ALLOWED = NO;
-                                DEVELOPMENT_TEAM = "";
-                                ENABLE_BITCODE = NO;
-                                HEADER_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                LIBRARY_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_CFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_LDFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                PRODUCT_NAME = "$(TARGET_NAME)";
-                                GCC_PREPROCESSOR_DEFINITIONS = (
-                                                "$(inherited)",
-                                        );
-                        };
-                        name = Release;
-                };
-                7AEAA6AE1D17439DBD5C6AC1 /* Release */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
-                                CLANG_C_LANGUAGE_STANDARD = c11;
-                                CODE_SIGN_STYLE = Automatic;
-                                CODE_SIGNING_ALLOWED = NO;
-                                DEVELOPMENT_TEAM = "";
-                                ENABLE_BITCODE = NO;
-                                GCC_PREPROCESSOR_DEFINITIONS = (
-                                                "$(inherited)",
-                                        );
-                                HEADER_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                LIBRARY_SEARCH_PATHS = (
-                                                "$(inherited)",
-                                        );
-                                MACOSX_DEPLOYMENT_TARGET = "11.0";
-                                OTHER_CFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                OTHER_LDFLAGS = (
-                                                "$(inherited)",
-                                        );
-                                PRODUCT_NAME = "$(TARGET_NAME)";
-                        };
-                        name = Release;
-                };
-                984F0849A27189CFB953BA1C /* Release */ = {
-                        isa = XCBuildConfiguration;
-                        buildSettings = {
+		8E6C5F4C8C10F477F2E498AB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_BITCODE = NO;
+				HEADER_SEARCH_PATHS = (
+						"$(inherited)",
+					);
+				LIBRARY_SEARCH_PATHS = (
+						"$(inherited)",
+					);
+				OTHER_CFLAGS = (
+						"$(inherited)",
+					);
+				OTHER_LDFLAGS = (
+						"$(inherited)",
+					);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+						"$(inherited)",
+					);
+			};
+			name = Release;
+		};
+		984F0849A27189CFB953BA1C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_C_LANGUAGE_STANDARD = c11;
 				CODE_SIGNING_ALLOWED = NO;
@@ -3187,26 +3043,26 @@
 						"ENABLE_EXT_BUILTIN_USER=1",
 						"ENABLE_EXT_BUILTIN_YYJSON=1",
 						"ENABLE_EXT_BUILTIN_SQLITE=1",
-						"PROGRAM_VERSION=\"20250922.1600_DEV\"",
-						"PSCAL_GIT_TAG=\"untagged\"",
+						"PROGRAM_VERSION=\"20250922.1502_DEV\"",
+						"PSCAL_GIT_TAG=\"v2.2.1\"",
 						"NDEBUG=1",
 					);
-                               HEADER_SEARCH_PATHS = (
-                                               "$(PROJECT_DIR)/../src",
-                                               "$(PROJECT_DIR)/../src/**",
-                                               "/Library/Frameworks/SDL2.framework/Headers",
-                                               "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
-                                               "/opt/homebrew/include",
-                                               "/opt/homebrew/include/SDL2",
-                                               "/opt/homebrew/opt/sdl2/include",
-                                               "/opt/homebrew/opt/sdl2/include/SDL2",
-                                               "/usr/local/include",
-                                               "/usr/local/include/SDL2",
-                                               "/usr/local/opt/sdl2/include",
-                                               "/usr/local/opt/sdl2/include/SDL2",
-                                               "/usr/include",
-                                               "/usr/include/SDL2",
-                                       );
+				HEADER_SEARCH_PATHS = (
+						"$(PROJECT_DIR)/../src",
+						"$(PROJECT_DIR)/../src/**",
+						"/Library/Frameworks/SDL2.framework/Headers",
+						"$(HOME)/Library/Frameworks/SDL2.framework/Headers",
+						"/opt/homebrew/include",
+						"/opt/homebrew/include/SDL2",
+						"/opt/homebrew/opt/sdl2/include",
+						"/opt/homebrew/opt/sdl2/include/SDL2",
+						"/usr/local/include",
+						"/usr/local/include/SDL2",
+						"/usr/local/opt/sdl2/include",
+						"/usr/local/opt/sdl2/include/SDL2",
+						"/usr/include",
+						"/usr/include/SDL2",
+					);
 				LIBRARY_SEARCH_PATHS = (
 						"$(inherited)",
 					);
@@ -3400,27 +3256,18 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-                5DBEE9E1FA1AE255134FFAAA /* Build configuration list for PBXNativeTarget "pscaljson2bc" */ = {
-                        isa = XCConfigurationList;
-                        buildConfigurations = (
-                                        092247FF457ECF0C36067D0E /* Debug */,
-                                        8E6C5F4C8C10F477F2E498AB /* Release */,
-                                );
-                        defaultConfigurationIsVisible = 0;
-                        defaultConfigurationName = Release;
-                };
-                9144035172374007A0813F17 /* Build configuration list for PBXNativeTarget "pscal-runner" */ = {
-                        isa = XCConfigurationList;
-                        buildConfigurations = (
-                                        86DFE7A7FB4946FDA95F3752 /* Debug */,
-                                        7AEAA6AE1D17439DBD5C6AC1 /* Release */,
-                                );
-                        defaultConfigurationIsVisible = 0;
-                        defaultConfigurationName = Release;
-                };
-                6217663AE4E01134DC9391DA /* Build configuration list for PBXNativeTarget "dascal" */ = {
-                        isa = XCConfigurationList;
-                        buildConfigurations = (
+		5DBEE9E1FA1AE255134FFAAA /* Build configuration list for PBXNativeTarget "pscaljson2bc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+					092247FF457ECF0C36067D0E /* Debug */,
+					8E6C5F4C8C10F477F2E498AB /* Release */,
+				);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6217663AE4E01134DC9391DA /* Build configuration list for PBXNativeTarget "dascal" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
 					3DFFEAEF97062D429BCD4DD8 /* Debug */,
 					CDFDBB0CC00170337A658932 /* Release */,
 				);
