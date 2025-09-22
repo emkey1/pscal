@@ -5,8 +5,10 @@ uses CRT, SysUtils;
 
 const
   API_KEY_FILENAME = '/usr/local/pscal/lib/openweathermap.key';
+  WIND_DIRECTION_LABELS: array[0..7] of string =
+    ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW');
 
-function ParseIntOrDefault(value: string; defaultValue: integer): integer;
+function ParseIntOrDefault(value: string; defaultValue: longint): longint;
 var
   parsedValue: longint;
   code: integer;
@@ -29,6 +31,7 @@ end;
 function FormatUnixTime(timestamp: int64): string;
 const
   SECONDS_PER_DAY = 86400;
+  UNIX_TO_GREGORIAN_OFFSET_DAYS = 719468;
 var
   days, secondsInDay: int64;
   era, doe, yoe, doy, mp: int64;
@@ -42,6 +45,8 @@ begin
     secondsInDay := secondsInDay + SECONDS_PER_DAY;
     Dec(days);
   end;
+
+  days := days + UNIX_TO_GREGORIAN_OFFSET_DAYS;
 
   era := days div 146097;
   doe := days - era * 146097;
@@ -87,9 +92,6 @@ begin
 end;
 
 function FormatWindDirection(degrees: double): string;
-const
-  Directions: array[0..7] of string =
-    ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW');
 var
   normalized: double;
   index: integer;
@@ -107,7 +109,7 @@ begin
     normalized := normalized - 360.0;
 
   index := Trunc((normalized + 22.5) / 45.0) mod 8;
-  FormatWindDirection := Directions[index];
+  FormatWindDirection := WIND_DIRECTION_LABELS[index];
 end;
 
 var
