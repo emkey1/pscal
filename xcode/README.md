@@ -17,6 +17,10 @@ keys:
   `clike`, `clike-repl`, or `rea`).
 - `args` – shell-style argument string.  Add multiple `args` entries if you want
   to append more pieces of the command line.
+- When launching the `pascal` front end pass the source file path directly as an
+  argument (`args = "Examples/Pascal/ThreadsProcPtrDemo.pas"`).  VM-specific
+  flags such as `--input` are only accepted by binaries like `pscalvm` or
+  `pscald`.
 - `working_dir` – optional working directory.  Relative paths are resolved from
   the configuration file's location, so the default `..` value points at the
   repository root.
