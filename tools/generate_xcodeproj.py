@@ -177,73 +177,6 @@ def format_objects(objects: Dict[str, PBXObject]) -> str:
     return "\n".join(lines)
 
 
-def gather_sdl_hint_paths() -> tuple[list[str], list[str], list[str]]:
-    """Return common SDL include, library, and framework directories.
-
-    The Xcode project does not run pkg-config during compilation, so it needs
-    pre-populated search paths whenever SDL support is toggled on.  We gather a
-    list of typical Homebrew, MacPorts, and framework install locations.  The
-    helper prefers directories that actually exist on the host but gracefully
-    falls back to the candidate list when none are present (for example when the
-    generator runs on a CI machine without SDL packages).  That way the emitted
-    project still hints the standard paths users are likely to have locally.
-    """
-
-    def candidate(path_repr: str) -> tuple[str, Path]:
-        if path_repr.startswith("$(HOME)/"):
-            relative = Path(path_repr[len("$(HOME)/") :])
-            check_path = Path.home() / relative
-        else:
-            check_path = Path(path_repr)
-        return path_repr, check_path
-
-    include_candidates = [
-        candidate("/opt/homebrew/include"),
-        candidate("/opt/homebrew/include/SDL2"),
-        candidate("/usr/local/include"),
-        candidate("/usr/local/include/SDL2"),
-        candidate("/opt/local/include"),
-        candidate("/opt/local/include/SDL2"),
-        candidate("$(HOME)/Library/Frameworks/SDL2.framework/Headers"),
-        candidate("/Library/Frameworks/SDL2.framework/Headers"),
-    ]
-
-    library_candidates = [
-        candidate("/opt/homebrew/lib"),
-        candidate("/usr/local/lib"),
-        candidate("/opt/local/lib"),
-    ]
-
-    framework_candidates = [
-        candidate("$(HOME)/Library/Frameworks"),
-        candidate("/Library/Frameworks"),
-    ]
-
-    def select_paths(candidates: Iterable[tuple[str, Path]]) -> list[str]:
-        selected: list[str] = []
-        seen = set()
-        for display, check_path in candidates:
-            if display in seen:
-                continue
-            seen.add(display)
-            if check_path.exists():
-                selected.append(display)
-
-        # Append the remaining candidate paths so the project hints common
-        # install locations even if they are not present on the generator host.
-        for display, _ in candidates:
-            if display not in selected:
-                selected.append(display)
-
-        return selected
-
-    return (
-        select_paths(include_candidates),
-        select_paths(library_candidates),
-        select_paths(framework_candidates),
-    )
-
-
 def build_project(output_path: Path, release_build: bool) -> None:
     # Source lists mirror the default CMake configuration (SDL disabled by default).
     pscal_sources = [
@@ -543,27 +476,15 @@ def build_project(output_path: Path, release_build: bool) -> None:
     # that subdirectory. Header includes in the source expect to resolve against
     # the repository root (e.g. "core/utils.h"), so the header search path must
     # explicitly reach back up to the real src/ tree.
-    sdl_include_paths, sdl_library_paths, sdl_framework_paths = gather_sdl_hint_paths()
-
-    header_search_paths = ["$(PROJECT_DIR)/../src", "$(PROJECT_DIR)/../src/**"]
-    header_search_paths.extend(sdl_include_paths)
-
-    library_search_paths = ["$(inherited)"]
-    library_search_paths.extend(sdl_library_paths)
-
-    framework_search_paths = ["$(inherited)"]
-    framework_search_paths.extend(sdl_framework_paths)
-
     common_project_settings = OrderedDict(
         [
             ("ALWAYS_SEARCH_USER_PATHS", "NO"),
             ("CLANG_C_LANGUAGE_STANDARD", "c11"),
             ("CODE_SIGNING_ALLOWED", "NO"),
             ("ENABLE_BITCODE", "NO"),
-            ("FRAMEWORK_SEARCH_PATHS", framework_search_paths),
             ("GCC_PREPROCESSOR_DEFINITIONS", ["$(inherited)"] + base_preprocessor_defs),
-            ("HEADER_SEARCH_PATHS", header_search_paths),
-            ("LIBRARY_SEARCH_PATHS", library_search_paths),
+            ("HEADER_SEARCH_PATHS", ["$(PROJECT_DIR)/../src", "$(PROJECT_DIR)/../src/**"]),
+            ("LIBRARY_SEARCH_PATHS", ["$(inherited)"]),
             ("MACOSX_DEPLOYMENT_TARGET", "11.0"),
             ("OTHER_CFLAGS", ["$(inherited)", "-Wall"]),
             ("OTHER_LDFLAGS", ["$(inherited)", "-lcurl", "-lsqlite3", "-lm", "-lpthread"]),
