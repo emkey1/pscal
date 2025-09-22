@@ -12,13 +12,48 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import subprocess
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 
 PROJECT_NAME = "Pscal"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def determine_version_info(release_build: bool) -> Tuple[str, str]:
+    """Mirror the CMake version and tag discovery logic."""
+
+    timestamp = datetime.now().strftime("%Y%m%d.%H%M")
+    suffix = "_REL" if release_build else "_DEV"
+    program_version = f"{timestamp}{suffix}"
+
+    git_tag = "untagged"
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            check=True,
+            capture_output=True,
+            cwd=REPO_ROOT,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    else:
+        candidate = result.stdout.strip()
+        if candidate:
+            git_tag = candidate
+
+    return program_version, git_tag
+
+
+def escape_define(value: str) -> str:
+    """Escape a string for inclusion in GCC_PREPROCESSOR_DEFINITIONS."""
+
+    return value.replace("\\", "\\\\").replace("\"", "\\\"")
 
 
 def md5_id(*parts: str) -> str:
@@ -142,7 +177,7 @@ def format_objects(objects: Dict[str, PBXObject]) -> str:
     return "\n".join(lines)
 
 
-def build_project(output_path: Path) -> None:
+def build_project(output_path: Path, release_build: bool) -> None:
     # Source lists mirror the default CMake configuration (SDL disabled by default).
     pscal_sources = [
         "src/Pascal/main.c",
@@ -425,6 +460,8 @@ def build_project(output_path: Path) -> None:
     project_release_id = md5_id("CONFIG", "PROJECT", "Release")
     project_config_list_id = md5_id("CONFIGLIST", "PROJECT")
 
+    program_version, git_tag = determine_version_info(release_build)
+
     base_preprocessor_defs = [
         "ENABLE_EXT_BUILTIN_MATH=1",
         "ENABLE_EXT_BUILTIN_STRINGS=1",
@@ -432,6 +469,8 @@ def build_project(output_path: Path) -> None:
         "ENABLE_EXT_BUILTIN_USER=1",
         "ENABLE_EXT_BUILTIN_YYJSON=1",
         "ENABLE_EXT_BUILTIN_SQLITE=1",
+        f'PROGRAM_VERSION=\\"{escape_define(program_version)}\\"',
+        f'PSCAL_GIT_TAG=\\"{escape_define(git_tag)}\\"',
     ]
     # The generated .xcodeproj lives in xcode/ which means PROJECT_DIR points to
     # that subdirectory. Header includes in the source expect to resolve against
@@ -675,9 +714,14 @@ def main() -> None:
         default=Path("xcode/Pscal.xcodeproj/project.pbxproj"),
         help="Destination project.pbxproj path",
     )
+    parser.add_argument(
+        "--release-build",
+        action="store_true",
+        help="Append _REL to PROGRAM_VERSION (mirrors CMake's -DRELEASE_BUILD=ON)",
+    )
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    build_project(args.output)
+    build_project(args.output, args.release_build)
 
 
 if __name__ == "__main__":
