@@ -11,6 +11,7 @@
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
+#include "Pascal/globals.h"
 #include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
@@ -1793,9 +1794,12 @@ Value evaluateCompileTimeValue(AST* node) {
                     } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
                         Value arg = evaluateCompileTimeValue(node->children[0]);
                         if (arg.type == TYPE_INTEGER) {
-                            Value result = makeChar(arg.i_val);
-                            freeValue(&arg);
-                            return result;
+                            long long code = arg.i_val;
+                            if (code >= 0 && code <= PASCAL_CHAR_MAX) {
+                                Value result = makeChar((int)code);
+                                freeValue(&arg);
+                                return result;
+                            }
                         }
                         freeValue(&arg);
                     } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {

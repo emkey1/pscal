@@ -581,8 +581,11 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
                 return makeVoid();
             }
             return makeChar(arg.c_val + 1);
-        case TYPE_BOOLEAN:
-            return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
+        case TYPE_BOOLEAN: {
+            long long next_val = arg.i_val + 1;
+            int bool_result = next_val > 1 ? 1 : (next_val != 0);
+            return makeBoolean(bool_result);
+        }
         case TYPE_ENUM: {
             int ordinal = arg.enum_val.ordinal;
             if (arg.enum_meta && ordinal + 1 >= arg.enum_meta->member_count) {

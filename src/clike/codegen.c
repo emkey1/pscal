@@ -674,10 +674,10 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 if (node->left && node->left->type == TCAST_STRING &&
                     node->element_type == TYPE_CHAR && node->dim_count == 1) {
                     char* str = tokenStringToCString(node->left->token);
-                    int slen = strlen(str);
-                    for (int i = 0; i <= slen; ++i) {
+                    size_t slen = strlen(str);
+                    for (size_t i = 0; i <= slen; ++i) {
                         char ch = (i < slen) ? str[i] : '\0';
-                        Value idxVal = makeInt(i);
+                        Value idxVal = makeInt((long long)i);
                         int idxConst = addConstantToChunk(chunk, &idxVal);
                         freeValue(&idxVal);
                         writeBytecodeChunk(chunk, CONSTANT, node->token.line);
@@ -813,7 +813,8 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 v = makeReal(node->token.float_val);
             } else if (node->token.type == CLIKE_TOKEN_CHAR_LITERAL) {
                 // Emit character literals distinctly
-                v = makeChar(node->token.int_val);
+                unsigned char char_code = (unsigned char)node->token.int_val;
+                v = makeChar(char_code);
             } else {
                 // Default to 64-bit integer regardless of inferred var_type
                 v = makeInt(node->token.int_val);

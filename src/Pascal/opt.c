@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
 
 static int isConst(AST* n, double* out, int* is_float) {
     if (!n) return 0;
@@ -92,7 +93,7 @@ static AST* foldBinary(AST* node) {
         newNode = newASTNode(AST_BOOLEAN, t);
         freeToken(t);
         setTypeAST(newNode, TYPE_BOOLEAN);
-        newNode->i_val = (int)res;
+        newNode->i_val = (res != 0) ? 1 : 0;
     } else if (result_is_float) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%g", res);
@@ -108,7 +109,11 @@ static AST* foldBinary(AST* node) {
         newNode = newASTNode(AST_NUMBER, t);
         freeToken(t);
         setTypeAST(newNode, TYPE_INTEGER);
-        newNode->i_val = iv;
+        if (iv < INT_MIN || iv > INT_MAX) {
+            freeAST(newNode);
+            return node;
+        }
+        newNode->i_val = (int)iv;
     }
     freeAST(node);
     return newNode;
@@ -136,7 +141,7 @@ static AST* foldUnary(AST* node) {
         newNode = newASTNode(AST_BOOLEAN, t);
         freeToken(t);
         setTypeAST(newNode, TYPE_BOOLEAN);
-        newNode->i_val = (int)res;
+        newNode->i_val = (res != 0) ? 1 : 0;
     } else if (is_float) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%g", res);
@@ -152,7 +157,11 @@ static AST* foldUnary(AST* node) {
         newNode = newASTNode(AST_NUMBER, t);
         freeToken(t);
         setTypeAST(newNode, TYPE_INTEGER);
-        newNode->i_val = iv;
+        if (iv < INT_MIN || iv > INT_MAX) {
+            freeAST(newNode);
+            return node;
+        }
+        newNode->i_val = (int)iv;
     }
     freeAST(node);
     return newNode;
