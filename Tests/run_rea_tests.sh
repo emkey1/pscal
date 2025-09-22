@@ -96,6 +96,16 @@ PY
   rm -f "$tmp_out" "$tmp_err"
 }
 
+has_ext_builtin_category() {
+  local binary="$1"
+  local category="$2"
+  set +e
+  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
+  local status=$?
+  set -e
+  return $status
+}
+
 # Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
@@ -130,11 +140,21 @@ EXIT_CODE=0
 
 check_ext_builtin_dump "$REA_BIN" rea
 
+if has_ext_builtin_category "$REA_BIN" sqlite; then
+  REA_SQLITE_AVAILABLE=1
+else
+  REA_SQLITE_AVAILABLE=0
+fi
+
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
 
   if should_skip "$test_name"; then
     echo "---- $test_name (skipped) ----"
+    continue
+  fi
+  if [ -f "$SCRIPT_DIR/rea/$test_name.sqlite" ] && [ "$REA_SQLITE_AVAILABLE" -ne 1 ]; then
+    echo "---- $test_name (skipped: SQLite builtins disabled) ----"
     continue
   fi
   in_file="$SCRIPT_DIR/rea/$test_name.in"

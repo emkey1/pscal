@@ -21,3 +21,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Note: PSCAL versions prior to 2.22 were released under the Unlicense.
+
+Third-party components:
+- SQLite is in the public domain. See https://www.sqlite.org/copyright.html for details.

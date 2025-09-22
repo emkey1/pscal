@@ -136,6 +136,16 @@ PY
   rm -f "$tmp_out" "$tmp_err"
 }
 
+has_ext_builtin_category() {
+  local binary="$1"
+  local category="$2"
+  set +e
+  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
+  local status=$?
+  set -e
+  return $status
+}
+
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
   if [ "${RUN_SDL:-0}" != "1" ]; then
@@ -161,6 +171,12 @@ EXIT_CODE=0
 
 check_ext_builtin_dump "$CLIKE_BIN" clike
 
+if has_ext_builtin_category "$CLIKE_BIN" sqlite; then
+  CLIKE_SQLITE_AVAILABLE=1
+else
+  CLIKE_SQLITE_AVAILABLE=0
+fi
+
 for src in "$SCRIPT_DIR"/clike/*.cl; do
   test_name=$(basename "$src" .cl)
   in_file="$SCRIPT_DIR/clike/$test_name.in"
@@ -174,6 +190,12 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
   if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
     echo "Skipping $test_name (SDL dummy driver)"
+    echo
+    continue
+  fi
+
+  if [ -f "$SCRIPT_DIR/clike/$test_name.sqlite" ] && [ "$CLIKE_SQLITE_AVAILABLE" -ne 1 ]; then
+    echo "Skipping $test_name (SQLite builtins disabled)"
     echo
     continue
   fi

@@ -18,6 +18,7 @@ The project currently ships several optional built‑in groups:
 | **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `RealTimeClock`, `Swap` |
 | **Strings** | `src/ext_builtins/strings` | (none yet) |
 | **Yyjson** | `src/ext_builtins/yyjson` | `YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`, `YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`, `YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull` |
+| **Sqlite** | `src/ext_builtins/sqlite` | `SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`, `SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`, `SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`, `SqliteClearBindings`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges` |
 | **User** | `src/ext_builtins/user` | (user-defined) |
 
 Individual categories can be enabled or disabled at configure time with
@@ -29,11 +30,16 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_SYSTEM=ON/OFF
 -DENABLE_EXT_BUILTIN_USER=ON/OFF
 -DENABLE_EXT_BUILTIN_YYJSON=ON/OFF
+-DENABLE_EXT_BUILTIN_SQLITE=ON/OFF
 ```
 
 ### Yyjson built-ins
 
 The `yyjson` category wraps the bundled [yyjson](https://github.com/ibireme/yyjson) library and exposes helpers for parsing documents, walking objects and arrays, and converting primitive values. Each routine operates on integer handles returned by `YyjsonRead` or the various query helpers; release value handles with `YyjsonFreeValue` and dispose of documents with `YyjsonDocFree` when they are no longer needed.
+
+### Sqlite built-ins
+
+The `sqlite` category embeds the platform SQLite3 library and presents handle-based wrappers that work consistently across the Pascal, C-like, and Rea front ends. `SqliteOpen` returns a database handle for the supplied path (use `:memory:` for an in-memory database); invoke `SqliteClose` when finished to dispose of the connection. Use `SqliteExec` for simple statements or the `SqlitePrepare`/`SqliteStep`/`SqliteFinalize` trio for parameterised queries. Column accessors (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`, etc.) operate on statement handles after `SqliteStep` yields a row. Binding helpers (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) populate positional parameters; call `SqliteReset` and `SqliteClearBindings` to reuse prepared statements. Diagnostic helpers such as `SqliteErrMsg`, `SqliteChanges`, and `SqliteLastInsertRowId` mirror their SQLite counterparts.
 
 ## Discovering available categories at runtime
 
@@ -280,4 +286,3 @@ $ build/bin/clike Examples/clike/docs_examples/ShowExtendedBuiltins
 PID = 98106
 After Swap: a=2 b=1
 ```
-

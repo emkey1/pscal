@@ -6,6 +6,8 @@ void registerStringBuiltins(void);
 void registerSystemBuiltins(void);
 void registerUserBuiltins(void);
 
+void registerSqliteBuiltins(void);
+
 void registerYyjsonBuiltins(void);
 void registerHasExtBuiltin(void);
 
@@ -23,6 +25,9 @@ static void registerExtendedBuiltinsOnce(void) {
 #endif
 #ifdef ENABLE_EXT_BUILTIN_SYSTEM
   registerSystemBuiltins();
+#endif
+#ifdef ENABLE_EXT_BUILTIN_SQLITE
+  registerSqliteBuiltins();
 #endif
 #ifdef ENABLE_EXT_BUILTIN_YYJSON
   registerYyjsonBuiltins();
