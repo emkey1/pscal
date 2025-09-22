@@ -29,6 +29,8 @@ build/bin/clike Examples/Clike/<program>
 - `sdl_smoke` – Rotating 3D cube demo that exercises the OpenGL helpers (requires building with SDL support).
 - `sdl_getmousestate` – SDL demo printing mouse coordinates and button states.
 - `show_pid` – Uses an extended builtin function to show the process ID
+- `sqlite_yyjson_demo` – Uses extended builtins for SQLite and Yyjson to load
+   JSON data into a database after checking availability with `#ifdef`
 - `sort_string` – Shows how to copy and sort a string via a `str*` parameter
 - `vm_version_demo` – Prints VM and bytecode versions and exits on mismatch
 

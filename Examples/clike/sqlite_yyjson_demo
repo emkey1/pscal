@@ -1,0 +1,238 @@
+#!/usr/bin/env clike
+
+#ifdef extended sqlite
+#ifdef extended yyjson
+
+int populateLibrary(int db, str jsonText) {
+    int doc;
+    int root;
+    int metaHandle;
+    int booksHandle;
+    int minPages;
+    int bookCount;
+    int insertStmt;
+    int queryStmt;
+    int inserted;
+    int i;
+
+    doc = YyjsonRead(jsonText);
+    if (doc < 0) {
+        printf("json_parse_failed\n");
+        return -1;
+    }
+
+    root = YyjsonGetRoot(doc);
+    printf("root_type=%s\n", YyjsonGetType(root));
+
+    metaHandle = YyjsonGetKey(root, "metadata");
+    booksHandle = YyjsonGetKey(root, "books");
+    if (metaHandle < 0 || booksHandle < 0) {
+        printf("json_missing_fields\n");
+        if (booksHandle >= 0) { YyjsonFreeValue(booksHandle); }
+        if (metaHandle >= 0) { YyjsonFreeValue(metaHandle); }
+        YyjsonFreeValue(root);
+        YyjsonDocFree(doc);
+        return -1;
+    }
+
+    minPages = -1;
+    {
+        int sourceHandle = YyjsonGetKey(metaHandle, "source");
+        int highlightHandle = YyjsonGetKey(metaHandle, "highlight");
+        int minPagesHandle = YyjsonGetKey(metaHandle, "minPages");
+
+        if (sourceHandle >= 0) {
+            printf("metadata_source=%s\n", YyjsonGetString(sourceHandle));
+            YyjsonFreeValue(sourceHandle);
+        }
+        if (minPagesHandle >= 0) {
+            minPages = (int)YyjsonGetInt(minPagesHandle);
+            printf("metadata_min_pages=%d\n", minPages);
+            YyjsonFreeValue(minPagesHandle);
+        }
+        if (highlightHandle >= 0) {
+            printf("metadata_highlight=%d\n", YyjsonGetBool(highlightHandle));
+            YyjsonFreeValue(highlightHandle);
+        }
+    }
+
+    bookCount = YyjsonGetLength(booksHandle);
+    printf("book_count=%d\n", bookCount);
+
+    insertStmt = SqlitePrepare(db, "INSERT INTO books(title, pages, recommended, price) VALUES (?1, ?2, ?3, ?4);");
+    printf("insert_stmt_valid=%s\n", insertStmt >= 0 ? "true" : "false");
+
+    inserted = 0;
+    for (i = 0; i < bookCount; i = i + 1) {
+        int bookHandle = YyjsonGetIndex(booksHandle, i);
+        if (bookHandle < 0) {
+            continue;
+        }
+
+        int titleHandle = YyjsonGetKey(bookHandle, "title");
+        int pagesHandle = YyjsonGetKey(bookHandle, "pages");
+        int recommendedHandle = YyjsonGetKey(bookHandle, "recommended");
+        int priceHandle = YyjsonGetKey(bookHandle, "price");
+        int notesHandle = YyjsonGetKey(bookHandle, "notes");
+
+        str title = titleHandle >= 0 ? YyjsonGetString(titleHandle) : "";
+        int pages = pagesHandle >= 0 ? (int)YyjsonGetInt(pagesHandle) : 0;
+        int recommended = recommendedHandle >= 0 ? YyjsonGetBool(recommendedHandle) : 0;
+        double price = priceHandle >= 0 ? YyjsonGetNumber(priceHandle) : 0.0;
+        int notesIsNull = notesHandle >= 0 ? YyjsonIsNull(notesHandle) : 1;
+
+        printf("book_%d_title=%s\n", i + 1, title);
+        printf("book_%d_pages=%d\n", i + 1, pages);
+        printf("book_%d_price=%.2f\n", i + 1, price);
+        printf("book_%d_notes_is_null=%d\n", i + 1, notesIsNull);
+        if (notesHandle >= 0 && !notesIsNull) {
+            printf("book_%d_note_text=%s\n", i + 1, YyjsonGetString(notesHandle));
+        }
+
+        SqliteBindText(insertStmt, 1, title);
+        SqliteBindInt(insertStmt, 2, pages);
+        SqliteBindInt(insertStmt, 3, recommended);
+        SqliteBindDouble(insertStmt, 4, price);
+
+        {
+            int stepRc = SqliteStep(insertStmt);
+            printf("book_%d_insert_step=%d\n", i + 1, stepRc);
+            if (stepRc == 101) {
+                inserted = inserted + 1;
+                printf("book_%d_rowid=%lld\n", i + 1, SqliteLastInsertRowId(db));
+            } else {
+                printf("book_%d_insert_failed=%d\n", i + 1, stepRc);
+            }
+            printf("book_%d_total_changes=%d\n", i + 1, SqliteChanges(db));
+        }
+
+        SqliteReset(insertStmt);
+        SqliteClearBindings(insertStmt);
+
+        if (notesHandle >= 0) { YyjsonFreeValue(notesHandle); }
+        if (priceHandle >= 0) { YyjsonFreeValue(priceHandle); }
+        if (recommendedHandle >= 0) { YyjsonFreeValue(recommendedHandle); }
+        if (pagesHandle >= 0) { YyjsonFreeValue(pagesHandle); }
+        if (titleHandle >= 0) { YyjsonFreeValue(titleHandle); }
+        YyjsonFreeValue(bookHandle);
+    }
+
+    SqliteFinalize(insertStmt);
+    printf("inserted_rows=%d\n", inserted);
+
+    queryStmt = SqlitePrepare(db, "SELECT title, pages, recommended FROM books WHERE pages >= ?1 ORDER BY pages DESC;");
+    printf("query_stmt_valid=%s\n", queryStmt >= 0 ? "true" : "false");
+    if (minPages >= 0) {
+        SqliteBindInt(queryStmt, 1, minPages);
+        printf("query_threshold=%d\n", minPages);
+    }
+
+    printf("result_column_count=%d\n", SqliteColumnCount(queryStmt));
+    printf("result_col0_name=%s\n", SqliteColumnName(queryStmt, 0));
+    printf("result_col1_name=%s\n", SqliteColumnName(queryStmt, 1));
+    printf("result_col2_name=%s\n", SqliteColumnName(queryStmt, 2));
+
+    {
+        int rc = SqliteStep(queryStmt);
+        int row = 0;
+        while (rc == 100) {
+            row = row + 1;
+            printf("result_%d_title=%s\n", row, SqliteColumnText(queryStmt, 0));
+            printf("result_%d_pages=%lld\n", row, SqliteColumnInt(queryStmt, 1));
+            printf("result_%d_recommended=%d\n", row, (int)SqliteColumnInt(queryStmt, 2));
+            printf("result_%d_type0=%s\n", row, SqliteColumnType(queryStmt, 0));
+            printf("result_%d_type1=%s\n", row, SqliteColumnType(queryStmt, 1));
+            printf("result_%d_type2=%s\n", row, SqliteColumnType(queryStmt, 2));
+            rc = SqliteStep(queryStmt);
+        }
+        printf("query_done_code=%d\n", rc);
+    }
+
+    SqliteFinalize(queryStmt);
+
+    YyjsonFreeValue(booksHandle);
+    YyjsonFreeValue(metaHandle);
+    YyjsonFreeValue(root);
+    YyjsonDocFree(doc);
+
+    return minPages;
+}
+
+int main() {
+    int db;
+    int rc;
+    int threshold;
+    str libraryJson;
+    str q;
+
+    printf("sqlite_yyjson_demo_start\n");
+    db = SqliteOpen(":memory:");
+    if (db < 0) {
+        printf("open_failed\n");
+        return 1;
+    }
+    printf("open_ok\n");
+
+    rc = SqliteExec(db, "CREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT NOT NULL, pages INTEGER, recommended INTEGER, price REAL);");
+    printf("create_rc=%d\n", rc);
+    if (rc != 0) {
+        printf("create_failed=%s\n", SqliteErrMsg(db));
+        printf("close_rc=%d\n", SqliteClose(db));
+        return 1;
+    }
+
+    q = tochar(34);
+    libraryJson =
+        "{" +
+        q + "metadata" + q + ":{" +
+        q + "source" + q + ":" + q + "inline_json" + q + "," +
+        q + "minPages" + q + ":320," +
+        q + "highlight" + q + ":true}," +
+        q + "books" + q + ":[" +
+        "{" +
+        q + "title" + q + ":" + q + "Pscal in Action" + q + "," +
+        q + "pages" + q + ":280," +
+        q + "recommended" + q + ":true," +
+        q + "price" + q + ":29.99," +
+        q + "notes" + q + ":null" +
+        "}," +
+        "{" +
+        q + "title" + q + ":" + q + "Virtual Machine Internals" + q + "," +
+        q + "pages" + q + ":420," +
+        q + "recommended" + q + ":true," +
+        q + "price" + q + ":49.50," +
+        q + "notes" + q + ":" + q + "deep dive" + q +
+        "}," +
+        "{" +
+        q + "title" + q + ":" + q + "Rea Recipes" + q + "," +
+        q + "pages" + q + ":310," +
+        q + "recommended" + q + ":false," +
+        q + "price" + q + ":39.00," +
+        q + "notes" + q + ":null" +
+        "}" +
+        "]" +
+        "}";
+
+    threshold = populateLibrary(db, libraryJson);
+    if (threshold < 0) {
+        printf("populate_failed\n");
+    } else {
+        printf("threshold_used=%d\n", threshold);
+    }
+
+    printf("close_rc=%d\n", SqliteClose(db));
+    return 0;
+}
+
+#else
+int main() {
+    printf("yyjson extended builtins are required for this demo.\n");
+    return 0;
+}
+#endif
+#else
+int main() {
+    printf("sqlite extended builtins are required for this demo.\n");
+    return 0;
+}
+#endif
