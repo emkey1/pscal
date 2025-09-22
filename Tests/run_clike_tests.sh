@@ -136,6 +136,82 @@ PY
   rm -f "$tmp_out" "$tmp_err"
 }
 
+exercise_clike_cli_smoke() {
+  local fixture="$ROOT_DIR/Tests/tools/fixtures/cli_clike.cl"
+  if [ ! -f "$fixture" ]; then
+    echo "Clike CLI fixture missing at $fixture" >&2
+    EXIT_CODE=1
+    return
+  fi
+
+  local tmp_out tmp_err status
+
+  echo "---- ClikeCLIVersion ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$CLIKE_BIN" -v >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "clike -v exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "clike -v emitted stderr:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "latest tag:" "$tmp_out"; then
+    echo "clike -v output missing latest tag:" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- ClikeCLIAstJson ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$CLIKE_BIN" --no-cache --dump-ast-json "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "clike --dump-ast-json failed with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "Dumping AST" "$tmp_err"; then
+    echo "clike --dump-ast-json missing progress messages" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q '"node_type"' "$tmp_out"; then
+    echo "clike --dump-ast-json produced unexpected stdout" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- ClikeCLITrace ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$CLIKE_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "clike --vm-trace-head exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "\[VM-TRACE\]" "$tmp_err"; then
+    echo "clike --vm-trace-head did not emit trace output" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+}
+
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
   if [ "${RUN_SDL:-0}" != "1" ]; then
@@ -160,6 +236,7 @@ cd "$ROOT_DIR"
 EXIT_CODE=0
 
 check_ext_builtin_dump "$CLIKE_BIN" clike
+exercise_clike_cli_smoke
 
 for src in "$SCRIPT_DIR"/clike/*.cl; do
   test_name=$(basename "$src" .cl)

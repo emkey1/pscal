@@ -47,6 +47,14 @@
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
 
+#ifndef PROGRAM_VERSION
+#define PROGRAM_VERSION "undefined.version_DEV"
+#endif
+
+#ifndef PSCAL_GIT_TAG
+#define PSCAL_GIT_TAG "untagged"
+#endif
+
 int gParamCount = 0;
 char **gParamValues = NULL;
 
@@ -60,6 +68,7 @@ static void initSymbolSystem(void) {
 static const char *REA_USAGE =
     "Usage: rea <options> <source.rea> [program_parameters...]\n"
     "   Options:\n"
+    "     -v                     Display version.\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
@@ -250,7 +259,11 @@ int main(int argc, char **argv) {
     int strict_mode = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
-        if (strcmp(argv[argi], "--dump-ast-json") == 0) {
+        if (strcmp(argv[argi], "-v") == 0) {
+            printf("Rea Compiler Version: %s (latest tag: %s)\n",
+                   PROGRAM_VERSION, PSCAL_GIT_TAG);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;

@@ -96,6 +96,78 @@ PY
   rm -f "$tmp_out" "$tmp_err"
 }
 
+exercise_rea_cli_smoke() {
+  local fixture="$ROOT_DIR/Tests/tools/fixtures/cli_rea.rea"
+  if [ ! -f "$fixture" ]; then
+    echo "Rea CLI fixture missing at $fixture" >&2
+    EXIT_CODE=1
+    return
+  fi
+
+  local tmp_out tmp_err status
+
+  echo "---- ReaCLIVersion ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$REA_BIN" -v >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "rea -v exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "rea -v emitted stderr:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "latest tag:" "$tmp_out"; then
+    echo "rea -v output missing latest tag:" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- ReaCLIStrict ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$REA_BIN" --no-cache --strict --dump-bytecode-only "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "rea --strict --dump-bytecode-only exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "Compiling Main Program AST to Bytecode" "$tmp_err"; then
+    echo "rea --strict --dump-bytecode-only missing disassembly banner" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- ReaCLITrace ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$REA_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "rea --vm-trace-head exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "\[VM-TRACE\]" "$tmp_err"; then
+    echo "rea --vm-trace-head did not emit trace output" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+}
+
 # Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
@@ -129,6 +201,7 @@ cd "$ROOT_DIR"
 EXIT_CODE=0
 
 check_ext_builtin_dump "$REA_BIN" rea
+exercise_rea_cli_smoke
 
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
