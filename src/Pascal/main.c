@@ -31,6 +31,7 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
+#include "core/preproc.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -471,6 +472,14 @@ int main(int argc, char *argv[]) {
     source_buffer[fsize] = '\0';
     fclose(file);
 
+    const char *defines[1] = {NULL};
+    int define_count = 0;
+#ifdef SDL
+    defines[define_count++] = "SDL_ENABLED";
+#endif
+    char *preprocessed_source = preprocessConditionals(source_buffer, defines, define_count);
+    const char *effective_source = preprocessed_source ? preprocessed_source : source_buffer;
+
     // Set up front end program's command-line parameters
     if (pscal_params_start_index < argc) {
         gParamCount = argc - pscal_params_start_index;
@@ -494,7 +503,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag,
+    int result = runProgram(effective_source, programName, argv[0], dump_ast_json_flag,
                             dump_bytecode_flag, dump_bytecode_only_flag, no_cache_flag);
 
     // Restore stderr and conditionally replay
@@ -538,6 +547,9 @@ int main(int argc, char *argv[]) {
         s_capture_active = 0; // disable atexit replay; we've handled it
     }
 
+    if (preprocessed_source) {
+        free(preprocessed_source);
+    }
     free(source_buffer); // Free the source code buffer
     return vmExitWithCleanup(result);
 }
