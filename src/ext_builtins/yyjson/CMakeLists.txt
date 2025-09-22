@@ -1,0 +1,6 @@
+# Sources for yyjson extended builtins
+set(EXT_BUILTIN_YYJSON_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/yyjson_builtins.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/register.c
+)
+set(EXT_BUILTIN_YYJSON_SOURCES ${EXT_BUILTIN_YYJSON_SOURCES} PARENT_SCOPE)

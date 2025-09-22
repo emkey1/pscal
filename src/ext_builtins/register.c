@@ -4,6 +4,7 @@ void registerMathBuiltins(void);
 void registerStringBuiltins(void);
 void registerSystemBuiltins(void);
 void registerUserBuiltins(void);
+void registerYyjsonBuiltins(void);
 void registerHasExtBuiltin(void);
 
 void registerExtendedBuiltins(void) {
@@ -16,6 +17,9 @@ void registerExtendedBuiltins(void) {
 #endif
 #ifdef ENABLE_EXT_BUILTIN_SYSTEM
   registerSystemBuiltins();
+#endif
+#ifdef ENABLE_EXT_BUILTIN_YYJSON
+  registerYyjsonBuiltins();
 #endif
 #ifdef ENABLE_EXT_BUILTIN_USER
   registerUserBuiltins();

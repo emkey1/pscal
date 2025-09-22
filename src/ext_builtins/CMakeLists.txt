@@ -5,6 +5,7 @@ option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
 option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
 option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable user-provided builtins" ON)
+option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 
 # Base sources that are always built
 set(PSCAL_EXT_BUILTIN_SOURCES
@@ -27,6 +28,11 @@ endif()
 if(ENABLE_EXT_BUILTIN_SYSTEM)
     add_subdirectory(system)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_SYSTEM_SOURCES})
+endif()
+
+if(ENABLE_EXT_BUILTIN_YYJSON)
+    add_subdirectory(yyjson)
+    list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_YYJSON_SOURCES})
 endif()
 
 if(ENABLE_EXT_BUILTIN_USER)

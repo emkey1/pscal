@@ -17,6 +17,7 @@ The project currently ships several optional built‑in groups:
 | **Math** | `src/ext_builtins/math` | `Factorial`, `Fibonacci`, `MandelbrotRow`, `Chudnovsky` |
 | **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `RealTimeClock`, `Swap` |
 | **Strings** | `src/ext_builtins/strings` | (none yet) |
+| **Yyjson** | `src/ext_builtins/yyjson` | `YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`, `YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`, `YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull` |
 | **User** | `src/ext_builtins/user` | (user-defined) |
 
 Individual categories can be enabled or disabled at configure time with
@@ -27,7 +28,12 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_STRINGS=ON/OFF
 -DENABLE_EXT_BUILTIN_SYSTEM=ON/OFF
 -DENABLE_EXT_BUILTIN_USER=ON/OFF
+-DENABLE_EXT_BUILTIN_YYJSON=ON/OFF
 ```
+
+### Yyjson built-ins
+
+The `yyjson` category wraps the bundled [yyjson](https://github.com/ibireme/yyjson) library and exposes helpers for parsing documents, walking objects and arrays, and converting primitive values. Each routine operates on integer handles returned by `YyjsonRead` or the various query helpers; release value handles with `YyjsonFreeValue` and dispose of documents with `YyjsonDocFree` when they are no longer needed.
 
 ## Threading considerations
 

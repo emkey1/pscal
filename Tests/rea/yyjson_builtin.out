@@ -1,0 +1,10 @@
+root_type=object
+name=pscal
+version=42
+enabled=0
+values_len=3
+values_sum=6
+pi=2.50000
+nested_present=yes
+maybe_is_null=1
+file_name=pscal

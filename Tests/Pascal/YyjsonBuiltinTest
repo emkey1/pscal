@@ -1,0 +1,74 @@
+program YyjsonBuiltinTest;
+var
+  doc, root: integer;
+  nameHandle, versionHandle, enabledHandle, valuesHandle: integer;
+  piHandle, nestedHandle, presentHandle, maybeHandle, valueHandle: integer;
+  fileDoc, fileRoot, fileNameHandle: integer;
+  arrLen, i, sum: integer;
+  piValue: double;
+begin
+  doc := YyjsonRead('{"name":"pscal","version":42,"enabled":false,"values":[1,2,3],"pi":2.5,"maybe":null,"nested":{"present":"yes"}}');
+  if doc < 0 then begin
+    writeln('doc_parse_failed');
+    halt(1);
+  end;
+
+  root := YyjsonGetRoot(doc);
+  writeln('root_type=', YyjsonGetType(root));
+
+  nameHandle := YyjsonGetKey(root, 'name');
+  writeln('name=', YyjsonGetString(nameHandle));
+
+  versionHandle := YyjsonGetKey(root, 'version');
+  writeln('version=', YyjsonGetInt(versionHandle));
+
+  enabledHandle := YyjsonGetKey(root, 'enabled');
+  writeln('enabled=', YyjsonGetBool(enabledHandle));
+
+  valuesHandle := YyjsonGetKey(root, 'values');
+  arrLen := YyjsonGetLength(valuesHandle);
+  writeln('values_len=', arrLen);
+  sum := 0;
+  for i := 0 to arrLen - 1 do begin
+    valueHandle := YyjsonGetIndex(valuesHandle, i);
+    if valueHandle >= 0 then begin
+      sum := sum + YyjsonGetInt(valueHandle);
+      YyjsonFreeValue(valueHandle);
+    end;
+  end;
+  writeln('values_sum=', sum);
+
+  piHandle := YyjsonGetKey(root, 'pi');
+  piValue := YyjsonGetNumber(piHandle);
+  writeln('pi=', piValue:0:5);
+
+  nestedHandle := YyjsonGetKey(root, 'nested');
+  presentHandle := YyjsonGetKey(nestedHandle, 'present');
+  writeln('nested_present=', YyjsonGetString(presentHandle));
+
+  maybeHandle := YyjsonGetKey(root, 'maybe');
+  writeln('maybe_is_null=', YyjsonIsNull(maybeHandle));
+
+  YyjsonFreeValue(maybeHandle);
+  YyjsonFreeValue(presentHandle);
+  YyjsonFreeValue(nestedHandle);
+  YyjsonFreeValue(piHandle);
+  YyjsonFreeValue(valuesHandle);
+  YyjsonFreeValue(enabledHandle);
+  YyjsonFreeValue(versionHandle);
+  YyjsonFreeValue(nameHandle);
+  YyjsonFreeValue(root);
+  YyjsonDocFree(doc);
+
+  fileDoc := YyjsonReadFile('data/yyjson_sample.json');
+  if fileDoc < 0 then begin
+    writeln('file_parse_failed');
+    halt(1);
+  end;
+  fileRoot := YyjsonGetRoot(fileDoc);
+  fileNameHandle := YyjsonGetKey(fileRoot, 'name');
+  writeln('file_name=', YyjsonGetString(fileNameHandle));
+  YyjsonFreeValue(fileNameHandle);
+  YyjsonFreeValue(fileRoot);
+  YyjsonDocFree(fileDoc);
+end.
