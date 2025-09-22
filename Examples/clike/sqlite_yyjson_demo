@@ -163,6 +163,7 @@ int main() {
     int rc;
     int threshold;
     str libraryJson;
+    str q;
 
     printf("sqlite_yyjson_demo_start\n");
     db = SqliteOpen(":memory:");
@@ -180,7 +181,37 @@ int main() {
         return 1;
     }
 
-    libraryJson = "{\"metadata\":{\"source\":\"inline_json\",\"minPages\":320,\"highlight\":true},\"books\":[{\"title\":\"Pscal in Action\",\"pages\":280,\"recommended\":true,\"price\":29.99,\"notes\":null},{\"title\":\"Virtual Machine Internals\",\"pages\":420,\"recommended\":true,\"price\":49.50,\"notes\":\"deep dive\"},{\"title\":\"Rea Recipes\",\"pages\":310,\"recommended\":false,\"price\":39.00,\"notes\":null}]}";
+    q = tochar(34);
+    libraryJson =
+        "{" +
+        q + "metadata" + q + ":{" +
+        q + "source" + q + ":" + q + "inline_json" + q + "," +
+        q + "minPages" + q + ":320," +
+        q + "highlight" + q + ":true}," +
+        q + "books" + q + ":[" +
+        "{" +
+        q + "title" + q + ":" + q + "Pscal in Action" + q + "," +
+        q + "pages" + q + ":280," +
+        q + "recommended" + q + ":true," +
+        q + "price" + q + ":29.99," +
+        q + "notes" + q + ":null" +
+        "}," +
+        "{" +
+        q + "title" + q + ":" + q + "Virtual Machine Internals" + q + "," +
+        q + "pages" + q + ":420," +
+        q + "recommended" + q + ":true," +
+        q + "price" + q + ":49.50," +
+        q + "notes" + q + ":" + q + "deep dive" + q +
+        "}," +
+        "{" +
+        q + "title" + q + ":" + q + "Rea Recipes" + q + "," +
+        q + "pages" + q + ":310," +
+        q + "recommended" + q + ":false," +
+        q + "price" + q + ":39.00," +
+        q + "notes" + q + ":null" +
+        "}" +
+        "]" +
+        "}";
 
     threshold = populateLibrary(db, libraryJson);
     if (threshold < 0) {
