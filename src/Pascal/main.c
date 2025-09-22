@@ -55,10 +55,6 @@
 int gParamCount = 0;
 char **gParamValues = NULL;
 
-#ifdef DEBUG
-List *inserted_global_names = NULL;
-#endif
-
 static int s_vm_trace_head = 0;
 
 typedef struct {

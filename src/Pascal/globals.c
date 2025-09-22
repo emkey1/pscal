@@ -13,6 +13,10 @@
 int last_io_error = 0; // Stores the error code of the last I/O operation.
 int typeWarn = 1; // Flag to control type warning messages (e.g., 1 for enabled, 0 for disabled).
 
+#ifdef DEBUG
+List *inserted_global_names = NULL; // Tracks globals inserted during debugging sessions.
+#endif
+
 // Symbol table globals - NOW POINTERS TO HASHTABLES.
 // These will be initialized by calling createHashTable() in initSymbolSystem().
 HashTable *globalSymbols = NULL; // Global symbol table (initialized to NULL, will point to a HashTable).
