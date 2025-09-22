@@ -7,20 +7,6 @@
       buildImplicitDependencies = "YES">
       <BuildActionEntries>
          <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
-               BuildableName = "pscal-runner"
-               BlueprintName = "pscal-runner"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
             buildForTesting = "YES"
             buildForRunning = "YES"
             buildForProfiling = "YES"
@@ -31,104 +17,6 @@
                BlueprintIdentifier = "5E25023744E0C0A65A215CA9"
                BuildableName = "pascal"
                BlueprintName = "pascal"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "10357B4171CB4A9AD54D88D2"
-               BuildableName = "pscalvm"
-               BlueprintName = "pscalvm"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "82B740F1338F2D1E38BD662A"
-               BuildableName = "pscaljson2bc"
-               BlueprintName = "pscaljson2bc"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "88B0AF68E103CCC4F85A8070"
-               BuildableName = "clike"
-               BlueprintName = "clike"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "985BEEC4149D1FE3D8B1FE84"
-               BuildableName = "clike-repl"
-               BlueprintName = "clike-repl"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CDD43774BFDB2E25DBF71290"
-               BuildableName = "rea"
-               BlueprintName = "rea"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D46234A48DF5C07F314CF022"
-               BuildableName = "dascal"
-               BlueprintName = "dascal"
-               ReferencedContainer = "container:Pscal.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "NO"
-            buildForRunning = "YES"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "EF0A27A8DC1B4F130FC6CECC"
-               BuildableName = "pscald"
-               BlueprintName = "pscald"
                ReferencedContainer = "container:Pscal.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -156,26 +44,12 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
-            BuildableName = "pscal-runner"
-            BlueprintName = "pscal-runner"
+            BlueprintIdentifier = "5E25023744E0C0A65A215CA9"
+            BuildableName = "pascal"
+            BlueprintName = "pascal"
             ReferencedContainer = "container:Pscal.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
-      <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "PSCAL_RUN_TARGET"
-            value = "pascal"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "PSCAL_RUN_EXECUTABLE"
-            value = ""
-            isEnabled = "NO">
-         </EnvironmentVariable>
-      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -187,9 +61,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
-            BuildableName = "pscal-runner"
-            BlueprintName = "pscal-runner"
+            BlueprintIdentifier = "5E25023744E0C0A65A215CA9"
+            BuildableName = "pascal"
+            BlueprintName = "pascal"
             ReferencedContainer = "container:Pscal.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

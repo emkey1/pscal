@@ -696,10 +696,6 @@
 			isa = PBXBuildFile;
 			fileRef = DB7CB696D0F4C0200AA3ACE1 /* register.c */;
 		};
-		822F9BEBBDF6F639CEF6BBD1 /* runner_main.c in Sources */ = {
-			isa = PBXBuildFile;
-			fileRef = 9827DC89B3A8EA0C881347BE /* runner_main.c */;
-		};
 		82464A15DEA94F45336D18A9 /* swap.c in Sources */ = {
 			isa = PBXBuildFile;
 			fileRef = 78E382CA6464C0DA12F3C75F /* swap.c */;
@@ -1591,13 +1587,6 @@
 			path = "query_builtin.c";
 			sourceTree = "<group>";
 		};
-		9827DC89B3A8EA0C881347BE /* runner_main.c */ = {
-			isa = PBXFileReference;
-			fileEncoding = 4;
-			lastKnownFileType = "sourcecode.c.c";
-			path = "runner_main.c";
-			sourceTree = "<group>";
-		};
 		988F98CFBAF3556D194CA40E /* register.c */ = {
 			isa = PBXFileReference;
 			fileEncoding = 4;
@@ -1674,13 +1663,6 @@
 			lastKnownFileType = "sourcecode.c.c";
 			path = "getpid.c";
 			sourceTree = "<group>";
-		};
-		C04721785837A0EB7B9D8A1D /* pscal-runner */ = {
-			isa = PBXFileReference;
-			explicitFileType = "compiled.mach-o.executable";
-			includeInIndex = 0;
-			path = "pscal-runner";
-			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 		CFD96FBE09D3B3111F48DAFD /* bytecode.c */ = {
 			isa = PBXFileReference;
@@ -1814,12 +1796,6 @@
 			lastKnownFileType = "sourcecode.c.c";
 			path = "registry.c";
 			sourceTree = "<group>";
-		};
-		0D70100BC7F7B0C188AB492A /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = ();
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		18DF9DF2E9ED7EA5AFB0F8A3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -2056,14 +2032,6 @@
 					3BBFCC2C6ADB64C33F6BADE2 /* sqlite_builtins.c in Sources */,
 					73448BECBF9C5757A08EC790 /* register.c in Sources */,
 					EAF2E939EE747A91EAB9D58B /* yyjson.c in Sources */,
-				);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		6225352F9B46B59DB9253B17 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-					822F9BEBBDF6F639CEF6BBD1 /* runner_main.c in Sources */,
 				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2363,15 +2331,6 @@
 			path = backend_ast;
 			name = backend_ast;
 		};
-		644211163E78545FC77F2AFC /* xcode */ = {
-			isa = PBXGroup;
-			children = (
-					9827DC89B3A8EA0C881347BE /* runner_main.c */,
-				);
-			sourceTree = "<group>";
-			path = xcode;
-			name = xcode;
-		};
 		89733B26D163C0BDF7131316 /* vm */ = {
 			isa = PBXGroup;
 			children = (
@@ -2389,7 +2348,6 @@
 					EB2C57F0682B5DF0D65C851D /* clike-repl */,
 					88FB6D7F8F9A20A50F7FB116 /* dascal */,
 					780ED30DC78EA640890E2AC6 /* pascal */,
-					C04721785837A0EB7B9D8A1D /* pscal-runner */,
 					80E7B0E79A788C3B481159AB /* pscald */,
 					A2EA821998C06580C5BB49AB /* pscaljson2bc */,
 					E0BB334EC6C0A1BEC70B2E19 /* pscalvm */,
@@ -2538,25 +2496,10 @@
 					D5A504733A16870BEDB85144 /* third_party */,
 					C8A1EC4ACBD71C1A702DB301 /* tools */,
 					89733B26D163C0BDF7131316 /* vm */,
-					644211163E78545FC77F2AFC /* xcode */,
 				);
 			sourceTree = "<group>";
 			path = src;
 			name = src;
-		};
-		042E9EE660D16CAF2B97C13D /* pscal-runner */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = FC013A7165AF77834EB6083D /* Build configuration list for PBXNativeTarget "pscal-runner" */;
-			buildPhases = (
-					6225352F9B46B59DB9253B17 /* Sources */,
-					0D70100BC7F7B0C188AB492A /* Frameworks */,
-				);
-			buildRules = ();
-			dependencies = ();
-			name = "pscal-runner";
-			productName = "pscal-runner";
-			productReference = C04721785837A0EB7B9D8A1D /* pscal-runner */;
-			productType = "com.apple.product-type.tool";
 		};
 		10357B4171CB4A9AD54D88D2 /* pscalvm */ = {
 			isa = PBXNativeTarget;
@@ -2708,10 +2651,6 @@
 						CreatedOnToolsVersion = "15.0";
 						ProvisioningStyle = Automatic;
 					};
-					042E9EE660D16CAF2B97C13D = {
-						CreatedOnToolsVersion = "15.0";
-						ProvisioningStyle = Automatic;
-					};
 				};
 			};
 			buildConfigurationList = 312100B82E481929C53FCB71 /* Build configuration list for PBXProject "Pscal" */;
@@ -2735,7 +2674,6 @@
 					985BEEC4149D1FE3D8B1FE84 /* clike-repl */,
 					CDD43774BFDB2E25DBF71290 /* rea */,
 					82B740F1338F2D1E38BD662A /* pscaljson2bc */,
-					042E9EE660D16CAF2B97C13D /* pscal-runner */,
 				);
 		};
 		092247FF457ECF0C36067D0E /* Debug */ = {
@@ -2779,7 +2717,7 @@
 						"ENABLE_EXT_BUILTIN_USER=1",
 						"ENABLE_EXT_BUILTIN_YYJSON=1",
 						"ENABLE_EXT_BUILTIN_SQLITE=1",
-						"PROGRAM_VERSION=\"20250922.1722_DEV\"",
+						"PROGRAM_VERSION=\"20250922.1600_DEV\"",
 						"PSCAL_GIT_TAG=\"untagged\"",
 						"DEBUG=1",
 					);
@@ -2918,32 +2856,6 @@
 			};
 			name = Debug;
 		};
-		5066F2CEF4B4BD478E45C845 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CODE_SIGNING_ALLOWED = NO;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_BITCODE = NO;
-				HEADER_SEARCH_PATHS = (
-						"$(inherited)",
-					);
-				LIBRARY_SEARCH_PATHS = (
-						"$(inherited)",
-					);
-				OTHER_CFLAGS = (
-						"$(inherited)",
-					);
-				OTHER_LDFLAGS = (
-						"$(inherited)",
-					);
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				GCC_PREPROCESSOR_DEFINITIONS = (
-						"$(inherited)",
-					);
-			};
-			name = Release;
-		};
 		63B8BC9736645B3F130936BE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -3078,32 +2990,6 @@
 			};
 			name = Release;
 		};
-		8D68A6D038B3B45598312C5E /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CODE_SIGNING_ALLOWED = NO;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_BITCODE = NO;
-				HEADER_SEARCH_PATHS = (
-						"$(inherited)",
-					);
-				LIBRARY_SEARCH_PATHS = (
-						"$(inherited)",
-					);
-				OTHER_CFLAGS = (
-						"$(inherited)",
-					);
-				OTHER_LDFLAGS = (
-						"$(inherited)",
-					);
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				GCC_PREPROCESSOR_DEFINITIONS = (
-						"$(inherited)",
-					);
-			};
-			name = Debug;
-		};
 		8E6C5F4C8C10F477F2E498AB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -3145,7 +3031,7 @@
 						"ENABLE_EXT_BUILTIN_USER=1",
 						"ENABLE_EXT_BUILTIN_YYJSON=1",
 						"ENABLE_EXT_BUILTIN_SQLITE=1",
-						"PROGRAM_VERSION=\"20250922.1722_DEV\"",
+						"PROGRAM_VERSION=\"20250922.1600_DEV\"",
 						"PSCAL_GIT_TAG=\"untagged\"",
 						"NDEBUG=1",
 					);
@@ -3387,15 +3273,6 @@
 			buildConfigurations = (
 					A4634666B8FE2290D35B8C1C /* Debug */,
 					42144B629B17D7910882E00C /* Release */,
-				);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		FC013A7165AF77834EB6083D /* Build configuration list for PBXNativeTarget "pscal-runner" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-					8D68A6D038B3B45598312C5E /* Debug */,
-					5066F2CEF4B4BD478E45C845 /* Release */,
 				);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
