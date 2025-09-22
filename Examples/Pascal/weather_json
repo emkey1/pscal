@@ -18,7 +18,7 @@ begin
     ParseIntOrDefault := defaultValue;
 end;
 
-function TwoDigit(value: longint): string;
+function TwoDigit(value: int64): string;
 begin
   if value < 10 then
     TwoDigit := '0' + IntToStr(value)
@@ -33,8 +33,8 @@ const
 var
   days, secondsInDay: int64;
   era, doe, yoe, doy, mp: int64;
-  year, month, day: longint;
-  hour, minute, second: longint;
+  year, month, day: int64;
+  hour, minute, second: int64;
 begin
   days := timestamp div SECONDS_PER_DAY;
   secondsInDay := timestamp mod SECONDS_PER_DAY;
@@ -49,21 +49,21 @@ begin
   era := days div 146097;
   doe := days - era * 146097;
   yoe := (doe - doe div 1460 + doe div 36524 - doe div 146096) div 365;
-  year := longint(yoe + era * 400);
+  year := yoe + era * 400;
   doy := doe - (365 * yoe + yoe div 4 - yoe div 100);
   mp := (5 * doy + 2) div 153;
-  day := longint(doy - (153 * mp + 2) div 5 + 1);
-  month := longint(mp + 3 - 12 * (mp div 10));
-  year := year + longint(mp div 10) + 1970;
-  hour := longint(secondsInDay div 3600);
-  minute := longint((secondsInDay mod 3600) div 60);
-  second := longint(secondsInDay mod 60);
+  day := doy - (153 * mp + 2) div 5 + 1;
+  month := mp + 3 - 12 * (mp div 10);
+  year := year + (mp div 10);
+  hour := secondsInDay div 3600;
+  minute := (secondsInDay mod 3600) div 60;
+  second := secondsInDay mod 60;
 
   FormatUnixTime := IntToStr(year) + '-' + TwoDigit(month) + '-' + TwoDigit(day)
     + ' ' + TwoDigit(hour) + ':' + TwoDigit(minute) + ':' + TwoDigit(second);
 end;
 
-function FormatUnixTimeWithOffset(timestamp: int64; offset: longint;
+function FormatUnixTimeWithOffset(timestamp: int64; offset: int64;
   hasOffset: boolean): string;
 var
   adjusted: int64;
@@ -74,10 +74,10 @@ begin
   FormatUnixTimeWithOffset := FormatUnixTime(adjusted);
 end;
 
-function FormatTimezoneOffset(offset: longint): string;
+function FormatTimezoneOffset(offset: int64): string;
 var
   sign: string;
-  absOffset, hours, minutes: longint;
+  absOffset, hours, minutes: int64;
 begin
   if offset >= 0 then
     sign := '+'
@@ -140,7 +140,8 @@ var
   rain1h, rain3h, snow1h, snow3h: double;
   lat, lon: double;
   humidity, pressure, visibility, cloudiness: integer;
-  timezoneOffset, statusCode: longint;
+  timezoneOffset: int64;
+  statusCode: longint;
   observationTime, sunriseTime, sunsetTime: int64;
   tempFound, humidityFound, windFound: boolean;
   feelsLikeFound, tempMinFound, tempMaxFound, pressureFound: boolean;
