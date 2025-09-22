@@ -35,6 +35,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "core/preproc.h"
+#include "core/build_info.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "ast/ast.h"
@@ -46,14 +47,6 @@
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
-
-#ifndef PROGRAM_VERSION
-#define PROGRAM_VERSION "undefined.version_DEV"
-#endif
-
-#ifndef PSCAL_GIT_TAG
-#define PSCAL_GIT_TAG "untagged"
-#endif
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -261,7 +254,7 @@ int main(int argc, char **argv) {
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "-v") == 0) {
             printf("Rea Compiler Version: %s (latest tag: %s)\n",
-                   PROGRAM_VERSION, PSCAL_GIT_TAG);
+                   pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
