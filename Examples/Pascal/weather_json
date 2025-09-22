@@ -219,6 +219,7 @@ begin
 
   ms := apiSend(url, '');
   response := apiReceive(ms);
+  MStreamFree(ms);
 
   doc := YyjsonRead(response);
   if doc < 0 then
