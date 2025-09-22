@@ -57,78 +57,125 @@ int main() {
 Here is the **JSON dump of the AST** for this example program:
 
 ```json
+--- Dumping AST to JSON (stdout) ---
 {
-  "type": "PROGRAM",
-  "tokenType": "TOKEN_INT",
-  "token": "int",
+  "node_type": "PROGRAM",
+  "token": {
+    "type": "IDENTIFIER",
+    "value": "int"
+  },
+  "var_type_annotated": "UNKNOWN_VAR_TYPE",
   "children": [
     {
-      "type": "FUN_DECL",
-      "tokenType": "TOKEN_IDENTIFIER",
-      "token": "main",
-      "right": {
-        "type": "COMPOUND",
-        "tokenType": "TOKEN_INT",
-        "token": "int",
-        "children": [
-          {
-            "type": "VAR_DECL",
-            "tokenType": "TOKEN_IDENTIFIER",
-            "token": "a",
-            "left": {
-              "type": "NUMBER",
-              "tokenType": "TOKEN_NUMBER",
-              "token": "5"
-            },
-            "right": {
-              "type": "IDENTIFIER",
-              "tokenType": "TOKEN_INT",
-              "token": "int"
-            }
+      "node_type": "FUNCTION_DECL",
+      "token": {
+        "type": "IDENTIFIER",
+        "value": "main"
+      },
+      "var_type_annotated": "UNKNOWN_VAR_TYPE",
+      "right": 
+        {
+          "node_type": "COMPOUND",
+          "token": {
+            "type": "IDENTIFIER",
+            "value": "int"
           },
-          {
-            "type": "EXPR_STMT",
-            "tokenType": "TOKEN_IDENTIFIER",
-            "token": "exit",
-            "left": {
-              "type": "CALL",
-              "tokenType": "TOKEN_IDENTIFIER",
-              "token": "printf",
-              "children": [
+          "var_type_annotated": "UNKNOWN_VAR_TYPE",
+          "children": [
+            {
+              "node_type": "VAR_DECL",
+              "token": {
+                "type": "IDENTIFIER",
+                "value": "a"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE",
+              "left": 
                 {
-                  "type": "STRING",
-                  "tokenType": "TOKEN_STRING",
-                  "token": "a = %d\\n"
+                  "node_type": "NUMBER",
+                  "token": {
+                    "type": "INTEGER_CONST",
+                    "value": "5"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
                 },
+              "right": 
                 {
-                  "type": "IDENTIFIER",
-                  "tokenType": "TOKEN_IDENTIFIER",
-                  "token": "a"
+                  "node_type": "VARIABLE",
+                  "token": {
+                    "type": "IDENTIFIER",
+                    "value": "int"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE"
                 }
-              ]
-            }
-          },
-          {
-            "type": "EXPR_STMT",
-            "tokenType": "}",
-            "token": "}",
-            "left": {
-              "type": "CALL",
-              "tokenType": "TOKEN_IDENTIFIER",
-              "token": "exit",
-              "children": [
+            },
+            {
+              "node_type": "EXPR_STMT",
+              "token": {
+                "type": "IDENTIFIER",
+                "value": "exit"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE",
+              "left": 
                 {
-                  "type": "NUMBER",
-                  "tokenType": "TOKEN_NUMBER",
-                  "token": "0"
+                  "node_type": "PROCEDURE_CALL",
+                  "token": {
+                    "type": "IDENTIFIER",
+                    "value": "printf"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE",
+                  "children": [
+                    {
+                      "node_type": "STRING",
+                      "token": {
+                        "type": "STRING_CONST",
+                        "value": "a = %d\\n"
+                      },
+                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                    },
+                    {
+                      "node_type": "VARIABLE",
+                      "token": {
+                        "type": "IDENTIFIER",
+                        "value": "a"
+                      },
+                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                    }
+                  ]
                 }
-              ]
+            },
+            {
+              "node_type": "EXPR_STMT",
+              "token": {
+                "type": "RBRACKET",
+                "value": "}"
+              },
+              "var_type_annotated": "UNKNOWN_VAR_TYPE",
+              "left": 
+                {
+                  "node_type": "PROCEDURE_CALL",
+                  "token": {
+                    "type": "IDENTIFIER",
+                    "value": "exit"
+                  },
+                  "var_type_annotated": "UNKNOWN_VAR_TYPE",
+                  "children": [
+                    {
+                      "node_type": "NUMBER",
+                      "token": {
+                        "type": "INTEGER_CONST",
+                        "value": "0"
+                      },
+                      "var_type_annotated": "UNKNOWN_VAR_TYPE"
+                    }
+                  ]
+                }
             }
-          }
-        ]
-      }
+          ]
+        }
     }
   ]
+
+--- AST JSON Dump Complete (stderr print)---
 }
 ```
 
@@ -139,37 +186,35 @@ Here is the **JSON dump of the AST** for this example program:
 Here is the **bytecode disassembly** produced from the AST:
 
 ```
---- Compiling Main Program AST to Bytecode ---
-== Disassembly: example2 ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    0 CALL             0007 (main) (0 args)
-0006    | HALT
+0000    0 CALL_USER_PROC       0 'main' @0005 (0 args)
+0004    | HALT
 
---- Routine main (at 0007) ---
-0007    2 CONSTANT            1 '5'
-0009    | SET_LOCAL           0 (slot)
-0011    3 CONSTANT            2 '0'
-0013    | CONSTANT            3 'a = '
-0015    | GET_LOCAL           0 (slot)
-0017    | CONSTANT            4 '\n'
-0019    | CALL_BUILTIN         5 'write' (4 args)
+--- Routine main (at 0005) ---
+0005    2 CONSTANT            1 '5'
+0007    | SET_LOCAL           0 (slot)
+0009    3 CONSTANT            2 '0'
+0011    | CONSTANT            3 'a = '
+0013    | GET_LOCAL           0 (slot)
+0015    | CONSTANT            4 '\n'
+0017    | CALL_BUILTIN_PROC   176 'write' (4 args)
 0023    | CONSTANT            2 '0'
 0025    4 POP
 0026    | CONSTANT            2 '0'
-0028    | CALL_BUILTIN         6 'halt' (1 args)
-0032    5 POP
-0033    1 RETURN
-== End Disassembly: example2 ==
+0028    | CALL_BUILTIN_PROC   124 'halt' (1 args)
+0034    5 POP
+0035    1 RETURN
+== End Disassembly: /tmp/foo1 ==
 
-Constants (7):
-  0000: STR   "main"
+Constants (7):\n  0000: STR   "main"
   0001: INT   5
   0002: INT   0
   0003: STR   "a = "
   0004: STR   "\n"
   0005: STR   "write"
   0006: STR   "halt"
+
 ```
 
 ---
