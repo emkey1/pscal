@@ -1148,6 +1148,8 @@ VarType getBuiltinReturnType(const char* name) {
     if (strcasecmp(name, "char") == 0 || strcasecmp(name, "tochar") == 0) return TYPE_CHAR;
     if (strcasecmp(name, "bool") == 0 || strcasecmp(name, "tobool") == 0) return TYPE_BOOLEAN;
 
+    if (strcasecmp(name, "realtimeclock") == 0) return TYPE_DOUBLE;
+
     /* Math routines returning REAL */
     if (strcasecmp(name, "cos")   == 0 ||
         strcasecmp(name, "sin")   == 0 ||

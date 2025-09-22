@@ -15,7 +15,7 @@ The project currently ships several optional built‑in groups:
 | Category | Location | Built-ins |
 | -------- | -------- | --------- |
 | **Math** | `src/ext_builtins/math` | `Factorial`, `Fibonacci`, `MandelbrotRow`, `Chudnovsky` |
-| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `Swap` |
+| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `RealTimeClock`, `Swap` |
 | **Strings** | `src/ext_builtins/strings` | (none yet) |
 | **User** | `src/ext_builtins/user` | (user-defined) |
 
@@ -86,6 +86,29 @@ static Value vmBuiltinGetPid(struct VM_s* vm, int arg_count, Value* args) {
 void registerGetPidBuiltin(void) {
     registerBuiltinFunction("GetPid", AST_FUNCTION_DECL, NULL);
     registerVmBuiltin("getpid", vmBuiltinGetPid);
+}
+```
+
+`realtimeclock.c` returns the current wall-clock time as a `DOUBLE`
+measured in seconds since the Unix epoch. It uses the highest resolution
+timer available on the host platform and reports monotonic results suitable
+for simple timing and latency measurements:
+
+```c
+static Value vmBuiltinRealTimeClock(struct VM_s* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "RealTimeClock expects no arguments.");
+        return makeDouble(0.0);
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long double seconds = ts.tv_sec + ts.tv_nsec / 1000000000.0L;
+    return makeDouble((double)seconds);
+}
+
+void registerRealTimeClockBuiltin(void) {
+    registerVmBuiltin("realtimeclock", vmBuiltinRealTimeClock,
+                      BUILTIN_TYPE_FUNCTION, "RealTimeClock");
 }
 ```
 

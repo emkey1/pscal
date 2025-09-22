@@ -75,7 +75,8 @@ static VarType builtinReturnType(const char* name) {
 
     static const char *const doubleFuncs[] = {
         "cos", "sin", "tan", "ln", "exp", "real", "cosh", "sinh", "tanh",
-        "cotan", "arccos", "arcsin", "arctan", "double", "todouble"
+        "cotan", "arccos", "arcsin", "arctan", "double", "todouble",
+        "realtimeclock"
     };
     if (builtinMatches(name, doubleFuncs, sizeof(doubleFuncs) / sizeof(doubleFuncs[0]))) {
         return TYPE_DOUBLE;
@@ -530,8 +531,16 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     }
                 }
             }
-            // Final fallback for known VM HTTP helpers; assign return types and validate args
-            if (strcasecmp(name, "httpsession") == 0) {
+            // Final fallback for runtime-registered builtins that need explicit validation
+            if (strcasecmp(name, "realtimeclock") == 0) {
+                if (node->child_count != 0) {
+                    fprintf(stderr,
+                            "Type error: realtimeclock expects no arguments at line %d, column %d\n",
+                            node->token.line, node->token.column);
+                    clike_error_count++;
+                }
+                t = TYPE_DOUBLE;
+            } else if (strcasecmp(name, "httpsession") == 0) {
                 if (node->child_count != 0) {
                     fprintf(stderr,
                             "Type error: httpsession expects no arguments at line %d, column %d\n",

@@ -2,6 +2,7 @@
 set(EXT_BUILTIN_SYSTEM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fileexists.c
     ${CMAKE_CURRENT_SOURCE_DIR}/getpid.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/realtimeclock.c
     ${CMAKE_CURRENT_SOURCE_DIR}/swap.c
     ${CMAKE_CURRENT_SOURCE_DIR}/register.c
 )

@@ -1,0 +1,10 @@
+float start = realtimeclock();
+float later = realtimeclock();
+
+if (start <= 0.0) {
+  printf("bad\n");
+} else if (later < start) {
+  printf("bad\n");
+} else {
+  printf("ok\n");
+}
