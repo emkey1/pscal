@@ -678,7 +678,15 @@ void vmDumpStackInfo(VM* vm) {
 
     // Disassemble and print the current instruction
     if (current_offset < vm->chunk->count) {
-        disassembleInstruction(vm->chunk, current_offset, vm->procedureTable);
+        int disasm_offset;
+        if (current_offset < 0) {
+            disasm_offset = 0;
+        } else if (current_offset > INT_MAX) {
+            disasm_offset = INT_MAX;
+        } else {
+            disasm_offset = (int)current_offset;
+        }
+        disassembleInstruction(vm->chunk, disasm_offset, vm->procedureTable);
     } else {
         fprintf(stderr, "         (End of bytecode or invalid offset)\n");
     }

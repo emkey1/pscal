@@ -1,5 +1,7 @@
 #include "clike/lexer.h"
 #include <ctype.h>
+#include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,6 +11,16 @@ static bool isAlpha(char c) {
 
 static bool isDigit(char c) {
     return c >= '0' && c <= '9';
+}
+
+static int clampPtrdiffToInt(ptrdiff_t diff) {
+    if (diff < 0) {
+        return 0;
+    }
+    if (diff > (ptrdiff_t)INT_MAX) {
+        return INT_MAX;
+    }
+    return (int)diff;
 }
 
 void clikeInitLexer(ClikeLexer *lexer, const char *source) {
@@ -48,7 +60,8 @@ static ClikeToken makeToken(ClikeLexer *lexer, ClikeTokenType type, const char *
 }
 static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int column) {
     while (isAlpha(peek(lexer)) || isDigit(peek(lexer))) advance(lexer);
-    int length = &lexer->src[lexer->pos] - start;
+    ptrdiff_t span = &lexer->src[lexer->pos] - start;
+    int length = clampPtrdiffToInt(span);
     if (length == 3 && strncmp(start, "int", 3) == 0) return makeToken(lexer, CLIKE_TOKEN_INT, start, length, column);
     if (length == 4 && strncmp(start, "long", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_LONG, start, length, column);
     if (length == 4 && strncmp(start, "void", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_VOID, start, length, column);
@@ -86,7 +99,8 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
     if (start[0] == '0' && (peek(lexer) == 'x' || peek(lexer) == 'X')) {
         advance(lexer); // consume 'x'
         while (isxdigit(peek(lexer))) advance(lexer);
-        int length = &lexer->src[lexer->pos] - start;
+        ptrdiff_t span = &lexer->src[lexer->pos] - start;
+        int length = clampPtrdiffToInt(span);
         ClikeToken t = makeToken(lexer, CLIKE_TOKEN_NUMBER, start, length, column);
         char *tmp = strndup(start, length);
         t.int_val = strtoll(tmp, NULL, 0);
@@ -99,7 +113,8 @@ static ClikeToken numberToken(ClikeLexer *lexer, const char *start, int column) 
         advance(lexer); // consume '.'
         while (isDigit(peek(lexer))) advance(lexer);
     }
-    int length = &lexer->src[lexer->pos] - start;
+    ptrdiff_t span = &lexer->src[lexer->pos] - start;
+    int length = clampPtrdiffToInt(span);
     ClikeToken t = makeToken(lexer, isFloat ? CLIKE_TOKEN_FLOAT_LITERAL : CLIKE_TOKEN_NUMBER, start, length, column);
     if (isFloat) t.float_val = atof(start); else t.int_val = strtoll(start, NULL, 10);
     return t;
@@ -110,7 +125,8 @@ static ClikeToken stringToken(ClikeLexer *lexer, const char *start, int column) 
     while (peek(lexer) != '"' && peek(lexer) != '\0') {
         advance(lexer);
     }
-    int length = &lexer->src[lexer->pos] - start - 1;
+    ptrdiff_t span = (&lexer->src[lexer->pos] - start) - 1;
+    int length = clampPtrdiffToInt(span);
     if (peek(lexer) == '"') advance(lexer); // consume closing quote
     return makeToken(lexer, CLIKE_TOKEN_STRING, start + 1, length, column);
 }

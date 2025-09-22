@@ -820,7 +820,7 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                                 node->i_val = 1;
                                 break;
                             case TYPE_BOOLEAN:
-                                node->i_val = v->i_val;
+                                node->i_val = v->i_val ? 1 : 0;
                                 break;
                             case TYPE_ENUM:
                                 node->i_val = v->enum_val.ordinal;

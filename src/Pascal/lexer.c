@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <limits.h>
 
 static inline bool isIdentifierStartChar(unsigned char c) {
     return (c == '_') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
@@ -238,7 +239,12 @@ Token *number(Lexer *lexer) {
     bool has_exponent = false;
     
     int token_line = lexer->line; // Capture line/col BEFORE advancing further if number() advances
-    int token_column = lexer->column - (lexer->pos - start); // Approximate start column of number
+    size_t consumed_chars = lexer->pos - start;
+    int consumed_cols = (consumed_chars > (size_t)INT_MAX) ? INT_MAX : (int)consumed_chars;
+    int token_column = lexer->column - consumed_cols; // Approximate start column of number
+    if (token_column < 1) {
+        token_column = 1;
+    }
 
 
     // Move these to the top so they're visible to make_number:
