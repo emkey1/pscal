@@ -1196,6 +1196,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
     vm->exit_requested = false;
+    vm->abort_requested = false;
     vm->current_builtin_name = NULL;
 
     vm->threadCount = 1; // main thread occupies index 0
@@ -1591,6 +1592,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
     vm->lastInstruction = vm->ip;
+    vm->abort_requested = false;
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
@@ -4164,6 +4166,10 @@ comparison_error_label:
                 }
 
                 BuiltinRoutineType builtin_type = effective_name ? getBuiltinType(effective_name) : BUILTIN_TYPE_NONE;
+                if (vm->abort_requested) {
+                    freeValue(&result);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 if (builtin_type == BUILTIN_TYPE_FUNCTION) {
                     push(vm, result);
                 } else {
@@ -4226,6 +4232,11 @@ comparison_error_label:
                         // temporary buffer on the stack.  Free it now to avoid leaking large
                         // allocations (e.g., texture pixel buffers) on every builtin call.
                         freeValue(&args[i]);
+                    }
+
+                    if (vm->abort_requested) {
+                        freeValue(&result);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
 
                     if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {

@@ -35,6 +35,27 @@ CMake build.
   the main compiler.
 - When new `.c` files are added, rerun `python tools/generate_xcodeproj.py`
   so that the project picks them up.
-- SDL-dependent sources are present but guarded by `#ifdef SDL`; if you need the
-  SDL runtime in Xcode, add the SDL frameworks via the target build settings and
-  define the `SDL` macro.
+- SDL-dependent sources are present but guarded by `#ifdef SDL`; see the next
+  section for enabling the SDL runtime inside Xcode.
+
+## Enabling SDL Support in Xcode
+
+The generated project keeps SDL optional so that builds succeed on machines
+that do not have the frameworks installed.  To toggle SDL on for any of the
+schemes:
+
+1. Select the **Project** navigator, click the `Pscal` project, then pick the
+   **Build Settings** tab for the desired target (for example **pascal**).
+2. Under **Preprocessor Macros** add `SDL=1` to both the Debug and Release
+   configurations.  Setting it at the project level will cascade to every
+   target.
+3. Open the **Build Phases** tab, expand **Link Binary With Libraries**, and add
+   `SDL2.framework`, `SDL2_ttf.framework`, and `SDL2_mixer.framework` (or the
+   dynamic libraries from Homebrew if you prefer `.dylib`s).
+4. If the SDL headers live outside `/Library/Frameworks`, add the parent folder
+   to **Header Search Paths** (e.g. `/opt/homebrew/include`).
+5. Clean and rebuild; SDL-only examples such as
+   `Examples/Pascal/SDLMultiBouncingBalls` will now launch from within Xcode.
+
+To disable SDL again, remove the frameworks and the `SDL` macro entry—no other
+changes are required.
