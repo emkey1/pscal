@@ -469,8 +469,8 @@ def build_project(output_path: Path, release_build: bool) -> None:
         "ENABLE_EXT_BUILTIN_USER=1",
         "ENABLE_EXT_BUILTIN_YYJSON=1",
         "ENABLE_EXT_BUILTIN_SQLITE=1",
-        f'PROGRAM_VERSION="{escape_define(program_version)}"',
-        f'PSCAL_GIT_TAG="{escape_define(git_tag)}"',
+        f'PROGRAM_VERSION=\\"{escape_define(program_version)}\\"',
+        f'PSCAL_GIT_TAG=\\"{escape_define(git_tag)}\\"',
     ]
     # The generated .xcodeproj lives in xcode/ which means PROJECT_DIR points to
     # that subdirectory. Header includes in the source expect to resolve against
