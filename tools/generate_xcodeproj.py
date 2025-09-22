@@ -368,6 +368,12 @@ def build_project(output_path: Path, release_build: bool) -> None:
                 },
             ),
             ("pscaljson2bc", {"sources": json2bc_sources}),
+            (
+                "pscal-runner",
+                {
+                    "sources": ["src/xcode/runner_main.c"],
+                },
+            ),
         ]
     )
 

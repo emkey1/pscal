@@ -23,6 +23,7 @@ The following command-line targets are available inside Xcode:
 - **clike** / **clike-repl** – Tiny C front-end and REPL
 - **rea** – REA front-end
 - **pscaljson2bc** – JSON-to-bytecode conversion utility
+- **pscal-runner** – Helper executable that launches another PSCAL binary
 
 Every target inherits the same header search paths and links against the system
 `curl`, `sqlite3`, `m`, and `pthread` libraries.  Extended builtins are enabled
@@ -38,3 +39,22 @@ CMake build.
 - SDL-dependent sources are present but guarded by `#ifdef SDL`; if you need the
   SDL runtime in Xcode, add the SDL frameworks via the target build settings and
   define the `SDL` macro.
+
+## Running Different Executables
+
+The shared **pascal** scheme now builds a lightweight `pscal-runner` helper.
+When you press **Run**, the helper invokes whichever PSCAL binary you request
+and forwards any launch arguments.
+
+- Use the scheme's *Run > Environment Variables* table to change the
+  `PSCAL_RUN_TARGET` value (default `pascal`). Set it to another product name
+  such as `pscalvm`, `clike`, or `pscaljson2bc`.
+- Alternatively, enable `PSCAL_RUN_EXECUTABLE` and point it at a specific
+  relative or absolute path if you need to run a custom build.
+- Arguments added under *Run > Arguments Passed On Launch* are passed directly
+  to the selected executable so you can test different flag combinations
+  without editing source files.
+
+This keeps the build products in sync—every binary listed above is built when
+you run the scheme—while making it easy to swap the active executable and its
+command-line arguments from inside Xcode.
