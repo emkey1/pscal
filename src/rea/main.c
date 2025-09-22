@@ -235,7 +235,10 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int main(int argc, char **argv) {
-    vmInitTerminalState();
+    const char *initTerm = getenv("PSCAL_INIT_TERM");
+    if (initTerm && *initTerm && *initTerm != '0') {
+        vmInitTerminalState();
+    }
 
     int dump_ast_json = 0;
     int dump_bytecode_flag = 0;
