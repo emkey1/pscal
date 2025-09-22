@@ -40,6 +40,7 @@ option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
 option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
 option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
+option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -49,6 +50,9 @@ if(ENABLE_EXT_BUILTIN_STRINGS)
 endif()
 if(ENABLE_EXT_BUILTIN_SYSTEM)
     add_compile_definitions(ENABLE_EXT_BUILTIN_SYSTEM)
+endif()
+if(ENABLE_EXT_BUILTIN_YYJSON)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_YYJSON)
 endif()
 if(ENABLE_EXT_BUILTIN_USER)
     add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
@@ -78,6 +82,7 @@ include_directories(
     src/backend_ast
     src/compiler
     src/vm
+    src/third_party/yyjson
 )
 
 # ---- Dependencies ----
@@ -184,6 +189,7 @@ endif()
 # Allow selectively enabling categories of extended builtins.
 add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND PSCAL_SOURCES src/third_party/yyjson/yyjson.c)
 
 # ---- Toolchain feature detection ----
 # Detect whether AddressSanitizer is usable before wiring it into dascal
@@ -354,6 +360,7 @@ set(CLIKE_SOURCES
 
 # Include user-supplied builtins in clike as well
 list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND CLIKE_SOURCES src/third_party/yyjson/yyjson.c)
 
 # When SDL support is enabled, clike needs the same SDL backend sources
 # as the main executables to provide implementations for graphics and
@@ -462,6 +469,7 @@ set(REA_SOURCES
 )
 
 list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND REA_SOURCES src/third_party/yyjson/yyjson.c)
 
 if(SDL)
     list(APPEND REA_SOURCES
@@ -555,6 +563,7 @@ set(JSON2BC_SOURCES
     src/Pascal/globals.c
 )
 list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND JSON2BC_SOURCES src/third_party/yyjson/yyjson.c)
 add_executable(pscaljson2bc ${JSON2BC_SOURCES})
 if(TARGET CURL::libcurl)
     target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)

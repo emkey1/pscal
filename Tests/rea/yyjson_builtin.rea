@@ -1,0 +1,71 @@
+int main() {
+  int doc = YyjsonRead("{\"name\":\"pscal\",\"version\":42,\"enabled\":false,\"values\":[1,2,3],\"pi\":2.5,\"maybe\":null,\"nested\":{\"present\":\"yes\"}}");
+  if (doc < 0) {
+    printf("doc_parse_failed\n");
+    return 1;
+  }
+
+  int root = YyjsonGetRoot(doc);
+  printf("root_type=%s\n", YyjsonGetType(root));
+
+  int nameHandle = YyjsonGetKey(root, "name");
+  printf("name=%s\n", YyjsonGetString(nameHandle));
+
+  int versionHandle = YyjsonGetKey(root, "version");
+  printf("version=%d\n", toint(YyjsonGetInt(versionHandle)));
+
+  int enabledHandle = YyjsonGetKey(root, "enabled");
+  printf("enabled=%d\n", YyjsonGetBool(enabledHandle));
+
+  int valuesHandle = YyjsonGetKey(root, "values");
+  int arrLen = YyjsonGetLength(valuesHandle);
+  printf("values_len=%d\n", arrLen);
+  int sum = 0;
+  int i = 0;
+  while (i < arrLen) {
+    int valueHandle = YyjsonGetIndex(valuesHandle, i);
+    if (valueHandle >= 0) {
+      sum = sum + toint(YyjsonGetInt(valueHandle));
+      YyjsonFreeValue(valueHandle);
+    }
+    i = i + 1;
+  }
+  printf("values_sum=%d\n", sum);
+
+  int piHandle = YyjsonGetKey(root, "pi");
+  double piValue = YyjsonGetNumber(piHandle);
+  printf("pi=%.5f\n", piValue);
+
+  int nestedHandle = YyjsonGetKey(root, "nested");
+  int presentHandle = YyjsonGetKey(nestedHandle, "present");
+  printf("nested_present=%s\n", YyjsonGetString(presentHandle));
+
+  int maybeHandle = YyjsonGetKey(root, "maybe");
+  printf("maybe_is_null=%d\n", YyjsonIsNull(maybeHandle));
+
+  YyjsonFreeValue(maybeHandle);
+  YyjsonFreeValue(presentHandle);
+  YyjsonFreeValue(nestedHandle);
+  YyjsonFreeValue(piHandle);
+  YyjsonFreeValue(valuesHandle);
+  YyjsonFreeValue(enabledHandle);
+  YyjsonFreeValue(versionHandle);
+  YyjsonFreeValue(nameHandle);
+  YyjsonFreeValue(root);
+  YyjsonDocFree(doc);
+
+  int fileDoc = YyjsonReadFile("Tests/data/yyjson_sample.json");
+  if (fileDoc < 0) {
+    printf("file_parse_failed\n");
+    return 1;
+  }
+  int fileRoot = YyjsonGetRoot(fileDoc);
+  int fileNameHandle = YyjsonGetKey(fileRoot, "name");
+  printf("file_name=%s\n", YyjsonGetString(fileNameHandle));
+  YyjsonFreeValue(fileNameHandle);
+  YyjsonFreeValue(fileRoot);
+  YyjsonDocFree(fileDoc);
+  return 0;
+}
+
+main();
