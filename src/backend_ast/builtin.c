@@ -40,6 +40,9 @@ static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     (void)args;
     const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
     runtimeError(vm, "Built-in '%s' requires SDL support. Rebuild with -DSDL=ON to enable it.", name);
+    if (vm) {
+        vm->abort_requested = true;
+    }
     return makeNil();
 }
 #define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
