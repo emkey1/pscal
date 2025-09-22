@@ -164,6 +164,16 @@ exercise_pascal_cli_smoke() {
   fi
   rm -f "$tmp_out" "$tmp_err"
   echo
+
+has_ext_builtin_category() {
+  local binary="$1"
+  local category="$2"
+  set +e
+  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
+  local status=$?
+  set -e
+  return $status
+
 }
 
 if [ ! -x "$PASCAL_BIN" ]; then
@@ -204,6 +214,12 @@ EXIT_CODE=0
 check_ext_builtin_dump "$PASCAL_BIN" pascal
 exercise_pascal_cli_smoke
 
+if has_ext_builtin_category "$PASCAL_BIN" sqlite; then
+  PASCAL_SQLITE_AVAILABLE=1
+else
+  PASCAL_SQLITE_AVAILABLE=0
+fi
+
 # Iterate over Pascal test sources (files without extensions)
 for src in "$SCRIPT_DIR"/Pascal/*; do
   test_name=$(basename "$src")
@@ -213,6 +229,12 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   # Skip SDL-dependent test unless RUN_SDL=1 forces it
   if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
     echo "Skipping $test_name (SDL disabled)"
+    echo
+    continue
+  fi
+
+  if [ -f "$SCRIPT_DIR/Pascal/$test_name.sqlite" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then
+    echo "Skipping $test_name (SQLite builtins disabled)"
     echo
     continue
   fi

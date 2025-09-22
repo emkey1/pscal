@@ -1,0 +1,60 @@
+program SqliteSmokeTest;
+
+var
+  db, stmt, rc: integer;
+begin
+  db := SqliteOpen(':memory:');
+  if db < 0 then
+  begin
+    writeln('open_failed');
+    halt(1);
+  end;
+  writeln('open_ok');
+
+  rc := SqliteExec(db, 'CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT);');
+  writeln('create_rc=', rc);
+
+  stmt := SqlitePrepare(db, 'INSERT INTO t(name) VALUES (?1);');
+  writeln('insert_stmt_valid=', stmt >= 0);
+
+  rc := SqliteBindText(stmt, 1, 'alpha');
+  writeln('bind_alpha_rc=', rc);
+  rc := SqliteStep(stmt);
+  writeln('insert_alpha_step=', rc);
+  rc := SqliteReset(stmt);
+  writeln('insert_reset_rc=', rc);
+
+  rc := SqliteBindText(stmt, 1, 'beta');
+  writeln('bind_beta_rc=', rc);
+  rc := SqliteStep(stmt);
+  writeln('insert_beta_step=', rc);
+  rc := SqliteFinalize(stmt);
+  writeln('insert_finalize_rc=', rc);
+
+  writeln('last_rowid=', SqliteLastInsertRowId(db));
+  writeln('changes=', SqliteChanges(db));
+
+  stmt := SqlitePrepare(db, 'SELECT id, name FROM t ORDER BY id;');
+  writeln('select_stmt_valid=', stmt >= 0);
+
+  rc := SqliteStep(stmt);
+  writeln('select_step1=', rc);
+  writeln('col_count=', SqliteColumnCount(stmt));
+  writeln('col0_type=', SqliteColumnType(stmt, 0));
+  writeln('col1_type=', SqliteColumnType(stmt, 1));
+  writeln('col0_int=', SqliteColumnInt(stmt, 0));
+  writeln('col1_text=', SqliteColumnText(stmt, 1));
+
+  rc := SqliteStep(stmt);
+  writeln('select_step2=', rc);
+  writeln('col0_int2=', SqliteColumnInt(stmt, 0));
+  writeln('col1_text2=', SqliteColumnText(stmt, 1));
+
+  rc := SqliteStep(stmt);
+  writeln('select_step3=', rc);
+
+  rc := SqliteFinalize(stmt);
+  writeln('select_finalize_rc=', rc);
+
+  writeln('close_rc=', SqliteClose(db));
+end.
