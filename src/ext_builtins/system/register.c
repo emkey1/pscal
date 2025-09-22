@@ -3,15 +3,18 @@
 
 void registerFileExistsBuiltin(void);
 void registerGetPidBuiltin(void);
+void registerRealTimeClockBuiltin(void);
 void registerSwapBuiltin(void);
 
 void registerSystemBuiltins(void) {
   extBuiltinRegisterCategory("system");
   extBuiltinRegisterFunction("system", "FileExists");
   extBuiltinRegisterFunction("system", "GetPid");
+  extBuiltinRegisterFunction("system", "RealTimeClock");
   extBuiltinRegisterFunction("system", "Swap");
 
   registerFileExistsBuiltin();
   registerGetPidBuiltin();
+  registerRealTimeClockBuiltin();
   registerSwapBuiltin();
 }

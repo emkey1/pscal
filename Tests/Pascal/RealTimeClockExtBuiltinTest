@@ -1,0 +1,22 @@
+program RealTimeClockExtBuiltinTest;
+
+var
+  first, second: real;
+begin
+  first := RealTimeClock();
+  second := RealTimeClock();
+
+  if first <= 0.0 then
+  begin
+    writeln('RealTimeClock returned non-positive timestamp');
+    halt(1);
+  end;
+
+  if second < first then
+  begin
+    writeln('RealTimeClock did not behave monotonically');
+    halt(1);
+  end;
+
+  writeln('RealTimeClock builtin test passed');
+end.
