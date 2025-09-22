@@ -403,11 +403,16 @@ def build_project(output_path: Path) -> None:
     products_ref = add_object(products_identifier, products_group)
 
     root_identifier = md5_id("GROUP", "")
+    root_fields = {
+        "children": [src_group, products_ref],
+        "sourceTree": "<group>",
+        "path": "..",
+        "name": PROJECT_NAME,
+    }
     root_group = PBXObject(
         comment=PROJECT_NAME.lower(),
         isa="PBXGroup",
-        children=[src_group, products_ref],
-        sourceTree="<group>",
+        **root_fields,
     )
     root_ref = add_object(root_identifier, root_group)
 

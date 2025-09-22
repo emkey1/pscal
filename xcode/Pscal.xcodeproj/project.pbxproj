@@ -2403,6 +2403,8 @@
 					8B60E3824A4B5D0B534EFDAE /* Products */,
 				);
 			sourceTree = "<group>";
+			path = "..";
+			name = Pscal;
 		};
 		9F90D12262F2EBCD1CCCA58B /* strings */ = {
 			isa = PBXGroup;
