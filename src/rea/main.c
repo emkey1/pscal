@@ -18,6 +18,7 @@
 #include "rea/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
+#include "ext_builtins/dump.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -35,6 +36,7 @@ static const char *REA_USAGE =
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+    "     --dump-ext-builtins    List extended builtin inventory and exit.\n"
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
@@ -212,6 +214,7 @@ int main(int argc, char **argv) {
     int dump_ast_json = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int dump_ext_builtins = 0;
     int vm_trace_head = 0;
     int no_cache = 0;
     int strict_mode = 0;
@@ -224,6 +227,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[argi], "--dump-ext-builtins") == 0) {
+            dump_ext_builtins = 1;
         } else if (strcmp(argv[argi], "--no-cache") == 0) {
             no_cache = 1;
         } else if (strcmp(argv[argi], "--strict") == 0) {
@@ -235,6 +240,12 @@ int main(int argc, char **argv) {
             return vmExitWithCleanup(EXIT_FAILURE);
         }
         argi++;
+    }
+
+    if (dump_ext_builtins) {
+        registerExtendedBuiltins();
+        extBuiltinDumpInventory(stdout);
+        return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
     if (argc <= argi) {

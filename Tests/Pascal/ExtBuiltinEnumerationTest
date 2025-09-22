@@ -1,0 +1,37 @@
+program ExtBuiltinEnumerationTest;
+var
+  catCount, fnCount, i, j: integer;
+  catName, fnName: string;
+  success, foundSystem, foundGetPid: boolean;
+begin
+  success := true;
+  foundSystem := false;
+  foundGetPid := false;
+  catCount := ExtBuiltinCategoryCount();
+  for i := 0 to catCount - 1 do
+  begin
+    catName := ExtBuiltinCategoryName(i);
+    if catName = '' then
+      success := false;
+    fnCount := ExtBuiltinFunctionCount(catName);
+    for j := 0 to fnCount - 1 do
+    begin
+      fnName := ExtBuiltinFunctionName(catName, j);
+      if fnName = '' then
+        success := false;
+      if (catName = 'system') and (fnName = 'GetPid') then
+        foundGetPid := true;
+    end;
+    if catName = 'system' then
+      foundSystem := true;
+  end;
+  if HasExtBuiltin('system', 'GetPid') then
+  begin
+    if not (foundSystem and foundGetPid) then
+      success := false;
+  end;
+  if success then
+    writeln('ok')
+  else
+    writeln('fail');
+end.
