@@ -433,6 +433,10 @@ def build_project(output_path: Path) -> None:
         "ENABLE_EXT_BUILTIN_YYJSON=1",
         "ENABLE_EXT_BUILTIN_SQLITE=1",
     ]
+    # The generated .xcodeproj lives in xcode/ which means PROJECT_DIR points to
+    # that subdirectory. Header includes in the source expect to resolve against
+    # the repository root (e.g. "core/utils.h"), so the header search path must
+    # explicitly reach back up to the real src/ tree.
     common_project_settings = OrderedDict(
         [
             ("ALWAYS_SEARCH_USER_PATHS", "NO"),
@@ -440,7 +444,7 @@ def build_project(output_path: Path) -> None:
             ("CODE_SIGNING_ALLOWED", "NO"),
             ("ENABLE_BITCODE", "NO"),
             ("GCC_PREPROCESSOR_DEFINITIONS", ["$(inherited)"] + base_preprocessor_defs),
-            ("HEADER_SEARCH_PATHS", ["$(PROJECT_DIR)/src", "$(PROJECT_DIR)/src/**"]),
+            ("HEADER_SEARCH_PATHS", ["$(PROJECT_DIR)/../src", "$(PROJECT_DIR)/../src/**"]),
             ("LIBRARY_SEARCH_PATHS", ["$(inherited)"]),
             ("MACOSX_DEPLOYMENT_TARGET", "11.0"),
             ("OTHER_CFLAGS", ["$(inherited)", "-Wall"]),
