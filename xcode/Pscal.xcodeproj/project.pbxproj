@@ -2837,10 +2837,22 @@
 						"PSCAL_GIT_TAG=\"untagged\"",
 						"DEBUG=1",
 					);
-				HEADER_SEARCH_PATHS = (
-						"$(PROJECT_DIR)/../src",
-						"$(PROJECT_DIR)/../src/**",
-					);
+                               HEADER_SEARCH_PATHS = (
+                                               "$(PROJECT_DIR)/../src",
+                                               "$(PROJECT_DIR)/../src/**",
+                                               "/Library/Frameworks/SDL2.framework/Headers",
+                                               "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
+                                               "/opt/homebrew/include",
+                                               "/opt/homebrew/include/SDL2",
+                                               "/opt/homebrew/opt/sdl2/include",
+                                               "/opt/homebrew/opt/sdl2/include/SDL2",
+                                               "/usr/local/include",
+                                               "/usr/local/include/SDL2",
+                                               "/usr/local/opt/sdl2/include",
+                                               "/usr/local/opt/sdl2/include/SDL2",
+                                               "/usr/include",
+                                               "/usr/include/SDL2",
+                                       );
 				LIBRARY_SEARCH_PATHS = (
 						"$(inherited)",
 					);
@@ -3179,10 +3191,22 @@
 						"PSCAL_GIT_TAG=\"untagged\"",
 						"NDEBUG=1",
 					);
-				HEADER_SEARCH_PATHS = (
-						"$(PROJECT_DIR)/../src",
-						"$(PROJECT_DIR)/../src/**",
-					);
+                               HEADER_SEARCH_PATHS = (
+                                               "$(PROJECT_DIR)/../src",
+                                               "$(PROJECT_DIR)/../src/**",
+                                               "/Library/Frameworks/SDL2.framework/Headers",
+                                               "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
+                                               "/opt/homebrew/include",
+                                               "/opt/homebrew/include/SDL2",
+                                               "/opt/homebrew/opt/sdl2/include",
+                                               "/opt/homebrew/opt/sdl2/include/SDL2",
+                                               "/usr/local/include",
+                                               "/usr/local/include/SDL2",
+                                               "/usr/local/opt/sdl2/include",
+                                               "/usr/local/opt/sdl2/include/SDL2",
+                                               "/usr/include",
+                                               "/usr/include/SDL2",
+                                       );
 				LIBRARY_SEARCH_PATHS = (
 						"$(inherited)",
 					);

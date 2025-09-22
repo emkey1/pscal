@@ -24,6 +24,22 @@ PROJECT_NAME = "Pscal"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+SDL_HEADER_HINTS = [
+    "/Library/Frameworks/SDL2.framework/Headers",
+    "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
+    "/opt/homebrew/include",
+    "/opt/homebrew/include/SDL2",
+    "/opt/homebrew/opt/sdl2/include",
+    "/opt/homebrew/opt/sdl2/include/SDL2",
+    "/usr/local/include",
+    "/usr/local/include/SDL2",
+    "/usr/local/opt/sdl2/include",
+    "/usr/local/opt/sdl2/include/SDL2",
+    "/usr/include",
+    "/usr/include/SDL2",
+]
+
+
 def determine_version_info(release_build: bool) -> Tuple[str, str]:
     """Mirror the CMake version and tag discovery logic."""
 
@@ -476,6 +492,10 @@ def build_project(output_path: Path, release_build: bool) -> None:
     # that subdirectory. Header includes in the source expect to resolve against
     # the repository root (e.g. "core/utils.h"), so the header search path must
     # explicitly reach back up to the real src/ tree.
+    header_search_paths = ["$(PROJECT_DIR)/../src", "$(PROJECT_DIR)/../src/**"]
+    header_search_paths.extend(SDL_HEADER_HINTS)
+    header_search_paths = list(dict.fromkeys(header_search_paths))
+
     common_project_settings = OrderedDict(
         [
             ("ALWAYS_SEARCH_USER_PATHS", "NO"),
@@ -483,7 +503,7 @@ def build_project(output_path: Path, release_build: bool) -> None:
             ("CODE_SIGNING_ALLOWED", "NO"),
             ("ENABLE_BITCODE", "NO"),
             ("GCC_PREPROCESSOR_DEFINITIONS", ["$(inherited)"] + base_preprocessor_defs),
-            ("HEADER_SEARCH_PATHS", ["$(PROJECT_DIR)/../src", "$(PROJECT_DIR)/../src/**"]),
+            ("HEADER_SEARCH_PATHS", header_search_paths),
             ("LIBRARY_SEARCH_PATHS", ["$(inherited)"]),
             ("MACOSX_DEPLOYMENT_TARGET", "11.0"),
             ("OTHER_CFLAGS", ["$(inherited)", "-Wall"]),
