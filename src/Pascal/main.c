@@ -32,6 +32,7 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "core/preproc.h"
+#include "core/build_info.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -56,14 +57,6 @@ char **gParamValues = NULL;
 
 #ifdef DEBUG
 List *inserted_global_names = NULL;
-#endif
-
-#ifndef PROGRAM_VERSION
-#define PROGRAM_VERSION "undefined.version_DEV"
-#endif
-
-#ifndef PSCAL_GIT_TAG
-#define PSCAL_GIT_TAG "untagged"
 #endif
 
 static int s_vm_trace_head = 0;
@@ -376,7 +369,7 @@ int main(int argc, char *argv[]) {
 
     if (argc == 1) {
         printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
-               PROGRAM_VERSION, PSCAL_GIT_TAG);
+               pscal_program_version_string(), pscal_git_tag_string());
         printf("%s\n", PASCAL_USAGE);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -386,7 +379,7 @@ int main(int argc, char *argv[]) {
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
             printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
-                   PROGRAM_VERSION, PSCAL_GIT_TAG);
+                   pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;

@@ -39,18 +39,11 @@
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
+#include "core/build_info.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
-
-#ifndef PROGRAM_VERSION
-#define PROGRAM_VERSION "undefined.version_DEV"
-#endif
-
-#ifndef PSCAL_GIT_TAG
-#define PSCAL_GIT_TAG "untagged"
-#endif
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -120,7 +113,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
             printf("Clike Compiler Version: %s (latest tag: %s)\n",
-                   PROGRAM_VERSION, PSCAL_GIT_TAG);
+                   pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
