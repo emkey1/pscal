@@ -15,8 +15,9 @@ The project currently ships several optional built‑in groups:
 | Category | Location | Built-ins |
 | -------- | -------- | --------- |
 | **Math** | `src/ext_builtins/math` | `Factorial`, `Fibonacci`, `MandelbrotRow`, `Chudnovsky` |
-| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `Swap` |
+| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `RealTimeClock`, `Swap` |
 | **Strings** | `src/ext_builtins/strings` | (none yet) |
+| **Yyjson** | `src/ext_builtins/yyjson` | `YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`, `YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`, `YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull` |
 | **User** | `src/ext_builtins/user` | (user-defined) |
 
 Individual categories can be enabled or disabled at configure time with
@@ -27,7 +28,70 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_STRINGS=ON/OFF
 -DENABLE_EXT_BUILTIN_SYSTEM=ON/OFF
 -DENABLE_EXT_BUILTIN_USER=ON/OFF
+-DENABLE_EXT_BUILTIN_YYJSON=ON/OFF
 ```
+
+### Yyjson built-ins
+
+The `yyjson` category wraps the bundled [yyjson](https://github.com/ibireme/yyjson) library and exposes helpers for parsing documents, walking objects and arrays, and converting primitive values. Each routine operates on integer handles returned by `YyjsonRead` or the various query helpers; release value handles with `YyjsonFreeValue` and dispose of documents with `YyjsonDocFree` when they are no longer needed.
+
+## Discovering available categories at runtime
+
+Programs can introspect the VM to see which extended built-in categories are
+available and which routines each one provides.  All three front ends expose
+the following helpers:
+
+- `ExtBuiltinCategoryCount()` returns the number of registered categories.
+- `ExtBuiltinCategoryName(index)` returns the name for a zero-based category
+  index.
+- `ExtBuiltinFunctionCount(category)` reports how many functions belong to a
+  category.
+- `ExtBuiltinFunctionName(category, index)` returns the name for a zero-based
+  function index within the given category.
+- `HasExtBuiltin(category, function)` checks for a specific routine.
+
+Pascal uses the Pascal-cased names shown above.  The C-like and Rea front ends
+expose the same helpers with lowercase identifiers (for example,
+`extbuiltincategorycount()`).
+
+Example Pascal snippet that lists the available routines when the category is
+present:
+
+```pascal
+var
+  i, j: integer;
+  cat, fn: string;
+begin
+  for i := 0 to ExtBuiltinCategoryCount() - 1 do
+  begin
+    cat := ExtBuiltinCategoryName(i);
+    writeln('Category: ', cat);
+    for j := 0 to ExtBuiltinFunctionCount(cat) - 1 do
+    begin
+      fn := ExtBuiltinFunctionName(cat, j);
+      writeln('  ', fn);
+    end;
+  end;
+end;
+```
+
+### Command-line discovery
+
+When you need to inspect the VM without writing a program, each front end
+accepts `--dump-ext-builtins` to emit the same inventory. The output uses a
+line-oriented format that is easy for regression harnesses to parse:
+
+```
+$ pascal --dump-ext-builtins
+category system
+function system FileExists
+function system GetPid
+```
+
+The `clike` and `rea` binaries expose the identical option and format, making
+it straightforward to tailor front-end-specific test suites based on the
+compiled VM's capabilities.
+
 
 ## Threading considerations
 
@@ -86,6 +150,29 @@ static Value vmBuiltinGetPid(struct VM_s* vm, int arg_count, Value* args) {
 void registerGetPidBuiltin(void) {
     registerBuiltinFunction("GetPid", AST_FUNCTION_DECL, NULL);
     registerVmBuiltin("getpid", vmBuiltinGetPid);
+}
+```
+
+`realtimeclock.c` returns the current wall-clock time as a `DOUBLE`
+measured in seconds since the Unix epoch. It uses the highest resolution
+timer available on the host platform and reports monotonic results suitable
+for simple timing and latency measurements:
+
+```c
+static Value vmBuiltinRealTimeClock(struct VM_s* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "RealTimeClock expects no arguments.");
+        return makeDouble(0.0);
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long double seconds = ts.tv_sec + ts.tv_nsec / 1000000000.0L;
+    return makeDouble((double)seconds);
+}
+
+void registerRealTimeClockBuiltin(void) {
+    registerVmBuiltin("realtimeclock", vmBuiltinRealTimeClock,
+                      BUILTIN_TYPE_FUNCTION, "RealTimeClock");
 }
 ```
 

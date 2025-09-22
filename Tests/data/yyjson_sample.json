@@ -1,0 +1,11 @@
+{
+  "name": "pscal",
+  "version": 42,
+  "enabled": false,
+  "values": [1, 2, 3],
+  "pi": 2.5,
+  "maybe": null,
+  "nested": {
+    "present": "yes"
+  }
+}

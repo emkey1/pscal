@@ -103,6 +103,8 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int", 3) == 0) return REA_TOKEN_INT;
             if (strncmp(start, "str", 3) == 0) return REA_TOKEN_STR;
             if (strncmp(start, "new", 3) == 0) return REA_TOKEN_NEW;
+            if (strncmp(start, "nil", 3) == 0) return REA_TOKEN_NIL;
+            if (strncmp(start, "xor", 3) == 0) return REA_TOKEN_XOR;
             break;
         case 4:
             if (strncmp(start, "else", 4) == 0) return REA_TOKEN_ELSE;
@@ -205,6 +207,8 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '|':
             if (match(lexer, '|')) return makeToken(lexer, REA_TOKEN_OR_OR, start);
             return makeToken(lexer, REA_TOKEN_OR, start);
+        case '^':
+            return makeToken(lexer, REA_TOKEN_XOR, start);
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':
@@ -338,6 +342,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_AND_AND: return "AND_AND";
         case REA_TOKEN_OR: return "OR";
         case REA_TOKEN_OR_OR: return "OR_OR";
+        case REA_TOKEN_XOR: return "XOR";
         case REA_TOKEN_GREATER: return "GREATER";
         case REA_TOKEN_GREATER_EQUAL: return "GREATER_EQUAL";
         case REA_TOKEN_LESS: return "LESS";
@@ -360,6 +365,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_RETURN: return "RETURN";
         case REA_TOKEN_TRUE: return "TRUE";
         case REA_TOKEN_FALSE: return "FALSE";
+        case REA_TOKEN_NIL: return "NIL";
         case REA_TOKEN_CONST: return "CONST";
         case REA_TOKEN_IMPORT: return "IMPORT";
         case REA_TOKEN_SPAWN: return "SPAWN";

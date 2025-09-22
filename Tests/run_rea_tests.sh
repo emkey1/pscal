@@ -12,6 +12,90 @@ REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
+check_ext_builtin_dump() {
+  local binary="$1"
+  local label="$2"
+  local tmp_out
+  local tmp_err
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+  local status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "Failed to dump extended builtins for $label (exit $status)" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! python3 - "$tmp_out" <<'PY'
+import sys
+
+path = sys.argv[1]
+seen = set()
+with open(path, 'r', encoding='utf-8') as fh:
+    for idx, raw_line in enumerate(fh, 1):
+        line = raw_line.rstrip('\n')
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        tag = parts[0]
+        if tag == 'category':
+            if len(parts) != 2:
+                print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            seen.add(parts[1])
+        elif tag == 'function':
+            if len(parts) != 3:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if parts[1] not in seen:
+                print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+            sys.exit(1)
+sys.exit(0)
+PY
+  then
+    echo "Unexpected output format from $label --dump-ext-builtins" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+}
+
 # Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
@@ -44,6 +128,8 @@ trap 'rm -rf "$TEST_HOME"' EXIT
 cd "$ROOT_DIR"
 EXIT_CODE=0
 
+check_ext_builtin_dump "$REA_BIN" rea
+
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
 
@@ -55,6 +141,35 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   out_file="$SCRIPT_DIR/rea/$test_name.out"
   err_file="$SCRIPT_DIR/rea/$test_name.err"
   src_rel=${src#$ROOT_DIR/}
+  disasm_file="$SCRIPT_DIR/rea/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
+
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --dump-bytecode-only "$src_rel" \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    rel_src="Tests/rea/$test_name.rea"
+    sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
+    rm -f "$disasm_stderr.bak"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
+  fi
+
   args_file="$SCRIPT_DIR/rea/$test_name.args"
   if [ -f "$args_file" ]; then
     if ! read -r args < "$args_file"; then
@@ -110,10 +225,62 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
     EXIT_CODE=1
   fi
 
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo
- done
+done
+
+# Ensure the Hangman example compiles cleanly and that the compiler emits
+# the WordRepository vtable before the global HangmanGame constructor runs.
+echo "---- HangmanExample ----"
+hangman_disasm=$(mktemp)
+set +e
+python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/hangman5 \
+  > /dev/null 2> "$hangman_disasm"
+status=$?
+set -e
+perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$hangman_disasm" > "$hangman_disasm.clean"
+mv "$hangman_disasm.clean" "$hangman_disasm"
+perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$hangman_disasm" > "$hangman_disasm.clean"
+mv "$hangman_disasm.clean" "$hangman_disasm"
+if [ $status -ne 0 ]; then
+  echo "Hangman example failed to compile" >&2
+  cat "$hangman_disasm"
+  EXIT_CODE=1
+else
+  if ! python3 - "$hangman_disasm" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text().splitlines()
+def_line = call_line = None
+for idx, line in enumerate(text, 1):
+    if def_line is None and "DEFINE_GLOBAL" in line and "'wordrepository_vtable'" in line:
+        def_line = idx
+    if call_line is None and "CALL_USER_PROC" in line and "'hangmangame'" in line:
+        call_line = idx
+if def_line is None:
+    print("Hangman example missing wordrepository vtable definition", file=sys.stderr)
+    sys.exit(1)
+if call_line is None:
+    print("Hangman example missing hangmangame call", file=sys.stderr)
+    sys.exit(1)
+if def_line > call_line:
+    print(
+        f"wordrepository vtable defined after hangmangame call (def_line={def_line}, call_line={call_line})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+  then
+    EXIT_CODE=1
+  fi
+fi
+rm -f "$hangman_disasm"
+echo
+echo
 
 # Basic cache reuse test for the Rea front end
 echo "---- CacheReuseTest ----"
@@ -122,13 +289,12 @@ src_dir=$(mktemp -d)
 cat > "$src_dir/CacheTest.rea" <<'EOF'
 writeln("first");
 EOF
-sleep 1
+shift_mtime "$src_dir/CacheTest.rea" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
@@ -151,14 +317,13 @@ src_dir=$(mktemp -d)
 cat > "$src_dir/BinaryTest.rea" <<'EOF'
 writeln("first");
 EOF
-sleep 1
+shift_mtime "$src_dir/BinaryTest.rea" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$REA_BIN"
+  shift_mtime "$REA_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?

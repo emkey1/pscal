@@ -1,0 +1,23 @@
+program XorExprSuite;
+
+var
+  int_a, int_b: integer;
+  bool_a, bool_b: boolean;
+
+begin
+  int_a := 5;
+  int_b := 3;
+  writeln('5 xor 3 = ', int_a xor int_b);
+
+  bool_a := true;
+  bool_b := false;
+  writeln('true xor false = ', bool_a xor bool_b);
+
+  bool_a := true;
+  bool_b := true;
+  writeln('true xor true = ', bool_a xor bool_b);
+
+  bool_a := false;
+  bool_b := false;
+  writeln('false xor false = ', bool_a xor bool_b);
+end.

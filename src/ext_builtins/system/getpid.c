@@ -8,7 +8,7 @@ static Value vmBuiltinGetPid(struct VM_s* vm, int arg_count, Value* args) {
 }
 
 void registerGetPidBuiltin(void) {
-    registerBuiltinFunction("GetPid", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("getpid", vmBuiltinGetPid);
+    registerVmBuiltin("getpid", vmBuiltinGetPid,
+                      BUILTIN_TYPE_FUNCTION, "GetPid");
 }
 

@@ -1,20 +1,48 @@
 # Changelog
 
-## Unreleased
+## v2.21 – 2025-09-21
+
+Enhancements
+- Bytecode & VM: Added `TO_BOOL`, direct field/array load opcodes (including constant-index forms), and `CALL_BUILTIN_PROC`/`CALL_USER_PROC` so builtin and user procedures carry stable identifiers regardless of SDL support.
+- Languages: Pascal/CLike emit the VM's XOR opcode with constant folding, Rea adds `nil`, and Pascal gained an `override builtin` directive plus ASCII-safe identifier lexing.
+- CLI & Docs: Pascal, CLike, and Rea accept `--no-cache`; documentation covers the new builtin-call flow; a comprehensive `PerformanceBenchmark` example exercises the VM.
+
+Stability and correctness
+- Deferred global initializers until after vtables are emitted, ensuring zero-argument `new` calls and nested `CALL_USER_PROC` invocations wire constructors in source order.
+- Pascal cached-bytecode detection no longer depends on `memmem`, musl builds tokenize identifiers reliably, and direct-load bytecode keeps cached locals metadata intact.
+- Rea preserves method metadata across recompiles, fixes call-frame slot allocation, and regression tests verify the Hangman5 vtable appears before its global constructor.
+- Mutex registries are shared by spawned threads and `INC_LOCAL`/`DEC_LOCAL` now adjust real and enum locals without type errors.
+
+Developer experience
+- Regression runners invoke every front end with `--no-cache`, normalize case-sensitive paths on macOS, and disassemble Hangman5 to guard vtable ordering.
+- The build system probes for AddressSanitizer support before enabling `dascal` instrumentation.
+
+Fixed
+- Prevented console color resets from forcing black backgrounds and restored WordRepository's vtable emission ahead of global constructors.
+
+
+
+## v2.2 – 2025-09-18
 
 Enhancements
 - Pascal: Introduced address-of operator `@` for routines and first-class procedure/function pointer types.
 - Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
-- Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1-arg form.
-- VM: Implemented indirect call opcodes and end-to-end support for passing an initial pointer argument to new threads.
-- Tools: Added standalone bytecode decompiler `pscald` matching `--dump-bytecode-only` output.
+- Rea (experimental): Added a new object‑oriented front end with classes, fields, methods, constructors, single inheritance via `extends`, virtual dispatch, and `my`/`myself`/`super` semantics. See `Docs/rea_*` and `Examples/rea/`.
+- Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1‑arg form.
+- VM: Implemented indirect call opcodes and support for passing an initial pointer argument to new threads.
+- Tools: Added standalone bytecode decompiler `pscald` and AST JSON → Bytecode compiler `pscaljson2bc` (with optional Bash/Zsh completions).
 
 Stability and correctness
-- Pointer metadata propagation: Pointer locals/globals now carry base-type metadata end-to-end so `new(p)` and `p^` dereferences work reliably.
-- Parser: Supports named parameter syntax in function/procedure pointer types (e.g., `function(x: Integer): Integer`).
+- Pointer metadata propagation: pointer locals/globals now carry base‑type metadata end‑to‑end so `new(p)` and `p^` dereferences work reliably.
+- Parser: supports named parameter syntax in procedure/function pointer types (e.g., `function(x: Integer): Integer`).
+- Cache: improved staleness detection when source/cache mtimes match; cache invalidates when the binary is newer.
 
 Developer experience
-- Documentation updated to cover `@`, procedure/function pointer types, indirect calls, and `CreateThread`/`WaitForThread` usage with examples.
+- Documentation updated for `@`, procedure/function pointers, indirect calls, thread APIs, AST JSON pipeline, and HTTP security.
+- Build: macOS SDK auto‑detect; opt‑in `-DPSCAL_USE_BREW_CURL=ON` to prefer Homebrew curl; clean `-Wall` builds.
+
+Fixed
+- Installer: ensure `/usr/local/pscal/misc` exists before copying misc assets.
 
 All notable changes to this project will be documented in this file.
 

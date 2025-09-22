@@ -4,6 +4,91 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
+PASCAL_ARGS=(--no-cache)
+
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
+check_ext_builtin_dump() {
+  local binary="$1"
+  local label="$2"
+  local tmp_out
+  local tmp_err
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+  local status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "Failed to dump extended builtins for $label (exit $status)" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! python3 - "$tmp_out" <<'PY'
+import sys
+
+path = sys.argv[1]
+seen = set()
+with open(path, 'r', encoding='utf-8') as fh:
+    for idx, raw_line in enumerate(fh, 1):
+        line = raw_line.rstrip('\n')
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        tag = parts[0]
+        if tag == 'category':
+            if len(parts) != 2:
+                print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            seen.add(parts[1])
+        elif tag == 'function':
+            if len(parts) != 3:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if parts[1] not in seen:
+                print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+            sys.exit(1)
+sys.exit(0)
+PY
+  then
+    echo "Unexpected output format from $label --dump-ext-builtins" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+}
 
 if [ ! -x "$PASCAL_BIN" ]; then
   echo "pascal binary not found at $PASCAL_BIN" >&2
@@ -40,6 +125,8 @@ fi
 
 EXIT_CODE=0
 
+check_ext_builtin_dump "$PASCAL_BIN" pascal
+
 # Iterate over Pascal test sources (files without extensions)
 for src in "$SCRIPT_DIR"/Pascal/*; do
   test_name=$(basename "$src")
@@ -65,16 +152,39 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   err_file="$SCRIPT_DIR/Pascal/$test_name.err"
   actual_out=$(mktemp)
   actual_err=$(mktemp)
+  disasm_file="$SCRIPT_DIR/Pascal/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
 
   echo "---- $test_name ----"
 
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" --dump-bytecode-only "Pascal/$test_name") \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -ne 'print unless /^Loaded cached byte code/' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
+  fi
+
   set +e
   if [ "$test_name" = "SDLFeaturesTest" ]; then
-    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
   elif [ -f "$in_file" ]; then
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
   else
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
   fi
   run_status=$?
   set -e
@@ -122,6 +232,8 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   fi
 
   rm -f "$SCRIPT_DIR/Pascal/$test_name.dbg"
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo
@@ -142,7 +254,7 @@ end.
 EOF
 
 # Ensure the cache entry's timestamp exceeds the source file's mtime.
-sleep 1
+shift_mtime "$src_file" -5
 
 # First run to populate the cache
 set +e
@@ -152,7 +264,6 @@ set -e
 
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
   # Second run should use the cache
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out_cache" 2> "$tmp_home/err_cache")
   status_cache=$?
@@ -226,14 +337,13 @@ end.
 EOF
 
 # Ensure cache timestamp precedes binary update
-sleep 1
+shift_mtime "$src_dir/BinaryTest" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$PASCAL_BIN"
+  shift_mtime "$PASCAL_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?

@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CLIKE_BIN="$ROOT_DIR/build/bin/clike"
+CLIKE_ARGS=(--no-cache)
 JSON2BC_BIN="$ROOT_DIR/build/bin/pscaljson2bc"
 PSCALVM_BIN="$ROOT_DIR/build/bin/pscalvm"
 
@@ -39,7 +40,7 @@ for src in "$SCRIPT_DIR"/json2bc/*.cl; do
   echo "---- json2bc:$test_name ----"
   set +e
   # Pipe AST JSON from clike to pscaljson2bc, then run the VM
-  "$CLIKE_BIN" --dump-ast-json "$src" | "$JSON2BC_BIN" -o "$tmp_bc" > "$actual_err" 2>&1
+  "$CLIKE_BIN" "${CLIKE_ARGS[@]}" --dump-ast-json "$src" | "$JSON2BC_BIN" -o "$tmp_bc" > "$actual_err" 2>&1
   run_status=$?
   if [ $run_status -ne 0 ]; then
     echo "json2bc compile failed for $test_name" >&2

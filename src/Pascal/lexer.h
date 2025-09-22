@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include "core/types.h"
+#include <stdbool.h>
 
 typedef struct {
     const char *text;
@@ -10,6 +11,8 @@ typedef struct {
     int line;
     int column;
     size_t text_len;
+    bool has_pending_builtin_override;
+    char *pending_builtin_override_names;
 } Lexer;
 
 /* Keyword mapping */
@@ -26,5 +29,6 @@ Token *identifier(Lexer *lexer);
 Token *stringLiteral(Lexer *lexer);
 Token *getNextToken(Lexer *lexer);
 void lexerError(Lexer *lexer, const char *msg);
+bool lexerConsumeOverrideBuiltinDirective(Lexer *lexer, const char *procedure_name);
 
 #endif // LEXER_H

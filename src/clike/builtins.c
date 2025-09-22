@@ -3,27 +3,37 @@
 #include <string.h>
 #include <strings.h>
 
-int clikeGetBuiltinID(const char *name) {
+const char* clikeCanonicalBuiltinName(const char *name) {
+    if (!name) {
+        return "";
+    }
+
     // The VM exposes Pascal's `length` builtin for string length.  Map the
     // C-like `strlen` to that builtin so we don't need a backend change.
     if (strcasecmp(name, "strlen") == 0) {
-        name = "length";
+        return "length";
     }
     // Provide `itoa` as a wrapper around Pascal's `str` builtin.
     if (strcasecmp(name, "itoa") == 0) {
-        name = "str";
+        return "str";
     }
     // Map C-like `exit` to Pascal's `halt` so an optional exit code may be supplied.
     if (strcasecmp(name, "exit") == 0) {
-        name = "halt";
+        return "halt";
     }
     if (strcasecmp(name, "remove") == 0) {
-        name = "erase";
+        return "erase";
     }
     if (strcasecmp(name, "toupper") == 0) {
-        name = "upcase";
+        return "upcase";
     }
-    return getBuiltinIDForCompiler(name);
+    return name;
+}
+
+int clikeGetBuiltinID(const char *name) {
+    if (!name) return -1;
+    const char* canonical = clikeCanonicalBuiltinName(name);
+    return getBuiltinIDForCompiler(canonical);
 }
 
 void clikeRegisterBuiltins(void) {

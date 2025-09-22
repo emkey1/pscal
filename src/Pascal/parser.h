@@ -4,6 +4,7 @@
 #include "types.h"
 #include "lexer.h"
 #include "ast/ast.h"
+#include "core/list.h"
 #include <stdbool.h>
 #include "compiler/bytecode.h"
 
@@ -11,11 +12,12 @@ typedef struct {
     Lexer *lexer;
     Token *current_token;
     const char *current_unit_name_context;
+    List *dependency_paths;
 } Parser;
 
 AST *parsePointerType(Parser *parser);
 
-void addProcedure(AST *proc_decl, const char* unit_context_name, HashTable *proc_table);
+void addProcedure(Parser *parser, AST *proc_decl, const char* unit_context_name, HashTable *proc_table);
 
 // Full parser API
 AST *buildProgramAST(Parser *parser, BytecodeChunk* chunk);

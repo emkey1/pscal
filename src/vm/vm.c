@@ -34,6 +34,9 @@ static void resetStack(VM* vm) {
 // Resolve a value to its underlying record by chasing pointer chains.
 // Returns NULL if a nil pointer is encountered.  If the original value is
 // neither a pointer nor a record, *invalid_type is set to true.
+static void push(VM* vm, Value value);
+static Value copyValueForStack(const Value* src);
+
 static Value* resolveRecord(Value* base, bool* invalid_type) {
     if (invalid_type) *invalid_type = false;
     if (base->type != TYPE_POINTER && base->type != TYPE_RECORD) {
@@ -45,6 +48,165 @@ static Value* resolveRecord(Value* base, bool* invalid_type) {
         current = current->ptr_val;
     }
     return current;
+}
+
+static Value* resolveRecordForField(VM* vm, Value* base_val_ptr) {
+    bool invalid_type = false;
+    Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+    if (invalid_type) {
+        runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+        return NULL;
+    }
+    if (record_struct_ptr == NULL) {
+        runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+        return NULL;
+    }
+    if (record_struct_ptr->type != TYPE_RECORD) {
+        runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+        return NULL;
+    }
+    return record_struct_ptr;
+}
+
+static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_index) {
+    Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
+    if (!record_struct_ptr) {
+        return false;
+    }
+
+    FieldValue* current = record_struct_ptr->record_val;
+    for (uint16_t i = 0; i < field_index && current; i++) {
+        current = current->next;
+    }
+    if (!current) {
+        runtimeError(vm, "VM Error: Field index out of range.");
+        return false;
+    }
+
+    push(vm, copyValueForStack(&current->value));
+    return true;
+}
+
+static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_name) {
+    if (!field_name) {
+        runtimeError(vm, "VM Error: Field name constant is invalid or NULL.");
+        return false;
+    }
+
+    Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
+    if (!record_struct_ptr) {
+        return false;
+    }
+
+    FieldValue* current = record_struct_ptr->record_val;
+    while (current) {
+        if (current->name && strcmp(current->name, field_name) == 0) {
+            push(vm, copyValueForStack(&current->value));
+            return true;
+        }
+        current = current->next;
+    }
+
+    runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+    return false;
+}
+
+static bool coerceValueToBoolean(const Value* value, bool* out_truth) {
+    if (!value || !out_truth) {
+        return false;
+    }
+    if (IS_BOOLEAN(*value)) {
+        *out_truth = AS_BOOLEAN(*value);
+        return true;
+    }
+    if (IS_INTLIKE(*value)) {
+        *out_truth = AS_INTEGER(*value) != 0;
+        return true;
+    }
+    if (IS_REAL(*value)) {
+        *out_truth = AS_REAL(*value) != 0.0;
+        return true;
+    }
+    if (IS_CHAR(*value)) {
+        *out_truth = AS_CHAR(*value) != '\0';
+        return true;
+    }
+    if (value->type == TYPE_NIL) {
+        *out_truth = false;
+        return true;
+    }
+    return false;
+}
+
+static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
+    if (!slot) {
+        runtimeError(vm, "VM Error: %s encountered a null local slot pointer.", opcode_name);
+        return false;
+    }
+
+    if (slot->type == TYPE_ENUM) {
+        long long new_ord = (long long)slot->enum_val.ordinal + delta;
+        slot->enum_val.ordinal = (int)new_ord;
+        slot->i_val = (long long)slot->enum_val.ordinal;
+        slot->u_val = (unsigned long long)slot->enum_val.ordinal;
+        return true;
+    }
+
+    if (isIntlikeType(slot->type)) {
+        long long new_val = AS_INTEGER(*slot) + delta;
+        switch (slot->type) {
+            case TYPE_BOOLEAN:
+                slot->i_val = (new_val != 0);
+                slot->u_val = (unsigned long long)slot->i_val;
+                break;
+            case TYPE_CHAR:
+                slot->c_val = (int)new_val;
+                SET_INT_VALUE(slot, slot->c_val);
+                break;
+            case TYPE_UINT8:
+            case TYPE_BYTE:
+            case TYPE_UINT16:
+            case TYPE_WORD:
+            case TYPE_UINT32:
+            case TYPE_UINT64:
+                slot->u_val = (unsigned long long)new_val;
+                slot->i_val = (long long)slot->u_val;
+                break;
+            default:
+                SET_INT_VALUE(slot, new_val);
+                break;
+        }
+        return true;
+    }
+
+    if (isRealType(slot->type)) {
+        long double current = AS_REAL(*slot);
+        long double updated = current + (long double)delta;
+
+        switch (slot->type) {
+            case TYPE_FLOAT: {
+                float f = (float)updated;
+                SET_REAL_VALUE(slot, f);
+                break;
+            }
+            case TYPE_DOUBLE: {
+                double d = (double)updated;
+                SET_REAL_VALUE(slot, d);
+                break;
+            }
+            case TYPE_LONG_DOUBLE:
+            default:
+                SET_REAL_VALUE(slot, updated);
+                break;
+        }
+        slot->i_val = (long long)updated;
+        slot->u_val = (unsigned long long)slot->i_val;
+        return true;
+    }
+
+    runtimeError(vm, "VM Error: %s requires an ordinal or real local, got %s.",
+                 opcode_name, varTypeToString(slot->type));
+    return false;
 }
 
 // --- Class method registration helpers ---
@@ -498,7 +660,8 @@ void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
-    fprintf(stderr, "Stack Size: %ld, Frame Count: %d\n", vm->stackTop - vm->stack, vm->frameCount);
+    ptrdiff_t stack_size = vm->stackTop - vm->stack;
+    fprintf(stderr, "Stack Size: %td, Frame Count: %d\n", stack_size, vm->frameCount);
     fprintf(stderr, "Stack Contents (bottom to top):\n");
     vmDumpStackInternal(vm, true);
     fprintf(stderr, "--------------------------\n");
@@ -509,8 +672,9 @@ void vmDumpStackInfo(VM* vm) {
     long current_offset = vm->ip - vm->chunk->code;
     int line = (current_offset > 0 && current_offset <= vm->chunk->count) ? vm->chunk->lines[current_offset - 1] : 0;
 
-    fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %ld, Frame Count: %d\n",
-            current_offset, line, vm->stackTop - vm->stack, vm->frameCount);
+    ptrdiff_t stack_size = vm->stackTop - vm->stack;
+    fprintf(stderr, "[VM_DEBUG] Offset: %04ld, Line: %4d, Stack Size: %td, Frame Count: %d\n",
+            current_offset, line, stack_size, vm->frameCount);
 
     // Disassemble and print the current instruction
     if (current_offset < vm->chunk->count) {
@@ -693,6 +857,52 @@ static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
             }
         }
     }
+    return NULL;
+}
+
+static Symbol* resolveProcedureAlias(Symbol* symbol) {
+    if (symbol && symbol->is_alias && symbol->real_symbol) {
+        return symbol->real_symbol;
+    }
+    return symbol;
+}
+
+static bool procedureVisibleFromFrames(VM* vm, Symbol* symbol) {
+    if (!symbol) return false;
+    if (!symbol->enclosing) return true;
+    if (!vm) return false;
+
+    for (int fi = vm->frameCount - 1; fi >= 0; fi--) {
+        Symbol* frame_symbol = vm->frames[fi].function_symbol;
+        while (frame_symbol) {
+            if (frame_symbol == symbol->enclosing) {
+                return true;
+            }
+            frame_symbol = frame_symbol->enclosing;
+        }
+    }
+    return false;
+}
+
+static Symbol* findProcedureByName(HashTable* table, const char* lookup_name, VM* vm) {
+    if (!table || !lookup_name) return NULL;
+
+    Symbol* sym = resolveProcedureAlias(hashTableLookup(table, lookup_name));
+    if (sym && procedureVisibleFromFrames(vm, sym)) {
+        return sym;
+    }
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (Symbol* entry = table->buckets[i]; entry; entry = entry->next) {
+            if (entry->type_def && entry->type_def->symbol_table) {
+                Symbol* nested = findProcedureByName((HashTable*)entry->type_def->symbol_table, lookup_name, vm);
+                if (nested) {
+                    return nested;
+                }
+            }
+        }
+    }
+
     return NULL;
 }
 
@@ -978,6 +1188,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
     vm->exit_requested = false;
+    vm->current_builtin_name = NULL;
 
     vm->threadCount = 1; // main thread occupies index 0
     for (int i = 0; i < VM_MAX_THREADS; i++) {
@@ -1114,6 +1325,14 @@ static inline uint16_t READ_SHORT(VM* vm_param) { // Pass vm explicitly here
     uint8_t msb = (*vm_param->ip++); // Explicitly use vm_param
     uint8_t lsb = (*vm_param->ip++); // Explicitly use vm_param
     return (uint16_t)(msb << 8) | lsb;
+}
+
+static inline uint32_t READ_UINT32(VM* vm_param) {
+    uint32_t b1 = (uint32_t)(*vm_param->ip++);
+    uint32_t b2 = (uint32_t)(*vm_param->ip++);
+    uint32_t b3 = (uint32_t)(*vm_param->ip++);
+    uint32_t b4 = (uint32_t)(*vm_param->ip++);
+    return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
 }
 
 #define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
@@ -1805,29 +2024,24 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             case NOT: {
                 Value val_popped = pop(vm);
                 bool condition_truth = false;
-                bool value_valid = true;
-
-                if (IS_BOOLEAN(val_popped)) {
-                    condition_truth = AS_BOOLEAN(val_popped);
-                } else if (IS_INTLIKE(val_popped)) {
-                    condition_truth = AS_INTEGER(val_popped) != 0;
-                } else if (IS_REAL(val_popped)) {
-                    condition_truth = AS_REAL(val_popped) != 0.0;
-                } else if (IS_CHAR(val_popped)) {
-                    condition_truth = AS_CHAR(val_popped) != '\0';
-                } else if (val_popped.type == TYPE_NIL) {
-                    condition_truth = false;
-                } else {
-                    value_valid = false;
-                }
-
-                if (!value_valid) {
-                    runtimeError(vm, "Runtime Error: Operand for NOT must be boolean or numeric.");
+                if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
+                    runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 push(vm, makeBoolean(!condition_truth));
+                freeValue(&val_popped);
+                break;
+            }
+            case TO_BOOL: {
+                Value val_popped = pop(vm);
+                bool condition_truth = false;
+                if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
+                    runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
+                    freeValue(&val_popped);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, makeBoolean(condition_truth));
                 freeValue(&val_popped);
                 break;
             }
@@ -1851,7 +2065,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 break;
             }
             case AND:
-            case OR: {
+            case OR:
+            case XOR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
                 Value result_val;
@@ -1861,19 +2076,23 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     bool bb = AS_BOOLEAN(b_val);
                     if (instruction_val == AND) {
                         result_val = makeBoolean(ba && bb);
-                    } else {
+                    } else if (instruction_val == OR) {
                         result_val = makeBoolean(ba || bb);
+                    } else {
+                        result_val = makeBoolean(ba ^ bb);
                     }
                 } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val))  {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (instruction_val == AND) {
                         result_val = makeInt(ia & ib);
-                    } else {
+                    } else if (instruction_val == OR) {
                         result_val = makeInt(ia | ib);
+                    } else {
+                        result_val = makeInt(ia ^ ib);
                     }
                 } else {
-                    runtimeError(vm, "Runtime Error: Operands for AND/OR must be both Boolean or both Integer. Got %s and %s.",
+                    runtimeError(vm, "Runtime Error: Operands for AND/OR/XOR must be both Boolean or both Integer. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -2352,6 +2571,22 @@ comparison_error_label:
                 push(vm, makePointer(&current->value, NULL));
                 break;
             }
+            case LOAD_FIELD_VALUE: {
+                uint8_t field_index = READ_BYTE();
+                Value base_val = pop(vm);
+                bool ok = pushFieldValueByOffset(vm, &base_val, field_index);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
+            case LOAD_FIELD_VALUE16: {
+                uint16_t field_index = READ_SHORT(vm);
+                Value base_val = pop(vm);
+                bool ok = pushFieldValueByOffset(vm, &base_val, field_index);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
             case GET_FIELD_ADDRESS: {
                 uint8_t field_name_idx = READ_BYTE();
                 Value* base_val_ptr = vm->stackTop - 1;
@@ -2417,6 +2652,34 @@ comparison_error_label:
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
                 return INTERPRET_RUNTIME_ERROR;
+            }
+            case LOAD_FIELD_VALUE_BY_NAME: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value base_val = pop(vm);
+                const Value* name_val = (field_name_idx < vm->chunk->constants_count)
+                                        ? &vm->chunk->constants[field_name_idx]
+                                        : NULL;
+                const char* field_name = (name_val && name_val->type == TYPE_STRING)
+                                          ? AS_STRING(*name_val)
+                                          : NULL;
+                bool ok = pushFieldValueByName(vm, &base_val, field_name);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
+            }
+            case LOAD_FIELD_VALUE_BY_NAME16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value base_val = pop(vm);
+                const Value* name_val = (field_name_idx < vm->chunk->constants_count)
+                                        ? &vm->chunk->constants[field_name_idx]
+                                        : NULL;
+                const char* field_name = (name_val && name_val->type == TYPE_STRING)
+                                          ? AS_STRING(*name_val)
+                                          : NULL;
+                bool ok = pushFieldValueByName(vm, &base_val, field_name);
+                freeValue(&base_val);
+                if (!ok) return INTERPRET_RUNTIME_ERROR;
+                break;
             }
             case GET_ELEMENT_ADDRESS: {
                 uint8_t dimension_count = READ_BYTE();
@@ -2539,7 +2802,7 @@ comparison_error_label:
                 int total_size = calculateArrayTotalSize(array_val_ptr);
                 if (offset < 0 || offset >= total_size) {
                     runtimeError(vm, "VM Error: Array element index out of bounds.");
-                    if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    freeValue(&operand);
                     if (using_wrapper) {
                         free(temp_wrapper.lower_bounds);
                         free(temp_wrapper.upper_bounds);
@@ -2552,6 +2815,300 @@ comparison_error_label:
                 if (operand.type == TYPE_POINTER) {
                     freeValue(&operand);
                 }
+                if (using_wrapper) {
+                    free(temp_wrapper.lower_bounds);
+                    free(temp_wrapper.upper_bounds);
+                }
+
+                break;
+            }
+            case GET_ELEMENT_ADDRESS_CONST: {
+                uint32_t flat_offset = READ_UINT32(vm);
+                Value operand = pop(vm);
+
+                Value* array_val_ptr = NULL;
+                Value temp_wrapper;
+                temp_wrapper.lower_bounds = NULL;
+                temp_wrapper.upper_bounds = NULL;
+                bool using_wrapper = false;
+
+                if (operand.type == TYPE_POINTER) {
+                    Value* candidate = (Value*)operand.ptr_val;
+                    if (candidate && candidate->type == TYPE_ARRAY) {
+                        array_val_ptr = candidate;
+                    } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                        AST* arrayType = operand.base_type_node;
+                        int dims = arrayType->child_count;
+                        temp_wrapper.type = TYPE_ARRAY;
+                        temp_wrapper.dimensions = dims;
+                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
+                        temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
+                        if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
+                            runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
+                            if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
+                            if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        for (int i = 0; i < dims; i++) {
+                            int lb = 0, ub = -1;
+                            AST* sub = arrayType->children[i];
+                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
+                                lb = sub->left->i_val;
+                                ub = sub->right->i_val;
+                            }
+                            temp_wrapper.lower_bounds[i] = lb;
+                            temp_wrapper.upper_bounds[i] = ub;
+                        }
+                        array_val_ptr = &temp_wrapper;
+                        using_wrapper = true;
+                    } else {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int total_size = calculateArrayTotalSize(array_val_ptr);
+                if (flat_offset >= (uint32_t)total_size) {
+                    runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    if (operand.type == TYPE_POINTER) {
+                        freeValue(&operand);
+                    }
+                    if (using_wrapper) {
+                        free(temp_wrapper.lower_bounds);
+                        free(temp_wrapper.upper_bounds);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, makePointer(&array_val_ptr->array_val[flat_offset], NULL));
+
+                if (operand.type == TYPE_POINTER) {
+                    freeValue(&operand);
+                }
+                if (using_wrapper) {
+                    free(temp_wrapper.lower_bounds);
+                    free(temp_wrapper.upper_bounds);
+                }
+
+                break;
+            }
+            case LOAD_ELEMENT_VALUE: {
+                uint8_t dimension_count = READ_BYTE();
+
+                Value operand = pop(vm);
+
+                if (dimension_count == 1 && operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        Value index_val = pop(vm);
+                        if (!isIntlikeType(index_val.type)) {
+                            runtimeError(vm, "VM Error: String index must be an integer.");
+                            freeValue(&index_val);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        long long pscal_index = index_val.i_val;
+                        freeValue(&index_val);
+
+                        size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
+                        if (pscal_index == 0) {
+                            push(vm, makeInt((long long)len));
+                            freeValue(&operand);
+                            break;
+                        }
+                        if (pscal_index < 1 || (size_t)pscal_index > len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                                         pscal_index, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        char ch = base_val->s_val ? base_val->s_val[pscal_index - 1] : '\0';
+                        push(vm, makeChar(ch));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
+
+                int* indices = malloc(sizeof(int) * dimension_count);
+                if (!indices) {
+                    runtimeError(vm, "VM Error: Malloc failed for array indices.");
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                for (int i = 0; i < dimension_count; i++) {
+                    Value index_val = pop(vm);
+                    if (isIntlikeType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
+                    } else if (isRealType(index_val.type)) {
+                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
+                    } else {
+                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                        free(indices);
+                        freeValue(&index_val);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    freeValue(&index_val);
+                }
+
+                Value* array_val_ptr = NULL;
+                Value temp_wrapper;
+                temp_wrapper.lower_bounds = NULL;
+                temp_wrapper.upper_bounds = NULL;
+                bool using_wrapper = false;
+
+                if (operand.type == TYPE_POINTER) {
+                    Value* candidate = (Value*)operand.ptr_val;
+                    if (candidate && candidate->type == TYPE_ARRAY) {
+                        array_val_ptr = candidate;
+                    } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                        AST* arrayType = operand.base_type_node;
+                        int dims = arrayType->child_count;
+                        temp_wrapper.type = TYPE_ARRAY;
+                        temp_wrapper.dimensions = dims;
+                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
+                        temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
+                        if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
+                            runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
+                            if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
+                            if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
+                            free(indices);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        for (int i = 0; i < dims; i++) {
+                            int lb = 0, ub = -1;
+                            AST* sub = arrayType->children[i];
+                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
+                                lb = sub->left->i_val;
+                                ub = sub->right->i_val;
+                            }
+                            temp_wrapper.lower_bounds[i] = lb;
+                            temp_wrapper.upper_bounds[i] = ub;
+                        }
+                        array_val_ptr = &temp_wrapper;
+                        using_wrapper = true;
+                    } else {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        free(indices);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    free(indices);
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int offset = computeFlatOffset(array_val_ptr, indices);
+                free(indices);
+
+                int total_size = calculateArrayTotalSize(array_val_ptr);
+                if (offset < 0 || offset >= total_size) {
+                    runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    if (operand.type == TYPE_POINTER) freeValue(&operand);
+                    if (using_wrapper) {
+                        free(temp_wrapper.lower_bounds);
+                        free(temp_wrapper.upper_bounds);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, copyValueForStack(&array_val_ptr->array_val[offset]));
+
+                freeValue(&operand);
+                if (using_wrapper) {
+                    free(temp_wrapper.lower_bounds);
+                    free(temp_wrapper.upper_bounds);
+                }
+
+                break;
+            }
+            case LOAD_ELEMENT_VALUE_CONST: {
+                uint32_t flat_offset = READ_UINT32(vm);
+
+                Value operand = pop(vm);
+
+                Value* array_val_ptr = NULL;
+                Value temp_wrapper;
+                temp_wrapper.lower_bounds = NULL;
+                temp_wrapper.upper_bounds = NULL;
+                bool using_wrapper = false;
+
+                if (operand.type == TYPE_POINTER) {
+                    Value* candidate = (Value*)operand.ptr_val;
+                    if (candidate && candidate->type == TYPE_ARRAY) {
+                        array_val_ptr = candidate;
+                    } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                        AST* arrayType = operand.base_type_node;
+                        int dims = arrayType->child_count;
+                        temp_wrapper.type = TYPE_ARRAY;
+                        temp_wrapper.dimensions = dims;
+                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
+                        temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
+                        if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
+                            runtimeError(vm, "VM Error: Malloc failed for temporary array wrapper bounds.");
+                            if (temp_wrapper.lower_bounds) free(temp_wrapper.lower_bounds);
+                            if (temp_wrapper.upper_bounds) free(temp_wrapper.upper_bounds);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        for (int i = 0; i < dims; i++) {
+                            int lb = 0, ub = -1;
+                            AST* sub = arrayType->children[i];
+                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
+                                lb = sub->left->i_val;
+                                ub = sub->right->i_val;
+                            }
+                            temp_wrapper.lower_bounds[i] = lb;
+                            temp_wrapper.upper_bounds[i] = ub;
+                        }
+                        array_val_ptr = &temp_wrapper;
+                        using_wrapper = true;
+                    } else {
+                        runtimeError(vm, "VM Error: Pointer does not point to an array for element access.");
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else if (operand.type == TYPE_ARRAY) {
+                    array_val_ptr = &operand;
+                } else {
+                    runtimeError(vm, "VM Error: Expected a pointer to an array for element access.");
+                    freeValue(&operand);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                int total_size = calculateArrayTotalSize(array_val_ptr);
+                if (flat_offset >= (uint32_t)total_size) {
+                    runtimeError(vm, "VM Error: Array element index out of bounds.");
+                    freeValue(&operand);
+                    if (using_wrapper) {
+                        free(temp_wrapper.lower_bounds);
+                        free(temp_wrapper.upper_bounds);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                push(vm, copyValueForStack(&array_val_ptr->array_val[flat_offset]));
+
+                freeValue(&operand);
                 if (using_wrapper) {
                     free(temp_wrapper.lower_bounds);
                     free(temp_wrapper.upper_bounds);
@@ -3086,6 +3643,40 @@ comparison_error_label:
                 freeValue(&value_from_stack);
                 break;
             }
+            case INC_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = &frame->slots[slot];
+                if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
+            case DEC_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = &frame->slots[slot];
+                if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
             case GET_UPVALUE: {
                 uint8_t slot = READ_BYTE();
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
@@ -3475,6 +4066,110 @@ comparison_error_label:
                 freeValue(&popped_val);
                 break;
             }
+            case CALL_BUILTIN_PROC: {
+                uint16_t builtin_id = READ_SHORT(vm);
+                uint16_t name_const_idx = READ_SHORT(vm);
+                uint8_t arg_count = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < arg_count) {
+                    runtimeError(vm, "VM Error: Stack underflow for built-in arguments.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* encoded_name = NULL;
+                if (name_const_idx < vm->chunk->constants_count) {
+                    Value* name_val = &vm->chunk->constants[name_const_idx];
+                    if (name_val->type == TYPE_STRING && name_val->s_val) {
+                        encoded_name = name_val->s_val;
+                    }
+                }
+
+                Value* args = vm->stackTop - arg_count;
+                const char* builtin_name = getVmBuiltinNameById((int)builtin_id);
+                VmBuiltinFn handler = getVmBuiltinHandlerById((int)builtin_id);
+
+                char lookup_name[MAX_ID_LENGTH + 1];
+                lookup_name[0] = '\0';
+                if (encoded_name && *encoded_name) {
+                    strncpy(lookup_name, encoded_name, MAX_ID_LENGTH);
+                    lookup_name[MAX_ID_LENGTH] = '\0';
+                    toLowerString(lookup_name);
+                } else if (builtin_name) {
+                    strncpy(lookup_name, builtin_name, MAX_ID_LENGTH);
+                    lookup_name[MAX_ID_LENGTH] = '\0';
+                    toLowerString(lookup_name);
+                }
+
+                if (!handler && lookup_name[0] != '\0') {
+                    handler = getVmBuiltinHandler(lookup_name);
+                    if (!builtin_name && encoded_name && *encoded_name) {
+                        builtin_name = encoded_name;
+                    }
+                }
+
+                const char* effective_name = builtin_name;
+                if (!effective_name && encoded_name && *encoded_name) {
+                    effective_name = encoded_name;
+                } else if (!effective_name && lookup_name[0] != '\0') {
+                    effective_name = lookup_name;
+                }
+
+                if (!handler) {
+                    if (effective_name && *effective_name) {
+                        runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' (id %u) called.",
+                                     effective_name, builtin_id);
+                    } else {
+                        runtimeError(vm, "VM Error: Unknown built-in id %u called.", builtin_id);
+                    }
+                    vm->stackTop -= arg_count;
+                    for (int i = 0; i < arg_count; i++) {
+                        if (args[i].type == TYPE_POINTER) {
+                            continue;
+                        }
+                        freeValue(&args[i]);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                bool needs_lock = (lookup_name[0] != '\0') ? builtinUsesGlobalStructures(lookup_name) : false;
+                if (needs_lock) pthread_mutex_lock(&globals_mutex);
+
+                const char* context_name = effective_name;
+                if (!context_name) {
+                    context_name = (lookup_name[0] != '\0') ? lookup_name : builtin_name;
+                }
+                const char* previous_builtin_name = vm->current_builtin_name;
+                vm->current_builtin_name = context_name;
+
+                Value result = handler(vm, arg_count, args);
+
+                if (needs_lock) pthread_mutex_unlock(&globals_mutex);
+                vm->current_builtin_name = previous_builtin_name;
+
+                vm->stackTop -= arg_count;
+                for (int i = 0; i < arg_count; i++) {
+                    if (args[i].type == TYPE_POINTER) {
+                        continue;
+                    }
+                    freeValue(&args[i]);
+                }
+
+                BuiltinRoutineType builtin_type = effective_name ? getBuiltinType(effective_name) : BUILTIN_TYPE_NONE;
+                if (builtin_type == BUILTIN_TYPE_FUNCTION) {
+                    push(vm, result);
+                } else {
+                    freeValue(&result);
+                }
+
+                if (vm->exit_requested) {
+                    vm->exit_requested = false;
+                    bool halted = false;
+                    InterpretResult res = returnFromCall(vm, &halted);
+                    if (res != INTERPRET_OK) return res;
+                    if (halted) return INTERPRET_OK;
+                }
+                break;
+            }
             case CALL_BUILTIN: {
                 uint16_t name_const_idx = READ_SHORT(vm);
                 uint8_t arg_count = READ_BYTE();
@@ -3498,8 +4193,15 @@ comparison_error_label:
                 if (handler) {
                     bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
                     if (needs_lock) pthread_mutex_lock(&globals_mutex);
+
+                    const char* context_name = builtin_name_original_case ? builtin_name_original_case : builtin_name_lower;
+                    const char* previous_builtin_name = vm->current_builtin_name;
+                    vm->current_builtin_name = context_name;
+
                     Value result = handler(vm, arg_count, args);
+
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
+                    vm->current_builtin_name = previous_builtin_name;
 
                     // Pop arguments from the stack and free their contents when safe.
                     // Arrays and pointers reference caller-managed memory, so avoid freeing
@@ -3541,6 +4243,124 @@ comparison_error_label:
                     if (res != INTERPRET_OK) return res;
                     if (halted) return INTERPRET_OK;
                 }
+                break;
+            }
+            case CALL_USER_PROC: {
+                if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    runtimeError(vm, "VM Error: Call stack overflow.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                uint16_t name_index = READ_SHORT(vm);
+                uint8_t declared_arity = READ_BYTE();
+
+                if (vm->stackTop - vm->stack < declared_arity) {
+                    runtimeError(vm, "VM Error: Stack underflow for call arguments. Expected %u, have %ld.",
+                                 declared_arity, (long)(vm->stackTop - vm->stack));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!vm->chunk || name_index >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Invalid procedure name index %u for CALL_USER_PROC.", name_index);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* name_val = &vm->chunk->constants[name_index];
+                if (name_val->type != TYPE_STRING || !name_val->s_val) {
+                    runtimeError(vm, "VM Error: CALL_USER_PROC requires string constant for callee name (index %u).", name_index);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* proc_name = name_val->s_val;
+                char lookup_name[MAX_SYMBOL_LENGTH + 1];
+                strncpy(lookup_name, proc_name, MAX_SYMBOL_LENGTH);
+                lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+                toLowerString(lookup_name);
+
+                if (!vm->procedureTable) {
+                    runtimeError(vm, "VM Error: Procedure table not initialized when calling '%s'.", proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Symbol* proc_symbol = findProcedureByName(vm->procedureTable, lookup_name, vm);
+                if (!proc_symbol) {
+                    runtimeError(vm, "VM Error: Procedure '%s' not found for CALL_USER_PROC.", proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!proc_symbol->is_defined || proc_symbol->bytecode_address < 0) {
+                    runtimeError(vm, "VM Error: Procedure '%s' has no compiled body.",
+                                 proc_symbol->name ? proc_symbol->name : proc_name);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                size_t target_address = (size_t)proc_symbol->bytecode_address;
+                if (!vm->chunk || target_address >= (size_t)vm->chunk->count) {
+                    runtimeError(vm, "VM Error: Procedure '%s' bytecode address %d out of range.",
+                                 proc_symbol->name ? proc_symbol->name : proc_name,
+                                 proc_symbol->bytecode_address);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                CallFrame* frame = &vm->frames[vm->frameCount++];
+                frame->return_address = vm->ip;
+                frame->slots = vm->stackTop - declared_arity;
+                frame->slotCount = 0;
+
+                if (proc_symbol->type_def && proc_symbol->type_def->child_count >= declared_arity) {
+                    for (int i = 0; i < declared_arity; i++) {
+                        AST* param_ast = proc_symbol->type_def->children[i];
+                        Value* arg_val = frame->slots + i;
+                        if (isRealType(param_ast->var_type) && isIntlikeType(arg_val->type)) {
+                            long double tmp = asLd(*arg_val);
+                            setTypeValue(arg_val, param_ast->var_type);
+                            SET_REAL_VALUE(arg_val, tmp);
+                        }
+                    }
+                }
+
+                frame->function_symbol = proc_symbol;
+                frame->locals_count = proc_symbol->locals_count;
+                frame->upvalue_count = proc_symbol->upvalue_count;
+                frame->upvalues = NULL;
+                frame->discard_result_on_return = false;
+                frame->vtable = NULL;
+
+                if (proc_symbol->upvalue_count > 0) {
+                    frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    CallFrame* parent_frame = NULL;
+                    if (proc_symbol->enclosing) {
+                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                parent_frame = &vm->frames[fi];
+                                break;
+                            }
+                        }
+                    } else if (vm->frameCount >= 2) {
+                        parent_frame = &vm->frames[vm->frameCount - 2];
+                    }
+
+                    if (!parent_frame) {
+                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                        if (proc_symbol->upvalues[i].isLocal) {
+                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                        } else {
+                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                        }
+                    }
+                }
+
+                for (int i = 0; i < proc_symbol->locals_count; i++) {
+                    push(vm, makeNil());
+                }
+
+                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+
+                vm->ip = vm->chunk->code + target_address;
                 break;
             }
             case CALL: {
@@ -4074,10 +4894,12 @@ comparison_error_label:
 
                 if (isRealType(raw_val.type)) {
                     long double rv = AS_REAL(raw_val);
+                    int width_int = width;
                     if (precision >= 0) {
-                        snprintf(buf, sizeof(buf), "%*.*Lf", width, precision, rv);
+                        snprintf(buf, sizeof(buf), "%*.*Lf", width_int, precision, rv);
                     } else {
-                        snprintf(buf, sizeof(buf), "%*.*LE", width, PASCAL_DEFAULT_FLOAT_PRECISION, rv);
+                        snprintf(buf, sizeof(buf), "%*.*LE", width_int,
+                                 (int)PASCAL_DEFAULT_FLOAT_PRECISION, rv);
                     }
                 } else if (raw_val.type == TYPE_CHAR) {
                     snprintf(buf, sizeof(buf), "%*c", width, raw_val.c_val);

@@ -1,19 +1,24 @@
 #!/usr/bin/env rea
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk or rotate the camera with classic WASD controls.
+// the user walk with W/S while steering the camera with the mouse.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
-const int TerrainSize = 128;
+const int TerrainSize = 128
+const int VertexStride = TerrainSize + 1;
+const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
 const int NoiseOctaves = 5;
 const float HeightScale = 32.0;
 const float EyeHeight = 4.5;
 const float MoveSpeed = 18.0;
-const float TurnSpeed = 85.0;
-const float PitchSpeed = 65.0;
 const float MaxPitch = 75.0;
+const float MouseYawSensitivity = 0.20;
+const float MousePitchSensitivity = 0.15;
+const float DegreesToRadians = 0.017453292519943295;
+const int ScanCodeW = 26; // SDL_SCANCODE_W
+const int ScanCodeS = 22; // SDL_SCANCODE_S
 
 bool hasDigit(str s) {
   int i = 1;
@@ -72,16 +77,18 @@ int extractSeedFromArgs(int fallback) {
 }
 
 class TerrainField {
-  float heights[(TerrainSize + 1) * (TerrainSize + 1)];
+  float heights[VertexCount];
   float minHeight;
   float maxHeight;
+  float normalizationScale;
   int seed;
 
   void TerrainField() {
     my.seed = 0;
     my.minHeight = 0.0;
     my.maxHeight = 0.0;
-    int total = (TerrainSize + 1) * (TerrainSize + 1);
+    my.normalizationScale = 0.0;
+    int total = VertexCount;
     int i = 0;
     while (i < total) {
       my.heights[i] = 0.0;
@@ -154,8 +161,15 @@ class TerrainField {
       }
       z = z + 1;
     }
-    if (my.minHeight == my.maxHeight) {
+    float span = my.maxHeight - my.minHeight;
+    if (span <= 0.0001) {
       my.maxHeight = my.minHeight + 0.001;
+      span = my.maxHeight - my.minHeight;
+    }
+    if (span <= 0.0001) {
+      my.normalizationScale = 0.0;
+    } else {
+      my.normalizationScale = 1.0 / span;
     }
   }
 
@@ -167,10 +181,13 @@ class TerrainField {
     return my.heights[my.index(x, z)];
   }
 
+  float heightByFlatIndex(int idx) {
+    return my.heights[idx];
+  }
+
   float normalized(float h) {
-    float span = my.maxHeight - my.minHeight;
-    if (span <= 0.0001) return 0.0;
-    float t = (h - my.minHeight) / span;
+    if (my.normalizationScale <= 0.0) return 0.0;
+    float t = (h - my.minHeight) * my.normalizationScale;
     if (t < 0.0) t = 0.0;
     if (t > 1.0) t = 1.0;
     return t;
@@ -209,11 +226,22 @@ class LandscapeDemo {
   float pitch;
   int lastTicks;
   bool running;
+  int lastMouseX;
+  int lastMouseY;
+  bool hasMouseSample;
+  float vertexHeights[VertexCount];
+  float vertexColorR[VertexCount];
+  float vertexColorG[VertexCount];
+  float vertexColorB[VertexCount];
+  float worldXCoords[VertexStride];
+  float worldZCoords[VertexStride];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
+    my.precomputeWorldCoordinates();
     my.field.build(initialSeed);
+    my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
@@ -221,6 +249,60 @@ class LandscapeDemo {
     my.pitch = -20.0;
     my.lastTicks = getticks();
     my.running = true;
+    my.lastMouseX = 0;
+    my.lastMouseY = 0;
+    my.hasMouseSample = false;
+  }
+
+  void precomputeWorldCoordinates() {
+    float half = TerrainSize * 0.5;
+    int i = 0;
+    while (i < VertexStride) {
+      float world = (i - half) * TileScale;
+      my.worldXCoords[i] = world;
+      my.worldZCoords[i] = world;
+      i = i + 1;
+    }
+  }
+
+  void updateVertexData() {
+    int idx = 0;
+    while (idx < VertexCount) {
+      float h = my.field.heightByFlatIndex(idx);
+      my.vertexHeights[idx] = h;
+      float t = my.field.normalized(h);
+      float r;
+      float g;
+      float b;
+      if (t < 0.35) {
+        float w = t / 0.35;
+        r = 0.0;
+        g = 0.28 + 0.35 * w;
+        b = 0.45 + 0.4 * w;
+      } else if (t < 0.6) {
+        float w = (t - 0.35) / 0.25;
+        r = 0.15 + 0.25 * w;
+        g = 0.42 + 0.35 * w;
+        b = 0.18 + 0.08 * w;
+      } else if (t < 0.85) {
+        float w = (t - 0.6) / 0.25;
+        r = 0.52 + 0.2 * w;
+        g = 0.40 + 0.18 * w;
+        b = 0.30 + 0.15 * w;
+      } else {
+        float w = (t - 0.85) / 0.15;
+        if (w < 0.0) w = 0.0;
+        if (w > 1.0) w = 1.0;
+        float c = 0.82 + 0.18 * w;
+        r = c;
+        g = c;
+        b = c;
+      }
+      my.vertexColorR[idx] = r;
+      my.vertexColorG[idx] = g;
+      my.vertexColorB[idx] = b;
+      idx = idx + 1;
+    }
   }
 
   void initGraphics() {
@@ -229,12 +311,20 @@ class LandscapeDemo {
     GLClearDepth(1.0);
     GLDepthTest(true);
     GLSetSwapInterval(1);
-    writeln("Controls: WASD to move, hold Shift to rotate view. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    getmousestate(mouseX, mouseY, mouseButtons);
+    my.lastMouseX = mouseX;
+    my.lastMouseY = mouseY;
+    my.hasMouseSample = true;
   }
 
   void regenerate(int newSeed) {
     my.seed = newSeed;
     my.field.build(newSeed);
+    my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
@@ -260,51 +350,23 @@ class LandscapeDemo {
     }
   }
 
-  void applyColor(float h) {
-    float t = my.field.normalized(h);
-    if (t < 0.35) {
-      float w = t / 0.35;
-      float r = 0.0;
-      float g = 0.28 + 0.35 * w;
-      float b = 0.45 + 0.4 * w;
-      GLColor3f(r, g, b);
-    } else if (t < 0.6) {
-      float w = (t - 0.35) / 0.25;
-      float r = 0.15 + 0.25 * w;
-      float g = 0.42 + 0.35 * w;
-      float b = 0.18 + 0.08 * w;
-      GLColor3f(r, g, b);
-    } else if (t < 0.85) {
-      float w = (t - 0.6) / 0.25;
-      float r = 0.52 + 0.2 * w;
-      float g = 0.40 + 0.18 * w;
-      float b = 0.30 + 0.15 * w;
-      GLColor3f(r, g, b);
-    } else {
-      float w = (t - 0.85) / 0.15;
-      if (w < 0.0) w = 0.0;
-      if (w > 1.0) w = 1.0;
-      float c = 0.82 + 0.18 * w;
-      GLColor3f(c, c, c);
-    }
-  }
-
   void drawTerrain() {
-    float half = TerrainSize * 0.5;
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
+      float worldZ0 = my.worldZCoords[z];
+      float worldZ1 = my.worldZCoords[z + 1];
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
       int x = 0;
       while (x <= TerrainSize) {
-        float h0 = my.field.rawHeight(x, z);
-        float h1 = my.field.rawHeight(x, z + 1);
-        float worldX = (x - half) * TileScale;
-        float worldZ0 = (z - half) * TileScale;
-        float worldZ1 = ((z + 1) - half) * TileScale;
-        my.applyColor(h0);
-        GLVertex3f(worldX, h0, worldZ0);
-        my.applyColor(h1);
-        GLVertex3f(worldX, h1, worldZ1);
+        int idx0 = rowIndex + x;
+        int idx1 = nextRowIndex + x;
+        float worldX = my.worldXCoords[x];
+        GLColor3f(my.vertexColorR[idx0], my.vertexColorG[idx0], my.vertexColorB[idx0]);
+        GLVertex3f(worldX, my.vertexHeights[idx0], worldZ0);
+        GLColor3f(my.vertexColorR[idx1], my.vertexColorG[idx1], my.vertexColorB[idx1]);
+        GLVertex3f(worldX, my.vertexHeights[idx1], worldZ1);
         x = x + 1;
       }
       GLEnd();
@@ -314,38 +376,45 @@ class LandscapeDemo {
 
   void updateCamera(float dt) {
     if (dt > 0.1) dt = 0.1;
-    bool shiftHeld = IsKeyDown("Left Shift") || IsKeyDown("Right Shift");
-    bool forward = IsKeyDown("W") || IsKeyDown("Up");
-    bool backward = IsKeyDown("S") || IsKeyDown("Down");
-    bool left = IsKeyDown("A") || IsKeyDown("Left");
-    bool right = IsKeyDown("D") || IsKeyDown("Right");
-
-    if (shiftHeld) {
-      if (left) my.yaw = my.yaw - TurnSpeed * dt;
-      if (right) my.yaw = my.yaw + TurnSpeed * dt;
-      if (forward) my.pitch = my.pitch + PitchSpeed * dt;
-      if (backward) my.pitch = my.pitch - PitchSpeed * dt;
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    getmousestate(mouseX, mouseY, mouseButtons);
+    if (!my.hasMouseSample) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
     } else {
-      float moveForward = 0.0;
-      float moveSide = 0.0;
-      if (forward) moveForward = moveForward + 1.0;
-      if (backward) moveForward = moveForward - 1.0;
-      if (right) moveSide = moveSide + 1.0;
-      if (left) moveSide = moveSide - 1.0;
-      float len = sqrt(moveForward * moveForward + moveSide * moveSide);
-      if (len > 0.0) {
-        moveForward = moveForward / len;
-        moveSide = moveSide / len;
-        float speed = MoveSpeed * dt;
-        float forwardX = sin(my.yaw);
-        float forwardZ = cos(my.yaw);
-        float rightX = sin(my.yaw + 90.0);
-        float rightZ = cos(my.yaw + 90.0);
-        float deltaX = (forwardX * moveForward + rightX * moveSide) * (speed / TileScale);
-        float deltaZ = (forwardZ * moveForward + rightZ * moveSide) * (speed / TileScale);
-        my.camX = my.camX + deltaX;
-        my.camZ = my.camZ + deltaZ;
+      int deltaX = mouseX - my.lastMouseX;
+      int deltaY = mouseY - my.lastMouseY;
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      if (deltaX != 0 || deltaY != 0) {
+        int maxDeltaX = WindowWidth / 2;
+        int maxDeltaY = WindowHeight / 2;
+        if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
+            deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
+          my.yaw = my.yaw - deltaX * MouseYawSensitivity;
+          my.pitch = my.pitch - deltaY * MousePitchSensitivity;
+        }
       }
+    }
+
+    bool forward = IsKeyDown(ScanCodeS);
+    bool backward = IsKeyDown(ScanCodeW);
+
+    float moveForward = 0.0;
+    if (forward) moveForward = moveForward + 1.0;
+    if (backward) moveForward = moveForward - 1.0;
+    if (moveForward != 0.0) {
+      float speed = MoveSpeed * dt * moveForward;
+      float yawRadians = my.yaw * DegreesToRadians;
+      float forwardX = sin(yawRadians);
+      float forwardZ = cos(yawRadians);
+      float deltaX = forwardX * (speed / TileScale);
+      float deltaZ = forwardZ * (speed / TileScale);
+      my.camX = my.camX + deltaX;
+      my.camZ = my.camZ + deltaZ;
     }
 
     if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;

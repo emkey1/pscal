@@ -34,6 +34,19 @@
 // Maximum number of arguments allowed for write/writeln
 #define MAX_WRITE_ARGS_VM 32
 
+#ifndef SDL
+static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
+    (void)arg_count;
+    (void)args;
+    const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
+    runtimeError(vm, "Built-in '%s' requires SDL support. Rebuild with -DSDL=ON to enable it.", name);
+    return makeNil();
+}
+#define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
+#else
+#define SDL_HANDLER(fn) fn
+#endif
+
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
 static _Thread_local unsigned int rand_seed = 1;
@@ -219,32 +232,24 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
     {"chr", vmBuiltinChr},
-#ifdef SDL
-    {"cleardevice", vmBuiltinCleardevice},
-#endif
+    {"cleardevice", SDL_HANDLER(vmBuiltinCleardevice)},
     {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
-#ifdef SDL
-    {"closegraph", vmBuiltinClosegraph},
-    {"closegraph3d", vmBuiltinClosegraph3d},
-#endif
+    {"closegraph", SDL_HANDLER(vmBuiltinClosegraph)},
+    {"closegraph3d", SDL_HANDLER(vmBuiltinClosegraph3d)},
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
     {"cosh", vmBuiltinCosh},
     {"cotan", vmBuiltinCotan},
     {"cursoroff", vmBuiltinCursoroff},
     {"cursoron", vmBuiltinCursoron},
-#ifdef SDL
-    {"createtargettexture", vmBuiltinCreatetargettexture}, // Moved
-    {"createtexture", vmBuiltinCreatetexture}, // Moved
-#endif
+    {"createtargettexture", SDL_HANDLER(vmBuiltinCreatetargettexture)}, // Moved
+    {"createtexture", SDL_HANDLER(vmBuiltinCreatetexture)}, // Moved
     {"dec", vmBuiltinDec},
     {"delay", vmBuiltinDelay},
     {"deline", vmBuiltinDeline},
-#ifdef SDL
-    {"destroytexture", vmBuiltinDestroytexture},
-#endif
+    {"destroytexture", SDL_HANDLER(vmBuiltinDestroytexture)},
     {"dispose", vmBuiltinDispose},
     {"dnslookup", vmBuiltinDnsLookup},
     {"dosExec", vmBuiltinDosExec},
@@ -257,94 +262,76 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"dosMkdir", vmBuiltinDosMkdir},
     {"dosRmdir", vmBuiltinDosRmdir},
     {"double", vmBuiltinToDouble},
-#ifdef SDL
-    {"drawcircle", vmBuiltinDrawcircle}, // Moved
-    {"drawline", vmBuiltinDrawline}, // Moved
-    {"drawpolygon", vmBuiltinDrawpolygon}, // Moved
-    {"drawrect", vmBuiltinDrawrect}, // Moved
-#endif
+    {"drawcircle", SDL_HANDLER(vmBuiltinDrawcircle)}, // Moved
+    {"drawline", SDL_HANDLER(vmBuiltinDrawline)}, // Moved
+    {"drawpolygon", SDL_HANDLER(vmBuiltinDrawpolygon)}, // Moved
+    {"drawrect", SDL_HANDLER(vmBuiltinDrawrect)}, // Moved
     {"eof", vmBuiltinEof},
     {"erase", vmBuiltinErase},
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-#ifdef SDL
-    {"fillcircle", vmBuiltinFillcircle},
-    {"fillrect", vmBuiltinFillrect},
-#endif
+    {"fillcircle", SDL_HANDLER(vmBuiltinFillcircle)},
+    {"fillrect", SDL_HANDLER(vmBuiltinFillrect)},
     {"findfirst", vmBuiltinDosFindfirst},
     {"findnext", vmBuiltinDosFindnext},
     {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
-#ifdef SDL
-    {"freesound", vmBuiltinFreesound},
-#endif
+    {"freesound", SDL_HANDLER(vmBuiltinFreesound)},
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
     {"getfattr", vmBuiltinDosGetfattr},
-#ifdef SDL
-    {"getmaxx", vmBuiltinGetmaxx},
-    {"getmaxy", vmBuiltinGetmaxy},
-    {"getmousestate", vmBuiltinGetmousestate},
-    {"getpixelcolor", vmBuiltinGetpixelcolor}, // Moved
-    {"gettextsize", vmBuiltinGettextsize},
-    {"getticks", vmBuiltinGetticks},
-    {"glbegin", vmBuiltinGlbegin},
-    {"glclear", vmBuiltinGlclear},
-    {"glclearcolor", vmBuiltinGlclearcolor},
-    {"glcleardepth", vmBuiltinGlcleardepth},
-    {"glcolor3f", vmBuiltinGlcolor3f},
-    {"gldepthtest", vmBuiltinGldepthtest},
-    {"glend", vmBuiltinGlend},
-    {"glfrustum", vmBuiltinGlfrustum},
-    {"glloadidentity", vmBuiltinGlloadidentity},
-    {"glmatrixmode", vmBuiltinGlmatrixmode},
-    {"glpopmatrix", vmBuiltinGlpopmatrix},
-    {"glpushmatrix", vmBuiltinGlpushmatrix},
-    {"glrotatef", vmBuiltinGlrotatef},
-    {"glscalef", vmBuiltinGlscalef},
-    {"glperspective", vmBuiltinGlperspective},
-    {"glsetswapinterval", vmBuiltinGlsetswapinterval},
-    {"glswapwindow", vmBuiltinGlswapwindow},
-    {"gltranslatef", vmBuiltinGltranslatef},
-    {"glvertex3f", vmBuiltinGlvertex3f},
-    {"glviewport", vmBuiltinGlviewport},
-#endif
+    {"getmaxx", SDL_HANDLER(vmBuiltinGetmaxx)},
+    {"getmaxy", SDL_HANDLER(vmBuiltinGetmaxy)},
+    {"getmousestate", SDL_HANDLER(vmBuiltinGetmousestate)},
+    {"getpixelcolor", SDL_HANDLER(vmBuiltinGetpixelcolor)}, // Moved
+    {"gettextsize", SDL_HANDLER(vmBuiltinGettextsize)},
+    {"getticks", SDL_HANDLER(vmBuiltinGetticks)},
+    {"glbegin", SDL_HANDLER(vmBuiltinGlbegin)},
+    {"glclear", SDL_HANDLER(vmBuiltinGlclear)},
+    {"glclearcolor", SDL_HANDLER(vmBuiltinGlclearcolor)},
+    {"glcleardepth", SDL_HANDLER(vmBuiltinGlcleardepth)},
+    {"glcolor3f", SDL_HANDLER(vmBuiltinGlcolor3f)},
+    {"gldepthtest", SDL_HANDLER(vmBuiltinGldepthtest)},
+    {"glend", SDL_HANDLER(vmBuiltinGlend)},
+    {"glfrustum", SDL_HANDLER(vmBuiltinGlfrustum)},
+    {"glloadidentity", SDL_HANDLER(vmBuiltinGlloadidentity)},
+    {"glmatrixmode", SDL_HANDLER(vmBuiltinGlmatrixmode)},
+    {"glpopmatrix", SDL_HANDLER(vmBuiltinGlpopmatrix)},
+    {"glpushmatrix", SDL_HANDLER(vmBuiltinGlpushmatrix)},
+    {"glrotatef", SDL_HANDLER(vmBuiltinGlrotatef)},
+    {"glscalef", SDL_HANDLER(vmBuiltinGlscalef)},
+    {"glperspective", SDL_HANDLER(vmBuiltinGlperspective)},
+    {"glsetswapinterval", SDL_HANDLER(vmBuiltinGlsetswapinterval)},
+    {"glswapwindow", SDL_HANDLER(vmBuiltinGlswapwindow)},
+    {"gltranslatef", SDL_HANDLER(vmBuiltinGltranslatef)},
+    {"glvertex3f", SDL_HANDLER(vmBuiltinGlvertex3f)},
+    {"glviewport", SDL_HANDLER(vmBuiltinGlviewport)},
     {"gettime", vmBuiltinDosGettime},
-#ifdef SDL
-    {"graphloop", vmBuiltinGraphloop},
-#endif
+    {"graphloop", SDL_HANDLER(vmBuiltinGraphloop)},
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
     {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
-#ifdef SDL
-    {"initgraph", vmBuiltinInitgraph},
-    {"initgraph3d", vmBuiltinInitgraph3d},
-#endif
-#ifdef SDL
-    {"initsoundsystem", vmBuiltinInitsoundsystem},
-    {"inittextsystem", vmBuiltinInittextsystem},
-#endif
+    {"initgraph", SDL_HANDLER(vmBuiltinInitgraph)},
+    {"initgraph3d", SDL_HANDLER(vmBuiltinInitgraph3d)},
+    {"initsoundsystem", SDL_HANDLER(vmBuiltinInitsoundsystem)},
+    {"inittextsystem", SDL_HANDLER(vmBuiltinInittextsystem)},
     {"insline", vmBuiltinInsline},
     {"int", vmBuiltinToInt},
     {"inttostr", vmBuiltinInttostr},
     {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
-#ifdef SDL
-    {"issoundplaying", vmBuiltinIssoundplaying}, // Moved
-#endif
+    {"issoundplaying", SDL_HANDLER(vmBuiltinIssoundplaying)}, // Moved
     {"keypressed", vmBuiltinKeypressed},
     {"length", vmBuiltinLength},
     {"ln", vmBuiltinLn},
     {"log10", vmBuiltinLog10},
-#ifdef SDL
-    {"loadimagetotexture", vmBuiltinLoadimagetotexture}, // Moved
-    {"loadsound", vmBuiltinLoadsound},
-#endif
+    {"loadimagetotexture", SDL_HANDLER(vmBuiltinLoadimagetotexture)}, // Moved
+    {"loadsound", SDL_HANDLER(vmBuiltinLoadsound)},
     {"low", vmBuiltinLow},
     {"lowvideo", vmBuiltinLowvideo},
     {"max", vmBuiltinMax},
@@ -360,17 +347,13 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
-#ifdef SDL
-    {"outtextxy", vmBuiltinOuttextxy}, // Moved
-#endif
+    {"outtextxy", SDL_HANDLER(vmBuiltinOuttextxy)}, // Moved
     {"paramcount", vmBuiltinParamcount},
     {"paramstr", vmBuiltinParamstr},
-#ifdef SDL
-    {"playsound", vmBuiltinPlaysound},
-    {"stopallsounds", vmBuiltinStopallsounds},
-    {"pollkey", vmBuiltinPollkey},
-    {"iskeydown", vmBuiltinIskeydown},
-#endif
+    {"playsound", SDL_HANDLER(vmBuiltinPlaysound)},
+    {"stopallsounds", SDL_HANDLER(vmBuiltinStopallsounds)},
+    {"pollkey", SDL_HANDLER(vmBuiltinPollkey)},
+    {"iskeydown", SDL_HANDLER(vmBuiltinIskeydown)},
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
@@ -379,14 +362,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fopen", vmBuiltinFopen},
     {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
-#ifdef SDL
-    {"putpixel", vmBuiltinPutpixel},
-#endif
-    {"quitrequested", vmBuiltinQuitrequested},
-#ifdef SDL
-    {"quitsoundsystem", vmBuiltinQuitsoundsystem},
-    {"quittextsystem", vmBuiltinQuittextsystem},
-#endif
+    {"putpixel", SDL_HANDLER(vmBuiltinPutpixel)},
+    {"write", vmBuiltinWrite}, // Preserve legacy builtin id for write
+    {"quitsoundsystem", SDL_HANDLER(vmBuiltinQuitsoundsystem)},
+    {"quittextsystem", SDL_HANDLER(vmBuiltinQuittextsystem)},
     {"random", vmBuiltinRandom},
     {"randomize", vmBuiltinRandomize},
     {"read", vmBuiltinRead},
@@ -395,12 +374,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"real", vmBuiltinReal},
     {"realtostr", vmBuiltinRealtostr},
     {"rename", vmBuiltinRename},
-#ifdef SDL
-    {"rendercopy", vmBuiltinRendercopy}, // Moved
-    {"rendercopyex", vmBuiltinRendercopyex}, // Moved
-    {"rendercopyrect", vmBuiltinRendercopyrect},
-    {"rendertexttotexture", vmBuiltinRendertexttotexture},
-#endif
+    {"rendercopy", SDL_HANDLER(vmBuiltinRendercopy)}, // Moved
+    {"rendercopyex", SDL_HANDLER(vmBuiltinRendercopyex)}, // Moved
+    {"rendercopyrect", SDL_HANDLER(vmBuiltinRendercopyrect)},
+    {"rendertexttotexture", SDL_HANDLER(vmBuiltinRendertexttotexture)},
     {"reset", vmBuiltinReset},
     {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
@@ -410,14 +387,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
     {"setlength", vmBuiltinSetlength},
-#ifdef SDL
-    {"setalphablend", vmBuiltinSetalphablend},
-    {"setcolor", vmBuiltinSetcolor}, // Moved
-    {"setrendertarget", vmBuiltinSetrendertarget}, // Moved
-#endif
-#ifdef SDL
-    {"setrgbcolor", vmBuiltinSetrgbcolor},
-#endif
+    {"setalphablend", SDL_HANDLER(vmBuiltinSetalphablend)},
+    {"setcolor", SDL_HANDLER(vmBuiltinSetcolor)}, // Moved
+    {"setrendertarget", SDL_HANDLER(vmBuiltinSetrendertarget)}, // Moved
+    {"setrgbcolor", SDL_HANDLER(vmBuiltinSetrgbcolor)},
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
@@ -447,22 +420,20 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
     {"toupper", vmBuiltinUpcase},
-#ifdef SDL
-    {"updatescreen", vmBuiltinUpdatescreen},
-    {"updatetexture", vmBuiltinUpdatetexture},
-#endif
+    {"updatescreen", SDL_HANDLER(vmBuiltinUpdatescreen)},
+    {"updatetexture", SDL_HANDLER(vmBuiltinUpdatetexture)},
     {"val", vmBuiltinVal},
     {"valreal", vmBuiltinValreal},
     {"vmversion", vmBuiltinVMVersion},
-#ifdef SDL
-    {"waitkeyevent", vmBuiltinWaitkeyevent}, // Moved
-#endif
+    {"waitkeyevent", SDL_HANDLER(vmBuiltinWaitkeyevent)}, // Moved
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
-    {"write", vmBuiltinWrite},
+    {"quitrequested", vmBuiltinQuitrequested},
     {"to be filled", NULL}
 };
+
+#undef SDL_HANDLER
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
 
@@ -480,9 +451,19 @@ static void initBuiltinRegistryMutex(void) {
     pthread_mutexattr_destroy(&attr);
 }
 
-void registerVmBuiltin(const char *name, VmBuiltinFn handler) {
+void registerVmBuiltin(const char *name, VmBuiltinFn handler,
+        BuiltinRoutineType type, const char *display_name) {
     if (!name || !handler) return;
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+
+    if (type == BUILTIN_TYPE_FUNCTION || type == BUILTIN_TYPE_PROCEDURE) {
+        const char *reg_name = display_name ? display_name : name;
+        ASTNodeType declType = (type == BUILTIN_TYPE_FUNCTION)
+                                   ? AST_FUNCTION_DECL
+                                   : AST_PROCEDURE_DECL;
+        registerBuiltinFunction(reg_name, declType, NULL);
+    }
+
     pthread_mutex_lock(&builtin_registry_mutex);
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
@@ -518,6 +499,40 @@ VmBuiltinFn getVmBuiltinHandler(const char *name) {
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
     return NULL;
+}
+
+VmBuiltinFn getVmBuiltinHandlerById(int id) {
+    if (id < 0) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    VmBuiltinFn handler = NULL;
+    if ((size_t)id < num_vm_builtins) {
+        handler = vmBuiltinDispatchTable[id].handler;
+    } else {
+        size_t extra_index = (size_t)id - num_vm_builtins;
+        if (extra_index < num_extra_vm_builtins) {
+            handler = extra_vm_builtins[extra_index].handler;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return handler;
+}
+
+const char* getVmBuiltinNameById(int id) {
+    if (id < 0) return NULL;
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    const char* name = NULL;
+    if ((size_t)id < num_vm_builtins) {
+        name = vmBuiltinDispatchTable[id].name;
+    } else {
+        size_t extra_index = (size_t)id - num_vm_builtins;
+        if (extra_index < num_extra_vm_builtins) {
+            name = extra_vm_builtins[extra_index].name;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return name;
 }
 
 Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
@@ -1154,11 +1169,28 @@ static void vmCreateThreadKey(void) {
     pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
 }
 
+static int vmTcgetattr(int fd, struct termios *term) {
+    int res;
+    do {
+        res = tcgetattr(fd, term);
+    } while (res < 0 && errno == EINTR);
+    return res;
+}
+
+static int vmTcsetattr(int fd, int optional_actions, const struct termios *term) {
+    int res;
+    do {
+        res = tcsetattr(fd, optional_actions, term);
+    } while (res < 0 && errno == EINTR);
+    return res;
+}
+
 static void vmRestoreTerminal(void) {
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_termios_saved && vm_raw_mode) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios);
-        vm_raw_mode = 0;
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
+            vm_raw_mode = 0;
+        }
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -1173,7 +1205,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     if (!isatty(STDIN_FILENO))
         return -1;
 
-    if (tcgetattr(STDIN_FILENO, &oldt) < 0)
+    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0)
         return -1;
 
     raw = oldt;
@@ -1181,13 +1213,13 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 5; // 0.5s timeout
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) < 0) {
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         return -1;
     }
 
     if (write(STDOUT_FILENO, query, strlen(query)) == -1) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
         return -1;
     }
 
@@ -1209,7 +1241,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     }
     buf[i] = '\0';
 
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 
     char *p = strchr(buf, ';');
     if (!p)
@@ -1300,7 +1332,7 @@ static void vmSetupTermHandlers(void) {
 
     pthread_mutex_lock(&vm_term_mutex);
     if (!vm_termios_saved) {
-        if (tcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
             vm_termios_saved = 1;
         }
     }
@@ -1358,12 +1390,20 @@ static void vmEnableRawMode(void) {
         return;
     }
 
+    if (!vm_termios_saved) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) != 0) {
+            pthread_mutex_unlock(&vm_term_mutex);
+            return;
+        }
+        vm_termios_saved = 1;
+    }
+
     struct termios raw = vm_orig_termios;
     raw.c_lflag &= ~(ICANON | ECHO);
     raw.c_cc[VMIN]  = 1;
     raw.c_cc[VTIME] = 0;
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
     }
     pthread_mutex_unlock(&vm_term_mutex);
@@ -1404,7 +1444,7 @@ static int getCursorPosition(int *row, int *col) {
     }
 
     // --- Save Current Terminal Settings ---
-    if (tcgetattr(STDIN_FILENO, &oldt) < 0) {
+    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
         perror("getCursorPosition: tcgetattr failed");
         return -1; // Critical failure
     }
@@ -1415,11 +1455,11 @@ static int getCursorPosition(int *row, int *col) {
     newt.c_cc[VMIN] = 0;              // Non-blocking read
     newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
         int setup_errno = errno;
         perror("getCursorPosition: tcsetattr (set raw) failed");
         // Attempt to restore original settings even if setting new ones failed
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
         errno = setup_errno; // Restore errno for accurate reporting
         return -1; // Critical failure
     }
@@ -1429,7 +1469,7 @@ static int getCursorPosition(int *row, int *col) {
     if (write(STDOUT_FILENO, dsr_query, strlen(dsr_query)) == -1) {
         int write_errno = errno;
         perror("getCursorPosition: write DSR query failed");
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
         errno = write_errno;
         return -1; // Critical failure
     }
@@ -1465,7 +1505,7 @@ static int getCursorPosition(int *row, int *col) {
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Restore Original Terminal Settings ---
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
         perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
         // Continue processing, but be aware terminal might be left in raw mode
     }
@@ -3684,6 +3724,12 @@ int getBuiltinIDForCompiler(const char *name) {
     pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+#ifndef SDL
+            if (vmBuiltinDispatchTable[i].handler == vmBuiltinSDLUnavailable) {
+                pthread_mutex_unlock(&builtin_registry_mutex);
+                return -1;
+            }
+#endif
             pthread_mutex_unlock(&builtin_registry_mutex);
             return (int)i;
         }
@@ -3704,8 +3750,9 @@ typedef struct {
     BuiltinRoutineType type;
 } RegisteredBuiltin;
 
-static RegisteredBuiltin builtin_registry[256];
+static RegisteredBuiltin* builtin_registry = NULL;
 static int builtin_registry_count = 0;
+static int builtin_registry_capacity = 0;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
@@ -3719,9 +3766,15 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
             return;
         }
     }
-    if (builtin_registry_count >= 256) {
-        pthread_mutex_unlock(&builtin_registry_mutex);
-        return;
+    if (builtin_registry_count >= builtin_registry_capacity) {
+        int new_capacity = builtin_registry_capacity < 64 ? 64 : builtin_registry_capacity * 2;
+        RegisteredBuiltin* new_registry = realloc(builtin_registry, sizeof(RegisteredBuiltin) * new_capacity);
+        if (!new_registry) {
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return;
+        }
+        builtin_registry = new_registry;
+        builtin_registry_capacity = new_capacity;
     }
     builtin_registry[builtin_registry_count].name = strdup(name);
     builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
@@ -4048,11 +4101,11 @@ void registerAllBuiltins(void) {
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
     /* CLike-style cast helper synonyms to avoid keyword collisions */
-    registerVmBuiltin("toint",    vmBuiltinToInt);
-    registerVmBuiltin("todouble", vmBuiltinToDouble);
-    registerVmBuiltin("tofloat",  vmBuiltinToFloat);
-    registerVmBuiltin("tochar",   vmBuiltinToChar);
-    registerVmBuiltin("tobool",   vmBuiltinToBool);
-    registerVmBuiltin("tobyte",   vmBuiltinToByte);
+    registerVmBuiltin("toint",    vmBuiltinToInt,    BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("todouble", vmBuiltinToDouble, BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tofloat",  vmBuiltinToFloat,  BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tochar",   vmBuiltinToChar,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }

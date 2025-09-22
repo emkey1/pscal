@@ -1,0 +1,26 @@
+program UserProcCallTest;
+
+type
+  TIntArray = array[1..3] of integer;
+
+function DoubleIt(x: integer): integer;
+begin
+  DoubleIt := x * 2;
+end;
+
+procedure PrintValue(value: integer);
+begin
+  writeln('value=', value);
+end;
+
+var
+  data: TIntArray;
+  i: integer;
+begin
+  writeln('double=', DoubleIt(5));
+  data[1] := 3;
+  data[2] := 4;
+  data[3] := 5;
+  for i := 1 to 3 do
+    PrintValue(data[i]);
+end.

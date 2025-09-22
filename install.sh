@@ -49,9 +49,14 @@ cp -r fonts/* /usr/local/pscal/fonts
 mkdir -p /usr/local/pscal/etc
 cp -r etc/* /usr/local/pscal/etc
 
+# Install simple web server files
+mkdir -p /usr/local/pscal/misc/htdocs
+cp -r lib/misc/simple_web_server/htdocs /usr/local/pscal/misc
+
 # Set group to executable for any installed binaries
 for bin in clike clike-repl dascal pascal pscalvm rea pscaljson2bc pscald; do
     if [ -f "/usr/local/bin/$bin" ]; then
         chmod go+x "/usr/local/bin/$bin"
     fi
 done
+

@@ -23,6 +23,7 @@ typedef enum {
     DIVIDE,        // Pop two values, divide, push result (handle integer/real later)
     NEGATE,        // Pop one value, negate it, push result (for unary minus)
     NOT,           // Pop one value (boolean), invert, push result
+    TO_BOOL,       // Pop one value, coerce using truthiness rules, push boolean result
     EQUAL,
     NOT_EQUAL,
     GREATER,
@@ -33,6 +34,7 @@ typedef enum {
     MOD,
     AND,
     OR,
+    XOR,
     SHL,           // Bit Shift Left
     SHR,           // Bit Shift Right
 
@@ -59,6 +61,8 @@ typedef enum {
 
     GET_LOCAL,     // Get local scoped variables
     SET_LOCAL,     // Set local scoped variables
+    INC_LOCAL,     // Increment a local slot by 1 (peephole optimized helper)
+    DEC_LOCAL,     // Decrement a local slot by 1 (peephole optimized helper)
     INIT_LOCAL_ARRAY, // Initialize local array variable
     INIT_LOCAL_FILE,  // Initialize local file variable
     INIT_LOCAL_POINTER, // Initialize local pointer variable
@@ -72,7 +76,12 @@ typedef enum {
 
     GET_FIELD_ADDRESS,
     GET_FIELD_ADDRESS16,
+    LOAD_FIELD_VALUE_BY_NAME,   // Pops base record/pointer, looks up field by name (1-byte const index) and pushes its value
+    LOAD_FIELD_VALUE_BY_NAME16, // Pops base record/pointer, looks up field by name (2-byte const index) and pushes its value
     GET_ELEMENT_ADDRESS,
+    GET_ELEMENT_ADDRESS_CONST, // Pops an array base and pushes address using a constant flat offset
+    LOAD_ELEMENT_VALUE,  // Pops array/pointer after its indices and pushes a copy of the addressed element's value
+    LOAD_ELEMENT_VALUE_CONST, // Pops array/pointer and loads element at constant flat offset
     GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     SET_INDIRECT,
     GET_INDIRECT,
@@ -91,12 +100,14 @@ typedef enum {
     // field.
     GET_FIELD_OFFSET,   // Operand: 1-byte field index
     GET_FIELD_OFFSET16, // Operand: 2-byte field index
+    LOAD_FIELD_VALUE,   // Pops the base record/pointer and pushes a copy of the field value (1-byte offset)
+    LOAD_FIELD_VALUE16, // Pops the base record/pointer and pushes a copy of the field value (2-byte offset)
 
     // For now, built-ins might be handled specially, or we can add a generic call
     CALL_BUILTIN,  // Placeholder for calling built-in functions
                       // Operands: 2-byte name index, 1-byte argument count
     
-    CALL_BUILTIN_PROC, // For void built-in procedures. Operand1: builtin_id, Operand2: arg_count
+    CALL_BUILTIN_PROC, // For void built-in procedures. Operands: 2-byte builtin_id, 2-byte name index, 1-byte arg count
     CALL_USER_PROC,    // For user-defined procedures/functions. Operand1: name_const_idx, Operand2: arg_count
 
     CALL_HOST,
@@ -149,6 +160,7 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value); // Add a value
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
+void emitInt32(BytecodeChunk* chunk, uint32_t value, int line);
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 int getInstructionLength(BytecodeChunk* chunk, int offset);
 

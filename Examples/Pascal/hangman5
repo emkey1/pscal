@@ -492,7 +492,7 @@ begin
   writeln('Initializing Hangman...');
 
   // --- Load word list ONCE ---
-  wordListCount := LoadWordList(wordListHead, '/usr/local/Pscal/etc/words');
+  wordListCount := LoadWordList(wordListHead, '/usr/local/pscal/etc/words');
   if wordListCount = 0 then
   begin
     writeln('Failed to load word list. Exiting.');

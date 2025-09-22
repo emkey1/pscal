@@ -74,7 +74,7 @@ BEGIN
       BEGIN
         // Cycle through the extended palette (indices 16-255)
         // Add 16 to offset past the standard 16 colors.
-        ColorIndex := 16 + (iter MOD PaletteSize);
+        ColorIndex := byte(16 + (iter MOD PaletteSize));
       END;
 
       // Set the extended color and draw the character

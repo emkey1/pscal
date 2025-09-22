@@ -14,6 +14,14 @@ The language is strongly typed and emphasizes readability and structured program
 * **Parenthesis-star comments:** Start with `(*` and end with `*)`. These can also be nested.
 * **Single-line comments:** Start with `//` and extend to the end of the line.
 
+Comments may also carry simple directives. Placing `override builtin` inside a comment immediately before or on the same line as a routine declaration tells the compiler that the upcoming user-defined routine intentionally replaces a builtin. For example:
+
+```pascal
+function Fibonacci(n: Integer): LongInt; // override builtin fibonacci
+```
+
+The directive works with `//`, `{ ... }`, or `(* ... *)` comment styles. If you omit the identifier after `override builtin`, the next builtin routine that would have generated an override warning is silenced. Supplying an identifier (case-insensitive) restricts suppression to that specific routine name.
+
 #### **Keywords**
 
 The following are reserved keywords and cannot be used as identifiers:

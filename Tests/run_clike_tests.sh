@@ -4,8 +4,137 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CLIKE_BIN="$ROOT_DIR/build/bin/clike"
+CLIKE_ARGS=(--no-cache)
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
+
+shift_mtime() {
+  local path="$1"
+  local delta="$2"
+  python3 - "$path" "$delta" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+delta = float(sys.argv[2])
+try:
+    st = os.stat(path)
+except FileNotFoundError:
+    sys.exit(1)
+now = time.time()
+if delta >= 0:
+    base = max(st.st_mtime, now)
+else:
+    base = min(st.st_mtime, now)
+target = base + delta
+if target < 0:
+    target = 0.0
+os.utime(path, (target, target))
+PY
+}
+
+wait_for_ready_file() {
+  local ready_file="$1"
+  local timeout="$2"
+  python3 - "$ready_file" "$timeout" <<'PY'
+import os
+import sys
+import time
+
+path = sys.argv[1]
+timeout = float(sys.argv[2])
+deadline = time.monotonic() + timeout
+while time.monotonic() < deadline:
+    if os.path.exists(path):
+        sys.exit(0)
+    time.sleep(0.05)
+sys.exit(1)
+PY
+}
+
+stop_server() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return
+  fi
+  if ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" 2>/dev/null || true
+    return
+  fi
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      return
+    fi
+    if ps -p "$pid" -o stat= 2>/dev/null | grep -q '^Z'; then
+      wait "$pid" 2>/dev/null || true
+      return
+    fi
+    sleep 0.05
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+check_ext_builtin_dump() {
+  local binary="$1"
+  local label="$2"
+  local tmp_out
+  local tmp_err
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+  local status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "Failed to dump extended builtins for $label (exit $status)" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! python3 - "$tmp_out" <<'PY'
+import sys
+
+path = sys.argv[1]
+seen = set()
+with open(path, 'r', encoding='utf-8') as fh:
+    for idx, raw_line in enumerate(fh, 1):
+        line = raw_line.rstrip('\n')
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        tag = parts[0]
+        if tag == 'category':
+            if len(parts) != 2:
+                print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            seen.add(parts[1])
+        elif tag == 'function':
+            if len(parts) != 3:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if parts[1] not in seen:
+                print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+            sys.exit(1)
+sys.exit(0)
+PY
+  then
+    echo "Unexpected output format from $label --dump-ext-builtins" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+}
 
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
@@ -30,6 +159,8 @@ cd "$ROOT_DIR"
 
 EXIT_CODE=0
 
+check_ext_builtin_dump "$CLIKE_BIN" clike
+
 for src in "$SCRIPT_DIR"/clike/*.cl; do
   test_name=$(basename "$src" .cl)
   in_file="$SCRIPT_DIR/clike/$test_name.in"
@@ -37,11 +168,39 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   err_file="$SCRIPT_DIR/clike/$test_name.err"
   actual_out=$(mktemp)
   actual_err=$(mktemp)
+  disasm_file="$SCRIPT_DIR/clike/$test_name.disasm"
+  disasm_stdout=""
+  disasm_stderr=""
   # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
   if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
     echo "Skipping $test_name (SDL dummy driver)"
     echo
     continue
+  fi
+
+  if [ -f "$disasm_file" ]; then
+    disasm_stdout=$(mktemp)
+    disasm_stderr=$(mktemp)
+    set +e
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" --dump-bytecode-only "$src" \
+      > "$disasm_stdout" 2> "$disasm_stderr"
+    disasm_status=$?
+    set -e
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+    mv "$disasm_stderr.clean" "$disasm_stderr"
+    rel_src="Tests/clike/$test_name.cl"
+    sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
+    rm -f "$disasm_stderr.bak"
+    if [ $disasm_status -ne 0 ]; then
+      echo "Disassembly run exited with $disasm_status: $test_name" >&2
+      cat "$disasm_stderr"
+      EXIT_CODE=1
+    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
+      echo "Disassembly mismatch: $test_name" >&2
+      EXIT_CODE=1
+    fi
   fi
 
   # Skip network-labeled tests unless RUN_NET_TESTS=1
@@ -55,20 +214,30 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
 
   server_pid=""
   server_script="$SCRIPT_DIR/clike/$test_name.net"
+  server_ready_file=""
   if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
-    python3 "$server_script" &
+    server_ready_file=$(mktemp)
+    rm -f "$server_ready_file"
+    PSCAL_NET_READY_FILE="$server_ready_file" python3 "$server_script" &
     server_pid=$!
     # Detach the server process from job control so terminating it later does
     # not emit noisy "Terminated" messages that interfere with test output.
     disown "$server_pid" 2>/dev/null || true
-    sleep 1
+    if ! wait_for_ready_file "$server_ready_file" 5; then
+      echo "Failed to start server for $test_name" >&2
+      EXIT_CODE=1
+      if [ -n "$server_pid" ]; then
+        stop_server "$server_pid"
+        server_pid=""
+      fi
+    fi
   fi
 
   set +e
   if [ -f "$in_file" ]; then
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$src" < "$in_file" > "$actual_out" 2> "$actual_err"
   else
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "$src" > "$actual_out" 2> "$actual_err"
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$CLIKE_BIN" "${CLIKE_ARGS[@]}" "$src" > "$actual_out" 2> "$actual_err"
   fi
   run_status=$?
   set -e
@@ -118,12 +287,15 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   fi
 
   if [ -n "$server_pid" ]; then
-    kill "$server_pid" 2>/dev/null || true
-    sleep 0.2
-    kill -9 "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
+    stop_server "$server_pid"
+    server_pid=""
+  fi
+  if [ -n "${server_ready_file:-}" ]; then
+    rm -f "$server_ready_file"
   fi
 
+  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
+  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
   rm -f "$actual_out" "$actual_err"
   echo
   echo
@@ -139,13 +311,12 @@ int main() {
     return 0;
 }
 EOF
-sleep 1
+shift_mtime "$src_dir/CacheTest.cl" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" CacheTest.cl > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" CacheTest.cl > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?
@@ -171,14 +342,13 @@ int main() {
     return 0;
 }
 EOF
-sleep 1
+shift_mtime "$src_dir/BinaryTest.cl" -5
 set +e
 (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" BinaryTest.cl > "$tmp_home/out1" 2> "$tmp_home/err1")
 status1=$?
 set -e
 if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  sleep 2
-  touch "$CLIKE_BIN"
+  shift_mtime "$CLIKE_BIN" 5
   set +e
   (cd "$src_dir" && HOME="$tmp_home" "$CLIKE_BIN" BinaryTest.cl > "$tmp_home/out2" 2> "$tmp_home/err2")
   status2=$?

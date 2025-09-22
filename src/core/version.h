@@ -1,7 +1,7 @@
 #ifndef PSCAL_VERSION_H
 #define PSCAL_VERSION_H
 
-#define PSCAL_VM_VERSION 5  // Added threading, increase version
+#define PSCAL_VM_VERSION 7  // Bump for expanded locals metadata in cache format
 
 #include <stdint.h>
 

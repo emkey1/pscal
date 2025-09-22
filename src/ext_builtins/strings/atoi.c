@@ -20,7 +20,7 @@ static Value vmBuiltinAtoi(struct VM_s* vm, int arg_count, Value* args) {
 }
 
 void registerAtoiBuiltin(void) {
-    registerBuiltinFunction("Atoi", AST_FUNCTION_DECL, NULL);
-    registerVmBuiltin("atoi", vmBuiltinAtoi);
+    registerVmBuiltin("atoi", vmBuiltinAtoi,
+                      BUILTIN_TYPE_FUNCTION, "Atoi");
 }
 

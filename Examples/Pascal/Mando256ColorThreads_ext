@@ -1,0 +1,235 @@
+#!/usr/bin/env pascal
+PROGRAM Mandelbrot256ColorThreadsBuiltin;
+
+USES Crt;
+
+CONST
+  MaxIter          = 80;
+  MinX             = -2.0;
+  MaxX             = 1.0;
+  MinY             = -1.0;
+  MaxY             = 1.0;
+  InsideColorIndex = 16;
+  PaletteSize      = 239;
+  ThreadCount      = 6;
+  MaxBufferCols    = 2048;
+  MaxBufferRows    = 1536;
+
+TYPE
+  TRowRange = record
+    StartRow: Integer;
+    EndRow: Integer;
+  end;
+  PRowRange = ^TRowRange;
+  TIterationRow = array[0..MaxBufferCols - 1] of Integer;
+
+VAR
+  Width, Height : Integer;
+  ScaleX, ScaleY: Real;
+  DrawChar      : Char;
+  ColorBuffer   : array[1..MaxBufferRows, 1..MaxBufferCols] of Byte;
+  ThreadHandles : array[0..ThreadCount - 1] of Integer;
+  RowMutex      : Integer;
+  NextRow       : Integer;
+  ThreadingEnabled: Boolean;
+
+PROCEDURE ComputeRow(Row: Integer);
+VAR
+  cy            : Real;
+  iter          : Integer;
+  ColorIndex    : Byte;
+  RowIterations : TIterationRow;
+  Col           : Integer;
+BEGIN
+  IF (Row < 1) OR (Row > Height) THEN
+    EXIT;
+
+  cy := MinY + Row * ScaleY;
+  MandelbrotRow(MinX + ScaleX, ScaleX, cy, MaxIter, Width - 1, RowIterations);
+  FOR Col := 1 TO Width DO
+  BEGIN
+    iter := RowIterations[Col - 1];
+    IF iter = MaxIter THEN
+      ColorIndex := InsideColorIndex
+    ELSE
+      ColorIndex := Byte(16 + (iter MOD PaletteSize));
+    ColorBuffer[Row, Col] := ColorIndex;
+  END;
+END;
+
+PROCEDURE ComputeRowRange(startRow, endRow: Integer);
+VAR
+  Row: Integer;
+BEGIN
+  IF startRow < 1 THEN
+    startRow := 1;
+  IF endRow > Height THEN
+    endRow := Height;
+  IF endRow < startRow THEN
+    EXIT;
+
+  FOR Row := startRow TO endRow DO
+    ComputeRow(Row);
+END;
+
+FUNCTION TryGetNextRow(VAR rowOut: Integer): Boolean;
+BEGIN
+  TryGetNextRow := FALSE;
+  IF (NOT ThreadingEnabled) OR (RowMutex < 0) THEN
+    EXIT;
+
+  lock(RowMutex);
+  IF NextRow <= Height THEN
+  BEGIN
+    rowOut := NextRow;
+    NextRow := NextRow + 1;
+    TryGetNextRow := TRUE;
+  END;
+  unlock(RowMutex);
+END;
+
+PROCEDURE ComputeRows(rangePtr: PRowRange);
+VAR
+  Row: Integer;
+  startRow, endRow: Integer;
+BEGIN
+  IF rangePtr = NIL THEN
+  BEGIN
+    IF NOT ThreadingEnabled THEN
+      EXIT;
+
+    WHILE TryGetNextRow(Row) DO
+      ComputeRow(Row);
+    EXIT;
+  END;
+
+  startRow := rangePtr^.StartRow;
+  endRow := rangePtr^.EndRow;
+
+  ComputeRowRange(startRow, endRow);
+END;
+
+PROCEDURE SpawnThreads;
+VAR
+  i, handle: Integer;
+  anyThread: Boolean;
+BEGIN
+  ThreadingEnabled := FALSE;
+  RowMutex := mutex();
+  IF RowMutex < 0 THEN
+  BEGIN
+    RowMutex := -1;
+    FOR i := 0 TO ThreadCount - 1 DO
+      ThreadHandles[i] := -1;
+    EXIT;
+  END;
+
+  NextRow := 1;
+  ThreadingEnabled := TRUE;
+  anyThread := FALSE;
+
+  FOR i := 0 TO ThreadCount - 1 DO
+  BEGIN
+    ThreadHandles[i] := -1;
+    handle := CreateThread(@ComputeRows, NIL);
+    IF handle >= 0 THEN
+    BEGIN
+      ThreadHandles[i] := handle;
+      anyThread := TRUE;
+    END;
+  END;
+
+  IF NOT anyThread THEN
+  BEGIN
+    ThreadingEnabled := FALSE;
+    destroy(RowMutex);
+    RowMutex := -1;
+  END;
+END;
+
+PROCEDURE JoinThreads;
+VAR
+  i: Integer;
+BEGIN
+  FOR i := 0 TO ThreadCount - 1 DO
+    IF ThreadHandles[i] >= 0 THEN
+      WaitForThread(ThreadHandles[i]);
+
+  IF RowMutex >= 0 THEN
+  BEGIN
+    destroy(RowMutex);
+    RowMutex := -1;
+  END;
+  ThreadingEnabled := FALSE;
+END;
+
+PROCEDURE DisplayBuffer;
+VAR
+  Row, Col: Integer;
+BEGIN
+  FOR Row := 1 TO Height DO
+  BEGIN
+    GotoXY(1, Row);
+    FOR Col := 1 TO Width DO
+    BEGIN
+      TextColorE(ColorBuffer[Row, Col]);
+      Write(DrawChar);
+    END;
+  END;
+END;
+
+BEGIN
+  Width := ScreenCols;
+  Height := ScreenRows;
+
+  ClrScr;
+
+  IF ThreadCount <= 0 THEN
+  BEGIN
+    WriteLn('ThreadCount must be positive.');
+    Write('Press any key to exit.');
+    ReadKey;
+    EXIT;
+  END;
+
+  IF NOT HasExtBuiltin('math', 'MandelbrotRow') THEN
+  BEGIN
+    WriteLn('Error: MandelbrotRow extended builtin unavailable.');
+    WriteLn('Rebuild with -DENABLE_EXT_BUILTIN_MATH=ON to enable it.');
+    Write('Press any key to exit.');
+    ReadKey;
+    EXIT;
+  END;
+
+  IF (Width > MaxBufferCols) OR (Height > MaxBufferRows) THEN
+  BEGIN
+    WriteLn('Screen size ', Width, 'x', Height, ' exceeds supported buffer dimensions of ', MaxBufferCols, 'x', MaxBufferRows, '.');
+    WriteLn('Please reduce the terminal size and rerun the program.');
+    Write('Press any key to exit.');
+    ReadKey;
+    EXIT;
+  END;
+
+  WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with 256 colors using ', ThreadCount, ' threads and MandelbrotRow builtin...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+  DrawChar := '#';
+
+  SpawnThreads;
+  IF ThreadingEnabled THEN
+    ComputeRows(NIL)
+  ELSE
+    ComputeRowRange(1, Height);
+
+  JoinThreads;
+
+  DisplayBuffer;
+
+  NormVideo;
+  TextColor(LightGray);
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+END.

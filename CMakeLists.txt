@@ -40,6 +40,7 @@ option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
 option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
 option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
+option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -49,6 +50,9 @@ if(ENABLE_EXT_BUILTIN_STRINGS)
 endif()
 if(ENABLE_EXT_BUILTIN_SYSTEM)
     add_compile_definitions(ENABLE_EXT_BUILTIN_SYSTEM)
+endif()
+if(ENABLE_EXT_BUILTIN_YYJSON)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_YYJSON)
 endif()
 if(ENABLE_EXT_BUILTIN_USER)
     add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
@@ -78,6 +82,7 @@ include_directories(
     src/backend_ast
     src/compiler
     src/vm
+    src/third_party/yyjson
 )
 
 # ---- Dependencies ----
@@ -160,7 +165,7 @@ endif()
 # ---- Source Files ----
 set(PSCAL_SOURCES
     src/Pascal/main.c src/Pascal/globals.c
-    src/core/types.c src/core/utils.c src/core/list.c src/core/version.c
+    src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
     src/Pascal/lexer.c src/Pascal/parser.c src/ast/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
@@ -184,6 +189,27 @@ endif()
 # Allow selectively enabling categories of extended builtins.
 add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND PSCAL_SOURCES src/third_party/yyjson/yyjson.c)
+
+# ---- Toolchain feature detection ----
+# Detect whether AddressSanitizer is usable before wiring it into dascal
+set(PSCAL_CAN_ENABLE_ASAN OFF)
+if(BUILD_DASCAL)
+    include(CheckCSourceCompiles)
+    set(_PSCAL_SAVED_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+    if(_PSCAL_SAVED_REQUIRED_FLAGS)
+        set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS} -fsanitize=address")
+    else()
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=address")
+    endif()
+    check_c_source_compiles("#include <stdio.h>\nint main(void){return 0;}\n" PSCAL_HAS_ADDRESS_SANITIZER)
+    set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS}")
+    if(PSCAL_HAS_ADDRESS_SANITIZER)
+        set(PSCAL_CAN_ENABLE_ASAN ON)
+    else()
+        message(WARNING "AddressSanitizer (-fsanitize=address) is not available; building dascal without it.")
+    endif()
+endif()
 
 
 # ---- Executable Targets Function ----
@@ -249,7 +275,7 @@ function(add_pscal_executable target_name)
     list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
     # Specific options for dascal (ASan)
-    if(${target_name} STREQUAL "dascal")
+    if(${target_name} STREQUAL "dascal" AND PSCAL_CAN_ENABLE_ASAN)
         list(APPEND TARGET_LINK_LIBS "-fsanitize=address")
     endif()
 
@@ -275,7 +301,11 @@ function(add_pscal_executable target_name)
         endif()
     elseif(${target_name} STREQUAL "dascal")
         target_compile_definitions(${target_name} PRIVATE DEBUG)
-        target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
+        if(PSCAL_CAN_ENABLE_ASAN)
+            target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
+        else()
+            target_compile_options(${target_name} PRIVATE -g)
+        endif()
     elseif(${target_name} STREQUAL "hscal")
         target_compile_definitions(${target_name} PRIVATE DEBUG SUPPRESS_EXIT)
         target_compile_options(${target_name} PRIVATE -g)
@@ -320,7 +350,7 @@ set(CLIKE_SOURCES
     src/clike/opt.c
     src/clike/preproc.c
     src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
@@ -330,6 +360,7 @@ set(CLIKE_SOURCES
 
 # Include user-supplied builtins in clike as well
 list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND CLIKE_SOURCES src/third_party/yyjson/yyjson.c)
 
 # When SDL support is enabled, clike needs the same SDL backend sources
 # as the main executables to provide implementations for graphics and
@@ -429,7 +460,7 @@ set(REA_SOURCES
     src/Pascal/parser.c
     src/ast/ast.c
     src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/compiler/compiler.c
     src/vm/vm.c
@@ -438,6 +469,7 @@ set(REA_SOURCES
 )
 
 list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND REA_SOURCES src/third_party/yyjson/yyjson.c)
 
 if(SDL)
     list(APPEND REA_SOURCES
@@ -531,6 +563,7 @@ set(JSON2BC_SOURCES
     src/Pascal/globals.c
 )
 list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND JSON2BC_SOURCES src/third_party/yyjson/yyjson.c)
 add_executable(pscaljson2bc ${JSON2BC_SOURCES})
 if(TARGET CURL::libcurl)
     target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)

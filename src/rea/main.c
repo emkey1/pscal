@@ -1,3 +1,29 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2024 PSCAL contributors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Note: PSCAL versions prior to 2.22 were released under the Unlicense.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +34,7 @@
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
+#include "core/preproc.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "ast/ast.h"
@@ -18,6 +45,7 @@
 #include "rea/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
+#include "ext_builtins/dump.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -35,6 +63,7 @@ static const char *REA_USAGE =
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+    "     --dump-ext-builtins    List extended builtin inventory and exit.\n"
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
@@ -143,6 +172,7 @@ static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
         nested_parser_instance.lexer = &nested_lexer;
         nested_parser_instance.current_token = getNextToken(&nested_lexer);
         nested_parser_instance.current_unit_name_context = lower_used_unit_name;
+        nested_parser_instance.dependency_paths = NULL;
 
         AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
 
@@ -206,11 +236,15 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int main(int argc, char **argv) {
-    vmInitTerminalState();
+    const char *initTerm = getenv("PSCAL_INIT_TERM");
+    if (initTerm && *initTerm && *initTerm != '0') {
+        vmInitTerminalState();
+    }
 
     int dump_ast_json = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int dump_ext_builtins = 0;
     int vm_trace_head = 0;
     int no_cache = 0;
     int strict_mode = 0;
@@ -223,6 +257,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[argi], "--dump-ext-builtins") == 0) {
+            dump_ext_builtins = 1;
         } else if (strcmp(argv[argi], "--no-cache") == 0) {
             no_cache = 1;
         } else if (strcmp(argv[argi], "--strict") == 0) {
@@ -234,6 +270,12 @@ int main(int argc, char **argv) {
             return vmExitWithCleanup(EXIT_FAILURE);
         }
         argi++;
+    }
+
+    if (dump_ext_builtins) {
+        registerExtendedBuiltins();
+        extBuiltinDumpInventory(stdout);
+        return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
     if (argc <= argi) {
@@ -264,6 +306,14 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
+    const char *defines[1] = {NULL};
+    int define_count = 0;
+#ifdef SDL
+    defines[define_count++] = "SDL_ENABLED";
+#endif
+    char *preprocessed_source = preprocessConditionals(src, defines, define_count);
+    const char *effective_src = preprocessed_source ? preprocessed_source : src;
+
     // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
     // future bytecode-level CALL injection.
 
@@ -288,14 +338,16 @@ int main(int argc, char **argv) {
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 
     if (strict_mode) reaSetStrictMode(1);
-    AST *program = parseRea(src);
+    AST *program = parseRea(effective_src);
     if (!program) {
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     reaPerformSemanticAnalysis(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -303,6 +355,7 @@ int main(int argc, char **argv) {
         annotateTypes(program, NULL, program);
         dumpASTJSON(program, stdout);
         freeAST(program);
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -350,7 +403,9 @@ int main(int argc, char **argv) {
         // Annotate types for the entire program prior to compilation so that
         // qualified method calls can be resolved to their class-mangled routines.
         annotateTypes(program, NULL, program);
+        compilerEnableDynamicLocals(1);
         compilation_ok = compileASTToBytecode(program, &chunk);
+        compilerEnableDynamicLocals(0);
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, &chunk);
@@ -394,7 +449,10 @@ int main(int argc, char **argv) {
             initVM(&vm);
             if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
             // Inline trace toggle via comment directives: trace on/off inside source
-            if (!vm_trace_head && src && strstr(src, "trace on")) vm.trace_head_instructions = 16;
+            if (!vm_trace_head && ((preprocessed_source && strstr(preprocessed_source, "trace on")) ||
+                                    (src && strstr(src, "trace on")))) {
+                vm.trace_head_instructions = 16;
+            }
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
         }
@@ -409,6 +467,7 @@ int main(int argc, char **argv) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
 
+    if (preprocessed_source) free(preprocessed_source);
     free(src);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }

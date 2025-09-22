@@ -9,6 +9,7 @@
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in CALL_HOST cast)
 #include "Pascal/globals.h"
+#include "backend_ast/builtin.h"
 #include "core/version.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
@@ -108,6 +109,13 @@ void emitShort(BytecodeChunk* chunk, uint16_t value, int line) { // From all.txt
     writeBytecodeChunk(chunk, (uint8_t)(value & 0xFF), line);
 }
 
+void emitInt32(BytecodeChunk* chunk, uint32_t value, int line) {
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 24) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 16) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)((value >> 8) & 0xFF), line);
+    writeBytecodeChunk(chunk, (uint8_t)(value & 0xFF), line);
+}
+
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
     if (offset_in_code < 0 || (offset_in_code + 1) >= chunk->count) {
         fprintf(stderr, "Error: patchShort out of bounds. Offset: %d, Chunk count: %d.\n",
@@ -141,6 +149,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case SET_GLOBAL:
         case GET_LOCAL:
         case SET_LOCAL:
+        case INC_LOCAL:
+        case DEC_LOCAL:
         case GET_GLOBAL_ADDRESS:
         case GET_LOCAL_ADDRESS:
         case GET_UPVALUE:
@@ -148,11 +158,17 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case GET_UPVALUE_ADDRESS:
         case GET_FIELD_ADDRESS:
         case GET_FIELD_OFFSET:
+        case LOAD_FIELD_VALUE:
+        case LOAD_FIELD_VALUE_BY_NAME:
         case ALLOC_OBJECT:
         case GET_ELEMENT_ADDRESS:
+        case LOAD_ELEMENT_VALUE:
         case GET_CHAR_ADDRESS:
         case INIT_LOCAL_FILE:
             return 2; // 1-byte opcode + 1-byte operand
+        case GET_ELEMENT_ADDRESS_CONST:
+        case LOAD_ELEMENT_VALUE_CONST:
+            return 5; // opcode + 4-byte flat offset
         case INIT_LOCAL_STRING:
             return 3; // opcode + slot + length
         case INIT_LOCAL_POINTER:
@@ -178,6 +194,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case CONSTANT16:
         case GET_FIELD_ADDRESS16:
         case GET_FIELD_OFFSET16:
+        case LOAD_FIELD_VALUE16:
+        case LOAD_FIELD_VALUE_BY_NAME16:
         case ALLOC_OBJECT16:
         case GET_GLOBAL16:
         case SET_GLOBAL16:
@@ -189,10 +207,22 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // 1-byte opcode + 2-byte operand
         case CALL_BUILTIN:
             return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
+        case CALL_BUILTIN_PROC:
+            return 6; // 1-byte opcode + 2-byte builtin id + 2-byte name idx + 1-byte arg count
+        case CALL_USER_PROC:
+            return 4; // 1-byte opcode + 2-byte name_idx + 1-byte arg count
         case CALL:
             return 6; // 1-byte opcode + 2-byte name_idx + 2-byte addr + 1-byte arity
+        case CALL_INDIRECT:
+        case PROC_CALL_INDIRECT:
+        case CALL_HOST:
+            return 2; // opcode + 1-byte operand
+        case CALL_METHOD:
+            return 3; // opcode + method index + arity
         case EXIT:
             return 1;
+        case THREAD_CREATE:
+            return 3; // opcode + 2-byte entry offset
         case DEFINE_GLOBAL: {
             // This instruction has a variable length.
             int current_pos = offset + 1; // Position after the opcode
@@ -357,6 +387,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case DIVIDE:        fprintf(stderr, "DIVIDE\n"); return offset + 1;
         case NEGATE:        fprintf(stderr, "NEGATE\n"); return offset + 1;
         case NOT:           fprintf(stderr, "NOT\n"); return offset + 1;
+        case TO_BOOL:       fprintf(stderr, "TO_BOOL\n"); return offset + 1;
         case EQUAL:         fprintf(stderr, "EQUAL\n"); return offset + 1;
         case NOT_EQUAL:     fprintf(stderr, "NOT_EQUAL\n"); return offset + 1;
         case GREATER:       fprintf(stderr, "GREATER\n"); return offset + 1;
@@ -367,6 +398,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case MOD:           fprintf(stderr, "MOD\n"); return offset + 1;
         case AND:           fprintf(stderr, "AND\n"); return offset + 1;
         case OR:            fprintf(stderr, "OR\n"); return offset + 1;
+        case XOR:           fprintf(stderr, "XOR\n"); return offset + 1;
         case SHL:           fprintf(stderr, "SHL\n"); return offset + 1;
         case SHR:           fprintf(stderr, "SHR\n"); return offset + 1;
 
@@ -555,6 +587,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "%-16s %4d (slot)\n", "SET_LOCAL", slot);
             return offset + 2;
         }
+        case INC_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (slot)\n", "INC_LOCAL", slot);
+            return offset + 2;
+        }
+        case DEC_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (slot)\n", "DEC_LOCAL", slot);
+            return offset + 2;
+        }
         case GET_UPVALUE: {
             uint8_t slot = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (slot)\n", "GET_UPVALUE", slot);
@@ -632,6 +674,29 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             return offset + 3;
         }
+        case LOAD_FIELD_VALUE_BY_NAME: {
+            uint8_t const_idx = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d ", "LOAD_FIELD_VALUE_BY_NAME", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                fprintf(stderr, "<INVALID FIELD CONST>\n");
+            }
+            return offset + 2;
+        }
+        case LOAD_FIELD_VALUE_BY_NAME16: {
+            uint16_t const_idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                                 chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d ", "LOAD_FIELD_VALUE_BY_NAME16", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                fprintf(stderr, "<INVALID FIELD CONST>\n");
+            }
+            return offset + 3;
+        }
         case ALLOC_OBJECT: {
             uint8_t fields = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (fields)\n", "ALLOC_OBJECT", fields);
@@ -654,10 +719,42 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             fprintf(stderr, "%-16s %4d (index)\n", "GET_FIELD_OFFSET16", idx);
             return offset + 3;
         }
+        case LOAD_FIELD_VALUE: {
+            uint8_t idx = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (index)\n", "LOAD_FIELD_VALUE", idx);
+            return offset + 2;
+        }
+        case LOAD_FIELD_VALUE16: {
+            uint16_t idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                            chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d (index)\n", "LOAD_FIELD_VALUE16", idx);
+            return offset + 3;
+        }
         case GET_ELEMENT_ADDRESS: {
             uint8_t dims = chunk->code[offset + 1];
             fprintf(stderr, "%-16s %4d (dims)\n", "GET_ELEMENT_ADDRESS", dims);
             return offset + 2;
+        }
+        case GET_ELEMENT_ADDRESS_CONST: {
+            uint32_t flat = ((uint32_t)chunk->code[offset + 1] << 24) |
+                            ((uint32_t)chunk->code[offset + 2] << 16) |
+                            ((uint32_t)chunk->code[offset + 3] << 8) |
+                            (uint32_t)chunk->code[offset + 4];
+            fprintf(stderr, "%-16s %10u (flat offset)\n", "GET_ELEMENT_ADDRESS_CONST", flat);
+            return offset + 5;
+        }
+        case LOAD_ELEMENT_VALUE: {
+            uint8_t dims = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (dims)\n", "LOAD_ELEMENT_VALUE", dims);
+            return offset + 2;
+        }
+        case LOAD_ELEMENT_VALUE_CONST: {
+            uint32_t flat = ((uint32_t)chunk->code[offset + 1] << 24) |
+                            ((uint32_t)chunk->code[offset + 2] << 16) |
+                            ((uint32_t)chunk->code[offset + 3] << 8) |
+                            (uint32_t)chunk->code[offset + 4];
+            fprintf(stderr, "%-16s %10u (flat offset)\n", "LOAD_ELEMENT_VALUE_CONST", flat);
+            return offset + 5;
         }
         case GET_CHAR_ADDRESS:
             fprintf(stderr, "GET_CHAR_ADDRESS\n"); // <-- ADDED MISSING CASE
@@ -689,14 +786,63 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     "CALL_BUILTIN", name_index, name, arg_count);
             return offset + 4;
         }
-        
+
         // These are not currently used in your compiler but are in the enum
-        case CALL_BUILTIN_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_BUILTIN_PROC");
-             return offset + 3;
-        case CALL_USER_PROC:
-             fprintf(stderr, "%-16s (not fully impl.)\n", "CALL_USER_PROC");
-             return offset + 3;
+        case CALL_BUILTIN_PROC: {
+            uint16_t builtin_id = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 3] << 8) |
+                                             chunk->code[offset + 4]);
+            uint8_t arg_count = chunk->code[offset + 5];
+            const char* name = NULL;
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                name = AS_STRING(chunk->constants[name_index]);
+            }
+            if (!name) {
+                name = getVmBuiltinNameById((int)builtin_id);
+            }
+            if (!name) name = "<UNKNOWN>";
+            fprintf(stderr, "%-16s %5u '%s' (%u args)\n",
+                    "CALL_BUILTIN_PROC", builtin_id, name, arg_count);
+            return offset + 6;
+        }
+        case CALL_USER_PROC: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            uint8_t arg_count = chunk->code[offset + 3];
+            const char* name = NULL;
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[name_index])) {
+                name = AS_STRING(chunk->constants[name_index]);
+            }
+
+            const char* display_name = name ? name : "<INVALID>";
+            int entry_address = -1;
+            if (procedureTable && name && *name) {
+                char lookup_name[MAX_SYMBOL_LENGTH + 1];
+                strncpy(lookup_name, name, MAX_SYMBOL_LENGTH);
+                lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+                toLowerString(lookup_name);
+                Symbol* sym = hashTableLookup(procedureTable, lookup_name);
+                sym = resolveSymbolAlias(sym);
+                if (sym && sym->is_defined) {
+                    entry_address = sym->bytecode_address;
+                }
+            }
+
+            if (entry_address >= 0) {
+                fprintf(stderr, "%-16s %5u '%s' @%04d (%u args)\n",
+                        "CALL_USER_PROC", name_index, display_name,
+                        (uint16_t)entry_address, arg_count);
+            } else {
+                fprintf(stderr, "%-16s %5u '%s' (%u args)\n",
+                        "CALL_USER_PROC", name_index, display_name, arg_count);
+            }
+            return offset + 4;
+        }
 
         case CALL_HOST: {
             uint8_t host_fn_id_val = chunk->code[offset + 1];

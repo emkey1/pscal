@@ -9,13 +9,22 @@ struct VM_s;
 
 typedef Value (*VmBuiltinFn)(struct VM_s* vm, int arg_count, Value* args);
 
+typedef enum {
+    BUILTIN_TYPE_NONE,
+    BUILTIN_TYPE_PROCEDURE,
+    BUILTIN_TYPE_FUNCTION
+} BuiltinRoutineType;
+
 typedef struct {
     const char* name;
     VmBuiltinFn handler;
 } VmBuiltinMapping;
 
 VmBuiltinFn getVmBuiltinHandler(const char* name);
-void registerVmBuiltin(const char *name, VmBuiltinFn handler);
+VmBuiltinFn getVmBuiltinHandlerById(int id);
+const char* getVmBuiltinNameById(int id);
+void registerVmBuiltin(const char *vm_name, VmBuiltinFn handler,
+                       BuiltinRoutineType type, const char *display_name);
 
 /* Optional hook for externally linked built-ins.  The weak
  * definition in builtin.c does nothing unless overridden. */
@@ -153,12 +162,6 @@ Value vmBuiltinDosGettime(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDosGetfattr(struct VM_s* vm, int arg_count, Value* args);
 
 int getBuiltinIDForCompiler(const char *name);
-
-typedef enum {
-    BUILTIN_TYPE_NONE,
-    BUILTIN_TYPE_PROCEDURE,
-    BUILTIN_TYPE_FUNCTION
-} BuiltinRoutineType;
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc);
 int isBuiltin(const char *name);

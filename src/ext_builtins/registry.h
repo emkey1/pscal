@@ -16,6 +16,9 @@ size_t extBuiltinGetCategoryCount(void);
  * Returns NULL if index is out of range. */
 const char *extBuiltinGetCategoryName(size_t index);
 
+/* Check if a category exists. */
+int extBuiltinHasCategory(const char *category);
+
 /* Query the number of functions registered for a given category.
  * Returns 0 if the category is unknown. */
 size_t extBuiltinGetFunctionCount(const char *category);

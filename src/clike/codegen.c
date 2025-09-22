@@ -62,6 +62,34 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
+                                    uint8_t arg_count, int line) {
+    if (!vmName) vmName = "";
+
+    const char* dispatch_name = clikeCanonicalBuiltinName(vmName);
+    char normalized_name[MAX_SYMBOL_LENGTH];
+    strncpy(normalized_name, dispatch_name, sizeof(normalized_name) - 1);
+    normalized_name[sizeof(normalized_name) - 1] = '\0';
+    toLowerString(normalized_name);
+
+    int nameIndex = addStringConstant(chunk, normalized_name);
+    int builtin_id = clikeGetBuiltinID(vmName);
+    if (builtin_id < 0) {
+        fprintf(stderr,
+                "L%d: Compiler Error: Unknown built-in procedure '%s'.\n",
+                line, vmName);
+        writeBytecodeChunk(chunk, CALL_BUILTIN, line);
+        emitShort(chunk, (uint16_t)nameIndex, line);
+        writeBytecodeChunk(chunk, arg_count, line);
+        return;
+    }
+
+    writeBytecodeChunk(chunk, CALL_BUILTIN_PROC, line);
+    emitShort(chunk, (uint16_t)builtin_id, line);
+    emitShort(chunk, (uint16_t)nameIndex, line);
+    writeBytecodeChunk(chunk, arg_count, line);
+}
+
 static char* tokenToCString(ClikeToken t) {
     char* s = (char*)malloc(t.length + 1);
     memcpy(s, t.lexeme, t.length);
@@ -826,8 +854,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 int jFalse = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 compileExpression(node->right, chunk, ctx);
                 // coerce to boolean
-                writeBytecodeChunk(chunk, NOT, node->token.line);
-                writeBytecodeChunk(chunk, NOT, node->token.line);
+                writeBytecodeChunk(chunk, TO_BOOL, node->token.line);
                 writeBytecodeChunk(chunk, JUMP, node->token.line);
                 int jEnd = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 // false path target
@@ -857,8 +884,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 patchShort(chunk, jEvalRight, offEval);
                 compileExpression(node->right, chunk, ctx);
                 // coerce to boolean
-                writeBytecodeChunk(chunk, NOT, node->token.line);
-                writeBytecodeChunk(chunk, NOT, node->token.line);
+                writeBytecodeChunk(chunk, TO_BOOL, node->token.line);
                 uint16_t offEnd2 = (uint16_t)(chunk->count - (jEnd2 + 2));
                 patchShort(chunk, jEnd2, offEnd2);
                 break;
@@ -901,6 +927,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 case CLIKE_TOKEN_OR_OR: writeBytecodeChunk(chunk, OR, node->token.line); break;
                 case CLIKE_TOKEN_BIT_AND: writeBytecodeChunk(chunk, AND, node->token.line); break;
                 case CLIKE_TOKEN_BIT_OR: writeBytecodeChunk(chunk, OR, node->token.line); break;
+                case CLIKE_TOKEN_BIT_XOR: writeBytecodeChunk(chunk, XOR, node->token.line); break;
                 case CLIKE_TOKEN_SHL: writeBytecodeChunk(chunk, SHL, node->token.line); break;
                 case CLIKE_TOKEN_SHR: writeBytecodeChunk(chunk, SHR, node->token.line); break;
                 default: break;
@@ -1068,8 +1095,31 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
             break;
         }
         case TCAST_ARRAY_ACCESS:
-            compileLValue(node, chunk, ctx);
-            writeBytecodeChunk(chunk, GET_INDIRECT, node->token.line);
+            for (int i = 0; i < node->child_count; ++i) {
+                compileExpression(node->children[i], chunk, ctx);
+            }
+            if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                char* name = tokenToCString(node->left->token);
+                int idx = resolveLocal(ctx, name);
+                if (idx >= 0) {
+                    writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, node->left->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->left->token.line);
+                } else {
+                    int nameIdx = getGlobalNameConstIndex(chunk, name);
+                    if (nameIdx < 256) {
+                        writeBytecodeChunk(chunk, GET_GLOBAL_ADDRESS, node->left->token.line);
+                        writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->left->token.line);
+                    } else {
+                        writeBytecodeChunk(chunk, GET_GLOBAL_ADDRESS16, node->left->token.line);
+                        emitShort(chunk, (uint16_t)nameIdx, node->left->token.line);
+                    }
+                }
+                free(name);
+            } else {
+                compileExpression(node->left, chunk, ctx);
+            }
+            writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE, node->token.line);
+            writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
             break;
         case TCAST_MEMBER:
             compileExpression(node->left, chunk, ctx);
@@ -1077,15 +1127,14 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 char *fname = tokenToCString(node->right->token);
                 int idx = addStringConstant(chunk, fname);
                 if (idx < 256) {
-                    writeBytecodeChunk(chunk, GET_FIELD_ADDRESS, node->token.line);
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE_BY_NAME, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 } else {
-                    writeBytecodeChunk(chunk, GET_FIELD_ADDRESS16, node->token.line);
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE_BY_NAME16, node->token.line);
                     emitShort(chunk, (uint16_t)idx, node->token.line);
                 }
                 free(fname);
             }
-            writeBytecodeChunk(chunk, GET_INDIRECT, node->token.line);
             break;
         case TCAST_THREAD_SPAWN: {
             ASTNodeClike *call = node->left;
@@ -1101,7 +1150,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                      * discard the assignment result then wipes out the just-
                      * stored local, leaving it NIL (e.g. feeding NIL to
                      * built-ins like toupper).  Generate a wrapper that
-                     * performs a normal CALL so the callee runs with a
+                     * performs a CALL_USER_PROC so the callee runs with a
                      * proper stack frame and separate local slot storage.
                      */
                     writeBytecodeChunk(chunk, THREAD_CREATE, call->token.line);
@@ -1115,9 +1164,8 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
 
                     int wrapper_addr = chunk->count;
                     int nameIdx = addStringConstant(chunk, name);
-                    writeBytecodeChunk(chunk, CALL, call->token.line);
+                    writeBytecodeChunk(chunk, CALL_USER_PROC, call->token.line);
                     emitShort(chunk, (uint16_t)nameIdx, call->token.line);
-                    emitShort(chunk, (uint16_t)sym->bytecode_address, call->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)sym->arity, call->token.line);
                     writeBytecodeChunk(chunk, RETURN, call->token.line);
 
@@ -1263,10 +1311,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                     compileExpression(node->children[arg_index], chunk, ctx);
                     write_arg_count++;
                 }
-                int nameIndex = addStringConstant(chunk, "write");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)write_arg_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "write",
+                                         (uint8_t)write_arg_count,
+                                         node->token.line);
                 Value zero = makeInt(0);
                 int zidx = addConstantToChunk(chunk, &zero);
                 freeValue(&zero);
@@ -1279,10 +1326,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileLValue(node->children[i], chunk, ctx);
                 }
-                int rlIndex = addStringConstant(chunk, "readln");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)rlIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "readln",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
 
                 if (strcasecmp(name, "scanf") == 0) {
                     Value zero = makeInt(0);
@@ -1308,10 +1354,21 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 }
                 const char* vmName = name;
                 if (strcasecmp(name, "remove") == 0) vmName = "erase";
-                int fnIndex = addStringConstant(chunk, vmName);
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)fnIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                BuiltinRoutineType builtinKind = getBuiltinType(vmName);
+                if (builtinKind == BUILTIN_TYPE_NONE && strcasecmp(vmName, name) != 0) {
+                    builtinKind = getBuiltinType(name);
+                }
+                if (builtinKind == BUILTIN_TYPE_PROCEDURE) {
+                    emitBuiltinProcedureCall(chunk, vmName,
+                                             (uint8_t)node->child_count,
+                                             node->token.line);
+                } else {
+                    int fnIndex = addStringConstant(chunk, vmName);
+                    writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
+                    emitShort(chunk, (uint16_t)fnIndex, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)node->child_count,
+                                       node->token.line);
+                }
             } else if (strcasecmp(name, "random") == 0) {
                 // Direct wrapper around the VM's random builtin.
                 for (int i = 0; i < node->child_count; ++i) {
@@ -1332,10 +1389,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                         compileExpression(node->children[i], chunk, ctx);
                     }
                 }
-                int strIndex = addStringConstant(chunk, "str");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)strIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "str",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
             } else if (strcasecmp(name, "strlen") == 0) {
                 // Map C's strlen to the Pascal-style length builtin.
                 for (int i = 0; i < node->child_count; ++i) {
@@ -1350,10 +1406,9 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                int hIndex = addStringConstant(chunk, "halt");
-                writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
-                emitShort(chunk, (uint16_t)hIndex, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
+                emitBuiltinProcedureCall(chunk, "halt",
+                                         (uint8_t)node->child_count,
+                                         node->token.line);
             } else {
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
@@ -1362,13 +1417,8 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 sym = resolveSymbolAlias(sym);
                 int nameIndex = addStringConstant(chunk, name);
                 if (sym) {
-                    writeBytecodeChunk(chunk, CALL, node->token.line);
+                    writeBytecodeChunk(chunk, CALL_USER_PROC, node->token.line);
                     emitShort(chunk, (uint16_t)nameIndex, node->token.line);
-                    if (sym->is_defined) {
-                        emitShort(chunk, (uint16_t)sym->bytecode_address, node->token.line);
-                    } else {
-                        emitShort(chunk, 0xFFFF, node->token.line);
-                    }
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
                 } else {
                     // If a local variable with this name exists, treat it as an indirect call through a function pointer.
@@ -1457,7 +1507,10 @@ static void compileFunction(ASTNodeClike *func, BytecodeChunk *chunk) {
      * discovered by the pre-pass. */
     int needed = ctx.maxLocalCount - ctx.paramCount;
     if (declaredLocals > needed) needed = declaredLocals;
-    sym->locals_count = (uint8_t)needed;
+    if (needed < 0) {
+        needed = 0;
+    }
+    sym->locals_count = (uint16_t)needed;
 
     // Free any remaining local metadata (params are at [0..paramCount-1]).
     for (int i = 0; i < ctx.localCount; i++) {
@@ -1491,33 +1544,28 @@ static void patchForwardCalls(BytecodeChunk *chunk) {
     if (!procedure_table || !chunk || !chunk->code) return;
     for (int offset = 0; offset < chunk->count; ) {
         uint8_t opcode = chunk->code[offset];
-        if (opcode == CALL) {
-            if (offset + 5 >= chunk->count) break;
-            uint16_t address = (uint16_t)((chunk->code[offset + 3] << 8) |
-                                          chunk->code[offset + 4]);
-            if (address == 0xFFFF) {
-                uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
-                                                 chunk->code[offset + 2]);
-                if (name_index < chunk->constants_count &&
-                    chunk->constants[name_index].type == TYPE_STRING) {
-                    const char *proc_name = AS_STRING(chunk->constants[name_index]);
+        if (opcode == CALL_USER_PROC) {
+            if (offset + 3 >= chunk->count) break;
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                             chunk->code[offset + 2]);
+            if (name_index < chunk->constants_count &&
+                chunk->constants[name_index].type == TYPE_STRING) {
+                const char *proc_name = AS_STRING(chunk->constants[name_index]);
+                if (proc_name && *proc_name) {
                     char lookup[MAX_SYMBOL_LENGTH];
                     strncpy(lookup, proc_name, sizeof(lookup) - 1);
                     lookup[sizeof(lookup) - 1] = '\0';
                     toLowerString(lookup);
                     Symbol *sym = hashTableLookup(procedure_table, lookup);
                     sym = resolveSymbolAlias(sym);
-                    if (sym && sym->is_defined) {
-                        patchShort(chunk, offset + 3,
-                                   (uint16_t)sym->bytecode_address);
-                    } else {
+                    if (!sym || !sym->is_defined) {
                         fprintf(stderr,
                                 "Compiler Error: Procedure '%s' was called but never defined.\n",
                                 proc_name);
                     }
                 }
             }
-            offset += 6;
+            offset += 4;
         } else {
             offset += getInstructionLength(chunk, offset);
         }
@@ -1543,16 +1591,14 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     predeclareFunctions(program);
 
     // Emit a call to main after globals have been defined.
-    writeBytecodeChunk(chunk, CALL, 0);
+    writeBytecodeChunk(chunk, CALL_USER_PROC, 0);
     int mainNameIdx = addStringConstant(chunk, "main");
     emitShort(chunk, (uint16_t)mainNameIdx, 0);
-    int mainAddrPatch = chunk->count;
-    emitShort(chunk, 0, 0);
     int mainArityPatch = chunk->count;
     writeBytecodeChunk(chunk, 0, 0);
     writeBytecodeChunk(chunk, HALT, 0);
 
-    int mainAddress = -1;
+    bool mainDefined = false;
     uint8_t mainArity = 0;
 
     // Compile imported modules before the main program
@@ -1639,14 +1685,15 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
         if (strcmp(name, "main") == 0) {
             Symbol* sym = (Symbol*)hashTableLookup(procedure_table, name);
             sym = resolveSymbolAlias(sym);
-            mainAddress = sym->bytecode_address;
-            mainArity = sym->arity;
+            if (sym && sym->is_defined) {
+                mainDefined = true;
+                mainArity = sym->arity;
+            }
         }
         free(name);
     }
 
-    if (mainAddress >= 0) {
-        patchShort(chunk, mainAddrPatch, (uint16_t)mainAddress);
+    if (mainDefined) {
         chunk->code[mainArityPatch] = mainArity;
     }
 

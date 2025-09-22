@@ -11,6 +11,7 @@
 #include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Define the helper function *only* when DEBUG is enabled
@@ -54,6 +55,25 @@ void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const ch
 AST *parseWriteArgument(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
+
+static void appendDependencyPath(Parser *parser, const char *path) {
+    if (!parser || !parser->dependency_paths || !path || !*path) {
+        return;
+    }
+
+    char *canonical = realpath(path, NULL);
+    const char *to_store = canonical ? canonical : path;
+
+    for (ListNode *node = parser->dependency_paths->head; node; node = node->next) {
+        if (strcmp(node->value, to_store) == 0) {
+            if (canonical) free(canonical);
+            return;
+        }
+    }
+
+    listAppend(parser->dependency_paths, to_store);
+    if (canonical) free(canonical);
+}
 
 AST *declarations(Parser *parser, bool in_interface) {
 #ifdef DEBUG
@@ -563,6 +583,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 continue; // skip missing unit regardless
             }
 
+            appendDependencyPath(parser_for_this_unit, nested_unit_path);
+
             char *unit_source_buffer = NULL;
             FILE *nested_file = fopen(nested_unit_path, "r");
             if (nested_file) {
@@ -593,6 +615,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             Parser nested_parser_instance;
             nested_parser_instance.lexer = &nested_lexer;
             nested_parser_instance.current_token = getNextToken(&nested_lexer);
+            nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -648,7 +671,7 @@ void errorParser(Parser *parser, const char *msg) {
     EXIT_FAILURE_HANDLER();
 }
 
-void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc, HashTable *proc_table_param) {
+void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_context_name_param_for_addproc, HashTable *proc_table_param) {
     // Create the name for the symbol table. This might involve mangling
     // with unit_context_name_param_for_addproc if it's not NULL.
     // For simplicity, let's assume for now the name is directly from the token,
@@ -658,11 +681,17 @@ void addProcedure(AST *proc_decl_ast_original, const char* unit_context_name_par
     char *proc_name_original = proc_decl_ast_original->token->value;
 
     if (isBuiltin(proc_name_original)) {
+        bool suppress_override_warning = false;
+        if (parser && parser->lexer) {
+            suppress_override_warning = lexerConsumeOverrideBuiltinDirective(parser->lexer, proc_name_original);
+        }
+        if (!suppress_override_warning) {
         const char* kind = (proc_decl_ast_original->type == AST_FUNCTION_DECL) ?
                            "function" : "procedure";
         fprintf(stderr,
                 "Warning: user-defined %s '%s' overrides builtin of the same name.\n",
                 kind, proc_name_original);
+        }
     }
 
     char *name_for_table = strdup(proc_name_original); // Start with a copy
@@ -960,6 +989,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     continue; // skip missing unit regardless
                 }
 
+                appendDependencyPath(main_parser, unit_file_path);
+
                 char* unit_source_buffer = NULL;
                 FILE *unit_file = fopen(unit_file_path, "r");
                 if(unit_file) {
@@ -990,7 +1021,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 Parser nested_parser_instance;
                 nested_parser_instance.lexer = &nested_lexer;
                 nested_parser_instance.current_token = getNextToken(&nested_lexer);
-                
+                nested_parser_instance.dependency_paths = main_parser->dependency_paths;
+
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
                 
@@ -1138,7 +1170,7 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
-    addProcedure(node, parser->current_unit_name_context, outer_table);
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table);
     if (copiedProcNameToken)
         freeToken(copiedProcNameToken);
 
@@ -1837,7 +1869,7 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
         popProcedureTable(false);
     }
 
-    addProcedure(node, parser->current_unit_name_context, outer_table); // Registers the function
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table); // Registers the function
     
     // copiedFuncNameToken was used by newASTNode which made its own copy if needed,
     // or took ownership if newASTNode doesn't copy.
@@ -2697,10 +2729,10 @@ AST *simpleExpression(Parser *parser) {
         node = unaryNode; // Update main node pointer
     }
 
-    // Loop for additive operators (+, -, OR) - Add XOR later if needed
+    // Loop for additive operators (+, -, OR, XOR)
     while (parser->current_token && (
            parser->current_token->type == TOKEN_PLUS || parser->current_token->type == TOKEN_MINUS ||
-           parser->current_token->type == TOKEN_OR /* || TOKEN_XOR */ ))
+           parser->current_token->type == TOKEN_OR || parser->current_token->type == TOKEN_XOR ))
     {
         Token *opOriginal = parser->current_token;
         Token *opCopied = copyToken(opOriginal); // Copy token before eating
@@ -2966,21 +2998,27 @@ AST *factor(Parser *parser) {
         // Flow continues to end.
 
     } else if (initialTokenType == TOKEN_AT) {
-        // Address-of operator: @Identifier
+        // Address-of operator: @Identifier, @Array[Index], etc.
         Token* atTok = copyToken(initialToken);
         eat(parser, TOKEN_AT);
-        if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
-            errorParser(parser, "Expected identifier after '@'");
+
+        AST* target = NULL;
+        if (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+            target = lvalue(parser);
+        } else {
+            errorParser(parser, "Expected addressable expression after '@'");
             if (atTok) freeToken(atTok);
             return newASTNode(AST_NOOP, NULL);
         }
-        // Create a VARIABLE node for the identifier
-        AST* idNode = newASTNode(AST_VARIABLE, parser->current_token);
-        eat(parser, TOKEN_IDENTIFIER);
-        // Create an ADDR_OF node and attach identifier as left child
+
+        if (!target || target->type == AST_NOOP) {
+            if (atTok) freeToken(atTok);
+            return target ? target : newASTNode(AST_NOOP, NULL);
+        }
+
         AST* addrNode = newASTNode(AST_ADDR_OF, atTok);
         if (atTok) freeToken(atTok);
-        setLeft(addrNode, idNode);
+        setLeft(addrNode, target);
         // Type will be annotated later (typically TYPE_POINTER)
         return addrNode;
 

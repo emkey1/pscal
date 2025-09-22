@@ -31,7 +31,7 @@ struct Symbol_s {
     bool is_defined;              // Flag to indicate if the body has been compiled (useful for forward declarations)
     int bytecode_address;         // Starting address (offset) in the bytecode chunk
     uint8_t arity;                // Number of parameters
-    uint8_t locals_count;         // Number of local variables (excluding parameters)
+    uint16_t locals_count;        // Number of local variables (excluding parameters)
     int slot_index;             // Index into the procedure's locals frame (-1 if not a local) // <--- THIS LINE IS UNCHANGED BUT CONFIRMED
     struct Symbol_s* real_symbol; // If this is an alias, this points to the real symbol
     struct Symbol_s* enclosing;   // Enclosing procedure/function, if any

@@ -105,6 +105,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_OF:            return "OF";
         case TOKEN_AND:           return "AND";
         case TOKEN_OR:            return "OR";
+        case TOKEN_XOR:           return "XOR";
         case TOKEN_SHL:           return "SHL";
         case TOKEN_SHR:           return "SHR";
         case TOKEN_TRUE:          return "TRUE";
@@ -1041,10 +1042,12 @@ void freeProcedureTable(void) {
                 freeAST(current_sym->type_def);
                 current_sym->type_def = NULL;
             }
-            
-            // Note: current_sym->value should be NULL for procedure/function symbols
-            // as they don't have a "value" in the variable sense. If it could be non-NULL,
-            // it would need freeing: if (current_sym->value) { freeValue(current_sym->value); free(current_sym->value); }
+
+            if (current_sym->value) {
+                freeValue(current_sym->value);
+                free(current_sym->value);
+                current_sym->value = NULL;
+            }
 
             free(current_sym); // Free the Symbol struct itself
             
@@ -2139,8 +2142,9 @@ int computeFlatOffset(Value *array, int *indices) {
     for (int i = array->dimensions - 1; i >= 0; i--) {
         // Bounds check for the current dimension
         if (indices[i] < array->lower_bounds[i] || indices[i] > array->upper_bounds[i]) {
-            fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %d.\n",
-                    indices[i], array->lower_bounds[i], array->upper_bounds[i], i + 1);
+            fprintf(stderr, "Runtime error: Index %d out of bounds [%d..%d] in dimension %lld.\n",
+                    indices[i], array->lower_bounds[i], array->upper_bounds[i],
+                    (long long)i + 1);
             EXIT_FAILURE_HANDLER();
         }
         
@@ -2300,7 +2304,18 @@ bool applyCurrentTextAttributes(FILE* stream) {
                              !gCurrentTextBlink && !gCurrentColorIsExt &&
                              !gCurrentBgIsExt);
 
-    if (is_default_state && (!stream_is_stdout || !gConsoleAttrDirty)) {
+    if (is_default_state) {
+        if (!stream_is_stdout || !gConsoleAttrDirty) {
+            return false;
+        }
+        if (gConsoleAttrDirtyFromReset) {
+            gConsoleAttrDirty = false;
+            gConsoleAttrDirtyFromReset = false;
+            return false;
+        }
+    }
+
+    if (stream_is_stdout && !gConsoleAttrDirty) {
         return false;
     }
 
@@ -2341,6 +2356,7 @@ bool applyCurrentTextAttributes(FILE* stream) {
     fprintf(stream, "%s", escape_sequence);
     if (stream_is_stdout) {
         gConsoleAttrDirty = false;
+        gConsoleAttrDirtyFromReset = false;
     }
     return true;
 }
@@ -2349,6 +2365,7 @@ void resetTextAttributes(FILE* stream) {
     fprintf(stream, "\x1B[0m");
     if (stream == stdout) {
         gConsoleAttrDirty = true;
+        gConsoleAttrDirtyFromReset = true;
     }
 }
 
@@ -2386,6 +2403,7 @@ void syncTextAttrSymbol(void) {
 
 void markTextAttrDirty(void) {
     gConsoleAttrDirty = true;
+    gConsoleAttrDirtyFromReset = false;
 }
 
 void setCurrentTextAttrFromByte(uint8_t attr) {

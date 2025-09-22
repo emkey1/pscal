@@ -7,10 +7,9 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    2 DEFINE_GLOBAL    NameIdx:3   'p' Type:POINTER ('Point')
 0012    4 DEFINE_GLOBAL    NameIdx:5   'a' Type:INT64 ('int')
 0017    | GET_GLOBAL          3 'p'
-0019    | GET_FIELD_OFFSET    1 (index)
-0021    | GET_INDIRECT
-0022    | SET_GLOBAL          5 'a'
-0024    0 HALT
+0019    | LOAD_FIELD_VALUE    1 (index)
+0021    | SET_GLOBAL          5 'a'
+0023    0 HALT
 == End Disassembly: Tests/rea/field_access_read.rea ==
 
 Constants (7):\n  0000: STR   "myself"

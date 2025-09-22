@@ -67,9 +67,12 @@ The following is a complete list of opcodes supported by the Pscal VM, as define
 * **`NOT`**:
     * **Operands:** None.
     * **Action:** Pops one boolean value, inverts it, and pushes the result.
-* **`AND`**, **`OR`**, **`SHL`**, **`SHR`**:
+* **`TO_BOOL`**:
     * **Operands:** None.
-    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `AND` and `OR` also support logical operations on booleans.
+    * **Action:** Pops one value, applies the VM's truthiness rules (numbers, characters, and booleans), and pushes the resulting boolean without inversion.
+* **`AND`**, **`OR`**, **`XOR`**, **`SHL`**, **`SHR`**:
+    * **Operands:** None.
+    * **Action:** Pop two integer values, perform the specified bitwise operation, and push the result. `AND`, `OR`, and `XOR` also support logical operations on booleans.
 * **`EQUAL`**, **`NOT_EQUAL`**, **`GREATER`**, **`GREATER_EQUAL`**, **`LESS`**, **`LESS_EQUAL`**:
     * **Operands:** None.
     * **Action:** Pop two values, perform the specified comparison, and push the boolean result (`true` or `false`).
@@ -203,9 +206,24 @@ This sequence uses `JUMP_IF_FALSE` to exit the loop and `JUMP` to repeat.
 * **`GET_FIELD_ADDRESS`** / **`GET_FIELD_ADDRESS16`**:
     * **Operands:** Constant index for the field's name.
     * **Action:** Pops a record or a pointer to a record from the stack and pushes a pointer to the specified field's `Value` struct.
+* **`LOAD_FIELD_VALUE`** / **`LOAD_FIELD_VALUE16`**:
+    * **Operands:** Field offset (1-byte or 2-byte).
+    * **Action:** Pops a record or pointer to a record (including chained pointers), resolves the field by offset—respecting hidden vtable slots—and pushes a copy of the field's value onto the stack.
+* **`LOAD_FIELD_VALUE_BY_NAME`** / **`LOAD_FIELD_VALUE_BY_NAME16`**:
+    * **Operands:** Constant index of the field name (1-byte or 2-byte).
+    * **Action:** Pops a record or pointer to a record, locates the named field, and pushes a copy of its value. Emits a runtime error if the field does not exist.
 * **`GET_ELEMENT_ADDRESS`**:
     * **Operands:** 1-byte dimension count.
     * **Action:** Pops an array or pointer to an array, and then pops the indices for each dimension. Pushes a pointer to the specified element's `Value` struct.
+* **`GET_ELEMENT_ADDRESS_CONST`**:
+    * **Operands:** 4-byte flat element offset.
+    * **Action:** Pops an array or pointer to an array and pushes the address of the element at the precomputed flat offset. Bounds must have been validated by the compiler when emitting the instruction.
+* **`LOAD_ELEMENT_VALUE`**:
+    * **Operands:** 1-byte dimension count.
+    * **Action:** Pops an array (or pointer to an array) and the indices for each dimension, checks bounds, and pushes a copy of the addressed element's value. Handles Pascal strings specially so that `s[0]` yields the length and `s[i]` yields the character value.
+* **`LOAD_ELEMENT_VALUE_CONST`**:
+    * **Operands:** 4-byte flat element offset.
+    * **Action:** Pops an array (or pointer to an array) and pushes a copy of the element at the provided constant flat offset. Intended for accesses whose indices were folded at compile time.
 * **`GET_CHAR_ADDRESS`**:
     * **Operands:** None.
     * **Action:** Pops an index and a pointer to a string. Pushes a pointer to the character at that index within the string.

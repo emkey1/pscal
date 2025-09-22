@@ -1,3 +1,29 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2024 PSCAL contributors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * Note: PSCAL versions prior to 2.22 were released under the Unlicense.
+ */
+
 #include "lexer.h"
 #include "parser.h"
 #include "ast/ast.h"
@@ -5,14 +31,17 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "core/list.h"
+#include "core/preproc.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/dump.h"
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
 #include "core/cache.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
 #ifdef SDL
 #include <SDL2/SDL.h>
@@ -35,6 +64,42 @@ List *inserted_global_names = NULL;
 
 static int s_vm_trace_head = 0;
 
+typedef struct {
+    size_t partial_match_len;
+} CachedMessageScannerState;
+
+static bool bufferContainsCachedMessage(const char *buf, size_t len, CachedMessageScannerState *state) {
+    static const char cached_msg[] = "Loaded cached byte code";
+    const size_t needle_len = sizeof(cached_msg) - 1;
+
+    if (!state || needle_len == 0) {
+        return false;
+    }
+
+    size_t matched = state->partial_match_len;
+
+    for (size_t i = 0; i < len; ++i) {
+        const char c = buf[i];
+
+        while (matched > 0 && c != cached_msg[matched]) {
+            matched = 0;
+        }
+
+        if (c == cached_msg[matched]) {
+            matched++;
+            if (matched == needle_len) {
+                state->partial_match_len = 0;
+                return true;
+            }
+        } else {
+            matched = 0;
+        }
+    }
+
+    state->partial_match_len = matched;
+    return false;
+}
+
 const char *PASCAL_USAGE =
     "Usage: pascal <options> <source_file> [program_parameters...]\n"
     "   Options:\n"
@@ -42,6 +107,8 @@ const char *PASCAL_USAGE =
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
+    "     --dump-ext-builtins         List extended builtin inventory and exit.\n"
+    "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
@@ -77,7 +144,9 @@ void initSymbolSystem(void) {
 #endif
 }
 
-int runProgram(const char *source, const char *programName, const char *frontend_path, int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag) {
+int runProgram(const char *source, const char *programName, const char *frontend_path,
+               int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag,
+               int no_cache_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -109,6 +178,8 @@ int runProgram(const char *source, const char *programName, const char *frontend
     Parser parser;
     parser.lexer = &lexer;
     parser.current_token = getNextToken(&lexer);
+    parser.current_unit_name_context = NULL;
+    parser.dependency_paths = createList();
     GlobalAST = buildProgramAST(&parser, &chunk);
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 
@@ -124,7 +195,33 @@ int runProgram(const char *source, const char *programName, const char *frontend
             overall_success_status = true;
         } else {
             GlobalAST = optimizePascalAST(GlobalAST);
-            used_cache = loadBytecodeFromCache(programName, frontend_path, NULL, 0, &chunk);
+            const char **dep_array = NULL;
+            int dep_count = 0;
+            if (parser.dependency_paths) {
+                dep_count = listSize(parser.dependency_paths);
+                if (dep_count > 0) {
+                    dep_array = (const char**)malloc(sizeof(char*) * dep_count);
+                    if (!dep_array) {
+                        fprintf(stderr, "Out of memory while collecting unit dependencies.\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    for (int i = 0; i < dep_count; ++i) {
+                        dep_array[i] = listGet(parser.dependency_paths, i);
+                    }
+                }
+            }
+
+            if (!no_cache_flag) {
+                used_cache = loadBytecodeFromCache(programName, frontend_path, dep_array, dep_count, &chunk);
+            }
+            if (dep_array) {
+                free(dep_array);
+                dep_array = NULL;
+            }
+            if (parser.dependency_paths) {
+                freeList(parser.dependency_paths);
+                parser.dependency_paths = NULL;
+            }
             bool compilation_ok_for_vm = true;
             if (!used_cache) {
                 if (dump_bytecode_flag) {
@@ -190,6 +287,11 @@ int runProgram(const char *source, const char *programName, const char *frontend
     }
 
     // No local stderr capture/restore here.
+
+    if (parser.dependency_paths) {
+        freeList(parser.dependency_paths);
+        parser.dependency_paths = NULL;
+    }
 
     freeBytecodeChunk(&chunk);
     freeProcedureTable();
@@ -262,6 +364,8 @@ int main(int argc, char *argv[]) {
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int dump_ext_builtins_flag = 0;
+    int no_cache_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
     int pscal_params_start_index = 0; // Will be set after source file is identified
@@ -285,6 +389,10 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[i], "--dump-ext-builtins") == 0) {
+            dump_ext_builtins_flag = 1;
+        } else if (strcmp(argv[i], "--no-cache") == 0) {
+            no_cache_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             s_vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
@@ -299,7 +407,13 @@ int main(int argc, char *argv[]) {
             break; // Stop parsing options, rest are program args
         }
     }
-    
+
+    if (dump_ext_builtins_flag) {
+        registerExtendedBuiltins();
+        extBuiltinDumpInventory(stdout);
+        return vmExitWithCleanup(EXIT_SUCCESS);
+    }
+
     // If --dump-ast-json was specified but no source file yet, check next arg
     if (dump_ast_json_flag && !sourceFile) {
         if (i < argc && argv[i][0] != '-') { // Check if current argv[i] is a potential source file
@@ -358,6 +472,14 @@ int main(int argc, char *argv[]) {
     source_buffer[fsize] = '\0';
     fclose(file);
 
+    const char *defines[1] = {NULL};
+    int define_count = 0;
+#ifdef SDL
+    defines[define_count++] = "SDL_ENABLED";
+#endif
+    char *preprocessed_source = preprocessConditionals(source_buffer, defines, define_count);
+    const char *effective_source = preprocessed_source ? preprocessed_source : source_buffer;
+
     // Set up front end program's command-line parameters
     if (pscal_params_start_index < argc) {
         gParamCount = argc - pscal_params_start_index;
@@ -381,7 +503,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Call runProgram
-    int result = runProgram(source_buffer, programName, argv[0], dump_ast_json_flag, dump_bytecode_flag, dump_bytecode_only_flag);
+    int result = runProgram(effective_source, programName, argv[0], dump_ast_json_flag,
+                            dump_bytecode_flag, dump_bytecode_only_flag, no_cache_flag);
 
     // Restore stderr and conditionally replay
     if (capture_stderr) {
@@ -391,13 +514,14 @@ int main(int argc, char *argv[]) {
             rewind(s_stderr_tmp);
             // Scan buffer for non-whitespace or cached message
             int has_non_ws = 0, has_cached = 0; char buf[4096]; size_t n;
+            CachedMessageScannerState cached_scan = {0};
             while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
                 for (size_t i = 0; i < n; i++) {
                     char c = buf[i];
                     if (!(c == ' ' || c == '\t' || c == '\r' || c == '\n')) { has_non_ws = 1; break; }
                 }
-                if (!has_cached) {
-                    if (memmem(buf, n, "Loaded cached byte code", 24) != NULL) has_cached = 1;
+                if (!has_cached && bufferContainsCachedMessage(buf, n, &cached_scan)) {
+                    has_cached = 1;
                 }
                 if (has_non_ws && has_cached) break;
             }
@@ -423,6 +547,9 @@ int main(int argc, char *argv[]) {
         s_capture_active = 0; // disable atexit replay; we've handled it
     }
 
+    if (preprocessed_source) {
+        free(preprocessed_source);
+    }
     free(source_buffer); // Free the source code buffer
     return vmExitWithCleanup(result);
 }
