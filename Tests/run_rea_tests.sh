@@ -167,6 +167,8 @@ exercise_rea_cli_smoke() {
   rm -f "$tmp_out" "$tmp_err"
   echo
 
+}
+
 has_ext_builtin_category() {
   local binary="$1"
   local category="$2"
