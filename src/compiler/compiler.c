@@ -3303,59 +3303,66 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_CONST_DECL: {
-            if (current_function_compiler == NULL && node->token) {
-                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
-                Value const_val = makeVoid();
-                AST* type_specifier_node = node->right;
-                AST* actual_type_def_node = type_specifier_node;
-                if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
-                    AST* resolved = lookupType(actual_type_def_node->token->value);
-                    if (resolved) actual_type_def_node = resolved;
-                }
+            if (!node->token) {
+                break;
+            }
 
-                if (node->var_type == TYPE_ARRAY && node->left && node->left->type == AST_ARRAY_LITERAL && actual_type_def_node) {
-                    if (actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
-                        int dimension_count = actual_type_def_node->child_count;
-                        if (dimension_count == 1) {
-                            AST* sub = actual_type_def_node->children[0];
-                            Value low_v = evaluateCompileTimeValue(sub->left);
-                            Value high_v = evaluateCompileTimeValue(sub->right);
-                            int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
-                            int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
-                            freeValue(&low_v);
-                            freeValue(&high_v);
-                            int lb[1] = { low };
-                            int ub[1] = { high };
-                            AST* elem_type_node = actual_type_def_node->right;
-                            VarType elem_type = elem_type_node->var_type;
-                            Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-                            int total = calculateArrayTotalSize(&arr_val);
-                            for (int j = 0; j < total && j < node->left->child_count; j++) {
-                                Value ev = evaluateCompileTimeValue(node->left->children[j]);
-                                freeValue(&arr_val.array_val[j]);
-                                arr_val.array_val[j] = makeCopyOfValue(&ev);
-                                freeValue(&ev);
-                            }
-                            const_val = arr_val;
-                        } else {
-                            const_val = evaluateCompileTimeValue(node->left);
+            Value const_val = makeVoid();
+            AST* type_specifier_node = node->right;
+            AST* actual_type_def_node = type_specifier_node;
+            if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                AST* resolved = lookupType(actual_type_def_node->token->value);
+                if (resolved) actual_type_def_node = resolved;
+            }
+
+            if (node->var_type == TYPE_ARRAY && node->left && node->left->type == AST_ARRAY_LITERAL && actual_type_def_node) {
+                if (actual_type_def_node->type == AST_ARRAY_TYPE) {
+                    int dimension_count = actual_type_def_node->child_count;
+                    if (dimension_count == 1) {
+                        AST* sub = actual_type_def_node->children[0];
+                        Value low_v = evaluateCompileTimeValue(sub->left);
+                        Value high_v = evaluateCompileTimeValue(sub->right);
+                        int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+                        int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+                        freeValue(&low_v);
+                        freeValue(&high_v);
+                        int lb[1] = { low };
+                        int ub[1] = { high };
+                        AST* elem_type_node = actual_type_def_node->right;
+                        VarType elem_type = elem_type_node ? elem_type_node->var_type : TYPE_UNKNOWN;
+                        Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+                        int total = calculateArrayTotalSize(&arr_val);
+                        for (int j = 0; j < total && j < node->left->child_count; j++) {
+                            Value ev = evaluateCompileTimeValue(node->left->children[j]);
+                            freeValue(&arr_val.array_val[j]);
+                            arr_val.array_val[j] = makeCopyOfValue(&ev);
+                            freeValue(&ev);
                         }
+                        const_val = arr_val;
                     } else {
                         const_val = evaluateCompileTimeValue(node->left);
                     }
                 } else {
                     const_val = evaluateCompileTimeValue(node->left);
                 }
+            } else {
+                const_val = evaluateCompileTimeValue(node->left);
+            }
 
-                if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
-                    fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
-                    compiler_had_error = true;
-                } else if (constIsClassMember(node)) {
+            if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+                fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
+                compiler_had_error = true;
+                freeValue(&const_val);
+                break;
+            }
+
+            if (current_function_compiler == NULL) {
+                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
+                if (constIsClassMember(node)) {
                     if (current_class_const_table) {
                         insertConstSymbolIn(current_class_const_table, node->token->value, const_val);
                     }
                 } else {
-                    // Insert into global symbol table so subsequent declarations can reference it.
                     insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
                     Symbol* sym = lookupGlobalSymbol(node->token->value);
                     if (sym && sym->value) {
@@ -3363,13 +3370,22 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         *(sym->value) = makeCopyOfValue(&const_val);
                         sym->is_const = true;
                     }
-
                     insertConstGlobalSymbol(node->token->value, const_val);
                 }
-
-                // Constants are resolved at compile time, so no bytecode emission is needed.
-                freeValue(&const_val);
+            } else {
+                AST* type_for_symbol = actual_type_def_node ? actual_type_def_node : type_specifier_node;
+                Symbol* sym = insertLocalSymbol(node->token->value,
+                                                const_val.type,
+                                                type_for_symbol,
+                                                false);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
             }
+
+            freeValue(&const_val);
             break;
         }
         case AST_TYPE_DECL: {
@@ -5209,7 +5225,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             ConstArrayAccessInfo const_info;
             if (computeConstantArrayAccess(node, &const_info)) {
-                compileLValue(const_info.base_expr, chunk, getLine(const_info.base_expr));
+                bool emitted_base = false;
+                AST* base_expr = const_info.base_expr;
+                if (base_expr && base_expr->type == AST_VARIABLE &&
+                    base_expr->token && base_expr->token->value) {
+                    const char* base_name = base_expr->token->value;
+                    Symbol* local_const = lookupLocalSymbol(base_name);
+                    if (local_const && local_const->is_const && local_const->value) {
+                        emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
+                        emitted_base = true;
+                    } else {
+                        Symbol* global_const = lookupGlobalSymbol(base_name);
+                        if (global_const && global_const->is_const && global_const->value) {
+                            emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
+                            emitted_base = true;
+                        } else {
+                            Value* const_val_ptr = findCompilerConstant(base_name);
+                            if (const_val_ptr) {
+                                emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                                emitted_base = true;
+                            }
+                        }
+                    }
+                }
+                if (!emitted_base) {
+                    compileLValue(base_expr, chunk, getLine(base_expr));
+                }
                 writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE_CONST, line);
                 emitInt32(chunk, (uint32_t)const_info.offset, line);
                 break;
@@ -5227,7 +5268,33 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             switch (base->type) {
-                case AST_VARIABLE:
+                case AST_VARIABLE: {
+                    bool emitted_base = false;
+                    if (base->token && base->token->value) {
+                        const char* base_name = base->token->value;
+                        Symbol* local_const = lookupLocalSymbol(base_name);
+                        if (local_const && local_const->is_const && local_const->value) {
+                            emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
+                            emitted_base = true;
+                        } else {
+                            Symbol* global_const = lookupGlobalSymbol(base_name);
+                            if (global_const && global_const->is_const && global_const->value) {
+                                emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
+                                emitted_base = true;
+                            } else {
+                                Value* const_val_ptr = findCompilerConstant(base_name);
+                                if (const_val_ptr) {
+                                    emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                                    emitted_base = true;
+                                }
+                            }
+                        }
+                    }
+                    if (!emitted_base) {
+                        compileLValue(base, chunk, getLine(base));
+                    }
+                    break;
+                }
                 case AST_FIELD_ACCESS:
                 case AST_ARRAY_ACCESS:
                 case AST_DEREFERENCE:
