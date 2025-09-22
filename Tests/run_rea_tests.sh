@@ -38,6 +38,64 @@ os.utime(path, (target, target))
 PY
 }
 
+check_ext_builtin_dump() {
+  local binary="$1"
+  local label="$2"
+  local tmp_out
+  local tmp_err
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+  local status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "Failed to dump extended builtins for $label (exit $status)" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! python3 - "$tmp_out" <<'PY'
+import sys
+
+path = sys.argv[1]
+seen = set()
+with open(path, 'r', encoding='utf-8') as fh:
+    for idx, raw_line in enumerate(fh, 1):
+        line = raw_line.rstrip('\n')
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        tag = parts[0]
+        if tag == 'category':
+            if len(parts) != 2:
+                print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            seen.add(parts[1])
+        elif tag == 'function':
+            if len(parts) != 3:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if parts[1] not in seen:
+                print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+            sys.exit(1)
+sys.exit(0)
+PY
+  then
+    echo "Unexpected output format from $label --dump-ext-builtins" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+}
+
 # Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
 # avoid "unbound variable" errors under `set -u` by explicitly declaring an
 # empty array. Otherwise, split the space-separated environment variable into
@@ -69,6 +127,8 @@ trap 'rm -rf "$TEST_HOME"' EXIT
 
 cd "$ROOT_DIR"
 EXIT_CODE=0
+
+check_ext_builtin_dump "$REA_BIN" rea
 
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)

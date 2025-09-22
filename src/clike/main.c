@@ -16,6 +16,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/dump.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -36,6 +37,7 @@ static const char *CLIKE_USAGE =
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
+    "     --dump-ext-builtins         List extended builtin inventory and exit.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n";
 
@@ -69,6 +71,7 @@ int main(int argc, char **argv) {
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int dump_ext_builtins_flag = 0;
     int vm_trace_head = 0;
     int no_cache_flag = 0;
     const char *path = NULL;
@@ -87,6 +90,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[i], "--dump-ext-builtins") == 0) {
+            dump_ext_builtins_flag = 1;
         } else if (strcmp(argv[i], "--no-cache") == 0) {
             no_cache_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
@@ -99,6 +104,12 @@ int main(int argc, char **argv) {
             clike_params_start = i + 1;
             break;
         }
+    }
+
+    if (dump_ext_builtins_flag) {
+        registerExtendedBuiltins();
+        extBuiltinDumpInventory(stdout);
+        return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
     if (!path) {
