@@ -62,6 +62,10 @@ List *inserted_global_names = NULL;
 #define PROGRAM_VERSION "undefined.version_DEV"
 #endif
 
+#ifndef PSCAL_GIT_TAG
+#define PSCAL_GIT_TAG "untagged"
+#endif
+
 static int s_vm_trace_head = 0;
 
 typedef struct {
@@ -371,7 +375,8 @@ int main(int argc, char *argv[]) {
     int pscal_params_start_index = 0; // Will be set after source file is identified
 
     if (argc == 1) {
-        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
+               PROGRAM_VERSION, PSCAL_GIT_TAG);
         printf("%s\n", PASCAL_USAGE);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -380,7 +385,8 @@ int main(int argc, char *argv[]) {
     int i = 1;
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
-            printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+            printf("Pscal Interpreter Version: %s (latest tag: %s)\n",
+                   PROGRAM_VERSION, PSCAL_GIT_TAG);
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;

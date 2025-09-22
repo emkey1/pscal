@@ -44,6 +44,14 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 
+#ifndef PROGRAM_VERSION
+#define PROGRAM_VERSION "undefined.version_DEV"
+#endif
+
+#ifndef PSCAL_GIT_TAG
+#define PSCAL_GIT_TAG "untagged"
+#endif
+
 int gParamCount = 0;
 char **gParamValues = NULL;
 
@@ -60,6 +68,7 @@ static void initSymbolSystemClike(void) {
 static const char *CLIKE_USAGE =
     "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
+    "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
@@ -109,7 +118,11 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--dump-ast-json") == 0) {
+        if (strcmp(argv[i], "-v") == 0) {
+            printf("Clike Compiler Version: %s (latest tag: %s)\n",
+                   PROGRAM_VERSION, PSCAL_GIT_TAG);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;

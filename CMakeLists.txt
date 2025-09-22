@@ -18,12 +18,30 @@ else()
 endif()
 set(PROGRAM_VERSION_STRING "${BASE_VERSION}${VERSION_SUFFIX}")
 message(STATUS "Building Pscal Version: ${PROGRAM_VERSION_STRING}")
+
+# Discover the most recent annotated tag so `-v` can report it alongside the
+# build identifier. Fall back to "untagged" when the repository has no tags or
+# when `git` is unavailable (for example in source snapshots).
+execute_process(
+    COMMAND git describe --tags --abbrev=0
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE PSCAL_GIT_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_DESCRIBE_RESULT
+)
+if(NOT GIT_DESCRIBE_RESULT EQUAL 0 OR PSCAL_GIT_TAG STREQUAL "")
+    set(PSCAL_GIT_TAG "untagged")
+endif()
 # ---- End Version Generation Logic ----
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
+add_compile_definitions(
+    PROGRAM_VERSION="${PROGRAM_VERSION_STRING}"
+    PSCAL_GIT_TAG="${PSCAL_GIT_TAG}"
+)
 
 # Optionally build additional binaries
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
