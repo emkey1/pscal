@@ -34,6 +34,7 @@
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
+#include "core/preproc.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "ast/ast.h"
@@ -302,6 +303,14 @@ int main(int argc, char **argv) {
     }
     src[len] = '\0';
 
+    const char *defines[1] = {NULL};
+    int define_count = 0;
+#ifdef SDL
+    defines[define_count++] = "SDL_ENABLED";
+#endif
+    char *preprocessed_source = preprocessConditionals(src, defines, define_count);
+    const char *effective_src = preprocessed_source ? preprocessed_source : src;
+
     // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
     // future bytecode-level CALL injection.
 
@@ -326,14 +335,16 @@ int main(int argc, char **argv) {
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 
     if (strict_mode) reaSetStrictMode(1);
-    AST *program = parseRea(src);
+    AST *program = parseRea(effective_src);
     if (!program) {
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     reaPerformSemanticAnalysis(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
@@ -341,6 +352,7 @@ int main(int argc, char **argv) {
         annotateTypes(program, NULL, program);
         dumpASTJSON(program, stdout);
         freeAST(program);
+        if (preprocessed_source) free(preprocessed_source);
         free(src);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -434,7 +446,10 @@ int main(int argc, char **argv) {
             initVM(&vm);
             if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
             // Inline trace toggle via comment directives: trace on/off inside source
-            if (!vm_trace_head && src && strstr(src, "trace on")) vm.trace_head_instructions = 16;
+            if (!vm_trace_head && ((preprocessed_source && strstr(preprocessed_source, "trace on")) ||
+                                    (src && strstr(src, "trace on")))) {
+                vm.trace_head_instructions = 16;
+            }
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
         }
@@ -449,6 +464,7 @@ int main(int argc, char **argv) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
 
+    if (preprocessed_source) free(preprocessed_source);
     free(src);
     return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }

@@ -1,0 +1,44 @@
+program IfdefExtendedTest;
+
+function MathCategory: integer;
+begin
+#ifdef extended math
+  MathCategory := 1;
+#else
+  MathCategory := 0;
+#endif
+end;
+
+function MathCategoryElseIf: integer;
+begin
+#ifdef extended missing_category
+  MathCategoryElseIf := 1;
+#elseif extended math
+  MathCategoryElseIf := 2;
+#else
+  MathCategoryElseIf := 3;
+#endif
+end;
+
+function FactorialAvailable: integer;
+begin
+#ifdef extended math Factorial
+  FactorialAvailable := 1;
+#else
+  FactorialAvailable := 0;
+#endif
+end;
+
+function ImaginaryFunction: integer;
+begin
+#ifdef extended math Imaginary
+  ImaginaryFunction := 1;
+#else
+  ImaginaryFunction := 0;
+#endif
+end;
+
+begin
+  writeln(MathCategory, ' ', MathCategoryElseIf, ' ',
+          FactorialAvailable, ' ', ImaginaryFunction);
+end.

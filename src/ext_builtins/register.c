@@ -1,4 +1,5 @@
 #include "backend_ast/builtin.h"
+#include <pthread.h>
 
 void registerMathBuiltins(void);
 void registerStringBuiltins(void);
@@ -10,7 +11,9 @@ void registerHasExtBuiltin(void);
 
 void registerExtBuiltinQueryBuiltins(void);
 
-void registerExtendedBuiltins(void) {
+static pthread_once_t s_ext_builtin_once = PTHREAD_ONCE_INIT;
+
+static void registerExtendedBuiltinsOnce(void) {
   registerExtBuiltinQueryBuiltins();
 #ifdef ENABLE_EXT_BUILTIN_MATH
   registerMathBuiltins();
@@ -27,4 +30,8 @@ void registerExtendedBuiltins(void) {
 #ifdef ENABLE_EXT_BUILTIN_USER
   registerUserBuiltins();
 #endif
+}
+
+void registerExtendedBuiltins(void) {
+  pthread_once(&s_ext_builtin_once, registerExtendedBuiltinsOnce);
 }

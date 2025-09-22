@@ -88,6 +88,13 @@ const char *extBuiltinGetCategoryName(size_t index) {
     return name;
 }
 
+int extBuiltinHasCategory(const char *category) {
+    pthread_mutex_lock(&registry_mutex);
+    int present = findCategory(category) != NULL;
+    pthread_mutex_unlock(&registry_mutex);
+    return present;
+}
+
 size_t extBuiltinGetFunctionCount(const char *category) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
