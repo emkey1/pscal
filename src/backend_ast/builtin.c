@@ -3105,8 +3105,46 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         color_was_applied = applyCurrentTextAttributes(output_stream);
     }
 
+    Value prev = makeVoid();
+    bool has_prev = false;
     for (int i = start_index; i < arg_count; i++) {
         Value val = args[i];
+        if (has_prev) {
+            bool add_space = true;
+            if (prev.type == TYPE_STRING && prev.s_val) {
+                size_t len = strlen(prev.s_val);
+                if (len == 0) {
+                    add_space = false;
+                } else {
+                    char last = prev.s_val[len - 1];
+                    if (isspace((unsigned char)last) || last == '=' || last == ':' || last == '-' ) {
+                        add_space = false;
+                    }
+                }
+            } else if (prev.type == TYPE_CHAR) {
+                char last = (char)prev.c_val;
+                if (isspace((unsigned char)last) || last == '=') {
+                    add_space = false;
+                }
+            }
+            if (val.type == TYPE_STRING && val.s_val) {
+                size_t len_cur = strlen(val.s_val);
+                if (len_cur > 0) {
+                    char first = val.s_val[0];
+                    if (isspace((unsigned char)first) || strchr(",.;:)]}!?)", first)) {
+                        add_space = false;
+                    }
+                }
+            } else if (val.type == TYPE_CHAR) {
+                char first = (char)val.c_val;
+                if (isspace((unsigned char)first) || strchr(",.;:)]}!?", first)) {
+                    add_space = false;
+                }
+            }
+            if (add_space) {
+                fputc(' ', output_stream);
+            }
+        }
         if (val.type == TYPE_STRING) {
             if (output_stream == stdout) {
                 fputs(val.s_val ? val.s_val : "", output_stream);
@@ -3119,6 +3157,8 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         } else {
             printValueToStream(val, output_stream);
         }
+        prev = val;
+        has_prev = true;
     }
 
     if (newline) {

@@ -384,7 +384,7 @@ def materialise_test(
 
 
 def build_command(command_template: str, source: Path, extra_files: List[ResolvedFile]) -> List[str]:
-    command_text = command_template.format(source=str(source))
+    command_text = command_template.format(source=str(source.resolve()))
     return shlex.split(command_text)
 
 

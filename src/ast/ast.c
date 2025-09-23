@@ -471,21 +471,6 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
             }
         }
 
-        // Final fallback: search the entire body of the current scope for a
-        // matching VAR_DECL (handles interleaved block structures found in Rea).
-        if (!foundDecl && (currentScopeNode->type == AST_PROCEDURE_DECL || currentScopeNode->type == AST_FUNCTION_DECL)) {
-            AST* body = (currentScopeNode->right && currentScopeNode->right->type != AST_BLOCK)
-                          ? currentScopeNode->right
-                          : currentScopeNode->extra;
-            if (!body || body->type != AST_COMPOUND) {
-                // For Pascal-style, body is an AST_BLOCK whose first child is declarations
-                body = currentScopeNode->right;
-            }
-            if (body) {
-                AST* anyDecl = findVarDeclInSubtree(body, varName);
-                if (anyDecl) foundDecl = anyDecl;
-            }
-        }
     }
 
     // If not found, walk outward and search enclosing procedure/function scopes.

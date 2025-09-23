@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 
 // Forward declaration from core/utils.c
 Token *newToken(TokenType type, const char *value, int line, int column);
@@ -27,6 +28,171 @@ typedef struct ClassInfo {
 
 static HashTable *class_table = NULL;    /* Maps class name -> ClassInfo */
 static AST *gProgramRoot = NULL;         /* Needed for declaration lookups */
+
+typedef struct {
+    AST **functions;
+    bool *captures_outer_scope;
+    size_t count;
+    size_t capacity;
+} ClosureCaptureRegistry;
+
+static ClosureCaptureRegistry gClosureRegistry = {0};
+
+static void clearClosureRegistry(void) {
+    free(gClosureRegistry.functions);
+    free(gClosureRegistry.captures_outer_scope);
+    gClosureRegistry.functions = NULL;
+    gClosureRegistry.captures_outer_scope = NULL;
+    gClosureRegistry.count = 0;
+    gClosureRegistry.capacity = 0;
+}
+
+static bool ensureClosureRegistryCapacity(size_t needed) {
+    if (gClosureRegistry.capacity >= needed) {
+        return true;
+    }
+    size_t newCap = gClosureRegistry.capacity ? gClosureRegistry.capacity * 2 : 16;
+    while (newCap < needed) {
+        newCap *= 2;
+    }
+
+    AST **newFuncs = (AST **)malloc(newCap * sizeof(AST *));
+    bool *newCaptures = (bool *)malloc(newCap * sizeof(bool));
+    if (!newFuncs || !newCaptures) {
+        free(newFuncs);
+        free(newCaptures);
+        return false;
+    }
+
+    if (gClosureRegistry.count > 0) {
+        memcpy(newFuncs, gClosureRegistry.functions, gClosureRegistry.count * sizeof(AST *));
+        memcpy(newCaptures, gClosureRegistry.captures_outer_scope, gClosureRegistry.count * sizeof(bool));
+    }
+
+    free(gClosureRegistry.functions);
+    free(gClosureRegistry.captures_outer_scope);
+    gClosureRegistry.functions = newFuncs;
+    gClosureRegistry.captures_outer_scope = newCaptures;
+    gClosureRegistry.capacity = newCap;
+    return true;
+}
+
+static void recordClosureCapture(AST *func, bool captures) {
+    if (!func) return;
+    for (size_t i = 0; i < gClosureRegistry.count; i++) {
+        if (gClosureRegistry.functions[i] == func) {
+            if (captures) gClosureRegistry.captures_outer_scope[i] = true;
+            return;
+        }
+    }
+    if (!ensureClosureRegistryCapacity(gClosureRegistry.count + 1)) {
+        return;
+    }
+    gClosureRegistry.functions[gClosureRegistry.count] = func;
+    gClosureRegistry.captures_outer_scope[gClosureRegistry.count] = captures;
+    gClosureRegistry.count++;
+}
+
+static bool closureCapturesOuterScope(AST *func) {
+    if (!func) return false;
+    for (size_t i = 0; i < gClosureRegistry.count; i++) {
+        if (gClosureRegistry.functions[i] == func) {
+            return gClosureRegistry.captures_outer_scope[i];
+        }
+    }
+    return false;
+}
+
+static AST *findEnclosingFunction(AST *node) {
+    if (!node) return NULL;
+    AST *curr = node->parent;
+    while (curr) {
+        if (curr->type == AST_FUNCTION_DECL || curr->type == AST_PROCEDURE_DECL) {
+            return curr;
+        }
+        curr = curr->parent;
+    }
+    return NULL;
+}
+
+static AST *getFunctionBody(AST *func) {
+    if (!func) return NULL;
+    if (func->type == AST_FUNCTION_DECL) {
+        return func->extra;
+    }
+    if (func->type == AST_PROCEDURE_DECL) {
+        return func->right;
+    }
+    return NULL;
+}
+
+static bool functionCapturesOuterVisitor(AST *node, AST *func) {
+    if (!node || !func) return false;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
+        return false; /* Nested function handled separately */
+    }
+
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        const char *name = node->token->value;
+        if (strcasecmp(name, "myself") != 0 && strcasecmp(name, "my") != 0) {
+            AST *decl = findStaticDeclarationInAST(name, node, gProgramRoot);
+            if (decl && (decl->type == AST_VAR_DECL || decl->type == AST_CONST_DECL)) {
+                AST *owner = findEnclosingFunction(decl);
+                if (owner && owner != func) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    if (node->left && functionCapturesOuterVisitor(node->left, func)) return true;
+    if (node->right && functionCapturesOuterVisitor(node->right, func)) return true;
+    if (node->extra && functionCapturesOuterVisitor(node->extra, func)) return true;
+    for (int i = 0; i < node->child_count; i++) {
+        if (functionCapturesOuterVisitor(node->children[i], func)) return true;
+    }
+    return false;
+}
+
+static bool functionCapturesOuter(AST *func) {
+    AST *body = getFunctionBody(func);
+    if (!body) return false;
+    return functionCapturesOuterVisitor(body, func);
+}
+
+static void analyzeClosureCaptures(AST *node) {
+    if (!node) return;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
+        bool captures = functionCapturesOuter(node);
+        recordClosureCapture(node, captures);
+    }
+    if (node->left) analyzeClosureCaptures(node->left);
+    if (node->right) analyzeClosureCaptures(node->right);
+    if (node->extra) analyzeClosureCaptures(node->extra);
+    for (int i = 0; i < node->child_count; i++) {
+        analyzeClosureCaptures(node->children[i]);
+    }
+}
+
+static AST *findFunctionInSubtree(AST *node, const char *name) {
+    if (!node || !name) return NULL;
+    if ((node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) &&
+        node->token && node->token->value &&
+        strcasecmp(node->token->value, name) == 0) {
+        return node;
+    }
+    AST *found = findFunctionInSubtree(node->left, name);
+    if (found) return found;
+    found = findFunctionInSubtree(node->right, name);
+    if (found) return found;
+    found = findFunctionInSubtree(node->extra, name);
+    if (found) return found;
+    for (int i = 0; i < node->child_count; i++) {
+        found = findFunctionInSubtree(node->children[i], name);
+        if (found) return found;
+    }
+    return NULL;
+}
 
 static char *lowerDup(const char *s) {
     if (!s) return NULL;
@@ -54,6 +220,40 @@ static ClassInfo *lookupClass(const char *name) {
     Symbol *sym = hashTableLookup(class_table, lower);
     if (!sym || !sym->value) return NULL;
     return (ClassInfo *)sym->value->ptr_val;
+}
+
+static int countFunctionParams(AST *func) {
+    if (!func) return 0;
+    int count = 0;
+    for (int i = 0; i < func->child_count; i++) {
+        AST *param = func->children[i];
+        if (!param || param->type != AST_VAR_DECL) continue;
+        count += param->child_count > 0 ? param->child_count : 1;
+    }
+    return count;
+}
+
+static AST *getFunctionParam(AST *func, int index) {
+    if (!func) return NULL;
+    int running = 0;
+    for (int i = 0; i < func->child_count; i++) {
+        AST *param = func->children[i];
+        if (!param || param->type != AST_VAR_DECL) continue;
+        int span = param->child_count > 0 ? param->child_count : 1;
+        if (index < running + span) {
+            return param;
+        }
+        running += span;
+    }
+    return NULL;
+}
+
+static bool paramIsImplicitSelf(AST *param) {
+    if (!param || param->child_count <= 0) return false;
+    AST *nameNode = param->children[0];
+    if (!nameNode || !nameNode->token || !nameNode->token->value) return false;
+    const char *name = nameNode->token->value;
+    return (strcasecmp(name, "myself") == 0 || strcasecmp(name, "my") == 0);
 }
 
 static void insertClassInfo(ClassInfo *ci) {
@@ -747,15 +947,64 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         }
     }
 
+    if (node->type == AST_ASSIGN) {
+        AST *lhs = node->left;
+        if (lhs && lhs->type == AST_VARIABLE && lhs->token && lhs->token->value) {
+            const char *name = lhs->token->value;
+            AST *decl = findStaticDeclarationInAST(name, lhs, gProgramRoot);
+            if (decl && decl->type == AST_CONST_DECL) {
+                fprintf(stderr, "L%d: cannot assign to constant '%s'.\n",
+                        lhs->token->line, name);
+                pascal_semantic_error_count++;
+            }
+        }
+    }
+
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
         /* Preserve explicit syntax while still annotating variables with their
          * declared types so later analyses (e.g. array element access) can
          * determine the base type.
          */
-        AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+        const char *ident = node->token->value;
+        AST *decl = findStaticDeclarationInAST(ident, node, gProgramRoot);
+        if (!decl) {
+            AST *scope = node->parent;
+            while (scope && scope->type != AST_FUNCTION_DECL && scope->type != AST_PROCEDURE_DECL) {
+                scope = scope->parent;
+            }
+            if (scope) {
+                AST *body = (scope->type == AST_FUNCTION_DECL) ? scope->extra : scope->right;
+                decl = findFunctionInSubtree(body, ident);
+            }
+        }
         if (decl && decl->right) {
             node->type_def = decl->right;
             node->var_type = decl->right->var_type;
+        } else {
+            if (strcasecmp(ident, "myself") != 0 && strcasecmp(ident, "my") != 0) {
+                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                        node->token->line, ident);
+                pascal_semantic_error_count++;
+            }
+        }
+
+        if (decl && (decl->type == AST_FUNCTION_DECL || decl->type == AST_PROCEDURE_DECL)) {
+            AST *enclosing = findEnclosingFunction(decl);
+            if (enclosing && closureCapturesOuterScope(decl)) {
+                bool partOfCall = false;
+                AST *parent = node->parent;
+                if (parent && parent->type == AST_PROCEDURE_CALL && parent->token && node->token &&
+                    parent->token->value && node->token->value &&
+                    strcasecmp(parent->token->value, node->token->value) == 0) {
+                    partOfCall = true;
+                }
+                if (!partOfCall) {
+                    fprintf(stderr,
+                            "L%d: closure captures a local value that would escape its lifetime.\n",
+                            node->token->line);
+                    pascal_semantic_error_count++;
+                }
+            }
         }
     }
 
@@ -950,6 +1199,66 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 }
             }
         }
+
+        if (node->token && node->token->value) {
+            char lower[MAX_SYMBOL_LENGTH];
+            strncpy(lower, node->token->value, sizeof(lower) - 1);
+            lower[sizeof(lower) - 1] = '\0';
+            for (int i = 0; lower[i]; i++) {
+                lower[i] = (char)tolower((unsigned char)lower[i]);
+            }
+
+            Symbol *procSym = lookupProcedure(lower);
+            if (procSym && procSym->is_alias && procSym->real_symbol) {
+                procSym = procSym->real_symbol;
+            }
+
+            if (procSym && procSym->type_def) {
+                AST *decl = procSym->type_def;
+                int totalParams = countFunctionParams(decl);
+                if (totalParams > 0) {
+                    int implicitCount = 0;
+                    AST *firstParam = getFunctionParam(decl, 0);
+                    if (paramIsImplicitSelf(firstParam)) {
+                        implicitCount = 1;
+                    }
+
+                    if (implicitCount == 0) {
+                        int explicitParams = totalParams;
+                        int providedArgs = node->child_count;
+
+                        int optionalCount = 0;
+                        for (int idx = totalParams - 1; idx >= implicitCount; idx--) {
+                            AST *paramDecl = getFunctionParam(decl, idx);
+                            if (paramDecl && paramDecl->left) {
+                                optionalCount++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        int requiredArgs = explicitParams - optionalCount;
+                        if (providedArgs < requiredArgs) {
+                            fprintf(stderr, "L%d: Not enough arguments for '%s'.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
+                        } else if (providedArgs > explicitParams) {
+                            fprintf(stderr, "L%d: Too many arguments for '%s'.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
+                        } else if (providedArgs < explicitParams) {
+                            for (int idx = providedArgs; idx < explicitParams; idx++) {
+                                AST *paramDecl = getFunctionParam(decl, idx);
+                                if (!paramDecl || !paramDecl->left) break;
+                                AST *defaultExpr = copyAST(paramDecl->left);
+                                if (!defaultExpr) continue;
+                                addChild(node, defaultExpr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     } else if (node->type == AST_ARRAY_ACCESS) {
         if (node->left) validateNodeInternal(node->left, clsContext);
         for (int i = 0; i < node->child_count; i++) {
@@ -1010,13 +1319,15 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
 void reaPerformSemanticAnalysis(AST *root) {
     if (!root) return;
     gProgramRoot = root;
+    clearClosureRegistry();
     collectClasses(root);
     collectMethods(root);
     linkParents();
     checkOverrides();
     addInheritedMethodAliases();
+    analyzeClosureCaptures(root);
     validateNodeInternal(root, NULL);
+    clearClosureRegistry();
     refreshProcedureMethodCopies();
     freeClassTable();
 }
-

@@ -356,7 +356,7 @@ static AST *parseJoin(ReaParser *p);
 static AST *parseIf(ReaParser *p);
 static AST *parseWhile(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
-static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex);
+static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex, bool pointerWrapped);
 static AST *parseWhile(ReaParser *p);
 static AST *parseDoWhile(ReaParser *p);
 static AST *parseFor(ReaParser *p);
@@ -1465,6 +1465,167 @@ static const char *typeName(ReaTokenType t) {
     }
 }
 
+static AST *parsePointerParamType(ReaParser *p) {
+    if (p->current.type == REA_TOKEN_EOF) {
+        return NULL;
+    }
+
+    ReaToken tok = p->current;
+    VarType mapped = mapType(tok.type);
+
+    if (tok.type == REA_TOKEN_VOID) {
+        const char *name = typeName(tok.type);
+        Token *typeTok = newToken(TOKEN_IDENTIFIER, name, tok.line, 0);
+        AST *typeNode = newASTNode(AST_TYPE_IDENTIFIER, typeTok);
+        setTypeAST(typeNode, TYPE_VOID);
+        reaAdvance(p);
+        return typeNode;
+    }
+
+    if (mapped != TYPE_VOID) {
+        const char *name = typeName(tok.type);
+        Token *typeTok = newToken(TOKEN_IDENTIFIER, name, tok.line, 0);
+        AST *typeNode = newASTNode(AST_TYPE_IDENTIFIER, typeTok);
+        setTypeAST(typeNode, mapped);
+        reaAdvance(p);
+        return typeNode;
+    }
+
+    if (tok.type == REA_TOKEN_IDENTIFIER) {
+        char *lex = (char *)malloc(tok.length + 1);
+        if (!lex) return NULL;
+        memcpy(lex, tok.start, tok.length);
+        lex[tok.length] = '\0';
+        Token *typeTok = newToken(TOKEN_IDENTIFIER, lex, tok.line, 0);
+        free(lex);
+        AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeTok);
+        setTypeAST(refNode, TYPE_RECORD);
+        reaAdvance(p);
+        return refNode;
+    }
+
+    fprintf(stderr, "L%d: expected type name in function pointer signature.\n", tok.line);
+    p->hadError = true;
+    return NULL;
+}
+
+static AST *parseFunctionPointerParamTypes(ReaParser *p) {
+    if (p->current.type != REA_TOKEN_LEFT_PAREN) {
+        fprintf(stderr, "L%d: expected '(' to begin function pointer signature.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+
+    reaAdvance(p); // consume '('
+    AST *params = newASTNode(AST_COMPOUND, NULL);
+
+    if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+        reaAdvance(p);
+        return params;
+    }
+
+    if (p->current.type == REA_TOKEN_VOID) {
+        int voidLine = p->current.line;
+        reaAdvance(p);
+        if (p->current.type == REA_TOKEN_RIGHT_PAREN) {
+            reaAdvance(p);
+            return params; // no parameters
+        }
+        const char *name = typeName(REA_TOKEN_VOID);
+        Token *typeTok = newToken(TOKEN_IDENTIFIER, name, voidLine, 0);
+        AST *voidNode = newASTNode(AST_TYPE_IDENTIFIER, typeTok);
+        setTypeAST(voidNode, TYPE_VOID);
+        addChild(params, voidNode);
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+        }
+    }
+
+    while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+        AST *typeNode = parsePointerParamType(p);
+        if (!typeNode) {
+            freeAST(params);
+            return NULL;
+        }
+        addChild(params, typeNode);
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            continue;
+        }
+        break;
+    }
+
+    if (p->current.type != REA_TOKEN_RIGHT_PAREN) {
+        fprintf(stderr, "L%d: expected ')' to close function pointer signature.\n", p->current.line);
+        p->hadError = true;
+        freeAST(params);
+        return NULL;
+    }
+    reaAdvance(p);
+    return params;
+}
+
+static AST *buildProcPointerType(AST *returnType, AST *paramList) {
+    AST *procType = newASTNode(AST_PROC_PTR_TYPE, NULL);
+    setTypeAST(procType, TYPE_POINTER);
+
+    if (paramList) {
+        if (paramList->child_count > 0) {
+            procType->children = paramList->children;
+            procType->child_count = paramList->child_count;
+            procType->child_capacity = paramList->child_capacity;
+            for (int i = 0; i < procType->child_count; i++) {
+                if (procType->children[i]) {
+                    procType->children[i]->parent = procType;
+                }
+            }
+            paramList->children = NULL;
+            paramList->child_count = 0;
+            paramList->child_capacity = 0;
+        }
+        freeAST(paramList);
+    }
+
+    if (returnType) {
+        
+        setRight(procType, returnType);
+    }
+    return procType;
+}
+
+static AST *parsePointerVariableAfterName(ReaParser *p, Token *nameTok, AST *baseType) {
+    if (p->current.type != REA_TOKEN_RIGHT_PAREN) {
+        fprintf(stderr, "L%d: expected ')' after function pointer declarator.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+    reaAdvance(p); // consume ')'
+
+    AST *paramTypes = parseFunctionPointerParamTypes(p);
+    if (!paramTypes) {
+        if (!p->hadError) {
+            p->hadError = true;
+        }
+        return NULL;
+    }
+
+    AST *pointerType = buildProcPointerType(baseType, paramTypes);
+    AST *varDecl = newASTNode(AST_VAR_DECL, NULL);
+    AST *varNode = newASTNode(AST_VARIABLE, nameTok);
+    setTypeAST(varNode, TYPE_POINTER);
+    addChild(varDecl, varNode);
+    setRight(varDecl, pointerType);
+    setTypeAST(varDecl, TYPE_POINTER);
+
+    if (p->current.type == REA_TOKEN_EQUAL) {
+        reaAdvance(p);
+        AST *init = parseExpression(p);
+        setLeft(varDecl, init);
+    }
+
+    return varDecl;
+}
+
 static AST *parseVarDecl(ReaParser *p) {
     // Allow constructor shorthand: inside a class, the constructor may omit
     // the return type and start directly with the class name, e.g.:
@@ -1491,7 +1652,7 @@ static AST *parseVarDecl(ReaParser *p) {
                 Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
                 free(lex);
                 reaAdvance(p); // consume constructor name
-                return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, -1);
+                return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, -1, false);
             }
         }
     }
@@ -1513,7 +1674,7 @@ static AST *parseVarDecl(ReaParser *p) {
         reaAdvance(p); // consume identifier
         if (p->current.type == REA_TOKEN_LEFT_PAREN) {
             int idx = p->currentClassName ? p->currentMethodIndex++ : -1;
-            return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, idx);
+            return parseFunctionDecl(p, nameTok, NULL, TYPE_VOID, idx, false);
         } else {
             fprintf(stderr, "L%d: Variable cannot have type void.\n", p->current.line);
             p->hadError = true;
@@ -1546,7 +1707,7 @@ static AST *parseVarDecl(ReaParser *p) {
         return NULL;
     }
 
-    if (p->current.type != REA_TOKEN_IDENTIFIER) return NULL;
+    if (p->current.type != REA_TOKEN_IDENTIFIER && p->current.type != REA_TOKEN_LEFT_PAREN) return NULL;
 
     AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
     AST *compound = newASTNode(AST_COMPOUND, NULL);
@@ -1555,8 +1716,65 @@ static AST *parseVarDecl(ReaParser *p) {
 
     bool first = true;
     while (1) {
+        bool handledPointer = false;
+        if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+            ReaLexer savedLexer = p->lexer;
+            ReaToken savedToken = p->current;
+            reaAdvance(p); // consume '('
+            if (p->current.type == REA_TOKEN_STAR) {
+                reaAdvance(p); // consume '*'
+                if (p->current.type == REA_TOKEN_IDENTIFIER) {
+                    char *nameLex = (char *)malloc(p->current.length + 1);
+                    if (!nameLex) { freeAST(compound); return NULL; }
+                    memcpy(nameLex, p->current.start, p->current.length);
+                    nameLex[p->current.length] = '\0';
+                    Token *nameTok = newToken(TOKEN_IDENTIFIER, nameLex, p->current.line, 0);
+                    free(nameLex);
+                    reaAdvance(p); // consume identifier
+
+                    AST *baseForPointer = first ? typeNode : copyAST(baseType);
+                    if (!baseForPointer) {
+                        freeAST(compound);
+                        return NULL;
+                    }
+
+                    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+                        int idxPtr = p->currentClassName ? p->currentMethodIndex++ : -1;
+                        AST *func = parseFunctionDecl(p, nameTok, baseForPointer, vtype, idxPtr, true);
+                        freeAST(compound);
+                        return func;
+                    }
+
+                    AST *varDecl = parsePointerVariableAfterName(p, nameTok, baseForPointer);
+                    if (!varDecl) {
+                        freeAST(compound);
+                        return NULL;
+                    }
+                    addChild(compound, varDecl);
+                    handledPointer = true;
+                    first = false;
+                } else {
+                    p->lexer = savedLexer;
+                    p->current = savedToken;
+                }
+            } else {
+                p->lexer = savedLexer;
+                p->current = savedToken;
+            }
+
+            if (handledPointer) {
+                if (p->current.type == REA_TOKEN_COMMA) {
+                    reaAdvance(p);
+                    continue;
+                }
+                break;
+            }
+        }
+
+        if (p->current.type != REA_TOKEN_IDENTIFIER) break;
+
         char *lex = (char *)malloc(p->current.length + 1);
-        if (!lex) { freeAST(compound); /* baseType not freed: shares tokens */ return NULL; }
+        if (!lex) { freeAST(compound); return NULL; }
         memcpy(lex, p->current.start, p->current.length);
         lex[p->current.length] = '\0';
         Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
@@ -1573,7 +1791,7 @@ static AST *parseVarDecl(ReaParser *p) {
         if (first && p->current.type == REA_TOKEN_LEFT_PAREN) {
             int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
             freeAST(compound);
-            return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2);
+            return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2, false);
         }
 
         AST *var = newASTNode(AST_VARIABLE, nameTok);
@@ -1594,7 +1812,7 @@ static AST *parseVarDecl(ReaParser *p) {
 
         if (p->current.type == REA_TOKEN_COMMA) {
             reaAdvance(p);
-            if (p->current.type != REA_TOKEN_IDENTIFIER) break;
+            if (p->current.type == REA_TOKEN_EOF) break;
             first = false;
             continue;
         }
@@ -1615,7 +1833,7 @@ static AST *parseVarDecl(ReaParser *p) {
     return compound;
 }
 
-static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex) {
+static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex, bool pointerWrapped) {
     
     VarType prevType = p->currentFunctionType;
     int prevDepth = p->functionDepth;
@@ -1693,10 +1911,38 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         setTypeAST(paramVar, pvtype);
         reaAdvance(p); // consume param name
 
+        bool duplicateParam = false;
+        for (int pi = 0; pi < params->child_count && !duplicateParam; pi++) {
+            AST *existingDecl = params->children[pi];
+            if (!existingDecl || existingDecl->type != AST_VAR_DECL) continue;
+            for (int pj = 0; pj < existingDecl->child_count; pj++) {
+                AST *existingVar = existingDecl->children[pj];
+                if (!existingVar || !existingVar->token || !existingVar->token->value) continue;
+                if (strcasecmp(existingVar->token->value, paramNameTok->value) == 0) {
+                    fprintf(stderr, "L%d: duplicate parameter '%s' in function declaration.\n",
+                            paramNameTok->line, paramNameTok->value);
+                    p->hadError = true;
+                    duplicateParam = true;
+                    break;
+                }
+            }
+        }
+
         AST *paramDecl = newASTNode(AST_VAR_DECL, NULL);
         addChild(paramDecl, paramVar);
         setRight(paramDecl, ptypeNode);
         setTypeAST(paramDecl, pvtype);
+
+        if (p->current.type == REA_TOKEN_EQUAL) {
+            reaAdvance(p); // consume '='
+            AST *defaultExpr = parseExpression(p);
+            if (defaultExpr) {
+                setLeft(paramDecl, defaultExpr);
+            } else {
+                p->hadError = true;
+            }
+        }
+
         addChild(params, paramDecl);
 
         if (p->current.type == REA_TOKEN_COMMA) {
@@ -1709,6 +1955,26 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         reaAdvance(p);
     }
 
+    if (pointerWrapped) {
+        if (p->current.type != REA_TOKEN_RIGHT_PAREN) {
+            fprintf(stderr, "L%d: expected ')' after function pointer parameters.\n", p->current.line);
+            p->hadError = true;
+            freeAST(params);
+            return NULL;
+        }
+        reaAdvance(p); // consume pointer-closing ')'
+        AST *pointerParams = parseFunctionPointerParamTypes(p);
+        if (!pointerParams) {
+            if (!p->hadError) {
+                p->hadError = true;
+            }
+            freeAST(params);
+            return NULL;
+        }
+        typeNode = buildProcPointerType(typeNode, pointerParams);
+        vtype = TYPE_POINTER;
+    }
+
     // Parse function body. Previously the parser split variable declarations
     // from executable statements and wrapped them into an `AST_BLOCK` with two
     // children (declarations and statements).  This caused any variable
@@ -1717,9 +1983,19 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     // and runtime errors.  Instead, parse the body as a simple compound block
     // preserving the original statement order so initializers execute where
     // they appear in source.
+    HashTable *outer_proc_table = current_procedure_table;
+    HashTable *local_proc_table = NULL;
     AST *block = NULL;
+    bool has_body = false;
     if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        local_proc_table = pushProcedureTable();
         block = parseBlock(p);  // consumes braces and returns AST_COMPOUND
+        has_body = true;
+        if (local_proc_table) {
+            popProcedureTable(false);
+        }
+    } else if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p); // consume forward declaration terminator
     }
 
     AST *func = (vtype == TYPE_VOID) ? newASTNode(AST_PROCEDURE_DECL, nameTok)
@@ -1747,67 +2023,89 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         setRight(func, typeNode);
         setExtra(func, block);
     }
+    if (local_proc_table) {
+        func->symbol_table = (Symbol*)local_proc_table;
+    }
     setTypeAST(func, vtype);
     
 
     
 
-    // Register function in procedure table
-    Symbol *sym = (Symbol*)malloc(sizeof(Symbol));
-    if (sym) {
-        memset(sym, 0, sizeof(Symbol));
-        sym->name = strdup(nameTok->value);
-        if (sym->name) {
-            for (int i = 0; sym->name[i]; i++) {
-                sym->name[i] = tolower((unsigned char)sym->name[i]);
+    // Register function in procedure table (reuse existing entry for forward declarations)
+    char lower_name[MAX_SYMBOL_LENGTH];
+    strncpy(lower_name, nameTok->value, sizeof(lower_name) - 1);
+    lower_name[sizeof(lower_name) - 1] = '\0';
+    for (int i = 0; lower_name[i]; i++) lower_name[i] = (char)tolower((unsigned char)lower_name[i]);
+
+    HashTable *target_table = outer_proc_table ? outer_proc_table : procedure_table;
+    Symbol *sym = target_table ? hashTableLookup(target_table, lower_name) : NULL;
+    if (sym && sym->is_alias && sym->real_symbol) {
+        sym = sym->real_symbol;
+    }
+
+    bool sym_is_new = false;
+    if (!sym) {
+        sym = (Symbol*)calloc(1, sizeof(Symbol));
+        if (sym) {
+            sym->name = strdup(lower_name);
+            sym_is_new = true;
+            if (target_table) {
+                hashTableInsert(target_table, sym);
             }
         }
+    }
+    if (sym) {
         sym->type = vtype;
+        if (sym->type_def) {
+            freeAST(sym->type_def);
+        }
         sym->type_def = copyAST(func);
-        hashTableInsert(procedure_table, sym);
+        if (!has_body) {
+            sym->is_defined = false;
+        }
     }
 
     // If inside a class, also add a bare-name alias so 'obj.method(...)' can resolve.
-    if (p->currentClassName && sym && sym->name) {
+    if (p->currentClassName && sym && sym_is_new && sym->name) {
         const char* dot = strchr(sym->name, '.');
         const char* bare = NULL;
         if (dot && *(dot + 1)) bare = dot + 1;
         if (bare) {
-            Symbol* alias2 = (Symbol*)malloc(sizeof(Symbol));
+            Symbol* alias2 = (Symbol*)calloc(1, sizeof(Symbol));
             if (alias2) {
-                memset(alias2, 0, sizeof(Symbol));
                 alias2->name = strdup(bare);
-                // already lower case since sym->name is lower
                 alias2->is_alias = true;
                 alias2->real_symbol = sym;
                 alias2->type = vtype;
                 alias2->type_def = copyAST(sym->type_def);
-                hashTableInsert(procedure_table, alias2);
+                if (target_table) {
+                    hashTableInsert(target_table, alias2);
+                }
             }
         }
     }
 
     // If this is a constructor (method name equals class name), add alias 'ClassName' -> real symbol
-    if (p->currentClassName && nameTok && nameTok->value) {
+    if (p->currentClassName && sym_is_new && nameTok && nameTok->value) {
         const char* dot = strchr(nameTok->value, '.');
         if (dot) {
-            // Check if name is ClassName.ClassName
             size_t cls_len = (size_t)(dot - nameTok->value);
             if (strlen(p->currentClassName) == cls_len && strncasecmp(nameTok->value, p->currentClassName, cls_len) == 0) {
                 const char* after = dot + 1;
                 if (strncasecmp(after, p->currentClassName, cls_len) == 0 && after[cls_len] == '\0') {
-                    Symbol* alias = (Symbol*)malloc(sizeof(Symbol));
+                    Symbol* alias = (Symbol*)calloc(1, sizeof(Symbol));
                     if (alias) {
-                        memset(alias, 0, sizeof(Symbol));
                         alias->name = strdup(p->currentClassName);
                         if (alias->name) {
-                            for (int i = 0; alias->name[i]; i++) alias->name[i] = tolower((unsigned char)alias->name[i]);
+                            for (int i = 0; alias->name[i]; i++) alias->name[i] = (char)tolower((unsigned char)alias->name[i]);
                         }
                         alias->is_alias = true;
                         alias->real_symbol = sym;
                         alias->type = vtype;
                         alias->type_def = sym ? copyAST(sym->type_def) : NULL;
-                        hashTableInsert(procedure_table, alias);
+                        if (target_table) {
+                            hashTableInsert(target_table, alias);
+                        }
                     }
                 }
             }
@@ -2128,7 +2426,9 @@ static AST *parseConstDecl(ReaParser *p) {
     if (value) {
         Value v = evaluateCompileTimeValue(value);
         if (v.type != TYPE_VOID && v.type != TYPE_UNKNOWN) {
-            addCompilerConstant(nameTok->value, &v, nameTok->line);
+            if (p->functionDepth == 0) {
+                addCompilerConstant(nameTok->value, &v, nameTok->line);
+            }
             if (!typeNode) setTypeAST(node, v.type);
         }
         freeValue(&v);

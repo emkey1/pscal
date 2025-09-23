@@ -562,6 +562,15 @@ void restoreLocalEnv(SymbolEnvSnapshot *snap) {
     // Pop the current local symbol table (free its memory).
     // The current localSymbols table holds symbols inserted in the now-ending scope.
     DEBUG_PRINT("[DEBUG SYMBOL] Restoring local env. Freeing current local env %p.\n", (void*)localSymbols);
+    if (localSymbols) {
+        for (int i = 0; i < HASHTABLE_SIZE; i++) {
+            Symbol *sym = localSymbols->buckets[i];
+            while (sym) {
+                if (!sym->is_alias) sym->type_def = NULL;
+                sym = sym->next;
+            }
+        }
+    }
     freeHashTable(localSymbols);
 
     // Restore the previous local symbol table from the snapshot.

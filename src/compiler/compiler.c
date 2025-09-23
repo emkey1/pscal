@@ -1416,6 +1416,53 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->upvalue_count = 0;
 }
 
+static void compilerBeginScope(FunctionCompilerState* fc) {
+    if (!fc) return;
+    fc->scope_depth++;
+}
+
+static void compilerEndScope(FunctionCompilerState* fc) {
+    if (!fc) return;
+    if (fc->scope_depth > 0) {
+        fc->scope_depth--;
+    }
+}
+
+static int resolveLocalInCurrentScope(FunctionCompilerState* fc, const char* name) {
+    if (!fc || !name) return -1;
+    for (int i = fc->local_count - 1; i >= 0; i--) {
+        CompilerLocal* local = &fc->locals[i];
+        if (local->depth < fc->scope_depth) {
+            break;
+        }
+        if (local->name && strcasecmp(local->name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool is_ref);
+
+static void registerVarDeclLocals(AST* varDecl, bool emitError) {
+    if (!current_function_compiler || !varDecl) return;
+    for (int i = 0; i < varDecl->child_count; i++) {
+        AST* varNameNode = varDecl->children[i];
+        if (!varNameNode || !varNameNode->token || !varNameNode->token->value) continue;
+        const char* name = varNameNode->token->value;
+        if (resolveLocalInCurrentScope(current_function_compiler, name) == -1) {
+            addLocal(current_function_compiler, name, getLine(varNameNode), false);
+        } else {
+            if (emitError) {
+                fprintf(stderr, "L%d: duplicate variable '%s' in this scope.\n",
+                        getLine(varNameNode), name);
+                compiler_had_error = true;
+            }
+        }
+    }
+}
+
+
 static void startLoop(int start_address) {
     if (loop_depth + 1 >= MAX_LOOP_DEPTH) {
         fprintf(stderr, "Compiler error: Loop nesting too deep.\n");
@@ -3428,6 +3475,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_COMPOUND: {
+            bool enters_scope = current_function_compiler != NULL && !node->is_global_scope;
+            SymbolEnvSnapshot scope_snapshot;
+            int starting_local = -1;
+            if (enters_scope) {
+                compilerBeginScope(current_function_compiler);
+                starting_local = current_function_compiler->local_count;
+                saveLocalEnv(&scope_snapshot);
+            }
             // Pass 1: compile nested routine declarations so they are available
             // regardless of where they appear in the block.
             for (int i = 0; i < node->child_count; i++) {
@@ -3447,6 +3502,17 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     continue;
                 }
                 compileStatement(child, chunk, getLine(child));
+            }
+            if (enters_scope) {
+                for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                    if (current_function_compiler->locals[i].name) {
+                        free(current_function_compiler->locals[i].name);
+                        current_function_compiler->locals[i].name = NULL;
+                    }
+                }
+                current_function_compiler->local_count = starting_local;
+                compilerEndScope(current_function_compiler);
+                restoreLocalEnv(&scope_snapshot);
             }
             break;
         }
@@ -3909,18 +3975,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_VAR_DECL: {
             if (current_function_compiler != NULL) {
-                for (int i = 0; i < node->child_count; i++) {
-                    AST *varNameNode = node->children[i];
-                    if (varNameNode && varNameNode->token) {
-                        int slot = resolveLocal(current_function_compiler,
-                                                varNameNode->token->value);
-                        if (slot == -1) {
-                            addLocal(current_function_compiler,
-                                     varNameNode->token->value,
-                                     getLine(varNameNode), false);
-                        }
-                    }
-                }
+                registerVarDeclLocals(node, true);
             }
             /*
              * After registering locals (if any), delegate to compileNode so that
@@ -4573,8 +4628,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
-                bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
-                bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                bool is_inc_dec = callee_is_builtin &&
+                                   (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
+                bool is_halt = callee_is_builtin && (strcasecmp(calleeName, "halt") == 0);
                 if (expected == 0 && arg_count > 0) {
                     int idx = arg_start;
                     if (idx < node->child_count) {
@@ -4864,10 +4920,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_COMPOUND: {
+            bool enters_scope = current_function_compiler != NULL && !node->is_global_scope;
+            SymbolEnvSnapshot scope_snapshot;
+            int starting_local = -1;
+            if (enters_scope) {
+                compilerBeginScope(current_function_compiler);
+                starting_local = current_function_compiler->local_count;
+                saveLocalEnv(&scope_snapshot);
+            }
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
                     compileStatement(node->children[i], chunk, getLine(node->children[i]));
                 }
+            }
+            if (enters_scope) {
+                for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                    if (current_function_compiler->locals[i].name) {
+                        free(current_function_compiler->locals[i].name);
+                        current_function_compiler->locals[i].name = NULL;
+                    }
+                }
+                current_function_compiler->local_count = starting_local;
+                compilerEndScope(current_function_compiler);
+                restoreLocalEnv(&scope_snapshot);
             }
             break;
         }
@@ -5898,10 +5973,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compiler_had_error = true;
                         for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
-                    } else if ((strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)
+                    } else if (((!func_symbol && isBuiltin(functionName) &&
+                                 (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)))
                                ? !(call_arg_count == 1 || call_arg_count == 2)
                                : (func_symbol->arity != call_arg_count)) {
-                        if (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0) {
+                        if (!func_symbol && isBuiltin(functionName) &&
+                            (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)) {
                             fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
                                     line, original_display_name, call_arg_count);
                         } else {
