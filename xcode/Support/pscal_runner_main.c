@@ -21,6 +21,21 @@ typedef enum ConfigLoadResult {
     CONFIG_LOAD_ERROR = -1
 } ConfigLoadResult;
 
+static const char *getProjectDirectoryEnv(void) {
+    static const char *const candidates[] = {
+        "PROJECT_DIR",
+        "SRCROOT",
+        "SOURCE_ROOT",
+    };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        const char *value = getenv(candidates[i]);
+        if (value && *value) {
+            return value;
+        }
+    }
+    return NULL;
+}
+
 static void freeArgList(ArgList *list) {
     if (!list) {
         return;
@@ -49,6 +64,61 @@ static int ensureBufferCapacity(char **buffer, size_t *capacity, size_t needed) 
     *buffer = resized;
     *capacity = newCapacity;
     return 0;
+}
+
+static char *expandEnvironmentMacros(const char *input) {
+    if (!input) {
+        return NULL;
+    }
+
+    size_t capacity = strlen(input) + 1;
+    char *output = malloc(capacity);
+    if (!output) {
+        return NULL;
+    }
+
+    size_t outLength = 0;
+    for (size_t i = 0; input[i] != '\0';) {
+        if (input[i] == '$' && input[i + 1] == '(') {
+            size_t nameStart = i + 2;
+            size_t nameEnd = nameStart;
+            while (input[nameEnd] && input[nameEnd] != ')') {
+                ++nameEnd;
+            }
+            if (input[nameEnd] == ')' && nameEnd > nameStart) {
+                size_t nameLen = nameEnd - nameStart;
+                char *name = malloc(nameLen + 1);
+                if (!name) {
+                    free(output);
+                    return NULL;
+                }
+                memcpy(name, input + nameStart, nameLen);
+                name[nameLen] = '\0';
+                const char *value = getenv(name);
+                free(name);
+                if (value && *value) {
+                    size_t valueLen = strlen(value);
+                    if (ensureBufferCapacity(&output, &capacity, outLength + valueLen + 1) != 0) {
+                        free(output);
+                        return NULL;
+                    }
+                    memcpy(output + outLength, value, valueLen);
+                    outLength += valueLen;
+                    i = nameEnd + 1;
+                    continue;
+                }
+            }
+        }
+
+        if (ensureBufferCapacity(&output, &capacity, outLength + 2) != 0) {
+            free(output);
+            return NULL;
+        }
+        output[outLength++] = input[i++];
+    }
+
+    output[outLength] = '\0';
+    return output;
 }
 
 static int appendArgOwned(ArgList *list, char *value) {
@@ -500,19 +570,30 @@ int main(void) {
     }
 
     bool configLoaded = false;
-    const char *configPath = getenv("PSCAL_RUN_CONFIG");
-    if (configPath && *configPath) {
-        char *envConfigDir = duplicateParentDirectory(configPath);
+    const char *configEnv = getenv("PSCAL_RUN_CONFIG");
+    char *expandedConfigPath = NULL;
+    if (configEnv && *configEnv) {
+        expandedConfigPath = expandEnvironmentMacros(configEnv);
+        if (!expandedConfigPath) {
+            fprintf(stderr, "[pscal-runner] out of memory\n");
+            freeArgList(&arguments);
+            free(binaryName);
+            return EXIT_FAILURE;
+        }
+        char *envConfigDir = duplicateParentDirectory(expandedConfigPath);
         if (!envConfigDir) {
             fprintf(stderr, "[pscal-runner] unable to determine configuration directory\n");
             freeArgList(&arguments);
             free(binaryName);
+            free(expandedConfigPath);
             return EXIT_FAILURE;
         }
         free(configDir);
         configDir = envConfigDir;
 
-        ConfigLoadResult result = loadConfigFromPath(configPath, true, &arguments, &binaryName, &workingDirectory, &configDir);
+        ConfigLoadResult result = loadConfigFromPath(expandedConfigPath, true, &arguments, &binaryName, &workingDirectory, &configDir);
+        free(expandedConfigPath);
+        expandedConfigPath = NULL;
         if (result == CONFIG_LOAD_ERROR) {
             freeArgList(&arguments);
             free(binaryName);
@@ -525,8 +606,10 @@ int main(void) {
         }
     }
 
+    free(expandedConfigPath);
+
     if (!configLoaded) {
-        const char *projectDir = getenv("PROJECT_DIR");
+        const char *projectDir = getProjectDirectoryEnv();
         if (projectDir && *projectDir) {
             char *projectConfigPath = joinPath(projectDir, "RunConfiguration.cfg");
             if (!projectConfigPath) {
@@ -617,7 +700,17 @@ int main(void) {
 
     const char *envWorkingDir = getenv("PSCAL_RUN_WORKING_DIRECTORY");
     if (envWorkingDir && *envWorkingDir) {
-        char *resolved = resolvePath(configDir, envWorkingDir);
+        char *expandedWorkingDir = expandEnvironmentMacros(envWorkingDir);
+        if (!expandedWorkingDir) {
+            fprintf(stderr, "[pscal-runner] out of memory\n");
+            freeArgList(&arguments);
+            free(binaryName);
+            free(workingDirectory);
+            free(configDir);
+            return EXIT_FAILURE;
+        }
+        char *resolved = resolvePath(configDir, expandedWorkingDir);
+        free(expandedWorkingDir);
         if (!resolved) {
             fprintf(stderr, "[pscal-runner] failed to resolve PSCAL_RUN_WORKING_DIRECTORY\n");
             freeArgList(&arguments);
