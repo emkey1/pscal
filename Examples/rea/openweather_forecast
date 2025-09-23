@@ -134,10 +134,15 @@ int main() {
   str placeName = "";
   str stateName = "";
   str countryName = "";
+  mstream geoOut;
+  bool geoOutAllocated = false;
+  mstream forecastOut;
+  bool forecastOutAllocated = false;
 
   if (ok) {
     str geocodeUrl = "https://api.openweathermap.org/geo/1.0/zip?zip=" + zip + "," + country + "&appid=" + apiKey;
-    mstream geoOut = mstreamcreate();
+    geoOut = mstreamcreate();
+    geoOutAllocated = true;
     int geoStatus = httprequest(session, "GET", geocodeUrl, nil, geoOut);
     str geoBody = mstreambuffer(geoOut);
 
@@ -201,14 +206,19 @@ int main() {
         YyjsonDocFree(geoDoc);
       }
     }
+  }
+
+  if (geoOutAllocated) {
     mstreamfree(geoOut);
+    geoOutAllocated = false;
   }
 
   if (ok) {
     str latStr = realtostr(lat);
     str lonStr = realtostr(lon);
     str forecastUrl = "https://api.openweathermap.org/data/3.0/onecall?lat=" + latStr + "&lon=" + lonStr + "&units=" + unitsParam + "&exclude=minutely,alerts&appid=" + apiKey;
-    mstream forecastOut = mstreamcreate();
+    forecastOut = mstreamcreate();
+    forecastOutAllocated = true;
     int forecastStatus = httprequest(session, "GET", forecastUrl, nil, forecastOut);
     str forecastBody = mstreambuffer(forecastOut);
 
@@ -436,7 +446,11 @@ int main() {
         YyjsonDocFree(forecastDoc);
       }
     }
+  }
+
+  if (forecastOutAllocated) {
     mstreamfree(forecastOut);
+    forecastOutAllocated = false;
   }
 
   httpclose(session);
