@@ -153,6 +153,22 @@ typedef struct FunctionBodyRange {
     int max_line;
 } FunctionBodyRange;
 
+static FunctionBodyRange *findFunctionBodyRangeForNode(AST *node,
+                                                       FunctionBodyRange *ranges,
+                                                       int range_count) {
+    if (!node || !ranges || range_count <= 0) {
+        return NULL;
+    }
+    for (AST *current = node; current; current = current->parent) {
+        for (int i = 0; i < range_count; i++) {
+            if (ranges[i].body == current) {
+                return &ranges[i];
+            }
+        }
+    }
+    return NULL;
+}
+
 static bool addGlobalName(const char ***array, int *count, int *capacity, const char *name) {
     if (!array || !count || !capacity || !name) {
         return false;
@@ -2495,17 +2511,46 @@ AST *parseRea(const char *source) {
             int stmt_min = INT_MAX;
             int stmt_max = 0;
             computeLineRange(s, &stmt_min, &stmt_max);
+            int references_non_global = -1;
             if (function_body_nodes && function_body_node_count > 0) {
                 for (int j = 0; j < function_body_node_count; j++) {
                     AST *body_node = function_body_nodes[j];
                     if (!body_node) continue;
-                    if (astStructurallyEqual(s, body_node)) {
-                        duplicate = true;
-                        if (s == body_node) {
-                            pointer_match = true;
-                        }
-                        break;
+                    if (!astStructurallyEqual(s, body_node)) {
+                        continue;
                     }
+                    FunctionBodyRange *owner = findFunctionBodyRangeForNode(body_node,
+                                                                            function_body_ranges,
+                                                                            function_body_range_count);
+                    bool same_span = false;
+                    if (owner && stmt_max > 0 && stmt_min <= stmt_max) {
+                        if (stmt_max >= owner->min_line && stmt_min <= owner->max_line) {
+                            same_span = true;
+                        }
+                    }
+                    bool uses_non_global = false;
+                    if (!same_span && global_name_count > 0 && stmt_max > 0) {
+                        if (references_non_global == -1) {
+                            references_non_global = statementReferencesNonGlobal(s,
+                                                                                global_names,
+                                                                                global_name_count,
+                                                                                NULL)
+                                                       ? 1 : 0;
+                        }
+                        uses_non_global = (references_non_global == 1);
+                    }
+                    if (!same_span && !uses_non_global) {
+                        continue;
+                    }
+                    duplicate = true;
+                    if (s == body_node) {
+                        pointer_match = true;
+                    }
+                    if (uses_non_global && owner && owner->body && s->parent != owner->body) {
+                        addChild(owner->body, s);
+                        reattached_to_body = true;
+                    }
+                    break;
                 }
             }
             if (!duplicate && function_body_range_count > 0) {
@@ -2524,7 +2569,14 @@ AST *parseRea(const char *source) {
                 }
             }
             if (!duplicate && global_name_count > 0 && stmt_max > 0) {
-                if (statementReferencesNonGlobal(s, global_names, global_name_count, NULL)) {
+                bool uses_non_global = false;
+                if (references_non_global != -1) {
+                    uses_non_global = (references_non_global == 1);
+                } else {
+                    uses_non_global = statementReferencesNonGlobal(s, global_names, global_name_count, NULL);
+                    references_non_global = uses_non_global ? 1 : 0;
+                }
+                if (uses_non_global) {
                     FunctionBodyRange *target = NULL;
                     for (int j = function_body_range_count - 1; j >= 0; j--) {
                         FunctionBodyRange *info = &function_body_ranges[j];
