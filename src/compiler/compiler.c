@@ -4021,16 +4021,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     num_labels = labels_node->child_count;
                 }
 
+                bool share_branch_body = (num_labels > 1);
+                int* match_jumps = NULL;
+                int match_jumps_count = 0;
+
                 // 3. For each label within the current branch.
                 for (int j = 0; j < num_labels; j++) {
                     AST* label = labels_to_check[j];
-                    
+
                     writeBytecodeChunk(chunk, DUP, line);
-                    
+
                     if (label->type == AST_SUBRANGE) {
                         // Logic for range: (case_val >= lower) AND (case_val <= upper)
                         // This is a more direct and correct translation.
-                        
+
                         // Check lower bound
                         writeBytecodeChunk(chunk, DUP, line);                   // Stack: [case, case]
                         compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, lower]
@@ -4042,7 +4046,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compileRValue(label->right, chunk, getLine(label));     // Stack: [case, bool1, case, upper]
                         writeBytecodeChunk(chunk, SWAP, line);                   // Stack: [case, bool1, upper, case]
                         writeBytecodeChunk(chunk, LESS_EQUAL, line);           // Stack: [case, bool1, bool2]
-                        
+
                         // Combine the two boolean results
                         writeBytecodeChunk(chunk, AND, line);                    // Stack: [case, final_bool]
 
@@ -4051,13 +4055,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compileRValue(label, chunk, getLine(label));
                         writeBytecodeChunk(chunk, EQUAL, line);                  // Stack: [case, bool]
                     }
-                    
+
                     // If the comparison is false, skip the branch body.
                     int false_jump = chunk->count;
                     writeBytecodeChunk(chunk, JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
 
-                    // The branch body starts here when the label matches.
-                    writeBytecodeChunk(chunk, POP, line); // Pop the matched case value.
+                    // When the label matches, pop the case value.
+                    writeBytecodeChunk(chunk, POP, line);
+
+                    if (share_branch_body) {
+                        // For multi-label branches, jump to the shared branch body.
+                        int match_jump = chunk->count;
+                        writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+
+                        match_jumps = realloc(match_jumps, (match_jumps_count + 1) * sizeof(int));
+                        match_jumps[match_jumps_count++] = match_jump;
+
+                        // Patch the false jump to point to the next label check.
+                        patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
+                        fallthrough_jump = false_jump + 1;
+                        continue;
+                    }
+
+                    // Single-label branches emit their body inline like the original implementation.
                     compileStatement(branch->right, chunk, getLine(branch->right));
 
                     // After body, jump to the end of the CASE.
@@ -4065,15 +4085,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     end_jumps[end_jumps_count++] = chunk->count;
                     writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
 
-                    // Patch the false jump to point to the next label.
+                    // Patch the false jump to point to the next label / branch.
                     patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
                     fallthrough_jump = false_jump + 1;
 
-                    // If a label in a multi-label branch matches, we jump to the body.
-                    // The other labels for this branch are now irrelevant.
+                    // Move to the next CASE branch.
                     goto next_branch;
                 }
-                
+
+                if (share_branch_body) {
+                    int branch_body_start = chunk->count;
+                    for (int j = 0; j < match_jumps_count; j++) {
+                        patchShort(chunk, match_jumps[j] + 1, branch_body_start - (match_jumps[j] + 3));
+                    }
+                    if (match_jumps) free(match_jumps);
+
+                    compileStatement(branch->right, chunk, getLine(branch->right));
+
+                    // After body, jump to the end of the CASE.
+                    end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
+                    end_jumps[end_jumps_count++] = chunk->count;
+                    writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+                }
+
             next_branch:;
             }
 
