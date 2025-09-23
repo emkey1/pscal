@@ -383,6 +383,12 @@ def build_project(output_path: Path, release_build: bool) -> None:
                     "release_defs": ["FRONTEND_REA"],
                 },
             ),
+            (
+                "pscal-runner",
+                {
+                    "sources": ["xcode/Support/pscal_runner_main.c"],
+                },
+            ),
             ("pscaljson2bc", {"sources": json2bc_sources}),
         ]
     )
@@ -447,6 +453,9 @@ def build_project(output_path: Path, release_build: bool) -> None:
         return group_ref
 
     src_group = emit_group(dir_tree.subdirs["src"], ("src",))
+    extra_top_groups: List[PBXRef] = []
+    for name in sorted(name for name in dir_tree.subdirs if name != "src"):
+        extra_top_groups.append(emit_group(dir_tree.subdirs[name], (name,)))
 
     # Root group and products group
     products_identifier = md5_id("GROUP", "Products")
@@ -455,7 +464,7 @@ def build_project(output_path: Path, release_build: bool) -> None:
 
     root_identifier = md5_id("GROUP", "")
     root_fields = {
-        "children": [src_group, products_ref],
+        "children": [src_group, *extra_top_groups, products_ref],
         "sourceTree": "<group>",
         "path": "..",
         "name": PROJECT_NAME,
