@@ -4021,6 +4021,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     num_labels = labels_node->child_count;
                 }
 
+                bool share_branch_body = (num_labels > 1);
                 int* match_jumps = NULL;
                 int match_jumps_count = 0;
 
@@ -4059,31 +4060,55 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     int false_jump = chunk->count;
                     writeBytecodeChunk(chunk, JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
 
-                    // When the label matches, pop the case value and jump to the shared branch body.
+                    // When the label matches, pop the case value.
                     writeBytecodeChunk(chunk, POP, line);
-                    int match_jump = chunk->count;
+
+                    if (share_branch_body) {
+                        // For multi-label branches, jump to the shared branch body.
+                        int match_jump = chunk->count;
+                        writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+
+                        match_jumps = realloc(match_jumps, (match_jumps_count + 1) * sizeof(int));
+                        match_jumps[match_jumps_count++] = match_jump;
+
+                        // Patch the false jump to point to the next label check.
+                        patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
+                        fallthrough_jump = false_jump + 1;
+                        continue;
+                    }
+
+                    // Single-label branches emit their body inline like the original implementation.
+                    compileStatement(branch->right, chunk, getLine(branch->right));
+
+                    // After body, jump to the end of the CASE.
+                    end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
+                    end_jumps[end_jumps_count++] = chunk->count;
                     writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
 
-                    match_jumps = realloc(match_jumps, (match_jumps_count + 1) * sizeof(int));
-                    match_jumps[match_jumps_count++] = match_jump;
-
-                    // Patch the false jump to point to the next label.
+                    // Patch the false jump to point to the next label / branch.
                     patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
                     fallthrough_jump = false_jump + 1;
+
+                    // Move to the next CASE branch.
+                    goto next_branch;
                 }
 
-                int branch_body_start = chunk->count;
-                for (int j = 0; j < match_jumps_count; j++) {
-                    patchShort(chunk, match_jumps[j] + 1, branch_body_start - (match_jumps[j] + 3));
+                if (share_branch_body) {
+                    int branch_body_start = chunk->count;
+                    for (int j = 0; j < match_jumps_count; j++) {
+                        patchShort(chunk, match_jumps[j] + 1, branch_body_start - (match_jumps[j] + 3));
+                    }
+                    if (match_jumps) free(match_jumps);
+
+                    compileStatement(branch->right, chunk, getLine(branch->right));
+
+                    // After body, jump to the end of the CASE.
+                    end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
+                    end_jumps[end_jumps_count++] = chunk->count;
+                    writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
                 }
-                if (match_jumps) free(match_jumps);
 
-                compileStatement(branch->right, chunk, getLine(branch->right));
-
-                // After body, jump to the end of the CASE.
-                end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
-                end_jumps[end_jumps_count++] = chunk->count;
-                writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+            next_branch:;
             }
 
             // After all branches, if an 'else' exists, compile it.
