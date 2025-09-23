@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
 #include "core/list.h"
 
 // Forward declaration from core/utils.c
@@ -46,6 +47,180 @@ static bool strictScanTop(AST* n) {
     if (strictScanTop(n->extra)) return true;
     for (int i = 0; i < n->child_count; i++) {
         if (strictScanTop(n->children[i])) return true;
+    }
+    return false;
+}
+
+static bool tokensStructurallyEqual(Token *a, Token *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->type != b->type) return false;
+    if ((a->value == NULL) != (b->value == NULL)) return false;
+    if (a->value && b->value && strcmp(a->value, b->value) != 0) return false;
+    return true;
+}
+
+static bool astStructurallyEqual(AST *a, AST *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->type != b->type) return false;
+    if (!tokensStructurallyEqual(a->token, b->token)) return false;
+    if (a->child_count != b->child_count) return false;
+    if (!astStructurallyEqual(a->left, b->left)) return false;
+    if (!astStructurallyEqual(a->right, b->right)) return false;
+    if (!astStructurallyEqual(a->extra, b->extra)) return false;
+    for (int i = 0; i < a->child_count; i++) {
+        if (!astStructurallyEqual(a->children[i], b->children[i])) return false;
+    }
+    return true;
+}
+
+static bool appendFunctionBodyNode(AST ***array, int *count, int *capacity, AST *node) {
+    if (!node || !array || !count || !capacity) {
+        return true;
+    }
+    if (*count >= *capacity) {
+        int new_capacity = (*capacity < 8) ? 8 : (*capacity * 2);
+        AST **resized = (AST **)realloc(*array, (size_t)new_capacity * sizeof(AST *));
+        if (!resized) {
+            return false;
+        }
+        *array = resized;
+        *capacity = new_capacity;
+    }
+    (*array)[(*count)++] = node;
+    return true;
+}
+
+static bool collectFunctionBodyNodesRecursive(AST *node, AST ***array, int *count, int *capacity) {
+    if (!node) {
+        return true;
+    }
+    if (!appendFunctionBodyNode(array, count, capacity, node)) {
+        return false;
+    }
+    if (!collectFunctionBodyNodesRecursive(node->left, array, count, capacity)) {
+        return false;
+    }
+    if (!collectFunctionBodyNodesRecursive(node->right, array, count, capacity)) {
+        return false;
+    }
+    if (!collectFunctionBodyNodesRecursive(node->extra, array, count, capacity)) {
+        return false;
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        if (!collectFunctionBodyNodesRecursive(node->children[i], array, count, capacity)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool collectFunctionBodyNodes(AST *body, AST ***array, int *count, int *capacity) {
+    return collectFunctionBodyNodesRecursive(body, array, count, capacity);
+}
+
+static void computeLineRange(AST *node, int *minLine, int *maxLine) {
+    if (!node || !minLine || !maxLine) {
+        return;
+    }
+    if (node->token) {
+        int line = node->token->line;
+        if (line > 0) {
+            if (line < *minLine) *minLine = line;
+            if (line > *maxLine) *maxLine = line;
+        }
+    }
+    if (node->left) {
+        computeLineRange(node->left, minLine, maxLine);
+    }
+    if (node->right) {
+        computeLineRange(node->right, minLine, maxLine);
+    }
+    if (node->extra) {
+        computeLineRange(node->extra, minLine, maxLine);
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i]) {
+            computeLineRange(node->children[i], minLine, maxLine);
+        }
+    }
+}
+
+typedef struct FunctionBodyRange {
+    AST *body;
+    int min_line;
+    int max_line;
+} FunctionBodyRange;
+
+static bool addGlobalName(const char ***array, int *count, int *capacity, const char *name) {
+    if (!array || !count || !capacity || !name) {
+        return false;
+    }
+    for (int i = 0; i < *count; i++) {
+        if (strcasecmp((*array)[i], name) == 0) {
+            return true;
+        }
+    }
+    if (*count >= *capacity) {
+        int new_capacity = (*capacity < 8) ? 8 : (*capacity * 2);
+        const char **resized = (const char **)realloc(*array, (size_t)new_capacity * sizeof(const char *));
+        if (!resized) {
+            return false;
+        }
+        *array = resized;
+        *capacity = new_capacity;
+    }
+    (*array)[(*count)++] = name;
+    return true;
+}
+
+static void collectGlobalNamesFromDecl(AST *decl, const char ***array, int *count, int *capacity) {
+    if (!decl) return;
+    switch (decl->type) {
+        case AST_VAR_DECL:
+        case AST_CONST_DECL:
+            for (int i = 0; i < decl->child_count; i++) {
+                AST *child = decl->children[i];
+                if (!child || !child->token || !child->token->value) continue;
+                addGlobalName(array, count, capacity, child->token->value);
+            }
+            break;
+        case AST_TYPE_DECL:
+        case AST_FUNCTION_DECL:
+        case AST_PROCEDURE_DECL:
+            if (decl->token && decl->token->value) {
+                addGlobalName(array, count, capacity, decl->token->value);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static bool statementReferencesNonGlobal(AST *node, const char **names, int count, AST *parent) {
+    if (!node) return false;
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        bool is_field_selector = parent && parent->type == AST_FIELD_ACCESS && parent->right == node;
+        if (!is_field_selector) {
+            const char *name = node->token->value;
+            bool known = false;
+            for (int i = 0; i < count; i++) {
+                if (strcasecmp(names[i], name) == 0) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                return true;
+            }
+        }
+    }
+    if (statementReferencesNonGlobal(node->left, names, count, node)) return true;
+    if (statementReferencesNonGlobal(node->right, names, count, node)) return true;
+    if (statementReferencesNonGlobal(node->extra, names, count, node)) return true;
+    for (int i = 0; i < node->child_count; i++) {
+        if (statementReferencesNonGlobal(node->children[i], names, count, node)) return true;
     }
     return false;
 }
@@ -2256,6 +2431,135 @@ AST *parseRea(const char *source) {
             
         }
     }
+
+    AST **function_body_nodes = NULL;
+    int function_body_node_count = 0;
+    int function_body_node_capacity = 0;
+    FunctionBodyRange *function_body_ranges = NULL;
+    int function_body_range_count = 0;
+    int function_body_range_capacity = 0;
+    const char **global_names = NULL;
+    int global_name_count = 0;
+    int global_name_capacity = 0;
+    bool collected_function_nodes = true;
+    for (int i = 0; i < decls->child_count && collected_function_nodes; i++) {
+        AST *d = decls->children[i];
+        if (!d) continue;
+        AST *body = NULL;
+        if (d->type == AST_FUNCTION_DECL) {
+            body = d->extra;
+        } else if (d->type == AST_PROCEDURE_DECL) {
+            body = d->right;
+        }
+        if (!body) continue;
+        if (!collectFunctionBodyNodes(body,
+                                      &function_body_nodes,
+                                      &function_body_node_count,
+                                      &function_body_node_capacity)) {
+            collected_function_nodes = false;
+        }
+        int min_line = INT_MAX;
+        int max_line = 0;
+        computeLineRange(body, &min_line, &max_line);
+        if (max_line > 0 && min_line <= max_line) {
+            if (function_body_range_count >= function_body_range_capacity) {
+                int new_capacity = function_body_range_capacity < 8 ? 8 : function_body_range_capacity * 2;
+                FunctionBodyRange *resized = (FunctionBodyRange *)realloc(function_body_ranges,
+                                                                          (size_t)new_capacity * sizeof(FunctionBodyRange));
+                if (resized) {
+                    function_body_ranges = resized;
+                    function_body_range_capacity = new_capacity;
+                }
+            }
+            if (function_body_range_count < function_body_range_capacity) {
+                function_body_ranges[function_body_range_count].body = body;
+                function_body_ranges[function_body_range_count].min_line = min_line;
+                function_body_ranges[function_body_range_count].max_line = max_line;
+                function_body_range_count++;
+            }
+        }
+    }
+
+    for (int i = 0; i < decls->child_count; i++) {
+        collectGlobalNamesFromDecl(decls->children[i], &global_names, &global_name_count, &global_name_capacity);
+    }
+
+    if ((function_body_nodes && function_body_node_count > 0) || function_body_range_count > 0) {
+        int write_idx = 0;
+        for (int i = 0; i < stmts->child_count; i++) {
+            AST *s = stmts->children[i];
+            if (!s) continue;
+            bool duplicate = false;
+            bool pointer_match = false;
+            bool reattached_to_body = false;
+            int stmt_min = INT_MAX;
+            int stmt_max = 0;
+            computeLineRange(s, &stmt_min, &stmt_max);
+            if (function_body_nodes && function_body_node_count > 0) {
+                for (int j = 0; j < function_body_node_count; j++) {
+                    AST *body_node = function_body_nodes[j];
+                    if (!body_node) continue;
+                    if (astStructurallyEqual(s, body_node)) {
+                        duplicate = true;
+                        if (s == body_node) {
+                            pointer_match = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (!duplicate && function_body_range_count > 0) {
+                if (stmt_max > 0 && stmt_min <= stmt_max) {
+                    for (int j = 0; j < function_body_range_count; j++) {
+                        FunctionBodyRange *info = &function_body_ranges[j];
+                        if (stmt_max >= info->min_line && stmt_min <= info->max_line) {
+                            duplicate = true;
+                            if (info->body && s->parent != info->body) {
+                                addChild(info->body, s);
+                                reattached_to_body = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!duplicate && global_name_count > 0 && stmt_max > 0) {
+                if (statementReferencesNonGlobal(s, global_names, global_name_count, NULL)) {
+                    FunctionBodyRange *target = NULL;
+                    for (int j = function_body_range_count - 1; j >= 0; j--) {
+                        FunctionBodyRange *info = &function_body_ranges[j];
+                        if (stmt_min >= info->min_line && stmt_min <= info->max_line) {
+                            target = info;
+                            break;
+                        }
+                        if (stmt_min > info->max_line) {
+                            target = info;
+                            break;
+                        }
+                    }
+                    if (target && target->body && s->parent != target->body) {
+                        addChild(target->body, s);
+                        reattached_to_body = true;
+                        duplicate = true;
+                    }
+                }
+            }
+            if (duplicate) {
+                if (!pointer_match && !reattached_to_body) {
+                    freeAST(s);
+                }
+                continue;
+            }
+            stmts->children[write_idx++] = s;
+        }
+        for (int i = write_idx; i < stmts->child_count; i++) {
+            stmts->children[i] = NULL;
+        }
+        stmts->child_count = write_idx;
+    }
+    free(function_body_nodes);
+    free(function_body_ranges);
+    free(global_names);
 
     // Optional strict validation for top-level structure issues (e.g., accidental use of 'myself' at top level).
     if (!p.hadError && g_rea_strict_mode) {
