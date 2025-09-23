@@ -1859,7 +1859,7 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%Lf", v.real.r_val);
             break;
         case TYPE_BOOLEAN:
-            fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val
+            fprintf(stream, "%s", v.i_val ? "true" : "false");
             break;
         case TYPE_CHAR:
             fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII
@@ -1872,7 +1872,7 @@ void printValueToStream(Value v, FILE *stream) {
             }
             break;
         case TYPE_NIL:
-            fprintf(stream, "NIL");
+            fprintf(stream, "nil");
             break;
         case TYPE_POINTER:
             fprintf(stream, "POINTER(@%p -> ", (void*)v.ptr_val);

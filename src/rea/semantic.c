@@ -126,6 +126,32 @@ static AST *getFunctionBody(AST *func) {
     return NULL;
 }
 
+static AST *findEnclosingCompound(AST *node) {
+    while (node && node->type != AST_COMPOUND) {
+        node = node->parent;
+    }
+    return node;
+}
+
+static int declarationLine(AST *decl) {
+    if (!decl) return 0;
+    if (decl->token) {
+        return decl->token->line;
+    }
+    if (decl->child_count > 0 && decl->children) {
+        for (int i = 0; i < decl->child_count; i++) {
+            AST *child = decl->children[i];
+            if (!child) continue;
+            if (child->token) return child->token->line;
+            if (child->left && child->left->token) return child->left->token->line;
+            if (child->right && child->right->token) return child->right->token->line;
+        }
+    }
+    if (decl->left && decl->left->token) return decl->left->token->line;
+    if (decl->right && decl->right->token) return decl->right->token->line;
+    return 0;
+}
+
 static bool functionCapturesOuterVisitor(AST *node, AST *func) {
     if (!node || !func) return false;
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
@@ -988,6 +1014,30 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
 
+        if (decl && (decl->type == AST_VAR_DECL || decl->type == AST_CONST_DECL)) {
+            AST *decl_func = findEnclosingFunction(decl);
+            AST *use_func = findEnclosingFunction(node);
+            if (decl_func == use_func) {
+                AST *decl_scope = findEnclosingCompound(decl);
+                AST *use_scope = findEnclosingCompound(node);
+                if (decl_scope && use_scope && decl_scope == use_scope) {
+                    int decl_line = declarationLine(decl);
+                    if (decl_line > 0 && decl_line > node->token->line) {
+                        Symbol *global = lookupGlobalSymbol(ident);
+                        if (global) {
+                            node->var_type = global->type;
+                            node->type_def = global->type_def;
+                            decl = NULL;
+                        } else {
+                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                    node->token->line, ident);
+                            pascal_semantic_error_count++;
+                        }
+                    }
+                }
+            }
+        }
+
         if (decl && (decl->type == AST_FUNCTION_DECL || decl->type == AST_PROCEDURE_DECL)) {
             AST *enclosing = findEnclosingFunction(decl);
             if (enclosing && closureCapturesOuterScope(decl)) {
@@ -1085,6 +1135,41 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
+        if (node->token && node->token->value) {
+            AST *callDecl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+            if (callDecl && (callDecl->type == AST_FUNCTION_DECL || callDecl->type == AST_PROCEDURE_DECL)) {
+                AST *decl_scope = findEnclosingCompound(callDecl);
+                AST *use_scope = findEnclosingCompound(node);
+                if (decl_scope && use_scope && decl_scope == use_scope) {
+                    int decl_line = declarationLine(callDecl);
+                    if (decl_line > 0 && decl_line > node->token->line) {
+                        Symbol *global = lookupGlobalSymbol(node->token->value);
+                        if (!global) {
+                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
+                        }
+                    }
+                }
+            }
+            AST *enclosing = findEnclosingFunction(node);
+            if (enclosing) {
+                AST *body = getFunctionBody(enclosing);
+                AST *nested = findFunctionInSubtree(body, node->token->value);
+                if (nested && nested != enclosing) {
+                    AST *decl_scope = findEnclosingCompound(nested);
+                    AST *use_scope = findEnclosingCompound(node);
+                    if (decl_scope && use_scope && decl_scope == use_scope) {
+                        int decl_line = declarationLine(nested);
+                        if (decl_line > 0 && decl_line > node->token->line) {
+                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
+                        }
+                    }
+                }
+            }
+        }
         if (!node->left && node->token && node->token->value && node->i_val == 0) {
             const char *us = strchr(node->token->value, '_');
             if (us) {

@@ -110,6 +110,7 @@ typedef struct {
     int depth; // Scope depth
     bool is_ref;
     bool is_captured;
+    AST* decl_node;
 } CompilerLocal;
 
 #define MAX_LOOP_DEPTH 16 // Max nested loops
@@ -1428,13 +1429,10 @@ static void compilerEndScope(FunctionCompilerState* fc) {
     }
 }
 
-static int resolveLocalInCurrentScope(FunctionCompilerState* fc, const char* name) {
+static int findLocalByName(FunctionCompilerState* fc, const char* name) {
     if (!fc || !name) return -1;
     for (int i = fc->local_count - 1; i >= 0; i--) {
         CompilerLocal* local = &fc->locals[i];
-        if (local->depth < fc->scope_depth) {
-            break;
-        }
         if (local->name && strcasecmp(local->name, name) == 0) {
             return i;
         }
@@ -1450,16 +1448,36 @@ static void registerVarDeclLocals(AST* varDecl, bool emitError) {
         AST* varNameNode = varDecl->children[i];
         if (!varNameNode || !varNameNode->token || !varNameNode->token->value) continue;
         const char* name = varNameNode->token->value;
-        if (resolveLocalInCurrentScope(current_function_compiler, name) == -1) {
-            addLocal(current_function_compiler, name, getLine(varNameNode), false);
-        } else {
+        int idx = findLocalByName(current_function_compiler, name);
+        if (idx >= 0) {
+        CompilerLocal* existing = &current_function_compiler->locals[idx];
+        if (existing->depth < 0) {
+            existing->depth = current_function_compiler->scope_depth;
+            existing->is_ref = false;
+            existing->is_captured = false;
+            existing->decl_node = varDecl;
+            continue;
+        }
+        if (existing->depth == current_function_compiler->scope_depth) {
+            if (existing->decl_node == varDecl) {
+                continue;
+            }
             if (emitError) {
                 fprintf(stderr, "L%d: duplicate variable '%s' in this scope.\n",
                         getLine(varNameNode), name);
                 compiler_had_error = true;
             }
+        } else {
+            addLocal(current_function_compiler, name, getLine(varNameNode), false);
+            CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
+            fresh->decl_node = varDecl;
         }
+    } else {
+        addLocal(current_function_compiler, name, getLine(varNameNode), false);
+        CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
+        fresh->decl_node = varDecl;
     }
+}
 }
 
 
@@ -1596,12 +1614,14 @@ static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool
     local->depth = fc->scope_depth;
     local->is_ref = is_ref;
     local->is_captured = false;
+    local->decl_node = NULL;
 }
 
 static int resolveLocal(FunctionCompilerState* fc, const char* name) {
     if (!fc) return -1;
     for (int i = fc->local_count - 1; i >= 0; i--) {
         CompilerLocal* local = &fc->locals[i];
+        if (local->depth < 0) continue;
         if (strcasecmp(name, local->name) == 0) {
             return i;
         }
@@ -3487,8 +3507,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             // regardless of where they appear in the block.
             for (int i = 0; i < node->child_count; i++) {
                 AST *child = node->children[i];
-                if (child && (child->type == AST_PROCEDURE_DECL ||
-                              child->type == AST_FUNCTION_DECL)) {
+                if (!child) continue;
+                if (child->type == AST_VAR_DECL) {
+                    registerVarDeclLocals(child, false);
+                }
+                if (child->type == AST_PROCEDURE_DECL ||
+                    child->type == AST_FUNCTION_DECL) {
                     compileNode(child, chunk, getLine(child));
                 }
             }
@@ -3632,6 +3656,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     // Step 3: Add all other local variables.
     blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
     if (blockNode) {
+        int locals_before_decl_scan = fc.local_count;
         if (blockNode->type == AST_BLOCK && blockNode->child_count > 0 &&
             blockNode->children[0]->type == AST_COMPOUND) {
             AST* decls = blockNode->children[0];
@@ -3658,6 +3683,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
                     }
                 }
             }
+        }
+        for (int i = locals_before_decl_scan; i < fc.local_count; i++) {
+            fc.locals[i].depth = -1;
+            fc.locals[i].decl_node = NULL;
         }
     }
 
@@ -5251,6 +5280,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (!is_param) {
                     Symbol *local_sym = lookupLocalSymbol(varName);
                     if (local_sym && !local_sym->is_local_var) {
+                        treat_as_local = false;
+                    }
+                }
+                if (treat_as_local) {
+                    CompilerLocal* local = &current_function_compiler->locals[local_slot];
+                    if (local->decl_node && getLine(local->decl_node) > line) {
                         treat_as_local = false;
                     }
                 }

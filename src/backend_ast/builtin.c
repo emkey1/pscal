@@ -3117,13 +3117,13 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
                     add_space = false;
                 } else {
                     char last = prev.s_val[len - 1];
-                    if (isspace((unsigned char)last) || last == '=' || last == ':' || last == '-' ) {
+                    if (isspace((unsigned char)last) || strchr("=:?!-", last)) {
                         add_space = false;
                     }
                 }
             } else if (prev.type == TYPE_CHAR) {
                 char last = (char)prev.c_val;
-                if (isspace((unsigned char)last) || last == '=') {
+                if (isspace((unsigned char)last) || strchr("=:?!-", last)) {
                     add_space = false;
                 }
             }
