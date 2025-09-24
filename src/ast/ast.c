@@ -390,13 +390,14 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
         return NULL;
     }
 
+    bool scanningParameters = (referenceNode == currentScopeNode);
     for (int i = 0; i < currentScopeNode->child_count; i++) {
         AST* paramDeclGroup = currentScopeNode->children[i];
         if (!paramDeclGroup) continue;
         if (paramDeclGroup->type == AST_VAR_DECL) {
             AST* found = matchVarDecl(paramDeclGroup, varName);
             if (found) {
-                if (referenceLine > 0) {
+                if (!scanningParameters && referenceLine > 0) {
                     int declLine = declarationLine(paramDeclGroup);
                     if (declLine > referenceLine) continue;
                 }

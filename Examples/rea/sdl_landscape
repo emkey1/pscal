@@ -500,8 +500,13 @@ class LandscapeDemo {
     }
   }
 
-  void emitWaterVertex(int idx, int gridX, int gridZ, float groundHeight,
-                       float basePhase, float baseSecondary, float baseSparkle) {
+  void emitWaterVertex(int idx,
+                       int gridX,
+                       int gridZ,
+                       float groundHeight,
+                       float basePhase,
+                       float baseSecondary,
+                       float baseSparkle) {
     float depth = my.waterHeight - groundHeight;
     if (depth < 0.0) depth = 0.0;
     if (depth > 6.0) depth = 6.0;
