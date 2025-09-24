@@ -500,7 +500,7 @@ class LandscapeDemo {
     }
   }
 
-  void emitWaterVertex(int idx,
+    void emitWaterVertex(int idx,
                        int gridX,
                        int gridZ,
                        float groundHeight,
