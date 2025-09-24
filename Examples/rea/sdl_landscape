@@ -3,18 +3,18 @@
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
 // the user walk with W/S while steering the camera with the mouse.
 
-const int WindowWidth = 1280;
-const int WindowHeight = 720;
+const int WindowWidth = 1600;
+const int WindowHeight = 1200;
 const int TerrainSize = 128
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
 const int NoiseOctaves = 5;
-const float HeightScale = 32.0;
-const float EyeHeight = 4.5;
+const float HeightScale = 16.0;
+const float EyeHeight = 6.5;
 const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
-const float MouseYawSensitivity = 0.20;
+const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
 const float DegreesToRadians = 0.017453292519943295;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
