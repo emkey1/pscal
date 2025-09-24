@@ -229,6 +229,9 @@ static void collectUsesClauses(AST* node, List* out) {
     if (node->type == AST_USES_CLAUSE && node->unit_list) {
         collectUnitListPaths(node->unit_list, out);
     }
+    if (node->type == AST_IMPORT && node->token && node->token->value) {
+        listAppend(out, node->token->value);
+    }
     if (node->left) collectUsesClauses(node->left, out);
     if (node->right) collectUsesClauses(node->right, out);
     if (node->extra) collectUsesClauses(node->extra, out);
@@ -350,6 +353,7 @@ int main(int argc, char **argv) {
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
+    reaSemanticSetSourcePath(path);
     reaPerformSemanticAnalysis(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);
@@ -406,12 +410,26 @@ int main(int argc, char **argv) {
         // Handle #import directives by loading and linking Pascal units before compiling the main program
         walkUsesClauses(program, &chunk);
 
+        int moduleCount = reaGetLoadedModuleCount();
+        for (int i = 0; i < moduleCount && compilation_ok; i++) {
+            AST *moduleAST = reaGetModuleAST(i);
+            if (!moduleAST) continue;
+            annotateTypes(moduleAST, NULL, moduleAST);
+            if (!compileModuleAST(moduleAST, &chunk)) {
+                compilation_ok = false;
+                fprintf(stderr, "Compilation failed while processing module '%s'.\n",
+                        reaGetModuleName(i) ? reaGetModuleName(i) : reaGetModulePath(i));
+            }
+        }
+
         // Annotate types for the entire program prior to compilation so that
         // qualified method calls can be resolved to their class-mangled routines.
-        annotateTypes(program, NULL, program);
-        compilerEnableDynamicLocals(1);
-        compilation_ok = compileASTToBytecode(program, &chunk);
-        compilerEnableDynamicLocals(0);
+        if (compilation_ok) {
+            annotateTypes(program, NULL, program);
+            compilerEnableDynamicLocals(1);
+            compilation_ok = compileASTToBytecode(program, &chunk);
+            compilerEnableDynamicLocals(0);
+        }
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, &chunk);

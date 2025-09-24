@@ -238,6 +238,12 @@ char *preprocessConditionals(const char *source, const char **defines, int defin
                     IfState st = stack[--sp];
                     emit = st.outer_active;
                 }
+            } else if (strcmp(directive, "import") == 0) {
+                if (emit) {
+                    size_t copy_len = (size_t)(line_end - line_start);
+                    memcpy(out + out_pos, line_start, copy_len);
+                    out_pos += copy_len;
+                }
             }
 
             if (arg) {

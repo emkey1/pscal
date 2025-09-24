@@ -105,6 +105,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "new", 3) == 0) return REA_TOKEN_NEW;
             if (strncmp(start, "nil", 3) == 0) return REA_TOKEN_NIL;
             if (strncmp(start, "xor", 3) == 0) return REA_TOKEN_XOR;
+            if (strncmp(start, "try", 3) == 0) return REA_TOKEN_TRY;
             break;
         case 4:
             if (strncmp(start, "else", 4) == 0) return REA_TOKEN_ELSE;
@@ -117,6 +118,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "text", 4) == 0) return REA_TOKEN_TEXT;
             if (strncmp(start, "int8", 4) == 0) return REA_TOKEN_INT8;
             if (strncmp(start, "join", 4) == 0) return REA_TOKEN_JOIN;
+            if (strncmp(start, "type", 4) == 0) return REA_TOKEN_TYPE;
             break;
         case 5:
             if (strncmp(start, "class", 5) == 0) return REA_TOKEN_CLASS;
@@ -130,6 +132,10 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int32", 5) == 0) return REA_TOKEN_INT32;
             if (strncmp(start, "int64", 5) == 0) return REA_TOKEN_INT64;
             if (strncmp(start, "spawn", 5) == 0) return REA_TOKEN_SPAWN;
+            if (strncmp(start, "alias", 5) == 0) return REA_TOKEN_ALIAS;
+            if (strncmp(start, "match", 5) == 0) return REA_TOKEN_MATCH;
+            if (strncmp(start, "catch", 5) == 0) return REA_TOKEN_CATCH;
+            if (strncmp(start, "throw", 5) == 0) return REA_TOKEN_THROW;
             break;
         case 6:
             if (strncmp(start, "return", 6) == 0) return REA_TOKEN_RETURN;
@@ -138,6 +144,8 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "double", 6) == 0) return REA_TOKEN_FLOAT;
             if (strncmp(start, "myself", 6) == 0) return REA_TOKEN_MYSELF;
             if (strncmp(start, "string", 6) == 0) return REA_TOKEN_STR;
+            if (strncmp(start, "module", 6) == 0) return REA_TOKEN_MODULE;
+            if (strncmp(start, "export", 6) == 0) return REA_TOKEN_EXPORT;
             break;
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
@@ -192,6 +200,7 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
         case '-':
             if (match(lexer, '-')) return makeToken(lexer, REA_TOKEN_MINUS_MINUS, start);
+            if (match(lexer, '>')) return makeToken(lexer, REA_TOKEN_ARROW, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_MINUS_EQUAL : REA_TOKEN_MINUS, start);
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
@@ -325,6 +334,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_DOT: return "DOT";
         case REA_TOKEN_SEMICOLON: return "SEMICOLON";
         case REA_TOKEN_COLON: return "COLON";
+        case REA_TOKEN_ARROW: return "ARROW";
         case REA_TOKEN_PLUS: return "PLUS";
         case REA_TOKEN_PLUS_PLUS: return "PLUS_PLUS";
         case REA_TOKEN_PLUS_EQUAL: return "PLUS_EQUAL";
@@ -360,6 +370,12 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_SWITCH: return "SWITCH";
         case REA_TOKEN_CASE: return "CASE";
         case REA_TOKEN_DEFAULT: return "DEFAULT";
+        case REA_TOKEN_TYPE: return "TYPE";
+        case REA_TOKEN_ALIAS: return "ALIAS";
+        case REA_TOKEN_MATCH: return "MATCH";
+        case REA_TOKEN_TRY: return "TRY";
+        case REA_TOKEN_CATCH: return "CATCH";
+        case REA_TOKEN_THROW: return "THROW";
         case REA_TOKEN_BREAK: return "BREAK";
         case REA_TOKEN_CONTINUE: return "CONTINUE";
         case REA_TOKEN_RETURN: return "RETURN";

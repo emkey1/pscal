@@ -8,5 +8,10 @@
  * methods.  Any detected issues are reported via stderr and the global
  * pascal_semantic_error_count variable. */
 void reaPerformSemanticAnalysis(AST *root);
+void reaSemanticSetSourcePath(const char *path);
+int reaGetLoadedModuleCount(void);
+AST *reaGetModuleAST(int index);
+const char *reaGetModulePath(int index);
+const char *reaGetModuleName(int index);
 
 #endif /* REA_SEMANTIC_H */

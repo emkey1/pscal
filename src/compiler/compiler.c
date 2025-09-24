@@ -77,6 +77,10 @@ void compilerEnableDynamicLocals(int enable) {
     compiler_dynamic_locals = enable ? 1 : 0;
 }
 
+void compilerSetCurrentUnitName(const char *name) {
+    current_compilation_unit_name = name;
+}
+
 static bool astNodeIsDescendant(AST* ancestor, AST* node) {
     if (!ancestor || !node) return false;
     for (AST* cur = node; cur != NULL; cur = cur->parent) {
@@ -639,7 +643,7 @@ static void emitDeferredGlobalInitializers(BytecodeChunk* chunk) {
                 actual_type_def_node = resolved_node;
             } else {
                 fprintf(stderr,
-                        "L%d: Compiler error: User-defined type '%s' not found.\n",
+                        "L%d: identifier '%s' not in scope.\n",
                         getLine(actual_type_def_node),
                         actual_type_def_node->token ? actual_type_def_node->token->value : "?");
                 compiler_had_error = true;
@@ -3027,14 +3031,11 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
     resetAddressConstantTracking();
-    // Initialize debug flag from environment (REA_DEBUG=1 to enable)
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
         if (d && *d && *d != '0') compiler_debug = 1;
     }
     gCurrentProgramRoot = rootNode;
-    // Do NOT re-initialize the chunk here, it's already populated with unit code.
-    // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
     compiler_had_error = false;
     current_function_compiler = NULL;
@@ -3053,8 +3054,6 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     current_procedure_table = procedure_table;
 
     if (rootNode->type == AST_PROGRAM) {
-        // The `USES` clause has already been handled during parsing.
-        // We only need to compile the main program block here.
         if (rootNode->right && rootNode->right->type == AST_BLOCK) {
             compileNode(rootNode->right, outputChunk, getLine(rootNode));
         } else {
@@ -3062,13 +3061,76 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
             compiler_had_error = true;
         }
     } else {
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for compilation, got %s.\n", astTypeToString(rootNode->type));
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for compilation, got %s.\n",
+                astTypeToString(rootNode->type));
         compiler_had_error = true;
     }
     if (!compiler_had_error) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
         applyPeepholeOptimizations(outputChunk);
     }
+    return !compiler_had_error;
+}
+
+bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
+    if (!rootNode || !outputChunk) return false;
+    resetAddressConstantTracking();
+    if (!compiler_debug) {
+        const char* d = getenv("REA_DEBUG");
+        if (d && *d && *d != '0') compiler_debug = 1;
+    }
+    gCurrentProgramRoot = rootNode;
+    compilerGlobalCount = 0;
+    compiler_had_error = false;
+    current_function_compiler = NULL;
+    int saved_myself_flag = compiler_defined_myself_global;
+    int saved_myself_idx = compiler_myself_global_name_idx;
+    compiler_defined_myself_global = true;
+    compiler_myself_global_name_idx = saved_myself_idx;
+    postpone_global_initializers = false;
+    if (deferred_global_initializers) {
+        free(deferred_global_initializers);
+        deferred_global_initializers = NULL;
+    }
+    deferred_global_initializer_count = 0;
+    deferred_global_initializer_capacity = 0;
+
+    ensureMyselfGlobalDefined(outputChunk, rootNode ? getLine(rootNode) : 0);
+
+    current_procedure_table = procedure_table;
+
+    const char *moduleName = NULL;
+    if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK &&
+        rootNode->right->child_count > 0) {
+        AST *decls = rootNode->right->children[0];
+        if (decls && decls->type == AST_COMPOUND) {
+            for (int i = 0; i < decls->child_count; i++) {
+                AST *child = decls->children[i];
+                if (child && child->type == AST_MODULE && child->token && child->token->value) {
+                    moduleName = child->token->value;
+                    break;
+                }
+            }
+        }
+    }
+
+    compilerSetCurrentUnitName(moduleName);
+
+    if (rootNode->type == AST_PROGRAM) {
+        if (rootNode->right && rootNode->right->type == AST_BLOCK) {
+            compileNode(rootNode->right, outputChunk, getLine(rootNode));
+        } else {
+            fprintf(stderr, "Compiler error: AST_PROGRAM node missing main block in module compilation.\n");
+            compiler_had_error = true;
+        }
+    } else {
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for module compilation, got %s.\n",
+                astTypeToString(rootNode->type));
+        compiler_had_error = true;
+    }
+    compilerSetCurrentUnitName(NULL);
+    compiler_defined_myself_global = saved_myself_flag;
+    compiler_myself_global_name_idx = saved_myself_idx;
     return !compiler_had_error;
 }
 
@@ -3091,6 +3153,10 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (!decl_child) continue;
+                    if (decl_child->type == AST_MODULE) {
+                        compileNode(decl_child, chunk, getLine(decl_child));
+                        continue;
+                    }
                     if (decl_child->type == AST_VAR_DECL ||
                         decl_child->type == AST_CONST_DECL ||
                         decl_child->type == AST_TYPE_DECL) {
@@ -3165,7 +3231,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (resolved_node) {
                         actual_type_def_node = resolved_node; // This now points to the AST_ARRAY_TYPE node
                     } else {
-                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        fprintf(stderr, "L%d: identifier '%s' not in scope.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
                         compiler_had_error = true;
                         break;
                     }
@@ -3214,7 +3280,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (resolved_node) {
                         actual_type_def_node = resolved_node;
                     } else {
-                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        fprintf(stderr, "L%d: identifier '%s' not in scope.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
                         compiler_had_error = true;
                         break;
                     }
@@ -3494,6 +3560,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
             break;
         }
+        case AST_MODULE: {
+            if (node->right) {
+                compileNode(node->right, chunk, getLine(node->right));
+            }
+            break;
+        }
         case AST_COMPOUND: {
             bool enters_scope = current_function_compiler != NULL && !node->is_global_scope;
             SymbolEnvSnapshot scope_snapshot;
@@ -3508,8 +3580,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             for (int i = 0; i < node->child_count; i++) {
                 AST *child = node->children[i];
                 if (!child) continue;
-                if (child->type == AST_VAR_DECL) {
-                    registerVarDeclLocals(child, false);
+            if (child->type == AST_VAR_DECL) {
+                registerVarDeclLocals(child, false);
+                } else if (child->type == AST_MODULE) {
+                    compileNode(child, chunk, getLine(child));
+                    continue;
                 }
                 if (child->type == AST_PROCEDURE_DECL ||
                     child->type == AST_FUNCTION_DECL) {

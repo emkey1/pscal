@@ -3,6 +3,9 @@
 #include "Pascal/globals.h"
 #include "core/types.h"
 #include "core/utils.h"
+#include "rea/parser.h"
+#include "ast/ast.h"
+#include "compiler/compiler.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +31,969 @@ typedef struct ClassInfo {
 
 static HashTable *class_table = NULL;    /* Maps class name -> ClassInfo */
 static AST *gProgramRoot = NULL;         /* Needed for declaration lookups */
+
+typedef enum {
+    REA_MODULE_EXPORT_CONST,
+    REA_MODULE_EXPORT_VAR,
+    REA_MODULE_EXPORT_FUNCTION,
+    REA_MODULE_EXPORT_PROCEDURE,
+    REA_MODULE_EXPORT_TYPE
+} ReaModuleExportKind;
+
+typedef struct ReaModuleExport {
+    char *name;                /* Unqualified export name */
+    ReaModuleExportKind kind;  /* Export category */
+    AST *decl;                 /* Pointer to declaration node inside module AST */
+} ReaModuleExport;
+
+typedef struct ReaModuleInfo {
+    char *path;                /* Source path (as imported) */
+    char *directory;           /* Directory containing the source */
+    char *name;                /* Declared module name */
+    AST *ast;                  /* Parsed AST root (PROGRAM) */
+    AST *module_node;          /* Pointer to AST_MODULE node */
+    ReaModuleExport *exports;  /* Dynamic array of exports */
+    int export_count;
+    int export_capacity;
+    bool processed;            /* Semantic analysis applied */
+    bool in_progress;          /* Guards against cyclic imports */
+} ReaModuleInfo;
+
+typedef struct ReaModuleBinding {
+    char *alias;               /* Accessible name within current scope */
+    ReaModuleInfo *module;     /* Target module */
+} ReaModuleBinding;
+
+typedef struct ReaModuleBindingList {
+    ReaModuleBinding *items;
+    int count;
+    int capacity;
+} ReaModuleBindingList;
+
+static ReaModuleInfo *gLoadedModules = NULL;
+static int gLoadedModuleCount = 0;
+static int gLoadedModuleCapacity = 0;
+
+static ReaModuleBindingList *gActiveBindings = NULL;
+static char **gModuleDirStack = NULL;
+static int gModuleDirDepth = 0;
+static char *reaDupString(const char *s);
+
+static char **gGenericTypeNames = NULL;
+static int gGenericTypeCount = 0;
+static int gGenericTypeCapacity = 0;
+static int *gGenericFrameStack = NULL;
+static int gGenericFrameDepth = 0;
+static int gGenericFrameCapacity = 0;
+
+static bool ensureGenericNameCapacity(int needed) {
+    if (gGenericTypeCapacity >= needed) return true;
+    int newCap = gGenericTypeCapacity ? gGenericTypeCapacity * 2 : 8;
+    while (newCap < needed) newCap *= 2;
+    char **resized = (char **)realloc(gGenericTypeNames, (size_t)newCap * sizeof(char *));
+    if (!resized) {
+        fprintf(stderr, "Memory allocation failure expanding generic type table.\n");
+        return false;
+    }
+    for (int i = gGenericTypeCapacity; i < newCap; i++) {
+        resized[i] = NULL;
+    }
+    gGenericTypeNames = resized;
+    gGenericTypeCapacity = newCap;
+    return true;
+}
+
+static bool ensureGenericFrameCapacity(int needed) {
+    if (gGenericFrameCapacity >= needed) return true;
+    int newCap = gGenericFrameCapacity ? gGenericFrameCapacity * 2 : 8;
+    while (newCap < needed) newCap *= 2;
+    int *resized = (int *)realloc(gGenericFrameStack, (size_t)newCap * sizeof(int));
+    if (!resized) {
+        fprintf(stderr, "Memory allocation failure expanding generic frame stack.\n");
+        return false;
+    }
+    gGenericFrameStack = resized;
+    gGenericFrameCapacity = newCap;
+    return true;
+}
+
+static void pushGenericFrame(void) {
+    if (!ensureGenericFrameCapacity(gGenericFrameDepth + 1)) {
+        EXIT_FAILURE_HANDLER();
+    }
+    gGenericFrameStack[gGenericFrameDepth++] = gGenericTypeCount;
+}
+
+static void popGenericFrame(void) {
+    if (gGenericFrameDepth <= 0) return;
+    int start = gGenericFrameStack[--gGenericFrameDepth];
+    for (int i = gGenericTypeCount - 1; i >= start; i--) {
+        free(gGenericTypeNames[i]);
+        gGenericTypeNames[i] = NULL;
+    }
+    gGenericTypeCount = start;
+}
+
+static void addGenericTypeName(const char *name) {
+    if (!name) return;
+    if (!ensureGenericNameCapacity(gGenericTypeCount + 1)) {
+        EXIT_FAILURE_HANDLER();
+    }
+    gGenericTypeNames[gGenericTypeCount] = strdup(name);
+    if (!gGenericTypeNames[gGenericTypeCount]) {
+        fprintf(stderr, "Memory allocation failure storing generic type name.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    gGenericTypeCount++;
+}
+
+static bool isGenericTypeName(const char *name) {
+    if (!name) return false;
+    for (int i = gGenericTypeCount - 1; i >= 0; i--) {
+        if (gGenericTypeNames[i] && strcasecmp(gGenericTypeNames[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clearGenericTypeState(void) {
+    for (int i = 0; i < gGenericTypeCount; i++) {
+        free(gGenericTypeNames[i]);
+    }
+    free(gGenericTypeNames);
+    gGenericTypeNames = NULL;
+    gGenericTypeCount = 0;
+    gGenericTypeCapacity = 0;
+    free(gGenericFrameStack);
+    gGenericFrameStack = NULL;
+    gGenericFrameDepth = 0;
+    gGenericFrameCapacity = 0;
+}
+
+static void freeDirStack(void) {
+    if (!gModuleDirStack) return;
+    for (int i = 0; i < gModuleDirDepth; i++) {
+        free(gModuleDirStack[i]);
+    }
+    free(gModuleDirStack);
+    gModuleDirStack = NULL;
+    gModuleDirDepth = 0;
+}
+
+static bool ensureDirStackCapacity(int needed) {
+    static int capacity = 0;
+    if (capacity >= needed) return true;
+    int newCap = capacity ? capacity * 2 : 8;
+    while (newCap < needed) newCap *= 2;
+    char **resized = (char **)realloc(gModuleDirStack, (size_t)newCap * sizeof(char *));
+    if (!resized) return false;
+    for (int i = capacity; i < newCap; i++) {
+        resized[i] = NULL;
+    }
+    gModuleDirStack = resized;
+    capacity = newCap;
+    return true;
+}
+
+static bool pushModuleDir(const char *dir) {
+    if (!ensureDirStackCapacity(gModuleDirDepth + 1)) {
+        fprintf(stderr, "Memory allocation failure expanding module directory stack.\n");
+        return false;
+    }
+    gModuleDirStack[gModuleDirDepth++] = dir ? reaDupString(dir) : NULL;
+    return true;
+}
+
+static void popModuleDir(void) {
+    if (gModuleDirDepth <= 0) return;
+    gModuleDirDepth--;
+    free(gModuleDirStack[gModuleDirDepth]);
+    gModuleDirStack[gModuleDirDepth] = NULL;
+}
+
+static char *reaDupString(const char *s) {
+    if (!s) return NULL;
+    char *copy = strdup(s);
+    if (!copy) {
+        fprintf(stderr, "Memory allocation failure duplicating string.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    return copy;
+}
+
+static bool pathIsAbsolute(const char *path) {
+    if (!path || !*path) return false;
+    if (path[0] == '/' || path[0] == '\\') return true;
+#if defined(_WIN32)
+    if (isalpha((unsigned char)path[0]) && path[1] == ':') return true;
+#endif
+    return false;
+}
+
+static char *joinPaths(const char *base, const char *relative) {
+    if (!relative || !*relative) return base ? reaDupString(base) : NULL;
+    if (!base || !*base) return reaDupString(relative);
+    size_t base_len = strlen(base);
+    bool need_sep = base_len > 0 && base[base_len - 1] != '/' && base[base_len - 1] != '\\';
+    size_t rel_len = strlen(relative);
+    size_t total = base_len + (need_sep ? 1 : 0) + rel_len + 1;
+    char *result = (char *)malloc(total);
+    if (!result) {
+        fprintf(stderr, "Memory allocation failure joining paths.\n");
+        return NULL;
+    }
+    strcpy(result, base);
+    if (need_sep) {
+        result[base_len] = '/';
+        memcpy(result + base_len + 1, relative, rel_len + 1);
+    } else {
+        memcpy(result + base_len, relative, rel_len + 1);
+    }
+    return result;
+}
+
+static char *duplicateDirName(const char *path) {
+    if (!path) return NULL;
+    const char *slash = strrchr(path, '/');
+#if defined(_WIN32)
+    const char *backslash = strrchr(path, '\\');
+    if (!slash || (backslash && backslash > slash)) {
+        slash = backslash;
+    }
+#endif
+    if (!slash) {
+        return reaDupString(".");
+    }
+    size_t len = (size_t)(slash - path);
+    if (len == 0) len = 1; // Preserve root "" -> "/"
+    char *dir = (char *)malloc(len + 1);
+    if (!dir) {
+        fprintf(stderr, "Memory allocation failure duplicating directory name.\n");
+        return NULL;
+    }
+    memcpy(dir, path, len);
+    dir[len] = '\0';
+    return dir;
+}
+
+void reaSemanticSetSourcePath(const char *path) {
+    freeDirStack();
+    if (!path) {
+        pushModuleDir(".");
+        return;
+    }
+    char *dir = duplicateDirName(path);
+    if (!dir) {
+        pushModuleDir(".");
+        return;
+    }
+    pushModuleDir(dir);
+    free(dir);
+}
+
+static void freeBindingList(ReaModuleBindingList *list) {
+    if (!list) return;
+    for (int i = 0; i < list->count; i++) {
+        free(list->items[i].alias);
+    }
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static bool ensureBindingCapacity(ReaModuleBindingList *list, int needed) {
+    if (!list) return false;
+    if (list->capacity >= needed) return true;
+    int newCap = list->capacity ? list->capacity * 2 : 4;
+    while (newCap < needed) newCap *= 2;
+    ReaModuleBinding *resized = (ReaModuleBinding *)realloc(list->items, (size_t)newCap * sizeof(ReaModuleBinding));
+    if (!resized) {
+        fprintf(stderr, "Memory allocation failure expanding module binding list.\n");
+        return false;
+    }
+    list->items = resized;
+    list->capacity = newCap;
+    return true;
+}
+
+static ReaModuleBinding *findBindingInList(const ReaModuleBindingList *list, const char *alias) {
+    if (!list || !alias) return NULL;
+    for (int i = 0; i < list->count; i++) {
+        if (strcasecmp(list->items[i].alias, alias) == 0) {
+            return &list->items[i];
+        }
+    }
+    return NULL;
+}
+
+static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleInfo *module, int line) {
+    if (!list || !alias || !module) return false;
+    ReaModuleBinding *existing = findBindingInList(list, alias);
+    if (existing) {
+        if (existing->module != module) {
+            fprintf(stderr, "L%d: duplicate module alias '%s'.\n", line, alias);
+            pascal_semantic_error_count++;
+            return false;
+        }
+        return true; // duplicate binding to same module; ignore
+    }
+    if (!ensureBindingCapacity(list, list->count + 1)) {
+        EXIT_FAILURE_HANDLER();
+    }
+    list->items[list->count].alias = reaDupString(alias);
+    list->items[list->count].module = module;
+    list->count++;
+    return true;
+}
+
+static ReaModuleBinding *findActiveBinding(const char *name) {
+    if (!gActiveBindings) return NULL;
+    return findBindingInList(gActiveBindings, name);
+}
+
+static char *resolveModulePath(const char *path, bool *out_exists) {
+    if (out_exists) *out_exists = false;
+    if (!path || !*path) return NULL;
+
+    if (pathIsAbsolute(path)) {
+        FILE *fp = fopen(path, "rb");
+        if (fp) {
+            if (out_exists) *out_exists = true;
+            fclose(fp);
+        }
+        return reaDupString(path);
+    }
+
+    for (int idx = gModuleDirDepth - 1; idx >= 0; idx--) {
+        const char *base = gModuleDirStack ? gModuleDirStack[idx] : NULL;
+        if (!base) continue;
+        char *candidate = joinPaths(base, path);
+        if (!candidate) continue;
+        FILE *fp = fopen(candidate, "rb");
+        if (fp) {
+            if (out_exists) *out_exists = true;
+            fclose(fp);
+            return candidate;
+        }
+        free(candidate);
+    }
+
+    // Fallback: relative to current working directory
+    char *candidate = reaDupString(path);
+    if (!candidate) return NULL;
+    FILE *fp = fopen(candidate, "rb");
+    if (fp) {
+        if (out_exists) *out_exists = true;
+        fclose(fp);
+        return candidate;
+    }
+    return candidate;
+}
+
+static ReaModuleInfo *findModuleByPath(const char *path) {
+    if (!path) return NULL;
+    for (int i = 0; i < gLoadedModuleCount; i++) {
+        if (strcasecmp(gLoadedModules[i].path, path) == 0) {
+            return &gLoadedModules[i];
+        }
+    }
+    return NULL;
+}
+
+static ReaModuleInfo *appendModuleInfo(void) {
+    if (gLoadedModuleCount >= gLoadedModuleCapacity) {
+        int newCap = gLoadedModuleCapacity ? gLoadedModuleCapacity * 2 : 4;
+        ReaModuleInfo *resized = (ReaModuleInfo *)realloc(gLoadedModules, (size_t)newCap * sizeof(ReaModuleInfo));
+        if (!resized) {
+            fprintf(stderr, "Memory allocation failure expanding module registry.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        // Zero initialise newly added slots
+        for (int i = gLoadedModuleCapacity; i < newCap; i++) {
+            memset(&resized[i], 0, sizeof(ReaModuleInfo));
+        }
+        gLoadedModules = resized;
+        gLoadedModuleCapacity = newCap;
+    }
+    ReaModuleInfo *info = &gLoadedModules[gLoadedModuleCount++];
+    memset(info, 0, sizeof(ReaModuleInfo));
+    return info;
+}
+
+static AST *getDeclsCompound(AST *node) {
+    if (!node) return NULL;
+    AST *block = NULL;
+    if (node->type == AST_PROGRAM || node->type == AST_MODULE) {
+        block = node->right;
+    } else if (node->type == AST_BLOCK) {
+        block = node;
+    }
+    if (!block || block->child_count <= 0 || !block->children) {
+        return NULL;
+    }
+    AST *decls = block->children[0];
+    if (decls && decls->type == AST_COMPOUND) {
+        return decls;
+    }
+    return NULL;
+}
+
+static AST *findModuleNode(AST *root) {
+    if (!root) return NULL;
+    if (root->type == AST_MODULE) {
+        return root;
+    }
+    AST *decls = getDeclsCompound(root);
+    if (!decls) return NULL;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *child = decls->children[i];
+        if (child && child->type == AST_MODULE) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
+static char *readFileContents(const char *path, size_t *outLen) {
+    if (outLen) *outLen = 0;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "Error: unable to open module '%s'.\n", path);
+        pascal_semantic_error_count++;
+        return NULL;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        fprintf(stderr, "Error: unable to seek module '%s'.\n", path);
+        pascal_semantic_error_count++;
+        return NULL;
+    }
+    long len = ftell(fp);
+    if (len < 0) {
+        fclose(fp);
+        fprintf(stderr, "Error: unable to determine size of module '%s'.\n", path);
+        pascal_semantic_error_count++;
+        return NULL;
+    }
+    rewind(fp);
+    char *buffer = (char*)malloc((size_t)len + 1);
+    if (!buffer) {
+        fclose(fp);
+        fprintf(stderr, "Memory allocation failure loading module '%s'.\n", path);
+        EXIT_FAILURE_HANDLER();
+    }
+    size_t readCount = fread(buffer, 1, (size_t)len, fp);
+    fclose(fp);
+    if (readCount != (size_t)len) {
+        free(buffer);
+        fprintf(stderr, "Error: unable to read module '%s'.\n", path);
+        pascal_semantic_error_count++;
+        return NULL;
+    }
+    buffer[len] = '\0';
+    if (outLen) *outLen = (size_t)len;
+    return buffer;
+}
+
+static bool ensureModuleExportCapacity(ReaModuleInfo *module, int needed) {
+    if (!module) return false;
+    if (module->export_capacity >= needed) return true;
+    int newCap = module->export_capacity ? module->export_capacity * 2 : 4;
+    while (newCap < needed) newCap *= 2;
+    ReaModuleExport *resized = (ReaModuleExport *)realloc(module->exports, (size_t)newCap * sizeof(ReaModuleExport));
+    if (!resized) {
+        fprintf(stderr, "Memory allocation failure expanding export table for module '%s'.\n", module->name ? module->name : "(unknown)");
+        EXIT_FAILURE_HANDLER();
+    }
+    for (int i = module->export_capacity; i < newCap; i++) {
+        memset(&resized[i], 0, sizeof(ReaModuleExport));
+    }
+    module->exports = resized;
+    module->export_capacity = newCap;
+    return true;
+}
+
+static char *makeQualifiedName(const char *moduleName, const char *member) {
+    if (!moduleName || !member) return NULL;
+    size_t len = strlen(moduleName) + 1 + strlen(member) + 1;
+    char *buf = (char*)malloc(len);
+    if (!buf) {
+        fprintf(stderr, "Memory allocation failure composing qualified name.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    snprintf(buf, len, "%s.%s", moduleName, member);
+    return buf;
+}
+
+static void addModuleExport(ReaModuleInfo *module, const char *name, ReaModuleExportKind kind, AST *decl) {
+    if (!module || !name) return;
+    if (!ensureModuleExportCapacity(module, module->export_count + 1)) {
+        EXIT_FAILURE_HANDLER();
+    }
+    ReaModuleExport *exp = &module->exports[module->export_count++];
+    exp->name = reaDupString(name);
+    exp->kind = kind;
+    exp->decl = decl;
+}
+
+static void collectModuleExports(ReaModuleInfo *module) {
+    if (!module || !module->module_node) return;
+    AST *decls = getDeclsCompound(module->module_node);
+    if (!decls) return;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *decl = decls->children[i];
+        if (!decl || !decl->is_exported) continue;
+        switch (decl->type) {
+            case AST_CONST_DECL:
+                if (decl->token && decl->token->value) {
+                    addModuleExport(module, decl->token->value, REA_MODULE_EXPORT_CONST, decl);
+                }
+                break;
+            case AST_VAR_DECL:
+                for (int j = 0; j < decl->child_count; j++) {
+                    AST *varNode = decl->children[j];
+                    if (!varNode || !varNode->token || !varNode->token->value) continue;
+                    addModuleExport(module, varNode->token->value, REA_MODULE_EXPORT_VAR, decl);
+                }
+                break;
+            case AST_FUNCTION_DECL:
+                if (decl->token && decl->token->value) {
+                    addModuleExport(module, decl->token->value, REA_MODULE_EXPORT_FUNCTION, decl);
+                }
+                break;
+            case AST_PROCEDURE_DECL:
+                if (decl->token && decl->token->value) {
+                    addModuleExport(module, decl->token->value, REA_MODULE_EXPORT_PROCEDURE, decl);
+                }
+                break;
+            case AST_TYPE_DECL:
+                if (decl->token && decl->token->value) {
+                    addModuleExport(module, decl->token->value, REA_MODULE_EXPORT_TYPE, decl);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+static ReaModuleExport *findModuleExport(const ReaModuleInfo *module, const char *name) {
+    if (!module || !name) return NULL;
+    for (int i = 0; i < module->export_count; i++) {
+        ReaModuleExport *exp = &module->exports[i];
+        if (exp->name && strcasecmp(exp->name, name) == 0) {
+            return exp;
+        }
+    }
+    return NULL;
+}
+
+static AST *findGlobalFunctionDecl(const char *name) {
+    if (!gProgramRoot || !name) return NULL;
+    AST *decls = getDeclsCompound(gProgramRoot);
+    if (!decls) return NULL;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *child = decls->children[i];
+        if (!child) continue;
+        if ((child->type == AST_FUNCTION_DECL || child->type == AST_PROCEDURE_DECL) &&
+            child->token && child->token->value && strcasecmp(child->token->value, name) == 0) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
+static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings);
+static ReaModuleInfo *loadModuleRecursive(const char *path);
+static void registerModuleExports(ReaModuleInfo *module);
+static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings);
+
+static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
+    if (!decls || !bindings) return;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *child = decls->children[i];
+        if (!child || child->type != AST_USES_CLAUSE) continue;
+        for (int j = 0; j < child->child_count; j++) {
+            AST *importNode = child->children[j];
+            if (!importNode || importNode->type != AST_IMPORT || !importNode->token || !importNode->token->value) continue;
+            const char *path = importNode->token->value;
+            ReaModuleInfo *mod = loadModuleRecursive(path);
+            if (!mod) continue;
+            const char *alias = NULL;
+            if (importNode->left && importNode->left->token && importNode->left->token->value) {
+                alias = importNode->left->token->value;
+            }
+            int line = importNode->token ? importNode->token->line : 0;
+            if (alias && *alias) {
+                addBinding(bindings, alias, mod, line);
+            }
+            if (mod->name) {
+                addBinding(bindings, mod->name, mod, line);
+            }
+        }
+    }
+}
+
+static ReaModuleInfo *loadModuleRecursive(const char *path) {
+    if (!path) return NULL;
+
+    bool pathExists = false;
+    char *resolved = resolveModulePath(path, &pathExists);
+    if (!resolved) {
+        fprintf(stderr, "Error: unable to resolve module path '%s'.\n", path);
+        pascal_semantic_error_count++;
+        return NULL;
+    }
+
+    ReaModuleInfo *existing = findModuleByPath(resolved);
+    if (existing) {
+        free(resolved);
+        if (existing->in_progress) {
+            fprintf(stderr, "Cyclic module dependency detected involving '%s'.\n", existing->path ? existing->path : path);
+            pascal_semantic_error_count++;
+        }
+        return existing;
+    }
+
+    size_t sourceLen = 0;
+    char *source = readFileContents(resolved, &sourceLen);
+    if (!source) {
+        fprintf(stderr, "Error: unable to open module '%s'.\n", resolved);
+        pascal_semantic_error_count++;
+        free(resolved);
+        return NULL;
+    }
+
+    AST *ast = parseRea(source);
+    if (!ast) {
+        free(source);
+        free(resolved);
+        return NULL;
+    }
+
+    if (!verifyASTLinks(ast, NULL)) {
+        fprintf(stderr, "AST verification failed while parsing module '%s'.\n", resolved);
+        pascal_semantic_error_count++;
+        freeAST(ast);
+        free(source);
+        free(resolved);
+        return NULL;
+    }
+
+    annotateTypes(ast, NULL, ast);
+
+    AST *moduleNode = findModuleNode(ast);
+    if (!moduleNode || !moduleNode->token || !moduleNode->token->value) {
+        fprintf(stderr, "Module file '%s' does not contain a module declaration.\n", resolved);
+        pascal_semantic_error_count++;
+        freeAST(ast);
+        free(source);
+        free(resolved);
+        return NULL;
+    }
+
+    ReaModuleInfo *info = appendModuleInfo();
+    info->path = resolved;
+    info->directory = duplicateDirName(resolved);
+    info->name = reaDupString(moduleNode->token->value);
+    info->ast = ast;
+    info->module_node = moduleNode;
+    info->export_count = 0;
+    info->processed = false;
+    info->in_progress = true;
+
+    AST *decls = getDeclsCompound(moduleNode);
+    AST *programDecls = getDeclsCompound(ast);
+    ReaModuleBindingList moduleBindings = {0};
+
+    bool pushed_dir = false;
+    if (info->directory && pushModuleDir(info->directory)) {
+        pushed_dir = true;
+    }
+
+    collectImportBindings(programDecls, &moduleBindings);
+    collectImportBindings(decls, &moduleBindings);
+
+    collectModuleExports(info);
+
+    analyzeProgramWithBindings(ast, &moduleBindings);
+    if (pushed_dir) {
+        popModuleDir();
+    }
+
+    info->processed = true;
+    info->in_progress = false;
+
+    registerModuleExports(info);
+
+    freeBindingList(&moduleBindings);
+    free(source);
+    return info;
+}
+
+static void registerModuleExports(ReaModuleInfo *module) {
+    if (!module || !module->name) return;
+    for (int i = 0; i < module->export_count; i++) {
+        ReaModuleExport *exp = &module->exports[i];
+        if (!exp->name) continue;
+        char *qualified = makeQualifiedName(module->name, exp->name);
+        if (!qualified) continue;
+
+        switch (exp->kind) {
+            case REA_MODULE_EXPORT_FUNCTION:
+            case REA_MODULE_EXPORT_PROCEDURE: {
+                char lowerName[MAX_SYMBOL_LENGTH];
+                strncpy(lowerName, qualified, sizeof(lowerName) - 1);
+                lowerName[sizeof(lowerName) - 1] = '\0';
+                toLowerString(lowerName);
+
+                Symbol *sym = lookupProcedure(lowerName);
+                if (!sym) {
+                    sym = (Symbol*)calloc(1, sizeof(Symbol));
+                    if (!sym) {
+                        fprintf(stderr, "Memory allocation failure registering module procedure '%s'.\n", qualified);
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    sym->name = strdup(lowerName);
+                    if (!sym->name) {
+                        fprintf(stderr, "Memory allocation failure duplicating procedure name '%s'.\n", lowerName);
+                        free(sym);
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    sym->is_alias = false;
+                    sym->is_const = false;
+                    sym->is_local_var = false;
+                    sym->is_inline = false;
+                    sym->next = NULL;
+                    sym->real_symbol = NULL;
+                    sym->enclosing = NULL;
+                    sym->value = NULL;
+                    sym->type_def = NULL;
+                    sym->is_defined = false;
+                    sym->bytecode_address = 0;
+                    sym->arity = 0;
+                    sym->locals_count = 0;
+                    sym->upvalue_count = 0;
+                    if (procedure_table) {
+                        hashTableInsert(procedure_table, sym);
+                    }
+                }
+                if (sym) {
+                    if (sym->type_def) {
+                        freeAST(sym->type_def);
+                    }
+                    sym->type_def = copyAST(exp->decl);
+                    sym->type = exp->decl ? exp->decl->var_type : TYPE_UNKNOWN;
+                    sym->is_defined = false;
+                    sym->arity = (uint8_t)((exp->decl && exp->decl->child_count < 255) ? exp->decl->child_count : 255);
+                }
+                break;
+            }
+            case REA_MODULE_EXPORT_CONST: {
+                AST *decl = exp->decl;
+                if (decl && decl->left) {
+                    Value v = evaluateCompileTimeValue(decl->left);
+                    if (v.type != TYPE_VOID && v.type != TYPE_UNKNOWN) {
+                        insertConstGlobalSymbol(qualified, v);
+                        addCompilerConstant(qualified, &v, decl->token ? decl->token->line : 0);
+                    }
+                    freeValue(&v);
+                }
+                break;
+            }
+            case REA_MODULE_EXPORT_VAR: {
+                AST *decl = exp->decl;
+                if (decl) {
+                    AST *typeNode = decl->right;
+                    VarType vt = decl->var_type;
+                    if (vt == TYPE_UNKNOWN && typeNode) {
+                        vt = typeNode->var_type;
+                    }
+                    insertGlobalSymbol(qualified, vt, typeNode);
+                }
+                break;
+            }
+            case REA_MODULE_EXPORT_TYPE:
+            default:
+                break;
+        }
+        free(qualified);
+    }
+}
+
+static ReaModuleInfo *moduleFromExpression(AST *expr) {
+    if (!expr) return NULL;
+    if (expr->type == AST_VARIABLE && expr->token && expr->token->value) {
+        ReaModuleBinding *binding = findActiveBinding(expr->token->value);
+        if (binding) return binding->module;
+    }
+    return NULL;
+}
+
+static void convertFieldAccessToVariable(AST *node, const char *qualifiedName, VarType type, AST *typeDef) {
+    if (!node || !qualifiedName) return;
+    int line = node->token ? node->token->line : 0;
+    if (node->left) {
+        freeAST(node->left);
+        node->left = NULL;
+    }
+    if (node->right) {
+        freeAST(node->right);
+        node->right = NULL;
+    }
+    if (node->extra) {
+        freeAST(node->extra);
+        node->extra = NULL;
+    }
+    if (node->token) {
+        freeToken(node->token);
+        node->token = NULL;
+    }
+    node->type = AST_VARIABLE;
+    node->token = newToken(TOKEN_IDENTIFIER, qualifiedName, line, 0);
+    node->var_type = type;
+    if (node->type_def) {
+        freeAST(node->type_def);
+        node->type_def = NULL;
+    }
+    node->type_def = typeDef ? copyAST(typeDef) : NULL;
+    node->child_count = 0;
+    if (node->children) {
+        free(node->children);
+        node->children = NULL;
+        node->child_capacity = 0;
+    }
+}
+
+static bool handleModuleFieldAccess(AST *node) {
+    if (!node || node->type != AST_FIELD_ACCESS) return false;
+    ReaModuleInfo *module = moduleFromExpression(node->left);
+    if (!module) return false;
+    const char *member = (node->right && node->right->token) ? node->right->token->value : NULL;
+    if (!member) return false;
+    ReaModuleExport *exp = findModuleExport(module, member);
+    if (!exp) {
+        fprintf(stderr, "L%d: '%s' is not exported from module '%s'.\n",
+                node->token ? node->token->line : (node->right && node->right->token ? node->right->token->line : 0),
+                member,
+                module->name ? module->name : "(unknown)");
+        pascal_semantic_error_count++;
+        return true;
+    }
+
+    if (exp->kind == REA_MODULE_EXPORT_CONST || exp->kind == REA_MODULE_EXPORT_VAR) {
+        char *qualified = makeQualifiedName(module->name, exp->name);
+        VarType vt = (exp->kind == REA_MODULE_EXPORT_CONST && exp->decl) ? exp->decl->var_type : TYPE_UNKNOWN;
+        AST *typeNode = NULL;
+        if (exp->kind == REA_MODULE_EXPORT_VAR && exp->decl) {
+            typeNode = exp->decl->right;
+            if (typeNode && vt == TYPE_UNKNOWN) vt = typeNode->var_type;
+        }
+        convertFieldAccessToVariable(node, qualified, vt, typeNode);
+        free(qualified);
+    } else {
+        fprintf(stderr, "L%d: member '%s' is not a value exported from module '%s'.\n",
+                node->token ? node->token->line : 0,
+                member,
+                module->name ? module->name : "(unknown)");
+        pascal_semantic_error_count++;
+    }
+    return true;
+}
+
+static void adjustCallChildrenForModule(AST *call) {
+    if (!call || call->child_count <= 0 || !call->children) return;
+    // Shift arguments left to remove the module expression stored as first child.
+    freeAST(call->children[0]);
+    for (int i = 1; i < call->child_count; i++) {
+        call->children[i - 1] = call->children[i];
+    }
+    call->child_count--;
+    if (call->child_count >= 0) {
+        call->children[call->child_count] = NULL;
+    }
+}
+
+static bool handleModuleCall(AST *node) {
+    if (!node || node->type != AST_PROCEDURE_CALL) return false;
+    ReaModuleInfo *module = moduleFromExpression(node->left);
+    if (!module) return false;
+    const char *member = node->token ? node->token->value : NULL;
+    if (!member && node->right && node->right->token) {
+        member = node->right->token->value;
+    }
+    if (!member) return false;
+    ReaModuleExport *exp = findModuleExport(module, member);
+    if (!exp || (exp->kind != REA_MODULE_EXPORT_FUNCTION && exp->kind != REA_MODULE_EXPORT_PROCEDURE)) {
+        fprintf(stderr, "L%d: '%s' is not exported from module '%s'.\n",
+                node->token ? node->token->line : 0,
+                member,
+                module->name ? module->name : "(unknown)");
+        pascal_semantic_error_count++;
+        return true;
+    }
+
+    char *qualified = makeQualifiedName(module->name, exp->name);
+    adjustCallChildrenForModule(node);
+    if (node->left) {
+        node->left = NULL;
+    }
+    int line = node->token ? node->token->line : 0;
+    if (node->token) {
+        freeToken(node->token);
+    }
+    node->token = newToken(TOKEN_IDENTIFIER, qualified, line, 0);
+    node->var_type = (exp->kind == REA_MODULE_EXPORT_FUNCTION && exp->decl) ? exp->decl->var_type : TYPE_VOID;
+    if (node->type_def) {
+        freeAST(node->type_def);
+        node->type_def = NULL;
+    }
+    if (exp->kind == REA_MODULE_EXPORT_FUNCTION && exp->decl) {
+        node->type_def = exp->decl->right ? copyAST(exp->decl->right) : NULL;
+    }
+    node->i_val = 0;
+    free(qualified);
+    return true;
+}
+
+static int countAccessibleExports(const char *name, ReaModuleBindingList *bindings, ReaModuleInfo **firstModule, ReaModuleExport **firstExport) {
+    if (firstModule) *firstModule = NULL;
+    if (firstExport) *firstExport = NULL;
+    if (!bindings || !name) return 0;
+    int count = 0;
+    ReaModuleInfo **seen = NULL;
+    int seenCount = 0;
+    for (int i = 0; i < bindings->count; i++) {
+        ReaModuleInfo *module = bindings->items[i].module;
+        if (!module) continue;
+        bool alreadySeen = false;
+        for (int s = 0; s < seenCount; s++) {
+            if (seen[s] == module) {
+                alreadySeen = true;
+                break;
+            }
+        }
+        if (alreadySeen) continue;
+        ReaModuleExport *exp = findModuleExport(module, name);
+        if (exp) {
+            if (count == 0) {
+                if (firstModule) *firstModule = module;
+                if (firstExport) *firstExport = exp;
+            }
+            count++;
+        }
+        seen = (ReaModuleInfo **)realloc(seen, (size_t)(seenCount + 1) * sizeof(ReaModuleInfo *));
+        if (!seen) {
+            fprintf(stderr, "Memory allocation failure tracking module export lookups.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        seen[seenCount++] = module;
+    }
+    free(seen);
+    return count;
+}
 
 typedef struct {
     AST **functions;
@@ -958,6 +1924,32 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     if (!node) return;
 
     ClassInfo *clsContext = currentClass;
+    bool pushedGenericFrame = false;
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
+        AST *generics = node->left;
+        if (generics && generics->type == AST_COMPOUND) {
+            pushGenericFrame();
+            pushedGenericFrame = true;
+            for (int i = 0; i < generics->child_count; i++) {
+                AST *param = generics->children[i];
+                if (param && param->token && param->token->value) {
+                    addGenericTypeName(param->token->value);
+                }
+            }
+        }
+    } else if (node->type == AST_TYPE_DECL) {
+        AST *generics = node->extra;
+        if (generics && generics->type == AST_COMPOUND) {
+            pushGenericFrame();
+            pushedGenericFrame = true;
+            for (int i = 0; i < generics->child_count; i++) {
+                AST *param = generics->children[i];
+                if (param && param->token && param->token->value) {
+                    addGenericTypeName(param->token->value);
+                }
+            }
+        }
+    }
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
         const char *fullname = node->token ? node->token->value : NULL;
         const char *us = fullname ? strchr(fullname, '.') : NULL;
@@ -1003,13 +1995,64 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 decl = findFunctionInSubtree(body, ident);
             }
         }
+        if (!decl) {
+            ReaModuleBinding *binding = findActiveBinding(ident);
+            if (binding) {
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
+            char lowered[MAX_SYMBOL_LENGTH * 2];
+            snprintf(lowered, sizeof(lowered), "%s", ident);
+            toLowerString(lowered);
+            Symbol *proc_sym = lookupProcedure(lowered);
+            if (proc_sym && proc_sym->is_defined) {
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
+            char lowerIdent[MAX_SYMBOL_LENGTH * 2];
+            snprintf(lowerIdent, sizeof(lowerIdent), "%s", ident);
+            toLowerString(lowerIdent);
+            Symbol *global = lookupGlobalSymbol(lowerIdent);
+            if (global) {
+                node->var_type = global->type;
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
+        }
+
         if (decl && decl->right) {
             node->type_def = decl->right;
             node->var_type = decl->right->var_type;
         } else {
+            if (isGenericTypeName(ident)) {
+                node->var_type = TYPE_UNKNOWN;
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
             if (strcasecmp(ident, "myself") != 0 && strcasecmp(ident, "my") != 0) {
-                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                        node->token->line, ident);
+                const char *dot = strchr(ident, '.');
+                if (dot) {
+                    size_t prefix_len = (size_t)(dot - ident);
+                    if (prefix_len > 0 && prefix_len < MAX_SYMBOL_LENGTH) {
+                        char prefix[MAX_SYMBOL_LENGTH];
+                        memcpy(prefix, ident, prefix_len);
+                        prefix[prefix_len] = '\0';
+                        if (findActiveBinding(prefix)) {
+                            if (pushedGenericFrame) popGenericFrame();
+                            return;
+                        }
+                    }
+                }
+                ReaModuleInfo *firstModule = NULL;
+                ReaModuleExport *firstExport = NULL;
+                int matches = countAccessibleExports(ident, gActiveBindings, &firstModule, &firstExport);
+                if (matches > 1) {
+                    fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                            node->token->line, ident);
+                } else {
+                    fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                            node->token->line, ident);
+                }
                 pascal_semantic_error_count++;
             }
         }
@@ -1029,8 +2072,16 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                             node->type_def = global->type_def;
                             decl = NULL;
                         } else {
-                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                    node->token->line, ident);
+                            ReaModuleInfo *firstModule = NULL;
+                            ReaModuleExport *firstExport = NULL;
+                            int matches = countAccessibleExports(ident, gActiveBindings, &firstModule, &firstExport);
+                            if (matches > 1) {
+                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                                        node->token->line, ident);
+                            } else {
+                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                        node->token->line, ident);
+                            }
                             pascal_semantic_error_count++;
                         }
                     }
@@ -1059,6 +2110,13 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_FIELD_ACCESS) {
+        if (handleModuleFieldAccess(node)) {
+            if (node->type != AST_FIELD_ACCESS) {
+                validateNodeInternal(node, clsContext);
+            }
+            if (pushedGenericFrame) popGenericFrame();
+            return;
+        }
         const char *cls = resolveExprClass(node->left, clsContext);
         if (cls) {
             ClassInfo *ci = lookupClass(cls);
@@ -1135,9 +2193,21 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
+        bool resolved = false;
+        if (handleModuleCall(node)) {
+            if (moduleFromExpression(node->left)) {
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
+        }
+        AST *callDecl = NULL;
         if (node->token && node->token->value) {
-            AST *callDecl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+            callDecl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+            if (!callDecl) {
+                callDecl = findGlobalFunctionDecl(node->token->value);
+            }
             if (callDecl && (callDecl->type == AST_FUNCTION_DECL || callDecl->type == AST_PROCEDURE_DECL)) {
+                resolved = true;
                 AST *decl_scope = findEnclosingCompound(callDecl);
                 AST *use_scope = findEnclosingCompound(node);
                 if (decl_scope && use_scope && decl_scope == use_scope) {
@@ -1145,9 +2215,19 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     if (decl_line > 0 && decl_line > node->token->line) {
                         Symbol *global = lookupGlobalSymbol(node->token->value);
                         if (!global) {
-                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                    node->token->line, node->token->value);
-                            pascal_semantic_error_count++;
+                            ReaModuleInfo *firstModule = NULL;
+                            ReaModuleExport *firstExport = NULL;
+                            int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
+                            if (matches > 1) {
+                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                                        node->token->line, node->token->value);
+                            } else if (!resolved && matches > 0) {
+                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                        node->token->line, node->token->value);
+                            }
+                            if (matches > 0) {
+                                pascal_semantic_error_count++;
+                            }
                         }
                     }
                 }
@@ -1157,14 +2237,25 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 AST *body = getFunctionBody(enclosing);
                 AST *nested = findFunctionInSubtree(body, node->token->value);
                 if (nested && nested != enclosing) {
+                    resolved = true;
                     AST *decl_scope = findEnclosingCompound(nested);
                     AST *use_scope = findEnclosingCompound(node);
                     if (decl_scope && use_scope && decl_scope == use_scope) {
                         int decl_line = declarationLine(nested);
                         if (decl_line > 0 && decl_line > node->token->line) {
-                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                    node->token->line, node->token->value);
-                            pascal_semantic_error_count++;
+                            ReaModuleInfo *firstModule = NULL;
+                            ReaModuleExport *firstExport = NULL;
+                            int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
+                            if (matches > 1) {
+                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                                        node->token->line, node->token->value);
+                            } else if (!resolved && matches > 0) {
+                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                        node->token->line, node->token->value);
+                            }
+                            if (matches > 0) {
+                                pascal_semantic_error_count++;
+                            }
                         }
                     }
                 }
@@ -1184,6 +2275,27 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                                 node->token->value, us + 1);
                         pascal_semantic_error_count++;
                     }
+                }
+            }
+        }
+        if (!callDecl && !node->left && node->token && node->token->value) {
+            char lowered[MAX_SYMBOL_LENGTH * 2];
+            snprintf(lowered, sizeof(lowered), "%s", node->token->value);
+            toLowerString(lowered);
+            Symbol *proc_sym = lookupProcedure(lowered);
+            if (!proc_sym || !proc_sym->is_defined) {
+                ReaModuleInfo *firstModule = NULL;
+                ReaModuleExport *firstExport = NULL;
+                int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
+                if (matches > 1) {
+                    fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                            node->token->line, node->token->value);
+                } else if (matches > 0) {
+                    fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                            node->token->line, node->token->value);
+                }
+                if (matches > 0) {
+                    pascal_semantic_error_count++;
                 }
             }
         }
@@ -1395,14 +2507,18 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     if (node->right) validateNodeInternal(node->right, clsContext);
     if (node->extra) validateNodeInternal(node->extra, clsContext);
     for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], clsContext);
+
+    if (pushedGenericFrame) popGenericFrame();
 }
 
 /* ------------------------------------------------------------------------- */
 /*  Public entry                                                             */
 /* ------------------------------------------------------------------------- */
 
-void reaPerformSemanticAnalysis(AST *root) {
+static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings) {
     if (!root) return;
+    ReaModuleBindingList *previous = gActiveBindings;
+    gActiveBindings = bindings;
     gProgramRoot = root;
     clearClosureRegistry();
     collectClasses(root);
@@ -1415,4 +2531,51 @@ void reaPerformSemanticAnalysis(AST *root) {
     clearClosureRegistry();
     refreshProcedureMethodCopies();
     freeClassTable();
+    gActiveBindings = previous;
+}
+
+void reaPerformSemanticAnalysis(AST *root) {
+    if (!root) return;
+    ReaModuleBindingList mainBindings = {0};
+    AST *decls = getDeclsCompound(root);
+    AST *stmts = NULL;
+    if (decls && decls->parent && decls->parent->child_count > 1) {
+        stmts = decls->parent->children[1];
+    } else if (root && root->type == AST_PROGRAM && root->right && root->right->child_count > 1) {
+        stmts = root->right->children[1];
+    }
+    if (stmts) {
+        // No additional processing needed for statements when collecting module bindings.
+    }
+    collectImportBindings(decls, &mainBindings);
+    collectImportBindings(stmts, &mainBindings);
+    if (decls) {
+        for (int i = 0; i < decls->child_count; i++) {
+            AST *child = decls->children[i];
+            (void)child;
+        }
+    }
+    analyzeProgramWithBindings(root, &mainBindings);
+    freeBindingList(&mainBindings);
+    clearGenericTypeState();
+    freeDirStack();
+}
+
+int reaGetLoadedModuleCount(void) {
+    return gLoadedModuleCount;
+}
+
+AST *reaGetModuleAST(int index) {
+    if (index < 0 || index >= gLoadedModuleCount) return NULL;
+    return gLoadedModules[index].ast;
+}
+
+const char *reaGetModulePath(int index) {
+    if (index < 0 || index >= gLoadedModuleCount) return NULL;
+    return gLoadedModules[index].path;
+}
+
+const char *reaGetModuleName(int index) {
+    if (index < 0 || index >= gLoadedModuleCount) return NULL;
+    return gLoadedModules[index].name;
 }

@@ -181,7 +181,9 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_TYPE_IDENTIFIER:return "TYPE_IDENTIFIER";
         case AST_SUBRANGE:       return "SUBRANGE";
         case AST_USES_CLAUSE:    return "USES_CLAUSE";
+        case AST_IMPORT:         return "IMPORT";
         case AST_UNIT:           return "UNIT";
+        case AST_MODULE:         return "MODULE";
         case AST_INTERFACE:      return "INTERFACE";
         case AST_IMPLEMENTATION: return "IMPLEMENTATION";
         case AST_INITIALIZATION: return "INITIALIZATION";

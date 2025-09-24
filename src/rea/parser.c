@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "symbol/symbol.h"
 #include "core/utils.h"
+#include "Pascal/globals.h"
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -25,9 +26,22 @@ typedef struct {
     const char* currentParentClassName; // non-owning pointer to current parent class name while in class body
     int currentMethodIndex; // index of next method in current class for vtable
     int functionDepth; // nesting level of function/procedure declarations
+    bool inModule;      // parsing module body
+    bool markExport;    // export modifier seen for next declaration
+    char **genericTypeNames;
+    int genericTypeCount;
+    int genericTypeCapacity;
+    int *genericFrameStack;
+    int genericFrameDepth;
+    int genericFrameCapacity;
 } ReaParser;
 
 static void reaAdvance(ReaParser *p) { p->current = reaNextToken(&p->lexer); }
+
+static ReaToken reaPeekToken(ReaParser *p) {
+    ReaLexer saved = p->lexer;
+    return reaNextToken(&saved);
+}
 
 // Strict mode control
 static int g_rea_strict_mode = 0;
@@ -49,6 +63,105 @@ static bool strictScanTop(AST* n) {
         if (strictScanTop(n->children[i])) return true;
     }
     return false;
+}
+
+static void ensureGenericFrameCapacity(ReaParser *p) {
+    if (p->genericFrameDepth >= p->genericFrameCapacity) {
+        int newCap = p->genericFrameCapacity ? p->genericFrameCapacity * 2 : 8;
+        int *resized = (int *)realloc(p->genericFrameStack, (size_t)newCap * sizeof(int));
+        if (!resized) {
+            fprintf(stderr, "Memory allocation failure expanding generic frame stack.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        p->genericFrameStack = resized;
+        p->genericFrameCapacity = newCap;
+    }
+}
+
+static bool typeNameAlreadyDefined(const char *name) {
+    if (!name) return false;
+    for (TypeEntry *entry = type_table; entry; entry = entry->next) {
+        if (entry->name && strcasecmp(entry->name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ensureGenericNameCapacity(ReaParser *p) {
+    if (p->genericTypeCount >= p->genericTypeCapacity) {
+        int newCap = p->genericTypeCapacity ? p->genericTypeCapacity * 2 : 16;
+        char **resized = (char **)realloc(p->genericTypeNames, (size_t)newCap * sizeof(char *));
+        if (!resized) {
+            fprintf(stderr, "Memory allocation failure expanding generic parameter table.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        for (int i = p->genericTypeCapacity; i < newCap; i++) {
+            resized[i] = NULL;
+        }
+        p->genericTypeNames = resized;
+        p->genericTypeCapacity = newCap;
+    }
+}
+
+static void pushGenericFrame(ReaParser *p) {
+    ensureGenericFrameCapacity(p);
+    p->genericFrameStack[p->genericFrameDepth++] = p->genericTypeCount;
+}
+
+static void popGenericFrame(ReaParser *p) {
+    if (p->genericFrameDepth <= 0) return;
+    int frameStart = p->genericFrameStack[--p->genericFrameDepth];
+    for (int i = p->genericTypeCount - 1; i >= frameStart; i--) {
+        free(p->genericTypeNames[i]);
+        p->genericTypeNames[i] = NULL;
+    }
+    p->genericTypeCount = frameStart;
+}
+
+static bool addGenericParam(ReaParser *p, const char *name, int line) {
+    if (p->genericFrameDepth <= 0) return false;
+    int frameStart = p->genericFrameStack[p->genericFrameDepth - 1];
+    for (int i = frameStart; i < p->genericTypeCount; i++) {
+        if (p->genericTypeNames[i] && strcasecmp(p->genericTypeNames[i], name) == 0) {
+            fprintf(stderr, "L%d: duplicate generic parameter '%s'.\n", line, name);
+            p->hadError = true;
+            return false;
+        }
+    }
+    ensureGenericNameCapacity(p);
+    p->genericTypeNames[p->genericTypeCount] = strdup(name);
+    if (!p->genericTypeNames[p->genericTypeCount]) {
+        fprintf(stderr, "Memory allocation failure storing generic parameter name.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    p->genericTypeCount++;
+    return true;
+}
+
+static bool isGenericTypeParam(const ReaParser *p, const char *name) {
+    if (!name) return false;
+    for (int i = p->genericTypeCount - 1; i >= 0; i--) {
+        if (p->genericTypeNames[i] && strcasecmp(p->genericTypeNames[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void clearGenericState(ReaParser *p) {
+    if (!p) return;
+    for (int i = 0; i < p->genericTypeCount; i++) {
+        free(p->genericTypeNames[i]);
+    }
+    free(p->genericTypeNames);
+    p->genericTypeNames = NULL;
+    p->genericTypeCount = 0;
+    p->genericTypeCapacity = 0;
+    free(p->genericFrameStack);
+    p->genericFrameStack = NULL;
+    p->genericFrameDepth = 0;
+    p->genericFrameCapacity = 0;
 }
 
 static bool tokensStructurallyEqual(Token *a, Token *b) {
@@ -356,16 +469,66 @@ static AST *parseJoin(ReaParser *p);
 static AST *parseIf(ReaParser *p);
 static AST *parseWhile(ReaParser *p);
 static AST *parseBlock(ReaParser *p);
+static AST *parseImport(ReaParser *p);
+static AST *parseModule(ReaParser *p);
+static void markExported(AST *node);
 static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarType vtype, int methodIndex, bool pointerWrapped);
 static AST *parseWhile(ReaParser *p);
 static AST *parseDoWhile(ReaParser *p);
 static AST *parseFor(ReaParser *p);
 static AST *parseSwitch(ReaParser *p);
 static AST *parseConstDecl(ReaParser *p);
+static AST *parseTypeAlias(ReaParser *p);
 static AST *parseImport(ReaParser *p);
+static AST *parsePointerParamType(ReaParser *p);
+static AST *parseFunctionPointerParamTypes(ReaParser *p);
+static AST *buildProcPointerType(AST *returnType, AST *paramList);
+static AST *parsePointerVariableAfterName(ReaParser *p, Token *nameTok, AST *baseType);
+static AST *parseCallTypeArgumentList(ReaParser *p);
+static bool looksLikeCallTypeArguments(ReaParser *p);
 
 // Access to global type table provided by Pascal front end
 AST *lookupType(const char* name);
+
+static AST *parseGenericParameterList(ReaParser *p) {
+    AST *list = newASTNode(AST_COMPOUND, NULL);
+    while (p->current.type != REA_TOKEN_GREATER && p->current.type != REA_TOKEN_EOF) {
+        if (p->current.type != REA_TOKEN_IDENTIFIER) {
+            fprintf(stderr, "L%d: Expected generic parameter name.\n", p->current.line);
+            p->hadError = true;
+            freeAST(list);
+            return NULL;
+        }
+        char *paramName = (char *)malloc(p->current.length + 1);
+        if (!paramName) {
+            fprintf(stderr, "Memory allocation failure while parsing generic parameter.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(paramName, p->current.start, p->current.length);
+        paramName[p->current.length] = '\0';
+        Token *paramTok = newToken(TOKEN_IDENTIFIER, paramName, p->current.line, 0);
+        free(paramName);
+        if (!addGenericParam(p, paramTok->value, paramTok->line)) {
+            // keep parsing to surface additional errors but avoid duplicating nodes
+        }
+        AST *paramNode = newASTNode(AST_VARIABLE, paramTok);
+        addChild(list, paramNode);
+        reaAdvance(p);
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            continue;
+        }
+        break;
+    }
+    if (p->current.type != REA_TOKEN_GREATER) {
+        fprintf(stderr, "L%d: Expected '>' to close generic parameter list.\n", p->current.line);
+        p->hadError = true;
+        freeAST(list);
+        return NULL;
+    }
+    reaAdvance(p);
+    return list;
+}
 
 // Helper to rewrite 'continue' statements to 'post; continue' inside for-loop bodies
 static AST *rewriteContinueWithPost(AST *node, AST *postStmt) {
@@ -945,6 +1108,15 @@ static AST *parseFactor(ReaParser *p) {
         reaAdvance(p); // consume identifier
 
         AST *call_args = NULL;
+        AST *callTypeArgs = NULL;
+        if (p->current.type == REA_TOKEN_LESS && looksLikeCallTypeArguments(p)) {
+            reaAdvance(p); // consume '<'
+            callTypeArgs = parseCallTypeArgumentList(p);
+            if (!callTypeArgs && p->hadError) {
+                freeToken(tok);
+                return NULL;
+            }
+        }
         if (p->current.type == REA_TOKEN_LEFT_PAREN) {
             reaAdvance(p); // consume '('
             call_args = newASTNode(AST_COMPOUND, NULL);
@@ -967,6 +1139,7 @@ static AST *parseFactor(ReaParser *p) {
                 transformPrintfArgs(p, call, call_args);
                 if (call_args) freeAST(call_args);
                 freeToken(tok);
+                if (callTypeArgs) freeAST(callTypeArgs);
             } else {
                 if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
                     call = newASTNode(AST_WRITELN, NULL);
@@ -989,6 +1162,12 @@ static AST *parseFactor(ReaParser *p) {
                     call_args->child_capacity = 0;
                 }
                 if (call_args) freeAST(call_args);
+                if (callTypeArgs && call) {
+                    call->extra = callTypeArgs;
+                    callTypeArgs->parent = call;
+                } else if (callTypeArgs) {
+                    freeAST(callTypeArgs);
+                }
             }
             setTypeAST(call, TYPE_UNKNOWN);
             // Support member access chaining after call (dots or brackets)
@@ -1065,6 +1244,9 @@ static AST *parseFactor(ReaParser *p) {
         } else {
             AST *node = newASTNode(AST_VARIABLE, tok);
             setTypeAST(node, TYPE_UNKNOWN);
+            if (callTypeArgs) {
+                freeAST(callTypeArgs);
+            }
             while (p->current.type == REA_TOKEN_DOT || p->current.type == REA_TOKEN_LEFT_BRACKET) {
                 if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
                     node = parseArrayAccess(p, node);
@@ -1465,6 +1647,106 @@ static const char *typeName(ReaTokenType t) {
     }
 }
 
+static void parseTypeArgumentsIfPresent(ReaParser *p, AST *typeRef) {
+    if (!typeRef || typeRef->type != AST_TYPE_REFERENCE) return;
+    if (p->current.type != REA_TOKEN_LESS) return;
+    reaAdvance(p); // consume '<'
+    while (p->current.type != REA_TOKEN_GREATER && p->current.type != REA_TOKEN_EOF) {
+        AST *argType = parsePointerParamType(p);
+        if (!argType) {
+            return;
+        }
+        addChild(typeRef, argType);
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            continue;
+        }
+        break;
+    }
+    if (p->current.type != REA_TOKEN_GREATER) {
+        fprintf(stderr, "L%d: Expected '>' to close type argument list.\n", p->current.line);
+        p->hadError = true;
+        return;
+    }
+    reaAdvance(p);
+}
+
+static AST *parseCallTypeArgumentList(ReaParser *p) {
+    AST *list = newASTNode(AST_COMPOUND, NULL);
+    while (p->current.type != REA_TOKEN_GREATER && p->current.type != REA_TOKEN_EOF) {
+        AST *argType = parsePointerParamType(p);
+        if (!argType) {
+            freeAST(list);
+            return NULL;
+        }
+        addChild(list, argType);
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            continue;
+        }
+        break;
+    }
+    if (p->current.type != REA_TOKEN_GREATER) {
+        fprintf(stderr, "L%d: Expected '>' to close call type argument list.\n", p->current.line);
+        p->hadError = true;
+        freeAST(list);
+        return NULL;
+    }
+    reaAdvance(p);
+    return list;
+}
+
+static bool tokenIsTypeKeyword(ReaTokenType t) {
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:
+        case REA_TOKEN_INT32:
+        case REA_TOKEN_INT16:
+        case REA_TOKEN_INT8:
+        case REA_TOKEN_FLOAT:
+        case REA_TOKEN_FLOAT32:
+        case REA_TOKEN_LONG_DOUBLE:
+        case REA_TOKEN_CHAR:
+        case REA_TOKEN_BYTE:
+        case REA_TOKEN_STR:
+        case REA_TOKEN_TEXT:
+        case REA_TOKEN_MSTREAM:
+        case REA_TOKEN_BOOL:
+        case REA_TOKEN_VOID:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool looksLikeCallTypeArguments(ReaParser *p) {
+    if (p->current.type != REA_TOKEN_LESS) {
+        return false;
+    }
+    ReaLexer saved = p->lexer;
+    ReaToken next = reaNextToken(&saved);
+    if (next.type == REA_TOKEN_GREATER) {
+        // Allow empty type argument list, though unusual
+    } else if (next.type != REA_TOKEN_IDENTIFIER && !tokenIsTypeKeyword(next.type)) {
+        return false;
+    }
+    int depth = 1;
+    ReaToken tok = next;
+    while (depth > 0) {
+        tok = reaNextToken(&saved);
+        if (tok.type == REA_TOKEN_EOF) {
+            return false;
+        }
+        if (tok.type == REA_TOKEN_LESS) {
+            depth++;
+        } else if (tok.type == REA_TOKEN_GREATER) {
+            depth--;
+        }
+    }
+    ReaToken after = reaNextToken(&saved);
+    return after.type == REA_TOKEN_LEFT_PAREN;
+}
+
 static AST *parsePointerParamType(ReaParser *p) {
     if (p->current.type == REA_TOKEN_EOF) {
         return NULL;
@@ -1498,9 +1780,21 @@ static AST *parsePointerParamType(ReaParser *p) {
         lex[tok.length] = '\0';
         Token *typeTok = newToken(TOKEN_IDENTIFIER, lex, tok.line, 0);
         free(lex);
+        if (isGenericTypeParam(p, typeTok->value)) {
+            AST *genericNode = newASTNode(AST_TYPE_REFERENCE, typeTok);
+            setTypeAST(genericNode, TYPE_UNKNOWN);
+            reaAdvance(p);
+            if (p->current.type == REA_TOKEN_LESS) {
+                fprintf(stderr, "L%d: Generic parameter '%s' cannot specify type arguments.\n",
+                        tok.line, typeTok->value);
+                p->hadError = true;
+            }
+            return genericNode;
+        }
         AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeTok);
         setTypeAST(refNode, TYPE_RECORD);
         reaAdvance(p);
+        parseTypeArgumentsIfPresent(p, refNode);
         return refNode;
     }
 
@@ -1688,23 +1982,61 @@ static AST *parseVarDecl(ReaParser *p) {
         setTypeAST(typeNode, vtype);
         reaAdvance(p); // consume type keyword
     } else if (p->current.type == REA_TOKEN_IDENTIFIER) {
-        // User-defined type (e.g., class name). Treat vars as POINTER to that type.
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
         memcpy(lex, p->current.start, p->current.length);
         lex[p->current.length] = '\0';
         Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
-        AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
-        setTypeAST(refNode, TYPE_RECORD);
-        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
-        setTypeAST(ptrNode, TYPE_POINTER);
-        setRight(ptrNode, refNode);
-        typeNode = ptrNode;
-        vtype = TYPE_POINTER; // store pointers to class instances by default
+
+        bool isGeneric = isGenericTypeParam(p, typeRefTok->value);
+        AST *resolvedType = isGeneric ? NULL : lookupType(typeRefTok->value);
+        bool treatAsPointer = false;
+        VarType resolvedVarType = TYPE_UNKNOWN;
+        if (resolvedType) {
+            resolvedVarType = resolvedType->var_type;
+            if (resolvedType->type == AST_RECORD_TYPE ||
+                resolvedVarType == TYPE_RECORD ||
+                resolvedVarType == TYPE_POINTER) {
+                treatAsPointer = true;
+            } else {
+                treatAsPointer = false;
+            }
+        } else if (!isGeneric) {
+            resolvedVarType = TYPE_UNKNOWN;
+        }
+
+        if (treatAsPointer) {
+            AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+            setTypeAST(refNode, TYPE_RECORD);
+            AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+            setTypeAST(ptrNode, TYPE_POINTER);
+            setRight(ptrNode, refNode);
+            typeNode = ptrNode;
+            vtype = TYPE_POINTER;
+        } else {
+            AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+            if (resolvedVarType == TYPE_VOID) resolvedVarType = TYPE_UNKNOWN;
+            setTypeAST(refNode, resolvedVarType);
+            typeNode = refNode;
+            vtype = resolvedVarType;
+        }
+
+        if (resolvedType && !resolvedType->token) {
+            freeAST(resolvedType);
+        }
+
         reaAdvance(p); // consume type identifier
     } else {
         return NULL;
+    }
+
+    if (p->current.type == REA_TOKEN_LESS) {
+        if (typeNode && typeNode->type == AST_TYPE_REFERENCE) {
+            parseTypeArgumentsIfPresent(p, typeNode);
+        } else if (typeNode && typeNode->type == AST_POINTER_TYPE && typeNode->right) {
+            parseTypeArgumentsIfPresent(p, typeNode->right);
+        }
     }
 
     if (p->current.type != REA_TOKEN_IDENTIFIER && p->current.type != REA_TOKEN_LEFT_PAREN) return NULL;
@@ -1788,7 +2120,7 @@ static AST *parseVarDecl(ReaParser *p) {
             varType = parseArrayType(p, varType, &vtype_local);
         }
 
-        if (first && p->current.type == REA_TOKEN_LEFT_PAREN) {
+        if (first && (p->current.type == REA_TOKEN_LEFT_PAREN || p->current.type == REA_TOKEN_LESS)) {
             int idx2 = p->currentClassName ? p->currentMethodIndex++ : -1;
             freeAST(compound);
             return parseFunctionDecl(p, nameTok, varType, vtype_local, idx2, false);
@@ -1852,6 +2184,21 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         }
     }
 
+    AST *genericParams = NULL;
+    bool genericFramePushed = false;
+    if (p->current.type == REA_TOKEN_LESS) {
+        genericFramePushed = true;
+        pushGenericFrame(p);
+        reaAdvance(p); // consume '<'
+        genericParams = parseGenericParameterList(p);
+        if (!genericParams) {
+            popGenericFrame(p);
+            p->currentFunctionType = prevType;
+            p->functionDepth = prevDepth;
+            return NULL;
+        }
+    }
+
     // Parse parameter list
     reaAdvance(p); // consume '('
     AST *params = newASTNode(AST_COMPOUND, NULL);
@@ -1882,14 +2229,28 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
             lex[p->current.length] = '\0';
             Token *typeRefTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
             free(lex);
-            AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
-            setTypeAST(refNode, TYPE_RECORD);
-            AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
-            setTypeAST(ptrNode, TYPE_POINTER);
-            setRight(ptrNode, refNode);
-            ptypeNode = ptrNode;
-            pvtype = TYPE_POINTER;
-            reaAdvance(p); // consume type identifier
+            if (isGenericTypeParam(p, typeRefTok->value)) {
+                AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+                setTypeAST(refNode, TYPE_UNKNOWN);
+                ptypeNode = refNode;
+                pvtype = TYPE_UNKNOWN;
+                reaAdvance(p); // consume type identifier
+                if (p->current.type == REA_TOKEN_LESS) {
+                    fprintf(stderr, "L%d: Generic parameter '%s' cannot specify type arguments.\n",
+                            typeRefTok->line, typeRefTok->value);
+                    p->hadError = true;
+                }
+            } else {
+                AST *refNode = newASTNode(AST_TYPE_REFERENCE, typeRefTok);
+                setTypeAST(refNode, TYPE_RECORD);
+                reaAdvance(p); // consume type identifier
+                parseTypeArgumentsIfPresent(p, refNode);
+                AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+                setTypeAST(ptrNode, TYPE_POINTER);
+                setRight(ptrNode, refNode);
+                ptypeNode = ptrNode;
+                pvtype = TYPE_POINTER;
+            }
         } else {
             ReaTokenType paramTypeTok = p->current.type;
             pvtype = mapType(paramTypeTok);
@@ -2023,6 +2384,13 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         setRight(func, typeNode);
         setExtra(func, block);
     }
+    if (genericParams) {
+        setLeft(func, genericParams);
+    }
+    if (genericFramePushed) {
+        popGenericFrame(p);
+    }
+
     if (local_proc_table) {
         func->symbol_table = (Symbol*)local_proc_table;
     }
@@ -2436,50 +2804,360 @@ static AST *parseConstDecl(ReaParser *p) {
     return node;
 }
 
+static AST *parseTypeAlias(ReaParser *p) {
+    int line = p->current.line;
+    reaAdvance(p); // consume 'type'
+
+    if (p->current.type != REA_TOKEN_ALIAS) {
+        fprintf(stderr, "L%d: Expected 'alias' after 'type'.\n", line);
+        p->hadError = true;
+        return NULL;
+    }
+    reaAdvance(p); // consume 'alias'
+
+    if (p->current.type != REA_TOKEN_IDENTIFIER) {
+        int line = p->current.line;
+        const char *lex = p->current.start;
+        int len = (int)p->current.length;
+        if (!lex || len <= 0) {
+            fprintf(stderr, "L%d: type name is reserved.\n", line);
+        } else {
+            fprintf(stderr, "L%d: type name '%.*s' is reserved.\n", line, len, lex);
+        }
+        p->hadError = true;
+        return NULL;
+    }
+
+    char *aliasName = (char *)malloc(p->current.length + 1);
+    if (!aliasName) {
+        fprintf(stderr, "Memory allocation failure while parsing type alias name.\n");
+        p->hadError = true;
+        return NULL;
+    }
+    memcpy(aliasName, p->current.start, p->current.length);
+    aliasName[p->current.length] = '\0';
+    Token *aliasTok = newToken(TOKEN_IDENTIFIER, aliasName, p->current.line, 0);
+    free(aliasName);
+    reaAdvance(p); // consume alias identifier
+
+    AST *typeParams = NULL;
+    bool framePushed = false;
+
+    if (typeNameAlreadyDefined(aliasTok->value)) {
+        fprintf(stderr, "L%d: type alias '%s' already defined.\n", aliasTok->line, aliasTok->value);
+        p->hadError = true;
+    } else {
+        AST *existing = lookupType(aliasTok->value);
+        if (existing) {
+            if (!existing->token) {
+                fprintf(stderr, "L%d: type name '%s' is reserved.\n", aliasTok->line, aliasTok->value);
+            } else {
+                fprintf(stderr, "L%d: type alias '%s' already defined.\n", aliasTok->line, aliasTok->value);
+            }
+            p->hadError = true;
+            if (!existing->token) {
+                freeAST(existing);
+            }
+        }
+    }
+
+    if (p->current.type == REA_TOKEN_LESS) {
+        framePushed = true;
+        pushGenericFrame(p);
+        reaAdvance(p); // consume '<'
+        typeParams = parseGenericParameterList(p);
+        if (!typeParams) {
+            popGenericFrame(p);
+            return NULL;
+        }
+    }
+
+    if (p->current.type != REA_TOKEN_EQUAL) {
+        fprintf(stderr, "L%d: Expected '=' in type alias declaration.\n", p->current.line);
+        p->hadError = true;
+        if (framePushed) {
+            popGenericFrame(p);
+        }
+        if (typeParams) freeAST(typeParams);
+        return NULL;
+    }
+    reaAdvance(p); // consume '='
+
+    AST *aliasType = parsePointerParamType(p);
+    if (!aliasType) {
+        if (!p->hadError) {
+            fprintf(stderr, "L%d: Expected type after '=' in type alias.\n", p->current.line);
+            p->hadError = true;
+        }
+        if (framePushed) {
+            popGenericFrame(p);
+        }
+        if (typeParams) freeAST(typeParams);
+        return NULL;
+    }
+
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+
+    AST *typeDecl = newASTNode(AST_TYPE_DECL, aliasTok);
+    setLeft(typeDecl, aliasType);
+    setTypeAST(typeDecl, aliasType->var_type);
+    if (typeParams && typeParams->child_count > 0) {
+        typeDecl->extra = typeParams;
+        typeParams->parent = typeDecl;
+    } else if (typeParams) {
+        freeAST(typeParams);
+    }
+
+    if (framePushed) {
+        popGenericFrame(p);
+    }
+
+    if (!p->hadError) {
+        insertType(aliasTok->value, aliasType);
+    }
+    return typeDecl;
+}
+
+static bool tokenIsKeyword(const ReaToken *tok, const char *keyword) {
+    if (!tok || tok->type != REA_TOKEN_IDENTIFIER) return false;
+    size_t len = strlen(keyword);
+    if ((size_t)tok->length != len) return false;
+    return strncasecmp(tok->start, keyword, len) == 0;
+}
+
 static AST *parseImport(ReaParser *p) {
-    // Parse: #import Identifier[, Identifier]* ;
-    // or:    #import "UnitName"[, "UnitName"]* ;
+    // Grammar:
+    //   #import (Identifier | StringLiteral) [as Identifier] (',' ...)* ';'
     reaAdvance(p); // consume '#import'
     AST *uses = newASTNode(AST_USES_CLAUSE, NULL);
-    uses->unit_list = createList();
 
+    bool parsed_any = false;
     while (p->current.type != REA_TOKEN_EOF) {
-        char *name = NULL;
+        char *path = NULL;
+        int path_line = p->current.line;
+
         if (p->current.type == REA_TOKEN_IDENTIFIER) {
-            name = (char*)malloc(p->current.length + 1);
-            if (!name) break;
-            memcpy(name, p->current.start, p->current.length);
-            name[p->current.length] = '\0';
+            path = (char*)malloc(p->current.length + 1);
+            if (!path) break;
+            memcpy(path, p->current.start, p->current.length);
+            path[p->current.length] = '\0';
             reaAdvance(p);
         } else if (p->current.type == REA_TOKEN_STRING) {
             size_t len = p->current.length;
             if (len >= 2) {
-                name = (char*)malloc(len - 1);
-                if (!name) break;
-                memcpy(name, p->current.start + 1, len - 2);
-                name[len - 2] = '\0';
+                path = (char*)malloc(len - 1);
+                if (!path) break;
+                memcpy(path, p->current.start + 1, len - 2);
+                path[len - 2] = '\0';
             }
             reaAdvance(p);
         } else {
             break;
         }
 
-        if (name) {
-            // Append a copy into the list; list implementation duplicates the pointer value
-            listAppend(uses->unit_list, name);
-            // We keep ownership consistent with Pascal parser which frees after use; for now, leave as is
+        char *alias = NULL;
+        if (tokenIsKeyword(&p->current, "as")) {
+            reaAdvance(p); // consume 'as'
+            if (p->current.type != REA_TOKEN_IDENTIFIER) {
+                fprintf(stderr, "L%d: Expected alias identifier after 'as'.\n", p->current.line);
+                p->hadError = true;
+            } else {
+                alias = (char*)malloc(p->current.length + 1);
+                if (!alias) {
+                    free(path);
+                    break;
+                }
+                memcpy(alias, p->current.start, p->current.length);
+                alias[p->current.length] = '\0';
+                reaAdvance(p);
+            }
         }
+
+        if (path) {
+            Token *pathTok = newToken(TOKEN_STRING_CONST, path, path_line, 0);
+            AST *importNode = newASTNode(AST_IMPORT, pathTok);
+            if (alias) {
+                Token *aliasTok = newToken(TOKEN_IDENTIFIER, alias, path_line, 0);
+                AST *aliasNode = newASTNode(AST_VARIABLE, aliasTok);
+                setLeft(importNode, aliasNode);
+            }
+            addChild(uses, importNode);
+            free(path);
+            if (alias) free(alias);
+            parsed_any = true;
+        }
+
         if (p->current.type == REA_TOKEN_COMMA) {
             reaAdvance(p);
             continue;
         }
         break;
     }
-    if (p->current.type == REA_TOKEN_SEMICOLON) reaAdvance(p);
+
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+
+    if (!parsed_any) {
+        fprintf(stderr, "L%d: Malformed #import directive.\n", p->current.line);
+        p->hadError = true;
+    }
+
     return uses;
 }
 
+static bool isExportableType(ASTNodeType type) {
+    switch (type) {
+        case AST_VAR_DECL:
+        case AST_CONST_DECL:
+        case AST_TYPE_DECL:
+        case AST_FUNCTION_DECL:
+        case AST_PROCEDURE_DECL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void markExported(AST *node) {
+    if (!node) return;
+    if (node->type == AST_COMPOUND || node->type == AST_BLOCK) {
+        if (node->left) markExported(node->left);
+        if (node->right) markExported(node->right);
+        if (node->extra) markExported(node->extra);
+        for (int i = 0; i < node->child_count; i++) {
+            markExported(node->children[i]);
+        }
+        return;
+    }
+    if (isExportableType(node->type)) {
+        node->is_exported = true;
+    }
+}
+
+static void appendModuleNode(AST *decls, AST *stmts, AST *node) {
+    if (!node) return;
+    if (node->type == AST_COMPOUND && node->is_global_scope) {
+        for (int i = 0; i < node->child_count; i++) {
+            AST *child = node->children[i];
+            if (!child) continue;
+            if (isExportableType(child->type) || child->type == AST_USES_CLAUSE || child->type == AST_IMPORT) {
+                addChild(decls, child);
+            } else {
+                addChild(stmts, child);
+            }
+            node->children[i] = NULL;
+        }
+        freeAST(node);
+        return;
+    }
+
+    if (isExportableType(node->type) || node->type == AST_USES_CLAUSE || node->type == AST_IMPORT || node->type == AST_MODULE) {
+        addChild(decls, node);
+    } else {
+        addChild(stmts, node);
+    }
+}
+
+static AST *parseModule(ReaParser *p) {
+    int module_line = p->current.line;
+    reaAdvance(p); // consume 'module'
+
+    if (p->current.type != REA_TOKEN_IDENTIFIER) {
+        fprintf(stderr, "L%d: Expected module name after 'module'.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+
+    char *name = (char*)malloc(p->current.length + 1);
+    if (!name) return NULL;
+    memcpy(name, p->current.start, p->current.length);
+    name[p->current.length] = '\0';
+    Token *nameTok = newToken(TOKEN_IDENTIFIER, name, module_line, 0);
+    free(name);
+    reaAdvance(p); // consume module name
+
+    if (p->current.type != REA_TOKEN_LEFT_BRACE) {
+        fprintf(stderr, "L%d: Expected '{' to begin module body.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+    reaAdvance(p); // consume '{'
+
+    bool prevInModule = p->inModule;
+    bool prevMark = p->markExport;
+    p->inModule = true;
+    p->markExport = false;
+
+    AST *moduleNode = newASTNode(AST_MODULE, nameTok);
+    AST *block = newASTNode(AST_BLOCK, NULL);
+    AST *decls = newASTNode(AST_COMPOUND, NULL);
+    AST *stmts = newASTNode(AST_COMPOUND, NULL);
+    decls->is_global_scope = true;
+    stmts->is_global_scope = true;
+    addChild(block, decls);
+    addChild(block, stmts);
+    setRight(moduleNode, block);
+
+    while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
+        AST *stmt = parseStatement(p);
+        if (!stmt) {
+            if (p->current.type == REA_TOKEN_RIGHT_BRACE || p->current.type == REA_TOKEN_EOF) {
+                break;
+            }
+            p->hadError = true;
+            break;
+        }
+        appendModuleNode(decls, stmts, stmt);
+        while (p->current.type == REA_TOKEN_SEMICOLON) {
+            reaAdvance(p);
+        }
+    }
+
+    if (p->current.type == REA_TOKEN_RIGHT_BRACE) {
+        reaAdvance(p);
+    } else {
+        fprintf(stderr, "L%d: Expected '}' to close module body.\n", p->current.line);
+        p->hadError = true;
+    }
+
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+
+    p->inModule = prevInModule;
+    p->markExport = prevMark;
+    return moduleNode;
+}
+
 static AST *parseStatement(ReaParser *p) {
+    if (p->current.type == REA_TOKEN_EXPORT) {
+        int line = p->current.line;
+        reaAdvance(p); // consume 'export'
+        if (!p->inModule) {
+            fprintf(stderr, "L%d: 'export' is only valid inside a module.\n", line);
+            p->hadError = true;
+        }
+        bool prevMark = p->markExport;
+        p->markExport = true;
+        AST *decl = parseStatement(p);
+        p->markExport = prevMark;
+        if (decl && p->inModule) {
+            markExported(decl);
+        }
+        return decl;
+    }
+
+    if (p->current.type == REA_TOKEN_MODULE) {
+        return parseModule(p);
+    }
+
+    if (p->current.type == REA_TOKEN_TYPE) {
+        return parseTypeAlias(p);
+    }
+
     if (p->current.type == REA_TOKEN_CLASS) {
         // class Name { field declarations ; ... }
         
@@ -2671,6 +3349,13 @@ static AST *parseStatement(ReaParser *p) {
         namebuf[n] = '\0';
         AST *tdef = lookupType(namebuf);
         if (tdef) {
+            if (!tdef->token) {
+                freeAST(tdef);
+            }
+            return parseVarDecl(p);
+        }
+        ReaToken peek = reaPeekToken(p);
+        if (peek.type == REA_TOKEN_IDENTIFIER || peek.type == REA_TOKEN_LESS) {
             return parseVarDecl(p);
         }
     }
@@ -2694,6 +3379,14 @@ AST *parseRea(const char *source) {
     p.currentParentClassName = NULL;
     p.currentMethodIndex = 0;
     p.functionDepth = 0;
+    p.inModule = false;
+    p.markExport = false;
+    p.genericTypeNames = NULL;
+    p.genericTypeCount = 0;
+    p.genericTypeCapacity = 0;
+    p.genericFrameStack = NULL;
+    p.genericFrameDepth = 0;
+    p.genericFrameCapacity = 0;
     reaAdvance(&p);
 
     AST *program = newASTNode(AST_PROGRAM, NULL);
@@ -2739,7 +3432,8 @@ AST *parseRea(const char *source) {
             }
             freeAST(stmt);
         } else if (stmt->type == AST_VAR_DECL || stmt->type == AST_FUNCTION_DECL || stmt->type == AST_PROCEDURE_DECL ||
-                   stmt->type == AST_TYPE_DECL || stmt->type == AST_CONST_DECL) {
+                   stmt->type == AST_TYPE_DECL || stmt->type == AST_CONST_DECL || stmt->type == AST_MODULE ||
+                   stmt->type == AST_USES_CLAUSE) {
             addChild(decls, stmt);
             
         } else {
@@ -2925,6 +3619,8 @@ AST *parseRea(const char *source) {
             }
         }
     }
+
+    clearGenericState(&p);
 
     if (p.hadError) {
         freeAST(program);

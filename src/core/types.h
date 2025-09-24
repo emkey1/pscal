@@ -210,7 +210,9 @@ typedef enum {
     AST_TYPE_IDENTIFIER, // Added: Represents a simple type identifier like "integer" or "MyCustomType"
     AST_SUBRANGE,
     AST_USES_CLAUSE,
+    AST_IMPORT,
     AST_UNIT,
+    AST_MODULE,
     AST_INTERFACE,
     AST_IMPLEMENTATION,
     AST_INITIALIZATION,
