@@ -19,6 +19,16 @@ var
   srName: string;
   i: integer;
 
+function TwoDigit(n: word): string;
+var
+  res: string;
+begin
+  res := '';
+  res := res + chr(ord('0') + (n div 10));
+  res := res + chr(ord('0') + (n mod 10));
+  TwoDigit := res;
+end;
+
 procedure WaitKey;
 begin
   TextBackground(Black);
@@ -51,8 +61,16 @@ procedure DemoDateTime;
 begin
   getDate(year, month, day, dow);
   getTime(hour, minute, second, sec100);
-  writeln('Today is ', year, '-', month, '-', day, ' (dow=', dow, ')');
-  writeln('Current time: ', hour, ':', minute, ':', second);
+  write('Today is ', year, '-');
+  write(TwoDigit(month));
+  write('-');
+  writeln(TwoDigit(day), ' (dow=', dow, ')');
+  write('Current time: ');
+  write(TwoDigit(hour));
+  write(':');
+  write(TwoDigit(minute));
+  write(':');
+  writeln(TwoDigit(second));
   writeln('HOME env: ', getEnv('HOME'));
 end;
 
