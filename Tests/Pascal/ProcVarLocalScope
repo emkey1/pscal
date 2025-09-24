@@ -1,0 +1,34 @@
+program ProcVarLocalScope;
+
+type
+  TProc = procedure(n: integer);
+  TFunc = function(x: integer): integer;
+
+procedure IncVar(n: integer);
+begin
+  writeln('inc ', n);
+end;
+
+function AddOffset(x: integer): integer;
+begin
+  AddOffset := x + 7;
+end;
+
+procedure Run;
+var
+  worker: TProc;
+  evaluator: TFunc;
+  value: integer;
+
+begin
+  value := 2;
+  worker := @IncVar;
+  evaluator := @AddOffset;
+  worker(value);
+  worker(value + 1);
+  writeln('eval=', evaluator(5));
+end;
+
+begin
+  Run;
+end.
