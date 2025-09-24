@@ -201,6 +201,12 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_DEREFERENCE:    return "DEREFERENCE";
         case AST_ADDR_OF:        return "ADDR_OF";
         case AST_NIL:            return "NIL";
+        case AST_MATCH:          return "MATCH";
+        case AST_MATCH_BRANCH:   return "MATCH_BRANCH";
+        case AST_PATTERN_BINDING:return "PATTERN_BINDING";
+        case AST_TRY:            return "TRY";
+        case AST_CATCH:          return "CATCH";
+        case AST_THROW:          return "THROW";
         default:                 return "UNKNOWN_AST_TYPE";
     }
 }

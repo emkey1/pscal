@@ -353,6 +353,75 @@ static ReaModuleBinding *findActiveBinding(const char *name) {
     return findBindingInList(gActiveBindings, name);
 }
 
+static char *tryResolveRelativePath(const char *relative, bool *out_exists) {
+    if (!relative || !*relative) return NULL;
+
+    for (int idx = gModuleDirDepth - 1; idx >= 0; idx--) {
+        const char *base = gModuleDirStack ? gModuleDirStack[idx] : NULL;
+        if (!base) continue;
+        char *candidate = joinPaths(base, relative);
+        if (!candidate) continue;
+        FILE *fp = fopen(candidate, "rb");
+        if (fp) {
+            if (out_exists) *out_exists = true;
+            fclose(fp);
+            return candidate;
+        }
+        free(candidate);
+    }
+
+    char *candidate = reaDupString(relative);
+    if (!candidate) return NULL;
+    FILE *fp = fopen(candidate, "rb");
+    if (fp) {
+        if (out_exists) *out_exists = true;
+        fclose(fp);
+        return candidate;
+    }
+    free(candidate);
+    return NULL;
+}
+
+static char *resolveAlternateSupportPath(const char *path, bool *out_exists) {
+    if (!path) return NULL;
+    const char *supportMarker = strstr(path, "__support");
+    if (!supportMarker) return NULL;
+    size_t prefixLen = (size_t)(supportMarker - path);
+    if (prefixLen == 0) return NULL;
+
+    const char *suffix = supportMarker;
+    char *prefix = (char *)malloc(prefixLen + 1);
+    if (!prefix) {
+        return NULL;
+    }
+    memcpy(prefix, path, prefixLen);
+    prefix[prefixLen] = '\0';
+
+    while (true) {
+        char *underscore = strrchr(prefix, '_');
+        if (!underscore) break;
+        *underscore = '\0';
+        if (*prefix == '\0') break;
+        size_t newLen = strlen(prefix) + strlen(suffix) + 1;
+        char *candidateRelative = (char *)malloc(newLen);
+        if (!candidateRelative) {
+            free(prefix);
+            return NULL;
+        }
+        strcpy(candidateRelative, prefix);
+        strcat(candidateRelative, suffix);
+        char *resolved = tryResolveRelativePath(candidateRelative, out_exists);
+        free(candidateRelative);
+        if (resolved) {
+            free(prefix);
+            return resolved;
+        }
+    }
+
+    free(prefix);
+    return NULL;
+}
+
 static char *resolveModulePath(const char *path, bool *out_exists) {
     if (out_exists) *out_exists = false;
     if (!path || !*path) return NULL;
@@ -366,30 +435,17 @@ static char *resolveModulePath(const char *path, bool *out_exists) {
         return reaDupString(path);
     }
 
-    for (int idx = gModuleDirDepth - 1; idx >= 0; idx--) {
-        const char *base = gModuleDirStack ? gModuleDirStack[idx] : NULL;
-        if (!base) continue;
-        char *candidate = joinPaths(base, path);
-        if (!candidate) continue;
-        FILE *fp = fopen(candidate, "rb");
-        if (fp) {
-            if (out_exists) *out_exists = true;
-            fclose(fp);
-            return candidate;
-        }
-        free(candidate);
+    char *resolved = tryResolveRelativePath(path, out_exists);
+    if (resolved) {
+        return resolved;
     }
 
-    // Fallback: relative to current working directory
-    char *candidate = reaDupString(path);
-    if (!candidate) return NULL;
-    FILE *fp = fopen(candidate, "rb");
-    if (fp) {
-        if (out_exists) *out_exists = true;
-        fclose(fp);
-        return candidate;
+    resolved = resolveAlternateSupportPath(path, out_exists);
+    if (resolved) {
+        return resolved;
     }
-    return candidate;
+
+    return reaDupString(path);
 }
 
 static ReaModuleInfo *findModuleByPath(const char *path) {
@@ -993,6 +1049,506 @@ static int countAccessibleExports(const char *name, ReaModuleBindingList *bindin
     }
     free(seen);
     return count;
+}
+
+static int gMatchTempCounter = 0;
+
+static AST *cloneTypeForVar(VarType type, AST *typeDef, int line) {
+    if (typeDef) {
+        return copyAST(typeDef);
+    }
+    const char *name = NULL;
+    switch (type) {
+        case TYPE_INT64: name = "int"; break;
+        case TYPE_INT32: name = "int32"; break;
+        case TYPE_INT16: name = "int16"; break;
+        case TYPE_INT8:  name = "int8"; break;
+        case TYPE_UINT64: name = "uint64"; break;
+        case TYPE_UINT32: name = "uint32"; break;
+        case TYPE_UINT16: name = "uint16"; break;
+        case TYPE_UINT8:  name = "uint8"; break;
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            name = "float";
+            break;
+        case TYPE_FLOAT: name = "float32"; break;
+        case TYPE_BOOLEAN: name = "bool"; break;
+        case TYPE_STRING: name = "str"; break;
+        case TYPE_CHAR:   name = "char"; break;
+        case TYPE_BYTE:   name = "byte"; break;
+        default:
+            break;
+    }
+    if (name) {
+        Token *tok = newToken(TOKEN_IDENTIFIER, name, line, 0);
+        AST *typeNode = newASTNode(AST_TYPE_IDENTIFIER, tok);
+        setTypeAST(typeNode, type);
+        return typeNode;
+    }
+    if (type == TYPE_POINTER) {
+        AST *ptrNode = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(ptrNode, TYPE_POINTER);
+        Token *tok = newToken(TOKEN_IDENTIFIER, "byte", line, 0);
+        AST *base = newASTNode(AST_TYPE_IDENTIFIER, tok);
+        setTypeAST(base, TYPE_BYTE);
+        setRight(ptrNode, base);
+        return ptrNode;
+    }
+    return NULL;
+}
+
+static AST *createBooleanLiteral(bool value, int line) {
+    Token *tok = newToken(value ? TOKEN_TRUE : TOKEN_FALSE, value ? "true" : "false", line, 0);
+    AST *node = newASTNode(AST_BOOLEAN, tok);
+    node->i_val = value ? 1 : 0;
+    setTypeAST(node, TYPE_BOOLEAN);
+    return node;
+}
+
+static AST *createNumberLiteral(long long value, VarType type, int line) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", value);
+    Token *tok = newToken(TOKEN_INTEGER_CONST, buf, line, 0);
+    AST *node = newASTNode(AST_NUMBER, tok);
+    node->i_val = (int)value;
+    setTypeAST(node, type);
+    return node;
+}
+
+static AST *createVarRef(const char *name, VarType type, AST *typeDef, int line) {
+    Token *tok = newToken(TOKEN_IDENTIFIER, name, line, 0);
+    AST *var = newASTNode(AST_VARIABLE, tok);
+    setTypeAST(var, type);
+    if (typeDef) {
+        var->type_def = copyAST(typeDef);
+    }
+    return var;
+}
+
+static AST *createAssignment(AST *lhs, AST *rhs, int line) {
+    Token *tok = newToken(TOKEN_ASSIGN, ":=", line, 0);
+    AST *assign = newASTNode(AST_ASSIGN, tok);
+    setLeft(assign, lhs);
+    setRight(assign, rhs);
+    setTypeAST(assign, lhs ? lhs->var_type : TYPE_VOID);
+    return assign;
+}
+
+static void appendStatementsFromBlock(AST *target, AST *block) {
+    if (!target || !block) return;
+    if (block->type == AST_COMPOUND) {
+        for (int i = 0; i < block->child_count; i++) {
+            AST *child = block->children[i];
+            if (!child) continue;
+            block->children[i] = NULL;
+            addChild(target, child);
+        }
+        block->child_count = 0;
+        freeAST(block);
+    } else {
+        addChild(target, block);
+    }
+}
+
+static AST *desugarMatchNode(AST *match);
+static AST *desugarTryNode(AST *node, VarType currentFunctionType);
+static AST *desugarThrowNode(AST *node, VarType currentFunctionType);
+static AST *desugarNode(AST *node, VarType currentFunctionType);
+static void ensureExceptionGlobals(AST *root);
+
+static AST *desugarMatchNode(AST *match) {
+    if (!match) return NULL;
+    AST *expr = match->left;
+    match->left = NULL;
+    int line = expr && expr->token ? expr->token->line : 0;
+
+    char valueName[64];
+    char handledName[64];
+    snprintf(valueName, sizeof(valueName), "__rea_match_val_%d", gMatchTempCounter);
+    snprintf(handledName, sizeof(handledName), "__rea_match_handled_%d", gMatchTempCounter);
+    gMatchTempCounter++;
+
+    VarType valueType = expr ? expr->var_type : TYPE_INT64;
+    AST *valueTypeNode = cloneTypeForVar(valueType, expr ? expr->type_def : NULL, line);
+    if (!valueTypeNode) {
+        valueTypeNode = cloneTypeForVar(TYPE_INT64, NULL, line);
+        valueType = TYPE_INT64;
+    }
+
+    Token *valueTok = newToken(TOKEN_IDENTIFIER, valueName, line, 0);
+    AST *valueVar = newASTNode(AST_VARIABLE, valueTok);
+    setTypeAST(valueVar, valueTypeNode ? valueTypeNode->var_type : valueType);
+    if (valueTypeNode) {
+        valueVar->type_def = copyAST(valueTypeNode);
+    }
+    AST *valueDecl = newASTNode(AST_VAR_DECL, NULL);
+    addChild(valueDecl, valueVar);
+    setRight(valueDecl, valueTypeNode);
+    setTypeAST(valueDecl, valueVar->var_type);
+    setLeft(valueDecl, expr);
+
+    Token *handledTok = newToken(TOKEN_IDENTIFIER, handledName, line, 0);
+    AST *handledVar = newASTNode(AST_VARIABLE, handledTok);
+    setTypeAST(handledVar, TYPE_BOOLEAN);
+    AST *handledTypeNode = cloneTypeForVar(TYPE_BOOLEAN, NULL, line);
+    AST *handledDecl = newASTNode(AST_VAR_DECL, NULL);
+    addChild(handledDecl, handledVar);
+    setRight(handledDecl, handledTypeNode);
+    setTypeAST(handledDecl, TYPE_BOOLEAN);
+    setLeft(handledDecl, createBooleanLiteral(false, line));
+
+    AST *result = newASTNode(AST_COMPOUND, NULL);
+    addChild(result, valueDecl);
+    addChild(result, handledDecl);
+
+    for (int i = 0; i < match->child_count; i++) {
+        AST *branch = match->children[i];
+        if (!branch) continue;
+        AST *pattern = branch->left;
+        AST *guard = branch->extra;
+        AST *body = branch->right;
+        branch->left = NULL;
+        branch->extra = NULL;
+        branch->right = NULL;
+
+        int branchLine = pattern && pattern->token ? pattern->token->line : line;
+        AST *patternBlock = newASTNode(AST_COMPOUND, NULL);
+
+        bool bindsName = pattern && pattern->type == AST_PATTERN_BINDING;
+        if (bindsName) {
+            Token *bindingTok = pattern->token;
+            pattern->token = NULL;
+            AST *bindingVar = newASTNode(AST_VARIABLE, bindingTok);
+            setTypeAST(bindingVar, valueVar->var_type);
+            AST *bindingTypeNode = cloneTypeForVar(valueVar->var_type, valueVar->type_def, bindingTok ? bindingTok->line : branchLine);
+            AST *bindingDecl = newASTNode(AST_VAR_DECL, NULL);
+            addChild(bindingDecl, bindingVar);
+            setRight(bindingDecl, bindingTypeNode);
+            setTypeAST(bindingDecl, valueVar->var_type);
+            AST *matchRef = createVarRef(valueName, valueVar->var_type, valueVar->type_def, bindingTok ? bindingTok->line : branchLine);
+            setLeft(bindingDecl, matchRef);
+            addChild(patternBlock, bindingDecl);
+            freeAST(pattern);
+            pattern = NULL;
+        }
+
+        AST *condition = NULL;
+        if (bindsName) {
+            condition = createBooleanLiteral(true, branchLine);
+        } else if (pattern) {
+            int condLine = pattern->token ? pattern->token->line : branchLine;
+            Token *eqTok = newToken(TOKEN_EQUAL, "=", condLine, 0);
+            AST *matchRef = createVarRef(valueName, valueVar->var_type, valueVar->type_def, condLine);
+            AST *cond = newASTNode(AST_BINARY_OP, eqTok);
+            setLeft(cond, matchRef);
+            setRight(cond, pattern);
+            setTypeAST(cond, TYPE_BOOLEAN);
+            condition = cond;
+        } else {
+            condition = createBooleanLiteral(true, branchLine);
+        }
+
+        AST *handledAssign = createAssignment(createVarRef(handledName, TYPE_BOOLEAN, NULL, branchLine),
+                                              createBooleanLiteral(true, branchLine),
+                                              branchLine);
+
+        if (guard) {
+            AST *guardBlock = newASTNode(AST_COMPOUND, NULL);
+            addChild(guardBlock, handledAssign);
+            appendStatementsFromBlock(guardBlock, body);
+            AST *guardIf = newASTNode(AST_IF, NULL);
+            setLeft(guardIf, guard);
+            setRight(guardIf, guardBlock);
+            addChild(patternBlock, guardIf);
+        } else {
+            addChild(patternBlock, handledAssign);
+            appendStatementsFromBlock(patternBlock, body);
+        }
+
+        Token *notTok = newToken(TOKEN_NOT, "not", branchLine, 0);
+        AST *notHandled = newASTNode(AST_UNARY_OP, notTok);
+        setLeft(notHandled, createVarRef(handledName, TYPE_BOOLEAN, NULL, branchLine));
+        setTypeAST(notHandled, TYPE_BOOLEAN);
+
+        AST *patternIf = newASTNode(AST_IF, NULL);
+        setLeft(patternIf, condition);
+        setRight(patternIf, patternBlock);
+
+        AST *outerBlock = newASTNode(AST_COMPOUND, NULL);
+        addChild(outerBlock, patternIf);
+
+        AST *outerIf = newASTNode(AST_IF, NULL);
+        setLeft(outerIf, notHandled);
+        setRight(outerIf, outerBlock);
+        addChild(result, outerIf);
+
+        freeAST(branch);
+    }
+
+    AST *defaultBlock = match->extra;
+    match->extra = NULL;
+    if (defaultBlock) {
+        Token *notTok = newToken(TOKEN_NOT, "not", line, 0);
+        AST *notHandled = newASTNode(AST_UNARY_OP, notTok);
+        setLeft(notHandled, createVarRef(handledName, TYPE_BOOLEAN, NULL, line));
+        setTypeAST(notHandled, TYPE_BOOLEAN);
+        AST *defaultBody = newASTNode(AST_COMPOUND, NULL);
+        appendStatementsFromBlock(defaultBody, defaultBlock);
+        AST *defaultIf = newASTNode(AST_IF, NULL);
+        setLeft(defaultIf, notHandled);
+        setRight(defaultIf, defaultBody);
+        addChild(result, defaultIf);
+    }
+
+    if (match->children) {
+        free(match->children);
+    }
+    match->child_count = 0;
+    match->child_capacity = 0;
+    free(match);
+    return result;
+}
+
+static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
+    if (!node) return NULL;
+    AST *tryBlock = node->left;
+    AST *catchNode = node->right;
+    node->left = NULL;
+    node->right = NULL;
+
+    AST *result = newASTNode(AST_COMPOUND, NULL);
+
+    AST *pendingReset = createAssignment(createVarRef("__rea_exc_pending", TYPE_BOOLEAN, NULL, 0),
+                                         createBooleanLiteral(false, 0),
+                                         0);
+    addChild(result, pendingReset);
+
+    if (tryBlock) {
+        appendStatementsFromBlock(result, tryBlock);
+    }
+
+    AST *catchDecl = NULL;
+    AST *catchBody = NULL;
+    if (catchNode) {
+        catchDecl = catchNode->left;
+        catchBody = catchNode->right;
+        catchNode->left = NULL;
+        catchNode->right = NULL;
+        freeAST(catchNode);
+    }
+
+    AST *ifBody = newASTNode(AST_COMPOUND, NULL);
+    if (catchDecl) {
+        AST *valueRef = createVarRef("__rea_exc_value", TYPE_INT64, NULL, 0);
+        setLeft(catchDecl, valueRef);
+        addChild(ifBody, catchDecl);
+    }
+    AST *clearPending = createAssignment(createVarRef("__rea_exc_pending", TYPE_BOOLEAN, NULL, 0),
+                                         createBooleanLiteral(false, 0),
+                                         0);
+    addChild(ifBody, clearPending);
+    appendStatementsFromBlock(ifBody, catchBody);
+
+    AST *condition = createVarRef("__rea_exc_pending", TYPE_BOOLEAN, NULL, 0);
+    AST *catchIf = newASTNode(AST_IF, NULL);
+    setLeft(catchIf, condition);
+    setRight(catchIf, ifBody);
+    addChild(result, catchIf);
+
+    free(node);
+    return result;
+}
+
+static AST *desugarThrowNode(AST *node, VarType currentFunctionType) {
+    if (!node) return NULL;
+    int line = node->i_val;
+    AST *expr = node->left;
+    node->left = NULL;
+
+    AST *result = newASTNode(AST_COMPOUND, NULL);
+
+    AST *setPending = createAssignment(createVarRef("__rea_exc_pending", TYPE_BOOLEAN, NULL, line),
+                                       createBooleanLiteral(true, line),
+                                       line);
+    addChild(result, setPending);
+
+    AST *valueExpr = expr ? expr : createNumberLiteral(0, TYPE_INT64, line);
+    AST *setValue = createAssignment(createVarRef("__rea_exc_value", TYPE_INT64, NULL, line),
+                                     valueExpr,
+                                     line);
+    addChild(result, setValue);
+
+    Token *retTok = newToken(TOKEN_RETURN, "return", line, 0);
+    AST *ret = newASTNode(AST_RETURN, retTok);
+    AST *retValue = NULL;
+    switch (currentFunctionType) {
+        case TYPE_BOOLEAN:
+            retValue = createBooleanLiteral(false, line);
+            break;
+        case TYPE_POINTER: {
+            Token *nilTok = newToken(TOKEN_NIL, "nil", line, 0);
+            AST *nilNode = newASTNode(AST_NIL, nilTok);
+            setTypeAST(nilNode, TYPE_POINTER);
+            retValue = nilNode;
+            break;
+        }
+        case TYPE_INT32:
+        case TYPE_INT16:
+        case TYPE_INT8:
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+        case TYPE_FLOAT:
+        case TYPE_INT64:
+            retValue = createNumberLiteral(0, currentFunctionType, line);
+            break;
+        default:
+            retValue = NULL;
+            break;
+    }
+    setLeft(ret, retValue);
+    setTypeAST(ret, currentFunctionType);
+    addChild(result, ret);
+
+    free(node);
+    return result;
+}
+
+static AST *desugarNode(AST *node, VarType currentFunctionType) {
+    if (!node) return NULL;
+
+    if (node->type == AST_FUNCTION_DECL) {
+        VarType retType = node->var_type;
+        if (node->left) {
+            AST *newLeft = desugarNode(node->left, currentFunctionType);
+            if (newLeft != node->left) setLeft(node, newLeft);
+        }
+        if (node->right) {
+            AST *newRight = desugarNode(node->right, currentFunctionType);
+            if (newRight != node->right) setRight(node, newRight);
+        }
+        if (node->extra) {
+            AST *newBody = desugarNode(node->extra, retType);
+            if (newBody != node->extra) setExtra(node, newBody);
+        }
+        for (int i = 0; i < node->child_count; i++) {
+            if (!node->children || !node->children[i]) continue;
+            AST *child = node->children[i];
+            AST *newChild = desugarNode(child, currentFunctionType);
+            if (newChild != child) {
+                node->children[i] = newChild;
+                if (newChild) newChild->parent = node;
+            }
+        }
+        return node;
+    }
+    if (node->type == AST_PROCEDURE_DECL) {
+        if (node->left) {
+            AST *newLeft = desugarNode(node->left, currentFunctionType);
+            if (newLeft != node->left) setLeft(node, newLeft);
+        }
+        if (node->extra) {
+            AST *newExtra = desugarNode(node->extra, TYPE_VOID);
+            if (newExtra != node->extra) setExtra(node, newExtra);
+        }
+        if (node->right) {
+            AST *newRight = desugarNode(node->right, TYPE_VOID);
+            if (newRight != node->right) setRight(node, newRight);
+        }
+        for (int i = 0; i < node->child_count; i++) {
+            if (!node->children || !node->children[i]) continue;
+            AST *child = node->children[i];
+            AST *newChild = desugarNode(child, currentFunctionType);
+            if (newChild != child) {
+                node->children[i] = newChild;
+                if (newChild) newChild->parent = node;
+            }
+        }
+        return node;
+    }
+
+    if (node->left) {
+        AST *newLeft = desugarNode(node->left, currentFunctionType);
+        if (newLeft != node->left) setLeft(node, newLeft);
+    }
+    if (node->right) {
+        AST *newRight = desugarNode(node->right, currentFunctionType);
+        if (newRight != node->right) setRight(node, newRight);
+    }
+    if (node->extra) {
+        AST *newExtra = desugarNode(node->extra, currentFunctionType);
+        if (newExtra != node->extra) setExtra(node, newExtra);
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        if (!node->children || !node->children[i]) continue;
+        AST *child = node->children[i];
+        AST *newChild = desugarNode(child, currentFunctionType);
+        if (newChild != child) {
+            node->children[i] = newChild;
+            if (newChild) newChild->parent = node;
+        }
+    }
+
+    if (node->type == AST_MATCH) {
+        return desugarMatchNode(node);
+    }
+    if (node->type == AST_TRY) {
+        return desugarTryNode(node, currentFunctionType);
+    }
+    if (node->type == AST_THROW) {
+        return desugarThrowNode(node, currentFunctionType);
+    }
+    return node;
+}
+
+static void ensureExceptionGlobals(AST *root) {
+    AST *decls = getDeclsCompound(root);
+    if (!decls) return;
+
+    bool hasPending = false;
+    bool hasValue = false;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *child = decls->children[i];
+        if (!child || child->type != AST_VAR_DECL) continue;
+        for (int j = 0; j < child->child_count; j++) {
+            AST *varNode = child->children[j];
+            if (!varNode || !varNode->token || !varNode->token->value) continue;
+            if (strcasecmp(varNode->token->value, "__rea_exc_pending") == 0) {
+                hasPending = true;
+            } else if (strcasecmp(varNode->token->value, "__rea_exc_value") == 0) {
+                hasValue = true;
+            }
+        }
+    }
+
+    if (!hasPending) {
+        AST *pendingDecl = newASTNode(AST_VAR_DECL, NULL);
+        Token *pendingTok = newToken(TOKEN_IDENTIFIER, "__rea_exc_pending", 0, 0);
+        AST *pendingVar = newASTNode(AST_VARIABLE, pendingTok);
+        setTypeAST(pendingVar, TYPE_BOOLEAN);
+        AST *pendingType = cloneTypeForVar(TYPE_BOOLEAN, NULL, 0);
+        addChild(pendingDecl, pendingVar);
+        setRight(pendingDecl, pendingType);
+        setTypeAST(pendingDecl, TYPE_BOOLEAN);
+        setLeft(pendingDecl, createBooleanLiteral(false, 0));
+        addChild(decls, pendingDecl);
+    }
+
+    if (!hasValue) {
+        AST *valueDecl = newASTNode(AST_VAR_DECL, NULL);
+        Token *valueTok = newToken(TOKEN_IDENTIFIER, "__rea_exc_value", 0, 0);
+        AST *valueVar = newASTNode(AST_VARIABLE, valueTok);
+        setTypeAST(valueVar, TYPE_INT64);
+        AST *valueType = cloneTypeForVar(TYPE_INT64, NULL, 0);
+        addChild(valueDecl, valueVar);
+        setRight(valueDecl, valueType);
+        setTypeAST(valueDecl, TYPE_INT64);
+        setLeft(valueDecl, createNumberLiteral(0, TYPE_INT64, 0));
+        addChild(decls, valueDecl);
+    }
 }
 
 typedef struct {
@@ -1993,6 +2549,12 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             if (scope) {
                 AST *body = (scope->type == AST_FUNCTION_DECL) ? scope->extra : scope->right;
                 decl = findFunctionInSubtree(body, ident);
+                if (decl && (decl->type == AST_FUNCTION_DECL || decl->type == AST_PROCEDURE_DECL) && node->token) {
+                    int decl_line = declarationLine(decl);
+                    if (decl_line > 0 && decl_line > node->token->line) {
+                        decl = NULL;
+                    }
+                }
             }
         }
         if (!decl) {
@@ -2193,7 +2755,6 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
         }
     } else if (node->type == AST_PROCEDURE_CALL) {
-        bool resolved = false;
         if (handleModuleCall(node)) {
             if (moduleFromExpression(node->left)) {
                 if (pushedGenericFrame) popGenericFrame();
@@ -2207,7 +2768,6 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 callDecl = findGlobalFunctionDecl(node->token->value);
             }
             if (callDecl && (callDecl->type == AST_FUNCTION_DECL || callDecl->type == AST_PROCEDURE_DECL)) {
-                resolved = true;
                 AST *decl_scope = findEnclosingCompound(callDecl);
                 AST *use_scope = findEnclosingCompound(node);
                 if (decl_scope && use_scope && decl_scope == use_scope) {
@@ -2215,19 +2775,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     if (decl_line > 0 && decl_line > node->token->line) {
                         Symbol *global = lookupGlobalSymbol(node->token->value);
                         if (!global) {
-                            ReaModuleInfo *firstModule = NULL;
-                            ReaModuleExport *firstExport = NULL;
-                            int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
-                            if (matches > 1) {
-                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
-                                        node->token->line, node->token->value);
-                            } else if (!resolved && matches > 0) {
-                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                        node->token->line, node->token->value);
-                            }
-                            if (matches > 0) {
-                                pascal_semantic_error_count++;
-                            }
+                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
                         }
                     }
                 }
@@ -2237,25 +2787,14 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 AST *body = getFunctionBody(enclosing);
                 AST *nested = findFunctionInSubtree(body, node->token->value);
                 if (nested && nested != enclosing) {
-                    resolved = true;
                     AST *decl_scope = findEnclosingCompound(nested);
                     AST *use_scope = findEnclosingCompound(node);
                     if (decl_scope && use_scope && decl_scope == use_scope) {
                         int decl_line = declarationLine(nested);
                         if (decl_line > 0 && decl_line > node->token->line) {
-                            ReaModuleInfo *firstModule = NULL;
-                            ReaModuleExport *firstExport = NULL;
-                            int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
-                            if (matches > 1) {
-                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
-                                        node->token->line, node->token->value);
-                            } else if (!resolved && matches > 0) {
-                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                        node->token->line, node->token->value);
-                            }
-                            if (matches > 0) {
-                                pascal_semantic_error_count++;
-                            }
+                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
                         }
                     }
                 }
@@ -2536,6 +3075,11 @@ static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings
 
 void reaPerformSemanticAnalysis(AST *root) {
     if (!root) return;
+    ensureExceptionGlobals(root);
+    AST *rewrittenRoot = desugarNode(root, TYPE_VOID);
+    if (rewrittenRoot) {
+        root = rewrittenRoot;
+    }
     ReaModuleBindingList mainBindings = {0};
     AST *decls = getDeclsCompound(root);
     AST *stmts = NULL;
