@@ -2476,45 +2476,55 @@ comparison_error_label:
             }
             case ALLOC_OBJECT: {
                 uint8_t field_count = READ_BYTE();
-                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
-                if (!fields) {
-                    runtimeError(vm, "VM Error: Out of memory allocating object.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                FieldValue* fields_head = NULL;
+                FieldValue** next_ptr = &fields_head;
                 for (uint16_t i = 0; i < field_count; i++) {
-                    fields[i].name = NULL;
-                    fields[i].value = makeNil();
-                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                    FieldValue* field = malloc(sizeof(FieldValue));
+                    if (!field) {
+                        freeFieldValue(fields_head);
+                        runtimeError(vm, "VM Error: Out of memory allocating object field.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    field->name = NULL;
+                    field->value = makeNil();
+                    field->next = NULL;
+                    *next_ptr = field;
+                    next_ptr = &field->next;
                 }
                 Value* obj = malloc(sizeof(Value));
                 if (!obj) {
-                    free(fields);
+                    freeFieldValue(fields_head);
                     runtimeError(vm, "VM Error: Out of memory allocating object value.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                *obj = makeRecord(fields);
+                *obj = makeRecord(fields_head);
                 push(vm, makePointer(obj, NULL));
                 break;
             }
             case ALLOC_OBJECT16: {
                 uint16_t field_count = READ_SHORT(vm);
-                FieldValue* fields = calloc(field_count, sizeof(FieldValue));
-                if (!fields) {
-                    runtimeError(vm, "VM Error: Out of memory allocating object.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                FieldValue* fields_head = NULL;
+                FieldValue** next_ptr = &fields_head;
                 for (uint16_t i = 0; i < field_count; i++) {
-                    fields[i].name = NULL;
-                    fields[i].value = makeNil();
-                    fields[i].next = (i + 1 < field_count) ? &fields[i + 1] : NULL;
+                    FieldValue* field = malloc(sizeof(FieldValue));
+                    if (!field) {
+                        freeFieldValue(fields_head);
+                        runtimeError(vm, "VM Error: Out of memory allocating object field.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    field->name = NULL;
+                    field->value = makeNil();
+                    field->next = NULL;
+                    *next_ptr = field;
+                    next_ptr = &field->next;
                 }
                 Value* obj = malloc(sizeof(Value));
                 if (!obj) {
-                    free(fields);
+                    freeFieldValue(fields_head);
                     runtimeError(vm, "VM Error: Out of memory allocating object value.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                *obj = makeRecord(fields);
+                *obj = makeRecord(fields_head);
                 push(vm, makePointer(obj, NULL));
                 break;
             }
