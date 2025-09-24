@@ -230,7 +230,13 @@ typedef enum {
     AST_DEREFERENCE,
     AST_ADDR_OF,
     AST_NIL,
-    AST_NEW
+    AST_NEW,
+    AST_MATCH,
+    AST_MATCH_BRANCH,
+    AST_PATTERN_BINDING,
+    AST_TRY,
+    AST_CATCH,
+    AST_THROW
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers

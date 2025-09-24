@@ -486,6 +486,9 @@ static AST *buildProcPointerType(AST *returnType, AST *paramList);
 static AST *parsePointerVariableAfterName(ReaParser *p, Token *nameTok, AST *baseType);
 static AST *parseCallTypeArgumentList(ReaParser *p);
 static bool looksLikeCallTypeArguments(ReaParser *p);
+static AST *parseMatch(ReaParser *p);
+static AST *parseTry(ReaParser *p);
+static AST *parseThrow(ReaParser *p);
 
 // Access to global type table provided by Pascal front end
 AST *lookupType(const char* name);
@@ -2762,6 +2765,278 @@ static AST *parseSwitch(ReaParser *p) {
     return node;
 }
 
+static AST *ensureCompound(AST *node) {
+    if (!node) return NULL;
+    if (node->type == AST_COMPOUND) {
+        return node;
+    }
+    AST *block = newASTNode(AST_COMPOUND, NULL);
+    addChild(block, node);
+    return block;
+}
+
+static AST *parseMatchPattern(ReaParser *p);
+static AST *parseMatchCase(ReaParser *p);
+
+static AST *parseTuplePattern(ReaParser *p) {
+    int startLine = p->current.line;
+    reaAdvance(p); // consume '('
+    AST *list = newASTNode(AST_LIST, NULL);
+    const char **names = NULL;
+    int nameCount = 0;
+    int nameCap = 0;
+    while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
+        if (p->current.type == REA_TOKEN_IDENTIFIER) {
+            char *lex = (char *)malloc(p->current.length + 1);
+            if (!lex) {
+                fprintf(stderr, "Memory allocation failure parsing tuple pattern.\n");
+                EXIT_FAILURE_HANDLER();
+            }
+            memcpy(lex, p->current.start, p->current.length);
+            lex[p->current.length] = '\0';
+            Token *tok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+            free(lex);
+            AST *binding = newASTNode(AST_PATTERN_BINDING, tok);
+            addChild(list, binding);
+            for (int i = 0; i < nameCount; i++) {
+                if (strcasecmp(names[i], tok->value) == 0) {
+                    fprintf(stderr, "L%d: duplicate pattern binding '%s'.\n", tok->line, tok->value);
+                    p->hadError = true;
+                    break;
+                }
+            }
+            if (nameCount >= nameCap) {
+                int newCap = nameCap ? nameCap * 2 : 4;
+                const char **resized = (const char **)realloc(names, (size_t)newCap * sizeof(const char *));
+                if (!resized) {
+                    fprintf(stderr, "Memory allocation failure recording tuple pattern names.\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                names = resized;
+                nameCap = newCap;
+            }
+            names[nameCount++] = tok->value;
+            reaAdvance(p);
+        } else {
+            AST *expr = parseExpression(p);
+            if (expr) {
+                addChild(list, expr);
+            } else {
+                break;
+            }
+        }
+        if (p->current.type == REA_TOKEN_COMMA) {
+            reaAdvance(p);
+            continue;
+        }
+        break;
+    }
+    if (p->current.type != REA_TOKEN_RIGHT_PAREN) {
+        fprintf(stderr, "L%d: expected ')' to close tuple pattern.\n", startLine);
+        p->hadError = true;
+    } else {
+        reaAdvance(p);
+    }
+    free(names);
+    return list;
+}
+
+static AST *parseMatchPattern(ReaParser *p) {
+    if (p->current.type == REA_TOKEN_LEFT_PAREN) {
+        return parseTuplePattern(p);
+    }
+    if (p->current.type == REA_TOKEN_IDENTIFIER) {
+        char *lex = (char *)malloc(p->current.length + 1);
+        if (!lex) {
+            fprintf(stderr, "Memory allocation failure parsing pattern binding.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        memcpy(lex, p->current.start, p->current.length);
+        lex[p->current.length] = '\0';
+        Token *tok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+        free(lex);
+        AST *binding = newASTNode(AST_PATTERN_BINDING, tok);
+        reaAdvance(p);
+        return binding;
+    }
+    return parseExpression(p);
+}
+
+static AST *parseMatchCase(ReaParser *p) {
+    reaAdvance(p); // consume 'case'
+    AST *pattern = parseMatchPattern(p);
+    AST *guard = NULL;
+    if (p->current.type == REA_TOKEN_IF) {
+        reaAdvance(p);
+        guard = parseExpression(p);
+    }
+    if (p->current.type != REA_TOKEN_ARROW) {
+        fprintf(stderr, "L%d: expected '->' after match pattern.\n", p->current.line);
+        p->hadError = true;
+    } else {
+        reaAdvance(p);
+    }
+    AST *body = NULL;
+    if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        body = parseBlock(p);
+    } else {
+        body = parseStatement(p);
+    }
+    body = ensureCompound(body);
+    AST *branch = newASTNode(AST_MATCH_BRANCH, NULL);
+    setLeft(branch, pattern);
+    setExtra(branch, guard);
+    setRight(branch, body);
+    return branch;
+}
+
+static AST *parseMatch(ReaParser *p) {
+    reaAdvance(p); // consume 'match'
+    AST *expr = parseExpression(p);
+    if (!expr) {
+        return NULL;
+    }
+    if (p->current.type != REA_TOKEN_LEFT_BRACE) {
+        fprintf(stderr, "L%d: expected '{' to begin match body.\n", p->current.line);
+        p->hadError = true;
+        return expr;
+    }
+    reaAdvance(p); // consume '{'
+    AST *node = newASTNode(AST_MATCH, NULL);
+    setLeft(node, expr);
+    bool sawDefault = false;
+    while (p->current.type != REA_TOKEN_RIGHT_BRACE && p->current.type != REA_TOKEN_EOF) {
+        if (p->current.type == REA_TOKEN_CASE) {
+            AST *branch = parseMatchCase(p);
+            if (branch) {
+                addChild(node, branch);
+            }
+            continue;
+        }
+        if (p->current.type == REA_TOKEN_DEFAULT) {
+            if (sawDefault) {
+                fprintf(stderr, "L%d: multiple default branches in match statement.\n", p->current.line);
+                p->hadError = true;
+            }
+            reaAdvance(p);
+            if (p->current.type != REA_TOKEN_ARROW) {
+                fprintf(stderr, "L%d: expected '->' after default label.\n", p->current.line);
+                p->hadError = true;
+            } else {
+                reaAdvance(p);
+            }
+            AST *body = NULL;
+            if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+                body = parseBlock(p);
+            } else {
+                body = parseStatement(p);
+            }
+            setExtra(node, ensureCompound(body));
+            sawDefault = true;
+            continue;
+        }
+        // Skip unexpected tokens to avoid infinite loop.
+        fprintf(stderr, "L%d: unexpected token in match body.\n", p->current.line);
+        p->hadError = true;
+        reaAdvance(p);
+    }
+    if (p->current.type != REA_TOKEN_RIGHT_BRACE) {
+        fprintf(stderr, "L%d: expected '}' to close match statement.\n", p->current.line);
+        p->hadError = true;
+    } else {
+        reaAdvance(p);
+    }
+    return node;
+}
+
+static AST *parseThrow(ReaParser *p) {
+    int line = p->current.line;
+    reaAdvance(p); // consume 'throw'
+    AST *expr = parseExpression(p);
+    if (p->current.type == REA_TOKEN_SEMICOLON) {
+        reaAdvance(p);
+    }
+    AST *node = newASTNode(AST_THROW, NULL);
+    setLeft(node, expr);
+    if (expr) {
+        setTypeAST(node, expr->var_type);
+    } else {
+        setTypeAST(node, TYPE_VOID);
+    }
+    node->i_val = line;
+    return node;
+}
+
+static AST *parseTry(ReaParser *p) {
+    reaAdvance(p); // consume 'try'
+    if (p->current.type != REA_TOKEN_LEFT_BRACE) {
+        fprintf(stderr, "L%d: expected '{' after try keyword.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+    AST *tryBlock = parseBlock(p);
+    if (p->current.type != REA_TOKEN_CATCH) {
+        fprintf(stderr, "L%d: expected catch clause for try block.\n", p->current.line);
+        p->hadError = true;
+        return tryBlock;
+    }
+    reaAdvance(p); // consume 'catch'
+    if (p->current.type != REA_TOKEN_LEFT_PAREN) {
+        fprintf(stderr, "L%d: expected '(' after catch.\n", p->current.line);
+        p->hadError = true;
+        return tryBlock;
+    }
+    reaAdvance(p);
+    AST *typeNode = parsePointerParamType(p);
+    if (!typeNode) {
+        // Default to int64 when parsing fails so later stages can continue.
+        Token *tok = newToken(TOKEN_IDENTIFIER, "int", p->current.line, 0);
+        typeNode = newASTNode(AST_TYPE_IDENTIFIER, tok);
+        setTypeAST(typeNode, TYPE_INT64);
+    }
+    if (p->current.type != REA_TOKEN_IDENTIFIER) {
+        fprintf(stderr, "L%d: expected identifier for catch variable.\n", p->current.line);
+        p->hadError = true;
+        return tryBlock;
+    }
+    char *lex = (char *)malloc(p->current.length + 1);
+    if (!lex) {
+        fprintf(stderr, "Memory allocation failure parsing catch variable.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    memcpy(lex, p->current.start, p->current.length);
+    lex[p->current.length] = '\0';
+    Token *nameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
+    free(lex);
+    reaAdvance(p);
+    if (p->current.type != REA_TOKEN_RIGHT_PAREN) {
+        fprintf(stderr, "L%d: expected ')' after catch binding.\n", p->current.line);
+        p->hadError = true;
+    } else {
+        reaAdvance(p);
+    }
+    AST *catchBody = NULL;
+    if (p->current.type == REA_TOKEN_LEFT_BRACE) {
+        catchBody = parseBlock(p);
+    } else {
+        catchBody = parseStatement(p);
+    }
+    catchBody = ensureCompound(catchBody);
+    AST *varNode = newASTNode(AST_VARIABLE, nameTok);
+    setTypeAST(varNode, typeNode ? typeNode->var_type : TYPE_INT64);
+    AST *catchDecl = newASTNode(AST_VAR_DECL, NULL);
+    addChild(catchDecl, varNode);
+    setRight(catchDecl, typeNode);
+    setTypeAST(catchDecl, typeNode ? typeNode->var_type : TYPE_INT64);
+    AST *catchNode = newASTNode(AST_CATCH, NULL);
+    setLeft(catchNode, catchDecl);
+    setRight(catchNode, catchBody);
+    AST *tryNode = newASTNode(AST_TRY, NULL);
+    setLeft(tryNode, tryBlock);
+    setRight(tryNode, catchNode);
+    return tryNode;
+}
+
 static AST *parseConstDecl(ReaParser *p) {
     reaAdvance(p); // consume 'const'
     AST *typeNode = NULL;
@@ -3309,6 +3584,15 @@ static AST *parseStatement(ReaParser *p) {
     }
     if (p->current.type == REA_TOKEN_SWITCH) {
         return parseSwitch(p);
+    }
+    if (p->current.type == REA_TOKEN_MATCH) {
+        return parseMatch(p);
+    }
+    if (p->current.type == REA_TOKEN_TRY) {
+        return parseTry(p);
+    }
+    if (p->current.type == REA_TOKEN_THROW) {
+        return parseThrow(p);
     }
     if (p->current.type == REA_TOKEN_CONTINUE) {
         reaAdvance(p);
