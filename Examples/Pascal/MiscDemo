@@ -84,10 +84,7 @@ begin
   end;
 end;
 
-{ This routine intentionally shares its name with the VM's builtin
-  toupper. The compiler will warn that the user-defined version
-  overrides the builtin, and the user-defined body will be used. }
-function ToUpper(s: string): string;
+function ToUpperString(s: string): string;
 var
   res: string;
   idx: integer;
@@ -100,10 +97,10 @@ begin
     else
       res := res + s[idx];
   end;
-  ToUpper := res;
+  ToUpperString := res;
 end;
 
-function ToLower(s: string): string;
+function ToLowerString(s: string): string;
 var
   res: string;
   idx: integer;
@@ -116,7 +113,7 @@ begin
     else
       res := res + s[idx];
   end;
-  ToLower := res;
+  ToLowerString := res;
 end;
 
 function TrimSpaces(s: string): string;
@@ -141,8 +138,8 @@ begin
   write('Enter text: ');
   readln(input);
   writeln('Trimmed: "', TrimSpaces(input), '"');
-  writeln('UpperCase: ', ToUpper(input));
-  writeln('LowerCase: ', ToLower(input));
+  writeln('UpperCase: ', ToUpperString(input));
+  writeln('LowerCase: ', ToLowerString(input));
   writeln('Reversed: ', ReverseString(input));
 end;
 
