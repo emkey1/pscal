@@ -10,13 +10,23 @@ MANIFEST_PATH = ROOT / "manifest.json"
 tests = []
 
 
+DEFAULT_PREAMBLE = "#include <stdio.h>\n\n"
+
+
 def normalise(text: str) -> str:
     return textwrap.dedent(text).strip("\n")
 
 
 def add(test):
     item = dict(test)
-    item["code"] = normalise(test["code"])
+    inject_stdio = item.pop("inject_stdio", True)
+    code_body = normalise(test["code"])
+    if inject_stdio:
+        lines = code_body.splitlines()
+        has_stdio = any("#include" in line and "stdio.h" in line for line in lines)
+        if not has_stdio:
+            code_body = DEFAULT_PREAMBLE + code_body
+    item["code"] = code_body
     if "expected_stdout" in item:
         item["expected_stdout"] = normalise(item["expected_stdout"])
     if "expected_stderr_substring" in item:
@@ -165,7 +175,7 @@ add({
             "indent": "    ",
             "min_depth": 1,
             "max_depth": 3,
-            "header": "if (true)",
+            "header": "if (1)",
             "placeholders": {
                 "shadow_name": {"type": "identifier", "min_length": 5, "avoid_placeholders": ["outer_name"]},
                 "delta_val": {"type": "int", "min": 1, "max": 3},
@@ -190,7 +200,7 @@ add({
     "expect": "compile_error",
     "code": """
         int main() {
-            if (true) {
+            if (1) {
                 int {{temp_name}} = 5;
                 printf("temp=%d\n", {{temp_name}});
             }
@@ -463,7 +473,7 @@ add({
     "code": """
         const int LIMIT = 5;
         int main() {
-            if (true) {
+            if (1) {
                 LIMIT = LIMIT + 1;
             }
             return LIMIT;
@@ -620,12 +630,13 @@ add({
 
 add({
     "id": "import_function_visible",
-    "name": "Imported function is visible",
+    "name": "Included function is visible",
     "category": "import_scope",
-    "description": "Functions from imported files should be callable.",
+    "description": "Functions declared in included headers should be callable.",
     "expect": "runtime_ok",
     "code": """
-        import "{{support_dir}}/imports/add_helper.cl";
+        #include "{{support_dir}}/imports/add_helper.h"
+
         int main() {
             printf("sum=%d\n", helper_add(2, 3));
             return 0;
@@ -634,7 +645,7 @@ add({
     "expected_stdout": "sum=5",
     "files": [
         {
-            "path": "imports/add_helper.cl",
+            "path": "imports/add_helper.h",
             "code": """
                 int helper_add(int a, int b) {
                     return a + b;
@@ -646,22 +657,23 @@ add({
 
 add({
     "id": "import_duplicate_definition_error",
-    "name": "Duplicate imported definition rejected",
+    "name": "Duplicate include definition rejected",
     "category": "import_scope",
-    "description": "Conflicting imports defining the same function should trigger an error.",
+    "description": "Conflicting headers defining the same function should trigger an error.",
     "expect": "compile_error",
     "code": """
-        import "{{support_dir}}/imports/conflict_left.cl";
-        import "{{support_dir}}/imports/conflict_right.cl";
+        #include "{{support_dir}}/imports/conflict_left.h"
+        #include "{{support_dir}}/imports/conflict_right.h"
+
         int main() {
             return repeated();
         }
     """,
-    "expected_stderr_substring": "duplicate",
-    "failure_reason": "Using two imports that define the same function should fail.",
+    "expected_stderr_substring": "repeated",
+    "failure_reason": "Using two includes that define the same function should fail.",
     "files": [
         {
-            "path": "imports/conflict_left.cl",
+            "path": "imports/conflict_left.h",
             "code": """
                 int repeated() {
                     return 1;
@@ -669,7 +681,7 @@ add({
             """,
         },
         {
-            "path": "imports/conflict_right.cl",
+            "path": "imports/conflict_right.h",
             "code": """
                 int repeated() {
                     return 2;
@@ -681,12 +693,13 @@ add({
 
 add({
     "id": "import_random_usage_ok",
-    "name": "Random import usage works",
+    "name": "Random include usage works",
     "category": "import_scope",
-    "description": "Randomised helper names continue to resolve.",
+    "description": "Randomised helper names continue to resolve after inclusion.",
     "expect": "runtime_ok",
     "code": """
-        import "{{support_dir}}/imports/random_helper.cl";
+        #include "{{support_dir}}/imports/random_helper.h"
+
         int main() {
             printf("helper=%d\n", {{helper_name}}(4));
             return 0;
@@ -698,7 +711,7 @@ add({
     },
     "files": [
         {
-            "path": "imports/random_helper.cl",
+            "path": "imports/random_helper.h",
             "code": """
                 int {{helper_name}}(int value) {
                     return value + 5;
@@ -747,12 +760,13 @@ add({
 
 add({
     "id": "name_resolution_import_variable_shadow",
-    "name": "Local variable overrides imported global",
+    "name": "Local variable overrides included global",
     "category": "resolution_scope",
-    "description": "Locals should shadow globals brought in via import.",
+    "description": "Locals should shadow globals brought in via headers.",
     "expect": "runtime_ok",
     "code": """
-        import "{{support_dir}}/resolution/global_value.cl";
+        #include "{{support_dir}}/resolution/global_value.h"
+
         int main() {
             int shared = 99;
             printf("local=%d\n", shared);
@@ -766,7 +780,7 @@ add({
     """,
     "files": [
         {
-            "path": "resolution/global_value.cl",
+            "path": "resolution/global_value.h",
             "code": """
                 int global_shared = 7;
             """,
@@ -892,13 +906,15 @@ add({
 
 add({
     "id": "integration_scope_import_shadow_mix",
-    "name": "Integration of imports and shadowing",
+    "name": "Integration of includes and shadowing",
     "category": "integration",
-    "description": "Combines imports, nested blocks, and shadowing in one scenario.",
+    "description": "Combines headers, nested blocks, and shadowing in one scenario.",
     "expect": "runtime_ok",
     "code": """
-        import "{{support_dir}}/integration/helpers.cl";
+        #include "{{support_dir}}/integration/helpers.h"
+
         int global = 10;
+
         int main() {
             int global = helper_value();
             int outer = 1;
@@ -918,7 +934,7 @@ add({
     """,
     "files": [
         {
-            "path": "integration/helpers.cl",
+            "path": "integration/helpers.h",
             "code": """
                 int helper_value() {
                     return 5;

@@ -9,7 +9,7 @@
       "category": "block_scope",
       "description": "Inner block shadows outer variable without mutating the outer binding.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int outer = 1;\n            printf(\"outer=%d, \", outer);\n            {\n                int outer = 2;\n                printf(\"inner=%d, \", outer);\n            }\n            printf(\"outer_after=%d\n\", outer);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            int outer = 1;\n            printf(\"outer=%d, \", outer);\n            {\n                int outer = 2;\n                printf(\"inner=%d, \", outer);\n            }\n            printf(\"outer_after=%d\n\", outer);\n            return 0;\n        }",
       "expected_stdout": "outer=1, inner=2, outer_after=1"
     },
     {
@@ -18,7 +18,7 @@
       "category": "block_scope",
       "description": "Variables declared inside a conditional do not leak and outer bindings stay intact.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int flag = 1;\n            int total = 0;\n            if (flag > 0) {\n                int flag = 5;\n                total = total + flag;\n            }\n            printf(\"total=%d\n\", total);\n            printf(\"flag=%d\n\", flag);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            int flag = 1;\n            int total = 0;\n            if (flag > 0) {\n                int flag = 5;\n                total = total + flag;\n            }\n            printf(\"total=%d\n\", total);\n            printf(\"flag=%d\n\", flag);\n            return 0;\n        }",
       "expected_stdout": "total=5\nflag=1"
     },
     {
@@ -27,7 +27,7 @@
       "category": "block_scope",
       "description": "Loop index is confined to the loop body so a new binding may reuse the name afterward.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int sum = 0;\n            for (int i = 0; i < 3; i = i + 1) {\n                sum = sum + i;\n            }\n            int i = 42;\n            printf(\"loop_sum=%d, after=%d\n\", sum, i);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            int sum = 0;\n            for (int i = 0; i < 3; i = i + 1) {\n                sum = sum + i;\n            }\n            int i = 42;\n            printf(\"loop_sum=%d, after=%d\n\", sum, i);\n            return 0;\n        }",
       "expected_stdout": "loop_sum=3, after=42"
     },
     {
@@ -36,7 +36,7 @@
       "category": "block_scope",
       "description": "Using a block-local variable after the block should be rejected.",
       "expect": "compile_error",
-      "code": "        int main() {\n            {\n                int hidden = 3;\n                printf(\"hidden=%d\n\", hidden);\n            }\n            return hidden;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            {\n                int hidden = 3;\n                printf(\"hidden=%d\n\", hidden);\n            }\n            return hidden;\n        }",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Block locals must not be reachable after the block closes."
     },
@@ -46,7 +46,7 @@
       "category": "block_scope",
       "description": "Loop indices cannot be referenced after the loop completes.",
       "expect": "compile_error",
-      "code": "        int main() {\n            for (int i = 0; i < 2; i = i + 1) {\n                printf(\"loop=%d\n\", i);\n            }\n            return i;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            for (int i = 0; i < 2; i = i + 1) {\n                printf(\"loop=%d\n\", i);\n            }\n            return i;\n        }",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "For-loop locals must not leak into the enclosing scope."
     },
@@ -56,7 +56,7 @@
       "category": "block_scope",
       "description": "Random identifiers and nested braces still preserve lexical scope.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int {{outer_name}} = 10;\n{{shadow_block}}\n            printf(\"after=%d\n\", {{outer_name}});\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            int {{outer_name}} = 10;\n{{shadow_block}}\n            printf(\"after=%d\n\", {{outer_name}});\n            return 0;\n        }",
       "expected_stdout": "shadow-ok\nafter=10",
       "placeholders": {
         "outer_name": {
@@ -69,7 +69,7 @@
           "indent": "    ",
           "min_depth": 1,
           "max_depth": 3,
-          "header": "if (true)",
+          "header": "if (1)",
           "placeholders": {
             "shadow_name": {
               "type": "identifier",
@@ -107,7 +107,7 @@
       "category": "block_scope",
       "description": "Random identifiers still cannot escape their block scope.",
       "expect": "compile_error",
-      "code": "        int main() {\n            if (true) {\n                int {{temp_name}} = 5;\n                printf(\"temp=%d\n\", {{temp_name}});\n            }\n            return {{temp_name}};\n        }",
+      "code": "#include <stdio.h>\n\n        int main() {\n            if (1) {\n                int {{temp_name}} = 5;\n                printf(\"temp=%d\n\", {{temp_name}});\n            }\n            return {{temp_name}};\n        }",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Identifiers introduced in conditional blocks must not be visible outside.",
       "placeholders": {
@@ -123,7 +123,7 @@
       "category": "function_scope",
       "description": "Function parameters hide globals of the same name without mutating them.",
       "expect": "runtime_ok",
-      "code": "        int total = 7;\n        int bump(int total) {\n            return total + 1;\n        }\n        int main() {\n            printf(\"bump=%d\n\", bump(3));\n            printf(\"global=%d\n\", total);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int total = 7;\n        int bump(int total) {\n            return total + 1;\n        }\n        int main() {\n            printf(\"bump=%d\n\", bump(3));\n            printf(\"global=%d\n\", total);\n            return 0;\n        }",
       "expected_stdout": "bump=4\nglobal=7"
     },
     {
@@ -132,7 +132,7 @@
       "category": "function_scope",
       "description": "Nested recursion should not pollute outer scopes or rely on shared locals.",
       "expect": "runtime_ok",
-      "code": "        int oddSum(int n);\n        int evenSum(int n) {\n            if (n <= 0) {\n                return 0;\n            }\n            return n + oddSum(n - 1);\n        }\n        int oddSum(int n) {\n            if (n <= 0) {\n                return 0;\n            }\n            return n + evenSum(n - 1);\n        }\n        int main() {\n            printf(\"sum=%d\n\", evenSum(4));\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int oddSum(int n);\n        int evenSum(int n) {\n            if (n <= 0) {\n                return 0;\n            }\n            return n + oddSum(n - 1);\n        }\n        int oddSum(int n) {\n            if (n <= 0) {\n                return 0;\n            }\n            return n + evenSum(n - 1);\n        }\n        int main() {\n            printf(\"sum=%d\n\", evenSum(4));\n            return 0;\n        }",
       "expected_stdout": "sum=10"
     },
     {
@@ -141,7 +141,7 @@
       "category": "function_scope",
       "description": "Parameters cannot be referenced outside of their defining function.",
       "expect": "compile_error",
-      "code": "int box(int payload) {\n    return payload + 1;\n}\nint main() {\n    box(41);\n    return payload;\n}",
+      "code": "#include <stdio.h>\n\nint box(int payload) {\n    return payload + 1;\n}\nint main() {\n    box(41);\n    return payload;\n}",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Function parameters must not leak into caller scope."
     },
@@ -151,7 +151,7 @@
       "category": "function_scope",
       "description": "Another function cannot access a local variable defined elsewhere.",
       "expect": "compile_error",
-      "code": "int helper() {\n    return scratch;\n}\nint main() {\n    int scratch = 9;\n    return helper();\n}",
+      "code": "#include <stdio.h>\n\nint helper() {\n    return scratch;\n}\nint main() {\n    int scratch = 9;\n    return helper();\n}",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Locals belong to their function activation only."
     },
@@ -161,7 +161,7 @@
       "category": "function_scope",
       "description": "A function may not define two parameters with the same identifier.",
       "expect": "compile_error",
-      "code": "int clash(int value, int value) {\n    return value;\n}\nint main() {\n    return clash(1, 2);\n}",
+      "code": "#include <stdio.h>\n\nint clash(int value, int value) {\n    return value;\n}\nint main() {\n    return clash(1, 2);\n}",
       "expected_stderr_substring": "duplicate",
       "failure_reason": "Parameter lists must have unique identifiers per function signature."
     },
@@ -171,7 +171,7 @@
       "category": "function_scope",
       "description": "Seeded random identifiers still respect function scope and globals.",
       "expect": "runtime_ok",
-      "code": "        int {{global_name}} = 2;\n        int {{func_name}}(int {{param_name}}) {\n            int {{local_name}} = {{param_name}} + {{global_name}};\n            printf(\"inner-ok\n\");\n            return {{param_name}} - {{global_name}} + {{local_name}} - {{local_name}};\n        }\n        int main() {\n            printf(\"result=%d\n\", {{func_name}}(5));\n            printf(\"global=%d\n\", {{global_name}});\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int {{global_name}} = 2;\n        int {{func_name}}(int {{param_name}}) {\n            int {{local_name}} = {{param_name}} + {{global_name}};\n            printf(\"inner-ok\n\");\n            return {{param_name}} - {{global_name}} + {{local_name}} - {{local_name}};\n        }\n        int main() {\n            printf(\"result=%d\n\", {{func_name}}(5));\n            printf(\"global=%d\n\", {{global_name}});\n            return 0;\n        }",
       "expected_stdout": "inner-ok\nresult=3\nglobal=2",
       "placeholders": {
         "global_name": {
@@ -210,7 +210,7 @@
       "category": "function_scope",
       "description": "Seeded random names still cannot leak parameters outside the function.",
       "expect": "compile_error",
-      "code": "int {{builder_name}}(int {{param_name}}) {\n    return {{param_name}};\n}\nint main() {\n    {{builder_name}}(1);\n    return {{param_name}};\n}",
+      "code": "#include <stdio.h>\n\nint {{builder_name}}(int {{param_name}}) {\n    return {{param_name}};\n}\nint main() {\n    {{builder_name}}(1);\n    return {{param_name}};\n}",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Function parameters are local to their defining function.",
       "placeholders": {
@@ -230,7 +230,7 @@
       "category": "const_scope",
       "description": "Global constants remain readable inside nested blocks without mutation.",
       "expect": "runtime_ok",
-      "code": "        const int LIMIT = 7;\n        int main() {\n            int total = LIMIT + 3;\n            printf(\"total=%d\n\", total);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        const int LIMIT = 7;\n        int main() {\n            int total = LIMIT + 3;\n            printf(\"total=%d\n\", total);\n            return 0;\n        }",
       "expected_stdout": "total=10"
     },
     {
@@ -239,7 +239,7 @@
       "category": "const_scope",
       "description": "A local mutable binding may shadow a constant without altering the constant value.",
       "expect": "runtime_ok",
-      "code": "        const int LIMIT = 5;\n        int main() {\n            int globalCopy = LIMIT;\n            int LIMIT = 2;\n            printf(\"local=%d\n\", LIMIT);\n            printf(\"global=%d\n\", globalCopy);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        const int LIMIT = 5;\n        int main() {\n            int globalCopy = LIMIT;\n            int LIMIT = 2;\n            printf(\"local=%d\n\", LIMIT);\n            printf(\"global=%d\n\", globalCopy);\n            return 0;\n        }",
       "expected_stdout": "local=2\nglobal=5"
     },
     {
@@ -248,7 +248,7 @@
       "category": "const_scope",
       "description": "Constants declared inside functions should not collide with outer constants.",
       "expect": "runtime_ok",
-      "code": "        const int LIMIT = 4;\n        int compute() {\n            const int LIMIT = 2;\n            return LIMIT;\n        }\n        int main() {\n            printf(\"inner=%d\n\", compute());\n            printf(\"outer=%d\n\", LIMIT);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        const int LIMIT = 4;\n        int compute() {\n            const int LIMIT = 2;\n            return LIMIT;\n        }\n        int main() {\n            printf(\"inner=%d\n\", compute());\n            printf(\"outer=%d\n\", LIMIT);\n            return 0;\n        }",
       "expected_stdout": "inner=2\nouter=4"
     },
     {
@@ -257,7 +257,7 @@
       "category": "const_scope",
       "description": "Reassigning a constant should produce an error.",
       "expect": "compile_error",
-      "code": "const int LIMIT = 5;\nint main() {\n    LIMIT = 6;\n    return 0;\n}",
+      "code": "#include <stdio.h>\n\nconst int LIMIT = 5;\nint main() {\n    LIMIT = 6;\n    return 0;\n}",
       "expected_stderr_substring": "const",
       "failure_reason": "Constants must be immutable after initialization."
     },
@@ -267,7 +267,7 @@
       "category": "const_scope",
       "description": "Constants remain immutable even when referenced inside nested blocks.",
       "expect": "compile_error",
-      "code": "const int LIMIT = 5;\nint main() {\n    if (true) {\n        LIMIT = LIMIT + 1;\n    }\n    return LIMIT;\n}",
+      "code": "#include <stdio.h>\n\nconst int LIMIT = 5;\nint main() {\n    if (1) {\n        LIMIT = LIMIT + 1;\n    }\n    return LIMIT;\n}",
       "expected_stderr_substring": "const",
       "failure_reason": "Nested blocks must respect constant immutability."
     },
@@ -277,7 +277,7 @@
       "category": "const_scope",
       "description": "Random identifiers demonstrate const shadowing with unique local names.",
       "expect": "runtime_ok",
-      "code": "        const int {{const_name}} = 8;\n        int main() {\n            int {{local_name}} = {{const_name}} - 3;\n            printf(\"shadow-const=%d\n\", {{const_name}});\n            printf(\"shadow-local=%d\n\", {{local_name}});\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        const int {{const_name}} = 8;\n        int main() {\n            int {{local_name}} = {{const_name}} - 3;\n            printf(\"shadow-const=%d\n\", {{const_name}});\n            printf(\"shadow-local=%d\n\", {{local_name}});\n            return 0;\n        }",
       "expected_stdout": "shadow-const=8\nshadow-local=5",
       "placeholders": {
         "const_name": {
@@ -299,7 +299,7 @@
       "category": "const_scope",
       "description": "Random identifier names still trigger errors when const bindings are reassigned.",
       "expect": "compile_error",
-      "code": "const int {{const_name}} = 3;\nint main() {\n    {{const_name}} = 4;\n    return {{const_name}};\n}",
+      "code": "#include <stdio.h>\n\nconst int {{const_name}} = 3;\nint main() {\n    {{const_name}} = 4;\n    return {{const_name}};\n}",
       "expected_stderr_substring": "const",
       "failure_reason": "Const immutability must not depend on identifier spelling.",
       "placeholders": {
@@ -315,7 +315,7 @@
       "category": "type_scope",
       "description": "Struct definitions are visible globally and inside functions.",
       "expect": "runtime_ok",
-      "code": "        struct Point {\n            int x;\n            int y;\n        };\n        int main() {\n            struct Point p;\n            p.x = 2;\n            p.y = 3;\n            printf(\"point=%d,%d\n\", p.x, p.y);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        struct Point {\n            int x;\n            int y;\n        };\n        int main() {\n            struct Point p;\n            p.x = 2;\n            p.y = 3;\n            printf(\"point=%d,%d\n\", p.x, p.y);\n            return 0;\n        }",
       "expected_stdout": "point=2,3"
     },
     {
@@ -324,7 +324,7 @@
       "category": "type_scope",
       "description": "Value identifiers can reuse struct names without collision.",
       "expect": "runtime_ok",
-      "code": "        struct Number {\n            int value;\n        };\n        int main() {\n            struct Number Number;\n            Number.value = 4;\n            int Number_value = 6;\n            printf(\"struct=%d\n\", Number.value);\n            printf(\"shadow=%d\n\", Number_value);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        struct Number {\n            int value;\n        };\n        int main() {\n            struct Number Number;\n            Number.value = 4;\n            int Number_value = 6;\n            printf(\"struct=%d\n\", Number.value);\n            printf(\"shadow=%d\n\", Number_value);\n            return 0;\n        }",
       "expected_stdout": "struct=4\nshadow=6"
     },
     {
@@ -333,7 +333,7 @@
       "category": "type_scope",
       "description": "Defining the same struct twice must fail.",
       "expect": "compile_error",
-      "code": "struct Data {\n    int value;\n};\nstruct Data {\n    int value;\n};\nint main() {\n    return 0;\n}",
+      "code": "#include <stdio.h>\n\nstruct Data {\n    int value;\n};\nstruct Data {\n    int value;\n};\nint main() {\n    return 0;\n}",
       "expected_stderr_substring": "redefinition",
       "failure_reason": "Struct declarations should not be redefined in the same scope."
     },
@@ -343,7 +343,7 @@
       "category": "type_scope",
       "description": "Random struct and field names behave consistently.",
       "expect": "runtime_ok",
-      "code": "        struct {{struct_name}} {\n            int {{field_name}};\n        };\n        int main() {\n            struct {{struct_name}} item;\n            item.{{field_name}} = 11;\n            printf(\"value=%d\n\", item.{{field_name}});\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        struct {{struct_name}} {\n            int {{field_name}};\n        };\n        int main() {\n            struct {{struct_name}} item;\n            item.{{field_name}} = 11;\n            printf(\"value=%d\n\", item.{{field_name}});\n            return 0;\n        }",
       "expected_stdout": "value=11",
       "placeholders": {
         "struct_name": {
@@ -358,46 +358,46 @@
     },
     {
       "id": "import_function_visible",
-      "name": "Imported function is visible",
+      "name": "Included function is visible",
       "category": "import_scope",
-      "description": "Functions from imported files should be callable.",
+      "description": "Functions declared in included headers should be callable.",
       "expect": "runtime_ok",
-      "code": "        import \"{{support_dir}}/imports/add_helper.cl\";\n        int main() {\n            printf(\"sum=%d\n\", helper_add(2, 3));\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        #include \"{{support_dir}}/imports/add_helper.h\"\n\n        int main() {\n            printf(\"sum=%d\n\", helper_add(2, 3));\n            return 0;\n        }",
       "expected_stdout": "sum=5",
       "files": [
         {
-          "path": "imports/add_helper.cl",
+          "path": "imports/add_helper.h",
           "code": "int helper_add(int a, int b) {\n    return a + b;\n}"
         }
       ]
     },
     {
       "id": "import_duplicate_definition_error",
-      "name": "Duplicate imported definition rejected",
+      "name": "Duplicate include definition rejected",
       "category": "import_scope",
-      "description": "Conflicting imports defining the same function should trigger an error.",
+      "description": "Conflicting headers defining the same function should trigger an error.",
       "expect": "compile_error",
-      "code": "import \"{{support_dir}}/imports/conflict_left.cl\";\nimport \"{{support_dir}}/imports/conflict_right.cl\";\nint main() {\n    return repeated();\n}",
-      "expected_stderr_substring": "duplicate",
-      "failure_reason": "Using two imports that define the same function should fail.",
+      "code": "#include <stdio.h>\n\n#include \"{{support_dir}}/imports/conflict_left.h\"\n#include \"{{support_dir}}/imports/conflict_right.h\"\n\nint main() {\n    return repeated();\n}",
+      "expected_stderr_substring": "repeated",
+      "failure_reason": "Using two includes that define the same function should fail.",
       "files": [
         {
-          "path": "imports/conflict_left.cl",
+          "path": "imports/conflict_left.h",
           "code": "int repeated() {\n    return 1;\n}"
         },
         {
-          "path": "imports/conflict_right.cl",
+          "path": "imports/conflict_right.h",
           "code": "int repeated() {\n    return 2;\n}"
         }
       ]
     },
     {
       "id": "import_random_usage_ok",
-      "name": "Random import usage works",
+      "name": "Random include usage works",
       "category": "import_scope",
-      "description": "Randomised helper names continue to resolve.",
+      "description": "Randomised helper names continue to resolve after inclusion.",
       "expect": "runtime_ok",
-      "code": "        import \"{{support_dir}}/imports/random_helper.cl\";\n        int main() {\n            printf(\"helper=%d\n\", {{helper_name}}(4));\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        #include \"{{support_dir}}/imports/random_helper.h\"\n\n        int main() {\n            printf(\"helper=%d\n\", {{helper_name}}(4));\n            return 0;\n        }",
       "expected_stdout": "helper=9",
       "placeholders": {
         "helper_name": {
@@ -407,7 +407,7 @@
       },
       "files": [
         {
-          "path": "imports/random_helper.cl",
+          "path": "imports/random_helper.h",
           "code": "int {{helper_name}}(int value) {\n    return value + 5;\n}"
         }
       ]
@@ -418,7 +418,7 @@
       "category": "resolution_scope",
       "description": "Lexical lookup should select the innermost binding first.",
       "expect": "runtime_ok",
-      "code": "        int value = 1;\n        int main() {\n            int globalCopy = value;\n            int value = 2;\n            printf(\"inner=%d\n\", value);\n            printf(\"outer=%d\n\", globalCopy);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int value = 1;\n        int main() {\n            int globalCopy = value;\n            int value = 2;\n            printf(\"inner=%d\n\", value);\n            printf(\"outer=%d\n\", globalCopy);\n            return 0;\n        }",
       "expected_stdout": "inner=2\nouter=1"
     },
     {
@@ -427,21 +427,21 @@
       "category": "resolution_scope",
       "description": "Referencing an undefined name must produce a clear error.",
       "expect": "compile_error",
-      "code": "int main() {\n    return missingName;\n}",
+      "code": "#include <stdio.h>\n\nint main() {\n    return missingName;\n}",
       "expected_stderr_substring": "missingName",
       "failure_reason": "Resolver must flag missing identifiers."
     },
     {
       "id": "name_resolution_import_variable_shadow",
-      "name": "Local variable overrides imported global",
+      "name": "Local variable overrides included global",
       "category": "resolution_scope",
-      "description": "Locals should shadow globals brought in via import.",
+      "description": "Locals should shadow globals brought in via headers.",
       "expect": "runtime_ok",
-      "code": "        import \"{{support_dir}}/resolution/global_value.cl\";\n        int main() {\n            int shared = 99;\n            printf(\"local=%d\n\", shared);\n            printf(\"global=%d\n\", global_shared);\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        #include \"{{support_dir}}/resolution/global_value.h\"\n\n        int main() {\n            int shared = 99;\n            printf(\"local=%d\n\", shared);\n            printf(\"global=%d\n\", global_shared);\n            return 0;\n        }",
       "expected_stdout": "local=99\nglobal=7",
       "files": [
         {
-          "path": "resolution/global_value.cl",
+          "path": "resolution/global_value.h",
           "code": "int global_shared = 7;"
         }
       ]
@@ -452,7 +452,7 @@
       "category": "resolution_scope",
       "description": "Random identifier names still prefer the innermost binding.",
       "expect": "runtime_ok",
-      "code": "        int {{outer_name}} = 10;\n        int main() {\n            int {{outer_name}} = 20;\n            printf(\"inner=%d\n\", {{outer_name}});\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int {{outer_name}} = 10;\n        int main() {\n            int {{outer_name}} = 20;\n            printf(\"inner=%d\n\", {{outer_name}});\n            return 0;\n        }",
       "expected_stdout": "inner=20",
       "placeholders": {
         "outer_name": {
@@ -467,7 +467,7 @@
       "category": "hoisting_scope",
       "description": "Functions should be callable before their definition appears.",
       "expect": "runtime_ok",
-      "code": "        int addOne(int value);\n        int main() {\n            printf(\"result=%d\n\", addOne(2));\n            return 0;\n        }\n        int addOne(int value) {\n            return value + 1;\n        }",
+      "code": "#include <stdio.h>\n\n        int addOne(int value);\n        int main() {\n            printf(\"result=%d\n\", addOne(2));\n            return 0;\n        }\n        int addOne(int value) {\n            return value + 1;\n        }",
       "expected_stdout": "result=3"
     },
     {
@@ -476,7 +476,7 @@
       "category": "hoisting_scope",
       "description": "Mutually recursive functions declared later should still resolve.",
       "expect": "runtime_ok",
-      "code": "        int odd(int n);\n        int even(int n) {\n            if (n == 0) {\n                return 1;\n            }\n            return odd(n - 1);\n        }\n        int odd(int n) {\n            if (n == 0) {\n                return 0;\n            }\n            return even(n - 1);\n        }\n        int main() {\n            printf(\"even?%d\n\", even(4));\n            printf(\"odd?%d\n\", odd(5));\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        int odd(int n);\n        int even(int n) {\n            if (n == 0) {\n                return 1;\n            }\n            return odd(n - 1);\n        }\n        int odd(int n) {\n            if (n == 0) {\n                return 0;\n            }\n            return even(n - 1);\n        }\n        int main() {\n            printf(\"even?%d\n\", even(4));\n            printf(\"odd?%d\n\", odd(5));\n            return 0;\n        }",
       "expected_stdout": "even?1\nodd?1"
     },
     {
@@ -485,7 +485,7 @@
       "category": "hoisting_scope",
       "description": "Variables should not be accessible before their declaration.",
       "expect": "compile_error",
-      "code": "int main() {\n    total = 5;\n    int total = 1;\n    return total;\n}",
+      "code": "#include <stdio.h>\n\nint main() {\n    total = 5;\n    int total = 1;\n    return total;\n}",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Variables are not hoisted like functions."
     },
@@ -495,7 +495,7 @@
       "category": "hoisting_scope",
       "description": "Random names should still obey non-hoisting rules for variables.",
       "expect": "compile_error",
-      "code": "int main() {\n    {{var_name}} = 1;\n    int {{var_name}} = 2;\n    return {{var_name}};\n}",
+      "code": "#include <stdio.h>\n\nint main() {\n    {{var_name}} = 1;\n    int {{var_name}} = 2;\n    return {{var_name}};\n}",
       "expected_stderr_substring": "undefined variable",
       "failure_reason": "Variable hoisting must be disallowed regardless of identifier.",
       "placeholders": {
@@ -507,15 +507,15 @@
     },
     {
       "id": "integration_scope_import_shadow_mix",
-      "name": "Integration of imports and shadowing",
+      "name": "Integration of includes and shadowing",
       "category": "integration",
-      "description": "Combines imports, nested blocks, and shadowing in one scenario.",
+      "description": "Combines headers, nested blocks, and shadowing in one scenario.",
       "expect": "runtime_ok",
-      "code": "        import \"{{support_dir}}/integration/helpers.cl\";\n        int global = 10;\n        int main() {\n            int global = helper_value();\n            int outer = 1;\n            if (global > 0) {\n                int outer = helper_shift() + global;\n                printf(\"inner=%d\n\", outer);\n            }\n            printf(\"shadowed_global=%d\n\", global);\n            printf(\"module_shift=%d\n\", helper_shift());\n            return 0;\n        }",
+      "code": "#include <stdio.h>\n\n        #include \"{{support_dir}}/integration/helpers.h\"\n\n        int global = 10;\n\n        int main() {\n            int global = helper_value();\n            int outer = 1;\n            if (global > 0) {\n                int outer = helper_shift() + global;\n                printf(\"inner=%d\n\", outer);\n            }\n            printf(\"shadowed_global=%d\n\", global);\n            printf(\"module_shift=%d\n\", helper_shift());\n            return 0;\n        }",
       "expected_stdout": "inner=8\nshadowed_global=5\nmodule_shift=3",
       "files": [
         {
-          "path": "integration/helpers.cl",
+          "path": "integration/helpers.h",
           "code": "int helper_value() {\n    return 5;\n}\nint helper_shift() {\n    return 3;\n}"
         }
       ]

@@ -2,8 +2,9 @@
 
 This package mirrors the manifest-driven regression suite used for the Rea
 front end, but targets the C-like compiler/runtime. The harness verifies block
-and function scoping, constant visibility, imports, hoisting behaviour, name
-resolution, and an integration scenario that mixes several of those features.
+and function scoping, constant visibility, header inclusion, hoisting
+behaviour, name resolution, and an integration scenario that mixes several of
+those features.
 
 ## Running the harness
 
@@ -29,7 +30,7 @@ resolution, and an integration scenario that mixes several of those features.
 
 1. Edit `scope_verify/clike/tests/build_manifest.py` to add or update entries.
    The helper normalises indentation and writes `manifest.json` when run.
-2. Optionally add supporting module files via the `files` array on a test
+2. Optionally add supporting header files via the `files` array on a test
    entry.
 3. Regenerate the manifest:
    ```sh
@@ -45,7 +46,7 @@ Each manifest entry specifies:
 - `expect` (`compile_ok`, `compile_error`, `runtime_ok`, `runtime_error`)
 - Optional `expected_stdout`, `expected_stderr_substring`
 - Optional `placeholders` for seeded randomisation, and `files` for auxiliary
-  imports
+  headers
 
 ## Command template hints
 
@@ -57,8 +58,8 @@ before comparison. Examples:
 ## Assumptions and notes
 
 The suite encodes several scoping assumptions for the C-like language:
-- **Imports**: `import "path";` brings top-level functions and globals into the
-  program. Conflicting global definitions should be diagnosed.
+- **Headers**: `#include "path"` brings declarations and definitions into the
+  translation unit. Conflicting definitions should be diagnosed.
 - **Functions**: Parameters and locals shadow outer bindings without mutating
   them. Functions must be declared (or forward-declared) before use unless
   hoisting via prototypes applies.
@@ -73,8 +74,8 @@ The suite encodes several scoping assumptions for the C-like language:
 
 If any of these assumptions diverge from the implementation, adjust the
 manifest entries and document the decision inline. The integration test
-(`integration_scope_import_shadow_mix`) exercises imports, nested blocks, and
-shadowing simultaneously to catch cross-feature regressions.
+(`integration_scope_import_shadow_mix`) exercises header inclusion, nested
+blocks, and shadowing simultaneously to catch cross-feature regressions.
 
 ## Artefacts
 
