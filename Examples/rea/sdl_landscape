@@ -233,13 +233,31 @@ class LandscapeDemo {
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
   float vertexColorB[VertexCount];
+  float vertexNormalX[VertexCount];
+  float vertexNormalY[VertexCount];
+  float vertexNormalZ[VertexCount];
   float worldXCoords[VertexStride];
   float worldZCoords[VertexStride];
+  float sunDirX;
+  float sunDirY;
+  float sunDirZ;
+  float waterHeight;
+  float waterNormalizedLevel;
+  float elapsedSeconds;
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
     my.precomputeWorldCoordinates();
+    my.elapsedSeconds = 0.0;
+    my.waterNormalizedLevel = 0.36;
+    float sunX = 0.45;
+    float sunY = 0.82;
+    float sunZ = 0.33;
+    float invLen = 1.0 / sqrt(sunX * sunX + sunY * sunY + sunZ * sunZ);
+    my.sunDirX = sunX * invLen;
+    my.sunDirY = sunY * invLen;
+    my.sunDirZ = sunZ * invLen;
     my.field.build(initialSeed);
     my.updateVertexData();
     my.camX = TerrainSize * 0.5;
@@ -265,7 +283,48 @@ class LandscapeDemo {
     }
   }
 
+  float saturate(float value) {
+    if (value < 0.0) return 0.0;
+    if (value > 1.0) return 1.0;
+    return value;
+  }
+
+  float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+  void computeVertexNormals() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int x = 0;
+      while (x <= TerrainSize) {
+        float left = my.field.rawHeight(x - 1, z);
+        float right = my.field.rawHeight(x + 1, z);
+        float down = my.field.rawHeight(x, z - 1);
+        float up = my.field.rawHeight(x, z + 1);
+        float dx = (right - left) / (2.0 * TileScale);
+        float dz = (up - down) / (2.0 * TileScale);
+        float nx = -dx;
+        float ny = 1.0;
+        float nz = -dz;
+        float length = sqrt(nx * nx + ny * ny + nz * nz);
+        if (length <= 0.0001) length = 1.0;
+        nx = nx / length;
+        ny = ny / length;
+        nz = nz / length;
+        int idx = z * VertexStride + x;
+        my.vertexNormalX[idx] = nx;
+        my.vertexNormalY[idx] = ny;
+        my.vertexNormalZ[idx] = nz;
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+  }
+
   void updateVertexData() {
+    my.computeVertexNormals();
+    float span = my.field.maxHeight - my.field.minHeight;
+    if (span <= 0.0001) span = 1.0;
+    my.waterHeight = my.field.minHeight + span * my.waterNormalizedLevel;
     int idx = 0;
     while (idx < VertexCount) {
       float h = my.field.heightByFlatIndex(idx);
@@ -274,30 +333,73 @@ class LandscapeDemo {
       float r;
       float g;
       float b;
-      if (t < 0.35) {
-        float w = t / 0.35;
-        r = 0.0;
-        g = 0.28 + 0.35 * w;
-        b = 0.45 + 0.4 * w;
-      } else if (t < 0.6) {
-        float w = (t - 0.35) / 0.25;
-        r = 0.15 + 0.25 * w;
-        g = 0.42 + 0.35 * w;
-        b = 0.18 + 0.08 * w;
-      } else if (t < 0.85) {
-        float w = (t - 0.6) / 0.25;
-        r = 0.52 + 0.2 * w;
-        g = 0.40 + 0.18 * w;
-        b = 0.30 + 0.15 * w;
+      bool underwater = t < my.waterNormalizedLevel;
+      if (underwater) {
+        float depth = (my.waterNormalizedLevel - t) / my.waterNormalizedLevel;
+        if (depth < 0.0) depth = 0.0;
+        if (depth > 1.0) depth = 1.0;
+        float shore = 1.0 - depth;
+        r = 0.05 + 0.08 * depth + 0.10 * shore;
+        g = 0.32 + 0.36 * depth + 0.18 * shore;
+        b = 0.52 + 0.40 * depth + 0.12 * shore;
+      } else if (t < my.waterNormalizedLevel + 0.06) {
+        float w = (t - my.waterNormalizedLevel) / 0.06;
+        r = 0.36 + 0.14 * w;
+        g = 0.34 + 0.20 * w;
+        b = 0.20 + 0.09 * w;
+      } else if (t < 0.62) {
+        float w = (t - (my.waterNormalizedLevel + 0.06)) / 0.16;
+        r = 0.24 + 0.18 * w;
+        g = 0.46 + 0.32 * w;
+        b = 0.22 + 0.12 * w;
+      } else if (t < 0.82) {
+        float w = (t - 0.62) / 0.20;
+        r = 0.46 + 0.26 * w;
+        g = 0.40 + 0.22 * w;
+        b = 0.30 + 0.20 * w;
       } else {
-        float w = (t - 0.85) / 0.15;
+        float w = (t - 0.82) / 0.18;
         if (w < 0.0) w = 0.0;
         if (w > 1.0) w = 1.0;
-        float c = 0.82 + 0.18 * w;
-        r = c;
-        g = c;
-        b = c;
+        float base = 0.84 + 0.14 * w;
+        r = base;
+        g = base;
+        b = base;
+        float frost = my.saturate((t - 0.88) / 0.12);
+        float sunSpark = 0.75 + 0.25 * frost;
+        r = my.lerp(r, sunSpark, frost * 0.4);
+        g = my.lerp(g, sunSpark, frost * 0.4);
+        b = my.lerp(b, sunSpark, frost * 0.6);
       }
+
+      if (!underwater) {
+        float nx = my.vertexNormalX[idx];
+        float ny = my.vertexNormalY[idx];
+        float nz = my.vertexNormalZ[idx];
+        float sunDot = nx * my.sunDirX + ny * my.sunDirY + nz * my.sunDirZ;
+        if (sunDot < 0.0) sunDot = 0.0;
+        float slope = 1.0 - ny;
+        if (slope < 0.0) slope = 0.0;
+        if (slope > 1.0) slope = 1.0;
+        float shade = (0.38 + sunDot * 0.62) * (1.0 - 0.28 * slope);
+        if (shade < 0.25) shade = 0.25;
+        if (shade > 1.1) shade = 1.1;
+        r = r * shade;
+        g = g * shade;
+        b = b * (shade + 0.05 * sunDot);
+        float cool = my.saturate((0.58 - t) * 3.5);
+        g = g + cool * 0.05;
+        b = b + cool * 0.07;
+        float alpine = my.saturate((t - 0.68) * 2.2);
+        r = my.lerp(r, r * 0.9, alpine * 0.4);
+        g = my.lerp(g, g * 0.88, alpine * 0.3);
+        b = my.lerp(b, b * 1.08, alpine * 0.3);
+      }
+
+      r = my.saturate(r);
+      g = my.saturate(g);
+      b = my.saturate(b);
+
       my.vertexColorR[idx] = r;
       my.vertexColorG[idx] = g;
       my.vertexColorB[idx] = b;
@@ -328,6 +430,7 @@ class LandscapeDemo {
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.elapsedSeconds = 0.0;
     writeln("Generated landscape for seed ", my.seed, ".");
   }
 
@@ -372,6 +475,63 @@ class LandscapeDemo {
       GLEnd();
       z = z + 1;
     }
+  }
+
+  void emitWaterVertex(int gridX, int gridZ, float groundHeight, float timeSeconds) {
+    float depth = my.waterHeight - groundHeight;
+    if (depth < 0.0) depth = 0.0;
+    if (depth > 6.0) depth = 6.0;
+    float depthFactor = depth / 6.0;
+    float shallow = 1.0 - depthFactor;
+    float phase = timeSeconds * 0.7 + gridX * 0.18 + gridZ * 0.12;
+    float secondary = timeSeconds * 1.6 + gridX * 0.05 + gridZ * 0.21;
+    float ripple = sin(phase) * (0.08 + 0.04 * depthFactor);
+    float ripple2 = cos(secondary) * (0.05 + 0.05 * depthFactor);
+    float surfaceHeight = my.waterHeight + 0.05 + ripple + ripple2;
+    float worldX = my.worldXCoords[gridX];
+    float worldZ = my.worldZCoords[gridZ];
+    float foam = my.saturate(1.0 - depth * 0.45);
+    float sparkle = 0.02 + 0.06 * sin(timeSeconds * 2.4 + (gridX + gridZ) * 0.22);
+    float r = 0.05 + 0.08 * depthFactor + 0.18 * foam + sparkle * shallow * 0.4;
+    float g = 0.34 + 0.30 * depthFactor + 0.26 * foam + sparkle * shallow * 0.5;
+    float b = 0.55 + 0.32 * depthFactor + 0.22 * foam + sparkle * 0.6;
+    r = my.saturate(r);
+    g = my.saturate(g);
+    b = my.saturate(b);
+    GLColor3f(r, g, b);
+    GLVertex3f(worldX, surfaceHeight, worldZ);
+  }
+
+  void drawWater(float timeSeconds) {
+    float allowance = 0.18;
+    GLBegin("triangles");
+    int z = 0;
+    while (z < TerrainSize) {
+      int x = 0;
+      while (x < TerrainSize) {
+        float h00 = my.field.rawHeight(x, z);
+        float h10 = my.field.rawHeight(x + 1, z);
+        float h01 = my.field.rawHeight(x, z + 1);
+        float h11 = my.field.rawHeight(x + 1, z + 1);
+        if (h00 <= my.waterHeight + allowance &&
+            h10 <= my.waterHeight + allowance &&
+            h01 <= my.waterHeight + allowance) {
+          my.emitWaterVertex(x, z, h00, timeSeconds);
+          my.emitWaterVertex(x + 1, z, h10, timeSeconds);
+          my.emitWaterVertex(x, z + 1, h01, timeSeconds);
+        }
+        if (h10 <= my.waterHeight + allowance &&
+            h11 <= my.waterHeight + allowance &&
+            h01 <= my.waterHeight + allowance) {
+          my.emitWaterVertex(x + 1, z, h10, timeSeconds);
+          my.emitWaterVertex(x + 1, z + 1, h11, timeSeconds);
+          my.emitWaterVertex(x, z + 1, h01, timeSeconds);
+        }
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+    GLEnd();
   }
 
   void updateCamera(float dt) {
@@ -449,6 +609,7 @@ class LandscapeDemo {
     GLTranslatef(-worldX, -my.camY, -worldZ);
 
     my.drawTerrain();
+    my.drawWater(my.elapsedSeconds);
     GLSwapWindow();
   }
 
@@ -463,6 +624,7 @@ class LandscapeDemo {
       my.lastTicks = now;
       if (dt < 0.0) dt = 0.0;
       my.updateCamera(dt);
+      my.elapsedSeconds = my.elapsedSeconds + dt;
       my.drawFrame();
       GraphLoop(1);
     }
