@@ -180,7 +180,27 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
-    if (node->freed) return;
+
+    static AST** freed_nodes = NULL;
+    static size_t freed_count = 0;
+    static size_t freed_capacity = 0;
+    for (size_t i = 0; i < freed_count; i++) {
+        if (freed_nodes[i] == node) {
+            return;
+        }
+    }
+
+    if (node->freed) {
+        if (freed_count == freed_capacity) {
+            size_t new_cap = freed_capacity == 0 ? 64 : freed_capacity * 2;
+            AST** new_buf = realloc(freed_nodes, new_cap * sizeof(AST*));
+            if (!new_buf) return;
+            freed_nodes = new_buf;
+            freed_capacity = new_cap;
+        }
+        freed_nodes[freed_count++] = node;
+        return;
+    }
     node->freed = true;
 
     if (isNodeInTypeTable(node)) {
@@ -225,6 +245,17 @@ void freeAST(AST *node) {
         freeToken(node->token);
         node->token = NULL;
     }
+    if (freed_count == freed_capacity) {
+        size_t new_cap = freed_capacity == 0 ? 64 : freed_capacity * 2;
+        AST** new_buf = realloc(freed_nodes, new_cap * sizeof(AST*));
+        if (!new_buf) {
+            free(node);
+            return;
+        }
+        freed_nodes = new_buf;
+        freed_capacity = new_cap;
+    }
+    freed_nodes[freed_count++] = node;
     free(node);
 }
 
