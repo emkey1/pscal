@@ -502,6 +502,7 @@ typedef struct {
     int capacity;
     int* addrs;
     bool merged;
+    bool has_unresolved;
 } VTableInfo;
 
 static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
@@ -531,6 +532,9 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
                 if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
             }
             if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+            if (parent->has_unresolved) {
+                vt->has_unresolved = true;
+            }
         }
     }
     vt->merged = true;
@@ -564,6 +568,7 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].capacity = 0;
                             tables[idx].addrs = NULL;
                             tables[idx].merged = false;
+                            tables[idx].has_unresolved = false;
                         }
                         int mindex = base->type_def->i_val;
                         if (mindex >= tables[idx].capacity) {
@@ -573,6 +578,9 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].capacity = newcap;
                         }
                         tables[idx].addrs[mindex] = base->bytecode_address;
+                        if (base->bytecode_address <= 0) {
+                            tables[idx].has_unresolved = true;
+                        }
                         if (mindex + 1 > tables[idx].method_count) tables[idx].method_count = mindex + 1;
                     }
                 }
@@ -588,6 +596,11 @@ static void emitVTables(BytecodeChunk* chunk) {
     for (int i = 0; i < table_count; i++) {
         VTableInfo* vt = &tables[i];
         if (vt->method_count == 0) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
+        if (vt->has_unresolved) {
             free(vt->class_name);
             free(vt->addrs);
             continue;
@@ -3383,6 +3396,22 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (!decl_child) continue;
+                    if (decl_child->type == AST_COMPOUND) {
+                        for (int j = 0; j < decl_child->child_count; j++) {
+                            AST* nested = decl_child->children[j];
+                            if (!nested) continue;
+                            if (nested->type == AST_MODULE) {
+                                compileNode(nested, chunk, getLine(nested));
+                                continue;
+                            }
+                            if (nested->type == AST_VAR_DECL ||
+                                nested->type == AST_CONST_DECL ||
+                                nested->type == AST_TYPE_DECL) {
+                                compileNode(nested, chunk, getLine(nested));
+                            }
+                        }
+                        continue;
+                    }
                     if (decl_child->type == AST_MODULE) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                         continue;
@@ -3400,7 +3429,18 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
-                    if (decl_child && (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL)) {
+                    if (!decl_child) continue;
+                    if (decl_child->type == AST_COMPOUND) {
+                        for (int j = 0; j < decl_child->child_count; j++) {
+                            AST* nested = decl_child->children[j];
+                            if (!nested) continue;
+                            if (nested->type == AST_PROCEDURE_DECL || nested->type == AST_FUNCTION_DECL) {
+                                compileNode(nested, chunk, getLine(nested));
+                            }
+                        }
+                        continue;
+                    }
+                    if (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }

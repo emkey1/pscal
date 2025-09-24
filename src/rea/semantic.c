@@ -1984,6 +1984,7 @@ static void collectClasses(AST *node) {
                         if (vp) {
                             *vp = v; /* shallow copy; safe for numeric types */
                             sym->value = vp;
+                            sym->type = v.type;
                         }
                     }
                 }
@@ -2432,6 +2433,14 @@ static Symbol *lookupField(ClassInfo *ci, const char *name) {
     return NULL;
 }
 
+static Symbol *lookupConstMember(ClassInfo *ci, const char *name) {
+    Symbol *sym = lookupField(ci, name);
+    if (sym && sym->is_const) {
+        return sym;
+    }
+    return NULL;
+}
+
 static Symbol *lookupMethod(ClassInfo *ci, const char *name) {
     if (!ci || !name) return NULL;
     char lower[MAX_SYMBOL_LENGTH];
@@ -2647,6 +2656,21 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             decl = findStaticDeclarationInAST(ident, node->parent->parent, gProgramRoot);
         }
         if (!decl) {
+            if (clsContext) {
+                Symbol *constSym = lookupConstMember(clsContext, ident);
+                if (constSym) {
+                    if (constSym->value) {
+                        node->var_type = constSym->value->type;
+                    } else if (constSym->type != TYPE_UNKNOWN) {
+                        node->var_type = constSym->type;
+                    }
+                    if (constSym->type_def) {
+                        node->type_def = copyAST(constSym->type_def);
+                    }
+                    if (pushedGenericFrame) popGenericFrame();
+                    return;
+                }
+            }
             AST *ancestor = node->parent;
             while (!decl && ancestor) {
                 decl = findStaticDeclarationInAST(ident, ancestor, gProgramRoot);
