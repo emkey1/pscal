@@ -42,6 +42,207 @@ typedef struct {
 static AddressConstantEntry* address_constant_entries = NULL;
 static int address_constant_count = 0;
 static int address_constant_capacity = 0;
+typedef struct {
+    BytecodeChunk* chunk;
+    char** classes;
+    int count;
+    int capacity;
+} VTableTrackerState;
+static BytecodeChunk* tracked_vtable_chunk = NULL;
+static char** emitted_vtable_classes = NULL;
+static int emitted_vtable_count = 0;
+static int emitted_vtable_capacity = 0;
+static VTableTrackerState* vtable_tracker_stack = NULL;
+static int vtable_tracker_depth = 0;
+static int vtable_tracker_capacity = 0;
+
+static void freeVTableClassList(char** list, int count) {
+    if (!list) return;
+    for (int i = 0; i < count; i++) {
+        free(list[i]);
+    }
+    free(list);
+}
+
+static void clearCurrentVTableTracker(void) {
+    if (emitted_vtable_classes) {
+        for (int i = 0; i < emitted_vtable_count; i++) {
+            free(emitted_vtable_classes[i]);
+        }
+        free(emitted_vtable_classes);
+    }
+    emitted_vtable_classes = NULL;
+    emitted_vtable_count = 0;
+    emitted_vtable_capacity = 0;
+}
+
+static void initializeVTableTracker(BytecodeChunk* chunk) {
+    if (vtable_tracker_depth != 0) {
+        return;
+    }
+    clearCurrentVTableTracker();
+    tracked_vtable_chunk = chunk;
+}
+
+static void ensureVTableTrackerForChunk(BytecodeChunk* chunk) {
+    if (tracked_vtable_chunk == chunk) {
+        return;
+    }
+    if (vtable_tracker_depth == 0) {
+        clearCurrentVTableTracker();
+    }
+    tracked_vtable_chunk = chunk;
+}
+
+static bool vtableTrackerHasClass(const char* class_name) {
+    if (!class_name) return false;
+    for (int i = 0; i < emitted_vtable_count; i++) {
+        if (strcmp(emitted_vtable_classes[i], class_name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vtableTrackerEnsureCapacity(int needed) {
+    if (needed <= emitted_vtable_capacity) {
+        return true;
+    }
+    int new_capacity = emitted_vtable_capacity < 8 ? 8 : emitted_vtable_capacity * 2;
+    while (new_capacity < needed) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char** resized = realloc(emitted_vtable_classes,
+                             (size_t)new_capacity * sizeof(char*));
+    if (!resized) {
+        fprintf(stderr, "Compiler error: Out of memory expanding vtable tracker.\n");
+        compiler_had_error = true;
+        return false;
+    }
+    emitted_vtable_classes = resized;
+    emitted_vtable_capacity = new_capacity;
+    return true;
+}
+
+static void vtableTrackerRecordClass(const char* class_name) {
+    if (!class_name || vtableTrackerHasClass(class_name)) {
+        return;
+    }
+    if (!vtableTrackerEnsureCapacity(emitted_vtable_count + 1)) {
+        return;
+    }
+    char* copy = strdup(class_name);
+    if (!copy) {
+        fprintf(stderr, "Compiler error: Out of memory storing vtable tracker entry.\n");
+        compiler_had_error = true;
+        return;
+    }
+    emitted_vtable_classes[emitted_vtable_count++] = copy;
+}
+
+static bool pushVTableTrackerState(BytecodeChunk* chunk) {
+    if (vtable_tracker_depth == vtable_tracker_capacity) {
+        int new_capacity = vtable_tracker_capacity < 4 ? 4 : vtable_tracker_capacity * 2;
+        VTableTrackerState* resized = realloc(vtable_tracker_stack,
+                                              (size_t)new_capacity * sizeof(VTableTrackerState));
+        if (!resized) {
+            fprintf(stderr, "Compiler error: Out of memory growing vtable tracker stack.\n");
+            compiler_had_error = true;
+            return false;
+        }
+        vtable_tracker_stack = resized;
+        vtable_tracker_capacity = new_capacity;
+    }
+
+    VTableTrackerState saved = {
+        .chunk = tracked_vtable_chunk,
+        .classes = emitted_vtable_classes,
+        .count = emitted_vtable_count,
+        .capacity = emitted_vtable_capacity,
+    };
+    vtable_tracker_stack[vtable_tracker_depth++] = saved;
+
+    tracked_vtable_chunk = chunk;
+    emitted_vtable_classes = NULL;
+    emitted_vtable_count = 0;
+    emitted_vtable_capacity = 0;
+
+    if (saved.chunk == chunk && saved.classes && saved.count > 0) {
+        emitted_vtable_capacity = saved.count;
+        emitted_vtable_classes = (char**)malloc((size_t)saved.count * sizeof(char*));
+        if (!emitted_vtable_classes) {
+            fprintf(stderr, "Compiler error: Out of memory copying vtable tracker.\n");
+            compiler_had_error = true;
+            emitted_vtable_capacity = 0;
+            return true;
+        }
+        for (int i = 0; i < saved.count; i++) {
+            emitted_vtable_classes[i] = strdup(saved.classes[i]);
+            if (!emitted_vtable_classes[i]) {
+                fprintf(stderr, "Compiler error: Out of memory copying vtable tracker entry.\n");
+                compiler_had_error = true;
+                for (int j = 0; j < i; j++) {
+                    free(emitted_vtable_classes[j]);
+                }
+                free(emitted_vtable_classes);
+                emitted_vtable_classes = NULL;
+                emitted_vtable_capacity = 0;
+                emitted_vtable_count = 0;
+                return true;
+            }
+        }
+        emitted_vtable_count = saved.count;
+    }
+    return true;
+}
+
+static void popVTableTrackerState(void) {
+    VTableTrackerState child = {
+        .chunk = tracked_vtable_chunk,
+        .classes = emitted_vtable_classes,
+        .count = emitted_vtable_count,
+        .capacity = emitted_vtable_capacity,
+    };
+
+    if (vtable_tracker_depth <= 0) {
+        if (child.classes) {
+            freeVTableClassList(child.classes, child.count);
+        }
+        tracked_vtable_chunk = NULL;
+        emitted_vtable_classes = NULL;
+        emitted_vtable_count = 0;
+        emitted_vtable_capacity = 0;
+        return;
+    }
+
+    VTableTrackerState parent = vtable_tracker_stack[--vtable_tracker_depth];
+    tracked_vtable_chunk = parent.chunk;
+    emitted_vtable_classes = parent.classes;
+    emitted_vtable_count = parent.count;
+    emitted_vtable_capacity = parent.capacity;
+
+    if (!parent.chunk && child.chunk) {
+        tracked_vtable_chunk = child.chunk;
+        emitted_vtable_classes = child.classes;
+        emitted_vtable_count = child.count;
+        emitted_vtable_capacity = child.capacity;
+        return;
+    }
+
+    if (parent.chunk == child.chunk && child.classes) {
+        for (int i = 0; i < child.count; i++) {
+            vtableTrackerRecordClass(child.classes[i]);
+        }
+    }
+
+    if (child.classes) {
+        freeVTableClassList(child.classes, child.count);
+    }
+}
 
 static void recordAddressConstantEntry(int constant_index, int element_index, int address) {
     if (constant_index < 0 || address < 0) return;
@@ -336,6 +537,7 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
 }
 
 static void emitVTables(BytecodeChunk* chunk) {
+    ensureVTableTrackerForChunk(chunk);
     VTableInfo* tables = NULL;
     int table_count = 0;
     for (int b = 0; b < HASHTABLE_SIZE; b++) {
@@ -385,7 +587,16 @@ static void emitVTables(BytecodeChunk* chunk) {
 
     for (int i = 0; i < table_count; i++) {
         VTableInfo* vt = &tables[i];
-        if (vt->method_count == 0) continue;
+        if (vt->method_count == 0) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
+        if (vtableTrackerHasClass(vt->class_name)) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
         int lb = 0;
         int ub = vt->method_count - 1;
         Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
@@ -416,6 +627,7 @@ static void emitVTables(BytecodeChunk* chunk) {
         int elemNameIdx = addStringConstant(chunk, "integer");
         writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
         emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
+        vtableTrackerRecordClass(vt->class_name);
         free(vt->class_name);
         free(vt->addrs);
     }
@@ -3035,6 +3247,12 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
         const char* d = getenv("REA_DEBUG");
         if (d && *d && *d != '0') compiler_debug = 1;
     }
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
+    }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
     compiler_had_error = false;
@@ -3069,6 +3287,9 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
         applyPeepholeOptimizations(outputChunk);
     }
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
+    }
     return !compiler_had_error;
 }
 
@@ -3078,6 +3299,12 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
         if (d && *d && *d != '0') compiler_debug = 1;
+    }
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
     }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
@@ -3131,6 +3358,9 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     compilerSetCurrentUnitName(NULL);
     compiler_defined_myself_global = saved_myself_flag;
     compiler_myself_global_name_idx = saved_myself_idx;
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
+    }
     return !compiler_had_error;
 }
 
@@ -6123,12 +6353,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 }
 
 void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
-    if (!unit_ast || unit_ast->type != AST_UNIT) {
-        return;
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
+    }
+
+    if (!unit_ast || !outputChunk || unit_ast->type != AST_UNIT) {
+        goto vtable_cleanup;
     }
     AST* impl_block = unit_ast->extra;
     if (!impl_block || impl_block->type != AST_COMPOUND) {
-        return;
+        goto vtable_cleanup;
     }
 
 
@@ -6144,6 +6381,11 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
 
     // Reset the context after finishing the unit
     current_compilation_unit_name = NULL;
+
+vtable_cleanup:
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
+    }
 }
 
 void finalizeBytecode(BytecodeChunk* chunk) {
