@@ -149,15 +149,6 @@ static void vtAdd(VarTable *t, const char *name, VarType type, ASTNodeClike *dec
     t->count++;
 }
 
-static int vtContains(VarTable *t, const char *name) {
-    for (int i = 0; i < t->count; ++i) {
-        if (strcmp(t->entries[i].name, name) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 static VarType vtGetType(VarTable *t, const char *name) {
     for (int i = 0; i < t->count; ++i) {
         if (strcmp(t->entries[i].name, name) == 0) {
@@ -192,20 +183,8 @@ static void ssPop(ScopeStack *s) {
     s->depth--;
 }
 
-static int ssAdd(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl) {
-    if (!s || s->depth <= 0) return 0;
-    VarTable *current = &s->scopes[s->depth - 1];
-    if (vtContains(current, name)) {
-        fprintf(stderr,
-                "Semantic error: duplicate declaration of '%s' at line %d, column %d\n",
-                name,
-                decl ? decl->token.line : 0,
-                decl ? decl->token.column : 0);
-        clike_error_count++;
-        return 0;
-    }
-    vtAdd(current, name, type, decl);
-    return 1;
+static void ssAdd(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl) {
+    vtAdd(&s->scopes[s->depth - 1], name, type, decl);
 }
 
 static VarType ssGet(ScopeStack *s, const char *name) {
@@ -227,7 +206,6 @@ static ASTNodeClike* ssGetDecl(ScopeStack *s, const char *name) {
 typedef struct {
     char *name;
     VarType type;
-    int has_body;
 } FuncEntry;
 
 static FuncEntry functions[256];
@@ -236,64 +214,49 @@ static int functionCount = 0;
 static void registerBuiltinFunctions(void) {
     functions[functionCount].name = strdup("printf");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("scanf");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("strlen");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("itoa");
     functions[functionCount].type = TYPE_VOID;
-    functions[functionCount].has_body = 1;
     functionCount++;
     // `exit` behaves like C's exit, terminating the program with an optional code.
     functions[functionCount].name = strdup("exit");
     functions[functionCount].type = TYPE_VOID;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("mstreamcreate");
     functions[functionCount].type = TYPE_MEMORYSTREAM;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("mstreamloadfromfile");
     functions[functionCount].type = TYPE_BOOLEAN;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("mstreamsavetofile");
     functions[functionCount].type = TYPE_VOID;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("mstreamfree");
     functions[functionCount].type = TYPE_VOID;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("mstreambuffer");
     functions[functionCount].type = TYPE_STRING;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("hasextbuiltin");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("extbuiltincategorycount");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("extbuiltincategoryname");
     functions[functionCount].type = TYPE_STRING;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("extbuiltinfunctioncount");
     functions[functionCount].type = TYPE_INT32;
-    functions[functionCount].has_body = 1;
     functionCount++;
     functions[functionCount].name = strdup("extbuiltinfunctionname");
     functions[functionCount].type = TYPE_STRING;
-    functions[functionCount].has_body = 1;
     functionCount++;
 }
 
@@ -309,36 +272,6 @@ static char *tokenToCString(ClikeToken t) {
     memcpy(s, t.lexeme, t.length);
     s[t.length] = '\0';
     return s;
-}
-
-static void registerFunctionDecl(ASTNodeClike *decl) {
-    if (!decl) return;
-    char *name = tokenToCString(decl->token);
-    for (int i = 0; i < functionCount; ++i) {
-        if (strcasecmp(functions[i].name, name) == 0) {
-            if (decl->is_forward_decl) {
-                free(name);
-                return;
-            }
-            if (functions[i].has_body) {
-                fprintf(stderr,
-                        "Semantic error: duplicate function definition '%s' at line %d, column %d\n",
-                        name,
-                        decl->token.line,
-                        decl->token.column);
-                clike_error_count++;
-            } else {
-                functions[i].has_body = 1;
-                functions[i].type = decl->var_type;
-            }
-            free(name);
-            return;
-        }
-    }
-    functions[functionCount].name = name;
-    functions[functionCount].type = decl->var_type;
-    functions[functionCount].has_body = decl->right != NULL && !decl->is_forward_decl;
-    functionCount++;
 }
 
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes);
@@ -464,24 +397,16 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             return TYPE_INT64;
         }
         case TCAST_ASSIGN: {
-            char *lhsName = NULL;
-            ASTNodeClike *lhsDecl = NULL;
-            if (node->left && node->left->type == TCAST_IDENTIFIER) {
-                lhsName = tokenToCString(node->left->token);
-                lhsDecl = ssGetDecl(scopes, lhsName);
-                if (lhsDecl && lhsDecl->is_const) {
-                    fprintf(stderr,
-                            "Semantic error: cannot assign to const '%s' at line %d, column %d\n",
-                            lhsName,
-                            node->token.line,
-                            node->token.column);
-                    clike_error_count++;
-                }
-            }
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             int allowStringToCharPointer = 0;
-            if (lt == TYPE_POINTER && rt == TYPE_STRING && lhsDecl) {
+            if (lt == TYPE_POINTER && rt == TYPE_STRING) {
+                ASTNodeClike *lhsDecl = NULL;
+                if (node->left && node->left->type == TCAST_IDENTIFIER) {
+                    char *lhsName = tokenToCString(node->left->token);
+                    lhsDecl = ssGetDecl(scopes, lhsName);
+                    free(lhsName);
+                }
                 if (isCharPointerDecl(lhsDecl)) {
                     allowStringToCharPointer = 1;
                 }
@@ -502,7 +427,6 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
             }
             node->var_type = lt;
-            if (lhsName) free(lhsName);
             return lt;
         }
         case TCAST_CALL: {
@@ -1164,7 +1088,10 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
         for (int j = 0; j < modules[i].prog->child_count; ++j) {
             ASTNodeClike *decl = modules[i].prog->children[j];
             if (decl->type == TCAST_FUN_DECL) {
-                registerFunctionDecl(decl);
+                char *name = tokenToCString(decl->token);
+                functions[functionCount].name = name;
+                functions[functionCount].type = decl->var_type;
+                functionCount++;
             }
         }
     }
@@ -1172,7 +1099,10 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) {
-            registerFunctionDecl(decl);
+            char *name = tokenToCString(decl->token);
+            functions[functionCount].name = name;
+            functions[functionCount].type = decl->var_type;
+            functionCount++;
         }
     }
 
@@ -1184,9 +1114,8 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {
             char *name = tokenToCString(decl->token);
-            if (ssAdd(&globalsScope, name, decl->var_type, decl)) {
-                vtAdd(&globalVars, name, decl->var_type, decl);
-            }
+            ssAdd(&globalsScope, name, decl->var_type, decl);
+            vtAdd(&globalVars, name, decl->var_type, decl);
             if (decl->left) analyzeExpr(decl->left, &globalsScope);
             free(name);
         }
