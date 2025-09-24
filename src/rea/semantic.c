@@ -1564,6 +1564,59 @@ static AST *findVarDeclAnywhere(AST *node, const char *ident, int referenceLine)
     return NULL;
 }
 
+static bool isDeclarationCompound(AST *node) {
+    if (!node || node->type != AST_COMPOUND || node->i_val != 1) return false;
+    bool hasChild = false;
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (!child) continue;
+        hasChild = true;
+        if (child->type == AST_VAR_DECL || child->type == AST_CONST_DECL) {
+            continue;
+        }
+        if (child->type == AST_COMPOUND && isDeclarationCompound(child)) {
+            continue;
+        }
+        return false;
+    }
+    return hasChild;
+}
+
+static AST *findDeclInCompound(AST *node, const char *ident, int referenceLine) {
+    if (!node || !ident) return NULL;
+    if (node->type == AST_VAR_DECL) {
+        for (int childIdx = 0; childIdx < node->child_count; childIdx++) {
+            AST *varNode = node->children[childIdx];
+            if (!varNode || !varNode->token || !varNode->token->value) continue;
+            if (strcasecmp(varNode->token->value, ident) == 0) {
+                int declLine = declarationLine(node);
+                if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                    return node;
+                }
+            }
+        }
+        return NULL;
+    }
+    if (node->type == AST_CONST_DECL) {
+        if (node->token && node->token->value &&
+            strcasecmp(node->token->value, ident) == 0) {
+            int declLine = declarationLine(node);
+            if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                return node;
+            }
+        }
+        return NULL;
+    }
+    if (node->type == AST_COMPOUND && isDeclarationCompound(node)) {
+        for (int i = 0; i < node->child_count; i++) {
+            AST *child = node->children[i];
+            AST *found = findDeclInCompound(child, ident, referenceLine);
+            if (found) return found;
+        }
+    }
+    return NULL;
+}
+
 static void ensureExceptionGlobals(AST *root) {
     if (!root || !astContainsExceptions(root)) {
         return;
@@ -2689,26 +2742,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                             for (int k = idx - 1; k >= 0 && !decl; k--) {
                                 AST *sibling = container->children[k];
                                 if (!sibling) continue;
-                                if (sibling->type == AST_VAR_DECL) {
-                                    for (int childIdx = 0; childIdx < sibling->child_count; childIdx++) {
-                                        AST *varNode = sibling->children[childIdx];
-                                        if (!varNode || !varNode->token || !varNode->token->value) continue;
-                                        if (strcasecmp(varNode->token->value, ident) == 0) {
-                                            int declLine = declarationLine(sibling);
-                                            if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
-                                                decl = sibling;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                } else if (sibling->type == AST_CONST_DECL) {
-                                    if (sibling->token && sibling->token->value &&
-                                        strcasecmp(sibling->token->value, ident) == 0) {
-                                        int declLine = declarationLine(sibling);
-                                        if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
-                                            decl = sibling;
-                                        }
-                                    }
+                                AST *found = findDeclInCompound(sibling, ident, referenceLine);
+                                if (found) {
+                                    decl = found;
                                 }
                                 if (decl) break;
                             }
