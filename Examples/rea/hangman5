@@ -160,7 +160,7 @@ class HangmanView {
   }
 
   void drawBorder() {
-    TextColor(LightGreen);
+    TextColor(CRT.LightGreen);
     GotoXY(my.borderLeft, my.borderTop); write(CornerTL);
     GotoXY(my.borderRight, my.borderTop); write(CornerTR);
     GotoXY(my.borderLeft, my.borderBottom); write(CornerBL);
@@ -179,7 +179,7 @@ class HangmanView {
       GotoXY(my.borderRight, y); write(LineV);
       y = y + 1;
     }
-    TextColor(White);
+    TextColor(CRT.White);
   }
 
   void drawHangman(int wrong) {
@@ -255,12 +255,12 @@ class HangmanView {
     GotoXY(my.borderLeft + 1 + padding, my.vGuessBarRow);
     int i = 1;
     write("Guesses Left: ");
-    TextColor(LightGreen);
+    TextColor(CRT.LightGreen);
     while (i <= remaining) { write("#"); i = i + 1; }
-    TextColor(LightRed);
+    TextColor(CRT.LightRed);
     i = 1;
     while (i <= wrong) { write("#"); i = i + 1; }
-    TextColor(White);
+    TextColor(CRT.White);
     write(" ["); write(remaining); write("/"); write(MAX_WRONG); write("]");
   }
 
@@ -269,7 +269,7 @@ class HangmanView {
     my.drawBorder();
     int pad;
     pad = my.centerPadding("Welcome to Hangman!");
-    GotoXY(my.borderLeft + 1 + pad, my.vHeaderRow); TextColor(LightGreen); writeln("Welcome to Hangman!"); TextColor(White);
+    GotoXY(my.borderLeft + 1 + pad, my.vHeaderRow); TextColor(CRT.LightGreen); writeln("Welcome to Hangman!"); TextColor(CRT.White);
     pad = my.centerPadding("(Guess a letter or ? for hint)");
     GotoXY(my.borderLeft + 1 + pad, my.vSubtitleRow); writeln("(Guess a letter or ? for hint)");
     pad = my.centerPadding(display);
@@ -403,15 +403,15 @@ class HangmanGame {
 
     my.view.render(my.display, my.guessed, my.wrong);
     if (my.display == my.chosen) {
-      TextColor(Green);
+      TextColor(CRT.Green);
       my.view.showMessage("You guessed the word!");
-      TextColor(White);
+      TextColor(CRT.White);
       my.wins = my.wins + 1;
     } else {
-      TextColor(LightRed);
+      TextColor(CRT.LightRed);
       msg = "Sorry, the word was " + my.chosen;
       my.view.showMessage(msg);
-      TextColor(White);
+      TextColor(CRT.White);
       my.losses = my.losses + 1;
     }
     str scoreMsg = "Score: " + inttostr(my.wins) + " wins / " + inttostr(my.losses) + " losses";

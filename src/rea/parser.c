@@ -3471,8 +3471,13 @@ static AST *parseStatement(ReaParser *p) {
         Token *vtTok = newToken(TOKEN_IDENTIFIER, "__vtable", classNameTok->line, 0);
         AST *vtVar = newASTNode(AST_VARIABLE, vtTok);
         setTypeAST(vtVar, TYPE_POINTER);
+
+        AST *vtType = newASTNode(AST_POINTER_TYPE, NULL);
+        setTypeAST(vtType, TYPE_POINTER);
+
         AST *vtDecl = newASTNode(AST_VAR_DECL, NULL);
         addChild(vtDecl, vtVar);
+        setRight(vtDecl, vtType);
         setTypeAST(vtDecl, TYPE_POINTER);
         addChild(recordAst, vtDecl);
         AST *methods = newASTNode(AST_COMPOUND, NULL);

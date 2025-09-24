@@ -3,4 +3,4 @@ R0
 R1
 A skip
 B hit
-vals:FALSE TRUE TRUE FALSE TRUE
+vals:false true true false true

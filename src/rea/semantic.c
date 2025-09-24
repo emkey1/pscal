@@ -1504,7 +1504,70 @@ static AST *desugarNode(AST *node, VarType currentFunctionType) {
     return node;
 }
 
+static int declarationLine(AST *decl);
+
+static bool astContainsExceptions(AST *node) {
+    if (!node) return false;
+    if (node->type == AST_TRY || node->type == AST_THROW) {
+        return true;
+    }
+    if (astContainsExceptions(node->left)) return true;
+    if (astContainsExceptions(node->right)) return true;
+    if (astContainsExceptions(node->extra)) return true;
+    for (int i = 0; i < node->child_count; i++) {
+        if (astContainsExceptions(node->children[i])) return true;
+    }
+    return false;
+}
+
+static AST *findEnclosingCompound(AST *node);
+
+static AST *findVarDeclAnywhere(AST *node, const char *ident, int referenceLine) {
+    if (!node || !ident) return NULL;
+    if (node->type == AST_VAR_DECL) {
+        for (int j = 0; j < node->child_count; j++) {
+            AST *nameNode = node->children[j];
+            if (!nameNode) continue;
+            if (nameNode->type == AST_VARIABLE && nameNode->token &&
+                strcasecmp(nameNode->token->value, ident) == 0) {
+                int declLine = declarationLine(node);
+                if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                    return node;
+                }
+            } else if (nameNode->type == AST_ASSIGN && nameNode->left &&
+                       nameNode->left->type == AST_VARIABLE &&
+                       nameNode->left->token &&
+                       strcasecmp(nameNode->left->token->value, ident) == 0) {
+                int declLine = declarationLine(node);
+                if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                    return node;
+                }
+            }
+        }
+    } else if (node->type == AST_CONST_DECL && node->token &&
+               strcasecmp(node->token->value, ident) == 0) {
+        int declLine = declarationLine(node);
+        if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+            return node;
+        }
+    }
+    AST *res = findVarDeclAnywhere(node->left, ident, referenceLine);
+    if (res) return res;
+    res = findVarDeclAnywhere(node->right, ident, referenceLine);
+    if (res) return res;
+    res = findVarDeclAnywhere(node->extra, ident, referenceLine);
+    if (res) return res;
+    for (int i = 0; i < node->child_count; i++) {
+        res = findVarDeclAnywhere(node->children[i], ident, referenceLine);
+        if (res) return res;
+    }
+    return NULL;
+}
+
 static void ensureExceptionGlobals(AST *root) {
+    if (!root || !astContainsExceptions(root)) {
+        return;
+    }
     AST *decls = getDeclsCompound(root);
     if (!decls) return;
 
@@ -2535,12 +2598,112 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        if (node->parent && node->parent->type == AST_VAR_DECL) {
+            AST *declParent = node->parent;
+            AST *recordScope = declParent->parent;
+            while (recordScope && recordScope->type == AST_COMPOUND) {
+                recordScope = recordScope->parent;
+            }
+            if (recordScope && recordScope->type == AST_RECORD_TYPE) {
+                if (declParent->right) {
+                    node->type_def = declParent->right;
+                    node->var_type = declParent->right->var_type;
+                } else {
+                    node->var_type = declParent->var_type;
+                }
+                if (pushedGenericFrame) popGenericFrame();
+                return;
+            }
+        }
+        if (node->parent && node->parent->type == AST_FIELD_ACCESS) {
+            AST *fieldAccess = node->parent;
+            const char *clsName = resolveExprClass(fieldAccess->left, clsContext);
+            if (clsName) {
+                ClassInfo *ci = lookupClass(clsName);
+                if (ci) {
+                    Symbol *fs = lookupField(ci, node->token->value);
+                    if (fs && fs->type_def) {
+                        node->type_def = copyAST(fs->type_def);
+                        node->var_type = fs->type_def->var_type;
+                    } else if (fs) {
+                        node->var_type = fs->type;
+                        node->type_def = fs->type_def ? copyAST(fs->type_def) : NULL;
+                    }
+                    if (pushedGenericFrame) popGenericFrame();
+                    return;
+                }
+            }
+        }
         /* Preserve explicit syntax while still annotating variables with their
          * declared types so later analyses (e.g. array element access) can
          * determine the base type.
          */
         const char *ident = node->token->value;
         AST *decl = findStaticDeclarationInAST(ident, node, gProgramRoot);
+        if (!decl && node->parent) {
+            decl = findStaticDeclarationInAST(ident, node->parent, gProgramRoot);
+        }
+        if (!decl && node->parent && node->parent->parent) {
+            decl = findStaticDeclarationInAST(ident, node->parent->parent, gProgramRoot);
+        }
+        if (!decl) {
+            AST *ancestor = node->parent;
+            while (!decl && ancestor) {
+                decl = findStaticDeclarationInAST(ident, ancestor, gProgramRoot);
+                ancestor = ancestor->parent;
+            }
+        }
+        if (!decl) {
+            int referenceLine = node->token ? node->token->line : 0;
+            AST *cursor = node->parent;
+            while (!decl && cursor) {
+                AST *container = cursor->parent;
+                if (container && container->type == AST_COMPOUND && container->children) {
+                    for (int idx = 0; idx < container->child_count; idx++) {
+                        AST *child = container->children[idx];
+                        if (child == cursor) {
+                            for (int k = idx - 1; k >= 0 && !decl; k--) {
+                                AST *sibling = container->children[k];
+                                if (!sibling) continue;
+                                if (sibling->type == AST_VAR_DECL) {
+                                    for (int childIdx = 0; childIdx < sibling->child_count; childIdx++) {
+                                        AST *varNode = sibling->children[childIdx];
+                                        if (!varNode || !varNode->token || !varNode->token->value) continue;
+                                        if (strcasecmp(varNode->token->value, ident) == 0) {
+                                            int declLine = declarationLine(sibling);
+                                            if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                                                decl = sibling;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else if (sibling->type == AST_CONST_DECL) {
+                                    if (sibling->token && sibling->token->value &&
+                                        strcasecmp(sibling->token->value, ident) == 0) {
+                                        int declLine = declarationLine(sibling);
+                                        if (referenceLine <= 0 || declLine <= 0 || declLine <= referenceLine) {
+                                            decl = sibling;
+                                        }
+                                    }
+                                }
+                                if (decl) break;
+                            }
+                            break;
+                        }
+                    }
+                }
+                cursor = cursor->parent;
+            }
+            if (!decl) {
+                decl = findVarDeclAnywhere(gProgramRoot, ident, referenceLine);
+                if (decl) {
+                    int declLine = declarationLine(decl);
+                    if (declLine > 0 && referenceLine > 0 && declLine != referenceLine) {
+                        decl = NULL;
+                    }
+                }
+            }
+        }
         if (!decl) {
             AST *scope = node->parent;
             while (scope && scope->type != AST_FUNCTION_DECL && scope->type != AST_PROCEDURE_DECL) {

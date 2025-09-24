@@ -1,0 +1,21 @@
+module CRT {
+  export const int Black = 0;
+  export const int Blue = 1;
+  export const int Green = 2;
+  export const int Cyan = 3;
+  export const int Red = 4;
+  export const int Magenta = 5;
+  export const int Brown = 6;
+  export const int LightGray = 7;
+  export const int DarkGray = 8;
+  export const int LightBlue = 9;
+  export const int LightGreen = 10;
+  export const int LightCyan = 11;
+  export const int LightRed = 12;
+  export const int LightMagenta = 13;
+  export const int Yellow = 14;
+  export const int White = 15;
+  export const int Blink = 128;
+
+  export int TextAttr = 0;
+}

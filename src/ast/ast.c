@@ -329,6 +329,9 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
     }
 
     AST* node = referenceNode;
+    if (node && node == currentScopeNode) {
+        node = node->parent;
+    }
     while (node && node != currentScopeNode) {
         AST* parent = node->parent;
         if (parent && parent->type == AST_COMPOUND) {
@@ -485,7 +488,7 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
 
         // Fallback to the general-purpose scope walk if still not found.
         if (!foundDecl) {
-            foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
+        foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
         }
 
         // As an additional fallback (handles languages where declarations and
