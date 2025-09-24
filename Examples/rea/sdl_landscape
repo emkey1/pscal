@@ -238,6 +238,9 @@ class LandscapeDemo {
   float vertexNormalZ[VertexCount];
   float worldXCoords[VertexStride];
   float worldZCoords[VertexStride];
+  float waterPhaseOffset[VertexCount];
+  float waterSecondaryOffset[VertexCount];
+  float waterSparkleOffset[VertexCount];
   float sunDirX;
   float sunDirY;
   float sunDirZ;
@@ -249,6 +252,7 @@ class LandscapeDemo {
     my.field = new TerrainField();
     my.seed = initialSeed;
     my.precomputeWorldCoordinates();
+    my.precomputeWaterOffsets();
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
     float sunX = 0.45;
@@ -280,6 +284,25 @@ class LandscapeDemo {
       my.worldXCoords[i] = world;
       my.worldZCoords[i] = world;
       i = i + 1;
+    }
+  }
+
+  void precomputeWaterOffsets() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int rowIndex = z * VertexStride;
+      float zPhase = z * 0.12;
+      float zSecondary = z * 0.21;
+      float zSparkle = z * 0.22;
+      int x = 0;
+      while (x <= TerrainSize) {
+        int idx = rowIndex + x;
+        my.waterPhaseOffset[idx] = x * 0.18 + zPhase;
+        my.waterSecondaryOffset[idx] = x * 0.05 + zSecondary;
+        my.waterSparkleOffset[idx] = x * 0.22 + zSparkle;
+        x = x + 1;
+      }
+      z = z + 1;
     }
   }
 
@@ -477,21 +500,22 @@ class LandscapeDemo {
     }
   }
 
-  void emitWaterVertex(int gridX, int gridZ, float groundHeight, float timeSeconds) {
+  void emitWaterVertex(int idx, int gridX, int gridZ, float groundHeight,
+                       float basePhase, float baseSecondary, float baseSparkle) {
     float depth = my.waterHeight - groundHeight;
     if (depth < 0.0) depth = 0.0;
     if (depth > 6.0) depth = 6.0;
     float depthFactor = depth / 6.0;
     float shallow = 1.0 - depthFactor;
-    float phase = timeSeconds * 0.7 + gridX * 0.18 + gridZ * 0.12;
-    float secondary = timeSeconds * 1.6 + gridX * 0.05 + gridZ * 0.21;
-    float ripple = sin(phase) * (0.08 + 0.04 * depthFactor);
-    float ripple2 = cos(secondary) * (0.05 + 0.05 * depthFactor);
+    float ripple = sin(basePhase + my.waterPhaseOffset[idx]) *
+                   (0.08 + 0.04 * depthFactor);
+    float ripple2 = cos(baseSecondary + my.waterSecondaryOffset[idx]) *
+                    (0.05 + 0.05 * depthFactor);
     float surfaceHeight = my.waterHeight + 0.05 + ripple + ripple2;
     float worldX = my.worldXCoords[gridX];
     float worldZ = my.worldZCoords[gridZ];
     float foam = my.saturate(1.0 - depth * 0.45);
-    float sparkle = 0.02 + 0.06 * sin(timeSeconds * 2.4 + (gridX + gridZ) * 0.22);
+    float sparkle = 0.02 + 0.06 * sin(baseSparkle + my.waterSparkleOffset[idx]);
     float r = 0.05 + 0.08 * depthFactor + 0.18 * foam + sparkle * shallow * 0.4;
     float g = 0.34 + 0.30 * depthFactor + 0.26 * foam + sparkle * shallow * 0.5;
     float b = 0.55 + 0.32 * depthFactor + 0.22 * foam + sparkle * 0.6;
@@ -504,28 +528,38 @@ class LandscapeDemo {
 
   void drawWater(float timeSeconds) {
     float allowance = 0.18;
+    float maxWaterHeight = my.waterHeight + allowance;
+    float basePhase = timeSeconds * 0.7;
+    float baseSecondary = timeSeconds * 1.6;
+    float baseSparkle = timeSeconds * 2.4;
     GLBegin("triangles");
     int z = 0;
     while (z < TerrainSize) {
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
       int x = 0;
       while (x < TerrainSize) {
-        float h00 = my.field.rawHeight(x, z);
-        float h10 = my.field.rawHeight(x + 1, z);
-        float h01 = my.field.rawHeight(x, z + 1);
-        float h11 = my.field.rawHeight(x + 1, z + 1);
-        if (h00 <= my.waterHeight + allowance &&
-            h10 <= my.waterHeight + allowance &&
-            h01 <= my.waterHeight + allowance) {
-          my.emitWaterVertex(x, z, h00, timeSeconds);
-          my.emitWaterVertex(x + 1, z, h10, timeSeconds);
-          my.emitWaterVertex(x, z + 1, h01, timeSeconds);
+        int idx00 = rowIndex + x;
+        int idx10 = rowIndex + x + 1;
+        int idx01 = nextRowIndex + x;
+        int idx11 = nextRowIndex + x + 1;
+        float h00 = my.vertexHeights[idx00];
+        float h10 = my.vertexHeights[idx10];
+        float h01 = my.vertexHeights[idx01];
+        float h11 = my.vertexHeights[idx11];
+        if (h00 <= maxWaterHeight &&
+            h10 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx00, x, z, h00, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
         }
-        if (h10 <= my.waterHeight + allowance &&
-            h11 <= my.waterHeight + allowance &&
-            h01 <= my.waterHeight + allowance) {
-          my.emitWaterVertex(x + 1, z, h10, timeSeconds);
-          my.emitWaterVertex(x + 1, z + 1, h11, timeSeconds);
-          my.emitWaterVertex(x, z + 1, h01, timeSeconds);
+        if (h10 <= maxWaterHeight &&
+            h11 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx11, x + 1, z + 1, h11, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
         }
         x = x + 1;
       }
