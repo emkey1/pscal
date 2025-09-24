@@ -1,0 +1,86 @@
+Test: integration_nested_scope_mix
+Category: integration
+Expectation: runtime_ok
+Description: Integration scenario combining shadowed constants, local types, and nested routines.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+L11: Compiler warning: Constant 'factor' redefined.
+VM Error: Internal - expected to resolve to a record for field access.
+[Error Location] Offset: 42, Line: 27
+
+--- VM Crash Context ---
+Instruction Pointer (IP): 0x6000017bc0bc
+Code Base: 0x6000017bc090
+Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
+0044    | SWAP
+
+Last Instructions executed (leading to crash, up to 10 bytes before error point):
+0032    | RETURN
+0033    | GET_FIELD_OFFSET    1 (index)
+0035    | SWAP
+0036    | SET_INDIRECT
+0037   21 RETURN
+0038   27 GET_LOCAL           0 (slot)
+0040    | GET_LOCAL_ADDRESS    1 (slot)
+
+--- VM State Dump (Full Stack at Crash) ---
+Stack Size: 6, Frame Count: 2
+Stack Contents (bottom to top):
+  [ nil ]
+  [ 2 ]
+  [ nil ]
+  [ nil ]
+  [ 2 ]
+  [ POINTER(@0x16ae48810 -> nil) ]
+--------------------------
+--- VM execution Failed (Runtime Error) ---
+[VM_DEBUG] Offset: 0044, Line:   27, Stack Size: 6, Frame Count: 2
+0044    | SWAP
+[VM_DEBUG] Stack Contents: [nil] [2] [nil] [nil] [2] [POINTER(@0x16ae48810 -> nil)]
+--- source ---
+program IntegrationScopeMix;
+const
+  Factor = 2;
+type
+  TInfo = record
+    Value: Integer;
+  end;
+
+procedure Compute(start: Integer);
+const
+  Factor = 3;
+type
+  TInfo = record
+    Value: Integer;
+    Total: Integer;
+  end;
+var
+  info: TInfo;
+  step: Integer;
+
+  procedure AddStep(multiplier: Integer);
+  begin
+    info.Total := info.Total + multiplier * start;
+  end;
+
+begin
+  info.Value := start;
+  info.Total := 0;
+  for step := 1 to Factor do
+  begin
+    AddStep(step);
+  end;
+  writeln('inner_total=', info.Total);
+  writeln('local_factor=', Factor);
+end;
+
+var
+  summary: TInfo;
+begin
+  summary.Value := 4;
+  Compute(2);
+  writeln('outer_scaled=', summary.Value * Factor);
+end.

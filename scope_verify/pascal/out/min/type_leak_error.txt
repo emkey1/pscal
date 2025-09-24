@@ -1,0 +1,60 @@
+Test: type_leak_error
+Category: type_scope
+Expectation: compile_error
+Description: Types declared inside a routine should not be visible in the outer scope.
+Reason: stderr missing expected substring
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+VM Error: Internal - expected to resolve to a record for field access.
+[Error Location] Offset: 19, Line: 11
+
+--- VM Crash Context ---
+Instruction Pointer (IP): 0x600002cb4015
+Code Base: 0x600002cb4000
+Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
+0021    | SWAP
+
+Last Instructions executed (leading to crash, up to 10 bytes before error point):
+0009    | DIVIDE
+0010    | RETURN
+0011    | SUBTRACT
+0012    3 JUMP               23 (to 0038)
+0015   11 CONSTANT            5 '1'
+0017    | GET_LOCAL_ADDRESS    0 (slot)
+
+--- VM State Dump (Full Stack at Crash) ---
+Stack Size: 4, Frame Count: 2
+Stack Contents (bottom to top):
+  [ nil ]
+  [ nil ]
+  [ 1 ]
+  [ POINTER(@0x16b140788 -> nil) ]
+--------------------------
+--- VM execution Failed (Runtime Error) ---
+[VM_DEBUG] Offset: 0021, Line:   11, Stack Size: 4, Frame Count: 2
+0021    | SWAP
+[VM_DEBUG] Stack Contents: [nil] [nil] [1] [POINTER(@0x16b140788 -> nil)]
+--- source ---
+program TypeLeak;
+
+procedure Factory;
+type
+  TInternal = record
+    Value: Integer;
+  end;
+var
+  item: TInternal;
+begin
+  item.Value := 1;
+  writeln('inside=', item.Value);
+end;
+
+var
+  other: TInternal;
+begin
+  Factory;
+  other.Value := 2;
+  writeln(other.Value);
+end.

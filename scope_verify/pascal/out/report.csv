@@ -1,0 +1,15 @@
+name,category,expect,exit_code,pass,reason
+routine_local_shadow_preserves_global,routine_scope,runtime_ok,0,yes,ok
+routine_parameter_shadows_global,routine_scope,runtime_ok,0,yes,ok
+routine_nested_procedure_captures_outer,routine_scope,runtime_ok,0,yes,ok
+routine_nested_function_captures_outer,routine_scope,runtime_ok,0,yes,ok
+routine_nested_function_leak_error,routine_scope,compile_error,1,no,stderr missing expected substring
+routine_parameter_leak_error,routine_scope,compile_error,1,no,stderr missing expected substring
+routine_duplicate_local_error,routine_scope,compile_error,0,no,expected non-zero exit code
+routine_loop_variable_persists_after,routine_scope,runtime_ok,0,yes,ok
+const_shadow_local_overrides_global,const_scope,runtime_ok,0,no,stdout mismatch
+const_nested_expression_uses_outer,const_scope,runtime_ok,0,yes,ok
+const_leak_error,const_scope,compile_error,0,no,expected non-zero exit code
+type_local_shadow_allows_outer,type_scope,runtime_ok,1,no,expected exit 0 but got 1
+type_leak_error,type_scope,compile_error,1,no,stderr missing expected substring
+integration_nested_scope_mix,integration,runtime_ok,1,no,expected exit 0 but got 1

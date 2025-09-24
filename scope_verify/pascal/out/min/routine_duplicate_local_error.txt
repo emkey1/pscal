@@ -1,0 +1,25 @@
+Test: routine_duplicate_local_error
+Category: routine_scope
+Expectation: compile_error
+Description: Declaring the same local identifier twice in one var block should be rejected.
+Reason: expected non-zero exit code
+Exit code: 0
+--- stdout ---
+1
+--- stderr ---
+<empty>
+--- source ---
+program RoutineDuplicateLocal;
+
+procedure Demo;
+var
+  temp: Integer;
+  temp: Integer;
+begin
+  temp := 1;
+  writeln(temp);
+end;
+
+begin
+  Demo;
+end.

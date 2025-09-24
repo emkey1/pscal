@@ -1,0 +1,25 @@
+Test: const_leak_error
+Category: const_scope
+Expectation: compile_error
+Description: Referencing a constant outside of the block where it is declared should fail.
+Reason: expected non-zero exit code
+Exit code: 0
+--- stdout ---
+hidden=4
+4
+--- stderr ---
+<empty>
+--- source ---
+program ConstLeak;
+
+procedure Maker;
+const
+  Hidden = 4;
+begin
+  writeln('hidden=', Hidden);
+end;
+
+begin
+  Maker;
+  writeln(Hidden);
+end.

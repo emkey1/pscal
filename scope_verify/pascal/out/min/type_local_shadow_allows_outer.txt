@@ -1,0 +1,75 @@
+Test: type_local_shadow_allows_outer
+Category: type_scope
+Expectation: runtime_ok
+Description: A type declared inside a routine shadows an outer type of the same name without affecting the outer definition.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+VM Error: Internal - expected to resolve to a record for field access.
+[Error Location] Offset: 53, Line: 27
+
+--- VM Crash Context ---
+Instruction Pointer (IP): 0x600001608037
+Code Base: 0x600001608000
+Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
+0055    | SWAP
+
+Last Instructions executed (leading to crash, up to 10 bytes before error point):
+0043    | DIVIDE
+0044    | ADD
+0045    8 RETURN
+0046   17 JUMP               46 (to 0095)
+0049   27 CONSTANT            7 '3'
+0051    | GET_LOCAL_ADDRESS    0 (slot)
+
+--- VM State Dump (Full Stack at Crash) ---
+Stack Size: 4, Frame Count: 2
+Stack Contents (bottom to top):
+  [ nil ]
+  [ nil ]
+  [ 3 ]
+  [ POINTER(@0x16ed00778 -> nil) ]
+--------------------------
+--- VM execution Failed (Runtime Error) ---
+[VM_DEBUG] Offset: 0055, Line:   27, Stack Size: 4, Frame Count: 2
+0055    | SWAP
+[VM_DEBUG] Stack Contents: [nil] [nil] [3] [POINTER(@0x16ed00778 -> nil)]
+--- source ---
+program TypeLocalShadow;
+type
+  TPair = record
+    Left: Integer;
+    Right: Integer;
+  end;
+
+procedure UseGlobal;
+var
+  pair: TPair;
+begin
+  pair.Left := 1;
+  pair.Right := 2;
+  writeln('global_pair=', pair.Left + pair.Right);
+end;
+
+procedure UseLocal;
+type
+  TPair = record
+    Left: Integer;
+    Right: Integer;
+    Sum: Integer;
+  end;
+var
+  pair: TPair;
+begin
+  pair.Left := 3;
+  pair.Right := 4;
+  pair.Sum := pair.Left + pair.Right;
+  writeln('local_sum=', pair.Sum);
+end;
+
+begin
+  UseLocal;
+  UseGlobal;
+end.
