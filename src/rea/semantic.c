@@ -1582,6 +1582,82 @@ static bool isDeclarationCompound(AST *node) {
     return hasChild;
 }
 
+static void flattenDeclarationCompounds(AST *node) {
+    if (!node) return;
+    flattenDeclarationCompounds(node->left);
+    flattenDeclarationCompounds(node->right);
+    flattenDeclarationCompounds(node->extra);
+    for (int i = 0; i < node->child_count; i++) {
+        flattenDeclarationCompounds(node->children[i]);
+    }
+
+    if (!node->children || node->child_count <= 0) {
+        return;
+    }
+
+    bool hasFlattenable = false;
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (child && child->type == AST_COMPOUND && isDeclarationCompound(child)) {
+            hasFlattenable = true;
+            break;
+        }
+    }
+    if (!hasFlattenable) {
+        return;
+    }
+
+    int newCount = 0;
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (!child) continue;
+        if (child->type == AST_COMPOUND && isDeclarationCompound(child)) {
+            for (int j = 0; j < child->child_count; j++) {
+                if (child->children[j]) {
+                    newCount++;
+                }
+            }
+        } else {
+            newCount++;
+        }
+    }
+
+    AST **flattened = (AST **)malloc((size_t)newCount * sizeof(AST *));
+    if (!flattened) {
+        fprintf(stderr, "Memory allocation failure while flattening declaration groups.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    int outIndex = 0;
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (!child) continue;
+        if (child->type == AST_COMPOUND && isDeclarationCompound(child)) {
+            for (int j = 0; j < child->child_count; j++) {
+                AST *grand = child->children[j];
+                if (!grand) continue;
+                child->children[j] = NULL;
+                grand->parent = node;
+                flattened[outIndex++] = grand;
+            }
+            free(child->children);
+            child->children = NULL;
+            child->child_count = 0;
+            child->child_capacity = 0;
+            child->left = child->right = child->extra = NULL;
+            child->parent = NULL;
+            freeAST(child);
+        } else {
+            flattened[outIndex++] = child;
+        }
+    }
+
+    free(node->children);
+    node->children = flattened;
+    node->child_count = outIndex;
+    node->child_capacity = outIndex;
+}
+
 static AST *findDeclInCompound(AST *node, const char *ident, int referenceLine) {
     if (!node || !ident) return NULL;
     if (node->type == AST_VAR_DECL) {
@@ -3303,6 +3379,7 @@ void reaPerformSemanticAnalysis(AST *root) {
     if (rewrittenRoot) {
         root = rewrittenRoot;
     }
+    flattenDeclarationCompounds(root);
     ReaModuleBindingList mainBindings = {0};
     AST *decls = getDeclsCompound(root);
     AST *stmts = NULL;
