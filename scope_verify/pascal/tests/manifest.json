@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "default_extension": "pas",
+  "tests": [
+    {
+      "id": "procedure_local_does_not_leak",
+      "name": "Procedure locals remain private",
+      "category": "procedure_scope",
+      "description": "Calling a procedure with a local variable should not mutate a global with the same name.",
+      "expect": "runtime_ok",
+      "code": "program ProcedureLocalScope;\n\nvar globalValue: integer;\n\nprocedure AssignLocal;\nvar globalValue: integer;\nbegin\n  globalValue := 42;\nend;\n\nbegin\n  globalValue := 5;\n  AssignLocal;\n  writeln('global=', globalValue);\nend.",
+      "expected_stdout": "global=5"
+    },
+    {
+      "id": "function_local_isolated",
+      "name": "Function locals compute without leaking",
+      "category": "function_scope",
+      "description": "A function can use a local helper variable without exposing it outside the function body.",
+      "expect": "runtime_ok",
+      "code": "program FunctionLocalScope;\n\nfunction BuildValue: integer;\nvar temp: integer;\nbegin\n  temp := 9;\n  BuildValue := temp;\nend;\n\nbegin\n  writeln('result=', BuildValue);\nend.",
+      "expected_stdout": "result=9"
+    },
+    {
+      "id": "function_local_not_visible_outside",
+      "name": "Function locals are undefined outside the function",
+      "category": "function_scope",
+      "description": "Referencing a function's local variable from the main block should fail to compile.",
+      "expect": "compile_error",
+      "code": "program FunctionHidden;\n\nfunction MakeValue: integer;\nvar hidden: integer;\nbegin\n  hidden := 2;\n  MakeValue := hidden;\nend;\n\nbegin\n  hidden := 1;\nend.",
+      "expected_stderr_substring": "Undefined variable 'hidden'"
+    },
+    {
+      "id": "procedure_local_not_visible_outside",
+      "name": "Procedure locals are undefined outside the procedure",
+      "category": "procedure_scope",
+      "description": "A procedure's local variable should not be assignable from the global scope.",
+      "expect": "compile_error",
+      "code": "program ProcedureHidden;\n\nprocedure Demo;\nvar helper: integer;\nbegin\n  helper := 3;\nend;\n\nbegin\n  helper := 4;\nend.",
+      "expected_stderr_substring": "Undefined variable 'helper'"
+    },
+    {
+      "id": "nested_procedure_closes_over_outer",
+      "name": "Nested procedure can access outer locals",
+      "category": "procedure_scope",
+      "description": "Inner procedures should see the locals declared in their enclosing scope.",
+      "expect": "runtime_ok",
+      "code": "program NestedProcedureScope;\n\nprocedure Outer;\nvar counter: integer;\n\n  procedure Inner;\n  begin\n    counter := counter + 1;\n  end;\n\nbegin\n  counter := 0;\n  Inner;\n  writeln('counter=', counter);\nend;\n\nbegin\n  Outer;\nend.",
+      "expected_stdout": "counter=1"
+    }
+  ]
+}
