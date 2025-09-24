@@ -3541,6 +3541,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                             node->left != NULL);
                 }
             } else { // Local variables
+                if (current_function_compiler != NULL) {
+                    registerVarDeclLocals(node, false);
+                }
                 AST* type_specifier_node = node->right;
 
                 // Resolve type alias if necessary
