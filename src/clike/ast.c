@@ -17,6 +17,7 @@ ASTNodeClike *newASTNodeClike(ASTNodeTypeClike type, ClikeToken token) {
     node->dim_count = 0;
     node->element_type = TYPE_UNKNOWN;
     node->is_const = 0;
+    node->is_forward_decl = 0;
     node->left = node->right = node->third = NULL;
     node->children = NULL;
     node->child_count = 0;
@@ -74,6 +75,7 @@ ASTNodeClike *cloneASTClike(ASTNodeClike *node) {
     copy->dim_count = node->dim_count;
     copy->element_type = node->element_type;
     copy->is_const = node->is_const;
+    copy->is_forward_decl = node->is_forward_decl;
     if (node->dim_count > 0 && node->array_dims) {
         copy->array_dims = (int*)malloc(sizeof(int) * node->dim_count);
         memcpy(copy->array_dims, node->array_dims, sizeof(int) * node->dim_count);

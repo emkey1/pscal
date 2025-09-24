@@ -273,7 +273,8 @@ AST* clikeLookupStruct(const char *name) {
 void clikeRegisterStruct(const char *name, AST *ast) {
     for (int i = 0; i < clike_struct_count; ++i) {
         if (strcmp(clike_structs[i].name, name) == 0) {
-            clike_structs[i].ast = ast;
+            fprintf(stderr, "Semantic error: redefinition of struct '%s'\n", name);
+            clike_error_count++;
             return;
         }
     }
@@ -641,12 +642,18 @@ static ASTNodeClike* funDeclaration(ParserClike *p, ClikeToken type_token, Clike
     expectToken(p, CLIKE_TOKEN_LPAREN, "(");
     ASTNodeClike *paramsNode = params(p);
     expectToken(p, CLIKE_TOKEN_RPAREN, ")");
-    ASTNodeClike *body = compoundStmt(p);
     ASTNodeClike *node = newASTNodeClike(TCAST_FUN_DECL, ident);
     node->var_type = isPointer ? TYPE_POINTER : clikeTokenTypeToVarType(type_token.type);
     if (isPointer) node->element_type = clikeTokenTypeToVarType(type_token.type);
     setLeftClike(node, paramsNode);
-    setRightClike(node, body);
+    if (p->current.type == CLIKE_TOKEN_SEMICOLON) {
+        advanceParser(p);
+        node->is_forward_decl = 1;
+        setRightClike(node, NULL);
+    } else {
+        ASTNodeClike *body = compoundStmt(p);
+        setRightClike(node, body);
+    }
     return node;
 }
 
@@ -1337,6 +1344,28 @@ static ASTNodeClike* postfix(ParserClike *p, ASTNodeClike *node) {
             ClikeToken field = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "field");
             ASTNodeClike *fieldId = newASTNodeClike(TCAST_IDENTIFIER, field);
             ASTNodeClike *member = newASTNodeClike(TCAST_MEMBER, arrow);
+            setLeftClike(member, node);
+            setRightClike(member, fieldId);
+            node = member;
+            while (p->current.type == CLIKE_TOKEN_LBRACKET) {
+                ClikeToken tok = p->current;
+                ASTNodeClike *access = newASTNodeClike(TCAST_ARRAY_ACCESS, tok);
+                setLeftClike(access, node);
+                do {
+                    advanceParser(p);
+                    ASTNodeClike *index = expression(p);
+                    expectToken(p, CLIKE_TOKEN_RBRACKET, "]");
+                    addChildClike(access, index);
+                } while (p->current.type == CLIKE_TOKEN_LBRACKET);
+                node = access;
+            }
+            continue;
+        }
+        if (p->current.type == CLIKE_TOKEN_DOT) {
+            ClikeToken dot = p->current; advanceParser(p);
+            ClikeToken field = p->current; expectToken(p, CLIKE_TOKEN_IDENTIFIER, "field");
+            ASTNodeClike *fieldId = newASTNodeClike(TCAST_IDENTIFIER, field);
+            ASTNodeClike *member = newASTNodeClike(TCAST_MEMBER, dot);
             setLeftClike(member, node);
             setRightClike(member, fieldId);
             node = member;

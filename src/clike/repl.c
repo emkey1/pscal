@@ -58,7 +58,7 @@ int main(void) {
 #ifdef SDL
         defines[define_count++] = "SDL_ENABLED";
 #endif
-        char *pre_src = clikePreprocess(src, defines, define_count);
+        char *pre_src = clikePreprocess(NULL, src, defines, define_count);
 
         ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
         ASTNodeClike *prog = parseProgramClike(&parser);
