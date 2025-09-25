@@ -3111,19 +3111,20 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         Value val = args[i];
         if (has_prev) {
             bool add_space = true;
+            const char *no_space_after = "=,.;:?!-)]}>)\"'";
             if (prev.type == TYPE_STRING && prev.s_val) {
                 size_t len = strlen(prev.s_val);
                 if (len == 0) {
                     add_space = false;
                 } else {
                     char last = prev.s_val[len - 1];
-                    if (isspace((unsigned char)last) || strchr("=:?!-", last)) {
+                    if (isspace((unsigned char)last) || strchr(no_space_after, last)) {
                         add_space = false;
                     }
                 }
             } else if (prev.type == TYPE_CHAR) {
                 char last = (char)prev.c_val;
-                if (isspace((unsigned char)last) || strchr("=:?!-", last)) {
+                if (isspace((unsigned char)last) || strchr(no_space_after, last)) {
                     add_space = false;
                 }
             }

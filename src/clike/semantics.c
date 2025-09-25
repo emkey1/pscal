@@ -127,6 +127,7 @@ typedef struct {
     char *name;
     VarType type;
     ASTNodeClike *decl;
+    int is_const;
 } VarEntry;
 
 typedef struct {
@@ -142,11 +143,21 @@ typedef struct {
 // Holds global variable declarations so that functions can reference them.
 static VarTable globalVars = {0};
 
-static void vtAdd(VarTable *t, const char *name, VarType type, ASTNodeClike *decl) {
+static void vtAdd(VarTable *t, const char *name, VarType type, ASTNodeClike *decl, int is_const) {
     t->entries[t->count].name = strdup(name);
     t->entries[t->count].type = type;
     t->entries[t->count].decl = decl;
+    t->entries[t->count].is_const = is_const;
     t->count++;
+}
+
+static int vtContains(VarTable *t, const char *name) {
+    for (int i = 0; i < t->count; ++i) {
+        if (strcmp(t->entries[i].name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static VarType vtGetType(VarTable *t, const char *name) {
@@ -183,8 +194,25 @@ static void ssPop(ScopeStack *s) {
     s->depth--;
 }
 
-static void ssAdd(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl) {
-    vtAdd(&s->scopes[s->depth - 1], name, type, decl);
+static int ssAdd(ScopeStack *s, const char *name, VarType type, ASTNodeClike *decl, int is_const) {
+    if (s->depth <= 0) return 0;
+    VarTable *current = &s->scopes[s->depth - 1];
+    if (vtContains(current, name)) {
+        const char *kind = "declaration";
+        if (decl && decl->type == TCAST_PARAM) kind = "parameter";
+        int line = decl ? decl->token.line : 0;
+        int column = decl ? decl->token.column : 0;
+        fprintf(stderr,
+                "Scope error: duplicate %s '%s' at line %d, column %d\n",
+                kind,
+                name,
+                line,
+                column);
+        clike_error_count++;
+        return 0;
+    }
+    vtAdd(current, name, type, decl, is_const);
+    return 1;
 }
 
 static VarType ssGet(ScopeStack *s, const char *name) {
@@ -206,58 +234,62 @@ static ASTNodeClike* ssGetDecl(ScopeStack *s, const char *name) {
 typedef struct {
     char *name;
     VarType type;
+    int has_definition;
+    int defined_line;
+    int defined_column;
 } FuncEntry;
 
 static FuncEntry functions[256];
 static int functionCount = 0;
 
+static void registerFunctionSignature(char *name, VarType type,
+                                      int has_definition, int line, int column) {
+    if (!name) return;
+    for (int i = 0; i < functionCount; ++i) {
+        if (strcasecmp(functions[i].name, name) == 0) {
+            if (has_definition) {
+                if (functions[i].has_definition) {
+                    fprintf(stderr,
+                            "Scope error: duplicate function definition '%s' at line %d, column %d\n",
+                            name,
+                            line,
+                            column);
+                    clike_error_count++;
+                } else {
+                    functions[i].has_definition = 1;
+                    functions[i].defined_line = line;
+                    functions[i].defined_column = column;
+                }
+            }
+            functions[i].type = type;
+            free(name);
+            return;
+        }
+    }
+    functions[functionCount].name = name;
+    functions[functionCount].type = type;
+    functions[functionCount].has_definition = has_definition;
+    functions[functionCount].defined_line = has_definition ? line : 0;
+    functions[functionCount].defined_column = has_definition ? column : 0;
+    functionCount++;
+}
+
 static void registerBuiltinFunctions(void) {
-    functions[functionCount].name = strdup("printf");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("scanf");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("strlen");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("itoa");
-    functions[functionCount].type = TYPE_VOID;
-    functionCount++;
-    // `exit` behaves like C's exit, terminating the program with an optional code.
-    functions[functionCount].name = strdup("exit");
-    functions[functionCount].type = TYPE_VOID;
-    functionCount++;
-    functions[functionCount].name = strdup("mstreamcreate");
-    functions[functionCount].type = TYPE_MEMORYSTREAM;
-    functionCount++;
-    functions[functionCount].name = strdup("mstreamloadfromfile");
-    functions[functionCount].type = TYPE_BOOLEAN;
-    functionCount++;
-    functions[functionCount].name = strdup("mstreamsavetofile");
-    functions[functionCount].type = TYPE_VOID;
-    functionCount++;
-    functions[functionCount].name = strdup("mstreamfree");
-    functions[functionCount].type = TYPE_VOID;
-    functionCount++;
-    functions[functionCount].name = strdup("mstreambuffer");
-    functions[functionCount].type = TYPE_STRING;
-    functionCount++;
-    functions[functionCount].name = strdup("hasextbuiltin");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("extbuiltincategorycount");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("extbuiltincategoryname");
-    functions[functionCount].type = TYPE_STRING;
-    functionCount++;
-    functions[functionCount].name = strdup("extbuiltinfunctioncount");
-    functions[functionCount].type = TYPE_INT32;
-    functionCount++;
-    functions[functionCount].name = strdup("extbuiltinfunctionname");
-    functions[functionCount].type = TYPE_STRING;
-    functionCount++;
+    registerFunctionSignature(strdup("printf"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("scanf"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("strlen"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("itoa"), TYPE_VOID, 0, 0, 0);
+    registerFunctionSignature(strdup("exit"), TYPE_VOID, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamcreate"), TYPE_MEMORYSTREAM, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamloadfromfile"), TYPE_BOOLEAN, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamsavetofile"), TYPE_VOID, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamfree"), TYPE_VOID, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreambuffer"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("hasextbuiltin"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltincategorycount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltinfunctioncount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltinfunctionname"), TYPE_STRING, 0, 0, 0);
 }
 
 static VarType getFunctionType(const char *name) {
@@ -399,15 +431,36 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
         case TCAST_ASSIGN: {
             VarType lt = analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
+            ASTNodeClike *lhsDecl = NULL;
+            ASTNodeClike *base = node->left;
+            while (base && base->type == TCAST_ARRAY_ACCESS) base = base->left;
+            if (base && base->type == TCAST_MEMBER) base = base->left;
+            char *lhsName = NULL;
+            if (base && base->type == TCAST_IDENTIFIER) {
+                lhsName = tokenToCString(base->token);
+                lhsDecl = ssGetDecl(scopes, lhsName);
+            }
+            if (lhsDecl && lhsDecl->is_const) {
+                const char *display = lhsName ? lhsName : "<const>";
+                int line = base ? base->token.line : node->token.line;
+                int column = base ? base->token.column : node->token.column;
+                fprintf(stderr,
+                        "Type error: cannot assign to const variable '%s' at line %d, column %d\n",
+                        display,
+                        line,
+                        column);
+                clike_error_count++;
+            }
+            free(lhsName);
             int allowStringToCharPointer = 0;
             if (lt == TYPE_POINTER && rt == TYPE_STRING) {
-                ASTNodeClike *lhsDecl = NULL;
+                ASTNodeClike *lhsDeclForPtr = NULL;
                 if (node->left && node->left->type == TCAST_IDENTIFIER) {
                     char *lhsName = tokenToCString(node->left->token);
-                    lhsDecl = ssGetDecl(scopes, lhsName);
+                    lhsDeclForPtr = ssGetDecl(scopes, lhsName);
                     free(lhsName);
                 }
-                if (isCharPointerDecl(lhsDecl)) {
+                if (isCharPointerDecl(lhsDeclForPtr)) {
                     allowStringToCharPointer = 1;
                 }
             }
@@ -855,7 +908,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
     switch (node->type) {
         case TCAST_VAR_DECL: {
             char *name = tokenToCString(node->token);
-            ssAdd(scopes, name, node->var_type, node);
+            ssAdd(scopes, name, node->var_type, node, node->is_const);
             free(name);
             if (node->left) {
                 VarType initType = analyzeExpr(node->left, scopes);
@@ -985,7 +1038,11 @@ static void analyzeFunction(ASTNodeClike *func) {
     // Global scope available to all functions
     ssPush(&scopes);
     for (int i = 0; i < globalVars.count; ++i) {
-        ssAdd(&scopes, globalVars.entries[i].name, globalVars.entries[i].type, globalVars.entries[i].decl);
+        ssAdd(&scopes,
+              globalVars.entries[i].name,
+              globalVars.entries[i].type,
+              globalVars.entries[i].decl,
+              globalVars.entries[i].is_const);
     }
 
     // Function scope for parameters/local variables
@@ -994,7 +1051,7 @@ static void analyzeFunction(ASTNodeClike *func) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
             char *name = tokenToCString(p->token);
-            ssAdd(&scopes, name, p->var_type, p);
+            ssAdd(&scopes, name, p->var_type, p, p->is_const);
             free(name);
         }
     }
@@ -1089,9 +1146,9 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
             ASTNodeClike *decl = modules[i].prog->children[j];
             if (decl->type == TCAST_FUN_DECL) {
                 char *name = tokenToCString(decl->token);
-                functions[functionCount].name = name;
-                functions[functionCount].type = decl->var_type;
-                functionCount++;
+                int has_body = decl->right != NULL;
+                registerFunctionSignature(name, decl->var_type, has_body,
+                                          decl->token.line, decl->token.column);
             }
         }
     }
@@ -1100,9 +1157,9 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_FUN_DECL) {
             char *name = tokenToCString(decl->token);
-            functions[functionCount].name = name;
-            functions[functionCount].type = decl->var_type;
-            functionCount++;
+            int has_body = decl->right != NULL;
+            registerFunctionSignature(name, decl->var_type, has_body,
+                                      decl->token.line, decl->token.column);
         }
     }
 
@@ -1114,8 +1171,9 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {
             char *name = tokenToCString(decl->token);
-            ssAdd(&globalsScope, name, decl->var_type, decl);
-            vtAdd(&globalVars, name, decl->var_type, decl);
+            if (ssAdd(&globalsScope, name, decl->var_type, decl, decl->is_const)) {
+                vtAdd(&globalVars, name, decl->var_type, decl, decl->is_const);
+            }
             if (decl->left) analyzeExpr(decl->left, &globalsScope);
             free(name);
         }
