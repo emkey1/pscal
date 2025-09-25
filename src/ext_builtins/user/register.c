@@ -7,6 +7,8 @@ void registerUserBuiltins(void) {
     extBuiltinRegisterCategory("user");
     extBuiltinRegisterFunction("user", "LandscapeDrawTerrain");
     extBuiltinRegisterFunction("user", "LandscapeDrawWater");
+    extBuiltinRegisterFunction("user", "LandscapePrecomputeWorldCoords");
+    extBuiltinRegisterFunction("user", "LandscapePrecomputeWaterOffsets");
 
     registerLandscapeBuiltins();
 }

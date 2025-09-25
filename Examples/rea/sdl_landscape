@@ -17,6 +17,12 @@ const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
 const float DegreesToRadians = 0.017453292519943295;
+const float Pi = 3.141592653589793;
+const float TwoPi = 6.283185307179586;
+const int CloudCount = 14;
+const float SunDistance = 220.0;
+const float SunCoreRadius = 18.0;
+const float SunHaloRadius = 34.0;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 
@@ -249,12 +255,38 @@ class LandscapeDemo {
   float elapsedSeconds;
   bool useFastTerrain;
   bool useFastWater;
+  bool useFastWorldCoords;
+  bool useFastWaterOffsets;
+  float cloudAzimuth[CloudCount];
+  float cloudElevation[CloudCount];
+  float cloudDistance[CloudCount];
+  float cloudScale[CloudCount];
+  float cloudSpeed[CloudCount];
+  float cloudBrightness[CloudCount];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
-    my.precomputeWorldCoordinates();
-    my.precomputeWaterOffsets();
+    my.useFastWorldCoords = hasextbuiltin("user", "LandscapePrecomputeWorldCoords");
+    my.useFastWaterOffsets = hasextbuiltin("user", "LandscapePrecomputeWaterOffsets");
+    if (my.useFastWorldCoords) {
+      landscapeprecomputeworldcoords(my.worldXCoords,
+                                     my.worldZCoords,
+                                     TileScale,
+                                     TerrainSize,
+                                     VertexStride);
+    } else {
+      my.precomputeWorldCoordinates();
+    }
+    if (my.useFastWaterOffsets) {
+      landscapeprecomputewateroffsets(my.waterPhaseOffset,
+                                      my.waterSecondaryOffset,
+                                      my.waterSparkleOffset,
+                                      TerrainSize,
+                                      VertexStride);
+    } else {
+      my.precomputeWaterOffsets();
+    }
     my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
     my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
     my.elapsedSeconds = 0.0;
@@ -267,6 +299,7 @@ class LandscapeDemo {
     my.sunDirY = sunY * invLen;
     my.sunDirZ = sunZ * invLen;
     my.field.build(initialSeed);
+    my.initializeSkyElements();
     my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
@@ -307,6 +340,32 @@ class LandscapeDemo {
         x = x + 1;
       }
       z = z + 1;
+    }
+  }
+
+  float skyRandom(int index, int salt) {
+    int xSeed = index * 97 + salt * 193 + my.seed * 37;
+    int zSeed = index * 131 + salt * 167 + my.seed * 59;
+    float noise = my.field.baseNoise(xSeed, zSeed);
+    return noise * 0.5 + 0.5;
+  }
+
+  void initializeSkyElements() {
+    int i = 0;
+    while (i < CloudCount) {
+      float azNoise = my.skyRandom(i, 11);
+      float elevNoise = my.skyRandom(i, 23);
+      float distNoise = my.skyRandom(i, 41);
+      float scaleNoise = my.skyRandom(i, 61);
+      float speedNoise = my.skyRandom(i, 83);
+      float brightNoise = my.skyRandom(i, 101);
+      my.cloudAzimuth[i] = azNoise * TwoPi;
+      my.cloudElevation[i] = 0.18 + elevNoise * 0.16;
+      my.cloudDistance[i] = 150.0 + distNoise * 70.0;
+      my.cloudScale[i] = 16.0 + scaleNoise * 18.0;
+      my.cloudSpeed[i] = 0.002 + speedNoise * 0.006;
+      my.cloudBrightness[i] = 0.72 + brightNoise * 0.20;
+      i = i + 1;
     }
   }
 
@@ -434,6 +493,206 @@ class LandscapeDemo {
     }
   }
 
+  void drawSunBillboard(float rightX,
+                        float rightY,
+                        float rightZ,
+                        float upX,
+                        float upY,
+                        float upZ) {
+    float sunX = my.sunDirX * SunDistance;
+    float sunY = my.sunDirY * SunDistance;
+    float sunZ = my.sunDirZ * SunDistance;
+    int segments = 48;
+
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.90, 0.58);
+    GLVertex3f(sunX, sunY, sunZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunHaloRadius) + upX * (sinA * SunHaloRadius);
+      float offsetY = rightY * (cosA * SunHaloRadius) + upY * (sinA * SunHaloRadius);
+      float offsetZ = rightZ * (cosA * SunHaloRadius) + upZ * (sinA * SunHaloRadius);
+      GLColor3f(1.0, 0.78, 0.36);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.98, 0.86);
+    GLVertex3f(sunX, sunY, sunZ);
+    i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunCoreRadius) + upX * (sinA * SunCoreRadius);
+      float offsetY = rightY * (cosA * SunCoreRadius) + upY * (sinA * SunCoreRadius);
+      float offsetZ = rightZ * (cosA * SunCoreRadius) + upZ * (sinA * SunCoreRadius);
+      GLColor3f(1.0, 0.94, 0.72);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+  }
+
+  void drawCloudPuff(float centerX,
+                     float centerY,
+                     float centerZ,
+                     float radiusX,
+                     float radiusY,
+                     float rightX,
+                     float rightY,
+                     float rightZ,
+                     float upX,
+                     float upY,
+                     float upZ,
+                     float brightness) {
+    int segments = 18;
+    float highlight = my.saturate(0.86 + brightness * 0.18);
+    float rim = my.saturate(0.80 + brightness * 0.16);
+    GLBegin("triangle_fan");
+    GLColor3f(highlight, highlight, highlight + 0.05);
+    GLVertex3f(centerX, centerY, centerZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float px = centerX + rightX * (cosA * radiusX) + upX * (sinA * radiusY);
+      float py = centerY + rightY * (cosA * radiusX) + upY * (sinA * radiusY);
+      float pz = centerZ + rightZ * (cosA * radiusX) + upZ * (sinA * radiusY);
+      GLColor3f(rim, rim, rim + 0.03);
+      GLVertex3f(px, py, pz);
+      i = i + 1;
+    }
+    GLEnd();
+  }
+
+  void drawCloudLayer(float timeSeconds,
+                      float rightX,
+                      float rightY,
+                      float rightZ,
+                      float upX,
+                      float upY,
+                      float upZ) {
+    int i = 0;
+    while (i < CloudCount) {
+      float azimuth = my.cloudAzimuth[i] + timeSeconds * my.cloudSpeed[i];
+      float elevation = my.cloudElevation[i];
+      float distance = my.cloudDistance[i];
+      float cosElev = cos(elevation);
+      float sinElev = sin(elevation);
+      float dirX = sin(azimuth) * cosElev;
+      float dirY = sinElev;
+      float dirZ = cos(azimuth) * cosElev;
+      float centerX = dirX * distance;
+      float centerY = dirY * distance;
+      float centerZ = dirZ * distance;
+      float baseScale = my.cloudScale[i];
+      float baseBrightness = my.cloudBrightness[i];
+      float sunInfluence = my.sunDirX * dirX + my.sunDirY * dirY + my.sunDirZ * dirZ;
+      float puffBrightness = my.saturate(baseBrightness + sunInfluence * 0.18);
+      float radiusX = baseScale * 0.55;
+      float radiusY = baseScale * 0.38;
+      my.drawCloudPuff(centerX,
+                       centerY,
+                       centerZ,
+                       radiusX,
+                       radiusY,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       puffBrightness);
+
+      float offset = baseScale * 0.6;
+      my.drawCloudPuff(centerX + rightX * offset * 0.6 + upX * offset * 0.12,
+                       centerY + rightY * offset * 0.6 + upY * offset * 0.12,
+                       centerZ + rightZ * offset * 0.6 + upZ * offset * 0.12,
+                       radiusX * 0.78,
+                       radiusY * 0.82,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.97 + 0.02));
+
+      my.drawCloudPuff(centerX - rightX * offset * 0.7 + upX * offset * 0.05,
+                       centerY - rightY * offset * 0.7 + upY * offset * 0.05,
+                       centerZ - rightZ * offset * 0.7 + upZ * offset * 0.05,
+                       radiusX * 0.72,
+                       radiusY * 0.78,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.94 + 0.03));
+
+      my.drawCloudPuff(centerX + upX * baseScale * 0.14,
+                       centerY + upY * baseScale * 0.14,
+                       centerZ + upZ * baseScale * 0.14,
+                       radiusX * 0.52,
+                       radiusY * 0.70,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.90 + 0.05));
+      i = i + 1;
+    }
+  }
+
+  void drawSky(float timeSeconds) {
+    float yawRadians = my.yaw * DegreesToRadians;
+    float pitchRadians = my.pitch * DegreesToRadians;
+    float cosYaw = cos(yawRadians);
+    float sinYaw = sin(yawRadians);
+    float cosPitch = cos(pitchRadians);
+    float sinPitch = sin(pitchRadians);
+    float forwardX = sinYaw * cosPitch;
+    float forwardY = -sinPitch;
+    float forwardZ = cosYaw * cosPitch;
+    float rightX = forwardZ;
+    float rightY = 0.0;
+    float rightZ = -forwardX;
+    float rightLen = sqrt(rightX * rightX + rightZ * rightZ);
+    if (rightLen <= 0.0001) {
+      rightX = 1.0;
+      rightY = 0.0;
+      rightZ = 0.0;
+      rightLen = 1.0;
+    }
+    rightX = rightX / rightLen;
+    rightZ = rightZ / rightLen;
+    float upX = forwardY * rightZ - forwardZ * rightY;
+    float upY = forwardZ * rightX - forwardX * rightZ;
+    float upZ = forwardX * rightY - forwardY * rightX;
+    float upLen = sqrt(upX * upX + upY * upY + upZ * upZ);
+    if (upLen <= 0.0001) {
+      upX = 0.0;
+      upY = 1.0;
+      upZ = 0.0;
+    } else {
+      upX = upX / upLen;
+      upY = upY / upLen;
+      upZ = upZ / upLen;
+    }
+    my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
+    my.drawCloudLayer(timeSeconds, rightX, rightY, rightZ, upX, upY, upZ);
+  }
+
   void initGraphics() {
     InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
     GLViewport(0, 0, WindowWidth, WindowHeight);
@@ -441,8 +700,11 @@ class LandscapeDemo {
     GLDepthTest(true);
     GLSetSwapInterval(1);
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
-    if (my.useFastTerrain || my.useFastWater) {
-      writeln("Using extended landscape rendering builtins for improved performance.");
+    if (my.useFastTerrain ||
+        my.useFastWater ||
+        my.useFastWorldCoords ||
+        my.useFastWaterOffsets) {
+      writeln("Using extended landscape builtins for improved performance.");
     }
     int mouseX = 0;
     int mouseY = 0;
@@ -456,6 +718,7 @@ class LandscapeDemo {
   void regenerate(int newSeed) {
     my.seed = newSeed;
     my.field.build(newSeed);
+    my.initializeSkyElements();
     my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
@@ -673,6 +936,7 @@ class LandscapeDemo {
     GLLoadIdentity();
     GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
     GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
+    my.drawSky(my.elapsedSeconds);
     float half = TerrainSize * 0.5;
     float worldX = (my.camX - half) * TileScale;
     float worldZ = (my.camZ - half) * TileScale;

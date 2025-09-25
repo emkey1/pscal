@@ -37,6 +37,134 @@ static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower, 
     return arrVal->array_val;
 }
 
+static inline void assignFloatValue(Value* target, double value) {
+    if (!target) return;
+    target->type = TYPE_FLOAT;
+    SET_REAL_VALUE(target, value);
+}
+
+static Value vmBuiltinLandscapePrecomputeWorldCoords(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 5) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords expects 5 arguments.");
+        return makeVoid();
+    }
+
+    int lower = 0, upper = 0;
+    Value* worldXCoords = resolveArrayArg(vm, &args[0], "LandscapePrecomputeWorldCoords", &lower, &upper);
+    if (!worldXCoords) return makeVoid();
+    if (lower != 0) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords requires coordinate arrays starting at index 0.");
+        return makeVoid();
+    }
+    int coordUpper = upper;
+
+    Value* worldZCoords = resolveArrayArg(vm, &args[1], "LandscapePrecomputeWorldCoords", &lower, &upper);
+    if (!worldZCoords) return makeVoid();
+    if (lower != 0) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords requires coordinate arrays starting at index 0.");
+        return makeVoid();
+    }
+    if (upper < coordUpper) coordUpper = upper;
+
+    if (!isRealType(args[2].type) && !IS_INTLIKE(args[2])) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords expects numeric tile scale argument.");
+        return makeVoid();
+    }
+    if (!IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords expects integer terrain parameters.");
+        return makeVoid();
+    }
+
+    double tileScale = (double)asLd(args[2]);
+    int terrainSize = (int)asI64(args[3]);
+    int vertexStride = (int)asI64(args[4]);
+
+    if (terrainSize < 1 || vertexStride < 2 || vertexStride != terrainSize + 1) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords received inconsistent terrain parameters.");
+        return makeVoid();
+    }
+
+    if (coordUpper < vertexStride - 1) {
+        runtimeError(vm, "LandscapePrecomputeWorldCoords arrays are smaller than the required vertex stride.");
+        return makeVoid();
+    }
+
+    double half = terrainSize * 0.5;
+    for (int i = 0; i < vertexStride; ++i) {
+        double world = (i - half) * tileScale;
+        assignFloatValue(&worldXCoords[i], world);
+        assignFloatValue(&worldZCoords[i], world);
+    }
+
+    return makeVoid();
+}
+
+static Value vmBuiltinLandscapePrecomputeWaterOffsets(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 5) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets expects 5 arguments.");
+        return makeVoid();
+    }
+
+    int lower = 0, upper = 0;
+    Value* waterPhaseOffset = resolveArrayArg(vm, &args[0], "LandscapePrecomputeWaterOffsets", &lower, &upper);
+    if (!waterPhaseOffset) return makeVoid();
+    if (lower != 0) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
+        return makeVoid();
+    }
+    int arrayUpper = upper;
+
+    Value* waterSecondaryOffset = resolveArrayArg(vm, &args[1], "LandscapePrecomputeWaterOffsets", &lower, &upper);
+    if (!waterSecondaryOffset) return makeVoid();
+    if (lower != 0) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
+        return makeVoid();
+    }
+    if (upper < arrayUpper) arrayUpper = upper;
+
+    Value* waterSparkleOffset = resolveArrayArg(vm, &args[2], "LandscapePrecomputeWaterOffsets", &lower, &upper);
+    if (!waterSparkleOffset) return makeVoid();
+    if (lower != 0) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
+        return makeVoid();
+    }
+    if (upper < arrayUpper) arrayUpper = upper;
+
+    if (!IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets expects integer terrain parameters.");
+        return makeVoid();
+    }
+
+    int terrainSize = (int)asI64(args[3]);
+    int vertexStride = (int)asI64(args[4]);
+
+    if (terrainSize < 1 || vertexStride < 2 || vertexStride != terrainSize + 1) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets received inconsistent terrain parameters.");
+        return makeVoid();
+    }
+
+    int vertexCount = vertexStride * vertexStride;
+    if (arrayUpper < vertexCount - 1) {
+        runtimeError(vm, "LandscapePrecomputeWaterOffsets arrays are smaller than the required vertex count.");
+        return makeVoid();
+    }
+
+    for (int z = 0; z <= terrainSize; ++z) {
+        int rowIndex = z * vertexStride;
+        double zPhase = z * 0.12;
+        double zSecondary = z * 0.21;
+        double zSparkle = z * 0.22;
+        for (int x = 0; x <= terrainSize; ++x) {
+            int idx = rowIndex + x;
+            assignFloatValue(&waterPhaseOffset[idx], x * 0.18 + zPhase);
+            assignFloatValue(&waterSecondaryOffset[idx], x * 0.05 + zSecondary);
+            assignFloatValue(&waterSparkleOffset[idx], x * 0.22 + zSparkle);
+        }
+    }
+
+    return makeVoid();
+}
+
 #ifdef SDL
 static bool ensureGlContext(VM* vm, const char* name) {
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
@@ -339,4 +467,8 @@ void registerLandscapeBuiltins(void) {
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawTerrain");
     registerVmBuiltin("landscapedrawwater", vmBuiltinLandscapeDrawWater,
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawWater");
+    registerVmBuiltin("landscapeprecomputeworldcoords", vmBuiltinLandscapePrecomputeWorldCoords,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWorldCoords");
+    registerVmBuiltin("landscapeprecomputewateroffsets", vmBuiltinLandscapePrecomputeWaterOffsets,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWaterOffsets");
 }
