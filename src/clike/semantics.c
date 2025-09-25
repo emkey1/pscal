@@ -93,6 +93,11 @@ static VarType builtinReturnType(const char* name) {
         return TYPE_INT64;
     }
 
+    static const char *const voidFuncs[] = { "writeln" };
+    if (builtinMatches(name, voidFuncs, sizeof(voidFuncs) / sizeof(voidFuncs[0]))) {
+        return TYPE_VOID;
+    }
+
     return TYPE_VOID;
 }
 
@@ -285,6 +290,7 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("mstreamsavetofile"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamfree"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreambuffer"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("writeln"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("hasextbuiltin"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltincategorycount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);
@@ -341,7 +347,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             node->var_type = t;
             if (t == TYPE_UNKNOWN) {
                 fprintf(stderr,
-                        "Type error: undefined variable '%s' at line %d, column %d\n",
+                        "Type error: undefined variable '%s' (not in scope) at line %d, column %d\n",
                         name,
                         node->token.line,
                         node->token.column);

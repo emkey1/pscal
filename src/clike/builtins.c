@@ -52,6 +52,7 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("mstreamsavetofile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamfree", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreambuffer", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("writeln", AST_PROCEDURE_DECL, NULL);
 
     /* DOS/OS helpers */
     registerBuiltinFunction("exec", AST_FUNCTION_DECL, NULL);

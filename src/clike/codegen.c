@@ -1257,7 +1257,22 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 writeBytecodeChunk(chunk, MUTEX_DESTROY, node->token.line);
                 break;
             }
-            if (strcasecmp(name, "printf") == 0) {
+            if (strcasecmp(name, "writeln") == 0) {
+                int write_arg_count = 0;
+                Value nl = makeInt(1);
+                int nlidx = addConstantToChunk(chunk, &nl);
+                freeValue(&nl);
+                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)nlidx, node->token.line);
+                write_arg_count++;
+                for (int i = 0; i < node->child_count; ++i) {
+                    compileExpression(node->children[i], chunk, ctx);
+                    write_arg_count++;
+                }
+                emitBuiltinProcedureCall(chunk, "write",
+                                         (uint8_t)write_arg_count,
+                                         node->token.line);
+            } else if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
                 Value nl = makeInt(0);
