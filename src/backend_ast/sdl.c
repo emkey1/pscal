@@ -1,1403 +1,1041 @@
-//
-//  sdl.c
-//  Pscal
-//
-//  Created by Michael Miller on 5/7/25.
-//
-#ifdef SDL
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-// Include SDL_mixer header directly
-#include <SDL2/SDL_mixer.h>
-// Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
-#include "audio.h"
+#!/usr/bin/env rea
+// Procedural landscape demo for the Rea front end. Generates a deterministic
+// height field from a seed, renders it with the SDL/OpenGL helpers, and lets
+// the user walk with W/S while steering the camera with the mouse.
 
-#include "core/utils.h"
-#include "vm/vm.h"
+const int WindowWidth = 1280;
+const int WindowHeight = 1024;
+const int TerrainSize = 128
+const int VertexStride = TerrainSize + 1;
+const int VertexCount = VertexStride * VertexStride;
+const float TileScale = 1.2;
+const int NoiseOctaves = 5;
+const float HeightScale = 16.0;
+const float EyeHeight = 6.5;
+const float MoveSpeed = 18.0;
+const float MaxPitch = 75.0;
+const float MouseYawSensitivity = 0.30;
+const float MousePitchSensitivity = 0.15;
+const float DegreesToRadians = 0.017453292519943295;
+const float Pi = 3.141592653589793;
+const float TwoPi = 6.283185307179586;
+const int CloudCount = 14;
+const float SunDistance = 220.0;
+const float SunCoreRadius = 18.0;
+const float SunHaloRadius = 34.0;
+const int ScanCodeW = 26; // SDL_SCANCODE_W
+const int ScanCodeS = 22; // SDL_SCANCODE_S
 
-#include "sdl.h" // This header includes SDL/SDL_ttf headers
-#include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
-
-#include <ctype.h>
-#include <string.h>
-#include <strings.h>
-
-// SDL Global Variable Definitions
-SDL_Window* gSdlWindow = NULL;
-SDL_Renderer* gSdlRenderer = NULL;
-SDL_GLContext gSdlGLContext = NULL;
-SDL_Color gSdlCurrentColor = { 255, 255, 255, 255 }; // Default white
-bool gSdlInitialized = false;
-int gSdlWidth = 0;
-int gSdlHeight = 0;
-TTF_Font* gSdlFont = NULL;
-int gSdlFontSize   = 16;
-SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
-int gSdlTextureWidths[MAX_SDL_TEXTURES];
-int gSdlTextureHeights[MAX_SDL_TEXTURES];
-bool gSdlTtfInitialized = false;
-bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
-
-static bool gSdlInputWatchInstalled = false;
-static Uint8 gSdlKeyState[SDL_NUM_SCANCODES];
-
-static void sdlResetCachedKeyState(void) {
-    memset(gSdlKeyState, 0, sizeof(gSdlKeyState));
+bool hasDigit(str s) {
+  int i = 1;
+  while (i <= length(s)) {
+    char ch = s[i];
+    if (ch >= '0' && ch <= '9') return true;
+    i = i + 1;
+  }
+  return false;
 }
 
-static int sdlInputEventWatch(void* userdata, SDL_Event* event) {
-    (void)userdata;
-
-    if (!event) {
-        return 1;
+int parseIntegerFromString(str s, int fallback) {
+  int len = length(s);
+  int idx = 1;
+  while (idx <= len) {
+    char ch = s[idx];
+    if ((ch >= '0' && ch <= '9') || ch == '+' || ch == '-') break;
+    idx = idx + 1;
+  }
+  if (idx > len) return fallback;
+  int sign = 1;
+  if (s[idx] == '+') {
+    idx = idx + 1;
+  } else if (s[idx] == '-') {
+    sign = -1;
+    idx = idx + 1;
+  }
+  int value = 0;
+  bool any = false;
+  while (idx <= len) {
+    char ch = s[idx];
+    if (ch >= '0' && ch <= '9') {
+      any = true;
+      value = value * 10 + (ch - '0');
+    } else {
+      break;
     }
-
-    switch (event->type) {
-        case SDL_KEYDOWN: {
-            SDL_Scancode sc = event->key.keysym.scancode;
-            if (sc >= 0 && sc < SDL_NUM_SCANCODES) {
-                gSdlKeyState[sc] = 1;
-            }
-            break;
-        }
-        case SDL_KEYUP: {
-            SDL_Scancode sc = event->key.keysym.scancode;
-            if (sc >= 0 && sc < SDL_NUM_SCANCODES) {
-                gSdlKeyState[sc] = 0;
-            }
-            break;
-        }
-        case SDL_WINDOWEVENT: {
-            if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
-                event->window.event == SDL_WINDOWEVENT_MINIMIZED) {
-                sdlResetCachedKeyState();
-            }
-            break;
-        }
-        case SDL_QUIT: {
-            sdlResetCachedKeyState();
-            break;
-        }
-        default:
-            break;
-    }
-
-    return 1;
+    idx = idx + 1;
+  }
+  if (!any) return fallback;
+  return value * sign;
 }
 
-void sdlEnsureInputWatch(void) {
-    if (!gSdlInputWatchInstalled) {
-        sdlResetCachedKeyState();
-        SDL_AddEventWatch(sdlInputEventWatch, NULL);
-        gSdlInputWatchInstalled = true;
+int extractSeedFromArgs(int fallback) {
+  int count = paramcount();
+  if (count == 0) return fallback;
+  int i = 1;
+  while (i <= count) {
+    str arg = paramstr(i);
+    if (hasDigit(arg)) {
+      return parseIntegerFromString(arg, fallback);
     }
+    i = i + 1;
+  }
+  return fallback;
 }
 
-bool sdlCachedKeyDown(SDL_Scancode sc) {
-    if (sc < 0 || sc >= SDL_NUM_SCANCODES) {
+class TerrainField {
+  float heights[VertexCount];
+  float minHeight;
+  float maxHeight;
+  float normalizationScale;
+  int seed;
+
+  void TerrainField() {
+    my.seed = 0;
+    my.minHeight = 0.0;
+    my.maxHeight = 0.0;
+    my.normalizationScale = 0.0;
+    int total = VertexCount;
+    int i = 0;
+    while (i < total) {
+      my.heights[i] = 0.0;
+      i = i + 1;
+    }
+  }
+
+  int index(int x, int z) { return z * (TerrainSize + 1) + x; }
+
+  float baseNoise(int x, int z) {
+    int n = x * 374761393 + z * 668265263 + my.seed * 362437;
+    n = n % 2147483647;
+    if (n < 0) n = n + 2147483647;
+    float value = n / 2147483647.0;
+    return value * 2.0 - 1.0;
+  }
+
+  float fade(float t) { return t * t * (3.0 - 2.0 * t); }
+
+  float valueNoise(float x, float z) {
+    int xi = floor(x);
+    int zi = floor(z);
+    float xf = x - xi;
+    float zf = z - zi;
+    float v00 = my.baseNoise(xi, zi);
+    float v10 = my.baseNoise(xi + 1, zi);
+    float v01 = my.baseNoise(xi, zi + 1);
+    float v11 = my.baseNoise(xi + 1, zi + 1);
+    float u = my.fade(xf);
+    float v = my.fade(zf);
+    float i1 = v00 + (v10 - v00) * u;
+    float i2 = v01 + (v11 - v01) * u;
+    return i1 + (i2 - i1) * v;
+  }
+
+  float fbm(float x, float z) {
+    float amplitude = 1.0;
+    float frequency = 1.0;
+    float sum = 0.0;
+    float total = 0.0;
+    int octave = 0;
+    while (octave < NoiseOctaves) {
+      sum = sum + my.valueNoise(x * frequency, z * frequency) * amplitude;
+      total = total + amplitude;
+      amplitude = amplitude * 0.5;
+      frequency = frequency * 2.0;
+      octave = octave + 1;
+    }
+    if (total == 0.0) return 0.0;
+    return sum / total;
+  }
+
+  void build(int s) {
+    my.seed = s;
+    my.minHeight = 1e9;
+    my.maxHeight = -1e9;
+    float baseFrequency = 0.035;
+    int z = 0;
+    while (z <= TerrainSize) {
+      int x = 0;
+      while (x <= TerrainSize) {
+        float sampleX = (x + s * 0.13) * baseFrequency;
+        float sampleZ = (z + s * 0.29) * baseFrequency;
+        float h = my.fbm(sampleX, sampleZ) * HeightScale;
+        int idx = my.index(x, z);
+        my.heights[idx] = h;
+        if (h < my.minHeight) my.minHeight = h;
+        if (h > my.maxHeight) my.maxHeight = h;
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+    float span = my.maxHeight - my.minHeight;
+    if (span <= 0.0001) {
+      my.maxHeight = my.minHeight + 0.001;
+      span = my.maxHeight - my.minHeight;
+    }
+    if (span <= 0.0001) {
+      my.normalizationScale = 0.0;
+    } else {
+      my.normalizationScale = 1.0 / span;
+    }
+  }
+
+  float rawHeight(int x, int z) {
+    if (x < 0) x = 0;
+    if (x > TerrainSize) x = TerrainSize;
+    if (z < 0) z = 0;
+    if (z > TerrainSize) z = TerrainSize;
+    return my.heights[my.index(x, z)];
+  }
+
+  float heightByFlatIndex(int idx) {
+    return my.heights[idx];
+  }
+
+  float normalized(float h) {
+    if (my.normalizationScale <= 0.0) return 0.0;
+    float t = (h - my.minHeight) * my.normalizationScale;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    return t;
+  }
+
+  float heightAt(float gx, float gz) {
+    if (gx < 0.0) gx = 0.0;
+    if (gx > TerrainSize) gx = TerrainSize;
+    if (gz < 0.0) gz = 0.0;
+    if (gz > TerrainSize) gz = TerrainSize;
+    int x0 = floor(gx);
+    int z0 = floor(gz);
+    int x1 = x0 + 1;
+    int z1 = z0 + 1;
+    if (x1 > TerrainSize) x1 = TerrainSize;
+    if (z1 > TerrainSize) z1 = TerrainSize;
+    float h00 = my.rawHeight(x0, z0);
+    float h10 = my.rawHeight(x1, z0);
+    float h01 = my.rawHeight(x0, z1);
+    float h11 = my.rawHeight(x1, z1);
+    float tx = gx - x0;
+    float tz = gz - z0;
+    float hx0 = h00 + (h10 - h00) * tx;
+    float hx1 = h01 + (h11 - h01) * tx;
+    return hx0 + (hx1 - hx0) * tz;
+  }
+}
+
+class LandscapeDemo {
+  TerrainField field;
+  int seed;
+  float camX;
+  float camZ;
+  float camY;
+  float yaw;
+  float pitch;
+  int lastTicks;
+  bool running;
+  int lastMouseX;
+  int lastMouseY;
+  bool hasMouseSample;
+  float vertexHeights[VertexCount];
+  float vertexColorR[VertexCount];
+  float vertexColorG[VertexCount];
+  float vertexColorB[VertexCount];
+  float vertexNormalX[VertexCount];
+  float vertexNormalY[VertexCount];
+  float vertexNormalZ[VertexCount];
+  float worldXCoords[VertexStride];
+  float worldZCoords[VertexStride];
+  float waterPhaseOffset[VertexCount];
+  float waterSecondaryOffset[VertexCount];
+  float waterSparkleOffset[VertexCount];
+  float sunDirX;
+  float sunDirY;
+  float sunDirZ;
+  float waterHeight;
+  float waterNormalizedLevel;
+  float elapsedSeconds;
+  bool useFastTerrain;
+  bool useFastWater;
+  bool useFastWorldCoords;
+  bool useFastWaterOffsets;
+  float cloudAzimuth[CloudCount];
+  float cloudElevation[CloudCount];
+  float cloudDistance[CloudCount];
+  float cloudScale[CloudCount];
+  float cloudSpeed[CloudCount];
+  float cloudBrightness[CloudCount];
+
+  void LandscapeDemo(int initialSeed) {
+    my.field = new TerrainField();
+    my.seed = initialSeed;
+    my.useFastWorldCoords = my.tryPrecomputeWorldCoordinates();
+    if (!my.useFastWorldCoords) {
+      my.precomputeWorldCoordinates();
+    }
+    my.useFastWaterOffsets = my.tryPrecomputeWaterOffsets();
+    if (!my.useFastWaterOffsets) {
+      my.precomputeWaterOffsets();
+    }
+    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
+    my.elapsedSeconds = 0.0;
+    my.waterNormalizedLevel = 0.36;
+    float sunX = 0.45;
+    float sunY = 0.82;
+    float sunZ = 0.33;
+    float invLen = 1.0 / sqrt(sunX * sunX + sunY * sunY + sunZ * sunZ);
+    my.sunDirX = sunX * invLen;
+    my.sunDirY = sunY * invLen;
+    my.sunDirZ = sunZ * invLen;
+    my.field.build(initialSeed);
+    my.initializeSkyElements();
+    my.updateVertexData();
+    my.camX = TerrainSize * 0.5;
+    my.camZ = TerrainSize * 0.5;
+    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.yaw = 135.0;
+    my.pitch = -20.0;
+    my.lastTicks = getticks();
+    my.running = true;
+    my.lastMouseX = 0;
+    my.lastMouseY = 0;
+    my.hasMouseSample = false;
+  }
+
+  bool tryPrecomputeWorldCoordinates() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWorldCoords")) {
+      return false;
+    }
+    landscapeprecomputeworldcoords(my.worldXCoords,
+                                   my.worldZCoords,
+                                   TileScale,
+                                   TerrainSize,
+                                   VertexStride);
+    float half = TerrainSize * 0.5;
+    float expectedMin = (0.0 - half) * TileScale;
+    float expectedMax = (TerrainSize - half) * TileScale;
+    float minSample = my.worldXCoords[0];
+    float maxSample = my.worldXCoords[TerrainSize];
+    if (!(minSample == minSample) || !(maxSample == maxSample)) {
+      return false;
+    }
+    float diffMin = minSample - expectedMin;
+    if (diffMin < 0.0) diffMin = -diffMin;
+    float diffMax = maxSample - expectedMax;
+    if (diffMax < 0.0) diffMax = -diffMax;
+    if (diffMin > 0.0005 || diffMax > 0.0005) {
+      return false;
+    }
+    return true;
+  }
+
+  void precomputeWorldCoordinates() {
+    float half = TerrainSize * 0.5;
+    int i = 0;
+    while (i < VertexStride) {
+      float world = (i - half) * TileScale;
+      my.worldXCoords[i] = world;
+      my.worldZCoords[i] = world;
+      i = i + 1;
+    }
+  }
+
+  bool tryPrecomputeWaterOffsets() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWaterOffsets")) {
+      return false;
+    }
+    landscapeprecomputewateroffsets(my.waterPhaseOffset,
+                                    my.waterSecondaryOffset,
+                                    my.waterSparkleOffset,
+                                    TerrainSize,
+                                    VertexStride);
+    if (TerrainSize >= 1) {
+      int checkIdx = 1;
+      float expectedPhase = 0.18;
+      float phase = my.waterPhaseOffset[checkIdx];
+      float secondary = my.waterSecondaryOffset[checkIdx];
+      if (!(phase == phase) || !(secondary == secondary)) {
         return false;
+      }
+      float phaseDiff = phase - expectedPhase;
+      if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
+      float expectedSecondary = 0.05;
+      float secondaryDiff = secondary - expectedSecondary;
+      if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
+      if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
+        return false;
+      }
     }
-    return gSdlKeyState[sc] != 0;
-}
+    return true;
+  }
 
-static SDL_Scancode resolveScancodeFromName(const char* name) {
-    if (!name) {
-        return SDL_SCANCODE_UNKNOWN;
+  void precomputeWaterOffsets() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int rowIndex = z * VertexStride;
+      float zPhase = z * 0.12;
+      float zSecondary = z * 0.21;
+      float zSparkle = z * 0.22;
+      int x = 0;
+      while (x <= TerrainSize) {
+        int idx = rowIndex + x;
+        my.waterPhaseOffset[idx] = x * 0.18 + zPhase;
+        my.waterSecondaryOffset[idx] = x * 0.05 + zSecondary;
+        my.waterSparkleOffset[idx] = x * 0.22 + zSparkle;
+        x = x + 1;
+      }
+      z = z + 1;
     }
+  }
 
-    char compact[64];
-    size_t srcLen = strlen(name);
-    if (srcLen >= sizeof(compact)) {
-        srcLen = sizeof(compact) - 1;
-    }
-    size_t compactLen = 0;
-    for (size_t i = 0; i < srcLen && compactLen < sizeof(compact) - 1; ++i) {
-        char ch = name[i];
-        if (ch != ' ' && ch != '_' && ch != '-') {
-            compact[compactLen++] = (char)tolower((unsigned char)ch);
-        }
-    }
-    compact[compactLen] = '\0';
+  float skyRandom(int index, int salt) {
+    int xSeed = index * 97 + salt * 193 + my.seed * 37;
+    int zSeed = index * 131 + salt * 167 + my.seed * 59;
+    float noise = my.field.baseNoise(xSeed, zSeed);
+    return noise * 0.5 + 0.5;
+  }
 
-    if (strcmp(compact, "lshift") == 0 || strcmp(compact, "leftshift") == 0) {
-        return SDL_SCANCODE_LSHIFT;
+  void initializeSkyElements() {
+    int i = 0;
+    while (i < CloudCount) {
+      float azNoise = my.skyRandom(i, 11);
+      float elevNoise = my.skyRandom(i, 23);
+      float distNoise = my.skyRandom(i, 41);
+      float scaleNoise = my.skyRandom(i, 61);
+      float speedNoise = my.skyRandom(i, 83);
+      float brightNoise = my.skyRandom(i, 101);
+      my.cloudAzimuth[i] = azNoise * TwoPi;
+      my.cloudElevation[i] = 0.18 + elevNoise * 0.16;
+      my.cloudDistance[i] = 150.0 + distNoise * 70.0;
+      my.cloudScale[i] = 16.0 + scaleNoise * 18.0;
+      my.cloudSpeed[i] = 0.002 + speedNoise * 0.006;
+      my.cloudBrightness[i] = 0.72 + brightNoise * 0.20;
+      i = i + 1;
     }
-    if (strcmp(compact, "rshift") == 0 || strcmp(compact, "rightshift") == 0) {
-        return SDL_SCANCODE_RSHIFT;
-    }
-    if (strcmp(compact, "shift") == 0) {
-        return SDL_SCANCODE_LSHIFT;
-    }
-    if (strcmp(compact, "space") == 0) {
-        return SDL_SCANCODE_SPACE;
-    }
-    if (strcmp(compact, "escape") == 0 || strcmp(compact, "esc") == 0) {
-        return SDL_SCANCODE_ESCAPE;
-    }
-    if (strcmp(compact, "enter") == 0 || strcmp(compact, "return") == 0) {
-        return SDL_SCANCODE_RETURN;
-    }
+  }
 
-    char normalized[64];
-    size_t normLen = srcLen;
-    if (normLen >= sizeof(normalized)) {
-        normLen = sizeof(normalized) - 1;
-    }
-    for (size_t i = 0; i < normLen; ++i) {
-        char ch = name[i];
-        if (ch == '_' || ch == '-') {
-            normalized[i] = ' ';
-        } else {
-            normalized[i] = ch;
-        }
-    }
-    normalized[normLen] = '\0';
+  float saturate(float value) {
+    if (value < 0.0) return 0.0;
+    if (value > 1.0) return 1.0;
+    return value;
+  }
 
-    if (normLen == 1) {
-        char letter[2];
-        letter[0] = (char)toupper((unsigned char)normalized[0]);
-        letter[1] = '\0';
-        SDL_Keycode keycode = SDL_GetKeyFromName(letter);
-        if (keycode != SDLK_UNKNOWN) {
-            SDL_Scancode sc = SDL_GetScancodeFromKey(keycode);
-            if (sc != SDL_SCANCODE_UNKNOWN) {
-                return sc;
-            }
-        }
+  float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+  void computeVertexNormals() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int x = 0;
+      while (x <= TerrainSize) {
+        float left = my.field.rawHeight(x - 1, z);
+        float right = my.field.rawHeight(x + 1, z);
+        float down = my.field.rawHeight(x, z - 1);
+        float up = my.field.rawHeight(x, z + 1);
+        float dx = (right - left) / (2.0 * TileScale);
+        float dz = (up - down) / (2.0 * TileScale);
+        float nx = -dx;
+        float ny = 1.0;
+        float nz = -dz;
+        float length = sqrt(nx * nx + ny * ny + nz * nz);
+        if (length <= 0.0001) length = 1.0;
+        nx = nx / length;
+        ny = ny / length;
+        nz = nz / length;
+        int idx = z * VertexStride + x;
+        my.vertexNormalX[idx] = nx;
+        my.vertexNormalY[idx] = ny;
+        my.vertexNormalZ[idx] = nz;
+        x = x + 1;
+      }
+      z = z + 1;
     }
+  }
 
-    SDL_Keycode keycode = SDL_GetKeyFromName(normalized);
-    if (keycode != SDLK_UNKNOWN) {
-        SDL_Scancode sc = SDL_GetScancodeFromKey(keycode);
-        if (sc != SDL_SCANCODE_UNKNOWN) {
-            return sc;
-        }
+  void updateVertexData() {
+    my.computeVertexNormals();
+    float span = my.field.maxHeight - my.field.minHeight;
+    if (span <= 0.0001) span = 1.0;
+    my.waterHeight = my.field.minHeight + span * my.waterNormalizedLevel;
+    int idx = 0;
+    while (idx < VertexCount) {
+      float h = my.field.heightByFlatIndex(idx);
+      my.vertexHeights[idx] = h;
+      float t = my.field.normalized(h);
+      float r;
+      float g;
+      float b;
+      bool underwater = t < my.waterNormalizedLevel;
+      if (underwater) {
+        float depth = (my.waterNormalizedLevel - t) / my.waterNormalizedLevel;
+        if (depth < 0.0) depth = 0.0;
+        if (depth > 1.0) depth = 1.0;
+        float shore = 1.0 - depth;
+        r = 0.05 + 0.08 * depth + 0.10 * shore;
+        g = 0.32 + 0.36 * depth + 0.18 * shore;
+        b = 0.52 + 0.40 * depth + 0.12 * shore;
+      } else if (t < my.waterNormalizedLevel + 0.06) {
+        float w = (t - my.waterNormalizedLevel) / 0.06;
+        r = 0.36 + 0.14 * w;
+        g = 0.34 + 0.20 * w;
+        b = 0.20 + 0.09 * w;
+      } else if (t < 0.62) {
+        float w = (t - (my.waterNormalizedLevel + 0.06)) / 0.16;
+        r = 0.24 + 0.18 * w;
+        g = 0.46 + 0.32 * w;
+        b = 0.22 + 0.12 * w;
+      } else if (t < 0.82) {
+        float w = (t - 0.62) / 0.20;
+        r = 0.46 + 0.26 * w;
+        g = 0.40 + 0.22 * w;
+        b = 0.30 + 0.20 * w;
+      } else {
+        float w = (t - 0.82) / 0.18;
+        if (w < 0.0) w = 0.0;
+        if (w > 1.0) w = 1.0;
+        float base = 0.84 + 0.14 * w;
+        r = base;
+        g = base;
+        b = base;
+        float frost = my.saturate((t - 0.88) / 0.12);
+        float sunSpark = 0.75 + 0.25 * frost;
+        r = my.lerp(r, sunSpark, frost * 0.4);
+        g = my.lerp(g, sunSpark, frost * 0.4);
+        b = my.lerp(b, sunSpark, frost * 0.6);
+      }
+
+      if (!underwater) {
+        float nx = my.vertexNormalX[idx];
+        float ny = my.vertexNormalY[idx];
+        float nz = my.vertexNormalZ[idx];
+        float sunDot = nx * my.sunDirX + ny * my.sunDirY + nz * my.sunDirZ;
+        if (sunDot < 0.0) sunDot = 0.0;
+        float slope = 1.0 - ny;
+        if (slope < 0.0) slope = 0.0;
+        if (slope > 1.0) slope = 1.0;
+        float shade = (0.38 + sunDot * 0.62) * (1.0 - 0.28 * slope);
+        if (shade < 0.25) shade = 0.25;
+        if (shade > 1.1) shade = 1.1;
+        r = r * shade;
+        g = g * shade;
+        b = b * (shade + 0.05 * sunDot);
+        float cool = my.saturate((0.58 - t) * 3.5);
+        g = g + cool * 0.05;
+        b = b + cool * 0.07;
+        float alpine = my.saturate((t - 0.68) * 2.2);
+        r = my.lerp(r, r * 0.9, alpine * 0.4);
+        g = my.lerp(g, g * 0.88, alpine * 0.3);
+        b = my.lerp(b, b * 1.08, alpine * 0.3);
+      }
+
+      r = my.saturate(r);
+      g = my.saturate(g);
+      b = my.saturate(b);
+
+      my.vertexColorR[idx] = r;
+      my.vertexColorG[idx] = g;
+      my.vertexColorB[idx] = b;
+      idx = idx + 1;
     }
+  }
 
-    return SDL_GetScancodeFromName(normalized);
-}
+  void drawSunBillboard(float rightX,
+                        float rightY,
+                        float rightZ,
+                        float upX,
+                        float upY,
+                        float upZ) {
+    float sunX = my.sunDirX * SunDistance;
+    float sunY = my.sunDirY * SunDistance;
+    float sunZ = my.sunDirZ * SunDistance;
+    int segments = 48;
 
-static SDL_Scancode resolveScancodeFromValue(Value arg, bool* out_ok) {
-    if (out_ok) {
-        *out_ok = false;
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.90, 0.58);
+    GLVertex3f(sunX, sunY, sunZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunHaloRadius) + upX * (sinA * SunHaloRadius);
+      float offsetY = rightY * (cosA * SunHaloRadius) + upY * (sinA * SunHaloRadius);
+      float offsetZ = rightZ * (cosA * SunHaloRadius) + upZ * (sinA * SunHaloRadius);
+      GLColor3f(1.0, 0.78, 0.36);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
     }
+    GLEnd();
 
-    if (arg.type == TYPE_STRING && arg.s_val != NULL) {
-        SDL_Scancode sc = resolveScancodeFromName(arg.s_val);
-        if (sc != SDL_SCANCODE_UNKNOWN && out_ok) {
-            *out_ok = true;
-        }
-        return sc;
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.98, 0.86);
+    GLVertex3f(sunX, sunY, sunZ);
+    i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunCoreRadius) + upX * (sinA * SunCoreRadius);
+      float offsetY = rightY * (cosA * SunCoreRadius) + upY * (sinA * SunCoreRadius);
+      float offsetZ = rightZ * (cosA * SunCoreRadius) + upZ * (sinA * SunCoreRadius);
+      GLColor3f(1.0, 0.94, 0.72);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
     }
+    GLEnd();
+  }
 
-    if (IS_INTLIKE(arg)) {
-        long long raw = AS_INTEGER(arg);
-        if (raw >= 0 && raw < SDL_NUM_SCANCODES) {
-            if (out_ok) {
-                *out_ok = true;
-            }
-            return (SDL_Scancode)raw;
-        }
-
-        SDL_Scancode sc = SDL_GetScancodeFromKey((SDL_Keycode)raw);
-        if (sc != SDL_SCANCODE_UNKNOWN) {
-            if (out_ok) {
-                *out_ok = true;
-            }
-            return sc;
-        }
-        return SDL_SCANCODE_UNKNOWN;
+  void drawCloudPuff(float centerX,
+                     float centerY,
+                     float centerZ,
+                     float radiusX,
+                     float radiusY,
+                     float rightX,
+                     float rightY,
+                     float rightZ,
+                     float upX,
+                     float upY,
+                     float upZ,
+                     float brightness) {
+    int segments = 18;
+    float highlight = my.saturate(0.86 + brightness * 0.18);
+    float rim = my.saturate(0.80 + brightness * 0.16);
+    GLBegin("triangle_fan");
+    GLColor3f(highlight, highlight, highlight + 0.05);
+    GLVertex3f(centerX, centerY, centerZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float px = centerX + rightX * (cosA * radiusX) + upX * (sinA * radiusY);
+      float py = centerY + rightY * (cosA * radiusX) + upY * (sinA * radiusY);
+      float pz = centerZ + rightZ * (cosA * radiusX) + upZ * (sinA * radiusY);
+      GLColor3f(rim, rim, rim + 0.03);
+      GLVertex3f(px, py, pz);
+      i = i + 1;
     }
+    GLEnd();
+  }
 
-    return SDL_SCANCODE_UNKNOWN;
-}
+  void drawCloudLayer(float timeSeconds,
+                      float rightX,
+                      float rightY,
+                      float rightZ,
+                      float upX,
+                      float upY,
+                      float upZ) {
+    int i = 0;
+    while (i < CloudCount) {
+      float azimuth = my.cloudAzimuth[i] + timeSeconds * my.cloudSpeed[i];
+      float elevation = my.cloudElevation[i];
+      float distance = my.cloudDistance[i];
+      float cosElev = cos(elevation);
+      float sinElev = sin(elevation);
+      float dirX = sin(azimuth) * cosElev;
+      float dirY = sinElev;
+      float dirZ = cos(azimuth) * cosElev;
+      float centerX = dirX * distance;
+      float centerY = dirY * distance;
+      float centerZ = dirZ * distance;
+      float baseScale = my.cloudScale[i];
+      float baseBrightness = my.cloudBrightness[i];
+      float sunInfluence = my.sunDirX * dirX + my.sunDirY * dirY + my.sunDirZ * dirZ;
+      float puffBrightness = my.saturate(baseBrightness + sunInfluence * 0.18);
+      float radiusX = baseScale * 0.55;
+      float radiusY = baseScale * 0.38;
+      my.drawCloudPuff(centerX,
+                       centerY,
+                       centerZ,
+                       radiusX,
+                       radiusY,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       puffBrightness);
 
-void initializeTextureSystem(void) {
-    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
-        gSdlTextures[i] = NULL;
-        gSdlTextureWidths[i] = 0;
-        gSdlTextureHeights[i] = 0;
-    }
-}
+      float offset = baseScale * 0.6;
+      my.drawCloudPuff(centerX + rightX * offset * 0.6 + upX * offset * 0.12,
+                       centerY + rightY * offset * 0.6 + upY * offset * 0.12,
+                       centerZ + rightZ * offset * 0.6 + upZ * offset * 0.12,
+                       radiusX * 0.78,
+                       radiusY * 0.82,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.97 + 0.02));
 
-void cleanupSdlWindowResources(void) {
-    if (gSdlGLContext) {
-        SDL_GL_DeleteContext(gSdlGLContext);
-        gSdlGLContext = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_GL_DeleteContext successful.\n");
-        #endif
-    }
-    if (gSdlRenderer) {
-        SDL_DestroyRenderer(gSdlRenderer);
-        gSdlRenderer = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyRenderer successful.\n");
-        #endif
-    }
-    if (gSdlWindow) {
-        SDL_DestroyWindow(gSdlWindow);
-        gSdlWindow = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
-        #endif
-    }
-    gSdlWidth = 0;
-    gSdlHeight = 0;
-    gSdlCurrentColor.r = 255;
-    gSdlCurrentColor.g = 255;
-    gSdlCurrentColor.b = 255;
-    gSdlCurrentColor.a = 255;
-    sdlResetCachedKeyState();
-}
+      my.drawCloudPuff(centerX - rightX * offset * 0.7 + upX * offset * 0.05,
+                       centerY - rightY * offset * 0.7 + upY * offset * 0.05,
+                       centerZ - rightZ * offset * 0.7 + upZ * offset * 0.05,
+                       radiusX * 0.72,
+                       radiusY * 0.78,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.94 + 0.03));
 
-// Helper to find a free texture slot or return an error ID
-int findFreeTextureID(void) {
-    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
-        if (gSdlTextures[i] == NULL) {
-            return i;
-        }
+      my.drawCloudPuff(centerX + upX * baseScale * 0.14,
+                       centerY + upY * baseScale * 0.14,
+                       centerZ + upZ * baseScale * 0.14,
+                       radiusX * 0.52,
+                       radiusY * 0.70,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.90 + 0.05));
+      i = i + 1;
     }
-    return -1; // No free slots
-}
+  }
 
-void sdlCleanupAtExit(void) {
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] Running sdlCleanupAtExit (Final Program Exit Cleanup)...\n");
-    #endif
-
-    // --- Clean up SDL_ttf resources ---
-    if (gSdlFont) {
-        TTF_CloseFont(gSdlFont);
-        gSdlFont = NULL;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_CloseFont successful.\n");
-        #endif
+  void drawSky(float timeSeconds) {
+    float yawRadians = my.yaw * DegreesToRadians;
+    float pitchRadians = my.pitch * DegreesToRadians;
+    float cosYaw = cos(yawRadians);
+    float sinYaw = sin(yawRadians);
+    float cosPitch = cos(pitchRadians);
+    float sinPitch = sin(pitchRadians);
+    float forwardX = sinYaw * cosPitch;
+    float forwardY = -sinPitch;
+    float forwardZ = cosYaw * cosPitch;
+    float rightX = forwardZ;
+    float rightY = 0.0;
+    float rightZ = -forwardX;
+    float rightLen = sqrt(rightX * rightX + rightZ * rightZ);
+    if (rightLen <= 0.0001) {
+      rightX = 1.0;
+      rightY = 0.0;
+      rightZ = 0.0;
+      rightLen = 1.0;
     }
-    if (gSdlTtfInitialized) {
-        TTF_Quit();
-        gSdlTtfInitialized = false;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_Quit successful.\n");
-        #endif
-    }
-
-    // --- Clean up SDL_image resources --- // <<< NEW SECTION
-    if (gSdlImageInitialized) {
-        IMG_Quit();
-        gSdlImageInitialized = false;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: IMG_Quit successful.\n");
-        #endif
-    }
-    // --- END NEW SECTION ---
-
-
-    // --- Clean up SDL_mixer audio resources ---
-    for (int i = 0; i < MAX_SOUNDS; ++i) {
-        if (gLoadedSounds[i] != NULL) {
-            Mix_FreeChunk(gLoadedSounds[i]);
-            gLoadedSounds[i] = NULL;
-            DEBUG_PRINT("[DEBUG AUDIO] sdlCleanupAtExit: Auto-freed sound chunk at index %d.\n", i);
-        }
-    }
-    int open_freq, open_channels;
-    Uint16 open_format;
-    if (Mix_QuerySpec(&open_freq, &open_format, &open_channels) != 0) {
-        Mix_CloseAudio();
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_CloseAudio successful.\n");
-        #endif
+    rightX = rightX / rightLen;
+    rightZ = rightZ / rightLen;
+    float upX = forwardY * rightZ - forwardZ * rightY;
+    float upY = forwardZ * rightX - forwardX * rightZ;
+    float upZ = forwardX * rightY - forwardY * rightX;
+    float upLen = sqrt(upX * upX + upY * upY + upZ * upZ);
+    if (upLen <= 0.0001) {
+      upX = 0.0;
+      upY = 1.0;
+      upZ = 0.0;
     } else {
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_CloseAudio skipped (audio not open or already closed by audioQuitSystem).\n");
-        #endif
+      upX = upX / upLen;
+      upY = upY / upLen;
+      upZ = upZ / upLen;
     }
-    Mix_Quit();
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG AUDIO] sdlCleanupAtExit: Mix_Quit successful.\n");
-    #endif
-    gSoundSystemInitialized = false;
+    my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
+    my.drawCloudLayer(timeSeconds, rightX, rightY, rightZ, upX, upY, upZ);
+  }
 
-
-    // --- Clean up core SDL video and timer resources ---
-    // Destroy textures first
-/*    for (int i = 0; i < MAX_SDL_TEXTURES; ++i) {
-        if (gSdlTextures[i] != NULL) {
-            SDL_DestroyTexture(gSdlTextures[i]);
-            gSdlTextures[i] = NULL;
-        }
+  void initGraphics() {
+    InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
+    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLSetSwapInterval(1);
+    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    if (my.useFastTerrain ||
+        my.useFastWater ||
+        my.useFastWorldCoords ||
+        my.useFastWaterOffsets) {
+      writeln("Using extended landscape builtins for improved performance.");
     }
- */
-    cleanupSdlWindowResources();
-    if (gSdlInitialized) {
-        SDL_Quit();
-        gSdlInitialized = false;
-        #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_Quit successful.\n");
-        #endif
-    }
-
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit finished.\n");
-    #endif
-}
-
-
-Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING) {
-        runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
-        return makeVoid();
-    }
-
-    if (!gSdlInitialized) {
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
-            runtimeError(vm, "Runtime error: SDL_Init failed in InitGraph: %s", SDL_GetError());
-            return makeVoid();
-        }
-        gSdlInitialized = true;
-
-        // Allow clicks to focus the window on macOS and avoid dropped initial events
-        SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
-    }
-
-    cleanupSdlWindowResources();
-
-    int width = (int)AS_INTEGER(args[0]);
-    int height = (int)AS_INTEGER(args[1]);
-    const char* title = args[2].s_val ? args[2].s_val : "Pscal Graphics";
-
-    if (width <= 0 || height <= 0) {
-        runtimeError(vm, "Runtime error: InitGraph width and height must be positive.");
-        return makeVoid();
-    }
-    
-    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
-    if (!gSdlWindow) {
-        runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
-        return makeVoid();
-    }
-
-    gSdlWidth = width;
-    gSdlHeight = height;
-
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!gSdlRenderer) {
-        runtimeError(vm, "Runtime error: SDL_CreateRenderer failed: %s", SDL_GetError());
-        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
-        return makeVoid();
-    }
-
-    gSdlGLContext = NULL;
-    initializeTextureSystem();
-
-    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-    SDL_RenderClear(gSdlRenderer);
-    SDL_RenderPresent(gSdlRenderer);
-    SDL_PumpEvents(); // Process any pending events so the window becomes visible
-    SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
-#if SDL_VERSION_ATLEAST(2,0,5)
-    SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
-#endif
-    sdlEnsureInputWatch();
-
-    gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
-
-    return makeVoid();
-}
-
-Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
-    cleanupSdlWindowResources();
-    return makeVoid();
-}
-
-Value vmBuiltinFillrect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 4) { runtimeError(vm, "FillRect expects 4 integer arguments."); return makeVoid(); }
-    // ... type checks for all 4 args being integer ...
-    SDL_Rect rect;
-    rect.x = (int)AS_INTEGER(args[0]);
-    rect.y = (int)AS_INTEGER(args[1]);
-    rect.w = (int)AS_INTEGER(args[2]) - rect.x + 1;
-    rect.h = (int)AS_INTEGER(args[3]) - rect.y + 1;
-    if (rect.w < 0) { rect.x += rect.w; rect.w = -rect.w; }
-    if (rect.h < 0) { rect.y += rect.h; rect.h = -rect.h; }
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    SDL_RenderFillRect(gSdlRenderer, &rect);
-    return makeVoid();
-}
-
-Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
-    if (arg_count != 2) {
-        runtimeError(vm, "UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).");
-        return makeVoid();
-    }
-
-    Value idVal = args[0];
-    Value pixelDataVal = args[1];
-
-    if (!isIntlikeType(idVal.type) || pixelDataVal.type != TYPE_ARRAY) {
-        runtimeError(vm, "UpdateTexture argument type mismatch.");
-        return makeVoid();
-    }
-    if (pixelDataVal.element_type != TYPE_BYTE) {
-        runtimeError(vm, "UpdateTexture PixelData must be an ARRAY OF Byte. Got array of %s.", varTypeToString(pixelDataVal.element_type));
-        return makeVoid();
-    }
-
-    int textureID = (int)AS_INTEGER(idVal);
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
-        runtimeError(vm, "UpdateTexture called with invalid TextureID %d.", textureID);
-        return makeVoid();
-    }
-
-    int texWidth = gSdlTextureWidths[textureID];
-    int pitch = texWidth * 4; // 4 bytes per pixel for RGBA8888
-    int expectedPscalArraySize = texWidth * gSdlTextureHeights[textureID] * 4;
-    int pscalArrayTotalElements = calculateArrayTotalSize(&pixelDataVal);
-
-    if (pscalArrayTotalElements != expectedPscalArraySize) {
-        runtimeError(vm, "UpdateTexture PixelData array size (%d) does not match texture dimensions*BPP (%d).",
-                pscalArrayTotalElements, expectedPscalArraySize);
-        return makeVoid();
-    }
-
-    // Since the VM passes direct Value pointers, we can create a temporary C buffer from them.
-    unsigned char* c_pixel_buffer = (unsigned char*)malloc(expectedPscalArraySize);
-    if (!c_pixel_buffer) {
-        runtimeError(vm, "Failed to allocate C buffer for UpdateTexture.");
-        return makeVoid();
-    }
-
-    for (int i = 0; i < expectedPscalArraySize; ++i) {
-        c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
-    }
-
-    if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
-        runtimeError(vm, "SDL_UpdateTexture failed: %s", SDL_GetError());
-    }
-
-    free(c_pixel_buffer);
-    return makeVoid();
-}
-
-Value vmBuiltinUpdatescreen(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) runtimeError(vm, "UpdateScreen expects 0 arguments.");
-    if (gSdlRenderer) SDL_RenderPresent(gSdlRenderer);
-    return makeVoid();
-}
-
-Value vmBuiltinCleardevice(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "Runtime error: ClearDevice expects 0 arguments.");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        runtimeError(vm, "Runtime error: Graphics mode not initialized before ClearDevice.");
-        return makeVoid();
-    }
-    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
-    SDL_RenderClear(gSdlRenderer);
-    return makeVoid();
-}
-
-Value vmBuiltinGetmaxx(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) runtimeError(vm, "GetMaxX expects 0 arguments.");
-    return makeInt(gSdlWidth > 0 ? gSdlWidth - 1 : 0);
-}
-
-Value vmBuiltinGetmaxy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) runtimeError(vm, "GetMaxY expects 0 arguments.");
-    return makeInt(gSdlHeight > 0 ? gSdlHeight - 1 : 0);
-}
-
-Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "GetTicks expects 0 arguments.");
-        return makeInt(0);
-    }
-    return makeInt((long long)SDL_GetTicks());
-}
-
-Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
-    gSdlCurrentColor.r = (Uint8)AS_INTEGER(args[0]);
-    gSdlCurrentColor.g = (Uint8)AS_INTEGER(args[1]);
-    gSdlCurrentColor.b = (Uint8)AS_INTEGER(args[2]);
-    gSdlCurrentColor.a = 255;
-    if (gSdlRenderer) {
-        SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    }
-    return makeVoid();
-}
-
-Value vmBuiltinQuittextsystem(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) runtimeError(vm, "QuitTextSystem expects 0 arguments.");
-    if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
-    if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
-    return makeVoid();
-}
-
-Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) { runtimeError(vm, "GetTextSize expects 3 arguments."); return makeVoid(); }
-    if (!gSdlFont) { runtimeError(vm, "Font not initialized for GetTextSize."); return makeVoid(); }
-    
-    const char* text = AS_STRING(args[0]);
-    Value* width_ptr = (Value*)args[1].ptr_val;
-    Value* height_ptr = (Value*)args[2].ptr_val;
-    
-    int w, h;
-    TTF_SizeUTF8(gSdlFont, text, &w, &h);
-    
-    freeValue(width_ptr); *width_ptr = makeInt(w);
-    freeValue(height_ptr); *height_ptr = makeInt(h);
-    
-    return makeVoid();
-}
-
-Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3 && arg_count != 4) {
-        runtimeError(vm, "GetMouseState expects 3 or 4 arguments.");
-        return makeVoid();
-    }
-
-    // --- ADD SAFETY CHECKS ---
-    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER || args[2].type != TYPE_POINTER ||
-        (arg_count == 4 && args[3].type != TYPE_POINTER)) {
-        runtimeError(vm, "GetMouseState requires VAR parameters, but a non-pointer type was received.");
-        return makeVoid();
-    }
-
-    Value* x_ptr = (Value*)args[0].ptr_val;
-    Value* y_ptr = (Value*)args[1].ptr_val;
-    Value* buttons_ptr = (Value*)args[2].ptr_val;
-    Value* inside_ptr = NULL;
-    if (arg_count == 4) {
-        inside_ptr = (Value*)args[3].ptr_val;
-    }
-
-    if (!x_ptr || !y_ptr || !buttons_ptr || (arg_count == 4 && !inside_ptr)) {
-        runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
-        return makeVoid();
-    }
-    // --- END SAFETY CHECKS ---
-
-    if (!gSdlInitialized || !gSdlWindow) {
-        runtimeError(vm, "Graphics system not initialized for GetMouseState.");
-        return makeVoid();
-    }
-
-    int mse_x = 0, mse_y = 0;
-    Uint32 sdl_buttons = 0;
-    bool inside_window = false;
-    bool has_focus = false;
-
-#ifdef __APPLE__
-    // On macOS avoid SDL_PumpEvents from non-main threads. Use global mouse
-    // state and convert to window-relative coordinates with border and HiDPI
-    // adjustments.
-    int global_x = 0, global_y = 0;
-    sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
-
-    int win_x = 0, win_y = 0;
-    SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
-#if SDL_VERSION_ATLEAST(2,0,5)
-    int border_top = 0, border_left = 0, border_bottom = 0, border_right = 0;
-    if (SDL_GetWindowBordersSize(gSdlWindow, &border_top, &border_left,
-                                 &border_bottom, &border_right) == 0) {
-        win_x += border_left;
-        win_y += border_top;
-    }
-#endif
-    mse_x = global_x - win_x;
-    mse_y = global_y - win_y;
-    int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
-    inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
-                     global_y >= win_y && global_y < (win_y + win_h));
-    has_focus = (SDL_GetMouseFocus() == gSdlWindow);
-
-    // Do NOT scale to renderer output size here; the rest of the VM and
-    // examples operate in window pixel coordinates (texture and drawing use
-    // window dimensions), so returning window-relative coordinates preserves
-    // 1:1 mapping with drawing code even on HiDPI displays.
-
-    if (mse_x < 0) {
-        mse_x = 0;
-    }
-    if (mse_y < 0) {
-        mse_y = 0;
-    }
-    if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
-    if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
-#else
-    // Update SDL state and prefer window-relative coordinates when we have focus.
-    SDL_PumpEvents();
-    SDL_Window* focus_window = SDL_GetMouseFocus();
-    if (focus_window == gSdlWindow) {
-        sdl_buttons = SDL_GetMouseState(&mse_x, &mse_y);
-        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
-        inside_window = (mse_x >= 0 && mse_x < win_w && mse_y >= 0 && mse_y < win_h);
-        has_focus = true;
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    if (mouseInside != 0) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
     } else {
-        int global_x = 0, global_y = 0;
-        sdl_buttons = SDL_GetGlobalMouseState(&global_x, &global_y);
-        int win_x = 0, win_y = 0; SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
-        mse_x = global_x - win_x;
-        mse_y = global_y - win_y;
-        int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
-        inside_window = (global_x >= win_x && global_x < (win_x + win_w) &&
-                         global_y >= win_y && global_y < (win_y + win_h));
-        has_focus = false;
-        
-        if (mse_x < 0) {
-            mse_x = 0;
+      my.hasMouseSample = false;
+    }
+  }
+
+  void regenerate(int newSeed) {
+    my.seed = newSeed;
+    my.field.build(newSeed);
+    my.initializeSkyElements();
+    my.updateVertexData();
+    my.camX = TerrainSize * 0.5;
+    my.camZ = TerrainSize * 0.5;
+    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.elapsedSeconds = 0.0;
+    writeln("Generated landscape for seed ", my.seed, ".");
+  }
+
+  void handleDiscreteInput() {
+    int key = pollkey();
+    while (key != 0) {
+      if (key == 'q' || key == 'Q' || key == 27) {
+        my.running = false;
+        return;
+      } else if (key == 'n' || key == 'N') {
+        my.regenerate(my.seed + 1);
+      } else if (key == 'p' || key == 'P') {
+        my.regenerate(my.seed - 1);
+      } else if (key == 'r' || key == 'R') {
+        int tickSeed = getticks();
+        if (tickSeed == 0) tickSeed = my.seed + 7;
+        my.regenerate(tickSeed);
+      }
+      key = pollkey();
+    }
+
+  }
+
+  void drawTerrain() {
+    if (my.useFastTerrain) {
+      landscapedrawterrain(my.vertexHeights,
+                           my.vertexColorR,
+                           my.vertexColorG,
+                           my.vertexColorB,
+                           my.worldXCoords,
+                           my.worldZCoords,
+                           TerrainSize,
+                           VertexStride);
+      return;
+    }
+    int z = 0;
+    while (z < TerrainSize) {
+      GLBegin("triangle_strip");
+      float worldZ0 = my.worldZCoords[z];
+      float worldZ1 = my.worldZCoords[z + 1];
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
+      int x = 0;
+      while (x <= TerrainSize) {
+        int idx0 = rowIndex + x;
+        int idx1 = nextRowIndex + x;
+        float worldX = my.worldXCoords[x];
+        GLColor3f(my.vertexColorR[idx0], my.vertexColorG[idx0], my.vertexColorB[idx0]);
+        GLVertex3f(worldX, my.vertexHeights[idx0], worldZ0);
+        GLColor3f(my.vertexColorR[idx1], my.vertexColorG[idx1], my.vertexColorB[idx1]);
+        GLVertex3f(worldX, my.vertexHeights[idx1], worldZ1);
+        x = x + 1;
+      }
+      GLEnd();
+      z = z + 1;
+    }
+  }
+
+    void emitWaterVertex(int idx,
+                       int gridX,
+                       int gridZ,
+                       float groundHeight,
+                       float basePhase,
+                       float baseSecondary,
+                       float baseSparkle) {
+    float depth = my.waterHeight - groundHeight;
+    if (depth < 0.0) depth = 0.0;
+    if (depth > 6.0) depth = 6.0;
+    float depthFactor = depth / 6.0;
+    float shallow = 1.0 - depthFactor;
+    float ripple = sin(basePhase + my.waterPhaseOffset[idx]) *
+                   (0.08 + 0.04 * depthFactor);
+    float ripple2 = cos(baseSecondary + my.waterSecondaryOffset[idx]) *
+                    (0.05 + 0.05 * depthFactor);
+    float surfaceHeight = my.waterHeight + 0.05 + ripple + ripple2;
+    float worldX = my.worldXCoords[gridX];
+    float worldZ = my.worldZCoords[gridZ];
+    float foam = my.saturate(1.0 - depth * 0.45);
+    float sparkle = 0.02 + 0.06 * sin(baseSparkle + my.waterSparkleOffset[idx]);
+    float r = 0.05 + 0.08 * depthFactor + 0.18 * foam + sparkle * shallow * 0.4;
+    float g = 0.34 + 0.30 * depthFactor + 0.26 * foam + sparkle * shallow * 0.5;
+    float b = 0.55 + 0.32 * depthFactor + 0.22 * foam + sparkle * 0.6;
+    r = my.saturate(r);
+    g = my.saturate(g);
+    b = my.saturate(b);
+    GLColor3f(r, g, b);
+    GLVertex3f(worldX, surfaceHeight, worldZ);
+  }
+
+  void drawWater(float timeSeconds) {
+    if (my.useFastWater) {
+      landscapedrawwater(my.vertexHeights,
+                         my.worldXCoords,
+                         my.worldZCoords,
+                         my.waterPhaseOffset,
+                         my.waterSecondaryOffset,
+                         my.waterSparkleOffset,
+                         my.waterHeight,
+                         timeSeconds,
+                         TerrainSize,
+                         VertexStride);
+      return;
+    }
+    float allowance = 0.18;
+    float maxWaterHeight = my.waterHeight + allowance;
+    float basePhase = timeSeconds * 0.7;
+    float baseSecondary = timeSeconds * 1.6;
+    float baseSparkle = timeSeconds * 2.4;
+    GLBegin("triangles");
+    int z = 0;
+    while (z < TerrainSize) {
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
+      int x = 0;
+      while (x < TerrainSize) {
+        int idx00 = rowIndex + x;
+        int idx10 = rowIndex + x + 1;
+        int idx01 = nextRowIndex + x;
+        int idx11 = nextRowIndex + x + 1;
+        float h00 = my.vertexHeights[idx00];
+        float h10 = my.vertexHeights[idx10];
+        float h01 = my.vertexHeights[idx01];
+        float h11 = my.vertexHeights[idx11];
+        if (h00 <= maxWaterHeight &&
+            h10 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx00, x, z, h00, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
         }
-        if (mse_y < 0) {
-            mse_y = 0;
+        if (h10 <= maxWaterHeight &&
+            h11 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx11, x + 1, z + 1, h11, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
         }
-        if (gSdlWidth > 0 && mse_x >= gSdlWidth) mse_x = gSdlWidth - 1;
-        if (gSdlHeight > 0 && mse_y >= gSdlHeight) mse_y = gSdlHeight - 1;
+        x = x + 1;
+      }
+      z = z + 1;
     }
-#endif
-
-    // Ignore buttons if the window is not focused or the pointer is outside it.
-    if (!inside_window || !has_focus) {
-        sdl_buttons = 0;
-    }
-    
-    int pscal_buttons = 0;
-    if (sdl_buttons & SDL_BUTTON_LMASK) pscal_buttons |= 1;
-    if (sdl_buttons & SDL_BUTTON_MMASK) pscal_buttons |= 2;
-    if (sdl_buttons & SDL_BUTTON_RMASK) pscal_buttons |= 4;
-
-    // Safely assign the retrieved values
-    freeValue(x_ptr);
-    *x_ptr = makeInt(mse_x);
-
-    freeValue(y_ptr);
-    *y_ptr = makeInt(mse_y);
-
-    freeValue(buttons_ptr);
-    *buttons_ptr = makeInt(pscal_buttons);
-
-    if (inside_ptr) {
-        freeValue(inside_ptr);
-        *inside_ptr = makeBoolean(inside_window && has_focus);
-    }
-
-    return makeVoid();
-}
-
-Value vmBuiltinDestroytexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
-    int textureID = (int)AS_INTEGER(args[0]);
-    if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
-        SDL_DestroyTexture(gSdlTextures[textureID]);
-        gSdlTextures[textureID] = NULL;
-    }
-    return makeVoid();
-}
-
-Value vmBuiltinRendercopyrect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 5) {
-        fprintf(stderr, "Runtime error: RenderCopyRect expects 5 arguments.\n");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopyRect.\n");
-        return makeVoid();
-    }
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
-        !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
-        fprintf(stderr, "Runtime error: RenderCopyRect expects integer arguments (TextureID, DestX, DestY, DestW, DestH).\n");
-        return makeVoid();
-    }
-    int textureID = (int)AS_INTEGER(args[0]);
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || !gSdlTextures[textureID]) {
-        fprintf(stderr, "Runtime error: RenderCopyRect called with invalid TextureID.\n");
-        return makeVoid();
-    }
-    SDL_Rect dstRect = { (int)AS_INTEGER(args[1]), (int)AS_INTEGER(args[2]), (int)AS_INTEGER(args[3]), (int)AS_INTEGER(args[4]) };
-    SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, &dstRect);
-    return makeVoid();
-}
-
-Value vmBuiltinSetalphablend(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_BOOLEAN) { runtimeError(vm, "SetAlphaBlend expects 1 boolean argument."); return makeVoid(); }
-    SDL_BlendMode mode = AS_BOOLEAN(args[0]) ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE;
-    if (gSdlRenderer) SDL_SetRenderDrawBlendMode(gSdlRenderer, mode);
-    return makeVoid();
-}
-
-Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 4) { runtimeError(vm, "RenderTextToTexture expects 4 arguments."); return makeInt(-1); }
-    if (!gSdlFont) { runtimeError(vm, "Font not initialized for RenderTextToTexture."); return makeInt(-1); }
-
-    const char* text = AS_STRING(args[0]);
-    SDL_Color color = { (Uint8)AS_INTEGER(args[1]), (Uint8)AS_INTEGER(args[2]), (Uint8)AS_INTEGER(args[3]), 255 };
-    
-    SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text, color);
-    if (!surf) return makeInt(-1);
-
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
-    SDL_FreeSurface(surf);
-    if (!tex) return makeInt(-1);
-
-    int free_slot = -1;
-    for(int i = 0; i < MAX_SDL_TEXTURES; i++) { if (!gSdlTextures[i]) { free_slot = i; break; } }
-    if (free_slot == -1) { SDL_DestroyTexture(tex); return makeInt(-1); }
-
-    gSdlTextures[free_slot] = tex;
-    SDL_QueryTexture(tex, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-
-    return makeInt(free_slot);
-}
-
-Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) {
-        runtimeError(vm, "InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        runtimeError(vm, "Graphics system not initialized before InitTextSystem.");
-        return makeVoid();
-    }
-    // Lazy Initialize SDL_ttf if not already done
-    if (!gSdlTtfInitialized) {
-        if (TTF_Init() == -1) {
-            runtimeError(vm, "SDL_ttf system initialization failed: %s", TTF_GetError());
-            return makeVoid();
-        }
-        gSdlTtfInitialized = true;
-    }
-
-    // Get arguments from the args array
-    Value fontNameVal = args[0];
-    Value fontSizeVal = args[1];
-
-    if (fontNameVal.type != TYPE_STRING || !isIntlikeType(fontSizeVal.type)) {
-        runtimeError(vm, "InitTextSystem argument type mismatch. Expected (String, Integer).");
-        return makeVoid(); // Don't free args, they are on the VM stack
-    }
-
-    const char* font_path = fontNameVal.s_val;
-    int font_size = (int)AS_INTEGER(fontSizeVal);
-
-    // Close previous font if one was loaded
-    if (gSdlFont) {
-        TTF_CloseFont(gSdlFont);
-        gSdlFont = NULL;
-    }
-
-    gSdlFont = TTF_OpenFont(font_path, font_size);
-    if (!gSdlFont) {
-        runtimeError(vm, "Failed to load font '%s': %s", font_path, TTF_GetError());
-        return makeVoid();
-    }
-    gSdlFontSize = font_size;
-
-    return makeVoid();
-}
-
-Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "CreateTargetTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before CreateTargetTexture."); return makeInt(-1); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "CreateTargetTexture arguments must be integers."); return makeInt(-1); }
-
-    int width = (int)AS_INTEGER(args[0]);
-    int height = (int)AS_INTEGER(args[1]);
-
-    if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTargetTexture dimensions must be positive."); return makeInt(-1); }
-
-    int textureID = findFreeTextureID();
-    if (textureID == -1) { runtimeError(vm, "Maximum number of textures reached."); return makeInt(-1); }
-
-    SDL_Texture* newTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
-    if (!newTexture) { runtimeError(vm, "SDL_CreateTexture (for target) failed: %s", SDL_GetError()); return makeInt(-1); }
-
-    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
-
-    gSdlTextures[textureID] = newTexture;
-    gSdlTextureWidths[textureID] = width;
-    gSdlTextureHeights[textureID] = height;
-    return makeInt(textureID);
-}
-
-Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "CreateTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before CreateTexture."); return makeInt(-1); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "CreateTexture arguments must be integers."); return makeInt(-1); }
-
-    int width = (int)AS_INTEGER(args[0]);
-    int height = (int)AS_INTEGER(args[1]);
-
-    if (width <= 0 || height <= 0) { runtimeError(vm, "CreateTexture dimensions must be positive."); return makeInt(-1); }
-
-    int textureID = findFreeTextureID();
-    if (textureID == -1) { runtimeError(vm, "Maximum number of textures reached."); return makeInt(-1); }
-
-    SDL_Texture* newTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
-    if (!newTexture) { runtimeError(vm, "SDL_CreateTexture failed: %s", SDL_GetError()); return makeInt(-1); }
-
-    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
-
-    gSdlTextures[textureID] = newTexture;
-    gSdlTextureWidths[textureID] = width;
-    gSdlTextureHeights[textureID] = height;
-    return makeInt(textureID);
-}
-
-Value vmBuiltinDrawcircle(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) { runtimeError(vm, "DrawCircle arguments must be integers."); return makeVoid(); }
-
-    int centerX = (int)AS_INTEGER(args[0]);
-    int centerY = (int)AS_INTEGER(args[1]);
-    int radius = (int)AS_INTEGER(args[2]);
-
-    if (radius < 0) return makeVoid();
-
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-
-    int x = radius;
-    int y = 0;
-    int err = 0;
-
-    while (x >= y) {
-        SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY + y);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY + y);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX + x, centerY - y);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX - x, centerY - y);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY + x);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY + x);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX + y, centerY - x);
-        SDL_RenderDrawPoint(gSdlRenderer, centerX - y, centerY - x);
-        if (err <= 0) {
-            y += 1;
-            err += 2*y + 1;
-        }
-        if (err > 0) {
-            x -= 1;
-            err -= 2*x + 1;
-        }
-    }
-    return makeVoid();
-}
-
-Value vmBuiltinDrawline(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 4) { runtimeError(vm, "DrawLine expects 4 integer arguments (x1, y1, x2, y2)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawLine."); return makeVoid(); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) ||
-        !IS_INTLIKE(args[2]) || !IS_INTLIKE(args[3])) { runtimeError(vm, "DrawLine arguments must be integers."); return makeVoid(); }
-
-    int x1 = (int)AS_INTEGER(args[0]);
-    int y1 = (int)AS_INTEGER(args[1]);
-    int x2 = (int)AS_INTEGER(args[2]);
-    int y2 = (int)AS_INTEGER(args[3]);
-
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    SDL_RenderDrawLine(gSdlRenderer, x1, y1, x2, y2);
-    return makeVoid();
-}
-
-Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) { runtimeError(vm, "DrawPolygon expects 2 arguments (PointsArray, NumPoints)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for DrawPolygon."); return makeVoid(); }
-
-    if (args[0].type != TYPE_ARRAY || !IS_INTLIKE(args[1])) { runtimeError(vm, "DrawPolygon argument type mismatch."); return makeVoid(); }
-    if (args[0].element_type != TYPE_RECORD) { runtimeError(vm, "DrawPolygon Points argument must be an ARRAY OF PointRecord."); return makeVoid(); }
-
-    int numPoints = (int)AS_INTEGER(args[1]);
-    if (numPoints < 2) return makeVoid();
-
-    int total_elements_in_pascal_array = 1;
-    for(int i=0; i < args[0].dimensions; ++i) { total_elements_in_pascal_array *= (args[0].upper_bounds[i] - args[0].lower_bounds[i] + 1); }
-    if (numPoints > total_elements_in_pascal_array) { runtimeError(vm, "NumPoints exceeds actual size of Pscal PointsArray."); return makeVoid(); }
-
-    SDL_Point* sdlPoints = malloc(sizeof(SDL_Point) * (numPoints + 1));
-    if (!sdlPoints) { runtimeError(vm, "Memory allocation failed for SDL_Point array in DrawPolygon."); return makeVoid(); }
-
-    for (int i = 0; i < numPoints; i++) {
-        Value recordValue = args[0].array_val[i];
-        if (recordValue.type != TYPE_RECORD || !recordValue.record_val) { runtimeError(vm, "Element in PointsArray is not a valid PointRecord."); free(sdlPoints); return makeVoid(); }
-        FieldValue* fieldX = recordValue.record_val;
-        FieldValue* fieldY = fieldX ? fieldX->next : NULL;
-
-        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && isIntlikeType(fieldX->value.type) &&
-            fieldY && strcasecmp(fieldY->name, "y") == 0 && isIntlikeType(fieldY->value.type)) {
-            sdlPoints[i].x = (int)AS_INTEGER(fieldX->value);
-            sdlPoints[i].y = (int)AS_INTEGER(fieldY->value);
-        } else { runtimeError(vm, "PointRecord does not have correct X,Y integer fields."); free(sdlPoints); return makeVoid(); }
-    }
-
-    if (numPoints > 1) { sdlPoints[numPoints] = sdlPoints[0]; } // Close the polygon
-
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    SDL_RenderDrawLines(gSdlRenderer, sdlPoints, numPoints > 1 ? numPoints + 1 : numPoints);
-
-    free(sdlPoints);
-    return makeVoid();
-}
-
-Value vmBuiltinDrawrect(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 4) { runtimeError(vm, "DrawRect expects 4 integer arguments (X1, Y1, X2, Y2)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawRect."); return makeVoid(); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) ||
-        !IS_INTLIKE(args[2]) || !IS_INTLIKE(args[3])) { runtimeError(vm, "DrawRect arguments must be integers."); return makeVoid(); }
-
-    int x1 = (int)AS_INTEGER(args[0]);
-    int y1 = (int)AS_INTEGER(args[1]);
-    int x2 = (int)AS_INTEGER(args[2]);
-    int y2 = (int)AS_INTEGER(args[3]);
-
-    SDL_Rect rect;
-    rect.x = (x1 < x2) ? x1 : x2;
-    rect.y = (y1 < y2) ? y1 : y2;
-    rect.w = abs(x2 - x1) + 1;
-    rect.h = abs(y2 - y1) + 1;
-
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    SDL_RenderDrawRect(gSdlRenderer, &rect);
-    return makeVoid();
-}
-
-Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 6) { runtimeError(vm, "GetPixelColor expects 6 arguments (X, Y: Integer; var R, G, B, A: Byte)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for GetPixelColor."); return makeVoid(); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) { runtimeError(vm, "GetPixelColor X,Y coordinates must be integers."); return makeVoid(); }
-
-    if (args[2].type != TYPE_POINTER || args[3].type != TYPE_POINTER ||
-        args[4].type != TYPE_POINTER || args[5].type != TYPE_POINTER) { runtimeError(vm, "GetPixelColor R,G,B,A parameters must be VAR Byte."); return makeVoid(); }
-
-    int x = (int)AS_INTEGER(args[0]);
-    int y = (int)AS_INTEGER(args[1]);
-
-    Value* r_ptr = (Value*)args[2].ptr_val;
-    Value* g_ptr = (Value*)args[3].ptr_val;
-    Value* b_ptr = (Value*)args[4].ptr_val;
-    Value* a_ptr = (Value*)args[5].ptr_val;
-
-    if (!r_ptr || !g_ptr || !b_ptr || !a_ptr) { runtimeError(vm, "Null pointer for RGBA output in GetPixelColor."); return makeVoid(); }
-
-    SDL_Rect pixelRect = {x, y, 1, 1};
-    Uint8 rgba[4] = {0, 0, 0, 0};
-
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
-    if (!surface) { runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError()); return makeVoid(); }
-
-    if (SDL_RenderReadPixels(gSdlRenderer, &pixelRect, surface->format->format, surface->pixels, surface->pitch) != 0) {
-        runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
-        SDL_FreeSurface(surface);
-        return makeVoid();
-    }
-
-    Uint32 pixelValue = ((Uint32*)surface->pixels)[0];
-    SDL_GetRGBA(pixelValue, surface->format, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
-
-    SDL_FreeSurface(surface);
-
-    freeValue(r_ptr); *r_ptr = makeByte(rgba[0]);
-    freeValue(g_ptr); *g_ptr = makeByte(rgba[1]);
-    freeValue(b_ptr); *b_ptr = makeByte(rgba[2]);
-    freeValue(a_ptr); *a_ptr = makeByte(rgba[3]);
-
-    return makeVoid();
-}
-
-Value vmBuiltinLoadimagetotexture(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "LoadImageToTexture expects 1 argument (FilePath: String)."); return makeInt(-1); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before LoadImageToTexture."); return makeInt(-1); }
-
-    if (!gSdlImageInitialized) {
-        int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
-        if (!(IMG_Init(imgFlags) & imgFlags)) { runtimeError(vm, "SDL_image initialization failed: %s", IMG_GetError()); return makeInt(-1); }
-        gSdlImageInitialized = true;
-    }
-
-    const char* filePath = args[0].s_val;
-    int free_slot = findFreeTextureID();
-    if (free_slot == -1) { runtimeError(vm, "No free texture slots available for LoadImageToTexture."); return makeInt(-1); }
-
-    SDL_Texture* newTexture = IMG_LoadTexture(gSdlRenderer, filePath);
-    if (!newTexture) { runtimeError(vm, "Failed to load image '%s' as texture: %s", filePath, IMG_GetError()); return makeInt(-1); }
-
-    gSdlTextures[free_slot] = newTexture;
-    SDL_QueryTexture(newTexture, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
-    SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
-    return makeInt(free_slot);
-}
-
-Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) { runtimeError(vm, "OutTextXY expects 3 arguments (X, Y: Integer; Text: String)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before OutTextXY."); return makeVoid(); }
-    if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "Text system or font not initialized before OutTextXY."); return makeVoid(); }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING) { runtimeError(vm, "OutTextXY argument type mismatch."); return makeVoid(); }
-
-    int x = (int)AS_INTEGER(args[0]);
-    int y = (int)AS_INTEGER(args[1]);
-    const char* text_to_render = args[2].s_val ? args[2].s_val : "";
-
-    SDL_Surface* textSurface = TTF_RenderUTF8_Solid(gSdlFont, text_to_render, gSdlCurrentColor);
-    if (!textSurface) { runtimeError(vm, "TTF_RenderUTF8_Solid failed in OutTextXY: %s", TTF_GetError()); return makeVoid(); }
-
-    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(gSdlRenderer, textSurface);
-    if (!textTexture) { SDL_FreeSurface(textSurface); runtimeError(vm, "SDL_CreateTextureFromSurface failed in OutTextXY: %s", SDL_GetError()); return makeVoid(); }
-
-    SDL_Rect destRect = { x, y, textSurface->w, textSurface->h };
-    SDL_RenderCopy(gSdlRenderer, textTexture, NULL, &destRect);
-
-    SDL_DestroyTexture(textTexture);
-    SDL_FreeSurface(textSurface);
-    return makeVoid();
-}
-
-Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        fprintf(stderr, "Runtime error: RenderCopy expects 1 argument (TextureID: Integer).\n");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        fprintf(stderr, "Runtime error: Graphics not initialized before RenderCopy.\n");
-        return makeVoid();
-    }
-
-    int textureID = (int)AS_INTEGER(args[0]);
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
-        fprintf(stderr, "Runtime error: RenderCopy called with invalid TextureID.\n");
-        return makeVoid();
-    }
-
-    SDL_RenderCopy(gSdlRenderer, gSdlTextures[textureID], NULL, NULL);
-    return makeVoid();
-}
-
-Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 13) {
-        fprintf(stderr, "Runtime error: RenderCopyEx expects 13 arguments.\n");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        fprintf(stderr, "Runtime error: Graphics mode not initialized before RenderCopyEx.\n");
-        return makeVoid();
-    }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2]) ||
-        !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4]) || !IS_INTLIKE(args[5]) ||
-        !IS_INTLIKE(args[6]) || !IS_INTLIKE(args[7]) || !IS_INTLIKE(args[8]) ||
-        !isRealType(args[9].type) || !IS_INTLIKE(args[10]) || !IS_INTLIKE(args[11]) ||
-        !IS_INTLIKE(args[12])) {
-        fprintf(stderr, "Runtime error: RenderCopyEx argument type mismatch. Expected (Int,Int,Int,Int,Int,Int,Int,Int,Int,Real,Int,Int,Int).\n");
-        return makeVoid();
-    }
-
-    int textureID = (int)AS_INTEGER(args[0]);
-    if (textureID < 0 || textureID >= MAX_SDL_TEXTURES || gSdlTextures[textureID] == NULL) {
-        fprintf(stderr, "Runtime error: RenderCopyEx called with invalid or unloaded TextureID.\n");
-        return makeVoid();
-    }
-    SDL_Texture* texture = gSdlTextures[textureID];
-
-    SDL_Rect srcRect = { (int)AS_INTEGER(args[1]), (int)AS_INTEGER(args[2]), (int)AS_INTEGER(args[3]), (int)AS_INTEGER(args[4]) };
-    SDL_Rect* srcRectPtr = (srcRect.w > 0 && srcRect.h > 0) ? &srcRect : NULL;
-
-    SDL_Rect dstRect = { (int)AS_INTEGER(args[5]), (int)AS_INTEGER(args[6]), (int)AS_INTEGER(args[7]), (int)AS_INTEGER(args[8]) };
-
-    double angle_degrees = (double)AS_REAL(args[9]);
-
-    SDL_Point rotationCenter;
-    SDL_Point* centerPtr = NULL;
-    int pscalRotX = (int)AS_INTEGER(args[10]);
-    int pscalRotY = (int)AS_INTEGER(args[11]);
-
-    if (pscalRotX >= 0 && pscalRotY >= 0) {
-        rotationCenter.x = pscalRotX;
-        rotationCenter.y = pscalRotY;
-        centerPtr = &rotationCenter;
-    }
-
-    SDL_RendererFlip sdl_flip = SDL_FLIP_NONE;
-    int flipMode = (int)AS_INTEGER(args[12]);
-    if (flipMode == 1) sdl_flip = SDL_FLIP_HORIZONTAL;
-    else if (flipMode == 2) sdl_flip = SDL_FLIP_VERTICAL;
-    else if (flipMode == 3) sdl_flip = (SDL_RendererFlip)(SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL);
-
-    SDL_RenderCopyEx(gSdlRenderer, texture, srcRectPtr, &dstRect, angle_degrees, centerPtr, sdl_flip);
-    return makeVoid();
-}
-
-Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || (!IS_INTLIKE(args[0]) && args[0].type != TYPE_BYTE)) {
-        runtimeError(vm, "SetColor expects 1 argument (color index 0-255).");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before SetColor."); return makeVoid(); }
-
-    long long colorCode = AS_INTEGER(args[0]);
-
-    if (colorCode >= 0 && colorCode <= 15) {
-         unsigned char intensity = (colorCode > 7) ? 255 : 192;
-         gSdlCurrentColor.r = (colorCode & 4) ? intensity : 0;
-         gSdlCurrentColor.g = (colorCode & 2) ? intensity : 0;
-         gSdlCurrentColor.b = (colorCode & 1) ? intensity : 0;
-         if (colorCode == 6) { gSdlCurrentColor.g = intensity / 2; }
-         if (colorCode == 7 || colorCode == 15) { gSdlCurrentColor.r=intensity; gSdlCurrentColor.g=intensity; gSdlCurrentColor.b=intensity; }
-         if (colorCode == 8) {gSdlCurrentColor.r = 128; gSdlCurrentColor.g = 128; gSdlCurrentColor.b = 128;}
-         if (colorCode == 0) {gSdlCurrentColor.r = 0; gSdlCurrentColor.g = 0; gSdlCurrentColor.b = 0;}
+    GLEnd();
+  }
+
+  void updateCamera(float dt) {
+    if (dt > 0.1) dt = 0.1;
+    int mouseX = 0;
+    int mouseY = 0;
+    int mouseButtons = 0;
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    bool insideWindow = mouseInside != 0;
+    if (!insideWindow) {
+      my.hasMouseSample = false;
+    } else if (!my.hasMouseSample) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
     } else {
-         int c = (int)(colorCode % 256);
-         gSdlCurrentColor.r = (c * 3) % 256;
-         gSdlCurrentColor.g = (c * 5) % 256;
-         gSdlCurrentColor.b = (c * 7) % 256;
-    }
-    gSdlCurrentColor.a = 255;
-
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-
-    return makeVoid();
-}
-
-Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before SetRenderTarget."); return makeVoid(); }
-
-    int textureID = (int)AS_INTEGER(args[0]);
-
-    SDL_Texture* targetTexture = NULL;
-    if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID] != NULL) {
-        Uint32 format;
-        int access;
-        int w, h;
-        if (SDL_QueryTexture(gSdlTextures[textureID], &format, &access, &w, &h) == 0) {
-            if (access == SDL_TEXTUREACCESS_TARGET) {
-                targetTexture = gSdlTextures[textureID];
-            } else {
-                runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
-            }
-        } else { runtimeError(vm, "Could not query texture %d for SetRenderTarget: %s", textureID, SDL_GetError()); }
-    } else if (textureID >= MAX_SDL_TEXTURES || (textureID >=0 && gSdlTextures[textureID] == NULL)) {
-        runtimeError(vm, "Invalid TextureID %d passed to SetRenderTarget. Defaulting to screen.", textureID);
-    }
-
-    SDL_SetRenderTarget(gSdlRenderer, targetTexture);
-    return makeVoid();
-}
-
-Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) {
-        runtimeError(vm, "IsKeyDown expects exactly 1 argument (string name or key code).");
-        return makeBoolean(false);
-    }
-    if (!gSdlInitialized || !gSdlWindow) {
-        runtimeError(vm, "Graphics mode not initialized before IsKeyDown.");
-        return makeBoolean(false);
-    }
-
-    bool ok = false;
-    SDL_Scancode sc = resolveScancodeFromValue(args[0], &ok);
-    if (!ok || sc == SDL_SCANCODE_UNKNOWN || sc < 0 || sc >= SDL_NUM_SCANCODES) {
-        runtimeError(vm, "IsKeyDown argument did not resolve to a valid SDL scancode.");
-        return makeBoolean(false);
-    }
-
-    sdlEnsureInputWatch();
-    SDL_PumpEvents();
-
-    return makeBoolean(sdlCachedKeyDown(sc));
-}
-
-Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "PollKey expects 0 arguments.");
-        return makeInt(0);
-    }
-    if (!gSdlInitialized || !gSdlWindow) {
-        runtimeError(vm, "Graphics mode not initialized before PollKey.");
-        return makeInt(0);
-    }
-
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) {
-            break_requested = 1;
-            return makeInt(0);
-        } else if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
-                break_requested = 1;
-            }
-            return makeInt((int)event.key.keysym.sym);
+      int deltaX = mouseX - my.lastMouseX;
+      int deltaY = mouseY - my.lastMouseY;
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      if (deltaX != 0 || deltaY != 0) {
+        int maxDeltaX = WindowWidth / 2;
+        int maxDeltaY = WindowHeight / 2;
+        if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
+            deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
+          my.yaw = my.yaw - deltaX * MouseYawSensitivity;
+          my.pitch = my.pitch - deltaY * MousePitchSensitivity;
         }
+      }
     }
-    return makeInt(0);
+
+    bool forward = IsKeyDown(ScanCodeW);
+    bool backward = IsKeyDown(ScanCodeS);
+
+    float moveForward = 0.0;
+    if (forward) moveForward = moveForward + 1.0;
+    if (backward) moveForward = moveForward - 1.0;
+    if (moveForward != 0.0) {
+      float speed = MoveSpeed * dt * moveForward;
+      float yawRadians = my.yaw * DegreesToRadians;
+      float pitchRadians = my.pitch * DegreesToRadians;
+      float forwardX = sin(yawRadians) * cos(pitchRadians);
+      float forwardZ = cos(yawRadians) * cos(pitchRadians);
+      float forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      if (forwardLen < 0.0001) {
+        forwardX = sin(yawRadians);
+        forwardZ = cos(yawRadians);
+        forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      }
+      if (forwardLen > 0.0001) {
+        forwardX = forwardX / forwardLen;
+        forwardZ = forwardZ / forwardLen;
+      }
+      float deltaX = forwardX * (speed / TileScale);
+      float deltaZ = forwardZ * (speed / TileScale);
+      my.camX = my.camX + deltaX;
+      my.camZ = my.camZ + deltaZ;
+    }
+
+    if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
+    if (my.yaw < 0.0) my.yaw = my.yaw + 360.0;
+    if (my.pitch > MaxPitch) my.pitch = MaxPitch;
+    if (my.pitch < -MaxPitch) my.pitch = -MaxPitch;
+
+    if (my.camX < 1.0) my.camX = 1.0;
+    if (my.camX > TerrainSize - 1) my.camX = TerrainSize - 1;
+    if (my.camZ < 1.0) my.camZ = 1.0;
+    if (my.camZ > TerrainSize - 1) my.camZ = TerrainSize - 1;
+
+    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+  }
+
+  void drawFrame() {
+    GLClearColor(0.36, 0.55, 0.78, 1.0);
+    GLClear();
+
+    GLMatrixMode("projection");
+    GLLoadIdentity();
+    float aspect = WindowWidth / float(WindowHeight);
+    GLPerspective(68.0, aspect, 0.1, 320.0);
+
+    GLMatrixMode("modelview");
+    GLLoadIdentity();
+    GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
+    GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
+    my.drawSky(my.elapsedSeconds);
+    float half = TerrainSize * 0.5;
+    float worldX = (my.camX - half) * TileScale;
+    float worldZ = (my.camZ - half) * TileScale;
+    GLTranslatef(-worldX, -my.camY, -worldZ);
+
+    my.drawTerrain();
+    my.drawWater(my.elapsedSeconds);
+    GLSwapWindow();
+  }
+
+  void run() {
+    my.initGraphics();
+    my.lastTicks = getticks();
+    while (my.running) {
+      my.handleDiscreteInput();
+      if (QuitRequested()) break;
+      int now = getticks();
+      float dt = (now - my.lastTicks) / 1000.0;
+      my.lastTicks = now;
+      if (dt < 0.0) dt = 0.0;
+      my.updateCamera(dt);
+      my.elapsedSeconds = my.elapsedSeconds + dt;
+      my.drawFrame();
+      GraphLoop(1);
+    }
+    CloseGraph3D();
+  }
 }
 
-Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
-    if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
-
-    SDL_Event event;
-    int waiting = 1;
-    while (waiting) {
-        if (SDL_WaitEvent(&event)) {
-            if (event.type == SDL_QUIT) { waiting = 0; }
-            else if (event.type == SDL_KEYDOWN) { waiting = 0; }
-        } else {
-            runtimeError(vm, "SDL_WaitEvent failed: %s", SDL_GetError());
-            waiting = 0;
-        }
-    }
-    return makeVoid();
+int main() {
+  int defaultSeed = 1337;
+  int seed = extractSeedFromArgs(defaultSeed);
+  printf("\nCalculating initial values.  This make take a bit.\n");
+  LandscapeDemo demo = new LandscapeDemo(seed);
+  demo.run();
+  return 0;
 }
-
-Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) {
-        runtimeError(vm, "FillCircle expects 3 integer arguments (CenterX, CenterY, Radius).");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        runtimeError(vm, "Graphics mode not initialized before FillCircle.");
-        return makeVoid();
-    }
-
-    // Accept either integer or real arguments and coerce to integers.
-    // Some front ends (e.g. the clike compiler) may supply real values
-    // when calling fillcircle.  Previously this triggered a runtime
-    // error and nothing was drawn.  To make the builtin more forgiving
-    // we transparently truncate real arguments to integers.
-    int centerX, centerY, radius;
-    if (IS_INTLIKE(args[0])) {
-        centerX = (int)AS_INTEGER(args[0]);
-    } else if (isRealType(args[0].type)) {
-        centerX = (int)AS_REAL(args[0]);
-    } else {
-        runtimeError(vm, "FillCircle argument 1 must be numeric.");
-        return makeVoid();
-    }
-
-    if (IS_INTLIKE(args[1])) {
-        centerY = (int)AS_INTEGER(args[1]);
-    } else if (isRealType(args[1].type)) {
-        centerY = (int)AS_REAL(args[1]);
-    } else {
-        runtimeError(vm, "FillCircle argument 2 must be numeric.");
-        return makeVoid();
-    }
-
-    if (IS_INTLIKE(args[2])) {
-        radius = (int)AS_INTEGER(args[2]);
-    } else if (isRealType(args[2].type)) {
-        radius = (int)AS_REAL(args[2]);
-    } else {
-        runtimeError(vm, "FillCircle argument 3 must be numeric.");
-        return makeVoid();
-    }
-
-    if (radius < 0) return makeVoid();
-
-    // Set the draw color from the global state
-    SDL_SetRenderDrawColor(
-        gSdlRenderer,
-        gSdlCurrentColor.r,
-        gSdlCurrentColor.g,
-        gSdlCurrentColor.b,
-        gSdlCurrentColor.a);
-
-    /*
-     * Previous implementation used horizontal lines with sqrt/floor to
-     * compute the circle span.  On some platforms this produced rounding
-     * issues that resulted in nothing being rendered for small radii.  The
-     * implementation below simply iterates over a bounding box and plots
-     * any point that falls inside the circle (dx*dx + dy*dy <= r^2).  This
-     * is a little more brute force but guarantees that every pixel inside
-     * the circle is touched, making the balls visible on all systems.
-     */
-    int r2 = radius * radius;
-    for (int dy = -radius; dy <= radius; ++dy) {
-        for (int dx = -radius; dx <= radius; ++dx) {
-            if (dx * dx + dy * dy <= r2) {
-                SDL_RenderDrawPoint(gSdlRenderer, centerX + dx, centerY + dy);
-            }
-        }
-    }
-
-    return makeVoid();
-}
-
-Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) {
-        runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
-        return makeVoid();
-    }
-    if (!IS_INTLIKE(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
-        runtimeError(vm, "GraphLoop argument must be an integer-like type.");
-        return makeVoid();
-    }
-
-    long long ms = AS_INTEGER(args[0]);
-    if (ms < 0) ms = 0;
-
-    if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
-        Uint32 startTime = SDL_GetTicks();
-        Uint32 targetTime = startTime + (Uint32)ms;
-        SDL_Event event;
-
-        while (SDL_GetTicks() < targetTime) {
-            SDL_PumpEvents();
-
-            /*
-             * Earlier versions of GraphLoop consumed the entire SDL event
-             * queue.  This meant that key press events – including the 'q'
-             * used by many demos to exit – were removed before routines such
-             * as PollKey had a chance to inspect them.  As a result, pressing
-             * 'q' or 'Q' would have no effect.
-             *
-             * Here we only remove SDL_QUIT events (which request application
-             * shutdown) and leave all other events untouched so that front-end
-             * code can process them on the next iteration.
-             */
-            if (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0) {
-                break_requested = 1;
-                return makeVoid();
-            }
-
-            SDL_Delay(1); // Prevent 100% CPU usage
-        }
-    }
-    return makeVoid();
-}
-
-Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2) {
-        runtimeError(vm, "PutPixel expects 2 arguments (X, Y).");
-        return makeVoid();
-    }
-    if (!gSdlInitialized || !gSdlRenderer) {
-        runtimeError(vm, "Graphics mode not initialized before PutPixel.");
-        return makeVoid();
-    }
-
-    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "PutPixel coordinates must be integers.");
-        return makeVoid();
-    }
-
-    int x = (int)AS_INTEGER(args[0]);
-    int y = (int)AS_INTEGER(args[1]);
-
-    // Set the draw color from the global state
-    SDL_SetRenderDrawColor(gSdlRenderer, gSdlCurrentColor.r, gSdlCurrentColor.g, gSdlCurrentColor.b, gSdlCurrentColor.a);
-    
-    // Draw the point
-    SDL_RenderDrawPoint(gSdlRenderer, x, y);
-    
-    return makeVoid();
-}
-#endif
