@@ -38,6 +38,27 @@ int gSdlTextureHeights[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
+static bool gSdlInputWatchInstalled = false;
+
+static int sdlInputWatch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+
+    if (!event) {
+        return 0;
+    }
+
+    if (event->type == SDL_QUIT) {
+        break_requested = 1;
+    } else if (event->type == SDL_KEYDOWN) {
+        SDL_Keycode sym = event->key.keysym.sym;
+        if (sym == SDLK_ESCAPE || sym == SDLK_q || sym == SDLK_Q) {
+            break_requested = 1;
+        }
+    }
+
+    return 0;
+}
+
 static SDL_Scancode resolveScancodeFromName(const char* name) {
     if (!name) {
         return SDL_SCANCODE_UNKNOWN;
@@ -158,6 +179,22 @@ void initializeTextureSystem(void) {
     }
 }
 
+void sdlEnsureInputWatch(void) {
+    if (!gSdlInitialized) {
+        return;
+    }
+
+    if (!gSdlInputWatchInstalled) {
+        if (SDL_AddEventWatch(sdlInputWatch, NULL) == 0) {
+            gSdlInputWatchInstalled = true;
+        } else {
+            #ifdef DEBUG
+            fprintf(stderr, "[DEBUG SDL] Failed to install input event watch: %s\n", SDL_GetError());
+            #endif
+        }
+    }
+}
+
 void cleanupSdlWindowResources(void) {
     if (gSdlGLContext) {
         SDL_GL_DeleteContext(gSdlGLContext);
@@ -266,6 +303,11 @@ void sdlCleanupAtExit(void) {
         }
     }
  */
+    if (gSdlInputWatchInstalled) {
+        SDL_DelEventWatch(sdlInputWatch, NULL);
+        gSdlInputWatchInstalled = false;
+    }
+
     cleanupSdlWindowResources();
     if (gSdlInitialized) {
         SDL_Quit();
