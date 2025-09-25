@@ -113,7 +113,7 @@ int main(void) {
         }
         initSymbolSystemClike();
         clikeRegisterBuiltins();
-        analyzeSemanticsClike(prog);
+        analyzeSemanticsClike(prog, NULL);
 
         if (!verifyASTClikeLinks(prog, NULL)) {
             fprintf(stderr, "AST verification failed after semantic analysis.\n");

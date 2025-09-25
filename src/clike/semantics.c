@@ -1074,7 +1074,7 @@ static void analyzeFunction(ASTNodeClike *func) {
     while (scopes.depth > 0) ssPop(&scopes);
 }
 
-void analyzeSemanticsClike(ASTNodeClike *program) {
+void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
     if (!program) return;
     functionCount = 0;
     registerBuiltinFunctions();
@@ -1092,6 +1092,12 @@ void analyzeSemanticsClike(ASTNodeClike *program) {
 
     for (int i = 0; i < clike_import_count; ++i) {
         const char *orig_path = clike_imports[i];
+        if (current_path && strcmp(orig_path, current_path) == 0) {
+            modules[i].prog = NULL;
+            modules[i].source = NULL;
+            modules[i].allocated_path = NULL;
+            continue;
+        }
         const char *path = orig_path;
         char *allocated_path = NULL;
         FILE *f = fopen(path, "rb");
