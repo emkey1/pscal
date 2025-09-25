@@ -1033,6 +1033,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
 }
 
 static void analyzeFunction(ASTNodeClike *func) {
+    if (!func || !func->right) return;
     ScopeStack scopes = {0};
 
     // Global scope available to all functions
