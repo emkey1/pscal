@@ -55,7 +55,7 @@ void bar(int left, int top, int right, int bottom) {
   }
   int y = top;
   while (y <= bottom) {
-    line(left, y, right, y);
+    drawline(left, y, right, y);
     y = y + 1;
   }
 }
@@ -109,15 +109,15 @@ void drawFrameOverlay() {
   setrgbcolor(18, 28, 42);
   bar(left, top, right, bottom);
   setrgbcolor(64, 84, 120);
-  line(left, top, right, top);
-  line(right, top, right, bottom);
-  line(right, bottom, left, bottom);
-  line(left, bottom, left, top);
+  drawline(left, top, right, top);
+  drawline(right, top, right, bottom);
+  drawline(right, bottom, left, bottom);
+  drawline(left, bottom, left, top);
   setrgbcolor(110, 130, 170);
-  line(left, top, left + 120, top - 36);
-  line(right, top, right + 120, top - 36);
-  line(right, bottom, right + 120, bottom + 36);
-  line(left, bottom, left + 120, bottom + 36);
+  drawline(left, top, left + 120, top - 36);
+  drawline(right, top, right + 120, top - 36);
+  drawline(right, bottom, right + 120, bottom + 36);
+  drawline(left, bottom, left + 120, bottom + 36);
 }
 
 void drawBalls() {
