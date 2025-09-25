@@ -1211,7 +1211,16 @@ Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
     sdlEnsureInputWatch();
     SDL_PumpEvents();
 
-    return makeBoolean(sdlCachedKeyDown(sc));
+    const Uint8* keyboardState = SDL_GetKeyboardState(NULL);
+    bool isDown = false;
+    if (keyboardState) {
+        isDown = keyboardState[sc] != 0;
+        gSdlKeyState[sc] = isDown ? 1 : 0;
+    } else {
+        isDown = sdlCachedKeyDown(sc);
+    }
+
+    return makeBoolean(isDown);
 }
 
 Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
