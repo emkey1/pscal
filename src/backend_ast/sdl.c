@@ -38,6 +38,69 @@ int gSdlTextureHeights[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
+static bool gSdlInputWatchInstalled = false;
+static Uint8 gSdlKeyState[SDL_NUM_SCANCODES];
+
+static void sdlResetCachedKeyState(void) {
+    memset(gSdlKeyState, 0, sizeof(gSdlKeyState));
+}
+
+static int sdlInputEventWatch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+
+    if (!event) {
+        return 1;
+    }
+
+    switch (event->type) {
+        case SDL_KEYDOWN: {
+            SDL_Scancode sc = event->key.keysym.scancode;
+            if (sc >= 0 && sc < SDL_NUM_SCANCODES) {
+                gSdlKeyState[sc] = 1;
+            }
+            break;
+        }
+        case SDL_KEYUP: {
+            SDL_Scancode sc = event->key.keysym.scancode;
+            if (sc >= 0 && sc < SDL_NUM_SCANCODES) {
+                gSdlKeyState[sc] = 0;
+            }
+            break;
+        }
+        case SDL_WINDOWEVENT: {
+            if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
+                event->window.event == SDL_WINDOWEVENT_MINIMIZED) {
+                sdlResetCachedKeyState();
+            }
+            break;
+        }
+        case SDL_QUIT: {
+            sdlResetCachedKeyState();
+            break;
+        }
+        default:
+            break;
+    }
+
+    return 1;
+}
+
+void sdlEnsureInputWatch(void) {
+    if (!gSdlInputWatchInstalled) {
+        sdlResetCachedKeyState();
+        if (SDL_AddEventWatch(sdlInputEventWatch, NULL) == 0) {
+            gSdlInputWatchInstalled = true;
+        }
+    }
+}
+
+bool sdlCachedKeyDown(SDL_Scancode sc) {
+    if (sc < 0 || sc >= SDL_NUM_SCANCODES) {
+        return false;
+    }
+    return gSdlKeyState[sc] != 0;
+}
+
 static SDL_Scancode resolveScancodeFromName(const char* name) {
     if (!name) {
         return SDL_SCANCODE_UNKNOWN;
@@ -186,6 +249,7 @@ void cleanupSdlWindowResources(void) {
     gSdlCurrentColor.g = 255;
     gSdlCurrentColor.b = 255;
     gSdlCurrentColor.a = 255;
+    sdlResetCachedKeyState();
 }
 
 // Helper to find a free texture slot or return an error ID
@@ -336,6 +400,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #if SDL_VERSION_ATLEAST(2,0,5)
     SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
 #endif
+    sdlEnsureInputWatch();
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
@@ -492,13 +557,14 @@ Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) {
-        runtimeError(vm, "GetMouseState expects 3 arguments.");
+    if (arg_count != 3 && arg_count != 4) {
+        runtimeError(vm, "GetMouseState expects 3 or 4 arguments.");
         return makeVoid();
     }
 
     // --- ADD SAFETY CHECKS ---
-    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER || args[2].type != TYPE_POINTER) {
+    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER || args[2].type != TYPE_POINTER ||
+        (arg_count == 4 && args[3].type != TYPE_POINTER)) {
         runtimeError(vm, "GetMouseState requires VAR parameters, but a non-pointer type was received.");
         return makeVoid();
     }
@@ -506,8 +572,12 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     Value* x_ptr = (Value*)args[0].ptr_val;
     Value* y_ptr = (Value*)args[1].ptr_val;
     Value* buttons_ptr = (Value*)args[2].ptr_val;
+    Value* inside_ptr = NULL;
+    if (arg_count == 4) {
+        inside_ptr = (Value*)args[3].ptr_val;
+    }
 
-    if (!x_ptr || !y_ptr || !buttons_ptr) {
+    if (!x_ptr || !y_ptr || !buttons_ptr || (arg_count == 4 && !inside_ptr)) {
         runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
         return makeVoid();
     }
@@ -610,6 +680,11 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
     freeValue(buttons_ptr);
     *buttons_ptr = makeInt(pscal_buttons);
+
+    if (inside_ptr) {
+        freeValue(inside_ptr);
+        *inside_ptr = makeBoolean(inside_window && has_focus);
+    }
 
     return makeVoid();
 }
@@ -1134,14 +1209,10 @@ Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
         return makeBoolean(false);
     }
 
+    sdlEnsureInputWatch();
     SDL_PumpEvents();
-    const Uint8* state = SDL_GetKeyboardState(NULL);
-    if (!state) {
-        runtimeError(vm, "SDL_GetKeyboardState returned NULL.");
-        return makeBoolean(false);
-    }
 
-    return makeBoolean(state[sc] != 0);
+    return makeBoolean(sdlCachedKeyDown(sc));
 }
 
 Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
