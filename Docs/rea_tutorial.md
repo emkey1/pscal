@@ -343,5 +343,5 @@ bytecode disassembly.
   build/bin/rea --no-cache Examples/rea/sdl_multibouncingballs
   ```
 
-  The Rea front end caches compiled chunks under `~/.pscal_cache`. Use `--no-cache`
+  The Rea front end caches compiled chunks under `~/.pscal/bc_cache`. Use `--no-cache`
   during iteration or delete the cache directory to force a fresh compile.

@@ -46,7 +46,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Find source file(s) matching a Pscal cache file."
     )
-    parser.add_argument("cache_file", help="Path to a file in ~/.pscal_cache")
+    parser.add_argument("cache_file", help="Path to a file in ~/.pscal/bc_cache")
 
     root_dir = str(Path("/").resolve())
     parser.add_argument(
