@@ -993,7 +993,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                 ssPush(scopes);
                 analyzeExpr(c->left, scopes);
                 for (int j = 0; j < c->child_count; ++j) {
-                    analyzeScopedStmt(c->children[j], scopes, retType);
+                    analyzeStmt(c->children[j], scopes, retType);
                 }
                 ssPop(scopes);
             }
