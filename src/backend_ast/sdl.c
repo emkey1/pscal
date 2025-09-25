@@ -88,9 +88,8 @@ static int sdlInputEventWatch(void* userdata, SDL_Event* event) {
 void sdlEnsureInputWatch(void) {
     if (!gSdlInputWatchInstalled) {
         sdlResetCachedKeyState();
-        if (SDL_AddEventWatch(sdlInputEventWatch, NULL) == 0) {
-            gSdlInputWatchInstalled = true;
-        }
+        SDL_AddEventWatch(sdlInputEventWatch, NULL);
+        gSdlInputWatchInstalled = true;
     }
 }
 
