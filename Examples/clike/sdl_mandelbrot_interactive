@@ -89,9 +89,14 @@ int tryInitFont(str path, int fontSize) {
  * Sets (clickButton, clickX, clickY) when a new click is found.
  */
 void pollMouse() {
-    int x = 0, y = 0, b = 0;
+    int x = 0, y = 0, b = 0, insideWindow = 0;
     graphloop(1);           /* Pump events */
-    getmousestate(&x, &y, &b);
+    getmousestate(&x, &y, &b, &insideWindow);
+
+    if (!insideWindow) {
+        prevButtons = b;
+        return;
+    }
 
     /* Fresh press detection: bit goes from 0 -> 1 */
     int freshLeft  = ((b & ButtonLeft)  != 0) && ((prevButtons & ButtonLeft)  == 0);

@@ -267,7 +267,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | issoundplaying | (sound: Sound) | Boolean | Query if sound playing. |
 | inittextsystem | (fontPath: String, fontSize: Integer) | void | Initialize text subsystem with a TTF font. |
 | quittextsystem | () | void | Shut down text subsystem. |
-| getmousestate | (var x: Integer, var y: Integer, var buttons: Integer) | void | Query mouse position and buttons. |
+| getmousestate | (var x: Integer, var y: Integer, var buttons: Integer [, var insideWindow: Integer]) | void | Query mouse position and button state. When the optional `insideWindow` VAR parameter is supplied it receives `1` if the cursor is inside the focused window, otherwise `0`. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
 | iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |

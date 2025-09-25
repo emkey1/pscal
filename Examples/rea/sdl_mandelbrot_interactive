@@ -248,7 +248,11 @@ class MandelbrotApp {
     int x = 0;
     int y = 0;
     int b = 0;
-    getmousestate(x, y, b);
+    int inside = 0;
+    getmousestate(x, y, b, inside);
+    if (inside == 0) {
+      b = 0;
+    }
     int winW = getmaxx() + 1;
     int winH = getmaxy() + 1;
     if (winW > 0 && winH > 0) {
