@@ -3,8 +3,8 @@
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
 // the user walk with W/S while steering the camera with the mouse.
 
-const int WindowWidth = 640;
-const int WindowHeight = 480;
+const int WindowWidth = 1280;
+const int WindowHeight = 1024;
 const int TerrainSize = 128
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
@@ -946,8 +946,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeW);
-    bool backward = IsKeyDown(ScanCodeS);
+    bool forward = IsKeyDown(ScanCodeS);
+    bool backward = IsKeyDown(ScanCodeW);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
@@ -1033,6 +1033,7 @@ class LandscapeDemo {
 int main() {
   int defaultSeed = 1337;
   int seed = extractSeedFromArgs(defaultSeed);
+  printf("Calculating initial values.  This make take a bit. \n");
   LandscapeDemo demo = new LandscapeDemo(seed);
   demo.run();
   return 0;

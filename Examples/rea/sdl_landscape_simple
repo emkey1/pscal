@@ -400,8 +400,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeW);
-    bool backward = IsKeyDown(ScanCodeS);
+    bool forward = IsKeyDown(ScanCodeS);
+    bool backward = IsKeyDown(ScanCodeW);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
