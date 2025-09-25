@@ -247,12 +247,16 @@ class LandscapeDemo {
   float waterHeight;
   float waterNormalizedLevel;
   float elapsedSeconds;
+  bool useFastTerrain;
+  bool useFastWater;
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
     my.precomputeWorldCoordinates();
     my.precomputeWaterOffsets();
+    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
     float sunX = 0.45;
@@ -437,6 +441,9 @@ class LandscapeDemo {
     GLDepthTest(true);
     GLSetSwapInterval(1);
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    if (my.useFastTerrain || my.useFastWater) {
+      writeln("Using extended landscape rendering builtins for improved performance.");
+    }
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
@@ -477,6 +484,17 @@ class LandscapeDemo {
   }
 
   void drawTerrain() {
+    if (my.useFastTerrain) {
+      landscapedrawterrain(my.vertexHeights,
+                           my.vertexColorR,
+                           my.vertexColorG,
+                           my.vertexColorB,
+                           my.worldXCoords,
+                           my.worldZCoords,
+                           TerrainSize,
+                           VertexStride);
+      return;
+    }
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
@@ -532,6 +550,19 @@ class LandscapeDemo {
   }
 
   void drawWater(float timeSeconds) {
+    if (my.useFastWater) {
+      landscapedrawwater(my.vertexHeights,
+                         my.worldXCoords,
+                         my.worldZCoords,
+                         my.waterPhaseOffset,
+                         my.waterSecondaryOffset,
+                         my.waterSparkleOffset,
+                         my.waterHeight,
+                         timeSeconds,
+                         TerrainSize,
+                         VertexStride);
+      return;
+    }
     float allowance = 0.18;
     float maxWaterHeight = my.waterHeight + allowance;
     float basePhase = timeSeconds * 0.7;
