@@ -24,6 +24,10 @@
 #define VM_MAX_THREADS 16
 #define VM_MAX_MUTEXES 64
 
+// Flags for the VM write/writeln builtin.
+#define VM_WRITE_FLAG_NEWLINE           0x1
+#define VM_WRITE_FLAG_SUPPRESS_SPACING  0x2
+
 // Forward declaration
 struct VM_s;
 

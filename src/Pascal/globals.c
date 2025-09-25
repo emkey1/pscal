@@ -56,6 +56,8 @@ int gWindowBottom          = 24;
 int break_requested = 0;
 // Flag used by builtin 'exit' to request unwinding the current routine (not program termination).
 int exit_requested = 0;
+int gSuppressWriteSpacing = 0;
+int gUppercaseBooleans = 0;
 // Semantic/type error counter for the Pascal front end
 int pascal_semantic_error_count = 0;
 int pascal_parser_error_count = 0;

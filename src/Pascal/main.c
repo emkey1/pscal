@@ -144,7 +144,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
     }
-    
+
+    gSuppressWriteSpacing = 1;
+    gUppercaseBooleans = 1;
+
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
 #ifdef SDL

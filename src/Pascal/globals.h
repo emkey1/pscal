@@ -78,6 +78,8 @@ extern List *inserted_global_names;
 
 extern int break_requested;
 extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
+extern int gSuppressWriteSpacing; // Non-zero disables automatic spacing between write arguments
+extern int gUppercaseBooleans;    // Non-zero prints TRUE/FALSE instead of true/false
 extern int pascal_semantic_error_count; // Count of semantic/type errors during analysis
 extern int pascal_parser_error_count;   // Count of parser (syntax) errors
 
