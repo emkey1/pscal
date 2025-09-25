@@ -2,9 +2,17 @@
 
 Pscal started out as a Pascal interpreter, written for the most part with the help of various AI's.  Most notably Google's Gemini 2.5 Pro and more recently OpenAI's GPT5 in conjunction with their codex.  It has quickly evolved into a VM with multiple front ends, documented below.
 
-The Pascal front end implements a significant subset of classic Pascal.  The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  Object‑oriented extensions are intentionally avoided, both in the Pascal front end and the pscal code base.
+There are currently three front end languages:
 
-Optional SDL2 support adds graphics and audio capabilities, and built‑in networking routines use libcurl.
+- Pascal: Implements a significant subset of classic Pascal.
+- CLike:  Implements a C like language that has native support for strings and some other enhancements.
+- Rea:    Implements an Object Oriented Programming Language (OOP)
+
+The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  
+
+Optional SDL2 support adds graphics and audio capabilities, and there is built‑in support for CURL, yyjson and SQLite with others easily added.
+
+The PSCAL suite is extensible through extended builtins.  Check the Docs directory for additional details on this.
 
 ## Forum
 - (Discord) https://discord.gg/AZM6D22CCs
