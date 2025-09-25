@@ -235,6 +235,8 @@ class LandscapeDemo {
   int lastMouseX;
   int lastMouseY;
   bool hasMouseSample;
+  bool forwardKeyDown;
+  bool backwardKeyDown;
   float vertexHeights[VertexCount];
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
@@ -299,6 +301,8 @@ class LandscapeDemo {
     my.lastMouseX = 0;
     my.lastMouseY = 0;
     my.hasMouseSample = false;
+    my.forwardKeyDown = false;
+    my.backwardKeyDown = false;
   }
 
   bool tryPrecomputeWorldCoordinates() {
@@ -793,6 +797,8 @@ class LandscapeDemo {
       }
       key = pollkey();
     }
+    my.forwardKeyDown = IsKeyDown(ScanCodeS);
+    my.backwardKeyDown = IsKeyDown(ScanCodeW);
   }
 
   void drawTerrain() {
@@ -946,8 +952,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeS);
-    bool backward = IsKeyDown(ScanCodeW);
+    bool forward = my.forwardKeyDown;
+    bool backward = my.backwardKeyDown;
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
