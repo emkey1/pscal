@@ -29,6 +29,7 @@ float screenX[NumBalls];
 float screenY[NumBalls];
 float screenRadius[NumBalls];
 float depthShade[NumBalls];
+int drawOrder[NumBalls];
 int colorR[NumBalls];
 int colorG[NumBalls];
 int colorB[NumBalls];
@@ -57,6 +58,29 @@ void bar(int left, int top, int right, int bottom) {
   while (y <= bottom) {
     drawline(left, y, right, y);
     y = y + 1;
+  }
+}
+
+void initDrawOrder() {
+  int i = 0;
+  while (i < NumBalls) {
+    drawOrder[i] = i;
+    i = i + 1;
+  }
+}
+
+void sortDrawOrderByDepth() {
+  int i = 1;
+  while (i < NumBalls) {
+    int currentIndex = drawOrder[i];
+    float currentShade = depthShade[currentIndex];
+    int j = i - 1;
+    while (j >= 0 && depthShade[drawOrder[j]] > currentShade) {
+      drawOrder[j + 1] = drawOrder[j];
+      j = j - 1;
+    }
+    drawOrder[j + 1] = currentIndex;
+    i = i + 1;
   }
 }
 
@@ -93,6 +117,7 @@ void initBalls() {
     depthShade[i] = 0.0;
     i = i + 1;
   }
+  initDrawOrder();
 }
 
 void drawFrameOverlay() {
@@ -127,32 +152,44 @@ void drawBalls() {
   int right = WindowWidth - FrameMargin;
   int bottom = WindowHeight - FrameMargin;
   while (i < NumBalls) {
-    float shade = depthShade[i];
+    int ballIndex = drawOrder[i];
+    float shade = depthShade[ballIndex];
     if (shade >= 0.0) {
-      int sx = FrameMargin + trunc(screenX[i]);
-      int sy = FrameMargin + trunc(screenY[i]);
-      int sr = trunc(screenRadius[i]);
+      int sx = FrameMargin + trunc(screenX[ballIndex]);
+      int sy = FrameMargin + trunc(screenY[ballIndex]);
+      int sr = trunc(screenRadius[ballIndex]);
       if (sr < 1) sr = 1;
       if (sx >= left - sr && sx <= right + sr && sy >= top - sr && sy <= bottom + sr) {
-        float glow = shade;
-        if (glow < 0.2) glow = 0.2;
-        if (glow > 1.0) glow = 1.0;
-        int r = trunc(colorR[i] * glow);
-        int g = trunc(colorG[i] * glow);
-        int b = trunc(colorB[i] * glow);
+        float glow = 0.35 + shade * 0.65;
+        if (glow > 1.1) glow = 1.1;
+        int r = trunc(colorR[ballIndex] * glow);
+        int g = trunc(colorG[ballIndex] * glow);
+        int b = trunc(colorB[ballIndex] * glow);
         if (r > 255) r = 255;
         if (g > 255) g = 255;
         if (b > 255) b = 255;
         setrgbcolor(r, g, b);
         fillcircle(sx, sy, sr);
-        int rimR = r + 40;
-        int rimG = g + 40;
-        int rimB = b + 40;
+        int rimR = r + 32;
+        int rimG = g + 32;
+        int rimB = b + 32;
         if (rimR > 255) rimR = 255;
         if (rimG > 255) rimG = 255;
         if (rimB > 255) rimB = 255;
         setrgbcolor(rimR, rimG, rimB);
         drawcircle(sx, sy, sr);
+        int highlightR = rimR + 16;
+        int highlightG = rimG + 16;
+        int highlightB = rimB + 16;
+        if (highlightR > 255) highlightR = 255;
+        if (highlightG > 255) highlightG = 255;
+        if (highlightB > 255) highlightB = 255;
+        setrgbcolor(highlightR, highlightG, highlightB);
+        int specX = sx - trunc(sr * 0.35);
+        int specY = sy - trunc(sr * 0.35);
+        int specRadius = trunc(sr * 0.25);
+        if (specRadius < 1) specRadius = 1;
+        drawcircle(specX, specY, specRadius);
       }
     }
     i = i + 1;
@@ -179,15 +216,16 @@ void updateSimulation(float deltaTime) {
                       velX, velY, velZ,
                       radii,
                       screenX, screenY, screenRadius, depthShade);
+  sortDrawOrderByDepth();
   elapsedSeconds = elapsedSeconds + deltaTime;
 }
 
 void handleInput() {
   if (keypressed()) {
-    int code = readkeycode();
-    if (code == 113 || code == 81) { // Q/q
+    char key = readkey();
+    if (key == 'q' || key == 'Q') {
       quit = true;
-    } else if (code == 32) { // Space
+    } else if (key == ' ') {
       paused = !paused;
     }
   }
