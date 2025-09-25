@@ -781,12 +781,10 @@ class LandscapeDemo {
   }
 
   void handleDiscreteInput() {
-    // Refresh the cached movement keys before draining the SDL event queue.
-    // This guarantees the input watch has been installed (via IsKeyDown)
-    // ahead of any key events we consume with pollkey(), so held keys such as
-    // W/S remain latched even if their initial press happens this frame.
-    my.forwardKeyDown = IsKeyDown(ScanCodeW);
-    my.backwardKeyDown = IsKeyDown(ScanCodeS);
+    // Prime the SDL key watcher before draining the queue so it sees any new
+    // keydown events we are about to consume with pollkey().
+    IsKeyDown(ScanCodeW);
+    IsKeyDown(ScanCodeS);
 
     int key = pollkey();
     while (key != 0) {
@@ -804,6 +802,12 @@ class LandscapeDemo {
       }
       key = pollkey();
     }
+
+    // Sample the movement keys after pumping events so their latched state
+    // reflects the latest SDL keyboard state even while the mouse is inside
+    // the window.
+    my.forwardKeyDown = IsKeyDown(ScanCodeW);
+    my.backwardKeyDown = IsKeyDown(ScanCodeS);
   }
 
   void drawTerrain() {
