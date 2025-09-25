@@ -51,7 +51,7 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
         break_requested = 1;
     } else if (event->type == SDL_KEYDOWN) {
         SDL_Keycode sym = event->key.keysym.sym;
-        if (sym == SDLK_ESCAPE || sym == SDLK_q || sym == SDLK_Q) {
+        if (sym == SDLK_ESCAPE || sym == SDLK_q) {
             break_requested = 1;
         }
     }
@@ -185,13 +185,8 @@ void sdlEnsureInputWatch(void) {
     }
 
     if (!gSdlInputWatchInstalled) {
-        if (SDL_AddEventWatch(sdlInputWatch, NULL) == 0) {
-            gSdlInputWatchInstalled = true;
-        } else {
-            #ifdef DEBUG
-            fprintf(stderr, "[DEBUG SDL] Failed to install input event watch: %s\n", SDL_GetError());
-            #endif
-        }
+        SDL_AddEventWatch(sdlInputWatch, NULL);
+        gSdlInputWatchInstalled = true;
     }
 }
 
