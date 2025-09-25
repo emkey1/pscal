@@ -327,6 +327,8 @@ int main(int argc, char **argv) {
     // future bytecode-level CALL injection.
 
     initSymbolSystem();
+    gSuppressWriteSpacing = 0;
+    gUppercaseBooleans = 0;
     registerAllBuiltins();
 #ifdef SDL
     registerSdlGlBuiltins();

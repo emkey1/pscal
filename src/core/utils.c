@@ -1867,7 +1867,11 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%Lf", v.real.r_val);
             break;
         case TYPE_BOOLEAN:
-            fprintf(stream, "%s", v.i_val ? "true" : "false");
+            if (gUppercaseBooleans) {
+                fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE");
+            } else {
+                fprintf(stream, "%s", v.i_val ? "true" : "false");
+            }
             break;
         case TYPE_CHAR:
             fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII

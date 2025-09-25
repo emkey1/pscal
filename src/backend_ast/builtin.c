@@ -1751,13 +1751,16 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    bool color_was_applied = applyCurrentTextAttributes(stdout);
-    printf("\x1B[2J\x1B[H");
-    if (color_was_applied) {
-        resetTextAttributes(stdout);
+    if (isatty(STDOUT_FILENO)) {
+        bool color_was_applied = applyCurrentTextAttributes(stdout);
+        fputs("\x1B[2J\x1B[H", stdout);
+        if (color_was_applied) {
+            resetTextAttributes(stdout);
+        }
+        fprintf(stdout, "\x1B[%d;%dH", gWindowTop, gWindowLeft);
+        fflush(stdout);
     }
-    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
-    fflush(stdout);
+
     return makeVoid();
 }
 
@@ -3065,11 +3068,14 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     }
 
     bool newline = false;
+    bool suppress_spacing = (gSuppressWriteSpacing != 0);
     Value flag = args[0];
     if (isRealType(flag.type)) {
         newline = (AS_REAL(flag) != 0.0);
     } else if (IS_INTLIKE(flag)) {
-        newline = (AS_INTEGER(flag) != 0);
+        long long raw = AS_INTEGER(flag);
+        newline = (raw & VM_WRITE_FLAG_NEWLINE) != 0;
+        suppress_spacing = suppress_spacing || ((raw & VM_WRITE_FLAG_SUPPRESS_SPACING) != 0);
     } else if (flag.type == TYPE_BOOLEAN) {
         newline = flag.i_val != 0;
     } else if (flag.type == TYPE_CHAR) {
@@ -3109,7 +3115,7 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     bool has_prev = false;
     for (int i = start_index; i < arg_count; i++) {
         Value val = args[i];
-        if (has_prev) {
+        if (!suppress_spacing && has_prev) {
             bool add_space = true;
             const char *no_space_after = "=,.;:?!-)]}>)\"'";
             if (prev.type == TYPE_STRING && prev.s_val) {
