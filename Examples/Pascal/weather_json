@@ -4,7 +4,7 @@ program DisplayWeatherJson;
 uses CRT, SysUtils;
 
 const
-  API_KEY_FILENAME = '/usr/local/pscal/lib/openweathermap.key';
+  DEFAULT_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';
 
 function ParseIntOrDefault(value: string; defaultValue: longint): longint;
 var
@@ -152,41 +152,74 @@ var
   timezoneFound, observationFound, sunriseFound, sunsetFound: boolean;
   statusOk: boolean;
 
-function ReadApiKeyFromFile(filename: string): string;
+function TryReadApiKeyFromFile(filename: string): string;
 var
   keyFile: Text;
   keyRead: string;
 begin
-  keyRead := '';
+  TryReadApiKeyFromFile := '';
   assign(keyFile, filename);
   {$I-}
   reset(keyFile);
   {$I+}
 
   if IOResult <> 0 then
-  begin
-    writeln('Error: Could not open API key file: "', filename, '"');
-    writeln('Please create this file and put your OpenWeatherMap API key in it.');
-    halt(1);
-  end;
+    exit;
 
   if eof(keyFile) then
   begin
-    writeln('Error: API key file "', filename, '" is empty.');
     close(keyFile);
-    halt(1);
+    exit;
   end;
 
   readln(keyFile, keyRead);
   close(keyFile);
 
-  if keyRead = '' then
+  keyRead := Trim(keyRead);
+  if keyRead <> '' then
+    TryReadApiKeyFromFile := keyRead;
+end;
+
+function LoadApiKey(): string;
+var
+  envKey, homeDir, keyPath, keyFromFile: string;
+begin
+  envKey := GetEnv('OPENWEATHER_API_KEY');
+  if envKey <> '' then
   begin
-    writeln('Error: Failed to read API key from file "', filename, '".');
-    halt(1);
+    LoadApiKey := envKey;
+    exit;
   end;
 
-  ReadApiKeyFromFile := keyRead;
+  homeDir := GetEnv('HOME');
+  if homeDir <> '' then
+  begin
+    if homeDir[length(homeDir)] = '/' then
+      keyPath := homeDir + '.pscal/etc/openweathermap.key'
+    else
+      keyPath := homeDir + '/.pscal/etc/openweathermap.key';
+
+    keyFromFile := TryReadApiKeyFromFile(keyPath);
+    if keyFromFile <> '' then
+    begin
+      LoadApiKey := keyFromFile;
+      exit;
+    end;
+  end
+  else
+    keyPath := '~/.pscal/etc/openweathermap.key';
+
+  keyFromFile := TryReadApiKeyFromFile(DEFAULT_API_KEY_PATH);
+  if keyFromFile <> '' then
+  begin
+    LoadApiKey := keyFromFile;
+    exit;
+  end;
+
+  writeln('Error: Unable to determine OpenWeather API key.');
+  writeln('Set the OPENWEATHER_API_KEY environment variable or create ', keyPath,
+          ' with your OpenWeather API key.');
+  halt(1);
 end;
 
 begin
@@ -197,7 +230,7 @@ begin
     halt(1);
   end;
 
-  apiKeyFromFile := ReadApiKeyFromFile(API_KEY_FILENAME);
+  apiKeyFromFile := LoadApiKey();
 
   if ParamCount >= 1 then
   begin

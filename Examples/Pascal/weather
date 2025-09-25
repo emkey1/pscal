@@ -4,7 +4,7 @@ program DisplayWeather;
 uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.
 
 const
-  API_KEY_FILENAME = '/usr/local/pscal/lib/openweathermap.key';       // Filename for key
+  DEFAULT_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';   // Legacy fallback
   MAX_SUBSTR_LEN = 1024;                         // Max length for copy/pos substrings
 
 type
@@ -23,48 +23,78 @@ var
   valCode : integer;        // Error code for StrToReal
 
 // --- Function to read API key from file ---
-function ReadApiKeyFromFile(filename: string): string;
+function TryReadApiKeyFromFile(filename: string): string;
 var
   keyFile: Text;
   keyRead: string;
 begin
-  keyRead := ''; // Default to empty string
+  TryReadApiKeyFromFile := '';
   assign(keyFile, filename);
-  {$I-} // Disable IO checking
+  {$I-}
   reset(keyFile);
-  {$I+} // Re-enable IO checking
+  {$I+}
 
   if IOResult <> 0 then
+    exit;
+
+  if eof(keyFile) then
   begin
-    writeln('Error: Could not open API key file: "', filename, '"');
-    writeln('Please create this file in the same directory and put your OpenWeatherMap API key in it.');
-    halt(1); // Stop execution
+    close(keyFile);
+    exit;
+  end;
+
+  readln(keyFile, keyRead);
+  close(keyFile);
+
+  keyRead := Trim(keyRead);
+  if keyRead <> '' then
+    TryReadApiKeyFromFile := keyRead;
+end;
+// --- END TryReadApiKeyFromFile ---
+
+// --- Function to obtain API key ---
+function LoadApiKey(): string;
+var
+  envKey, homeDir, keyPath, keyFromFile: string;
+begin
+  envKey := GetEnv('OPENWEATHER_API_KEY');
+  if envKey <> '' then
+  begin
+    LoadApiKey := envKey;
+    exit;
+  end;
+
+  homeDir := GetEnv('HOME');
+  if homeDir <> '' then
+  begin
+    if homeDir[length(homeDir)] = '/' then
+      keyPath := homeDir + '.pscal/etc/openweathermap.key'
+    else
+      keyPath := homeDir + '/.pscal/etc/openweathermap.key';
+
+    keyFromFile := TryReadApiKeyFromFile(keyPath);
+    if keyFromFile <> '' then
+    begin
+      LoadApiKey := keyFromFile;
+      exit;
+    end;
   end
   else
+    keyPath := '~/.pscal/etc/openweathermap.key';
+
+  keyFromFile := TryReadApiKeyFromFile(DEFAULT_API_KEY_PATH);
+  if keyFromFile <> '' then
   begin
-    if eof(keyFile) then
-    begin
-      writeln('Error: API key file "', filename, '" is empty.');
-      close(keyFile);
-      halt(1);
-    end
-    else
-    begin
-      readln(keyFile, keyRead); // Read the first line
-      close(keyFile);
-      // NOTE: No trimming implemented here, assumes key file is clean.
-    end;
+    LoadApiKey := keyFromFile;
+    exit;
   end;
 
-  if keyRead = '' then // Check if key was actually read
-  begin
-      writeln('Error: Failed to read API key from file "', filename, '".');
-      halt(1);
-  end;
-
-  ReadApiKeyFromFile := keyRead; // Return the key
+  writeln('Error: Unable to determine OpenWeather API key.');
+  writeln('Set the OPENWEATHER_API_KEY environment variable or create ', keyPath,
+          ' with your OpenWeather API key.');
+  halt(1);
 end;
-// --- END ReadApiKeyFromFile ---
+// --- END LoadApiKey ---
 
 
 // --- Helper function ExtractStringValue ---
@@ -244,7 +274,7 @@ end;
 begin
 
   // --- Read API Key ---
-  apiKeyFromFile := ReadApiKeyFromFile(API_KEY_FILENAME);
+  apiKeyFromFile := LoadApiKey();
   // { DEBUG: Key debug lines removed }
 
   // --- Check for command-line argument for Zip Code ---
