@@ -42,6 +42,24 @@ float randomUnit() {
   return random(10000) / 10000.0;
 }
 
+void bar(int left, int top, int right, int bottom) {
+  if (left > right) {
+    int temp = left;
+    left = right;
+    right = temp;
+  }
+  if (top > bottom) {
+    int temp = top;
+    top = bottom;
+    bottom = temp;
+  }
+  int y = top;
+  while (y <= bottom) {
+    line(left, y, right, y);
+    y = y + 1;
+  }
+}
+
 void initBalls() {
   int i = 0;
   float halfWidth = BoxWidth * 0.5;
