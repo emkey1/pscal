@@ -59,6 +59,204 @@ str formatDateTime(int epochSeconds, int offsetSeconds) {
   return date + " " + pad2(hour) + ":" + pad2(minute);
 }
 
+void printCurrentConditions(int currentHandle, str tempUnitSymbol) {
+  float currentTemp = 0.0;
+  int humidity = -1;
+  str currentSummary = "";
+  str summaryText = "";
+  int currentTempHandle = -1;
+  int humidityHandle = -1;
+  int weatherArrayHandle = -1;
+  int weatherLen = 0;
+  int weatherEntry = -1;
+  int descHandle = -1;
+
+  if (currentHandle < 0) {
+    return;
+  }
+
+  currentTemp = 0.0;
+  humidity = -1;
+  currentSummary = "";
+  summaryText = "";
+  weatherLen = 0;
+  weatherEntry = -1;
+  descHandle = -1;
+
+  currentTempHandle = YyjsonGetKey(currentHandle, "temp");
+  if (currentTempHandle >= 0) {
+    currentTemp = YyjsonGetNumber(currentTempHandle);
+    YyjsonFreeValue(currentTempHandle);
+  }
+
+  humidityHandle = YyjsonGetKey(currentHandle, "humidity");
+  if (humidityHandle >= 0) {
+    humidity = (int)YyjsonGetInt(humidityHandle);
+    YyjsonFreeValue(humidityHandle);
+  }
+
+  weatherArrayHandle = YyjsonGetKey(currentHandle, "weather");
+  if (weatherArrayHandle >= 0) {
+    weatherLen = YyjsonGetLength(weatherArrayHandle);
+    if (weatherLen > 0) {
+      weatherEntry = YyjsonGetIndex(weatherArrayHandle, 0);
+      if (weatherEntry >= 0) {
+        descHandle = YyjsonGetKey(weatherEntry, "description");
+        if (descHandle >= 0) {
+          currentSummary = YyjsonGetString(descHandle);
+          YyjsonFreeValue(descHandle);
+        }
+        YyjsonFreeValue(weatherEntry);
+      }
+    }
+    YyjsonFreeValue(weatherArrayHandle);
+  }
+
+  summaryText = currentSummary;
+  if (summaryText == "") {
+    summaryText = "No description";
+  }
+  if (humidity >= 0) {
+    printf("Current: %.1f%s, %s (humidity %d%%)\n", currentTemp, tempUnitSymbol, summaryText, humidity);
+  } else {
+    printf("Current: %.1f%s, %s\n", currentTemp, tempUnitSymbol, summaryText);
+  }
+
+  YyjsonFreeValue(currentHandle);
+}
+
+void printDailyForecast(int dailyHandle, int timezoneOffset, str tempUnitSymbol) {
+  int dailyLen = 0;
+  int daysToShow = 0;
+  int i = 0;
+  int dayHandle = -1;
+  int dtHandle = -1;
+  int dt = 0;
+  str dayLabel = "";
+  int tempBlock = -1;
+  int minHandle = -1;
+  int maxHandle = -1;
+  float minTemp = 0.0;
+  float maxTemp = 0.0;
+  int popHandle = -1;
+  float pop = -1.0;
+  int rainHandle = -1;
+  float rain = -1.0;
+  int snowHandle = -1;
+  float snow = -1.0;
+  int weatherHandle = -1;
+  int weatherLen = 0;
+  int weatherEntry = -1;
+  int descHandle = -1;
+  str summary = "";
+
+  if (dailyHandle < 0) {
+    return;
+  }
+
+  dailyLen = YyjsonGetLength(dailyHandle);
+  if (dailyLen > 0) {
+    writeln("\nDaily forecast:");
+  }
+
+  daysToShow = dailyLen;
+  if (daysToShow > 7) {
+    daysToShow = 7;
+  }
+
+  i = 0;
+  while (i < daysToShow) {
+    dayHandle = YyjsonGetIndex(dailyHandle, i);
+    if (dayHandle >= 0) {
+      dtHandle = YyjsonGetKey(dayHandle, "dt");
+      dt = 0;
+      if (dtHandle >= 0) {
+        dt = (int)YyjsonGetInt(dtHandle);
+        YyjsonFreeValue(dtHandle);
+      }
+
+      dayLabel = formatDateTime(dt, timezoneOffset);
+
+      minTemp = 0.0;
+      maxTemp = 0.0;
+      tempBlock = YyjsonGetKey(dayHandle, "temp");
+      if (tempBlock >= 0) {
+        minHandle = YyjsonGetKey(tempBlock, "min");
+        if (minHandle >= 0) {
+          minTemp = YyjsonGetNumber(minHandle);
+          YyjsonFreeValue(minHandle);
+        }
+        maxHandle = YyjsonGetKey(tempBlock, "max");
+        if (maxHandle >= 0) {
+          maxTemp = YyjsonGetNumber(maxHandle);
+          YyjsonFreeValue(maxHandle);
+        }
+        YyjsonFreeValue(tempBlock);
+      }
+
+      pop = -1.0;
+      popHandle = YyjsonGetKey(dayHandle, "pop");
+      if (popHandle >= 0) {
+        pop = YyjsonGetNumber(popHandle);
+        YyjsonFreeValue(popHandle);
+      }
+
+      rain = -1.0;
+      rainHandle = YyjsonGetKey(dayHandle, "rain");
+      if (rainHandle >= 0) {
+        rain = YyjsonGetNumber(rainHandle);
+        YyjsonFreeValue(rainHandle);
+      }
+
+      snow = -1.0;
+      snowHandle = YyjsonGetKey(dayHandle, "snow");
+      if (snowHandle >= 0) {
+        snow = YyjsonGetNumber(snowHandle);
+        YyjsonFreeValue(snowHandle);
+      }
+
+      summary = "";
+      weatherHandle = YyjsonGetKey(dayHandle, "weather");
+      if (weatherHandle >= 0) {
+        weatherLen = YyjsonGetLength(weatherHandle);
+        if (weatherLen > 0) {
+          weatherEntry = YyjsonGetIndex(weatherHandle, 0);
+          if (weatherEntry >= 0) {
+            descHandle = YyjsonGetKey(weatherEntry, "description");
+            if (descHandle >= 0) {
+              summary = YyjsonGetString(descHandle);
+              YyjsonFreeValue(descHandle);
+            }
+            YyjsonFreeValue(weatherEntry);
+          }
+        }
+        YyjsonFreeValue(weatherHandle);
+      }
+
+      if (summary == "") {
+        summary = "No description";
+      }
+
+      printf("  %s — %s. High %.1f%s / Low %.1f%s", dayLabel, summary, maxTemp, tempUnitSymbol, minTemp, tempUnitSymbol);
+      if (pop >= 0.0) {
+        printf(", precip %.0f%%", pop * 100.0);
+      }
+      if (rain >= 0.0) {
+        printf(", rain %.1f mm", rain);
+      }
+      if (snow >= 0.0) {
+        printf(", snow %.1f mm", snow);
+      }
+      printf("\n");
+
+      YyjsonFreeValue(dayHandle);
+    }
+    i = i + 1;
+  }
+
+  YyjsonFreeValue(dailyHandle);
+}
+
 int main() {
   if (getenvint("RUN_NET_TESTS", 0) != 1) {
     writeln("RUN_NET_TESTS=1 is required to run this network demo. Exiting without contacting the API.");
@@ -138,6 +336,18 @@ int main() {
   bool geoOutAllocated = false;
   mstream forecastOut;
   bool forecastOutAllocated = false;
+  int timezoneOffset = 0;
+  str timezoneName = "";
+  str locationLine = "";
+  str offsetStr = "";
+  int tzHandle = -1;
+  int tzOffsetHandle = -1;
+  int currentHandle = -1;
+  int dailyHandle = -1;
+  int forecastDoc = -1;
+  int rootHandle = -1;
+  int codHandle = -1;
+  int messageHandle = -1;
 
   if (ok) {
     str geocodeUrl = "https://api.openweathermap.org/geo/1.0/zip?zip=" + zip + "," + country + "&appid=" + apiKey;
@@ -176,27 +386,32 @@ int main() {
           ok = false;
           exitCode = 1;
         } else {
+          int zipHandle;
+          int nameHandle;
+          int stateHandle;
+          int countryHandle;
+
           lat = YyjsonGetNumber(latHandle);
           lon = YyjsonGetNumber(lonHandle);
           YyjsonFreeValue(latHandle);
           YyjsonFreeValue(lonHandle);
 
-          int zipHandle = YyjsonGetKey(geoRoot, "zip");
+          zipHandle = YyjsonGetKey(geoRoot, "zip");
           if (zipHandle >= 0) {
             resolvedZip = YyjsonGetString(zipHandle);
             YyjsonFreeValue(zipHandle);
           }
-          int nameHandle = YyjsonGetKey(geoRoot, "name");
+          nameHandle = YyjsonGetKey(geoRoot, "name");
           if (nameHandle >= 0) {
             placeName = YyjsonGetString(nameHandle);
             YyjsonFreeValue(nameHandle);
           }
-          int stateHandle = YyjsonGetKey(geoRoot, "state");
+          stateHandle = YyjsonGetKey(geoRoot, "state");
           if (stateHandle >= 0) {
             stateName = YyjsonGetString(stateHandle);
             YyjsonFreeValue(stateHandle);
           }
-          int countryHandle = YyjsonGetKey(geoRoot, "country");
+          countryHandle = YyjsonGetKey(geoRoot, "country");
           if (countryHandle >= 0) {
             countryName = YyjsonGetString(countryHandle);
             YyjsonFreeValue(countryHandle);
@@ -230,45 +445,55 @@ int main() {
       ok = false;
       exitCode = 1;
     } else {
-      int forecastDoc = YyjsonRead(forecastBody);
+      forecastDoc = YyjsonRead(forecastBody);
       if (forecastDoc < 0) {
         writeln("Error: Failed to parse forecast response as JSON.");
         ok = false;
         exitCode = 1;
       } else {
-        int root = YyjsonGetRoot(forecastDoc);
+        rootHandle = YyjsonGetRoot(forecastDoc);
         bool forecastOk = true;
+        codHandle = YyjsonGetKey(rootHandle, "cod");
 
-        int codHandle = YyjsonGetKey(root, "cod");
         if (codHandle >= 0) {
-          int messageHandle = YyjsonGetKey(root, "message");
+          messageHandle = YyjsonGetKey(rootHandle, "message");
           if (messageHandle >= 0) {
             writeln("One Call API error: ", YyjsonGetString(messageHandle));
             YyjsonFreeValue(messageHandle);
+            messageHandle = -1;
           } else {
             writeln("One Call API returned an error response.");
           }
           YyjsonFreeValue(codHandle);
+          codHandle = -1;
           forecastOk = false;
           ok = false;
           exitCode = 1;
         }
 
-        int timezoneOffset = 0;
-        str timezoneName = "";
         if (forecastOk) {
-          int tzHandle = YyjsonGetKey(root, "timezone");
+          timezoneName = "";
+          timezoneOffset = 0;
+          locationLine = "";
+          offsetStr = "";
+          tzHandle = -1;
+          tzOffsetHandle = -1;
+          currentHandle = -1;
+          dailyHandle = -1;
+
+          tzHandle = YyjsonGetKey(rootHandle, "timezone");
           if (tzHandle >= 0) {
             timezoneName = YyjsonGetString(tzHandle);
             YyjsonFreeValue(tzHandle);
+            tzHandle = -1;
           }
-          int tzOffsetHandle = YyjsonGetKey(root, "timezone_offset");
+          tzOffsetHandle = YyjsonGetKey(rootHandle, "timezone_offset");
           if (tzOffsetHandle >= 0) {
             timezoneOffset = (int)YyjsonGetInt(tzOffsetHandle);
             YyjsonFreeValue(tzOffsetHandle);
+            tzOffsetHandle = -1;
           }
 
-          str locationLine;
           if (placeName != "") {
             locationLine = "Forecast for " + placeName;
             if (stateName != "") {
@@ -287,7 +512,7 @@ int main() {
 
           writeln(locationLine);
           writeln("Coordinates: ", latStr, ", ", lonStr);
-          str offsetStr = formatUtcOffset(timezoneOffset);
+          offsetStr = formatUtcOffset(timezoneOffset);
           if (timezoneName != "") {
             writeln("Timezone: ", timezoneName, " (UTC", offsetStr, ")");
           } else {
@@ -295,155 +520,27 @@ int main() {
           }
           writeln("Units: ", unitsParam, " (temperature in ", tempUnitSymbol, ")");
 
-          int currentHandle = YyjsonGetKey(root, "current");
+          currentHandle = YyjsonGetKey(rootHandle, "current");
           if (currentHandle >= 0) {
-            float currentTemp = 0.0;
-            int humidity = -1;
-            str currentSummary = "";
-            int currentTempHandle = YyjsonGetKey(currentHandle, "temp");
-            if (currentTempHandle >= 0) {
-              currentTemp = YyjsonGetNumber(currentTempHandle);
-              YyjsonFreeValue(currentTempHandle);
-            }
-            int humidityHandle = YyjsonGetKey(currentHandle, "humidity");
-            if (humidityHandle >= 0) {
-              humidity = (int)YyjsonGetInt(humidityHandle);
-              YyjsonFreeValue(humidityHandle);
-            }
-            int weatherArrayHandle = YyjsonGetKey(currentHandle, "weather");
-            if (weatherArrayHandle >= 0) {
-              int weatherLen = YyjsonGetLength(weatherArrayHandle);
-              if (weatherLen > 0) {
-                int weatherEntry = YyjsonGetIndex(weatherArrayHandle, 0);
-                if (weatherEntry >= 0) {
-                  int descHandle = YyjsonGetKey(weatherEntry, "description");
-                  if (descHandle >= 0) {
-                    currentSummary = YyjsonGetString(descHandle);
-                    YyjsonFreeValue(descHandle);
-                  }
-                  YyjsonFreeValue(weatherEntry);
-                }
-              }
-              YyjsonFreeValue(weatherArrayHandle);
-            }
-            str summaryText = currentSummary;
-            if (summaryText == "") {
-              summaryText = "No description";
-            }
-            if (humidity >= 0) {
-              printf("Current: %.1f%s, %s (humidity %d%%)\n", currentTemp, tempUnitSymbol, summaryText, humidity);
-            } else {
-              printf("Current: %.1f%s, %s\n", currentTemp, tempUnitSymbol, summaryText);
-            }
-            YyjsonFreeValue(currentHandle);
+            printCurrentConditions(currentHandle, tempUnitSymbol);
           }
 
-          int dailyHandle = YyjsonGetKey(root, "daily");
+          dailyHandle = YyjsonGetKey(rootHandle, "daily");
           if (dailyHandle >= 0) {
-            int dailyLen = YyjsonGetLength(dailyHandle);
-            if (dailyLen > 0) {
-              writeln("\nDaily forecast:");
-            }
-            int daysToShow = dailyLen;
-            if (daysToShow > 7) {
-              daysToShow = 7;
-            }
-            int i = 0;
-            while (i < daysToShow) {
-              int dayHandle = YyjsonGetIndex(dailyHandle, i);
-              if (dayHandle >= 0) {
-                int dtHandle = YyjsonGetKey(dayHandle, "dt");
-                int dt = 0;
-                if (dtHandle >= 0) {
-                  dt = (int)YyjsonGetInt(dtHandle);
-                  YyjsonFreeValue(dtHandle);
-                }
-                str dayLabel = formatDateTime(dt, timezoneOffset);
-
-                float minTemp = 0.0;
-                float maxTemp = 0.0;
-                int tempBlock = YyjsonGetKey(dayHandle, "temp");
-                if (tempBlock >= 0) {
-                  int minHandle = YyjsonGetKey(tempBlock, "min");
-                  if (minHandle >= 0) {
-                    minTemp = YyjsonGetNumber(minHandle);
-                    YyjsonFreeValue(minHandle);
-                  }
-                  int maxHandle = YyjsonGetKey(tempBlock, "max");
-                  if (maxHandle >= 0) {
-                    maxTemp = YyjsonGetNumber(maxHandle);
-                    YyjsonFreeValue(maxHandle);
-                  }
-                  YyjsonFreeValue(tempBlock);
-                }
-
-                float pop = -1.0;
-                int popHandle = YyjsonGetKey(dayHandle, "pop");
-                if (popHandle >= 0) {
-                  pop = YyjsonGetNumber(popHandle);
-                  YyjsonFreeValue(popHandle);
-                }
-
-                float rain = -1.0;
-                int rainHandle = YyjsonGetKey(dayHandle, "rain");
-                if (rainHandle >= 0) {
-                  rain = YyjsonGetNumber(rainHandle);
-                  YyjsonFreeValue(rainHandle);
-                }
-
-                float snow = -1.0;
-                int snowHandle = YyjsonGetKey(dayHandle, "snow");
-                if (snowHandle >= 0) {
-                  snow = YyjsonGetNumber(snowHandle);
-                  YyjsonFreeValue(snowHandle);
-                }
-
-                str summary = "";
-                int weatherHandle = YyjsonGetKey(dayHandle, "weather");
-                if (weatherHandle >= 0) {
-                  int weatherLen = YyjsonGetLength(weatherHandle);
-                  if (weatherLen > 0) {
-                    int weatherEntry = YyjsonGetIndex(weatherHandle, 0);
-                    if (weatherEntry >= 0) {
-                      int descHandle = YyjsonGetKey(weatherEntry, "description");
-                      if (descHandle >= 0) {
-                        summary = YyjsonGetString(descHandle);
-                        YyjsonFreeValue(descHandle);
-                      }
-                      YyjsonFreeValue(weatherEntry);
-                    }
-                  }
-                  YyjsonFreeValue(weatherHandle);
-                }
-                if (summary == "") {
-                  summary = "No description";
-                }
-
-                printf("  %s — %s. High %.1f%s / Low %.1f%s", dayLabel, summary, maxTemp, tempUnitSymbol, minTemp, tempUnitSymbol);
-                if (pop >= 0.0) {
-                  float popPercent = pop * 100.0;
-                  printf(", precip %.0f%%", popPercent);
-                }
-                if (rain >= 0.0) {
-                  printf(", rain %.1f mm", rain);
-                }
-                if (snow >= 0.0) {
-                  printf(", snow %.1f mm", snow);
-                }
-                printf("\n");
-
-                YyjsonFreeValue(dayHandle);
-              }
-              i = i + 1;
-            }
-            YyjsonFreeValue(dailyHandle);
+            printDailyForecast(dailyHandle, timezoneOffset, tempUnitSymbol);
           } else {
             writeln("No daily forecast data was returned.");
           }
         }
 
-        YyjsonFreeValue(root);
-        YyjsonDocFree(forecastDoc);
+        if (rootHandle >= 0) {
+          YyjsonFreeValue(rootHandle);
+          rootHandle = -1;
+        }
+        if (forecastDoc >= 0) {
+          YyjsonDocFree(forecastDoc);
+          forecastDoc = -1;
+        }
       }
     }
   }
