@@ -280,6 +280,7 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"findnext", vmBuiltinDosFindnext},
     {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
+    {"formatfloat", vmBuiltinFormatfloat},
     {"freesound", SDL_HANDLER(vmBuiltinFreesound)},
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
@@ -1078,6 +1079,42 @@ Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
     }
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
+    return makeString(buffer);
+}
+
+Value vmBuiltinFormatfloat(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || arg_count > 2 || !IS_NUMERIC(args[0])) {
+        runtimeError(vm, "FormatFloat expects (numeric [, integer precision]).");
+        return makeString("");
+    }
+
+    long double value = isRealType(args[0].type) ? AS_REAL(args[0]) : (long double)AS_INTEGER(args[0]);
+
+    int precision = PASCAL_DEFAULT_FLOAT_PRECISION;
+    if (arg_count == 2) {
+        if (!IS_INTLIKE(args[1])) {
+            runtimeError(vm, "FormatFloat precision must be an integer.");
+            return makeString("");
+        }
+        long long requested = AS_INTEGER(args[1]);
+        if (requested < 0) {
+            requested = 0;
+        } else if (requested > 18) {
+            requested = 18;
+        }
+        precision = (int)requested;
+    }
+
+    char fmt[16];
+    snprintf(fmt, sizeof(fmt), "%%.%dLf", precision);
+
+    char buffer[128];
+    int written = snprintf(buffer, sizeof(buffer), fmt, value);
+    if (written < 0 || written >= (int)sizeof(buffer)) {
+        runtimeError(vm, "FormatFloat failed to format value.");
+        return makeString("");
+    }
+
     return makeString(buffer);
 }
 
@@ -4085,6 +4122,7 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("Randomize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("ReadKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("FormatFloat", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Rename", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("Erase", AST_PROCEDURE_DECL, NULL);

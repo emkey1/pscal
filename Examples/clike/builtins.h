@@ -145,6 +145,7 @@ int read();
 int readkey();
 int readln();
 int real();
+int formatfloat();
 int realtostr();
 int rename();
 int rendercopy();

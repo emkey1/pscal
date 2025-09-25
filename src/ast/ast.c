@@ -1277,7 +1277,8 @@ VarType getBuiltinReturnType(const char* name) {
     }
 
     /* String producing helpers */
-    if (strcasecmp(name, "inttostr")  == 0 ||
+    if (strcasecmp(name, "formatfloat") == 0 ||
+        strcasecmp(name, "inttostr")  == 0 ||
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
         strcasecmp(name, "copy")      == 0 ||
