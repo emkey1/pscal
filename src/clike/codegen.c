@@ -10,6 +10,7 @@
 #include "Pascal/globals.h"
 #include "compiler/compiler.h"
 #include "vm/string_sentinels.h"
+#include "vm/vm.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -1260,7 +1261,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
             if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
-                Value nl = makeInt(0);
+                Value nl = makeInt(VM_WRITE_FLAG_SUPPRESS_SPACING);
                 int nlidx = addConstantToChunk(chunk, &nl);
                 freeValue(&nl);
                 writeBytecodeChunk(chunk, CONSTANT, node->token.line);

@@ -3161,6 +3161,8 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             }
         } else if (val.type == TYPE_CHAR) {
             fputc(val.c_val, output_stream);
+        } else if (suppress_spacing && val.type == TYPE_BOOLEAN) {
+            fputc(val.i_val ? '1' : '0', output_stream);
         } else {
             printValueToStream(val, output_stream);
         }
