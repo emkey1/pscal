@@ -6,109 +6,110 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0004    | HALT
 
 --- Routine rhs1 (at 0005) ---
-0005    1 CONSTANT            1 '0'
+0005    1 CONSTANT            1 '2'
 0007    | CONSTANT            2 'R1\n'
 0009    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0015    | CONSTANT            1 '0'
+0015    | CONSTANT            4 '0'
 0017    | POP
-0018    | CONSTANT            4 '1'
+0018    | CONSTANT            5 '1'
 0020    | RETURN
 0021    | RETURN
 
 --- Routine rhs0 (at 0022) ---
-0022    2 CONSTANT            1 '0'
-0024    | CONSTANT            5 'R0\n'
+0022    2 CONSTANT            1 '2'
+0024    | CONSTANT            6 'R0\n'
 0026    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0032    | CONSTANT            1 '0'
+0032    | CONSTANT            4 '0'
 0034    | POP
-0035    | CONSTANT            1 '0'
+0035    | CONSTANT            4 '0'
 0037    | RETURN
 0038    | RETURN
 
 --- Routine main (at 0039) ---
-0039    5 CONSTANT            1 '0'
+0039    5 CONSTANT            4 '0'
 0041    | JUMP_IF_FALSE       8 (to 0052)
-0044    | CALL_USER_PROC       6 'rhs1' @0005 (0 args)
+0044    | CALL_USER_PROC       7 'rhs1' @0005 (0 args)
 0048    | TO_BOOL
 0049    | JUMP                2 (to 0054)
-0052    | CONSTANT            7 'false'
+0052    | CONSTANT            8 'false'
 0054    6 JUMP_IF_FALSE      13 (to 0070)
-0057    5 CONSTANT            1 '0'
-0059    | CONSTANT            8 'A\n'
+0057    5 CONSTANT            1 '2'
+0059    | CONSTANT            9 'A\n'
 0061    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0067    | CONSTANT            1 '0'
+0067    | CONSTANT            4 '0'
 0069    6 POP
-0070    | CONSTANT            4 '1'
+0070    | CONSTANT            5 '1'
 0072    | JUMP_IF_FALSE       5 (to 0080)
-0075    | CONSTANT            9 'true'
+0075    | CONSTANT           10 'true'
 0077    | JUMP                5 (to 0085)
-0080    | CALL_USER_PROC       6 'rhs1' @0005 (0 args)
+0080    | CALL_USER_PROC       7 'rhs1' @0005 (0 args)
 0084    | TO_BOOL
 0085    7 JUMP_IF_FALSE      13 (to 0101)
-0088    6 CONSTANT            1 '0'
-0090    | CONSTANT           10 'B\n'
+0088    6 CONSTANT            1 '2'
+0090    | CONSTANT           11 'B\n'
 0092    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0098    | CONSTANT            1 '0'
+0098    | CONSTANT            4 '0'
 0100    7 POP
-0101    | CONSTANT            4 '1'
+0101    | CONSTANT            5 '1'
 0103    | JUMP_IF_FALSE       8 (to 0114)
-0106    | CALL_USER_PROC       6 'rhs1' @0005 (0 args)
+0106    | CALL_USER_PROC       7 'rhs1' @0005 (0 args)
 0110    | TO_BOOL
 0111    | JUMP                2 (to 0116)
-0114    | CONSTANT           11 'false'
+0114    | CONSTANT           12 'false'
 0116    8 JUMP_IF_FALSE      13 (to 0132)
-0119    7 CONSTANT            1 '0'
-0121    | CONSTANT           12 'C\n'
+0119    7 CONSTANT            1 '2'
+0121    | CONSTANT           13 'C\n'
 0123    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0129    | CONSTANT            1 '0'
+0129    | CONSTANT            4 '0'
 0131    8 POP
-0132    | CONSTANT            1 '0'
+0132    | CONSTANT            4 '0'
 0134    | JUMP_IF_FALSE       5 (to 0142)
-0137    | CONSTANT           13 'true'
+0137    | CONSTANT           14 'true'
 0139    | JUMP                5 (to 0147)
-0142    | CALL_USER_PROC      14 'rhs0' @0022 (0 args)
+0142    | CALL_USER_PROC      15 'rhs0' @0022 (0 args)
 0146    | TO_BOOL
 0147    9 JUMP_IF_FALSE      13 (to 0163)
-0150    8 CONSTANT            1 '0'
-0152    | CONSTANT           15 'D\n'
+0150    8 CONSTANT            1 '2'
+0152    | CONSTANT           16 'D\n'
 0154    | CALL_BUILTIN_PROC   176 'write' (2 args)
-0160    | CONSTANT            1 '0'
+0160    | CONSTANT            4 '0'
 0162    9 POP
-0163    | CONSTANT            1 '0'
-0165    | CONSTANT           16 'vals:'
-0167    0 CONSTANT            1 '0'
-0169    9 CONSTANT           17 ' '
-0171    0 CONSTANT            4 '1'
-0173    9 CONSTANT           17 ' '
-0175    0 CONSTANT            4 '1'
-0177    9 CONSTANT           17 ' '
-0179    0 CONSTANT            4 '1'
-0181    9 CONSTANT           18 '\n'
+0163    | CONSTANT            1 '2'
+0165    | CONSTANT           17 'vals:'
+0167    0 CONSTANT            4 '0'
+0169    9 CONSTANT           18 ' '
+0171    0 CONSTANT            5 '1'
+0173    9 CONSTANT           18 ' '
+0175    0 CONSTANT            5 '1'
+0177    9 CONSTANT           18 ' '
+0179    0 CONSTANT            5 '1'
+0181    9 CONSTANT           19 '\n'
 0183    | CALL_BUILTIN_PROC   176 'write' (10 args)
-0189    | CONSTANT            1 '0'
+0189    | CONSTANT            4 '0'
 0191   10 POP
-0192    | CONSTANT            1 '0'
+0192    | CONSTANT            4 '0'
 0194   11 RETURN
 0195    4 RETURN
 == End Disassembly: Tests/clike/ShortCircuit.cl ==
 
-Constants (19):\n  0000: STR   "main"
-  0001: INT   0
+Constants (20):\n  0000: STR   "main"
+  0001: INT   2
   0002: STR   "R1\n"
   0003: STR   "write"
-  0004: INT   1
-  0005: STR   "R0\n"
-  0006: STR   "rhs1"
-  0007: BOOL  false
-  0008: STR   "A\n"
-  0009: BOOL  true
-  0010: STR   "B\n"
-  0011: BOOL  false
-  0012: STR   "C\n"
-  0013: BOOL  true
-  0014: STR   "rhs0"
-  0015: STR   "D\n"
-  0016: STR   "vals:"
-  0017: STR   " "
-  0018: STR   "\n"
+  0004: INT   0
+  0005: INT   1
+  0006: STR   "R0\n"
+  0007: STR   "rhs1"
+  0008: BOOL  false
+  0009: STR   "A\n"
+  0010: BOOL  true
+  0011: STR   "B\n"
+  0012: BOOL  false
+  0013: STR   "C\n"
+  0014: BOOL  true
+  0015: STR   "rhs0"
+  0016: STR   "D\n"
+  0017: STR   "vals:"
+  0018: STR   " "
+  0019: STR   "\n"
 

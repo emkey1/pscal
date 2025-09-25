@@ -3069,13 +3069,15 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
 
     bool newline = false;
     bool suppress_spacing = (gSuppressWriteSpacing != 0);
+    bool suppress_spacing_flag = false;
     Value flag = args[0];
     if (isRealType(flag.type)) {
         newline = (AS_REAL(flag) != 0.0);
     } else if (IS_INTLIKE(flag)) {
         long long raw = AS_INTEGER(flag);
         newline = (raw & VM_WRITE_FLAG_NEWLINE) != 0;
-        suppress_spacing = suppress_spacing || ((raw & VM_WRITE_FLAG_SUPPRESS_SPACING) != 0);
+        suppress_spacing_flag = ((raw & VM_WRITE_FLAG_SUPPRESS_SPACING) != 0);
+        suppress_spacing = suppress_spacing || suppress_spacing_flag;
     } else if (flag.type == TYPE_BOOLEAN) {
         newline = flag.i_val != 0;
     } else if (flag.type == TYPE_CHAR) {
@@ -3152,7 +3154,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
                 fputc(' ', output_stream);
             }
         }
-        if (val.type == TYPE_STRING) {
+        if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
+            fputs(val.i_val ? "1" : "0", output_stream);
+        } else if (val.type == TYPE_STRING) {
             if (output_stream == stdout) {
                 fputs(val.s_val ? val.s_val : "", output_stream);
             } else {
