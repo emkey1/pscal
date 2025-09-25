@@ -1733,7 +1733,7 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
             return;
         }
 
-        analyzeSemanticsClike(modProg);
+        analyzeSemanticsClike(modProg, orig_path);
 
         if (!verifyASTClikeLinks(modProg, NULL)) {
             fprintf(stderr, "AST verification failed for module '%s' after semantic analysis.\n", path);
