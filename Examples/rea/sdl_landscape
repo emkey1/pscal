@@ -1030,6 +1030,10 @@ class LandscapeDemo {
     my.initGraphics();
     my.lastTicks = getticks();
     while (my.running) {
+      // Pump SDL events before sampling keyboard state so IsKeyDown observes
+      // the latest key transitions. SDL_GetKeyboardState (used by IsKeyDown)
+      // only reflects new input after SDL_PumpEvents or a polling helper runs.
+      GraphLoop(0);
       my.handleDiscreteInput();
       if (QuitRequested()) break;
       int now = getticks();
