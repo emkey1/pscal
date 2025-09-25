@@ -152,7 +152,7 @@ void drawBalls() {
         if (rimG > 255) rimG = 255;
         if (rimB > 255) rimB = 255;
         setrgbcolor(rimR, rimG, rimB);
-        circle(sx, sy, sr);
+        drawcircle(sx, sy, sr);
       }
     }
     i = i + 1;
@@ -161,12 +161,12 @@ void drawBalls() {
 
 void drawHud() {
   setrgbcolor(200, 215, 235);
-  moveto(FrameMargin + 12, FrameMargin + 24);
+  int textX = FrameMargin + 12;
+  int hudTop = FrameMargin + 24;
   string label = "Multi Bouncing Balls 3D - Press Q to quit, Space to pause";
-  outtext(label);
-  moveto(FrameMargin + 12, FrameMargin + 48);
+  outtextxy(textX, hudTop, label);
   string timeLabel = "Elapsed: " + formatfloat(elapsedSeconds, 1) + "s";
-  outtext(timeLabel);
+  outtextxy(textX, FrameMargin + 48, timeLabel);
 }
 
 void updateSimulation(float deltaTime) {
@@ -207,6 +207,16 @@ void initApp() {
     halt();
   }
   initgraph(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D");
+  string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+  string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+  string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+  if (fileexists(systemFontPath)) {
+    inittextsystem(systemFontPath, 18);
+  } else if (fileexists(repoFontPath1)) {
+    inittextsystem(repoFontPath1, 18);
+  } else {
+    inittextsystem(repoFontPath2, 18);
+  }
   randomize();
   FrameDelay = trunc(1000 / TargetFPS);
   quit = false;
