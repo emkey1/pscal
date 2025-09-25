@@ -267,24 +267,12 @@ class LandscapeDemo {
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
-    my.useFastWorldCoords = hasextbuiltin("user", "LandscapePrecomputeWorldCoords");
-    my.useFastWaterOffsets = hasextbuiltin("user", "LandscapePrecomputeWaterOffsets");
-    if (my.useFastWorldCoords) {
-      landscapeprecomputeworldcoords(my.worldXCoords,
-                                     my.worldZCoords,
-                                     TileScale,
-                                     TerrainSize,
-                                     VertexStride);
-    } else {
+    my.useFastWorldCoords = my.tryPrecomputeWorldCoordinates();
+    if (!my.useFastWorldCoords) {
       my.precomputeWorldCoordinates();
     }
-    if (my.useFastWaterOffsets) {
-      landscapeprecomputewateroffsets(my.waterPhaseOffset,
-                                      my.waterSecondaryOffset,
-                                      my.waterSparkleOffset,
-                                      TerrainSize,
-                                      VertexStride);
-    } else {
+    my.useFastWaterOffsets = my.tryPrecomputeWaterOffsets();
+    if (!my.useFastWaterOffsets) {
       my.precomputeWaterOffsets();
     }
     my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
@@ -313,6 +301,28 @@ class LandscapeDemo {
     my.hasMouseSample = false;
   }
 
+  bool tryPrecomputeWorldCoordinates() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWorldCoords")) {
+      return false;
+    }
+    landscapeprecomputeworldcoords(my.worldXCoords,
+                                   my.worldZCoords,
+                                   TileScale,
+                                   TerrainSize,
+                                   VertexStride);
+    float half = TerrainSize * 0.5;
+    float expectedMin = (0.0 - half) * TileScale;
+    float expectedMax = (TerrainSize - half) * TileScale;
+    float diffMin = my.worldXCoords[0] - expectedMin;
+    if (diffMin < 0.0) diffMin = -diffMin;
+    float diffMax = my.worldXCoords[TerrainSize] - expectedMax;
+    if (diffMax < 0.0) diffMax = -diffMax;
+    if (diffMin > 0.0005 || diffMax > 0.0005) {
+      return false;
+    }
+    return true;
+  }
+
   void precomputeWorldCoordinates() {
     float half = TerrainSize * 0.5;
     int i = 0;
@@ -322,6 +332,31 @@ class LandscapeDemo {
       my.worldZCoords[i] = world;
       i = i + 1;
     }
+  }
+
+  bool tryPrecomputeWaterOffsets() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWaterOffsets")) {
+      return false;
+    }
+    landscapeprecomputewateroffsets(my.waterPhaseOffset,
+                                    my.waterSecondaryOffset,
+                                    my.waterSparkleOffset,
+                                    TerrainSize,
+                                    VertexStride);
+    if (TerrainSize >= 1) {
+      int checkIdx = 1;
+      float expectedPhase = 0.18;
+      float phaseDiff = my.waterPhaseOffset[checkIdx] - expectedPhase;
+      if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
+      float expectedSecondary = 0.05;
+      float secondaryDiff =
+          my.waterSecondaryOffset[checkIdx] - expectedSecondary;
+      if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
+      if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void precomputeWaterOffsets() {
@@ -893,8 +928,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeS);
-    bool backward = IsKeyDown(ScanCodeW);
+    bool forward = IsKeyDown(ScanCodeW);
+    bool backward = IsKeyDown(ScanCodeS);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
