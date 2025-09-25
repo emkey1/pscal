@@ -9,6 +9,7 @@ VM. For instructions on adding your own routines, see
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
 | inttostr | (i: Integer) | String | Convert integer to string. |
+| formatfloat | (x: Numeric [, precision: Integer]) | String | Convert numeric value to string with fixed decimal precision. |
 | realtostr | (r: Real) | String | Convert real to string. |
 | real | (x: Ordinal or Real) | Real | Convert value to real. |
 | length | (s: String or Array) | Integer | Length of string or array. |
