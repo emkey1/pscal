@@ -79,6 +79,25 @@
       "expected_stdout": "sum=6\nafter_loop=4"
     },
     {
+      "id": "routine_nested_parameter_shadow_preserves_outer",
+      "name": "Nested parameter shadow leaves outer locals intact",
+      "category": "routine_scope",
+      "description": "Nested procedures may reuse parameter names without mutating captured outer locals or globals.",
+      "expect": "runtime_ok",
+      "code": "program RoutineNestedParameterShadow;\nvar\n  value: Integer;\n\nprocedure Outer;\nvar\n  value: Integer;\n\n  procedure Inner(value: Integer);\n  begin\n    writeln('inner=', value);\n  end;\n\nbegin\n  value := 3;\n  Inner(5);\n  writeln('outer=', value);\nend;\n\nbegin\n  value := 7;\n  Outer;\n  writeln('global=', value);\nend.",
+      "expected_stdout": "inner=5\nouter=3\nglobal=7"
+    },
+    {
+      "id": "routine_sibling_local_access_error",
+      "name": "Sibling routine cannot access another's local",
+      "category": "routine_scope",
+      "description": "Attempting to read a local variable from a different routine triggers a runtime failure.",
+      "expect": "runtime_error",
+      "code": "program RoutineSiblingLocalAccess;\n\nprocedure Producer;\nvar\n  hidden: Integer;\nbegin\n  hidden := 1;\n  writeln('producer=', hidden);\nend;\n\nprocedure Consumer;\nbegin\n  writeln(hidden);\nend;\n\nbegin\n  Producer;\n  Consumer;\nend.",
+      "expected_stderr_substring": "Undefined global variable",
+      "failure_reason": "Locals belong to their routine activation; sibling procedures must not see each other's locals."
+    },
+    {
       "id": "const_shadow_local_overrides_global",
       "name": "Inner constant redefinition persists globally",
       "category": "const_scope",
@@ -107,6 +126,25 @@
       "failure_reason": "Document the existing constant-leak behaviour so regressions are caught."
     },
     {
+      "id": "const_parameter_expression_compile_error",
+      "name": "Constant expressions cannot depend on parameters",
+      "category": "const_scope",
+      "description": "Procedure-local constants must be compile-time evaluable; referencing a parameter should be rejected.",
+      "expect": "compile_error",
+      "code": "program ConstParameterExpressionError;\n\nprocedure Demo(value: Integer);\nconst\n  Double = value * 2;\nbegin\n  writeln('double=', Double);\nend;\n\nbegin\n  Demo(4);\nend.",
+      "expected_stderr_substring": "must be compile-time evaluable",
+      "failure_reason": "Constants are folded at compile time; parameter references violate that rule."
+    },
+    {
+      "id": "const_forward_reference_evaluated",
+      "name": "Constants may reference later declarations in same block",
+      "category": "const_scope",
+      "description": "Document that constant initialisers can refer to later constants within the same declaration block.",
+      "expect": "runtime_ok",
+      "code": "program ConstForwardReference;\nconst\n  First = Second + 1;\n  Second = 2;\nbegin\n  writeln('value=', First);\nend.",
+      "expected_stdout": "value=3"
+    },
+    {
       "id": "type_local_shadow_allows_outer",
       "name": "Local type shadow keeps outer definition intact",
       "category": "type_scope",
@@ -124,6 +162,26 @@
       "code": "program TypeLeak;\n\nprocedure Factory;\ntype\n  PInternal = ^TInternal;\n  TInternal = record\n    Value: Integer;\n  end;\nvar\n  item: PInternal;\nbegin\n  new(item);\n  item^.Value := 1;\n  writeln('inside=', item^.Value);\nend;\n\nvar\n  other: PInternal;\nbegin\n  Factory;\n  new(other);\n  other^.Value := 2;\n  writeln('outside=', other^.Value);\nend.",
       "expected_stdout": "inside=1\noutside=2",
       "failure_reason": "Capture the observed leaking behaviour for regression coverage."
+    },
+    {
+      "id": "type_sibling_leak_visible",
+      "name": "Sibling routines see leaked local type",
+      "category": "type_scope",
+      "description": "Type declarations made inside one routine remain available to other routines in the same unit.",
+      "expect": "runtime_ok",
+      "code": "program TypeSiblingLeak;\n\nprocedure Maker;\ntype\n  PItem = ^TItem;\n  TItem = record\n    Value: Integer;\n  end;\nvar\n  inst: PItem;\nbegin\n  new(inst);\n  inst^.Value := 1;\n  writeln('maker=', inst^.Value);\nend;\n\nprocedure Consumer;\nvar\n  inst: PItem;\nbegin\n  new(inst);\n  inst^.Value := 2;\n  writeln('consumer=', inst^.Value);\nend;\n\nbegin\n  Maker;\n  Consumer;\nend.",
+      "expected_stdout": "maker=1\nconsumer=2",
+      "failure_reason": "Current implementation leaks routine-local type aliases into the global namespace."
+    },
+    {
+      "id": "type_forward_reference_compile_error",
+      "name": "Types must be declared before use",
+      "category": "resolution_scope",
+      "description": "Variables declared before their type definition should fail to compile.",
+      "expect": "compile_error",
+      "code": "program TypeForwardReferenceError;\nvar\n  item: TRecord;\n\ntype\n  TRecord = record\n    Value: Integer;\n  end;\n\nbegin\n  item.Value := 5;\n  writeln('value=', item.Value);\nend.",
+      "expected_stderr_substring": "Undefined type",
+      "failure_reason": "Pascal requires types to be declared before they're referenced in variable sections."
     },
     {
       "id": "integration_nested_scope_mix",
