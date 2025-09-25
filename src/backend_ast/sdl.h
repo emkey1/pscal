@@ -33,6 +33,9 @@ extern int gSdlTextureHeights[MAX_SDL_TEXTURES];
 extern bool gSdlTtfInitialized;
 extern bool gSdlImageInitialized;
 
+void sdlEnsureInputWatch(void);
+bool sdlCachedKeyDown(SDL_Scancode sc);
+
 
 // System Functions
 void initializeSdlSystems(void);

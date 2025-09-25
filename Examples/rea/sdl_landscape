@@ -753,10 +753,15 @@ class LandscapeDemo {
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    getmousestate(mouseX, mouseY, mouseButtons);
-    my.lastMouseX = mouseX;
-    my.lastMouseY = mouseY;
-    my.hasMouseSample = true;
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    if (mouseInside != 0) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
+    } else {
+      my.hasMouseSample = false;
+    }
   }
 
   void regenerate(int newSeed) {
@@ -916,8 +921,12 @@ class LandscapeDemo {
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    getmousestate(mouseX, mouseY, mouseButtons);
-    if (!my.hasMouseSample) {
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    bool insideWindow = mouseInside != 0;
+    if (!insideWindow) {
+      my.hasMouseSample = false;
+    } else if (!my.hasMouseSample) {
       my.lastMouseX = mouseX;
       my.lastMouseY = mouseY;
       my.hasMouseSample = true;
@@ -946,8 +955,19 @@ class LandscapeDemo {
     if (moveForward != 0.0) {
       float speed = MoveSpeed * dt * moveForward;
       float yawRadians = my.yaw * DegreesToRadians;
-      float forwardX = sin(yawRadians);
-      float forwardZ = cos(yawRadians);
+      float pitchRadians = my.pitch * DegreesToRadians;
+      float forwardX = sin(yawRadians) * cos(pitchRadians);
+      float forwardZ = cos(yawRadians) * cos(pitchRadians);
+      float forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      if (forwardLen < 0.0001) {
+        forwardX = sin(yawRadians);
+        forwardZ = cos(yawRadians);
+        forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      }
+      if (forwardLen > 0.0001) {
+        forwardX = forwardX / forwardLen;
+        forwardZ = forwardZ / forwardLen;
+      }
       float deltaX = forwardX * (speed / TileScale);
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
