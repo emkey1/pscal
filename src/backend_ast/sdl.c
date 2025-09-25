@@ -529,8 +529,8 @@ Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 3) {
-        runtimeError(vm, "GetMouseState expects 3 arguments.");
+    if (arg_count != 3 && arg_count != 4) {
+        runtimeError(vm, "GetMouseState expects 3 or 4 arguments.");
         return makeVoid();
     }
 
@@ -543,6 +543,19 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     Value* x_ptr = (Value*)args[0].ptr_val;
     Value* y_ptr = (Value*)args[1].ptr_val;
     Value* buttons_ptr = (Value*)args[2].ptr_val;
+    Value* inside_ptr = NULL;
+
+    if (arg_count == 4) {
+        if (args[3].type != TYPE_POINTER) {
+            runtimeError(vm, "GetMouseState requires VAR parameters, but a non-pointer type was received.");
+            return makeVoid();
+        }
+        inside_ptr = (Value*)args[3].ptr_val;
+        if (!inside_ptr) {
+            runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
+            return makeVoid();
+        }
+    }
 
     if (!x_ptr || !y_ptr || !buttons_ptr) {
         runtimeError(vm, "GetMouseState received a NIL pointer for a VAR parameter.");
@@ -647,6 +660,11 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
     freeValue(buttons_ptr);
     *buttons_ptr = makeInt(pscal_buttons);
+
+    if (inside_ptr) {
+        freeValue(inside_ptr);
+        *inside_ptr = makeInt((inside_window && has_focus) ? 1 : 0);
+    }
 
     return makeVoid();
 }

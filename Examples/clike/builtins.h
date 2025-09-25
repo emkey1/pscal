@@ -73,7 +73,7 @@ int freesound();
 int getenv();
 int getmaxx();
 int getmaxy();
-void getmousestate(int* x, int* y, int* buttons);
+void getmousestate(int* x, int* y, int* buttons, int* insideWindow);
 int getpixelcolor();
 int gettextsize();
 int getticks();

@@ -7,22 +7,27 @@
 
 int main() {
 #ifdef SDL_ENABLED
-    int x, y, buttons;
+    int x, y, buttons, inside;
     int prevX = -1;
     int prevY = -1;
     int prevButtons = 0;
+    int prevInside = 0;
 
     printf("Move the mouse inside the window. Press Q to quit.\n");
     initgraph(800, 600, "getmousestate demo");
 
     while (1) {
         graphloop(1);
-        getmousestate(&x, &y, &buttons);
-        if (x != prevX || y != prevY || buttons != prevButtons) {
-            printf("Mouse: x=%d y=%d buttons=%d\n", x, y, buttons);
+        getmousestate(&x, &y, &buttons, &inside);
+        if (!inside) {
+            buttons = 0;
+        }
+        if (x != prevX || y != prevY || buttons != prevButtons || inside != prevInside) {
+            printf("Mouse: x=%d y=%d buttons=%d inside=%d\n", x, y, buttons, inside);
             prevX = x;
             prevY = y;
             prevButtons = buttons;
+            prevInside = inside;
         }
         if (keypressed()) {
             char c = readkey();
