@@ -59,6 +59,78 @@ str formatDateTime(int epochSeconds, int offsetSeconds) {
   return date + " " + pad2(hour) + ":" + pad2(minute);
 }
 
+str trimWhitespace(str value) {
+  int left = 1;
+  int right = length(value);
+  while (left <= right && (value[left] == ' ' || value[left] == '\t' ||
+         value[left] == '\n' || value[left] == '\r')) {
+    left = left + 1;
+  }
+  while (right >= left && (value[right] == ' ' || value[right] == '\t' ||
+         value[right] == '\n' || value[right] == '\r')) {
+    right = right - 1;
+  }
+  if (right < left) {
+    return "";
+  }
+  int resultLen = right - left + 1;
+  str trimmed;
+  setlength(trimmed, resultLen);
+  int i = 0;
+  while (i < resultLen) {
+    trimmed[i + 1] = value[left + i];
+    i = i + 1;
+  }
+  return trimmed;
+}
+
+str tryReadApiKeyFromFile(str path) {
+  if (!fileexists(path)) {
+    return "";
+  }
+  text f;
+  assign(f, path);
+  reset(f);
+  if (eof(f)) {
+    close(f);
+    return "";
+  }
+  str line;
+  readln(f, line);
+  close(f);
+  return trimWhitespace(line);
+}
+
+str resolveApiKey() {
+  str envKey = getenv("OPENWEATHER_API_KEY");
+  if (envKey != "") {
+    return envKey;
+  }
+
+  str home = getenv("HOME");
+  str desiredPath = "~/.pscal/etc/openweathermap.key";
+  if (home != "") {
+    if (home[length(home)] == '/') {
+      desiredPath = home + ".pscal/etc/openweathermap.key";
+    } else {
+      desiredPath = home + "/.pscal/etc/openweathermap.key";
+    }
+    str fileKey = tryReadApiKeyFromFile(desiredPath);
+    if (fileKey != "") {
+      return fileKey;
+    }
+  }
+
+  str legacyKey = tryReadApiKeyFromFile("/usr/local/pscal/lib/openweathermap.key");
+  if (legacyKey != "") {
+    return legacyKey;
+  }
+
+  writeln("Error: Unable to determine OpenWeather API key.");
+  writeln("Set the OPENWEATHER_API_KEY environment variable or create ~/.pscal/etc/openweathermap.key with your key.");
+  return "";
+}
+
 void printCurrentConditions(int currentHandle, str tempUnitSymbol) {
   float currentTemp = 0.0;
   int humidity = -1;
@@ -268,9 +340,8 @@ int main() {
     return 1;
   }
 
-  str apiKey = getenv("OPENWEATHER_API_KEY");
+  str apiKey = resolveApiKey();
   if (apiKey == "") {
-    writeln("Error: Please set the OPENWEATHER_API_KEY environment variable with your OpenWeather API key.");
     return 1;
   }
 
