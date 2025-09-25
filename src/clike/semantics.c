@@ -307,6 +307,18 @@ static char *tokenToCString(ClikeToken t) {
 }
 
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes);
+static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType);
+
+static void analyzeScopedStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType) {
+    if (!node) return;
+    if (node->type == TCAST_COMPOUND) {
+        analyzeStmt(node, scopes, retType);
+        return;
+    }
+    ssPush(scopes);
+    analyzeStmt(node, scopes, retType);
+    ssPop(scopes);
+}
 
 static int isCharPointerDecl(const ASTNodeClike *decl) {
     return decl && decl->var_type == TYPE_POINTER && decl->element_type == TYPE_CHAR;
@@ -945,12 +957,12 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             break;
         case TCAST_IF:
             analyzeExpr(node->left, scopes);
-            analyzeStmt(node->right, scopes, retType);
-            analyzeStmt(node->third, scopes, retType);
+            analyzeScopedStmt(node->right, scopes, retType);
+            analyzeScopedStmt(node->third, scopes, retType);
             break;
         case TCAST_WHILE:
             analyzeExpr(node->left, scopes);
-            analyzeStmt(node->right, scopes, retType);
+            analyzeScopedStmt(node->right, scopes, retType);
             break;
         case TCAST_FOR:
             ssPush(scopes);
@@ -971,19 +983,21 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
             ssPop(scopes);
             break;
         case TCAST_DO_WHILE:
-            analyzeStmt(node->right, scopes, retType);
+            analyzeScopedStmt(node->right, scopes, retType);
             analyzeExpr(node->left, scopes);
             break;
         case TCAST_SWITCH:
             analyzeExpr(node->left, scopes);
             for (int i = 0; i < node->child_count; ++i) {
                 ASTNodeClike *c = node->children[i];
+                ssPush(scopes);
                 analyzeExpr(c->left, scopes);
                 for (int j = 0; j < c->child_count; ++j) {
-                    analyzeStmt(c->children[j], scopes, retType);
+                    analyzeScopedStmt(c->children[j], scopes, retType);
                 }
+                ssPop(scopes);
             }
-            if (node->right) analyzeStmt(node->right, scopes, retType);
+            analyzeScopedStmt(node->right, scopes, retType);
             break;
         case TCAST_BREAK:
         case TCAST_CONTINUE:
