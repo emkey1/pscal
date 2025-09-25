@@ -3,7 +3,10 @@
 The Rea compiler is an experimental front end for PSCAL. This tutorial walks through
 building the compiler, running the SDL multi bouncing balls sample located at
 `Examples/rea/sdl_multibouncingballs`, and understanding every part of the
-program.
+program. Once you are comfortable with the 2D version, check out the
+`Examples/rea/sdl_multibouncingballs_3d` variant that renders a 3D boxed arena
+and leans on the `BouncingBalls3DStep` extended builtin for fast physics and
+projection.
 
 ## Build the compiler
 
