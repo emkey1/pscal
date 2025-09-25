@@ -375,7 +375,7 @@ if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
     EXIT_CODE=1
   fi
 
-  cache_file=$(find "$tmp_home/.pscal_cache" -name '*.bc' | head -n 1)
+  cache_file=$(find "$tmp_home/.pscal/bc_cache" -name '*.bc' | head -n 1)
 
   src_real=$(realpath "$src_file")
   if ! python3 - "$cache_file" "$src_real" <<'PY'

@@ -65,8 +65,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--cache-dir",
-        default="~/.pscal_cache",
-        help="Cache directory (default: ~/.pscal_cache)",
+        default="~/.pscal/bc_cache",
+        help="Cache directory (default: ~/.pscal/bc_cache)",
     )
     root_dir = str(Path("/").resolve())
     parser.add_argument(

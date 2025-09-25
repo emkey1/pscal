@@ -14,7 +14,8 @@
 #include <errno.h>
 #include <stdint.h>
 
-#define CACHE_DIR ".pscal_cache"
+#define CACHE_ROOT ".pscal"
+#define CACHE_DIR "bc_cache"
 #define CACHE_MAGIC 0x50534243 /* 'PSBC' */
 
 
@@ -33,11 +34,33 @@ static unsigned long hashPath(const char* path) {
 char* buildCachePath(const char* source_path) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
-    size_t dir_len = strlen(home) + 1 + strlen(CACHE_DIR) + 1;
+    size_t root_len = strlen(home) + 1 + strlen(CACHE_ROOT) + 1;
+    char* root = (char*)malloc(root_len);
+    if (!root) return NULL;
+    snprintf(root, root_len, "%s/%s", home, CACHE_ROOT);
+    if (mkdir(root, 0700) != 0 && errno != EEXIST) {
+        free(root);
+        return NULL;
+    }
+
+    if (chmod(root, 0700) != 0) {
+        free(root);
+        return NULL;
+    }
+
+    size_t dir_len = strlen(root) + 1 + strlen(CACHE_DIR) + 1;
     char* dir = (char*)malloc(dir_len);
-    if (!dir) return NULL;
-    snprintf(dir, dir_len, "%s/%s", home, CACHE_DIR);
-    mkdir(dir, 0777); // ensure directory exists
+    if (!dir) {
+        free(root);
+        return NULL;
+    }
+    snprintf(dir, dir_len, "%s/%s", root, CACHE_DIR);
+    if (mkdir(dir, 0777) != 0 && errno != EEXIST) {
+        free(dir);
+        free(root);
+        return NULL;
+    }
+    free(root);
 
     unsigned long h = hashPath(source_path);
     size_t path_len = dir_len + 32;
