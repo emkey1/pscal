@@ -39,6 +39,7 @@
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
+#include "core/build_info.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
@@ -60,6 +61,7 @@ static void initSymbolSystemClike(void) {
 static const char *CLIKE_USAGE =
     "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
+    "     -v                          Display version.\n"
     "     --dump-ast-json             Dump AST to JSON and exit.\n"
     "     --dump-bytecode             Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
@@ -109,7 +111,11 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--dump-ast-json") == 0) {
+        if (strcmp(argv[i], "-v") == 0) {
+            printf("Clike Compiler Version: %s (latest tag: %s)\n",
+                   pscal_program_version_string(), pscal_git_tag_string());
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
@@ -162,7 +168,7 @@ int main(int argc, char **argv) {
 #ifdef SDL
     defines[define_count++] = "SDL_ENABLED";
 #endif
-    char *pre_src = clikePreprocess(src, defines, define_count);
+    char *pre_src = clikePreprocess(src, path, defines, define_count);
 
     ParserClike parser; initParserClike(&parser, pre_src ? pre_src : src);
     ASTNodeClike *prog = parseProgramClike(&parser);
@@ -193,7 +199,7 @@ int main(int argc, char **argv) {
 
     initSymbolSystemClike();
     clikeRegisterBuiltins();
-    analyzeSemanticsClike(prog);
+    analyzeSemanticsClike(prog, path);
 
     if (!verifyASTClikeLinks(prog, NULL)) {
         fprintf(stderr, "AST verification failed after semantic analysis.\n");

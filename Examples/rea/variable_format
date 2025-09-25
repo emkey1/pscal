@@ -3,10 +3,10 @@
    It can span across multiple lines.
 */
 
-// The Main class contains the entry point for the program.
-class Main {
+// The demo class holds the logic for showcasing variables and formatting.
+class VariableFormatDemo {
   // A simple method to demonstrate variable declaration and operations.
-  void main() {
+  void run() {
     // Variable declarations with different data types
     int int_var = 10;
     float float_var = 5.5;
@@ -32,7 +32,7 @@ class Main {
 }
 
 int main() {
-    Main m = new Main();  // allocate the object
-    m.main();
+    VariableFormatDemo demo = new VariableFormatDemo();  // allocate the object
+    demo.run();
     return 0;
 }

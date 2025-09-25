@@ -1,0 +1,50 @@
+Test: routine_nested_function_leak_error
+Category: routine_scope
+Expectation: compile_error
+Description: Nested helper functions must not be callable from the outer scope.
+Reason: stderr missing expected substring
+Exit code: 1
+--- stdout ---
+3
+--- stderr ---
+Runtime Error: Undefined global variable 'hidden'.
+[Error Location] Offset: 55, Line: 14
+
+--- VM Crash Context ---
+Instruction Pointer (IP): 0x6000026ac3b9
+Code Base: 0x6000026ac380
+Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
+0057    | CALL_INDIRECT    (args=1)
+
+Last Instructions executed (leading to crash, up to 10 bytes before error point):
+0045    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0051   14 CONSTANT            3 '1'
+0053    | CONSTANT            8 '3'
+
+--- VM State Dump (Full Stack at Crash) ---
+Stack Size: 3, Frame Count: 1
+Stack Contents (bottom to top):
+  [ nil ]
+  [ 1 ]
+  [ 3 ]
+--------------------------
+--- VM execution Failed (Runtime Error) ---
+[VM_DEBUG] Offset: 0057, Line:   14, Stack Size: 3, Frame Count: 1
+0057    | CALL_INDIRECT    (args=1)
+[VM_DEBUG] Stack Contents: [nil] [1] [3]
+--- source ---
+program RoutineNestedFunctionLeak;
+
+function Outer(value: Integer): Integer;
+  function Hidden(delta: Integer): Integer;
+  begin
+    Hidden := value + delta;
+  end;
+begin
+  Outer := Hidden(1);
+end;
+
+begin
+  writeln(Outer(2));
+  writeln(Hidden(3));
+end.

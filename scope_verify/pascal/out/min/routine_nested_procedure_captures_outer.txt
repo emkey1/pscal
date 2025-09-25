@@ -1,0 +1,37 @@
+Test: routine_nested_procedure_captures_outer
+Category: routine_scope
+Expectation: runtime_ok
+Description: Nested procedures should capture and mutate variables from the enclosing scope.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+L7: Compiler error: Local variable 'index' not found in scope.
+Compilation failed with errors.
+--- source ---
+program RoutineNestedCapture;
+var
+  total: Integer;
+
+procedure Accumulate(start: Integer);
+var
+  index: Integer;
+
+  procedure Step(amount: Integer);
+  begin
+    total := total + amount;
+  end;
+
+begin
+  for index := 1 to 3 do
+  begin
+    Step(index * start);
+  end;
+end;
+
+begin
+  total := 0;
+  Accumulate(1);
+  writeln('total=', total);
+end.

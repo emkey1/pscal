@@ -1,0 +1,35 @@
+Test: routine_nested_function_captures_outer
+Category: routine_scope
+Expectation: runtime_ok
+Description: Nested functions should capture both local and outer-scope variables while leaving globals untouched.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+L7: Compiler error: Local variable 'localbase' not found in scope.
+Compilation failed with errors.
+--- source ---
+program RoutineNestedFunction;
+var
+  globalBase: Integer;
+
+function Factory(offset: Integer): Integer;
+var
+  localBase: Integer;
+
+  function Accumulate(step: Integer): Integer;
+  begin
+    Accumulate := localBase + offset + step + globalBase;
+  end;
+
+begin
+  localBase := offset * 2;
+  Factory := Accumulate(1);
+end;
+
+begin
+  globalBase := 7;
+  writeln('result=', Factory(3));
+  writeln('global=', globalBase);
+end.

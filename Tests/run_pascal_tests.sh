@@ -90,6 +90,94 @@ PY
   rm -f "$tmp_out" "$tmp_err"
 }
 
+exercise_pascal_cli_smoke() {
+  local fixture="$ROOT_DIR/Tests/tools/fixtures/cli_pascal.pas"
+  if [ ! -f "$fixture" ]; then
+    echo "Pascal CLI fixture missing at $fixture" >&2
+    EXIT_CODE=1
+    return
+  fi
+
+  local tmp_out tmp_err status
+
+  echo "---- PascalCLIVersion ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$PASCAL_BIN" -v >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "pascal -v exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_err" ]; then
+    echo "pascal -v emitted stderr:" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "latest tag:" "$tmp_out"; then
+    echo "pascal -v output missing latest tag:" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- PascalCLIAstJson ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$PASCAL_BIN" --no-cache --dump-ast-json "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "pascal --dump-ast-json failed with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "Dumping AST" "$tmp_err"; then
+    echo "pascal --dump-ast-json missing progress messages" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q '"type"' "$tmp_out"; then
+    echo "pascal --dump-ast-json produced unexpected stdout" >&2
+    cat "$tmp_out" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- PascalCLITrace ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$PASCAL_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "pascal --vm-trace-head exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif ! grep -q "\[VM-TRACE\]" "$tmp_err"; then
+    echo "pascal --vm-trace-head did not emit trace output" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+}
+
+has_ext_builtin_category() {
+  local binary="$1"
+  local category="$2"
+  set +e
+  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
+  local status=$?
+  set -e
+  return $status
+
+}
+
 if [ ! -x "$PASCAL_BIN" ]; then
   echo "pascal binary not found at $PASCAL_BIN" >&2
   exit 1
@@ -126,6 +214,13 @@ fi
 EXIT_CODE=0
 
 check_ext_builtin_dump "$PASCAL_BIN" pascal
+exercise_pascal_cli_smoke
+
+if has_ext_builtin_category "$PASCAL_BIN" sqlite; then
+  PASCAL_SQLITE_AVAILABLE=1
+else
+  PASCAL_SQLITE_AVAILABLE=0
+fi
 
 # Iterate over Pascal test sources (files without extensions)
 for src in "$SCRIPT_DIR"/Pascal/*; do
@@ -136,6 +231,12 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   # Skip SDL-dependent test unless RUN_SDL=1 forces it
   if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
     echo "Skipping $test_name (SDL disabled)"
+    echo
+    continue
+  fi
+
+  if [ -f "$SCRIPT_DIR/Pascal/$test_name.sqlite" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then
+    echo "Skipping $test_name (SQLite builtins disabled)"
     echo
     continue
   fi
@@ -274,7 +375,7 @@ if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
     EXIT_CODE=1
   fi
 
-  cache_file=$(find "$tmp_home/.pscal_cache" -name '*.bc' | head -n 1)
+  cache_file=$(find "$tmp_home/.pscal/bc_cache" -name '*.bc' | head -n 1)
 
   src_real=$(realpath "$src_file")
   if ! python3 - "$cache_file" "$src_real" <<'PY'

@@ -22,6 +22,8 @@ Value* findCompilerConstant(const char* name_original_case);
 Value evaluateCompileTimeValue(AST* node); // For parser to evaluate const expressions
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk);
+bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk);
+void compilerSetCurrentUnitName(const char *name);
 
 // Feature toggles for frontends
 void compilerEnableDynamicLocals(int enable);

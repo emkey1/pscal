@@ -180,7 +180,27 @@ void setExtra(AST *parent, AST *child) {
 
 void freeAST(AST *node) {
     if (!node) return;
-    if (node->freed) return;
+
+    static AST** freed_nodes = NULL;
+    static size_t freed_count = 0;
+    static size_t freed_capacity = 0;
+    for (size_t i = 0; i < freed_count; i++) {
+        if (freed_nodes[i] == node) {
+            return;
+        }
+    }
+
+    if (node->freed) {
+        if (freed_count == freed_capacity) {
+            size_t new_cap = freed_capacity == 0 ? 64 : freed_capacity * 2;
+            AST** new_buf = realloc(freed_nodes, new_cap * sizeof(AST*));
+            if (!new_buf) return;
+            freed_nodes = new_buf;
+            freed_capacity = new_cap;
+        }
+        freed_nodes[freed_count++] = node;
+        return;
+    }
     node->freed = true;
 
     if (isNodeInTypeTable(node)) {
@@ -225,6 +245,17 @@ void freeAST(AST *node) {
         freeToken(node->token);
         node->token = NULL;
     }
+    if (freed_count == freed_capacity) {
+        size_t new_cap = freed_capacity == 0 ? 64 : freed_capacity * 2;
+        AST** new_buf = realloc(freed_nodes, new_cap * sizeof(AST*));
+        if (!new_buf) {
+            free(node);
+            return;
+        }
+        freed_nodes = new_buf;
+        freed_capacity = new_cap;
+    }
+    freed_nodes[freed_count++] = node;
     free(node);
 }
 
@@ -295,21 +326,55 @@ void setTypeAST(AST *node, VarType type) {
     node->var_type = type;
 }
 
+static bool constDeclMatches(AST* node, const char* varName) {
+    return node && node->type == AST_CONST_DECL &&
+           node->token && node->token->value &&
+           strcasecmp(node->token->value, varName) == 0;
+}
+
+static int declarationLine(AST* decl) {
+    if (!decl) return 0;
+    if (decl->token) return decl->token->line;
+    if (decl->child_count > 0 && decl->children) {
+        for (int i = 0; i < decl->child_count; i++) {
+            AST* child = decl->children[i];
+            if (!child) continue;
+            if (child->token) return child->token->line;
+            if (child->left && child->left->token) return child->left->token->line;
+            if (child->right && child->right->token) return child->right->token->line;
+        }
+    }
+    if (decl->left && decl->left->token) return decl->left->token->line;
+    if (decl->right && decl->right->token) return decl->right->token->line;
+    return 0;
+}
+
 static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
 
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
     if (!currentScopeNode || !varName || !referenceNode) return NULL;
 
+    int referenceLine = 0;
+    if (referenceNode->token) {
+        referenceLine = referenceNode->token->line;
+    }
+
     AST* node = referenceNode;
+    if (node && node == currentScopeNode) {
+        node = node->parent;
+    }
     while (node && node != currentScopeNode) {
         AST* parent = node->parent;
         if (parent && parent->type == AST_COMPOUND) {
             for (int i = 0; i < parent->child_count; i++) {
                 AST* sibling = parent->children[i];
                 if (sibling == node) break;
-                if (sibling && sibling->type == AST_VAR_DECL) {
+                if (!sibling) continue;
+                if (sibling->type == AST_VAR_DECL) {
                     AST* found = matchVarDecl(sibling, varName);
                     if (found) return found;
+                } else if (constDeclMatches(sibling, varName)) {
+                    return sibling;
                 }
             }
         }
@@ -325,11 +390,25 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
         return NULL;
     }
 
+    bool scanningParameters = (referenceNode == currentScopeNode);
     for (int i = 0; i < currentScopeNode->child_count; i++) {
         AST* paramDeclGroup = currentScopeNode->children[i];
-        if (paramDeclGroup && paramDeclGroup->type == AST_VAR_DECL) {
+        if (!paramDeclGroup) continue;
+        if (paramDeclGroup->type == AST_VAR_DECL) {
             AST* found = matchVarDecl(paramDeclGroup, varName);
-            if (found) return paramDeclGroup;
+            if (found) {
+                if (!scanningParameters && referenceLine > 0) {
+                    int declLine = declarationLine(paramDeclGroup);
+                    if (declLine > referenceLine) continue;
+                }
+                return paramDeclGroup;
+            }
+        } else if (constDeclMatches(paramDeclGroup, varName)) {
+            if (referenceLine > 0) {
+                int declLine = declarationLine(paramDeclGroup);
+                if (declLine > referenceLine) continue;
+            }
+            return paramDeclGroup;
         }
     }
 
@@ -348,9 +427,22 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
         if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
             for (int i = 0; i < declarationsNode->child_count; i++) {
                 AST* varDeclGroup = declarationsNode->children[i];
-                if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                if (!varDeclGroup) continue;
+                if (varDeclGroup->type == AST_VAR_DECL) {
                     AST* found = matchVarDecl(varDeclGroup, varName);
-                    if (found) return varDeclGroup;
+                    if (found) {
+                        if (referenceLine > 0) {
+                            int declLine = declarationLine(varDeclGroup);
+                            if (declLine > referenceLine) continue;
+                        }
+                        return varDeclGroup;
+                    }
+                } else if (constDeclMatches(varDeclGroup, varName)) {
+                    if (referenceLine > 0) {
+                        int declLine = declarationLine(varDeclGroup);
+                        if (declLine > referenceLine) continue;
+                    }
+                    return varDeclGroup;
                 }
             }
         }
@@ -376,36 +468,14 @@ static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
     return NULL;
 }
 
-static AST* findVarDeclInSubtree(AST* root, const char* varName) {
-    if (!root) return NULL;
-    if (root->type == AST_VAR_DECL) {
-        AST* m = matchVarDecl(root, varName);
-        if (m) return root;
-    }
-    if (root->left) {
-        AST* r = findVarDeclInSubtree(root->left, varName);
-        if (r) return r;
-    }
-    if (root->right) {
-        AST* r = findVarDeclInSubtree(root->right, varName);
-        if (r) return r;
-    }
-    if (root->extra) {
-        AST* r = findVarDeclInSubtree(root->extra, varName);
-        if (r) return r;
-    }
-    for (int i = 0; i < root->child_count; i++) {
-        AST* c = root->children ? root->children[i] : NULL;
-        if (!c) continue;
-        AST* r = findVarDeclInSubtree(c, varName);
-        if (r) return r;
-    }
-    return NULL;
-}
-
 static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentScopeNode, AST* referenceNode, AST* globalProgramNode) {
      if (!varName) return NULL;
      AST* foundDecl = NULL;
+
+     int referenceLine = 0;
+     if (referenceNode && referenceNode->token) {
+         referenceLine = referenceNode->token->line;
+     }
 
      // First, check for the identifier in the global symbol table. This will find enums.
      Symbol* sym = lookupGlobalSymbol(varName);
@@ -427,7 +497,8 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
             if (declarationsNode && declarationsNode->type == AST_COMPOUND) {
                 for (int i = 0; i < declarationsNode->child_count && !foundDecl; i++) {
                     AST* varDeclGroup = declarationsNode->children[i];
-                    if (varDeclGroup && varDeclGroup->type == AST_VAR_DECL) {
+                    if (!varDeclGroup) continue;
+                    if (varDeclGroup->type == AST_VAR_DECL) {
                         for (int j = 0; j < varDeclGroup->child_count; j++) {
                             AST* nameNode = varDeclGroup->children[j];
                             if (!nameNode) continue;
@@ -440,6 +511,8 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
                                 break;
                             }
                         }
+                    } else if (constDeclMatches(varDeclGroup, varName)) {
+                        foundDecl = varDeclGroup;
                     }
                 }
             }
@@ -447,7 +520,7 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
 
         // Fallback to the general-purpose scope walk if still not found.
         if (!foundDecl) {
-            foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
+        foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
         }
 
         // As an additional fallback (handles languages where declarations and
@@ -460,9 +533,23 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
                 if (ancestor->type == AST_COMPOUND) {
                     for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
                         AST* sibling = ancestor->children[i];
-                        if (sibling && sibling->type == AST_VAR_DECL) {
+                        if (!sibling) continue;
+                        if (sibling->type == AST_VAR_DECL) {
                             AST* m = matchVarDecl(sibling, varName);
-                            if (m) { foundDecl = sibling; break; }
+                            if (m) {
+                                if (referenceLine > 0) {
+                                    int declLine = declarationLine(sibling);
+                                    if (declLine > referenceLine) continue;
+                                }
+                                foundDecl = sibling; break;
+                            }
+                        } else if (constDeclMatches(sibling, varName)) {
+                            if (referenceLine > 0) {
+                                int declLine = declarationLine(sibling);
+                                if (declLine > referenceLine) continue;
+                            }
+                            foundDecl = sibling;
+                            break;
                         }
                     }
                 }
@@ -471,21 +558,6 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
             }
         }
 
-        // Final fallback: search the entire body of the current scope for a
-        // matching VAR_DECL (handles interleaved block structures found in Rea).
-        if (!foundDecl && (currentScopeNode->type == AST_PROCEDURE_DECL || currentScopeNode->type == AST_FUNCTION_DECL)) {
-            AST* body = (currentScopeNode->right && currentScopeNode->right->type != AST_BLOCK)
-                          ? currentScopeNode->right
-                          : currentScopeNode->extra;
-            if (!body || body->type != AST_COMPOUND) {
-                // For Pascal-style, body is an AST_BLOCK whose first child is declarations
-                body = currentScopeNode->right;
-            }
-            if (body) {
-                AST* anyDecl = findVarDeclInSubtree(body, varName);
-                if (anyDecl) foundDecl = anyDecl;
-            }
-        }
     }
 
     // If not found, walk outward and search enclosing procedure/function scopes.
@@ -513,21 +585,27 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
                                if (varNameNode) {
                                    if (varNameNode->token && varNameNode->type == AST_VARIABLE &&
                                        strcasecmp(varNameNode->token->value, varName) == 0) {
-                                       foundDecl = declGroup;
-                                       goto found_static_decl;
-                                   } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
-                                              varNameNode->left->type == AST_VARIABLE && varNameNode->left->token &&
-                                              strcasecmp(varNameNode->left->token->value, varName) == 0) {
-                                       foundDecl = declGroup;
-                                       goto found_static_decl;
-                                   }
-                               }
-                           }
+                                       if (referenceLine <= 0 || declarationLine(declGroup) <= referenceLine) {
+                                           foundDecl = declGroup;
+                                           goto found_static_decl;
+                                       }
+                                    } else if (varNameNode->type == AST_ASSIGN && varNameNode->left &&
+                                                varNameNode->left->type == AST_VARIABLE && varNameNode->left->token &&
+                                                strcasecmp(varNameNode->left->token->value, varName) == 0) {
+                                       if (referenceLine <= 0 || declarationLine(declGroup) <= referenceLine) {
+                                           foundDecl = declGroup;
+                                           goto found_static_decl;
+                                       }
+                                    }
+                                }
+                            }
                        }
                         else if (declGroup && declGroup->type == AST_CONST_DECL) {
                              if (declGroup->token && strcasecmp(declGroup->token->value, varName) == 0) {
-                                  foundDecl = declGroup;
-                                  goto found_static_decl;
+                                  if (referenceLine <= 0 || declarationLine(declGroup) <= referenceLine) {
+                                      foundDecl = declGroup;
+                                      goto found_static_decl;
+                                  }
                              }
                        }
                    }

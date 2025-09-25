@@ -1,4 +1,5 @@
 #include "clike/ast.h"
+#include "core/utils.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -283,10 +284,16 @@ static void dumpASTClikeJSONRecursive(ASTNodeClike *node, FILE *out, int level) 
         fputc('}', out);
     }
 
-    /* Minimal type annotation so the loader sets TYPE_UNKNOWN */
-    fputs(",\n", out);
-    indent(out, level + 2);
-    fputs("\"var_type_annotated\": \"UNKNOWN_VAR_TYPE\"", out);
+    /*
+     * Emit an annotated type only when semantic analysis produced a concrete
+     * value.  The loader treats the field as optional and assumes
+     * TYPE_UNKNOWN when it is absent.
+     */
+    if (node->var_type != TYPE_UNKNOWN) {
+        fputs(",\n", out);
+        indent(out, level + 2);
+        fprintf(out, "\"var_type_annotated\": \"%s\"", varTypeToString(node->var_type));
+    }
 
     if (node->left) {
         fputs(",\n", out);

@@ -24,6 +24,7 @@ typedef struct AST {
     bool is_global_scope;    // Flag for block nodes
     bool is_inline;          // Flag for inline directive on procedures/functions
     bool is_virtual;         // Flag for class methods participating in V-table
+    bool is_exported;        // Flag for exported module declarations
     struct AST *type_def;    // For TYPE_REFERENCE etc.
     bool freed;              // Internal flag to guard against double free
 } AST;

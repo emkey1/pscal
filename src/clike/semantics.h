@@ -3,6 +3,6 @@
 
 #include "clike/ast.h"
 
-void analyzeSemanticsClike(ASTNodeClike *program);
+void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path);
 
 #endif

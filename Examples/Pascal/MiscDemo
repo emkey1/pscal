@@ -19,6 +19,16 @@ var
   srName: string;
   i: integer;
 
+function TwoDigit(n: word): string;
+var
+  res: string;
+begin
+  res := '';
+  res := res + chr(ord('0') + (n div 10));
+  res := res + chr(ord('0') + (n mod 10));
+  TwoDigit := res;
+end;
+
 procedure WaitKey;
 begin
   TextBackground(Black);
@@ -51,8 +61,16 @@ procedure DemoDateTime;
 begin
   getDate(year, month, day, dow);
   getTime(hour, minute, second, sec100);
-  writeln('Today is ', year, '-', month, '-', day, ' (dow=', dow, ')');
-  writeln('Current time: ', hour, ':', minute, ':', second);
+  write('Today is ', year, '-');
+  write(TwoDigit(month));
+  write('-');
+  writeln(TwoDigit(day), ' (dow=', dow, ')');
+  write('Current time: ');
+  write(TwoDigit(hour));
+  write(':');
+  write(TwoDigit(minute));
+  write(':');
+  writeln(TwoDigit(second));
   writeln('HOME env: ', getEnv('HOME'));
 end;
 
@@ -66,10 +84,7 @@ begin
   end;
 end;
 
-{ This routine intentionally shares its name with the VM's builtin
-  toupper. The compiler will warn that the user-defined version
-  overrides the builtin, and the user-defined body will be used. }
-function ToUpper(s: string): string;
+function ToUpperString(s: string): string;
 var
   res: string;
   idx: integer;
@@ -82,10 +97,10 @@ begin
     else
       res := res + s[idx];
   end;
-  ToUpper := res;
+  ToUpperString := res;
 end;
 
-function ToLower(s: string): string;
+function ToLowerString(s: string): string;
 var
   res: string;
   idx: integer;
@@ -98,7 +113,7 @@ begin
     else
       res := res + s[idx];
   end;
-  ToLower := res;
+  ToLowerString := res;
 end;
 
 function TrimSpaces(s: string): string;
@@ -123,8 +138,8 @@ begin
   write('Enter text: ');
   readln(input);
   writeln('Trimmed: "', TrimSpaces(input), '"');
-  writeln('UpperCase: ', ToUpper(input));
-  writeln('LowerCase: ', ToLower(input));
+  writeln('UpperCase: ', ToUpperString(input));
+  writeln('LowerCase: ', ToLowerString(input));
   writeln('Reversed: ', ReverseString(input));
 end;
 

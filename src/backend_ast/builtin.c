@@ -40,6 +40,9 @@ static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     (void)args;
     const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
     runtimeError(vm, "Built-in '%s' requires SDL support. Rebuild with -DSDL=ON to enable it.", name);
+    if (vm) {
+        vm->abort_requested = true;
+    }
     return makeNil();
 }
 #define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
@@ -581,8 +584,11 @@ Value vmBuiltinSucc(VM* vm, int arg_count, Value* args) {
                 return makeVoid();
             }
             return makeChar(arg.c_val + 1);
-        case TYPE_BOOLEAN:
-            return makeBoolean(arg.i_val + 1 > 1 ? 1 : arg.i_val + 1);
+        case TYPE_BOOLEAN: {
+            long long next_val = arg.i_val + 1;
+            int bool_result = next_val > 1 ? 1 : (next_val != 0);
+            return makeBoolean(bool_result);
+        }
         case TYPE_ENUM: {
             int ordinal = arg.enum_val.ordinal;
             if (arg.enum_meta && ordinal + 1 >= arg.enum_meta->member_count) {
@@ -1745,13 +1751,16 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    bool color_was_applied = applyCurrentTextAttributes(stdout);
-    printf("\x1B[2J\x1B[H");
-    if (color_was_applied) {
-        resetTextAttributes(stdout);
+    if (isatty(STDOUT_FILENO)) {
+        bool color_was_applied = applyCurrentTextAttributes(stdout);
+        fputs("\x1B[2J\x1B[H", stdout);
+        if (color_was_applied) {
+            resetTextAttributes(stdout);
+        }
+        fprintf(stdout, "\x1B[%d;%dH", gWindowTop, gWindowLeft);
+        fflush(stdout);
     }
-    printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
-    fflush(stdout);
+
     return makeVoid();
 }
 
@@ -3059,11 +3068,16 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     }
 
     bool newline = false;
+    bool suppress_spacing = (gSuppressWriteSpacing != 0);
+    bool suppress_spacing_flag = false;
     Value flag = args[0];
     if (isRealType(flag.type)) {
         newline = (AS_REAL(flag) != 0.0);
     } else if (IS_INTLIKE(flag)) {
-        newline = (AS_INTEGER(flag) != 0);
+        long long raw = AS_INTEGER(flag);
+        newline = (raw & VM_WRITE_FLAG_NEWLINE) != 0;
+        suppress_spacing_flag = ((raw & VM_WRITE_FLAG_SUPPRESS_SPACING) != 0);
+        suppress_spacing = suppress_spacing || suppress_spacing_flag;
     } else if (flag.type == TYPE_BOOLEAN) {
         newline = flag.i_val != 0;
     } else if (flag.type == TYPE_CHAR) {
@@ -3099,9 +3113,50 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         color_was_applied = applyCurrentTextAttributes(output_stream);
     }
 
+    Value prev = makeVoid();
+    bool has_prev = false;
     for (int i = start_index; i < arg_count; i++) {
         Value val = args[i];
-        if (val.type == TYPE_STRING) {
+        if (!suppress_spacing && has_prev) {
+            bool add_space = true;
+            const char *no_space_after = "=,.;:?!-)]}>)\"'";
+            if (prev.type == TYPE_STRING && prev.s_val) {
+                size_t len = strlen(prev.s_val);
+                if (len == 0) {
+                    add_space = false;
+                } else {
+                    char last = prev.s_val[len - 1];
+                    if (isspace((unsigned char)last) || strchr(no_space_after, last)) {
+                        add_space = false;
+                    }
+                }
+            } else if (prev.type == TYPE_CHAR) {
+                char last = (char)prev.c_val;
+                if (isspace((unsigned char)last) || strchr(no_space_after, last)) {
+                    add_space = false;
+                }
+            }
+            if (val.type == TYPE_STRING && val.s_val) {
+                size_t len_cur = strlen(val.s_val);
+                if (len_cur > 0) {
+                    char first = val.s_val[0];
+                    if (isspace((unsigned char)first) || strchr(",.;:)]}!?)", first)) {
+                        add_space = false;
+                    }
+                }
+            } else if (val.type == TYPE_CHAR) {
+                char first = (char)val.c_val;
+                if (isspace((unsigned char)first) || strchr(",.;:)]}!?", first)) {
+                    add_space = false;
+                }
+            }
+            if (add_space) {
+                fputc(' ', output_stream);
+            }
+        }
+        if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
+            fputs(val.i_val ? "1" : "0", output_stream);
+        } else if (val.type == TYPE_STRING) {
             if (output_stream == stdout) {
                 fputs(val.s_val ? val.s_val : "", output_stream);
             } else {
@@ -3113,6 +3168,8 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         } else {
             printValueToStream(val, output_stream);
         }
+        prev = val;
+        has_prev = true;
     }
 
     if (newline) {

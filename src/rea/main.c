@@ -35,6 +35,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "core/preproc.h"
+#include "core/build_info.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "ast/ast.h"
@@ -60,6 +61,7 @@ static void initSymbolSystem(void) {
 static const char *REA_USAGE =
     "Usage: rea <options> <source.rea> [program_parameters...]\n"
     "   Options:\n"
+    "     -v                     Display version.\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
@@ -227,6 +229,9 @@ static void collectUsesClauses(AST* node, List* out) {
     if (node->type == AST_USES_CLAUSE && node->unit_list) {
         collectUnitListPaths(node->unit_list, out);
     }
+    if (node->type == AST_IMPORT && node->token && node->token->value) {
+        listAppend(out, node->token->value);
+    }
     if (node->left) collectUsesClauses(node->left, out);
     if (node->right) collectUsesClauses(node->right, out);
     if (node->extra) collectUsesClauses(node->extra, out);
@@ -250,7 +255,11 @@ int main(int argc, char **argv) {
     int strict_mode = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
-        if (strcmp(argv[argi], "--dump-ast-json") == 0) {
+        if (strcmp(argv[argi], "-v") == 0) {
+            printf("Rea Compiler Version: %s (latest tag: %s)\n",
+                   pscal_program_version_string(), pscal_git_tag_string());
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
@@ -318,6 +327,8 @@ int main(int argc, char **argv) {
     // future bytecode-level CALL injection.
 
     initSymbolSystem();
+    gSuppressWriteSpacing = 0;
+    gUppercaseBooleans = 0;
     registerAllBuiltins();
 #ifdef SDL
     registerSdlGlBuiltins();
@@ -344,6 +355,7 @@ int main(int argc, char **argv) {
         free(src);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
+    reaSemanticSetSourcePath(path);
     reaPerformSemanticAnalysis(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);
@@ -400,12 +412,26 @@ int main(int argc, char **argv) {
         // Handle #import directives by loading and linking Pascal units before compiling the main program
         walkUsesClauses(program, &chunk);
 
+        int moduleCount = reaGetLoadedModuleCount();
+        for (int i = 0; i < moduleCount && compilation_ok; i++) {
+            AST *moduleAST = reaGetModuleAST(i);
+            if (!moduleAST) continue;
+            annotateTypes(moduleAST, NULL, moduleAST);
+            if (!compileModuleAST(moduleAST, &chunk)) {
+                compilation_ok = false;
+                fprintf(stderr, "Compilation failed while processing module '%s'.\n",
+                        reaGetModuleName(i) ? reaGetModuleName(i) : reaGetModulePath(i));
+            }
+        }
+
         // Annotate types for the entire program prior to compilation so that
         // qualified method calls can be resolved to their class-mangled routines.
-        annotateTypes(program, NULL, program);
-        compilerEnableDynamicLocals(1);
-        compilation_ok = compileASTToBytecode(program, &chunk);
-        compilerEnableDynamicLocals(0);
+        if (compilation_ok) {
+            annotateTypes(program, NULL, program);
+            compilerEnableDynamicLocals(1);
+            compilation_ok = compileASTToBytecode(program, &chunk);
+            compilerEnableDynamicLocals(0);
+        }
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, &chunk);

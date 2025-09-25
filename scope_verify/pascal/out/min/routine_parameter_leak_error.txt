@@ -1,0 +1,47 @@
+Test: routine_parameter_leak_error
+Category: routine_scope
+Expectation: compile_error
+Description: Routine parameters should not be visible outside the routine itself.
+Reason: stderr missing expected substring
+Exit code: 1
+--- stdout ---
+inside=3
+--- stderr ---
+Runtime Error: Undefined global variable 'value'.
+[Error Location] Offset: 31, Line: 10
+
+--- VM Crash Context ---
+Instruction Pointer (IP): 0x6000019a4021
+Code Base: 0x6000019a4000
+Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):
+0033    | CALL_BUILTIN_PROC   176 'write' (2 args)
+
+Last Instructions executed (leading to crash, up to 10 bytes before error point):
+0021    | ADD
+0022    3 RETURN
+0023    9 CONSTANT            6 '3'
+0025    | CALL_USER_PROC       7 'echo' @0010 (1 args)
+0029   10 CONSTANT            3 '1'
+
+--- VM State Dump (Full Stack at Crash) ---
+Stack Size: 2, Frame Count: 1
+Stack Contents (bottom to top):
+  [ nil ]
+  [ 1 ]
+--------------------------
+--- VM execution Failed (Runtime Error) ---
+[VM_DEBUG] Offset: 0033, Line:   10, Stack Size: 2, Frame Count: 1
+0033    | CALL_BUILTIN_PROC   176 'write' (2 args)
+[VM_DEBUG] Stack Contents: [nil] [1]
+--- source ---
+program RoutineParameterLeak;
+
+procedure Echo(value: Integer);
+begin
+  writeln('inside=', value);
+end;
+
+begin
+  Echo(3);
+  writeln(value);
+end.

@@ -181,7 +181,9 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_TYPE_IDENTIFIER:return "TYPE_IDENTIFIER";
         case AST_SUBRANGE:       return "SUBRANGE";
         case AST_USES_CLAUSE:    return "USES_CLAUSE";
+        case AST_IMPORT:         return "IMPORT";
         case AST_UNIT:           return "UNIT";
+        case AST_MODULE:         return "MODULE";
         case AST_INTERFACE:      return "INTERFACE";
         case AST_IMPLEMENTATION: return "IMPLEMENTATION";
         case AST_INITIALIZATION: return "INITIALIZATION";
@@ -199,6 +201,12 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_DEREFERENCE:    return "DEREFERENCE";
         case AST_ADDR_OF:        return "ADDR_OF";
         case AST_NIL:            return "NIL";
+        case AST_MATCH:          return "MATCH";
+        case AST_MATCH_BRANCH:   return "MATCH_BRANCH";
+        case AST_PATTERN_BINDING:return "PATTERN_BINDING";
+        case AST_TRY:            return "TRY";
+        case AST_CATCH:          return "CATCH";
+        case AST_THROW:          return "THROW";
         default:                 return "UNKNOWN_AST_TYPE";
     }
 }
@@ -1859,7 +1867,11 @@ void printValueToStream(Value v, FILE *stream) {
             fprintf(stream, "%Lf", v.real.r_val);
             break;
         case TYPE_BOOLEAN:
-            fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE"); // Boolean still uses i_val
+            if (gUppercaseBooleans) {
+                fprintf(stream, "%s", v.i_val ? "TRUE" : "FALSE");
+            } else {
+                fprintf(stream, "%s", v.i_val ? "true" : "false");
+            }
             break;
         case TYPE_CHAR:
             fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII
@@ -1872,7 +1884,7 @@ void printValueToStream(Value v, FILE *stream) {
             }
             break;
         case TYPE_NIL:
-            fprintf(stream, "NIL");
+            fprintf(stream, "nil");
             break;
         case TYPE_POINTER:
             fprintf(stream, "POINTER(@%p -> ", (void*)v.ptr_val);

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <curl/curl.h>
 #include <pthread.h>
 #ifdef _WIN32
@@ -213,7 +214,16 @@ static void sleep_ms(long ms) {
 #ifdef _WIN32
     Sleep(ms);
 #else
-    usleep(ms * 1000);
+    if (ms <= 0) {
+        usleep(0);
+    } else {
+        unsigned long long usec_total = (unsigned long long)ms * 1000ULL;
+        useconds_t max_delay = (useconds_t)~(useconds_t)0;
+        if (usec_total > (unsigned long long)max_delay) {
+            usec_total = (unsigned long long)max_delay;
+        }
+        usleep((useconds_t)usec_total);
+    }
 #endif
 }
 
@@ -545,13 +555,18 @@ static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *use
 
 
 
+        if (new_capacity > (size_t)INT_MAX) {
+            fprintf(stderr, "Memory allocation error in write_callback: capacity overflow\n");
+            return 0;
+        }
+
         unsigned char *new_buffer = realloc(mstream->buffer, new_capacity);
         if (!new_buffer) {
             fprintf(stderr, "Memory allocation error in write_callback (realloc)\n");
             return 0;
         }
         mstream->buffer = new_buffer;
-        mstream->capacity = new_capacity;
+        mstream->capacity = (int)new_capacity;
     }
 
     memcpy(&(mstream->buffer[mstream->size]), contents, real_size);
@@ -2213,7 +2228,7 @@ Value vmBuiltinSocketSetBlocking(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     int s = (int)AS_INTEGER(args[0]);
-    int blocking = args[1].i_val;
+    int blocking = args[1].i_val != 0;
 #ifdef _WIN32
     u_long mode = blocking ? 0 : 1;
     int r = ioctlsocket(s, FIONBIO, &mode);

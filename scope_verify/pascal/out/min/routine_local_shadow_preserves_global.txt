@@ -1,0 +1,30 @@
+Test: routine_local_shadow_preserves_global
+Category: routine_scope
+Expectation: runtime_ok
+Description: Procedure-local variable with same name as global should shadow without mutating the outer binding.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+L7: Compiler error: Local variable 'counter' not found in scope.
+Compilation failed with errors.
+--- source ---
+program RoutineLocalShadow;
+var
+  counter: Integer;
+
+procedure Run;
+var
+  counter: Integer;
+begin
+  counter := 10;
+  writeln('inner=', counter);
+end;
+
+begin
+  counter := 3;
+  writeln('outer_before=', counter);
+  Run;
+  writeln('outer_after=', counter);
+end.

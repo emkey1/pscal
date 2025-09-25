@@ -26,6 +26,12 @@ jobs:
         env:
           REA_SKIP_TESTS: "constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr"
         run: Tests/run_rea_tests.sh
+      - name: Run CLike scope tests
+        run: python3 scope_verify/clike/clike_scope_test_harness.py --manifest scope_verify/clike/tests/manifest.json
+      - name: Run Pascal scope tests
+        run: python3 scope_verify/pascal/pascal_scope_test_harness.py --manifest scope_verify/pascal/tests/manifest.json
+      - name: Run Rea scope tests
+        run: python3 scope_verify/rea/rea_scope_test_harness.py --manifest scope_verify/rea/tests/manifest.json
       - name: Compile CLike examples (dump-only)
         run: |
           set -e

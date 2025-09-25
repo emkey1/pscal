@@ -1,5 +1,5 @@
 // globals.c
-// This file defines and initializes the global variables used throughout the Pscal interpreter.
+// This file defines and initializes the global variables used throughout Pascal 
 
 // Include the globals header file, which declares the global variables.
 #include "globals.h"
@@ -12,6 +12,10 @@
 // I/O and type conversion globals
 int last_io_error = 0; // Stores the error code of the last I/O operation.
 int typeWarn = 1; // Flag to control type warning messages (e.g., 1 for enabled, 0 for disabled).
+
+#ifdef DEBUG
+List *inserted_global_names = NULL; // Tracks globals inserted during debugging sessions.
+#endif
 
 // Symbol table globals - NOW POINTERS TO HASHTABLES.
 // These will be initialized by calling createHashTable() in initSymbolSystem().
@@ -52,6 +56,8 @@ int gWindowBottom          = 24;
 atomic_int break_requested = ATOMIC_VAR_INIT(0);
 // Flag used by builtin 'exit' to request unwinding the current routine (not program termination).
 int exit_requested = 0;
+int gSuppressWriteSpacing = 0;
+int gUppercaseBooleans = 0;
 // Semantic/type error counter for the Pascal front end
 int pascal_semantic_error_count = 0;
 int pascal_parser_error_count = 0;

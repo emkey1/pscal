@@ -1,0 +1,27 @@
+Test: const_shadow_local_overrides_global
+Category: const_scope
+Expectation: runtime_ok
+Description: Block-local constants should shadow outer constants without mutating them.
+Reason: stdout mismatch
+Exit code: 0
+--- stdout ---
+inner=5
+outer=5
+--- stderr ---
+L7: Compiler warning: Constant 'base' redefined.
+--- source ---
+program ConstShadow;
+const
+  Base = 2;
+
+procedure Show;
+const
+  Base = 5;
+begin
+  writeln('inner=', Base);
+end;
+
+begin
+  Show;
+  writeln('outer=', Base);
+end.

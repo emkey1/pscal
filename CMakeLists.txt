@@ -18,15 +18,33 @@ else()
 endif()
 set(PROGRAM_VERSION_STRING "${BASE_VERSION}${VERSION_SUFFIX}")
 message(STATUS "Building Pscal Version: ${PROGRAM_VERSION_STRING}")
+
+# Discover the most recent annotated tag so `-v` can report it alongside the
+# build identifier. Fall back to "untagged" when the repository has no tags or
+# when `git` is unavailable (for example in source snapshots).
+execute_process(
+    COMMAND git describe --tags --abbrev=0
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE PSCAL_GIT_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_DESCRIBE_RESULT
+)
+if(NOT GIT_DESCRIBE_RESULT EQUAL 0 OR PSCAL_GIT_TAG STREQUAL "")
+    set(PSCAL_GIT_TAG "untagged")
+endif()
 # ---- End Version Generation Logic ----
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-add_compile_definitions(PROGRAM_VERSION="${PROGRAM_VERSION_STRING}")
+add_compile_definitions(
+    PROGRAM_VERSION="${PROGRAM_VERSION_STRING}"
+    PSCAL_GIT_TAG="${PSCAL_GIT_TAG}"
+)
 
 # Optionally build additional binaries
-option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+option(BUILD_DASCAL "Build the dascal debugging binary" ON)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
@@ -41,6 +59,7 @@ option(ENABLE_EXT_BUILTIN_STRINGS "Enable extended string builtins" ON)
 option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
 option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
+option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -56,6 +75,24 @@ if(ENABLE_EXT_BUILTIN_YYJSON)
 endif()
 if(ENABLE_EXT_BUILTIN_USER)
     add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
+endif()
+
+set(PSCAL_SQLITE_LIBS "")
+set(PSCAL_SQLITE_INCLUDE_DIRS "")
+if(ENABLE_EXT_BUILTIN_SQLITE)
+    find_package(SQLite3 QUIET)
+    if(SQLite3_FOUND)
+        add_compile_definitions(ENABLE_EXT_BUILTIN_SQLITE)
+        if(SQLite3_LIBRARIES)
+            set(PSCAL_SQLITE_LIBS ${SQLite3_LIBRARIES})
+        endif()
+        if(SQLite3_INCLUDE_DIRS)
+            set(PSCAL_SQLITE_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
+        endif()
+    else()
+        message(WARNING "SQLite3 development files not found; disabling sqlite extended builtins. Set -DENABLE_EXT_BUILTIN_SQLITE=OFF to silence this warning.")
+        set(ENABLE_EXT_BUILTIN_SQLITE OFF CACHE BOOL "Enable extended sqlite builtins" FORCE)
+    endif()
 endif()
 
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
@@ -84,6 +121,9 @@ include_directories(
     src/vm
     src/third_party/yyjson
 )
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
+    include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
+endif()
 
 # ---- Dependencies ----
 set(PSCAL_OPENGL_TARGET "")
@@ -271,6 +311,10 @@ function(add_pscal_executable target_name)
         list(APPEND TARGET_LINK_LIBS ${CURL_LIBRARIES})
     endif()
 
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        list(APPEND TARGET_LINK_LIBS ${PSCAL_SQLITE_LIBS})
+    endif()
+
     list(APPEND TARGET_LINK_LIBS m) # Math library
     list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
@@ -381,6 +425,9 @@ if(TARGET CURL::libcurl)
 else()
     target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(clike PRIVATE ${PSCAL_SQLITE_LIBS})
+endif()
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
 list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
@@ -390,6 +437,9 @@ if(TARGET CURL::libcurl)
     target_link_libraries(clike-repl PRIVATE CURL::libcurl m Threads::Threads)
 else()
     target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(clike-repl PRIVATE ${PSCAL_SQLITE_LIBS})
 endif()
 
 # When SDL support is enabled, clike needs the same SDL include paths,
@@ -487,6 +537,9 @@ if(TARGET CURL::libcurl)
 else()
     target_link_libraries(rea PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(rea PRIVATE ${PSCAL_SQLITE_LIBS})
+endif()
 
 if(SDL)
     target_include_directories(rea PRIVATE
@@ -569,6 +622,9 @@ if(TARGET CURL::libcurl)
     target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)
 else()
     target_link_libraries(pscaljson2bc PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(pscaljson2bc PRIVATE ${PSCAL_SQLITE_LIBS})
 endif()
 if(SDL)
     target_include_directories(pscaljson2bc PRIVATE

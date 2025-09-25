@@ -4,19 +4,25 @@
 // the user walk with W/S while steering the camera with the mouse.
 
 const int WindowWidth = 1280;
-const int WindowHeight = 720;
+const int WindowHeight = 1024;
 const int TerrainSize = 128
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
 const int NoiseOctaves = 5;
-const float HeightScale = 32.0;
-const float EyeHeight = 4.5;
+const float HeightScale = 16.0;
+const float EyeHeight = 6.5;
 const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
-const float MouseYawSensitivity = 0.20;
+const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
 const float DegreesToRadians = 0.017453292519943295;
+const float Pi = 3.141592653589793;
+const float TwoPi = 6.283185307179586;
+const int CloudCount = 14;
+const float SunDistance = 220.0;
+const float SunCoreRadius = 18.0;
+const float SunHaloRadius = 34.0;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 
@@ -229,18 +235,61 @@ class LandscapeDemo {
   int lastMouseX;
   int lastMouseY;
   bool hasMouseSample;
+  bool forwardKeyDown;
+  bool backwardKeyDown;
   float vertexHeights[VertexCount];
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
   float vertexColorB[VertexCount];
+  float vertexNormalX[VertexCount];
+  float vertexNormalY[VertexCount];
+  float vertexNormalZ[VertexCount];
   float worldXCoords[VertexStride];
   float worldZCoords[VertexStride];
+  float waterPhaseOffset[VertexCount];
+  float waterSecondaryOffset[VertexCount];
+  float waterSparkleOffset[VertexCount];
+  float sunDirX;
+  float sunDirY;
+  float sunDirZ;
+  float waterHeight;
+  float waterNormalizedLevel;
+  float elapsedSeconds;
+  bool useFastTerrain;
+  bool useFastWater;
+  bool useFastWorldCoords;
+  bool useFastWaterOffsets;
+  float cloudAzimuth[CloudCount];
+  float cloudElevation[CloudCount];
+  float cloudDistance[CloudCount];
+  float cloudScale[CloudCount];
+  float cloudSpeed[CloudCount];
+  float cloudBrightness[CloudCount];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
-    my.precomputeWorldCoordinates();
+    my.useFastWorldCoords = my.tryPrecomputeWorldCoordinates();
+    if (!my.useFastWorldCoords) {
+      my.precomputeWorldCoordinates();
+    }
+    my.useFastWaterOffsets = my.tryPrecomputeWaterOffsets();
+    if (!my.useFastWaterOffsets) {
+      my.precomputeWaterOffsets();
+    }
+    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
+    my.elapsedSeconds = 0.0;
+    my.waterNormalizedLevel = 0.36;
+    float sunX = 0.45;
+    float sunY = 0.82;
+    float sunZ = 0.33;
+    float invLen = 1.0 / sqrt(sunX * sunX + sunY * sunY + sunZ * sunZ);
+    my.sunDirX = sunX * invLen;
+    my.sunDirY = sunY * invLen;
+    my.sunDirZ = sunZ * invLen;
     my.field.build(initialSeed);
+    my.initializeSkyElements();
     my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
@@ -252,6 +301,35 @@ class LandscapeDemo {
     my.lastMouseX = 0;
     my.lastMouseY = 0;
     my.hasMouseSample = false;
+    my.forwardKeyDown = false;
+    my.backwardKeyDown = false;
+  }
+
+  bool tryPrecomputeWorldCoordinates() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWorldCoords")) {
+      return false;
+    }
+    landscapeprecomputeworldcoords(my.worldXCoords,
+                                   my.worldZCoords,
+                                   TileScale,
+                                   TerrainSize,
+                                   VertexStride);
+    float half = TerrainSize * 0.5;
+    float expectedMin = (0.0 - half) * TileScale;
+    float expectedMax = (TerrainSize - half) * TileScale;
+    float minSample = my.worldXCoords[0];
+    float maxSample = my.worldXCoords[TerrainSize];
+    if (!(minSample == minSample) || !(maxSample == maxSample)) {
+      return false;
+    }
+    float diffMin = minSample - expectedMin;
+    if (diffMin < 0.0) diffMin = -diffMin;
+    float diffMax = maxSample - expectedMax;
+    if (diffMax < 0.0) diffMax = -diffMax;
+    if (diffMin > 0.0005 || diffMax > 0.0005) {
+      return false;
+    }
+    return true;
   }
 
   void precomputeWorldCoordinates() {
@@ -265,7 +343,122 @@ class LandscapeDemo {
     }
   }
 
+  bool tryPrecomputeWaterOffsets() {
+    if (!hasextbuiltin("user", "LandscapePrecomputeWaterOffsets")) {
+      return false;
+    }
+    landscapeprecomputewateroffsets(my.waterPhaseOffset,
+                                    my.waterSecondaryOffset,
+                                    my.waterSparkleOffset,
+                                    TerrainSize,
+                                    VertexStride);
+    if (TerrainSize >= 1) {
+      int checkIdx = 1;
+      float expectedPhase = 0.18;
+      float phase = my.waterPhaseOffset[checkIdx];
+      float secondary = my.waterSecondaryOffset[checkIdx];
+      if (!(phase == phase) || !(secondary == secondary)) {
+        return false;
+      }
+      float phaseDiff = phase - expectedPhase;
+      if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
+      float expectedSecondary = 0.05;
+      float secondaryDiff = secondary - expectedSecondary;
+      if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
+      if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void precomputeWaterOffsets() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int rowIndex = z * VertexStride;
+      float zPhase = z * 0.12;
+      float zSecondary = z * 0.21;
+      float zSparkle = z * 0.22;
+      int x = 0;
+      while (x <= TerrainSize) {
+        int idx = rowIndex + x;
+        my.waterPhaseOffset[idx] = x * 0.18 + zPhase;
+        my.waterSecondaryOffset[idx] = x * 0.05 + zSecondary;
+        my.waterSparkleOffset[idx] = x * 0.22 + zSparkle;
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+  }
+
+  float skyRandom(int index, int salt) {
+    int xSeed = index * 97 + salt * 193 + my.seed * 37;
+    int zSeed = index * 131 + salt * 167 + my.seed * 59;
+    float noise = my.field.baseNoise(xSeed, zSeed);
+    return noise * 0.5 + 0.5;
+  }
+
+  void initializeSkyElements() {
+    int i = 0;
+    while (i < CloudCount) {
+      float azNoise = my.skyRandom(i, 11);
+      float elevNoise = my.skyRandom(i, 23);
+      float distNoise = my.skyRandom(i, 41);
+      float scaleNoise = my.skyRandom(i, 61);
+      float speedNoise = my.skyRandom(i, 83);
+      float brightNoise = my.skyRandom(i, 101);
+      my.cloudAzimuth[i] = azNoise * TwoPi;
+      my.cloudElevation[i] = 0.18 + elevNoise * 0.16;
+      my.cloudDistance[i] = 150.0 + distNoise * 70.0;
+      my.cloudScale[i] = 16.0 + scaleNoise * 18.0;
+      my.cloudSpeed[i] = 0.002 + speedNoise * 0.006;
+      my.cloudBrightness[i] = 0.72 + brightNoise * 0.20;
+      i = i + 1;
+    }
+  }
+
+  float saturate(float value) {
+    if (value < 0.0) return 0.0;
+    if (value > 1.0) return 1.0;
+    return value;
+  }
+
+  float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+  void computeVertexNormals() {
+    int z = 0;
+    while (z <= TerrainSize) {
+      int x = 0;
+      while (x <= TerrainSize) {
+        float left = my.field.rawHeight(x - 1, z);
+        float right = my.field.rawHeight(x + 1, z);
+        float down = my.field.rawHeight(x, z - 1);
+        float up = my.field.rawHeight(x, z + 1);
+        float dx = (right - left) / (2.0 * TileScale);
+        float dz = (up - down) / (2.0 * TileScale);
+        float nx = -dx;
+        float ny = 1.0;
+        float nz = -dz;
+        float length = sqrt(nx * nx + ny * ny + nz * nz);
+        if (length <= 0.0001) length = 1.0;
+        nx = nx / length;
+        ny = ny / length;
+        nz = nz / length;
+        int idx = z * VertexStride + x;
+        my.vertexNormalX[idx] = nx;
+        my.vertexNormalY[idx] = ny;
+        my.vertexNormalZ[idx] = nz;
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+  }
+
   void updateVertexData() {
+    my.computeVertexNormals();
+    float span = my.field.maxHeight - my.field.minHeight;
+    if (span <= 0.0001) span = 1.0;
+    my.waterHeight = my.field.minHeight + span * my.waterNormalizedLevel;
     int idx = 0;
     while (idx < VertexCount) {
       float h = my.field.heightByFlatIndex(idx);
@@ -274,35 +467,278 @@ class LandscapeDemo {
       float r;
       float g;
       float b;
-      if (t < 0.35) {
-        float w = t / 0.35;
-        r = 0.0;
-        g = 0.28 + 0.35 * w;
-        b = 0.45 + 0.4 * w;
-      } else if (t < 0.6) {
-        float w = (t - 0.35) / 0.25;
-        r = 0.15 + 0.25 * w;
-        g = 0.42 + 0.35 * w;
-        b = 0.18 + 0.08 * w;
-      } else if (t < 0.85) {
-        float w = (t - 0.6) / 0.25;
-        r = 0.52 + 0.2 * w;
-        g = 0.40 + 0.18 * w;
-        b = 0.30 + 0.15 * w;
+      bool underwater = t < my.waterNormalizedLevel;
+      if (underwater) {
+        float depth = (my.waterNormalizedLevel - t) / my.waterNormalizedLevel;
+        if (depth < 0.0) depth = 0.0;
+        if (depth > 1.0) depth = 1.0;
+        float shore = 1.0 - depth;
+        r = 0.05 + 0.08 * depth + 0.10 * shore;
+        g = 0.32 + 0.36 * depth + 0.18 * shore;
+        b = 0.52 + 0.40 * depth + 0.12 * shore;
+      } else if (t < my.waterNormalizedLevel + 0.06) {
+        float w = (t - my.waterNormalizedLevel) / 0.06;
+        r = 0.36 + 0.14 * w;
+        g = 0.34 + 0.20 * w;
+        b = 0.20 + 0.09 * w;
+      } else if (t < 0.62) {
+        float w = (t - (my.waterNormalizedLevel + 0.06)) / 0.16;
+        r = 0.24 + 0.18 * w;
+        g = 0.46 + 0.32 * w;
+        b = 0.22 + 0.12 * w;
+      } else if (t < 0.82) {
+        float w = (t - 0.62) / 0.20;
+        r = 0.46 + 0.26 * w;
+        g = 0.40 + 0.22 * w;
+        b = 0.30 + 0.20 * w;
       } else {
-        float w = (t - 0.85) / 0.15;
+        float w = (t - 0.82) / 0.18;
         if (w < 0.0) w = 0.0;
         if (w > 1.0) w = 1.0;
-        float c = 0.82 + 0.18 * w;
-        r = c;
-        g = c;
-        b = c;
+        float base = 0.84 + 0.14 * w;
+        r = base;
+        g = base;
+        b = base;
+        float frost = my.saturate((t - 0.88) / 0.12);
+        float sunSpark = 0.75 + 0.25 * frost;
+        r = my.lerp(r, sunSpark, frost * 0.4);
+        g = my.lerp(g, sunSpark, frost * 0.4);
+        b = my.lerp(b, sunSpark, frost * 0.6);
       }
+
+      if (!underwater) {
+        float nx = my.vertexNormalX[idx];
+        float ny = my.vertexNormalY[idx];
+        float nz = my.vertexNormalZ[idx];
+        float sunDot = nx * my.sunDirX + ny * my.sunDirY + nz * my.sunDirZ;
+        if (sunDot < 0.0) sunDot = 0.0;
+        float slope = 1.0 - ny;
+        if (slope < 0.0) slope = 0.0;
+        if (slope > 1.0) slope = 1.0;
+        float shade = (0.38 + sunDot * 0.62) * (1.0 - 0.28 * slope);
+        if (shade < 0.25) shade = 0.25;
+        if (shade > 1.1) shade = 1.1;
+        r = r * shade;
+        g = g * shade;
+        b = b * (shade + 0.05 * sunDot);
+        float cool = my.saturate((0.58 - t) * 3.5);
+        g = g + cool * 0.05;
+        b = b + cool * 0.07;
+        float alpine = my.saturate((t - 0.68) * 2.2);
+        r = my.lerp(r, r * 0.9, alpine * 0.4);
+        g = my.lerp(g, g * 0.88, alpine * 0.3);
+        b = my.lerp(b, b * 1.08, alpine * 0.3);
+      }
+
+      r = my.saturate(r);
+      g = my.saturate(g);
+      b = my.saturate(b);
+
       my.vertexColorR[idx] = r;
       my.vertexColorG[idx] = g;
       my.vertexColorB[idx] = b;
       idx = idx + 1;
     }
+  }
+
+  void drawSunBillboard(float rightX,
+                        float rightY,
+                        float rightZ,
+                        float upX,
+                        float upY,
+                        float upZ) {
+    float sunX = my.sunDirX * SunDistance;
+    float sunY = my.sunDirY * SunDistance;
+    float sunZ = my.sunDirZ * SunDistance;
+    int segments = 48;
+
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.90, 0.58);
+    GLVertex3f(sunX, sunY, sunZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunHaloRadius) + upX * (sinA * SunHaloRadius);
+      float offsetY = rightY * (cosA * SunHaloRadius) + upY * (sinA * SunHaloRadius);
+      float offsetZ = rightZ * (cosA * SunHaloRadius) + upZ * (sinA * SunHaloRadius);
+      GLColor3f(1.0, 0.78, 0.36);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+
+    GLBegin("triangle_fan");
+    GLColor3f(1.0, 0.98, 0.86);
+    GLVertex3f(sunX, sunY, sunZ);
+    i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunCoreRadius) + upX * (sinA * SunCoreRadius);
+      float offsetY = rightY * (cosA * SunCoreRadius) + upY * (sinA * SunCoreRadius);
+      float offsetZ = rightZ * (cosA * SunCoreRadius) + upZ * (sinA * SunCoreRadius);
+      GLColor3f(1.0, 0.94, 0.72);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+  }
+
+  void drawCloudPuff(float centerX,
+                     float centerY,
+                     float centerZ,
+                     float radiusX,
+                     float radiusY,
+                     float rightX,
+                     float rightY,
+                     float rightZ,
+                     float upX,
+                     float upY,
+                     float upZ,
+                     float brightness) {
+    int segments = 18;
+    float highlight = my.saturate(0.86 + brightness * 0.18);
+    float rim = my.saturate(0.80 + brightness * 0.16);
+    GLBegin("triangle_fan");
+    GLColor3f(highlight, highlight, highlight + 0.05);
+    GLVertex3f(centerX, centerY, centerZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float px = centerX + rightX * (cosA * radiusX) + upX * (sinA * radiusY);
+      float py = centerY + rightY * (cosA * radiusX) + upY * (sinA * radiusY);
+      float pz = centerZ + rightZ * (cosA * radiusX) + upZ * (sinA * radiusY);
+      GLColor3f(rim, rim, rim + 0.03);
+      GLVertex3f(px, py, pz);
+      i = i + 1;
+    }
+    GLEnd();
+  }
+
+  void drawCloudLayer(float timeSeconds,
+                      float rightX,
+                      float rightY,
+                      float rightZ,
+                      float upX,
+                      float upY,
+                      float upZ) {
+    int i = 0;
+    while (i < CloudCount) {
+      float azimuth = my.cloudAzimuth[i] + timeSeconds * my.cloudSpeed[i];
+      float elevation = my.cloudElevation[i];
+      float distance = my.cloudDistance[i];
+      float cosElev = cos(elevation);
+      float sinElev = sin(elevation);
+      float dirX = sin(azimuth) * cosElev;
+      float dirY = sinElev;
+      float dirZ = cos(azimuth) * cosElev;
+      float centerX = dirX * distance;
+      float centerY = dirY * distance;
+      float centerZ = dirZ * distance;
+      float baseScale = my.cloudScale[i];
+      float baseBrightness = my.cloudBrightness[i];
+      float sunInfluence = my.sunDirX * dirX + my.sunDirY * dirY + my.sunDirZ * dirZ;
+      float puffBrightness = my.saturate(baseBrightness + sunInfluence * 0.18);
+      float radiusX = baseScale * 0.55;
+      float radiusY = baseScale * 0.38;
+      my.drawCloudPuff(centerX,
+                       centerY,
+                       centerZ,
+                       radiusX,
+                       radiusY,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       puffBrightness);
+
+      float offset = baseScale * 0.6;
+      my.drawCloudPuff(centerX + rightX * offset * 0.6 + upX * offset * 0.12,
+                       centerY + rightY * offset * 0.6 + upY * offset * 0.12,
+                       centerZ + rightZ * offset * 0.6 + upZ * offset * 0.12,
+                       radiusX * 0.78,
+                       radiusY * 0.82,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.97 + 0.02));
+
+      my.drawCloudPuff(centerX - rightX * offset * 0.7 + upX * offset * 0.05,
+                       centerY - rightY * offset * 0.7 + upY * offset * 0.05,
+                       centerZ - rightZ * offset * 0.7 + upZ * offset * 0.05,
+                       radiusX * 0.72,
+                       radiusY * 0.78,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.94 + 0.03));
+
+      my.drawCloudPuff(centerX + upX * baseScale * 0.14,
+                       centerY + upY * baseScale * 0.14,
+                       centerZ + upZ * baseScale * 0.14,
+                       radiusX * 0.52,
+                       radiusY * 0.70,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ,
+                       my.saturate(puffBrightness * 0.90 + 0.05));
+      i = i + 1;
+    }
+  }
+
+  void drawSky(float timeSeconds) {
+    float yawRadians = my.yaw * DegreesToRadians;
+    float pitchRadians = my.pitch * DegreesToRadians;
+    float cosYaw = cos(yawRadians);
+    float sinYaw = sin(yawRadians);
+    float cosPitch = cos(pitchRadians);
+    float sinPitch = sin(pitchRadians);
+    float forwardX = sinYaw * cosPitch;
+    float forwardY = -sinPitch;
+    float forwardZ = cosYaw * cosPitch;
+    float rightX = forwardZ;
+    float rightY = 0.0;
+    float rightZ = -forwardX;
+    float rightLen = sqrt(rightX * rightX + rightZ * rightZ);
+    if (rightLen <= 0.0001) {
+      rightX = 1.0;
+      rightY = 0.0;
+      rightZ = 0.0;
+      rightLen = 1.0;
+    }
+    rightX = rightX / rightLen;
+    rightZ = rightZ / rightLen;
+    float upX = forwardY * rightZ - forwardZ * rightY;
+    float upY = forwardZ * rightX - forwardX * rightZ;
+    float upZ = forwardX * rightY - forwardY * rightX;
+    float upLen = sqrt(upX * upX + upY * upY + upZ * upZ);
+    if (upLen <= 0.0001) {
+      upX = 0.0;
+      upY = 1.0;
+      upZ = 0.0;
+    } else {
+      upX = upX / upLen;
+      upY = upY / upLen;
+      upZ = upZ / upLen;
+    }
+    my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
+    my.drawCloudLayer(timeSeconds, rightX, rightY, rightZ, upX, upY, upZ);
   }
 
   void initGraphics() {
@@ -312,26 +748,44 @@ class LandscapeDemo {
     GLDepthTest(true);
     GLSetSwapInterval(1);
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    if (my.useFastTerrain ||
+        my.useFastWater ||
+        my.useFastWorldCoords ||
+        my.useFastWaterOffsets) {
+      writeln("Using extended landscape builtins for improved performance.");
+    }
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    getmousestate(mouseX, mouseY, mouseButtons);
-    my.lastMouseX = mouseX;
-    my.lastMouseY = mouseY;
-    my.hasMouseSample = true;
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    if (mouseInside != 0) {
+      my.lastMouseX = mouseX;
+      my.lastMouseY = mouseY;
+      my.hasMouseSample = true;
+    } else {
+      my.hasMouseSample = false;
+    }
   }
 
   void regenerate(int newSeed) {
     my.seed = newSeed;
     my.field.build(newSeed);
+    my.initializeSkyElements();
     my.updateVertexData();
     my.camX = TerrainSize * 0.5;
     my.camZ = TerrainSize * 0.5;
     my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.elapsedSeconds = 0.0;
     writeln("Generated landscape for seed ", my.seed, ".");
   }
 
   void handleDiscreteInput() {
+    // Prime the SDL key watcher before draining the queue so it sees any new
+    // keydown events we are about to consume with pollkey().
+    IsKeyDown(ScanCodeW);
+    IsKeyDown(ScanCodeS);
+
     int key = pollkey();
     while (key != 0) {
       if (key == 'q' || key == 'Q' || key == 27) {
@@ -348,9 +802,26 @@ class LandscapeDemo {
       }
       key = pollkey();
     }
+
+    // Sample the movement keys after pumping events so their latched state
+    // reflects the latest SDL keyboard state even while the mouse is inside
+    // the window.
+    my.forwardKeyDown = IsKeyDown(ScanCodeW);
+    my.backwardKeyDown = IsKeyDown(ScanCodeS);
   }
 
   void drawTerrain() {
+    if (my.useFastTerrain) {
+      landscapedrawterrain(my.vertexHeights,
+                           my.vertexColorR,
+                           my.vertexColorG,
+                           my.vertexColorB,
+                           my.worldXCoords,
+                           my.worldZCoords,
+                           TerrainSize,
+                           VertexStride);
+      return;
+    }
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
@@ -374,13 +845,103 @@ class LandscapeDemo {
     }
   }
 
+    void emitWaterVertex(int idx,
+                       int gridX,
+                       int gridZ,
+                       float groundHeight,
+                       float basePhase,
+                       float baseSecondary,
+                       float baseSparkle) {
+    float depth = my.waterHeight - groundHeight;
+    if (depth < 0.0) depth = 0.0;
+    if (depth > 6.0) depth = 6.0;
+    float depthFactor = depth / 6.0;
+    float shallow = 1.0 - depthFactor;
+    float ripple = sin(basePhase + my.waterPhaseOffset[idx]) *
+                   (0.08 + 0.04 * depthFactor);
+    float ripple2 = cos(baseSecondary + my.waterSecondaryOffset[idx]) *
+                    (0.05 + 0.05 * depthFactor);
+    float surfaceHeight = my.waterHeight + 0.05 + ripple + ripple2;
+    float worldX = my.worldXCoords[gridX];
+    float worldZ = my.worldZCoords[gridZ];
+    float foam = my.saturate(1.0 - depth * 0.45);
+    float sparkle = 0.02 + 0.06 * sin(baseSparkle + my.waterSparkleOffset[idx]);
+    float r = 0.05 + 0.08 * depthFactor + 0.18 * foam + sparkle * shallow * 0.4;
+    float g = 0.34 + 0.30 * depthFactor + 0.26 * foam + sparkle * shallow * 0.5;
+    float b = 0.55 + 0.32 * depthFactor + 0.22 * foam + sparkle * 0.6;
+    r = my.saturate(r);
+    g = my.saturate(g);
+    b = my.saturate(b);
+    GLColor3f(r, g, b);
+    GLVertex3f(worldX, surfaceHeight, worldZ);
+  }
+
+  void drawWater(float timeSeconds) {
+    if (my.useFastWater) {
+      landscapedrawwater(my.vertexHeights,
+                         my.worldXCoords,
+                         my.worldZCoords,
+                         my.waterPhaseOffset,
+                         my.waterSecondaryOffset,
+                         my.waterSparkleOffset,
+                         my.waterHeight,
+                         timeSeconds,
+                         TerrainSize,
+                         VertexStride);
+      return;
+    }
+    float allowance = 0.18;
+    float maxWaterHeight = my.waterHeight + allowance;
+    float basePhase = timeSeconds * 0.7;
+    float baseSecondary = timeSeconds * 1.6;
+    float baseSparkle = timeSeconds * 2.4;
+    GLBegin("triangles");
+    int z = 0;
+    while (z < TerrainSize) {
+      int rowIndex = z * VertexStride;
+      int nextRowIndex = (z + 1) * VertexStride;
+      int x = 0;
+      while (x < TerrainSize) {
+        int idx00 = rowIndex + x;
+        int idx10 = rowIndex + x + 1;
+        int idx01 = nextRowIndex + x;
+        int idx11 = nextRowIndex + x + 1;
+        float h00 = my.vertexHeights[idx00];
+        float h10 = my.vertexHeights[idx10];
+        float h01 = my.vertexHeights[idx01];
+        float h11 = my.vertexHeights[idx11];
+        if (h00 <= maxWaterHeight &&
+            h10 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx00, x, z, h00, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
+        }
+        if (h10 <= maxWaterHeight &&
+            h11 <= maxWaterHeight &&
+            h01 <= maxWaterHeight) {
+          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx11, x + 1, z + 1, h11, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
+        }
+        x = x + 1;
+      }
+      z = z + 1;
+    }
+    GLEnd();
+  }
+
   void updateCamera(float dt) {
     if (dt > 0.1) dt = 0.1;
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    getmousestate(mouseX, mouseY, mouseButtons);
-    if (!my.hasMouseSample) {
+    int mouseInside = 0;
+    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
+    bool insideWindow = mouseInside != 0;
+    if (!insideWindow) {
+      my.hasMouseSample = false;
+    } else if (!my.hasMouseSample) {
       my.lastMouseX = mouseX;
       my.lastMouseY = mouseY;
       my.hasMouseSample = true;
@@ -400,8 +961,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeS);
-    bool backward = IsKeyDown(ScanCodeW);
+    bool forward = my.forwardKeyDown;
+    bool backward = my.backwardKeyDown;
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
@@ -409,8 +970,19 @@ class LandscapeDemo {
     if (moveForward != 0.0) {
       float speed = MoveSpeed * dt * moveForward;
       float yawRadians = my.yaw * DegreesToRadians;
-      float forwardX = sin(yawRadians);
-      float forwardZ = cos(yawRadians);
+      float pitchRadians = my.pitch * DegreesToRadians;
+      float forwardX = sin(yawRadians) * cos(pitchRadians);
+      float forwardZ = cos(yawRadians) * cos(pitchRadians);
+      float forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      if (forwardLen < 0.0001) {
+        forwardX = sin(yawRadians);
+        forwardZ = cos(yawRadians);
+        forwardLen = sqrt(forwardX * forwardX + forwardZ * forwardZ);
+      }
+      if (forwardLen > 0.0001) {
+        forwardX = forwardX / forwardLen;
+        forwardZ = forwardZ / forwardLen;
+      }
       float deltaX = forwardX * (speed / TileScale);
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
@@ -443,12 +1015,14 @@ class LandscapeDemo {
     GLLoadIdentity();
     GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
     GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
+    my.drawSky(my.elapsedSeconds);
     float half = TerrainSize * 0.5;
     float worldX = (my.camX - half) * TileScale;
     float worldZ = (my.camZ - half) * TileScale;
     GLTranslatef(-worldX, -my.camY, -worldZ);
 
     my.drawTerrain();
+    my.drawWater(my.elapsedSeconds);
     GLSwapWindow();
   }
 
@@ -456,6 +1030,10 @@ class LandscapeDemo {
     my.initGraphics();
     my.lastTicks = getticks();
     while (my.running) {
+      // Pump SDL events before sampling keyboard state so IsKeyDown observes
+      // the latest key transitions. SDL_GetKeyboardState (used by IsKeyDown)
+      // only reflects new input after SDL_PumpEvents or a polling helper runs.
+      GraphLoop(0);
       my.handleDiscreteInput();
       if (QuitRequested()) break;
       int now = getticks();
@@ -463,6 +1041,7 @@ class LandscapeDemo {
       my.lastTicks = now;
       if (dt < 0.0) dt = 0.0;
       my.updateCamera(dt);
+      my.elapsedSeconds = my.elapsedSeconds + dt;
       my.drawFrame();
       GraphLoop(1);
     }
@@ -473,6 +1052,7 @@ class LandscapeDemo {
 int main() {
   int defaultSeed = 1337;
   int seed = extractSeedFromArgs(defaultSeed);
+  printf("Calculating initial values.  This make take a bit. \n");
   LandscapeDemo demo = new LandscapeDemo(seed);
   demo.run();
   return 0;

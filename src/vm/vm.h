@@ -24,6 +24,10 @@
 #define VM_MAX_THREADS 16
 #define VM_MAX_MUTEXES 64
 
+// Flags for the VM write/writeln builtin.
+#define VM_WRITE_FLAG_NEWLINE           0x1
+#define VM_WRITE_FLAG_SUPPRESS_SPACING  0x2
+
 // Forward declaration
 struct VM_s;
 
@@ -93,6 +97,7 @@ typedef struct VM_s {
     int frameCount;
 
     bool exit_requested;      // Indicates a builtin requested early exit from the current frame
+    bool abort_requested;     // Raised when a builtin requests an immediate interpreter abort
     const char* current_builtin_name; // Tracks the name of the builtin currently executing (for diagnostics)
 
     // Threading support

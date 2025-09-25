@@ -11,6 +11,7 @@
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
+#include "Pascal/globals.h"
 #include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
@@ -41,6 +42,207 @@ typedef struct {
 static AddressConstantEntry* address_constant_entries = NULL;
 static int address_constant_count = 0;
 static int address_constant_capacity = 0;
+typedef struct {
+    BytecodeChunk* chunk;
+    char** classes;
+    int count;
+    int capacity;
+} VTableTrackerState;
+static BytecodeChunk* tracked_vtable_chunk = NULL;
+static char** emitted_vtable_classes = NULL;
+static int emitted_vtable_count = 0;
+static int emitted_vtable_capacity = 0;
+static VTableTrackerState* vtable_tracker_stack = NULL;
+static int vtable_tracker_depth = 0;
+static int vtable_tracker_capacity = 0;
+
+static void freeVTableClassList(char** list, int count) {
+    if (!list) return;
+    for (int i = 0; i < count; i++) {
+        free(list[i]);
+    }
+    free(list);
+}
+
+static void clearCurrentVTableTracker(void) {
+    if (emitted_vtable_classes) {
+        for (int i = 0; i < emitted_vtable_count; i++) {
+            free(emitted_vtable_classes[i]);
+        }
+        free(emitted_vtable_classes);
+    }
+    emitted_vtable_classes = NULL;
+    emitted_vtable_count = 0;
+    emitted_vtable_capacity = 0;
+}
+
+static void initializeVTableTracker(BytecodeChunk* chunk) {
+    if (vtable_tracker_depth != 0) {
+        return;
+    }
+    clearCurrentVTableTracker();
+    tracked_vtable_chunk = chunk;
+}
+
+static void ensureVTableTrackerForChunk(BytecodeChunk* chunk) {
+    if (tracked_vtable_chunk == chunk) {
+        return;
+    }
+    if (vtable_tracker_depth == 0) {
+        clearCurrentVTableTracker();
+    }
+    tracked_vtable_chunk = chunk;
+}
+
+static bool vtableTrackerHasClass(const char* class_name) {
+    if (!class_name) return false;
+    for (int i = 0; i < emitted_vtable_count; i++) {
+        if (strcmp(emitted_vtable_classes[i], class_name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vtableTrackerEnsureCapacity(int needed) {
+    if (needed <= emitted_vtable_capacity) {
+        return true;
+    }
+    int new_capacity = emitted_vtable_capacity < 8 ? 8 : emitted_vtable_capacity * 2;
+    while (new_capacity < needed) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char** resized = realloc(emitted_vtable_classes,
+                             (size_t)new_capacity * sizeof(char*));
+    if (!resized) {
+        fprintf(stderr, "Compiler error: Out of memory expanding vtable tracker.\n");
+        compiler_had_error = true;
+        return false;
+    }
+    emitted_vtable_classes = resized;
+    emitted_vtable_capacity = new_capacity;
+    return true;
+}
+
+static void vtableTrackerRecordClass(const char* class_name) {
+    if (!class_name || vtableTrackerHasClass(class_name)) {
+        return;
+    }
+    if (!vtableTrackerEnsureCapacity(emitted_vtable_count + 1)) {
+        return;
+    }
+    char* copy = strdup(class_name);
+    if (!copy) {
+        fprintf(stderr, "Compiler error: Out of memory storing vtable tracker entry.\n");
+        compiler_had_error = true;
+        return;
+    }
+    emitted_vtable_classes[emitted_vtable_count++] = copy;
+}
+
+static bool pushVTableTrackerState(BytecodeChunk* chunk) {
+    if (vtable_tracker_depth == vtable_tracker_capacity) {
+        int new_capacity = vtable_tracker_capacity < 4 ? 4 : vtable_tracker_capacity * 2;
+        VTableTrackerState* resized = realloc(vtable_tracker_stack,
+                                              (size_t)new_capacity * sizeof(VTableTrackerState));
+        if (!resized) {
+            fprintf(stderr, "Compiler error: Out of memory growing vtable tracker stack.\n");
+            compiler_had_error = true;
+            return false;
+        }
+        vtable_tracker_stack = resized;
+        vtable_tracker_capacity = new_capacity;
+    }
+
+    VTableTrackerState saved = {
+        .chunk = tracked_vtable_chunk,
+        .classes = emitted_vtable_classes,
+        .count = emitted_vtable_count,
+        .capacity = emitted_vtable_capacity,
+    };
+    vtable_tracker_stack[vtable_tracker_depth++] = saved;
+
+    tracked_vtable_chunk = chunk;
+    emitted_vtable_classes = NULL;
+    emitted_vtable_count = 0;
+    emitted_vtable_capacity = 0;
+
+    if (saved.chunk == chunk && saved.classes && saved.count > 0) {
+        emitted_vtable_capacity = saved.count;
+        emitted_vtable_classes = (char**)malloc((size_t)saved.count * sizeof(char*));
+        if (!emitted_vtable_classes) {
+            fprintf(stderr, "Compiler error: Out of memory copying vtable tracker.\n");
+            compiler_had_error = true;
+            emitted_vtable_capacity = 0;
+            return true;
+        }
+        for (int i = 0; i < saved.count; i++) {
+            emitted_vtable_classes[i] = strdup(saved.classes[i]);
+            if (!emitted_vtable_classes[i]) {
+                fprintf(stderr, "Compiler error: Out of memory copying vtable tracker entry.\n");
+                compiler_had_error = true;
+                for (int j = 0; j < i; j++) {
+                    free(emitted_vtable_classes[j]);
+                }
+                free(emitted_vtable_classes);
+                emitted_vtable_classes = NULL;
+                emitted_vtable_capacity = 0;
+                emitted_vtable_count = 0;
+                return true;
+            }
+        }
+        emitted_vtable_count = saved.count;
+    }
+    return true;
+}
+
+static void popVTableTrackerState(void) {
+    VTableTrackerState child = {
+        .chunk = tracked_vtable_chunk,
+        .classes = emitted_vtable_classes,
+        .count = emitted_vtable_count,
+        .capacity = emitted_vtable_capacity,
+    };
+
+    if (vtable_tracker_depth <= 0) {
+        if (child.classes) {
+            freeVTableClassList(child.classes, child.count);
+        }
+        tracked_vtable_chunk = NULL;
+        emitted_vtable_classes = NULL;
+        emitted_vtable_count = 0;
+        emitted_vtable_capacity = 0;
+        return;
+    }
+
+    VTableTrackerState parent = vtable_tracker_stack[--vtable_tracker_depth];
+    tracked_vtable_chunk = parent.chunk;
+    emitted_vtable_classes = parent.classes;
+    emitted_vtable_count = parent.count;
+    emitted_vtable_capacity = parent.capacity;
+
+    if (!parent.chunk && child.chunk) {
+        tracked_vtable_chunk = child.chunk;
+        emitted_vtable_classes = child.classes;
+        emitted_vtable_count = child.count;
+        emitted_vtable_capacity = child.capacity;
+        return;
+    }
+
+    if (parent.chunk == child.chunk && child.classes) {
+        for (int i = 0; i < child.count; i++) {
+            vtableTrackerRecordClass(child.classes[i]);
+        }
+    }
+
+    if (child.classes) {
+        freeVTableClassList(child.classes, child.count);
+    }
+}
 
 static void recordAddressConstantEntry(int constant_index, int element_index, int address) {
     if (constant_index < 0 || address < 0) return;
@@ -76,6 +278,10 @@ void compilerEnableDynamicLocals(int enable) {
     compiler_dynamic_locals = enable ? 1 : 0;
 }
 
+void compilerSetCurrentUnitName(const char *name) {
+    current_compilation_unit_name = name;
+}
+
 static bool astNodeIsDescendant(AST* ancestor, AST* node) {
     if (!ancestor || !node) return false;
     for (AST* cur = node; cur != NULL; cur = cur->parent) {
@@ -109,6 +315,7 @@ typedef struct {
     int depth; // Scope depth
     bool is_ref;
     bool is_captured;
+    AST* decl_node;
 } CompilerLocal;
 
 #define MAX_LOOP_DEPTH 16 // Max nested loops
@@ -295,6 +502,7 @@ typedef struct {
     int capacity;
     int* addrs;
     bool merged;
+    bool has_unresolved;
 } VTableInfo;
 
 static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
@@ -324,12 +532,16 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
                 if (vt->addrs[j] == NO_VTABLE_ENTRY) vt->addrs[j] = parent->addrs[j];
             }
             if (parent->method_count > vt->method_count) vt->method_count = parent->method_count;
+            if (parent->has_unresolved) {
+                vt->has_unresolved = true;
+            }
         }
     }
     vt->merged = true;
 }
 
 static void emitVTables(BytecodeChunk* chunk) {
+    ensureVTableTrackerForChunk(chunk);
     VTableInfo* tables = NULL;
     int table_count = 0;
     for (int b = 0; b < HASHTABLE_SIZE; b++) {
@@ -356,6 +568,7 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].capacity = 0;
                             tables[idx].addrs = NULL;
                             tables[idx].merged = false;
+                            tables[idx].has_unresolved = false;
                         }
                         int mindex = base->type_def->i_val;
                         if (mindex >= tables[idx].capacity) {
@@ -365,6 +578,9 @@ static void emitVTables(BytecodeChunk* chunk) {
                             tables[idx].capacity = newcap;
                         }
                         tables[idx].addrs[mindex] = base->bytecode_address;
+                        if (base->bytecode_address <= 0) {
+                            tables[idx].has_unresolved = true;
+                        }
                         if (mindex + 1 > tables[idx].method_count) tables[idx].method_count = mindex + 1;
                     }
                 }
@@ -379,7 +595,21 @@ static void emitVTables(BytecodeChunk* chunk) {
 
     for (int i = 0; i < table_count; i++) {
         VTableInfo* vt = &tables[i];
-        if (vt->method_count == 0) continue;
+        if (vt->method_count == 0) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
+        if (vt->has_unresolved) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
+        if (vtableTrackerHasClass(vt->class_name)) {
+            free(vt->class_name);
+            free(vt->addrs);
+            continue;
+        }
         int lb = 0;
         int ub = vt->method_count - 1;
         Value arr = makeArrayND(1, &lb, &ub, TYPE_INT32, NULL);
@@ -410,6 +640,7 @@ static void emitVTables(BytecodeChunk* chunk) {
         int elemNameIdx = addStringConstant(chunk, "integer");
         writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
         emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
+        vtableTrackerRecordClass(vt->class_name);
         free(vt->class_name);
         free(vt->addrs);
     }
@@ -637,7 +868,7 @@ static void emitDeferredGlobalInitializers(BytecodeChunk* chunk) {
                 actual_type_def_node = resolved_node;
             } else {
                 fprintf(stderr,
-                        "L%d: Compiler error: User-defined type '%s' not found.\n",
+                        "L%d: identifier '%s' not in scope.\n",
                         getLine(actual_type_def_node),
                         actual_type_def_node->token ? actual_type_def_node->token->value : "?");
                 compiler_had_error = true;
@@ -1415,6 +1646,70 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->upvalue_count = 0;
 }
 
+static void compilerBeginScope(FunctionCompilerState* fc) {
+    if (!fc) return;
+    fc->scope_depth++;
+}
+
+static void compilerEndScope(FunctionCompilerState* fc) {
+    if (!fc) return;
+    if (fc->scope_depth > 0) {
+        fc->scope_depth--;
+    }
+}
+
+static int findLocalByName(FunctionCompilerState* fc, const char* name) {
+    if (!fc || !name) return -1;
+    for (int i = fc->local_count - 1; i >= 0; i--) {
+        CompilerLocal* local = &fc->locals[i];
+        if (local->name && strcasecmp(local->name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool is_ref);
+
+static void registerVarDeclLocals(AST* varDecl, bool emitError) {
+    if (!current_function_compiler || !varDecl) return;
+    for (int i = 0; i < varDecl->child_count; i++) {
+        AST* varNameNode = varDecl->children[i];
+        if (!varNameNode || !varNameNode->token || !varNameNode->token->value) continue;
+        const char* name = varNameNode->token->value;
+        int idx = findLocalByName(current_function_compiler, name);
+        if (idx >= 0) {
+        CompilerLocal* existing = &current_function_compiler->locals[idx];
+        if (existing->depth < 0) {
+            existing->depth = current_function_compiler->scope_depth;
+            existing->is_ref = false;
+            existing->is_captured = false;
+            existing->decl_node = varDecl;
+            continue;
+        }
+        if (existing->depth == current_function_compiler->scope_depth) {
+            if (existing->decl_node == varDecl) {
+                continue;
+            }
+            if (emitError) {
+                fprintf(stderr, "L%d: duplicate variable '%s' in this scope.\n",
+                        getLine(varNameNode), name);
+                compiler_had_error = true;
+            }
+        } else {
+            addLocal(current_function_compiler, name, getLine(varNameNode), false);
+            CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
+            fresh->decl_node = varDecl;
+        }
+    } else {
+        addLocal(current_function_compiler, name, getLine(varNameNode), false);
+        CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
+        fresh->decl_node = varDecl;
+    }
+}
+}
+
+
 static void startLoop(int start_address) {
     if (loop_depth + 1 >= MAX_LOOP_DEPTH) {
         fprintf(stderr, "Compiler error: Loop nesting too deep.\n");
@@ -1548,12 +1843,14 @@ static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool
     local->depth = fc->scope_depth;
     local->is_ref = is_ref;
     local->is_captured = false;
+    local->decl_node = NULL;
 }
 
 static int resolveLocal(FunctionCompilerState* fc, const char* name) {
     if (!fc) return -1;
     for (int i = fc->local_count - 1; i >= 0; i--) {
         CompilerLocal* local = &fc->locals[i];
+        if (local->depth < 0) continue;
         if (strcasecmp(name, local->name) == 0) {
             return i;
         }
@@ -1793,9 +2090,12 @@ Value evaluateCompileTimeValue(AST* node) {
                     } else if (strcasecmp(funcName, "chr") == 0 && node->child_count == 1) {
                         Value arg = evaluateCompileTimeValue(node->children[0]);
                         if (arg.type == TYPE_INTEGER) {
-                            Value result = makeChar(arg.i_val);
-                            freeValue(&arg);
-                            return result;
+                            long long code = arg.i_val;
+                            if (code >= 0 && code <= PASCAL_CHAR_MAX) {
+                                Value result = makeChar((int)code);
+                                freeValue(&arg);
+                                return result;
+                            }
                         }
                         freeValue(&arg);
                     } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
@@ -2956,14 +3256,17 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
     resetAddressConstantTracking();
-    // Initialize debug flag from environment (REA_DEBUG=1 to enable)
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
         if (d && *d && *d != '0') compiler_debug = 1;
     }
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
+    }
     gCurrentProgramRoot = rootNode;
-    // Do NOT re-initialize the chunk here, it's already populated with unit code.
-    // initBytecodeChunk(outputChunk);
     compilerGlobalCount = 0;
     compiler_had_error = false;
     current_function_compiler = NULL;
@@ -2982,8 +3285,6 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     current_procedure_table = procedure_table;
 
     if (rootNode->type == AST_PROGRAM) {
-        // The `USES` clause has already been handled during parsing.
-        // We only need to compile the main program block here.
         if (rootNode->right && rootNode->right->type == AST_BLOCK) {
             compileNode(rootNode->right, outputChunk, getLine(rootNode));
         } else {
@@ -2991,12 +3292,87 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
             compiler_had_error = true;
         }
     } else {
-        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for compilation, got %s.\n", astTypeToString(rootNode->type));
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for compilation, got %s.\n",
+                astTypeToString(rootNode->type));
         compiler_had_error = true;
     }
     if (!compiler_had_error) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
         applyPeepholeOptimizations(outputChunk);
+    }
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
+    }
+    return !compiler_had_error;
+}
+
+bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
+    if (!rootNode || !outputChunk) return false;
+    resetAddressConstantTracking();
+    if (!compiler_debug) {
+        const char* d = getenv("REA_DEBUG");
+        if (d && *d && *d != '0') compiler_debug = 1;
+    }
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
+    }
+    gCurrentProgramRoot = rootNode;
+    compilerGlobalCount = 0;
+    compiler_had_error = false;
+    current_function_compiler = NULL;
+    int saved_myself_flag = compiler_defined_myself_global;
+    int saved_myself_idx = compiler_myself_global_name_idx;
+    compiler_defined_myself_global = true;
+    compiler_myself_global_name_idx = saved_myself_idx;
+    postpone_global_initializers = false;
+    if (deferred_global_initializers) {
+        free(deferred_global_initializers);
+        deferred_global_initializers = NULL;
+    }
+    deferred_global_initializer_count = 0;
+    deferred_global_initializer_capacity = 0;
+
+    ensureMyselfGlobalDefined(outputChunk, rootNode ? getLine(rootNode) : 0);
+
+    current_procedure_table = procedure_table;
+
+    const char *moduleName = NULL;
+    if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK &&
+        rootNode->right->child_count > 0) {
+        AST *decls = rootNode->right->children[0];
+        if (decls && decls->type == AST_COMPOUND) {
+            for (int i = 0; i < decls->child_count; i++) {
+                AST *child = decls->children[i];
+                if (child && child->type == AST_MODULE && child->token && child->token->value) {
+                    moduleName = child->token->value;
+                    break;
+                }
+            }
+        }
+    }
+
+    compilerSetCurrentUnitName(moduleName);
+
+    if (rootNode->type == AST_PROGRAM) {
+        if (rootNode->right && rootNode->right->type == AST_BLOCK) {
+            compileNode(rootNode->right, outputChunk, getLine(rootNode));
+        } else {
+            fprintf(stderr, "Compiler error: AST_PROGRAM node missing main block in module compilation.\n");
+            compiler_had_error = true;
+        }
+    } else {
+        fprintf(stderr, "Compiler error: Expected AST_PROGRAM as root for module compilation, got %s.\n",
+                astTypeToString(rootNode->type));
+        compiler_had_error = true;
+    }
+    compilerSetCurrentUnitName(NULL);
+    compiler_defined_myself_global = saved_myself_flag;
+    compiler_myself_global_name_idx = saved_myself_idx;
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
     }
     return !compiler_had_error;
 }
@@ -3020,6 +3396,26 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
                     if (!decl_child) continue;
+                    if (decl_child->type == AST_COMPOUND) {
+                        for (int j = 0; j < decl_child->child_count; j++) {
+                            AST* nested = decl_child->children[j];
+                            if (!nested) continue;
+                            if (nested->type == AST_MODULE) {
+                                compileNode(nested, chunk, getLine(nested));
+                                continue;
+                            }
+                            if (nested->type == AST_VAR_DECL ||
+                                nested->type == AST_CONST_DECL ||
+                                nested->type == AST_TYPE_DECL) {
+                                compileNode(nested, chunk, getLine(nested));
+                            }
+                        }
+                        continue;
+                    }
+                    if (decl_child->type == AST_MODULE) {
+                        compileNode(decl_child, chunk, getLine(decl_child));
+                        continue;
+                    }
                     if (decl_child->type == AST_VAR_DECL ||
                         decl_child->type == AST_CONST_DECL ||
                         decl_child->type == AST_TYPE_DECL) {
@@ -3033,7 +3429,18 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
                     AST* decl_child = declarations->children[i];
-                    if (decl_child && (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL)) {
+                    if (!decl_child) continue;
+                    if (decl_child->type == AST_COMPOUND) {
+                        for (int j = 0; j < decl_child->child_count; j++) {
+                            AST* nested = decl_child->children[j];
+                            if (!nested) continue;
+                            if (nested->type == AST_PROCEDURE_DECL || nested->type == AST_FUNCTION_DECL) {
+                                compileNode(nested, chunk, getLine(nested));
+                            }
+                        }
+                        continue;
+                    }
+                    if (decl_child->type == AST_PROCEDURE_DECL || decl_child->type == AST_FUNCTION_DECL) {
                         compileNode(decl_child, chunk, getLine(decl_child));
                     }
                 }
@@ -3094,7 +3501,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (resolved_node) {
                         actual_type_def_node = resolved_node; // This now points to the AST_ARRAY_TYPE node
                     } else {
-                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        fprintf(stderr, "L%d: identifier '%s' not in scope.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
                         compiler_had_error = true;
                         break;
                     }
@@ -3134,6 +3541,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                             node->left != NULL);
                 }
             } else { // Local variables
+                if (current_function_compiler != NULL) {
+                    registerVarDeclLocals(node, false);
+                }
                 AST* type_specifier_node = node->right;
 
                 // Resolve type alias if necessary
@@ -3143,7 +3553,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     if (resolved_node) {
                         actual_type_def_node = resolved_node;
                     } else {
-                        fprintf(stderr, "L%d: Compiler error: User-defined type '%s' not found.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
+                        fprintf(stderr, "L%d: identifier '%s' not in scope.\n", getLine(actual_type_def_node), actual_type_def_node->token->value);
                         compiler_had_error = true;
                         break;
                     }
@@ -3303,59 +3713,66 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         }
         case AST_CONST_DECL: {
-            if (current_function_compiler == NULL && node->token) {
-                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
-                Value const_val = makeVoid();
-                AST* type_specifier_node = node->right;
-                AST* actual_type_def_node = type_specifier_node;
-                if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
-                    AST* resolved = lookupType(actual_type_def_node->token->value);
-                    if (resolved) actual_type_def_node = resolved;
-                }
+            if (!node->token) {
+                break;
+            }
 
-                if (node->var_type == TYPE_ARRAY && node->left && node->left->type == AST_ARRAY_LITERAL && actual_type_def_node) {
-                    if (actual_type_def_node && actual_type_def_node->type == AST_ARRAY_TYPE) {
-                        int dimension_count = actual_type_def_node->child_count;
-                        if (dimension_count == 1) {
-                            AST* sub = actual_type_def_node->children[0];
-                            Value low_v = evaluateCompileTimeValue(sub->left);
-                            Value high_v = evaluateCompileTimeValue(sub->right);
-                            int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
-                            int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
-                            freeValue(&low_v);
-                            freeValue(&high_v);
-                            int lb[1] = { low };
-                            int ub[1] = { high };
-                            AST* elem_type_node = actual_type_def_node->right;
-                            VarType elem_type = elem_type_node->var_type;
-                            Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-                            int total = calculateArrayTotalSize(&arr_val);
-                            for (int j = 0; j < total && j < node->left->child_count; j++) {
-                                Value ev = evaluateCompileTimeValue(node->left->children[j]);
-                                freeValue(&arr_val.array_val[j]);
-                                arr_val.array_val[j] = makeCopyOfValue(&ev);
-                                freeValue(&ev);
-                            }
-                            const_val = arr_val;
-                        } else {
-                            const_val = evaluateCompileTimeValue(node->left);
+            Value const_val = makeVoid();
+            AST* type_specifier_node = node->right;
+            AST* actual_type_def_node = type_specifier_node;
+            if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_REFERENCE) {
+                AST* resolved = lookupType(actual_type_def_node->token->value);
+                if (resolved) actual_type_def_node = resolved;
+            }
+
+            if (node->var_type == TYPE_ARRAY && node->left && node->left->type == AST_ARRAY_LITERAL && actual_type_def_node) {
+                if (actual_type_def_node->type == AST_ARRAY_TYPE) {
+                    int dimension_count = actual_type_def_node->child_count;
+                    if (dimension_count == 1) {
+                        AST* sub = actual_type_def_node->children[0];
+                        Value low_v = evaluateCompileTimeValue(sub->left);
+                        Value high_v = evaluateCompileTimeValue(sub->right);
+                        int low = (low_v.type == TYPE_INTEGER) ? (int)low_v.i_val : 0;
+                        int high = (high_v.type == TYPE_INTEGER) ? (int)high_v.i_val : -1;
+                        freeValue(&low_v);
+                        freeValue(&high_v);
+                        int lb[1] = { low };
+                        int ub[1] = { high };
+                        AST* elem_type_node = actual_type_def_node->right;
+                        VarType elem_type = elem_type_node ? elem_type_node->var_type : TYPE_UNKNOWN;
+                        Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
+                        int total = calculateArrayTotalSize(&arr_val);
+                        for (int j = 0; j < total && j < node->left->child_count; j++) {
+                            Value ev = evaluateCompileTimeValue(node->left->children[j]);
+                            freeValue(&arr_val.array_val[j]);
+                            arr_val.array_val[j] = makeCopyOfValue(&ev);
+                            freeValue(&ev);
                         }
+                        const_val = arr_val;
                     } else {
                         const_val = evaluateCompileTimeValue(node->left);
                     }
                 } else {
                     const_val = evaluateCompileTimeValue(node->left);
                 }
+            } else {
+                const_val = evaluateCompileTimeValue(node->left);
+            }
 
-                if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
-                    fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
-                    compiler_had_error = true;
-                } else if (constIsClassMember(node)) {
+            if (const_val.type == TYPE_VOID || const_val.type == TYPE_UNKNOWN) {
+                fprintf(stderr, "L%d: Constant '%s' must be compile-time evaluable.\n", line, node->token->value);
+                compiler_had_error = true;
+                freeValue(&const_val);
+                break;
+            }
+
+            if (current_function_compiler == NULL) {
+                DBG_PRINTF("[dbg] CONST_DECL name=%s line=%d ctx=global\n", node->token->value, line);
+                if (constIsClassMember(node)) {
                     if (current_class_const_table) {
                         insertConstSymbolIn(current_class_const_table, node->token->value, const_val);
                     }
                 } else {
-                    // Insert into global symbol table so subsequent declarations can reference it.
                     insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
                     Symbol* sym = lookupGlobalSymbol(node->token->value);
                     if (sym && sym->value) {
@@ -3363,13 +3780,22 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         *(sym->value) = makeCopyOfValue(&const_val);
                         sym->is_const = true;
                     }
-
                     insertConstGlobalSymbol(node->token->value, const_val);
                 }
-
-                // Constants are resolved at compile time, so no bytecode emission is needed.
-                freeValue(&const_val);
+            } else {
+                AST* type_for_symbol = actual_type_def_node ? actual_type_def_node : type_specifier_node;
+                Symbol* sym = insertLocalSymbol(node->token->value,
+                                                const_val.type,
+                                                type_for_symbol,
+                                                false);
+                if (sym && sym->value) {
+                    freeValue(sym->value);
+                    *(sym->value) = makeCopyOfValue(&const_val);
+                    sym->is_const = true;
+                }
             }
+
+            freeValue(&const_val);
             break;
         }
         case AST_TYPE_DECL: {
@@ -3407,13 +3833,34 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             patchShort(chunk, jump_over_body_operand_offset, offset_to_skip_body);
             break;
         }
+        case AST_MODULE: {
+            if (node->right) {
+                compileNode(node->right, chunk, getLine(node->right));
+            }
+            break;
+        }
         case AST_COMPOUND: {
+            bool enters_scope = current_function_compiler != NULL && !node->is_global_scope;
+            SymbolEnvSnapshot scope_snapshot;
+            int starting_local = -1;
+            if (enters_scope) {
+                compilerBeginScope(current_function_compiler);
+                starting_local = current_function_compiler->local_count;
+                saveLocalEnv(&scope_snapshot);
+            }
             // Pass 1: compile nested routine declarations so they are available
             // regardless of where they appear in the block.
             for (int i = 0; i < node->child_count; i++) {
                 AST *child = node->children[i];
-                if (child && (child->type == AST_PROCEDURE_DECL ||
-                              child->type == AST_FUNCTION_DECL)) {
+                if (!child) continue;
+            if (child->type == AST_VAR_DECL) {
+                registerVarDeclLocals(child, false);
+                } else if (child->type == AST_MODULE) {
+                    compileNode(child, chunk, getLine(child));
+                    continue;
+                }
+                if (child->type == AST_PROCEDURE_DECL ||
+                    child->type == AST_FUNCTION_DECL) {
                     compileNode(child, chunk, getLine(child));
                 }
             }
@@ -3427,6 +3874,17 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     continue;
                 }
                 compileStatement(child, chunk, getLine(child));
+            }
+            if (enters_scope) {
+                for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                    if (current_function_compiler->locals[i].name) {
+                        free(current_function_compiler->locals[i].name);
+                        current_function_compiler->locals[i].name = NULL;
+                    }
+                }
+                current_function_compiler->local_count = starting_local;
+                compilerEndScope(current_function_compiler);
+                restoreLocalEnv(&scope_snapshot);
             }
             break;
         }
@@ -3546,6 +4004,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     // Step 3: Add all other local variables.
     blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
     if (blockNode) {
+        int locals_before_decl_scan = fc.local_count;
         if (blockNode->type == AST_BLOCK && blockNode->child_count > 0 &&
             blockNode->children[0]->type == AST_COMPOUND) {
             AST* decls = blockNode->children[0];
@@ -3572,6 +4031,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
                     }
                 }
             }
+        }
+        for (int i = locals_before_decl_scan; i < fc.local_count; i++) {
+            fc.locals[i].depth = -1;
+            fc.locals[i].decl_node = NULL;
         }
     }
 
@@ -3889,18 +4352,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_VAR_DECL: {
             if (current_function_compiler != NULL) {
-                for (int i = 0; i < node->child_count; i++) {
-                    AST *varNameNode = node->children[i];
-                    if (varNameNode && varNameNode->token) {
-                        int slot = resolveLocal(current_function_compiler,
-                                                varNameNode->token->value);
-                        if (slot == -1) {
-                            addLocal(current_function_compiler,
-                                     varNameNode->token->value,
-                                     getLine(varNameNode), false);
-                        }
-                    }
-                }
+                registerVarDeclLocals(node, true);
             }
             /*
              * After registering locals (if any), delegate to compileNode so that
@@ -4001,16 +4453,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     num_labels = labels_node->child_count;
                 }
 
+                bool share_branch_body = (num_labels > 1);
+                int* match_jumps = NULL;
+                int match_jumps_count = 0;
+
                 // 3. For each label within the current branch.
                 for (int j = 0; j < num_labels; j++) {
                     AST* label = labels_to_check[j];
-                    
+
                     writeBytecodeChunk(chunk, DUP, line);
-                    
+
                     if (label->type == AST_SUBRANGE) {
                         // Logic for range: (case_val >= lower) AND (case_val <= upper)
                         // This is a more direct and correct translation.
-                        
+
                         // Check lower bound
                         writeBytecodeChunk(chunk, DUP, line);                   // Stack: [case, case]
                         compileRValue(label->left, chunk, getLine(label));      // Stack: [case, case, lower]
@@ -4022,7 +4478,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compileRValue(label->right, chunk, getLine(label));     // Stack: [case, bool1, case, upper]
                         writeBytecodeChunk(chunk, SWAP, line);                   // Stack: [case, bool1, upper, case]
                         writeBytecodeChunk(chunk, LESS_EQUAL, line);           // Stack: [case, bool1, bool2]
-                        
+
                         // Combine the two boolean results
                         writeBytecodeChunk(chunk, AND, line);                    // Stack: [case, final_bool]
 
@@ -4031,13 +4487,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compileRValue(label, chunk, getLine(label));
                         writeBytecodeChunk(chunk, EQUAL, line);                  // Stack: [case, bool]
                     }
-                    
+
                     // If the comparison is false, skip the branch body.
                     int false_jump = chunk->count;
                     writeBytecodeChunk(chunk, JUMP_IF_FALSE, line); emitShort(chunk, 0xFFFF, line);
 
-                    // The branch body starts here when the label matches.
-                    writeBytecodeChunk(chunk, POP, line); // Pop the matched case value.
+                    // When the label matches, pop the case value.
+                    writeBytecodeChunk(chunk, POP, line);
+
+                    if (share_branch_body) {
+                        // For multi-label branches, jump to the shared branch body.
+                        int match_jump = chunk->count;
+                        writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+
+                        match_jumps = realloc(match_jumps, (match_jumps_count + 1) * sizeof(int));
+                        match_jumps[match_jumps_count++] = match_jump;
+
+                        // Patch the false jump to point to the next label check.
+                        patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
+                        fallthrough_jump = false_jump + 1;
+                        continue;
+                    }
+
+                    // Single-label branches emit their body inline like the original implementation.
                     compileStatement(branch->right, chunk, getLine(branch->right));
 
                     // After body, jump to the end of the CASE.
@@ -4045,15 +4517,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     end_jumps[end_jumps_count++] = chunk->count;
                     writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
 
-                    // Patch the false jump to point to the next label.
+                    // Patch the false jump to point to the next label / branch.
                     patchShort(chunk, false_jump + 1, chunk->count - (false_jump + 3));
                     fallthrough_jump = false_jump + 1;
 
-                    // If a label in a multi-label branch matches, we jump to the body.
-                    // The other labels for this branch are now irrelevant.
+                    // Move to the next CASE branch.
                     goto next_branch;
                 }
-                
+
+                if (share_branch_body) {
+                    int branch_body_start = chunk->count;
+                    for (int j = 0; j < match_jumps_count; j++) {
+                        patchShort(chunk, match_jumps[j] + 1, branch_body_start - (match_jumps[j] + 3));
+                    }
+                    if (match_jumps) free(match_jumps);
+
+                    compileStatement(branch->right, chunk, getLine(branch->right));
+
+                    // After body, jump to the end of the CASE.
+                    end_jumps = realloc(end_jumps, (end_jumps_count + 1) * sizeof(int));
+                    end_jumps[end_jumps_count++] = chunk->count;
+                    writeBytecodeChunk(chunk, JUMP, line); emitShort(chunk, 0xFFFF, line);
+                }
+
             next_branch:;
             }
 
@@ -4519,8 +5005,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool param_mismatch = false;
             if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
-                bool is_inc_dec = (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
-                bool is_halt = (strcasecmp(calleeName, "halt") == 0);
+                bool is_inc_dec = callee_is_builtin &&
+                                   (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
+                bool is_halt = callee_is_builtin && (strcasecmp(calleeName, "halt") == 0);
                 if (expected == 0 && arg_count > 0) {
                     int idx = arg_start;
                     if (idx < node->child_count) {
@@ -4810,10 +5297,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_COMPOUND: {
+            bool enters_scope = current_function_compiler != NULL && !node->is_global_scope;
+            SymbolEnvSnapshot scope_snapshot;
+            int starting_local = -1;
+            if (enters_scope) {
+                compilerBeginScope(current_function_compiler);
+                starting_local = current_function_compiler->local_count;
+                saveLocalEnv(&scope_snapshot);
+            }
             for (int i = 0; i < node->child_count; i++) {
                 if (node->children[i]) {
                     compileStatement(node->children[i], chunk, getLine(node->children[i]));
                 }
+            }
+            if (enters_scope) {
+                for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                    if (current_function_compiler->locals[i].name) {
+                        free(current_function_compiler->locals[i].name);
+                        current_function_compiler->locals[i].name = NULL;
+                    }
+                }
+                current_function_compiler->local_count = starting_local;
+                compilerEndScope(current_function_compiler);
+                restoreLocalEnv(&scope_snapshot);
             }
             break;
         }
@@ -5125,6 +5631,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         treat_as_local = false;
                     }
                 }
+                if (treat_as_local) {
+                    CompilerLocal* local = &current_function_compiler->locals[local_slot];
+                    if (local->decl_node && getLine(local->decl_node) > line) {
+                        treat_as_local = false;
+                    }
+                }
             }
 
             if (treat_as_local) {
@@ -5209,7 +5721,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             ConstArrayAccessInfo const_info;
             if (computeConstantArrayAccess(node, &const_info)) {
-                compileLValue(const_info.base_expr, chunk, getLine(const_info.base_expr));
+                bool emitted_base = false;
+                AST* base_expr = const_info.base_expr;
+                if (base_expr && base_expr->type == AST_VARIABLE &&
+                    base_expr->token && base_expr->token->value) {
+                    const char* base_name = base_expr->token->value;
+                    Symbol* local_const = lookupLocalSymbol(base_name);
+                    if (local_const && local_const->is_const && local_const->value) {
+                        emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
+                        emitted_base = true;
+                    } else {
+                        Symbol* global_const = lookupGlobalSymbol(base_name);
+                        if (global_const && global_const->is_const && global_const->value) {
+                            emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
+                            emitted_base = true;
+                        } else {
+                            Value* const_val_ptr = findCompilerConstant(base_name);
+                            if (const_val_ptr) {
+                                emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                                emitted_base = true;
+                            }
+                        }
+                    }
+                }
+                if (!emitted_base) {
+                    compileLValue(base_expr, chunk, getLine(base_expr));
+                }
                 writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE_CONST, line);
                 emitInt32(chunk, (uint32_t)const_info.offset, line);
                 break;
@@ -5227,7 +5764,33 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             switch (base->type) {
-                case AST_VARIABLE:
+                case AST_VARIABLE: {
+                    bool emitted_base = false;
+                    if (base->token && base->token->value) {
+                        const char* base_name = base->token->value;
+                        Symbol* local_const = lookupLocalSymbol(base_name);
+                        if (local_const && local_const->is_const && local_const->value) {
+                            emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
+                            emitted_base = true;
+                        } else {
+                            Symbol* global_const = lookupGlobalSymbol(base_name);
+                            if (global_const && global_const->is_const && global_const->value) {
+                                emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
+                                emitted_base = true;
+                            } else {
+                                Value* const_val_ptr = findCompilerConstant(base_name);
+                                if (const_val_ptr) {
+                                    emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                                    emitted_base = true;
+                                }
+                            }
+                        }
+                    }
+                    if (!emitted_base) {
+                        compileLValue(base, chunk, getLine(base));
+                    }
+                    break;
+                }
                 case AST_FIELD_ACCESS:
                 case AST_ARRAY_ACCESS:
                 case AST_DEREFERENCE:
@@ -5793,10 +6356,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compiler_had_error = true;
                         for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                         emitConstant(chunk, addNilConstant(chunk), line);
-                    } else if ((strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)
+                    } else if (((!func_symbol && isBuiltin(functionName) &&
+                                 (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)))
                                ? !(call_arg_count == 1 || call_arg_count == 2)
                                : (func_symbol->arity != call_arg_count)) {
-                        if (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0) {
+                        if (!func_symbol && isBuiltin(functionName) &&
+                            (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)) {
                             fprintf(stderr, "L%d: Compiler Error: '%s' expects 1 or 2 argument(s) but %d were provided.\n",
                                     line, original_display_name, call_arg_count);
                         } else {
@@ -5831,12 +6396,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 }
 
 void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
-    if (!unit_ast || unit_ast->type != AST_UNIT) {
-        return;
+    bool vtable_state_pushed = false;
+    if (tracked_vtable_chunk != NULL) {
+        vtable_state_pushed = pushVTableTrackerState(outputChunk);
+    } else {
+        initializeVTableTracker(outputChunk);
+    }
+
+    if (!unit_ast || !outputChunk || unit_ast->type != AST_UNIT) {
+        goto vtable_cleanup;
     }
     AST* impl_block = unit_ast->extra;
     if (!impl_block || impl_block->type != AST_COMPOUND) {
-        return;
+        goto vtable_cleanup;
     }
 
 
@@ -5852,6 +6424,11 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk) {
 
     // Reset the context after finishing the unit
     current_compilation_unit_name = NULL;
+
+vtable_cleanup:
+    if (vtable_state_pushed) {
+        popVTableTrackerState();
+    }
 }
 
 void finalizeBytecode(BytecodeChunk* chunk) {

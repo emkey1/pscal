@@ -210,7 +210,9 @@ typedef enum {
     AST_TYPE_IDENTIFIER, // Added: Represents a simple type identifier like "integer" or "MyCustomType"
     AST_SUBRANGE,
     AST_USES_CLAUSE,
+    AST_IMPORT,
     AST_UNIT,
+    AST_MODULE,
     AST_INTERFACE,
     AST_IMPLEMENTATION,
     AST_INITIALIZATION,
@@ -228,7 +230,13 @@ typedef enum {
     AST_DEREFERENCE,
     AST_ADDR_OF,
     AST_NIL,
-    AST_NEW
+    AST_NEW,
+    AST_MATCH,
+    AST_MATCH_BRANCH,
+    AST_PATTERN_BINDING,
+    AST_TRY,
+    AST_CATCH,
+    AST_THROW
 } ASTNodeType;
 
 // Define the function pointer type for built-in handlers

@@ -32,6 +32,7 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "core/preproc.h"
+#include "core/build_info.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -53,14 +54,6 @@
 /* Global variables */
 int gParamCount = 0;
 char **gParamValues = NULL;
-
-#ifdef DEBUG
-List *inserted_global_names = NULL;
-#endif
-
-#ifndef PROGRAM_VERSION
-#define PROGRAM_VERSION "undefined.version_DEV"
-#endif
 
 static int s_vm_trace_head = 0;
 
@@ -151,7 +144,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
     }
-    
+
+    gSuppressWriteSpacing = 1;
+    gUppercaseBooleans = 1;
+
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
 #ifdef SDL
@@ -371,7 +367,8 @@ int main(int argc, char *argv[]) {
     int pscal_params_start_index = 0; // Will be set after source file is identified
 
     if (argc == 1) {
-        printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+        printf("Pascal Version: %s (latest tag: %s)\n",
+               pscal_program_version_string(), pscal_git_tag_string());
         printf("%s\n", PASCAL_USAGE);
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
@@ -380,7 +377,8 @@ int main(int argc, char *argv[]) {
     int i = 1;
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
-            printf("Pscal Interpreter Version: %s\n", PROGRAM_VERSION);
+            printf("Pascal Version: %s (latest tag: %s)\n",
+                   pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
