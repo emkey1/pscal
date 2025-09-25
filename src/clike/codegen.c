@@ -10,6 +10,7 @@
 #include "Pascal/globals.h"
 #include "compiler/compiler.h"
 #include "vm/string_sentinels.h"
+#include "vm/vm.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -89,6 +90,42 @@ static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
     emitShort(chunk, (uint16_t)builtin_id, line);
     emitShort(chunk, (uint16_t)nameIndex, line);
     writeBytecodeChunk(chunk, arg_count, line);
+}
+
+static void emitBuiltinFunctionCall(BytecodeChunk* chunk, const char* vmName,
+                                   uint8_t arg_count, int line) {
+    if (!vmName) vmName = "";
+
+    const char* dispatch_name = clikeCanonicalBuiltinName(vmName);
+    char normalized_name[MAX_SYMBOL_LENGTH];
+    strncpy(normalized_name, dispatch_name, sizeof(normalized_name) - 1);
+    normalized_name[sizeof(normalized_name) - 1] = '\0';
+    toLowerString(normalized_name);
+
+    int nameIndex = addStringConstant(chunk, normalized_name);
+    if (clikeGetBuiltinID(vmName) < 0) {
+        fprintf(stderr,
+                "L%d: Compiler Error: Unknown built-in function '%s'.\n",
+                line, vmName);
+    }
+
+    writeBytecodeChunk(chunk, CALL_BUILTIN, line);
+    emitShort(chunk, (uint16_t)nameIndex, line);
+    writeBytecodeChunk(chunk, arg_count, line);
+}
+
+static bool isNumericPrintfSpec(char spec) {
+    switch (spec) {
+        case 'd':
+        case 'i':
+        case 'u':
+        case 'o':
+        case 'x':
+        case 'X':
+            return true;
+        default:
+            return false;
+    }
 }
 
 static char* tokenToCString(ClikeToken t) {
@@ -1260,7 +1297,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
             if (strcasecmp(name, "printf") == 0) {
                 int arg_index = 0;
                 int write_arg_count = 0;
-                Value nl = makeInt(0);
+                Value nl = makeInt(VM_WRITE_FLAG_SUPPRESS_SPACING);
                 int nlidx = addConstantToChunk(chunk, &nl);
                 freeValue(&nl);
                 writeBytecodeChunk(chunk, CONSTANT, node->token.line);
@@ -1309,7 +1346,13 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                                         write_arg_count++;
                                         seglen = 0;
                                     }
-                                    compileExpression(node->children[arg_index++], chunk, ctx);
+                                    ASTNodeClike* argNode = node->children[arg_index];
+                                    compileExpression(argNode, chunk, ctx);
+                                    if (isNumericPrintfSpec(fmt[j]) && argNode &&
+                                        (argNode->var_type == TYPE_BOOLEAN || argNode->var_type == TYPE_CHAR)) {
+                                        emitBuiltinFunctionCall(chunk, "toint", 1, node->token.line);
+                                    }
+                                    arg_index++;
                                     if (width > 0 || precision >= 0) {
                                         if (precision < 0) precision = PASCAL_DEFAULT_FLOAT_PRECISION;
                                         writeBytecodeChunk(chunk, FORMAT_VALUE, node->token.line);
