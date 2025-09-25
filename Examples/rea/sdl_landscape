@@ -313,9 +313,14 @@ class LandscapeDemo {
     float half = TerrainSize * 0.5;
     float expectedMin = (0.0 - half) * TileScale;
     float expectedMax = (TerrainSize - half) * TileScale;
-    float diffMin = my.worldXCoords[0] - expectedMin;
+    float minSample = my.worldXCoords[0];
+    float maxSample = my.worldXCoords[TerrainSize];
+    if (!(minSample == minSample) || !(maxSample == maxSample)) {
+      return false;
+    }
+    float diffMin = minSample - expectedMin;
     if (diffMin < 0.0) diffMin = -diffMin;
-    float diffMax = my.worldXCoords[TerrainSize] - expectedMax;
+    float diffMax = maxSample - expectedMax;
     if (diffMax < 0.0) diffMax = -diffMax;
     if (diffMin > 0.0005 || diffMax > 0.0005) {
       return false;
@@ -346,11 +351,15 @@ class LandscapeDemo {
     if (TerrainSize >= 1) {
       int checkIdx = 1;
       float expectedPhase = 0.18;
-      float phaseDiff = my.waterPhaseOffset[checkIdx] - expectedPhase;
+      float phase = my.waterPhaseOffset[checkIdx];
+      float secondary = my.waterSecondaryOffset[checkIdx];
+      if (!(phase == phase) || !(secondary == secondary)) {
+        return false;
+      }
+      float phaseDiff = phase - expectedPhase;
       if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
       float expectedSecondary = 0.05;
-      float secondaryDiff =
-          my.waterSecondaryOffset[checkIdx] - expectedSecondary;
+      float secondaryDiff = secondary - expectedSecondary;
       if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
       if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
         return false;
