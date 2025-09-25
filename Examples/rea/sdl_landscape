@@ -757,15 +757,10 @@ class LandscapeDemo {
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    int mouseInside = 0;
-    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
-    if (mouseInside != 0) {
-      my.lastMouseX = mouseX;
-      my.lastMouseY = mouseY;
-      my.hasMouseSample = true;
-    } else {
-      my.hasMouseSample = false;
-    }
+    getmousestate(mouseX, mouseY, mouseButtons);
+    my.lastMouseX = mouseX;
+    my.lastMouseY = mouseY;
+    my.hasMouseSample = true;
   }
 
   void regenerate(int newSeed) {
@@ -936,12 +931,8 @@ class LandscapeDemo {
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
-    int mouseInside = 0;
-    getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
-    bool insideWindow = mouseInside != 0;
-    if (!insideWindow) {
-      my.hasMouseSample = false;
-    } else if (!my.hasMouseSample) {
+    getmousestate(mouseX, mouseY, mouseButtons);
+    if (!my.hasMouseSample) {
       my.lastMouseX = mouseX;
       my.lastMouseY = mouseY;
       my.hasMouseSample = true;
@@ -953,8 +944,11 @@ class LandscapeDemo {
       if (deltaX != 0 || deltaY != 0) {
         int maxDeltaX = WindowWidth / 2;
         int maxDeltaY = WindowHeight / 2;
-        if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
-            deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
+        bool largeDelta = (deltaX < -maxDeltaX || deltaX > maxDeltaX ||
+                           deltaY < -maxDeltaY || deltaY > maxDeltaY);
+        if (largeDelta) {
+          my.hasMouseSample = false;
+        } else {
           my.yaw = my.yaw - deltaX * MouseYawSensitivity;
           my.pitch = my.pitch - deltaY * MousePitchSensitivity;
         }
