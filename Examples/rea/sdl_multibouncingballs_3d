@@ -184,25 +184,20 @@ void drawGlassBox() {
     float halfHeight = BoxHeight * 0.5;
     float frontZ = -12.0;
     float backZ = -BoxDepth;
+    float floorBackZ = backZ + 1.0;
 
     GLDisable("lighting");
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
 
-    GLColor4f(0.10, 0.18, 0.28, 0.22);
-    GLBegin("quads");
-        GLVertex3f(-halfWidth, halfHeight, backZ);
-        GLVertex3f(halfWidth, halfHeight, backZ);
-        GLVertex3f(halfWidth, -halfHeight, backZ);
-        GLVertex3f(-halfWidth, -halfHeight, backZ);
-    GLEnd();
-
+    // Draw the floor before the back wall so depth testing keeps it visible
+    // when viewed through the glass from behind.
     GLColor4f(0.08, 0.12, 0.20, 0.35);
     GLBegin("quads");
         GLVertex3f(-halfWidth, -halfHeight, frontZ);
         GLVertex3f(halfWidth, -halfHeight, frontZ);
-        GLVertex3f(halfWidth, -halfHeight, backZ);
-        GLVertex3f(-halfWidth, -halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, floorBackZ);
+        GLVertex3f(-halfWidth, -halfHeight, floorBackZ);
     GLEnd();
 
     int gridSteps = 12;
@@ -213,12 +208,20 @@ void drawGlassBox() {
             float t = (i * 1.0) / gridSteps;
             float x = -halfWidth + t * BoxWidth;
             GLVertex3f(x, -halfHeight + 0.2, frontZ);
-            GLVertex3f(x, -halfHeight + 0.2, backZ);
-            float z = frontZ + t * (backZ - frontZ);
+            GLVertex3f(x, -halfHeight + 0.2, floorBackZ);
+            float z = frontZ + t * (floorBackZ - frontZ);
             GLVertex3f(-halfWidth, -halfHeight + 0.2, z);
             GLVertex3f(halfWidth, -halfHeight + 0.2, z);
             i = i + 1;
         }
+    GLEnd();
+
+    GLColor4f(0.12, 0.18, 0.26, 0.06);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
     GLEnd();
 
     GLDisable("blend");
@@ -269,8 +272,8 @@ void drawScene() {
 
     GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
 
-    drawGlassBox();
     drawBalls();
+    drawGlassBox();
 
     GLSwapWindow();
 }
