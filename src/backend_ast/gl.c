@@ -1064,4 +1064,22 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "GLIsHardwareAccelerated does not take any arguments.");
+        return makeBoolean(false);
+    }
+    if (!ensureGlContext(vm, "GLIsHardwareAccelerated")) {
+        return makeBoolean(false);
+    }
+
+    int accelerated = 0;
+    if (SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated) != 0) {
+        runtimeError(vm, "GLIsHardwareAccelerated: SDL_GL_GetAttribute failed: %s", SDL_GetError());
+        return makeBoolean(false);
+    }
+
+    return makeBoolean(accelerated != 0);
+}
+
 #endif // SDL

@@ -432,6 +432,12 @@ void handleInput() {
 
 void initApp() {
     InitGraph3D(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D", 24, 8);
+    bool gpuAccelerated = GLIsHardwareAccelerated();
+    if (gpuAccelerated) {
+        writeln("OpenGL acceleration: hardware (GPU).");
+    } else {
+        writeln("OpenGL acceleration: software fallback.");
+    }
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     setupLighting();

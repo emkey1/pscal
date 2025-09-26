@@ -3923,19 +3923,21 @@ typedef struct {
     const char *display_name;
     const char *vm_name;
     VmBuiltinFn handler;
+    BuiltinRoutineType type;
 } SdlGlDynamicBuiltin;
 
 static const SdlGlDynamicBuiltin sdl_gl_dynamic_builtins[] = {
-    {"GLColor4f", "glcolor4f", vmBuiltinGlcolor4f},
-    {"GLNormal3f", "glnormal3f", vmBuiltinGlnormal3f},
-    {"GLEnable", "glenable", vmBuiltinGlenable},
-    {"GLDisable", "gldisable", vmBuiltinGldisable},
-    {"GLShadeModel", "glshademodel", vmBuiltinGlshademodel},
-    {"GLLightfv", "gllightfv", vmBuiltinGllightfv},
-    {"GLMaterialfv", "glmaterialfv", vmBuiltinGlmaterialfv},
-    {"GLMaterialf", "glmaterialf", vmBuiltinGlmaterialf},
-    {"GLColorMaterial", "glcolormaterial", vmBuiltinGlcolormaterial},
-    {"GLBlendFunc", "glblendfunc", vmBuiltinGlblendfunc},
+    {"GLColor4f", "glcolor4f", vmBuiltinGlcolor4f, BUILTIN_TYPE_PROCEDURE},
+    {"GLNormal3f", "glnormal3f", vmBuiltinGlnormal3f, BUILTIN_TYPE_PROCEDURE},
+    {"GLEnable", "glenable", vmBuiltinGlenable, BUILTIN_TYPE_PROCEDURE},
+    {"GLDisable", "gldisable", vmBuiltinGldisable, BUILTIN_TYPE_PROCEDURE},
+    {"GLShadeModel", "glshademodel", vmBuiltinGlshademodel, BUILTIN_TYPE_PROCEDURE},
+    {"GLLightfv", "gllightfv", vmBuiltinGllightfv, BUILTIN_TYPE_PROCEDURE},
+    {"GLMaterialfv", "glmaterialfv", vmBuiltinGlmaterialfv, BUILTIN_TYPE_PROCEDURE},
+    {"GLMaterialf", "glmaterialf", vmBuiltinGlmaterialf, BUILTIN_TYPE_PROCEDURE},
+    {"GLColorMaterial", "glcolormaterial", vmBuiltinGlcolormaterial, BUILTIN_TYPE_PROCEDURE},
+    {"GLBlendFunc", "glblendfunc", vmBuiltinGlblendfunc, BUILTIN_TYPE_PROCEDURE},
+    {"GLIsHardwareAccelerated", "glishardwareaccelerated", vmBuiltinGlishardwareaccelerated, BUILTIN_TYPE_FUNCTION},
 };
 
 void registerSdlGlBuiltins(void) {
@@ -3944,7 +3946,7 @@ void registerSdlGlBuiltins(void) {
     }
     for (size_t i = 0; i < sizeof(sdl_gl_dynamic_builtins) / sizeof(sdl_gl_dynamic_builtins[0]); ++i) {
         const SdlGlDynamicBuiltin *entry = &sdl_gl_dynamic_builtins[i];
-        registerVmBuiltin(entry->vm_name, entry->handler, BUILTIN_TYPE_PROCEDURE, entry->display_name);
+        registerVmBuiltin(entry->vm_name, entry->handler, entry->type, entry->display_name);
     }
 }
 #endif
