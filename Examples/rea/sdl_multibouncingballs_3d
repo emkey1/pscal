@@ -407,9 +407,21 @@ class BallSystem extends Renderable {
     float highlightRadius[NumBalls];
     float highlightStrength[NumBalls];
     SphereMesh mesh;
+    float minSpeed;
+    float maxSpeed;
+    float cameraDistance;
 
     void BallSystem() {
         myself.mesh = new SphereMesh();
+        myself.minSpeed = MinSpeed;
+        myself.maxSpeed = MaxSpeed;
+        myself.cameraDistance = CameraDistance;
+    }
+
+    void configure(float newMinSpeed, float newMaxSpeed, float newCameraDistance) {
+        myself.minSpeed = newMinSpeed;
+        myself.maxSpeed = newMaxSpeed;
+        myself.cameraDistance = newCameraDistance;
     }
 
     void initBalls(float minSpeed, float maxSpeed) {
@@ -457,30 +469,33 @@ class BallSystem extends Renderable {
         }
     }
 
-    void update(float deltaTime, float minSpeed, float maxSpeed, float cameraDistance) {
+    void update(float deltaTime) {
         BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
-            WallElasticity, minSpeed, maxSpeed, VelocityDrag,
-            cameraDistance, WindowWidth, WindowHeight,
-            posX, posY, posZ, velX, velY, velZ, radius,
-            screenX, screenY, screenRadius, depthShade,
-            lightIntensity, rimIntensity, highlightX, highlightY, highlightRadius, highlightStrength);
+            WallElasticity, myself.minSpeed, myself.maxSpeed, VelocityDrag,
+            myself.cameraDistance, WindowWidth, WindowHeight,
+            myself.posX, myself.posY, myself.posZ,
+            myself.velX, myself.velY, myself.velZ, myself.radius,
+            myself.screenX, myself.screenY, myself.screenRadius, myself.depthShade,
+            myself.lightIntensity, myself.rimIntensity,
+            myself.highlightX, myself.highlightY,
+            myself.highlightRadius, myself.highlightStrength);
     }
 
     void draw() {
         int i = 0;
         while (i < NumBalls) {
-            drawBall(i);
+            myself.drawBall(i);
             i = i + 1;
         }
     }
 
     void drawBall(int index) {
-        float baseR = colorR[index] / 255.0;
-        float baseG = colorG[index] / 255.0;
-        float baseB = colorB[index] / 255.0;
-        float lit = lightIntensity[index];
-        float rim = rimIntensity[index];
-        float highlight = highlightStrength[index];
+        float baseR = myself.colorR[index] / 255.0;
+        float baseG = myself.colorG[index] / 255.0;
+        float baseB = myself.colorB[index] / 255.0;
+        float lit = myself.lightIntensity[index];
+        float rim = myself.rimIntensity[index];
+        float highlight = myself.highlightStrength[index];
 
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
         color.scale(0.28 + 0.62 * lit);
@@ -494,21 +509,21 @@ class BallSystem extends Renderable {
         color.add(specColor);
 
         GLPushMatrix();
-        GLTranslatef(posX[index], posY[index], posZ[index]);
-        GLScalef(radius[index], radius[index], radius[index]);
+        GLTranslatef(myself.posX[index], myself.posY[index], myself.posZ[index]);
+        GLScalef(myself.radius[index], myself.radius[index], myself.radius[index]);
         GLColor3f(color.r, color.g, color.b);
-        mesh.drawUnit();
-        drawSpecularHighlight(index);
+        myself.mesh.drawUnit();
+        myself.drawSpecularHighlight(index);
         GLPopMatrix();
     }
 
     void drawSpecularHighlight(int index) {
-        float radiusScale = highlightRadius[index];
+        float radiusScale = myself.highlightRadius[index];
         if (radiusScale <= 0.001) return;
-        float strength = highlightStrength[index];
+        float strength = myself.highlightStrength[index];
         if (strength <= 0.001) return;
-        float hx = highlightX[index];
-        float hy = highlightY[index];
+        float hx = myself.highlightX[index];
+        float hy = myself.highlightY[index];
         GLDisable("lighting");
         GLEnable("blend");
         GLBlendFunc("src_alpha", "one_minus_src_alpha");
@@ -566,6 +581,7 @@ class DemoApp extends Renderable {
         myself.frameDelay = trunc(1000 / myself.targetFps);
         myself.deltaTime = 1.0 / myself.targetFps;
         myself.elapsed = 0.0;
+        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
     }
 
     void configureGraphics() {
@@ -578,35 +594,37 @@ class DemoApp extends Renderable {
         }
         GLViewport(0, 0, WindowWidth, WindowHeight);
         GLSetSwapInterval(1);
-        lighting.setup();
+        myself.lighting.setup();
     }
 
     void init() {
         randomize();
-        configureGraphics();
+        myself.configureGraphics();
         float fpsBoost = 1.7;
         float speedBoost = 2.45;
         float cameraPull = 0.66;
-        BouncingBalls3DAccelerate(targetFps, frameDelay, deltaTime,
-            minSpeed, maxSpeed, cameraDistance,
+        BouncingBalls3DAccelerate(myself.targetFps, myself.frameDelay, myself.deltaTime,
+            myself.minSpeed, myself.maxSpeed, myself.cameraDistance,
             fpsBoost, speedBoost, cameraPull);
-        balls.initBalls(minSpeed, maxSpeed);
-        stars.init();
+        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
+        myself.balls.initBalls(myself.minSpeed, myself.maxSpeed);
+        myself.stars.init();
         elapsedSeconds = 0.0;
-        camera.yaw = 0.0;
-        camera.pitch = InitialCameraPitch;
-        camera.distance = cameraDistance;
-        camera.yawVelocity = CameraOrbitSpeed;
-        quit = false;
-        paused = false;
+        myself.camera.yaw = 0.0;
+        myself.camera.pitch = InitialCameraPitch;
+        myself.camera.distance = myself.cameraDistance;
+        myself.camera.yawVelocity = CameraOrbitSpeed;
+        myself.quit = false;
+        myself.paused = false;
     }
 
     void update(float dt) {
-        if (paused) return;
-        balls.update(dt, minSpeed, maxSpeed, cameraDistance);
-        elapsed = elapsed + dt;
-        elapsedSeconds = elapsed;
-        camera.updateAutoYaw(dt);
+        if (myself.paused) return;
+        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
+        myself.balls.update(dt);
+        myself.elapsed = myself.elapsed + dt;
+        elapsedSeconds = myself.elapsed;
+        myself.camera.updateAutoYaw(dt);
     }
 
     void drawScene() {
@@ -620,15 +638,15 @@ class DemoApp extends Renderable {
 
         GLMatrixMode("modelview");
         GLLoadIdentity();
-        GLTranslatef(0.0, 0.0, -camera.distance);
-        GLRotatef(camera.pitch, 1.0, 0.0, 0.0);
-        GLRotatef(camera.yaw, 0.0, 1.0, 0.0);
+        GLTranslatef(0.0, 0.0, -myself.camera.distance);
+        GLRotatef(myself.camera.pitch, 1.0, 0.0, 0.0);
+        GLRotatef(myself.camera.yaw, 0.0, 1.0, 0.0);
 
         GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
 
-        stars.draw();
-        balls.draw();
-        arena.draw();
+        myself.stars.draw();
+        myself.balls.draw();
+        myself.arena.draw();
 
         GLSwapWindow();
     }
@@ -645,45 +663,45 @@ class DemoApp extends Renderable {
         if (leftDown) yawInput = yawInput - 1.0;
         if (rightDown) yawInput = yawInput + 1.0;
         if (yawInput == 0.0) {
-            camera.yawVelocity = camera.autoOrbitSpeed;
+            myself.camera.yawVelocity = myself.camera.autoOrbitSpeed;
         } else {
-            camera.yawVelocity = yawInput * camera.manualYawSpeed;
+            myself.camera.yawVelocity = yawInput * myself.camera.manualYawSpeed;
         }
 
         if (upDown && !downDown) {
-            camera.pitch = camera.pitch + deltaTime * camera.manualPitchSpeed;
+            myself.camera.pitch = myself.camera.pitch + myself.deltaTime * myself.camera.manualPitchSpeed;
         } else if (downDown && !upDown) {
-            camera.pitch = camera.pitch - deltaTime * camera.manualPitchSpeed;
+            myself.camera.pitch = myself.camera.pitch - myself.deltaTime * myself.camera.manualPitchSpeed;
         }
 
         if (closer && !further) {
-            camera.distance = camera.distance - 320.0 * deltaTime;
-            if (camera.distance < 960.0) camera.distance = 960.0;
+            myself.camera.distance = myself.camera.distance - 320.0 * myself.deltaTime;
+            if (myself.camera.distance < 960.0) myself.camera.distance = 960.0;
         } else if (further && !closer) {
-            camera.distance = camera.distance + 320.0 * deltaTime;
-            if (camera.distance > 2800.0) camera.distance = 2800.0;
+            myself.camera.distance = myself.camera.distance + 320.0 * myself.deltaTime;
+            if (myself.camera.distance > 2800.0) myself.camera.distance = 2800.0;
         }
 
-        cameraDistance = camera.distance;
-        camera.clampPitch();
+        myself.cameraDistance = myself.camera.distance;
+        myself.camera.clampPitch();
     }
 
     void handleInput() {
-        adjustCameraFromInput();
+        myself.adjustCameraFromInput();
         if (keypressed()) {
             char key = readkey();
             switch (key) {
                 case 'q':
                 case 'Q':
-                    quit = true;
+                    myself.quit = true;
                     break;
                 case ' ':
-                    paused = !paused;
+                    myself.paused = !myself.paused;
                     break;
                 case 'r':
                 case 'R':
-                    balls.initBalls(minSpeed, maxSpeed);
-                    elapsed = 0.0;
+                    myself.balls.initBalls(myself.minSpeed, myself.maxSpeed);
+                    myself.elapsed = 0.0;
                     elapsedSeconds = 0.0;
                     break;
                 default:
@@ -693,17 +711,17 @@ class DemoApp extends Renderable {
     }
 
     void run() {
-        init();
+        myself.init();
         writeln("Multi Bouncing Balls 3D Ultra Advanced ... Press Q to quit, Space to pause, R to reseed.");
-        while (!quit) {
+        while (!myself.quit) {
             if (QuitRequested()) {
-                quit = true;
+                myself.quit = true;
                 break;
             }
-            handleInput();
-            update(deltaTime);
-            drawScene();
-            GraphLoop(frameDelay);
+            myself.handleInput();
+            myself.update(myself.deltaTime);
+            myself.drawScene();
+            GraphLoop(myself.frameDelay);
         }
         CloseGraph3D();
         writeln("Demo finished.");
