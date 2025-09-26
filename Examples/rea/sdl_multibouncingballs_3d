@@ -197,7 +197,7 @@ void drawGlassBox() {
     GLColor4f(0.18, 0.26, 0.38, 0.30);
     GLBegin("lines");
         while (i <= gridSteps) {
-            float t = (float)i / gridSteps;
+            float t = (i * 1.0) / gridSteps;
             float x = -halfWidth + t * BoxWidth;
             GLVertex3f(x, -halfHeight + 0.2, frontZ);
             GLVertex3f(x, -halfHeight + 0.2, backZ);
