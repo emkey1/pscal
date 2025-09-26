@@ -106,6 +106,46 @@ static Value* fetchZeroBasedArray(VM* vm, Value* arg, const char* name,
     return arr;
 }
 
+typedef struct NumericVarRef {
+    Value* slot;
+    bool isInteger;
+} NumericVarRef;
+
+static bool fetchNumericVarRef(VM* vm, Value* arg, const char* name,
+                               const char* paramDesc, NumericVarRef* out) {
+    if (!out) return false;
+    if (arg->type != TYPE_POINTER) {
+        runtimeError(vm, "%s expects VAR parameter for %s.", name, paramDesc);
+        return false;
+    }
+
+    Value* slot = (Value*)arg->ptr_val;
+    if (!slot) {
+        runtimeError(vm, "%s received NIL storage for %s.", name, paramDesc);
+        return false;
+    }
+
+    if (!IS_NUMERIC(*slot)) {
+        runtimeError(vm, "%s %s must be numeric.", name, paramDesc);
+        return false;
+    }
+
+    out->slot = slot;
+    out->isInteger = IS_INTLIKE(*slot);
+    return true;
+}
+
+static void assignNumericVar(const NumericVarRef* ref, long double value) {
+    if (!ref || !ref->slot) return;
+    if (ref->isInteger) {
+        long double truncated = truncl(value);
+        if (truncated < 0.0L) truncated = 0.0L;
+        SET_INT_VALUE(ref->slot, (long long)truncated);
+    } else {
+        SET_REAL_VALUE(ref->slot, value);
+    }
+}
+
 static void writeDefaultLightingOutputs(const Balls3DParams* params, int index) {
     if (params->lightIntensity) assignFloatValue(&params->lightIntensity[index], 0.0);
     if (params->rimIntensity) assignFloatValue(&params->rimIntensity[index], 0.0);
@@ -678,10 +718,91 @@ static Value vmBuiltinBouncingBalls3DStepAdvanced(VM* vm, int arg_count,
     return runBalls3DStep(vm, name, &params);
 }
 
+static Value vmBuiltinBouncingBalls3DAccelerate(VM* vm, int arg_count,
+                                                Value* args) {
+    const char* name = "BouncingBalls3DAccelerate";
+    if (arg_count != 9) {
+        runtimeError(vm, "%s expects 9 arguments.", name);
+        return makeVoid();
+    }
+
+    NumericVarRef targetFps;
+    NumericVarRef frameDelay;
+    NumericVarRef deltaTime;
+    NumericVarRef minSpeed;
+    NumericVarRef maxSpeed;
+    NumericVarRef cameraDistance;
+    if (!fetchNumericVarRef(vm, &args[0], name, "target FPS", &targetFps) ||
+        !fetchNumericVarRef(vm, &args[1], name, "frame delay", &frameDelay) ||
+        !fetchNumericVarRef(vm, &args[2], name, "delta time", &deltaTime) ||
+        !fetchNumericVarRef(vm, &args[3], name, "minimum speed", &minSpeed) ||
+        !fetchNumericVarRef(vm, &args[4], name, "maximum speed", &maxSpeed) ||
+        !fetchNumericVarRef(vm, &args[5], name, "camera distance",
+                            &cameraDistance)) {
+        return makeVoid();
+    }
+
+    for (int i = 6; i < 9; ++i) {
+        if (!IS_NUMERIC(args[i])) {
+            runtimeError(vm, "%s expects numeric scaling factors.", name);
+            return makeVoid();
+        }
+    }
+
+    double fpsMultiplier = (double)asLd(args[6]);
+    double speedMultiplier = (double)asLd(args[7]);
+    double cameraScale = (double)asLd(args[8]);
+    if (!(fpsMultiplier > 0.0)) {
+        runtimeError(vm, "%s requires a positive FPS multiplier.", name);
+        return makeVoid();
+    }
+    if (!(speedMultiplier > 0.0)) {
+        runtimeError(vm, "%s requires a positive speed multiplier.", name);
+        return makeVoid();
+    }
+    if (!(cameraScale > 0.0)) {
+        runtimeError(vm, "%s requires a positive camera scale.", name);
+        return makeVoid();
+    }
+
+    long double baseTargetFps = asLd(*targetFps.slot);
+    if (baseTargetFps < 1.0L) baseTargetFps = 60.0L;
+    long double boostedFps = baseTargetFps * fpsMultiplier;
+    if (boostedFps < 30.0L) boostedFps = 30.0L;
+    if (boostedFps > 480.0L) boostedFps = 480.0L;
+
+    long double boostedDeltaTime = 1.0L / boostedFps;
+    long double boostedFrameDelay = 1000.0L / boostedFps;
+
+    long double baseMinSpeed = fabsl(asLd(*minSpeed.slot));
+    long double baseMaxSpeed = fabsl(asLd(*maxSpeed.slot));
+    if (baseMinSpeed < 1.0L) baseMinSpeed = 1.0L;
+    if (baseMaxSpeed < baseMinSpeed) baseMaxSpeed = baseMinSpeed;
+    long double boostedMinSpeed = baseMinSpeed * speedMultiplier;
+    long double boostedMaxSpeed = baseMaxSpeed * speedMultiplier;
+    if (boostedMaxSpeed < boostedMinSpeed) boostedMaxSpeed = boostedMinSpeed;
+
+    long double baseCamera = fabsl(asLd(*cameraDistance.slot));
+    if (baseCamera < 120.0L) baseCamera = 120.0L;
+    long double boostedCamera = baseCamera * cameraScale;
+    if (boostedCamera < 120.0L) boostedCamera = 120.0L;
+
+    assignNumericVar(&targetFps, boostedFps);
+    assignNumericVar(&deltaTime, boostedDeltaTime);
+    assignNumericVar(&frameDelay, boostedFrameDelay);
+    assignNumericVar(&minSpeed, boostedMinSpeed);
+    assignNumericVar(&maxSpeed, boostedMaxSpeed);
+    assignNumericVar(&cameraDistance, boostedCamera);
+
+    return makeVoid();
+}
+
 void registerBalls3DBuiltins(void) {
     registerVmBuiltin("bouncingballs3dstep", vmBuiltinBouncingBalls3DStep,
                       BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DStep");
     registerVmBuiltin("bouncingballs3dstepadvanced",
                       vmBuiltinBouncingBalls3DStepAdvanced, BUILTIN_TYPE_PROCEDURE,
                       "BouncingBalls3DStepAdvanced");
+    registerVmBuiltin("bouncingballs3daccelerate", vmBuiltinBouncingBalls3DAccelerate,
+                      BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DAccelerate");
 }
