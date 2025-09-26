@@ -166,43 +166,79 @@ void drawBalls() {
   int bottom = WindowHeight - FrameMargin;
   while (i < NumBalls) {
     int ballIndex = drawOrder[i];
-    float shade = depthShade[ballIndex];
-    if (shade >= 0.0) {
+    float closeness = depthShade[ballIndex];
+    if (closeness >= 0.0) {
       int sx = FrameMargin + trunc(screenX[ballIndex]);
       int sy = FrameMargin + trunc(screenY[ballIndex]);
       int sr = trunc(screenRadius[ballIndex]);
       if (sr < 1) sr = 1;
       if (sx >= left - sr && sx <= right + sr && sy >= top - sr && sy <= bottom + sr) {
-        float glow = 0.35 + shade * 0.65;
-        if (glow > 1.1) glow = 1.1;
-        int r = trunc(colorR[ballIndex] * glow);
-        int g = trunc(colorG[ballIndex] * glow);
-        int b = trunc(colorB[ballIndex] * glow);
-        if (r > 255) r = 255;
-        if (g > 255) g = 255;
-        if (b > 255) b = 255;
-        setrgbcolor(r, g, b);
+        float bodyIntensity = 0.55 + closeness * 0.45;
+        float shadowIntensity = 0.35 + closeness * 0.25;
+        int baseR = trunc(colorR[ballIndex] * bodyIntensity);
+        int baseG = trunc(colorG[ballIndex] * bodyIntensity);
+        int baseB = trunc(colorB[ballIndex] * bodyIntensity);
+        int shadowR = trunc(colorR[ballIndex] * shadowIntensity);
+        int shadowG = trunc(colorG[ballIndex] * shadowIntensity);
+        int shadowB = trunc(colorB[ballIndex] * shadowIntensity);
+        if (baseR > 255) baseR = 255;
+        if (baseG > 255) baseG = 255;
+        if (baseB > 255) baseB = 255;
+        if (shadowR > 255) shadowR = 255;
+        if (shadowG > 255) shadowG = 255;
+        if (shadowB > 255) shadowB = 255;
+
+        int shadowOffsetX = trunc(sr * 0.18);
+        int shadowOffsetY = trunc(sr * 0.22);
+        int shadowRadius = trunc(sr * 1.05);
+        setrgbcolor(shadowR, shadowG, shadowB);
+        fillcircle(sx + shadowOffsetX, sy + shadowOffsetY, shadowRadius);
+
+        setrgbcolor(baseR, baseG, baseB);
         fillcircle(sx, sy, sr);
-        int rimR = r + 32;
-        int rimG = g + 32;
-        int rimB = b + 32;
-        if (rimR > 255) rimR = 255;
-        if (rimG > 255) rimG = 255;
-        if (rimB > 255) rimB = 255;
-        setrgbcolor(rimR, rimG, rimB);
+
+        int layers = 4;
+        int layer = 1;
+        while (layer <= layers) {
+          float t = layer / float(layers + 1);
+          float layerScale = 1.0 - t * 0.45;
+          int layerRadius = trunc(sr * layerScale);
+          if (layerRadius < 1) layerRadius = 1;
+          float highlightBoost = 0.75 + (1.0 - t) * 0.25;
+          int layerR = trunc(baseR * highlightBoost);
+          int layerG = trunc(baseG * highlightBoost);
+          int layerB = trunc(baseB * highlightBoost);
+          if (layerR > 255) layerR = 255;
+          if (layerG > 255) layerG = 255;
+          if (layerB > 255) layerB = 255;
+          int offsetX = trunc(-sr * 0.28 * (1.0 - t));
+          int offsetY = trunc(-sr * 0.32 * (1.0 - t));
+          setrgbcolor(layerR, layerG, layerB);
+          fillcircle(sx + offsetX, sy + offsetY, layerRadius);
+          layer = layer + 1;
+        }
+
+        int outlineR = baseR + 28;
+        int outlineG = baseG + 28;
+        int outlineB = baseB + 28;
+        if (outlineR > 255) outlineR = 255;
+        if (outlineG > 255) outlineG = 255;
+        if (outlineB > 255) outlineB = 255;
+        setrgbcolor(outlineR, outlineG, outlineB);
         drawcircle(sx, sy, sr);
-        int highlightR = rimR + 16;
-        int highlightG = rimG + 16;
-        int highlightB = rimB + 16;
+
+        int highlightRadius = trunc(sr * 0.22);
+        if (highlightRadius < 1) highlightRadius = 1;
+        int highlightX = sx - trunc(sr * 0.4);
+        int highlightY = sy - trunc(sr * 0.45);
+        int highlightR = baseR + trunc(90 * (0.6 + closeness * 0.4));
+        int highlightG = baseG + trunc(90 * (0.6 + closeness * 0.4));
+        int highlightB = baseB + trunc(90 * (0.6 + closeness * 0.4));
         if (highlightR > 255) highlightR = 255;
         if (highlightG > 255) highlightG = 255;
         if (highlightB > 255) highlightB = 255;
         setrgbcolor(highlightR, highlightG, highlightB);
-        int specX = sx - trunc(sr * 0.35);
-        int specY = sy - trunc(sr * 0.35);
-        int specRadius = trunc(sr * 0.25);
-        if (specRadius < 1) specRadius = 1;
-        drawcircle(specX, specY, specRadius);
+        fillcircle(highlightX, highlightY, highlightRadius);
       }
     }
     i = i + 1;
@@ -221,192 +257,43 @@ void drawHud() {
 
 void updateSimulation(float deltaTime) {
   if (paused) return;
-  float halfWidth = BoxWidth * 0.5;
-  float halfHeight = BoxHeight * 0.5;
-  float nearPlane = 0.0;
-  float backPlane = -BoxDepth;
   float screenWidth = WindowWidth - FrameMargin * 2;
   float screenHeight = WindowHeight - FrameMargin * 2;
-  float viewScaleX = screenWidth / BoxWidth;
-  float viewScaleY = screenHeight / BoxHeight;
+  BouncingBalls3DStep(NumBalls,
+                      deltaTime,
+                      BoxWidth,
+                      BoxHeight,
+                      BoxDepth,
+                      WallElasticity,
+                      MinSpeed,
+                      MaxSpeed,
+                      VelocityDrag,
+                      CameraDistance,
+                      screenWidth,
+                      screenHeight,
+                      posX,
+                      posY,
+                      posZ,
+                      velX,
+                      velY,
+                      velZ,
+                      radii,
+                      screenX,
+                      screenY,
+                      screenRadius,
+                      depthShade);
 
   int i = 0;
-  while (i < NumBalls) {
-    float x = posX[i];
-    float y = posY[i];
-    float z = posZ[i];
-    float vx = velX[i];
-    float vy = velY[i];
-    float vz = velZ[i];
-    float r = radii[i];
-    if (r <= 0.0) r = 1.0;
-
-    float minX = -halfWidth + r;
-    float maxX = halfWidth - r;
-    float minY = -halfHeight + r;
-    float maxY = halfHeight - r;
-    float minZ = backPlane + r;
-    float maxZ = nearPlane - r;
-
-    vx = vx * VelocityDrag;
-    vy = vy * VelocityDrag;
-    vz = vz * VelocityDrag;
-
-    x = x + vx * deltaTime;
-    y = y + vy * deltaTime;
-    z = z + vz * deltaTime;
-
-    if (x < minX) {
-      x = minX;
-      vx = abs(vx) * WallElasticity;
-      if (vx < MinSpeed) vx = MinSpeed;
-    } else if (x > maxX) {
-      x = maxX;
-      vx = -abs(vx) * WallElasticity;
-      if (-vx < MinSpeed) vx = -MinSpeed;
-    }
-    if (y < minY) {
-      y = minY;
-      vy = abs(vy) * WallElasticity;
-      if (vy < MinSpeed) vy = MinSpeed;
-    } else if (y > maxY) {
-      y = maxY;
-      vy = -abs(vy) * WallElasticity;
-      if (-vy < MinSpeed) vy = -MinSpeed;
-    }
-    if (z < minZ) {
-      z = minZ;
-      vz = abs(vz) * WallElasticity;
-      if (vz < MinSpeed) vz = MinSpeed;
-    } else if (z > maxZ) {
-      z = maxZ;
-      vz = -abs(vz) * WallElasticity;
-      if (-vz < MinSpeed) vz = -MinSpeed;
-    }
-
-    vx = enforceSpeed(vx, MinSpeed, MaxSpeed);
-    vy = enforceSpeed(vy, MinSpeed, MaxSpeed);
-    vz = enforceSpeed(vz, MinSpeed, MaxSpeed);
-
-    posX[i] = x;
-    posY[i] = y;
-    posZ[i] = z;
-    velX[i] = vx;
-    velY[i] = vy;
-    velZ[i] = vz;
-    i = i + 1;
-  }
-
-  i = 0;
-  while (i < NumBalls) {
-    int j = i + 1;
-    while (j < NumBalls) {
-      float xi = posX[i];
-      float yi = posY[i];
-      float zi = posZ[i];
-      float vxi = velX[i];
-      float vyi = velY[i];
-      float vzi = velZ[i];
-      float ri = radii[i];
-      float mi = ri * ri * ri;
-      if (mi <= 0.0) mi = 1.0;
-
-      float xj = posX[j];
-      float yj = posY[j];
-      float zj = posZ[j];
-      float vxj = velX[j];
-      float vyj = velY[j];
-      float vzj = velZ[j];
-      float rj = radii[j];
-      float mj = rj * rj * rj;
-      if (mj <= 0.0) mj = 1.0;
-
-      float dx = xj - xi;
-      float dy = yj - yi;
-      float dz = zj - zi;
-      float sumR = ri + rj;
-      float distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < sumR * sumR) {
-        float dist = sqrt(distSq);
-        float nx;
-        float ny;
-        float nz;
-        if (dist > 0.000001) {
-          nx = dx / dist;
-          ny = dy / dist;
-          nz = dz / dist;
-        } else {
-          nx = 1.0;
-          ny = 0.0;
-          nz = 0.0;
-          dist = sumR;
-        }
-
-        float viN = vxi * nx + vyi * ny + vzi * nz;
-        float vjN = vxj * nx + vyj * ny + vzj * nz;
-
-        float viT_x = vxi - viN * nx;
-        float viT_y = vyi - viN * ny;
-        float viT_z = vzi - viN * nz;
-
-        float vjT_x = vxj - vjN * nx;
-        float vjT_y = vyj - vjN * ny;
-        float vjT_z = vzj - vjN * nz;
-
-        float newViN = (viN * (mi - mj) + 2.0 * mj * vjN) / (mi + mj);
-        float newVjN = (vjN * (mj - mi) + 2.0 * mi * viN) / (mi + mj);
-
-        vxi = viT_x + newViN * nx;
-        vyi = viT_y + newViN * ny;
-        vzi = viT_z + newViN * nz;
-
-        vxj = vjT_x + newVjN * nx;
-        vyj = vjT_y + newVjN * ny;
-        vzj = vjT_z + newVjN * nz;
-
-        float overlap = sumR - dist;
-        if (overlap > 0.0) {
-          float correction = overlap * 0.5;
-          xi = xi - correction * nx;
-          yi = yi - correction * ny;
-          zi = zi - correction * nz;
-          xj = xj + correction * nx;
-          yj = yj + correction * ny;
-          zj = zj + correction * nz;
-        }
-
-        vxi = enforceSpeed(vxi, MinSpeed, MaxSpeed);
-        vyi = enforceSpeed(vyi, MinSpeed, MaxSpeed);
-        vzi = enforceSpeed(vzi, MinSpeed, MaxSpeed);
-        vxj = enforceSpeed(vxj, MinSpeed, MaxSpeed);
-        vyj = enforceSpeed(vyj, MinSpeed, MaxSpeed);
-        vzj = enforceSpeed(vzj, MinSpeed, MaxSpeed);
-
-        posX[i] = xi;
-        posY[i] = yi;
-        posZ[i] = zi;
-        velX[i] = vxi;
-        velY[i] = vyi;
-        velZ[i] = vzi;
-
-        posX[j] = xj;
-        posY[j] = yj;
-        posZ[j] = zj;
-        velX[j] = vxj;
-        velY[j] = vyj;
-        velZ[j] = vzj;
-      }
-      j = j + 1;
-    }
-    i = i + 1;
-  }
-
-  i = 0;
+  float nearPlane = 0.0;
+  float backPlane = -BoxDepth;
+  float viewScaleX = screenWidth / BoxWidth;
+  float viewScaleY = screenHeight / BoxHeight;
   while (i < NumBalls) {
     float x = posX[i];
     float y = posY[i];
     float z = posZ[i];
     float r = radii[i];
+
     if (z > nearPlane - r) {
       z = nearPlane - r;
       posZ[i] = z;
@@ -422,6 +309,7 @@ void updateSimulation(float deltaTime) {
       i = i + 1;
       continue;
     }
+
     float perspective = CameraDistance / denom;
     float sx = screenWidth * 0.5 + x * perspective * viewScaleX;
     float sy = screenHeight * 0.5 - y * perspective * viewScaleY;
@@ -431,12 +319,15 @@ void updateSimulation(float deltaTime) {
     float depthFactor = -z / BoxDepth;
     if (depthFactor < 0.0) depthFactor = 0.0;
     if (depthFactor > 1.0) depthFactor = 1.0;
-    float shade = 0.25 + 0.75 * depthFactor;
+    float proximity = 1.0 - depthFactor;
+    float depthScale = 0.65 + 0.9 * proximity;
+    float scaledRadius = sr * depthScale;
+    if (scaledRadius < 1.0) scaledRadius = 1.0;
 
     screenX[i] = sx;
     screenY[i] = sy;
-    screenRadius[i] = sr;
-    depthShade[i] = shade;
+    screenRadius[i] = scaledRadius;
+    depthShade[i] = proximity;
     i = i + 1;
   }
 
