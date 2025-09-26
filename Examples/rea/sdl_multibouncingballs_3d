@@ -412,7 +412,7 @@ class BallSystem extends Renderable {
         myself.mesh = new SphereMesh();
     }
 
-    void initBalls() {
+    void initBalls(float minSpeed, float maxSpeed) {
         int i = 0;
         float halfWidth = BoxWidth * 0.5;
         float halfHeight = BoxHeight * 0.5;
@@ -430,8 +430,8 @@ class BallSystem extends Renderable {
             myself.posY[i] = -halfHeight + r + randomUnit() * availY;
             myself.posZ[i] = -r - randomUnit() * (BoxDepth - 2.0 * r);
 
-            int speedRange = trunc(MaxSpeed - MinSpeed);
-            float speed = MinSpeed + random(speedRange + 1) + randomUnit();
+            int speedRange = trunc(maxSpeed - minSpeed);
+            float speed = minSpeed + random(speedRange + 1) + randomUnit();
             float yaw = random(360) * (Pi / 180.0);
             float pitch = (random(121) - 60.0) * (Pi / 180.0);
             float dirXY = cos(pitch);
@@ -457,19 +457,10 @@ class BallSystem extends Renderable {
         }
     }
 
-    void accelerate(float targetFps, int frameDelay, float deltaTime) {
-        float fpsBoost = 1.7;
-        float speedBoost = 2.45;
-        float cameraPull = 0.66;
-        BouncingBalls3DAccelerate(targetFps, frameDelay, deltaTime,
-            MinSpeed, MaxSpeed, CameraDistance,
-            fpsBoost, speedBoost, cameraPull);
-    }
-
-    void update(float deltaTime) {
+    void update(float deltaTime, float minSpeed, float maxSpeed, float cameraDistance) {
         BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
-            WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
-            CameraDistance, WindowWidth, WindowHeight,
+            WallElasticity, minSpeed, maxSpeed, VelocityDrag,
+            cameraDistance, WindowWidth, WindowHeight,
             posX, posY, posZ, velX, velY, velZ, radius,
             screenX, screenY, screenRadius, depthShade,
             lightIntensity, rimIntensity, highlightX, highlightY, highlightRadius, highlightStrength);
@@ -550,8 +541,12 @@ class DemoApp extends Renderable {
     BallSystem balls;
     bool quit;
     bool paused;
+    float targetFps;
     int frameDelay;
     float deltaTime;
+    float minSpeed;
+    float maxSpeed;
+    float cameraDistance;
     float elapsed;
 
     void DemoApp() {
@@ -564,8 +559,12 @@ class DemoApp extends Renderable {
         myself.balls = new BallSystem();
         myself.quit = false;
         myself.paused = false;
-        myself.frameDelay = trunc(1000 / TargetFPS);
-        myself.deltaTime = 1.0 / TargetFPS;
+        myself.targetFps = TargetFPS;
+        myself.minSpeed = MinSpeed;
+        myself.maxSpeed = MaxSpeed;
+        myself.cameraDistance = CameraDistance;
+        myself.frameDelay = trunc(1000 / myself.targetFps);
+        myself.deltaTime = 1.0 / myself.targetFps;
         myself.elapsed = 0.0;
     }
 
@@ -585,12 +584,18 @@ class DemoApp extends Renderable {
     void init() {
         randomize();
         configureGraphics();
-        balls.accelerate(TargetFPS, frameDelay, deltaTime);
-        balls.initBalls();
+        float fpsBoost = 1.7;
+        float speedBoost = 2.45;
+        float cameraPull = 0.66;
+        BouncingBalls3DAccelerate(targetFps, frameDelay, deltaTime,
+            minSpeed, maxSpeed, cameraDistance,
+            fpsBoost, speedBoost, cameraPull);
+        balls.initBalls(minSpeed, maxSpeed);
         stars.init();
         elapsedSeconds = 0.0;
         camera.yaw = 0.0;
         camera.pitch = InitialCameraPitch;
+        camera.distance = cameraDistance;
         camera.yawVelocity = CameraOrbitSpeed;
         quit = false;
         paused = false;
@@ -598,7 +603,7 @@ class DemoApp extends Renderable {
 
     void update(float dt) {
         if (paused) return;
-        balls.update(dt);
+        balls.update(dt, minSpeed, maxSpeed, cameraDistance);
         elapsed = elapsed + dt;
         elapsedSeconds = elapsed;
         camera.updateAutoYaw(dt);
@@ -659,6 +664,7 @@ class DemoApp extends Renderable {
             if (camera.distance > 2800.0) camera.distance = 2800.0;
         }
 
+        cameraDistance = camera.distance;
         camera.clampPitch();
     }
 
@@ -676,7 +682,7 @@ class DemoApp extends Renderable {
                     break;
                 case 'r':
                 case 'R':
-                    balls.initBalls();
+                    balls.initBalls(minSpeed, maxSpeed);
                     elapsed = 0.0;
                     elapsedSeconds = 0.0;
                     break;
