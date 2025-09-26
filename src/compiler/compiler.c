@@ -5191,8 +5191,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     /* BouncingBalls3D builtins write simulation data back via VAR arrays */
                     ((strcasecmp(calleeName, "bouncingballs3dstep") == 0 ||
                       strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepultra") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepUltra") == 0) && param_index >= 12) ||
                     ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
-                      strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15)
+                      strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepultraadvanced") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepUltraAdvanced") == 0) && param_index >= 15)
                     || ((strcasecmp(calleeName, "bouncingballs3daccelerate") == 0 ||
                          strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
                 )) {
