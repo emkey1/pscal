@@ -129,9 +129,9 @@ void initStars() {
     // Anchor a bright "sun" star roughly where the scene's directional light originates.
     float lightDirLength = sqrt(LightDirX * LightDirX + LightDirY * LightDirY + LightDirZ * LightDirZ);
     if (lightDirLength < 0.00001) lightDirLength = 1.0;
-    float lightDirX = -LightDirX / lightDirLength;
-    float lightDirY = -LightDirY / lightDirLength;
-    float lightDirZ = -LightDirZ / lightDirLength;
+    float lightDirX = (0.0 - LightDirX) / lightDirLength;
+    float lightDirY = (0.0 - LightDirY) / lightDirLength;
+    float lightDirZ = (0.0 - LightDirZ) / lightDirLength;
     float highlightDistance = innerRadius + 0.78 * (outerRadius - innerRadius);
     starX[0] = lightDirX * highlightDistance;
     starY[0] = lightDirY * highlightDistance;
