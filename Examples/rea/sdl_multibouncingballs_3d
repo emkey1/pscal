@@ -266,7 +266,7 @@ void drawScene() {
 
 void updateSimulation(float deltaTime) {
     if (paused) return;
-    BouncingBalls3DStep(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
+    BouncingBalls3DStepUltra(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
         WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
         CameraDistance, WindowWidth, WindowHeight,
         posX, posY, posZ, velX, velY, velZ, radii,
