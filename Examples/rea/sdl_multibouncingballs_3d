@@ -111,8 +111,8 @@ class CameraRig {
     float minPitch;
     float maxPitch;
     float autoOrbitSpeed;
-    float manualYawSpeed;
-    float manualPitchSpeed;
+    float manualYawSpeedValue;
+    float manualPitchSpeedValue;
 
     void CameraRig(float dist, float initialYaw, float initialPitch,
             float autoSpeed, float manualYaw, float manualPitch,
@@ -122,8 +122,8 @@ class CameraRig {
         myself.pitch = initialPitch;
         myself.yawVelocity = autoSpeed;
         myself.autoOrbitSpeed = autoSpeed;
-        myself.manualYawSpeed = manualYaw;
-        myself.manualPitchSpeed = manualPitch;
+        myself.manualYawSpeedValue = manualYaw;
+        myself.manualPitchSpeedValue = manualPitch;
         myself.minPitch = minPitchDeg;
         myself.maxPitch = maxPitchDeg;
     }
@@ -407,21 +407,21 @@ class BallSystem extends Renderable {
     float highlightRadius[NumBalls];
     float highlightStrength[NumBalls];
     SphereMesh mesh;
-    float minSpeed;
-    float maxSpeed;
-    float cameraDistance;
+    float minSpeedValue;
+    float maxSpeedValue;
+    float cameraDistanceValue;
 
     void BallSystem() {
         myself.mesh = new SphereMesh();
-        myself.minSpeed = MinSpeed;
-        myself.maxSpeed = MaxSpeed;
-        myself.cameraDistance = CameraDistance;
+        myself.minSpeedValue = MinSpeed;
+        myself.maxSpeedValue = MaxSpeed;
+        myself.cameraDistanceValue = CameraDistance;
     }
 
     void configure(float newMinSpeed, float newMaxSpeed, float newCameraDistance) {
-        myself.minSpeed = newMinSpeed;
-        myself.maxSpeed = newMaxSpeed;
-        myself.cameraDistance = newCameraDistance;
+        myself.minSpeedValue = newMinSpeed;
+        myself.maxSpeedValue = newMaxSpeed;
+        myself.cameraDistanceValue = newCameraDistance;
     }
 
     void initBalls(float minSpeed, float maxSpeed) {
@@ -471,8 +471,8 @@ class BallSystem extends Renderable {
 
     void update(float deltaTime) {
         BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
-            WallElasticity, myself.minSpeed, myself.maxSpeed, VelocityDrag,
-            myself.cameraDistance, WindowWidth, WindowHeight,
+            WallElasticity, myself.minSpeedValue, myself.maxSpeedValue, VelocityDrag,
+            myself.cameraDistanceValue, WindowWidth, WindowHeight,
             myself.posX, myself.posY, myself.posZ,
             myself.velX, myself.velY, myself.velZ, myself.radius,
             myself.screenX, myself.screenY, myself.screenRadius, myself.depthShade,
@@ -556,12 +556,12 @@ class DemoApp extends Renderable {
     BallSystem balls;
     bool quit;
     bool paused;
-    float targetFps;
+    float targetFpsValue;
     int frameDelay;
     float deltaTime;
-    float minSpeed;
-    float maxSpeed;
-    float cameraDistance;
+    float minSpeedValue;
+    float maxSpeedValue;
+    float cameraDistanceValue;
     float elapsed;
 
     void DemoApp() {
@@ -574,14 +574,14 @@ class DemoApp extends Renderable {
         myself.balls = new BallSystem();
         myself.quit = false;
         myself.paused = false;
-        myself.targetFps = TargetFPS;
-        myself.minSpeed = MinSpeed;
-        myself.maxSpeed = MaxSpeed;
-        myself.cameraDistance = CameraDistance;
-        myself.frameDelay = trunc(1000 / myself.targetFps);
-        myself.deltaTime = 1.0 / myself.targetFps;
+        myself.targetFpsValue = TargetFPS;
+        myself.minSpeedValue = MinSpeed;
+        myself.maxSpeedValue = MaxSpeed;
+        myself.cameraDistanceValue = CameraDistance;
+        myself.frameDelay = trunc(1000 / myself.targetFpsValue);
+        myself.deltaTime = 1.0 / myself.targetFpsValue;
         myself.elapsed = 0.0;
-        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
+        myself.balls.configure(myself.minSpeedValue, myself.maxSpeedValue, myself.cameraDistanceValue);
     }
 
     void configureGraphics() {
@@ -603,16 +603,16 @@ class DemoApp extends Renderable {
         float fpsBoost = 1.7;
         float speedBoost = 2.45;
         float cameraPull = 0.66;
-        BouncingBalls3DAccelerate(myself.targetFps, myself.frameDelay, myself.deltaTime,
-            myself.minSpeed, myself.maxSpeed, myself.cameraDistance,
+        BouncingBalls3DAccelerate(myself.targetFpsValue, myself.frameDelay, myself.deltaTime,
+            myself.minSpeedValue, myself.maxSpeedValue, myself.cameraDistanceValue,
             fpsBoost, speedBoost, cameraPull);
-        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
-        myself.balls.initBalls(myself.minSpeed, myself.maxSpeed);
+        myself.balls.configure(myself.minSpeedValue, myself.maxSpeedValue, myself.cameraDistanceValue);
+        myself.balls.initBalls(myself.minSpeedValue, myself.maxSpeedValue);
         myself.stars.init();
         elapsedSeconds = 0.0;
         myself.camera.yaw = 0.0;
         myself.camera.pitch = InitialCameraPitch;
-        myself.camera.distance = myself.cameraDistance;
+        myself.camera.distance = myself.cameraDistanceValue;
         myself.camera.yawVelocity = CameraOrbitSpeed;
         myself.quit = false;
         myself.paused = false;
@@ -620,7 +620,7 @@ class DemoApp extends Renderable {
 
     void update(float dt) {
         if (myself.paused) return;
-        myself.balls.configure(myself.minSpeed, myself.maxSpeed, myself.cameraDistance);
+        myself.balls.configure(myself.minSpeedValue, myself.maxSpeedValue, myself.cameraDistanceValue);
         myself.balls.update(dt);
         myself.elapsed = myself.elapsed + dt;
         elapsedSeconds = myself.elapsed;
@@ -665,13 +665,13 @@ class DemoApp extends Renderable {
         if (yawInput == 0.0) {
             myself.camera.yawVelocity = myself.camera.autoOrbitSpeed;
         } else {
-            myself.camera.yawVelocity = yawInput * myself.camera.manualYawSpeed;
+            myself.camera.yawVelocity = yawInput * myself.camera.manualYawSpeedValue;
         }
 
         if (upDown && !downDown) {
-            myself.camera.pitch = myself.camera.pitch + myself.deltaTime * myself.camera.manualPitchSpeed;
+            myself.camera.pitch = myself.camera.pitch + myself.deltaTime * myself.camera.manualPitchSpeedValue;
         } else if (downDown && !upDown) {
-            myself.camera.pitch = myself.camera.pitch - myself.deltaTime * myself.camera.manualPitchSpeed;
+            myself.camera.pitch = myself.camera.pitch - myself.deltaTime * myself.camera.manualPitchSpeedValue;
         }
 
         if (closer && !further) {
@@ -682,7 +682,7 @@ class DemoApp extends Renderable {
             if (myself.camera.distance > 2800.0) myself.camera.distance = 2800.0;
         }
 
-        myself.cameraDistance = myself.camera.distance;
+        myself.cameraDistanceValue = myself.camera.distance;
         myself.camera.clampPitch();
     }
 
@@ -700,7 +700,7 @@ class DemoApp extends Renderable {
                     break;
                 case 'r':
                 case 'R':
-                    myself.balls.initBalls(myself.minSpeed, myself.maxSpeed);
+                    myself.balls.initBalls(myself.minSpeedValue, myself.maxSpeedValue);
                     myself.elapsed = 0.0;
                     elapsedSeconds = 0.0;
                     break;
