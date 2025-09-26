@@ -34,9 +34,12 @@ const int SphereStacks = 20;
 const int SphereSlices = 36;
 const float Pi = 3.1415926535;
 
-const int NumStars = 260;
+const int NumStars = 261;
 const float StarInnerRadiusScale = 1.45;
 const float StarOuterRadiusScale = 2.85;
+const float LightStarSize = 22.0;
+const float LightStarBrightness = 1.0;
+const float LightStarTwinkleRate = 0.22;
 
 const float LightDirX = -0.55;
 const float LightDirY = -0.35;
@@ -123,6 +126,21 @@ void initStars() {
     if (cameraGuard > innerRadius) innerRadius = cameraGuard;
     float outerRadius = boxRadius * StarOuterRadiusScale;
     if (outerRadius < innerRadius + 1.0) outerRadius = innerRadius + 1.0;
+    // Anchor a bright "sun" star roughly where the scene's directional light originates.
+    float lightDirLength = sqrt(LightDirX * LightDirX + LightDirY * LightDirY + LightDirZ * LightDirZ);
+    if (lightDirLength < 0.00001) lightDirLength = 1.0;
+    float lightDirX = -LightDirX / lightDirLength;
+    float lightDirY = -LightDirY / lightDirLength;
+    float lightDirZ = -LightDirZ / lightDirLength;
+    float highlightDistance = innerRadius + 0.78 * (outerRadius - innerRadius);
+    starX[0] = lightDirX * highlightDistance;
+    starY[0] = lightDirY * highlightDistance;
+    starZ[0] = lightDirZ * highlightDistance;
+    starSize[0] = LightStarSize;
+    starBaseBrightness[0] = LightStarBrightness;
+    starTwinkleRate[0] = LightStarTwinkleRate;
+    starPhase[0] = 0.0;
+    i = 1;
     while (i < NumStars) {
         float cosTheta = 2.0 * randomUnit() - 1.0;
         if (cosTheta > 1.0) cosTheta = 1.0;
