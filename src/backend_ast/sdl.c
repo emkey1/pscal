@@ -9,6 +9,7 @@
 #include <SDL2/SDL_ttf.h>
 // Include SDL_mixer header directly
 #include <SDL2/SDL_mixer.h>
+#include <SDL2/SDL_syswm.h>
 // Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
 #include "audio.h"
 
@@ -21,6 +22,11 @@
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
+
+#ifdef SDL_VIDEO_DRIVER_X11
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#endif
 
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;
@@ -40,6 +46,11 @@ bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG 
 
 static bool gSdlInputWatchInstalled = false;
 
+#ifdef SDL_VIDEO_DRIVER_X11
+static Atom gX11WmPingAtom = None;
+static bool gX11WmAtomsInitialized = false;
+#endif
+
 #define MAX_PENDING_KEYCODES 128
 
 static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
@@ -55,6 +66,50 @@ static void enqueuePendingKeycode(SDL_Keycode code) {
     int tail = (gPendingKeyStart + gPendingKeyCount) % MAX_PENDING_KEYCODES;
     gPendingKeycodes[tail] = code;
     gPendingKeyCount++;
+}
+
+static void handleSysWmEvent(const SDL_Event* event) {
+#ifdef SDL_VIDEO_DRIVER_X11
+    if (!event || event->type != SDL_SYSWMEVENT) {
+        return;
+    }
+
+    SDL_SysWMmsg* msg = event->syswm.msg;
+    if (!msg || msg->subsystem != SDL_SYSWM_X11) {
+        return;
+    }
+
+    Display* display = msg->msg.x11.display;
+    XEvent* xevent = &msg->msg.x11.event;
+    if (!display || !xevent || xevent->type != ClientMessage) {
+        return;
+    }
+
+    if (!gX11WmAtomsInitialized) {
+        gX11WmPingAtom = XInternAtom(display, "_NET_WM_PING", False);
+        gX11WmAtomsInitialized = true;
+    }
+
+    if (gX11WmPingAtom == None) {
+        return;
+    }
+
+    if ((Atom)xevent->xclient.message_type != gX11WmPingAtom) {
+        return;
+    }
+
+    Window clientWindow = xevent->xclient.window;
+
+    XEvent reply = *xevent;
+    reply.xclient.window = DefaultRootWindow(display);
+    reply.xclient.data.l[1] = clientWindow;
+
+    XSendEvent(display, reply.xclient.window, False,
+        SubstructureNotifyMask | SubstructureRedirectMask, &reply);
+    XFlush(display);
+#else
+    (void)event;
+#endif
 }
 
 static bool dequeuePendingKeycode(SDL_Keycode* outCode) {
@@ -84,6 +139,11 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
     (void)userdata;
 
     if (!event) {
+        return 0;
+    }
+
+    if (event->type == SDL_SYSWMEVENT) {
+        handleSysWmEvent(event);
         return 0;
     }
 
@@ -1264,6 +1324,11 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
         if (event.type == SDL_QUIT) {
             break_requested = 1;
             return makeInt(0);
@@ -1292,6 +1357,11 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     int waiting = 1;
     while (waiting) {
         if (SDL_WaitEvent(&event)) {
+            if (event.type == SDL_SYSWMEVENT) {
+                handleSysWmEvent(&event);
+                continue;
+            }
+
             if (event.type == SDL_QUIT) {
                 break_requested = 1;
                 waiting = 0;
@@ -1405,13 +1475,18 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
             SDL_PumpEvents();
 
             while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_SYSWMEVENT) {
+                    handleSysWmEvent(&event);
+                    continue;
+                }
+
                 if (event.type == SDL_QUIT) {
                     break_requested = 1;
                     return makeVoid();
                 }
 
                 if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
-                    /* Swallow close requests so the compositor knows we processed the ping. */
+                    /* Swallow window close requests; _NET_WM_PING is handled separately in handleSysWmEvent. */
                     continue;
                 }
 
