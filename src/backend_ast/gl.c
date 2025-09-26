@@ -123,6 +123,360 @@ static bool parsePrimitive(Value arg, GLenum* primitive) {
     return false;
 }
 
+static bool parseCapability(Value arg, GLenum* cap) {
+    if (IS_INTLIKE(arg)) {
+        *cap = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+#ifdef GL_LIGHTING
+        if (strcasecmp(arg.s_val, "lighting") == 0) {
+            *cap = GL_LIGHTING;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT0
+        if (strcasecmp(arg.s_val, "light0") == 0) {
+            *cap = GL_LIGHT0;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT1
+        if (strcasecmp(arg.s_val, "light1") == 0) {
+            *cap = GL_LIGHT1;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT2
+        if (strcasecmp(arg.s_val, "light2") == 0) {
+            *cap = GL_LIGHT2;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT3
+        if (strcasecmp(arg.s_val, "light3") == 0) {
+            *cap = GL_LIGHT3;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT4
+        if (strcasecmp(arg.s_val, "light4") == 0) {
+            *cap = GL_LIGHT4;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT5
+        if (strcasecmp(arg.s_val, "light5") == 0) {
+            *cap = GL_LIGHT5;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT6
+        if (strcasecmp(arg.s_val, "light6") == 0) {
+            *cap = GL_LIGHT6;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT7
+        if (strcasecmp(arg.s_val, "light7") == 0) {
+            *cap = GL_LIGHT7;
+            return true;
+        }
+#endif
+#ifdef GL_COLOR_MATERIAL
+        if (strcasecmp(arg.s_val, "color_material") == 0) {
+            *cap = GL_COLOR_MATERIAL;
+            return true;
+        }
+#endif
+#ifdef GL_NORMALIZE
+        if (strcasecmp(arg.s_val, "normalize") == 0) {
+            *cap = GL_NORMALIZE;
+            return true;
+        }
+#endif
+        if (strcasecmp(arg.s_val, "blend") == 0) {
+            *cap = GL_BLEND;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "cull_face") == 0 ||
+            strcasecmp(arg.s_val, "cullface") == 0) {
+            *cap = GL_CULL_FACE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "depth_test") == 0 ||
+            strcasecmp(arg.s_val, "depthtest") == 0) {
+            *cap = GL_DEPTH_TEST;
+            return true;
+        }
+#ifdef GL_FOG
+        if (strcasecmp(arg.s_val, "fog") == 0) {
+            *cap = GL_FOG;
+            return true;
+        }
+#endif
+        if (strcasecmp(arg.s_val, "scissor_test") == 0 ||
+            strcasecmp(arg.s_val, "scissortest") == 0) {
+            *cap = GL_SCISSOR_TEST;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "texture_2d") == 0) {
+            *cap = GL_TEXTURE_2D;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseShadeModel(Value arg, GLenum* mode) {
+    if (IS_INTLIKE(arg)) {
+        *mode = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "smooth") == 0) {
+            *mode = GL_SMOOTH;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "flat") == 0) {
+            *mode = GL_FLAT;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseLight(Value arg, GLenum* light) {
+    if (IS_INTLIKE(arg)) {
+        *light = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+#ifdef GL_LIGHT0
+        if (strcasecmp(arg.s_val, "light0") == 0) {
+            *light = GL_LIGHT0;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT1
+        if (strcasecmp(arg.s_val, "light1") == 0) {
+            *light = GL_LIGHT1;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT2
+        if (strcasecmp(arg.s_val, "light2") == 0) {
+            *light = GL_LIGHT2;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT3
+        if (strcasecmp(arg.s_val, "light3") == 0) {
+            *light = GL_LIGHT3;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT4
+        if (strcasecmp(arg.s_val, "light4") == 0) {
+            *light = GL_LIGHT4;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT5
+        if (strcasecmp(arg.s_val, "light5") == 0) {
+            *light = GL_LIGHT5;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT6
+        if (strcasecmp(arg.s_val, "light6") == 0) {
+            *light = GL_LIGHT6;
+            return true;
+        }
+#endif
+#ifdef GL_LIGHT7
+        if (strcasecmp(arg.s_val, "light7") == 0) {
+            *light = GL_LIGHT7;
+            return true;
+        }
+#endif
+    }
+    return false;
+}
+
+static bool parseLightParam(Value arg, GLenum* pname) {
+    if (IS_INTLIKE(arg)) {
+        *pname = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "position") == 0) {
+            *pname = GL_POSITION;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "diffuse") == 0) {
+            *pname = GL_DIFFUSE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "specular") == 0) {
+            *pname = GL_SPECULAR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "ambient") == 0) {
+            *pname = GL_AMBIENT;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseMaterialFace(Value arg, GLenum* face) {
+    if (IS_INTLIKE(arg)) {
+        *face = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "front") == 0) {
+            *face = GL_FRONT;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "back") == 0) {
+            *face = GL_BACK;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "front_and_back") == 0 ||
+            strcasecmp(arg.s_val, "frontandback") == 0) {
+            *face = GL_FRONT_AND_BACK;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseMaterialParam(Value arg, GLenum* pname) {
+    if (IS_INTLIKE(arg)) {
+        *pname = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "ambient") == 0) {
+            *pname = GL_AMBIENT;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "diffuse") == 0) {
+            *pname = GL_DIFFUSE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "specular") == 0) {
+            *pname = GL_SPECULAR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "emission") == 0) {
+            *pname = GL_EMISSION;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "ambient_and_diffuse") == 0 ||
+            strcasecmp(arg.s_val, "ambientdiffuse") == 0) {
+            *pname = GL_AMBIENT_AND_DIFFUSE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "shininess") == 0) {
+            *pname = GL_SHININESS;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseColorMaterialMode(Value arg, GLenum* mode) {
+    if (IS_INTLIKE(arg)) {
+        *mode = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "ambient") == 0) {
+            *mode = GL_AMBIENT;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "diffuse") == 0) {
+            *mode = GL_DIFFUSE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "ambient_and_diffuse") == 0 ||
+            strcasecmp(arg.s_val, "ambientdiffuse") == 0) {
+            *mode = GL_AMBIENT_AND_DIFFUSE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "specular") == 0) {
+            *mode = GL_SPECULAR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "emission") == 0) {
+            *mode = GL_EMISSION;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseBlendFactor(Value arg, GLenum* factor) {
+    if (IS_INTLIKE(arg)) {
+        *factor = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "zero") == 0) {
+            *factor = GL_ZERO;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "one") == 0) {
+            *factor = GL_ONE;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "src_color") == 0 ||
+            strcasecmp(arg.s_val, "srccolor") == 0) {
+            *factor = GL_SRC_COLOR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "one_minus_src_color") == 0 ||
+            strcasecmp(arg.s_val, "oneminussrccolor") == 0) {
+            *factor = GL_ONE_MINUS_SRC_COLOR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "dst_color") == 0 ||
+            strcasecmp(arg.s_val, "dstcolor") == 0) {
+            *factor = GL_DST_COLOR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "one_minus_dst_color") == 0 ||
+            strcasecmp(arg.s_val, "oneminusdstcolor") == 0) {
+            *factor = GL_ONE_MINUS_DST_COLOR;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "src_alpha") == 0 ||
+            strcasecmp(arg.s_val, "srcalpha") == 0) {
+            *factor = GL_SRC_ALPHA;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "one_minus_src_alpha") == 0 ||
+            strcasecmp(arg.s_val, "oneminussrcalpha") == 0) {
+            *factor = GL_ONE_MINUS_SRC_ALPHA;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "dst_alpha") == 0 ||
+            strcasecmp(arg.s_val, "dstalpha") == 0) {
+            *factor = GL_DST_ALPHA;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "one_minus_dst_alpha") == 0 ||
+            strcasecmp(arg.s_val, "oneminusdstalpha") == 0) {
+            *factor = GL_ONE_MINUS_DST_ALPHA;
+            return true;
+        }
+    }
+    return false;
+}
+
 Value vmBuiltinGlclearcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 4) {
         runtimeError(vm, "GLClearColor expects 4 numeric arguments (r, g, b, a).");
@@ -432,6 +786,27 @@ Value vmBuiltinGlcolor3f(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinGlcolor4f(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 4) {
+        runtimeError(vm, "GLColor4f expects 4 numeric arguments.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLColor4f")) return makeVoid();
+
+    float vals[4];
+    for (int i = 0; i < 4; ++i) {
+        if (!valueToFloat(args[i], &vals[i])) {
+            runtimeError(vm, "GLColor4f argument %d must be numeric.", i + 1);
+            return makeVoid();
+        }
+        if (vals[i] < 0.0f) vals[i] = 0.0f;
+        if (vals[i] > 1.0f) vals[i] = 1.0f;
+    }
+
+    glColor4f(vals[0], vals[1], vals[2], vals[3]);
+    return makeVoid();
+}
+
 Value vmBuiltinGlvertex3f(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) {
         runtimeError(vm, "GLVertex3f expects 3 numeric arguments.");
@@ -448,6 +823,217 @@ Value vmBuiltinGlvertex3f(VM* vm, int arg_count, Value* args) {
     }
 
     glVertex3f(vals[0], vals[1], vals[2]);
+    return makeVoid();
+}
+
+Value vmBuiltinGlnormal3f(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) {
+        runtimeError(vm, "GLNormal3f expects 3 numeric arguments.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLNormal3f")) return makeVoid();
+
+    float vals[3];
+    for (int i = 0; i < 3; ++i) {
+        if (!valueToFloat(args[i], &vals[i])) {
+            runtimeError(vm, "GLNormal3f argument %d must be numeric.", i + 1);
+            return makeVoid();
+        }
+    }
+
+    glNormal3f(vals[0], vals[1], vals[2]);
+    return makeVoid();
+}
+
+Value vmBuiltinGlenable(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLEnable expects 1 argument (GL capability).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLEnable")) return makeVoid();
+
+    GLenum cap;
+    if (!parseCapability(args[0], &cap)) {
+        runtimeError(vm, "GLEnable argument must be a known capability name or GLenum value.");
+        return makeVoid();
+    }
+
+    glEnable(cap);
+    return makeVoid();
+}
+
+Value vmBuiltinGldisable(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLDisable expects 1 argument (GL capability).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLDisable")) return makeVoid();
+
+    GLenum cap;
+    if (!parseCapability(args[0], &cap)) {
+        runtimeError(vm, "GLDisable argument must be a known capability name or GLenum value.");
+        return makeVoid();
+    }
+
+    glDisable(cap);
+    return makeVoid();
+}
+
+Value vmBuiltinGlshademodel(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLShadeModel expects 1 argument (string or GLenum).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLShadeModel")) return makeVoid();
+
+    GLenum mode;
+    if (!parseShadeModel(args[0], &mode)) {
+        runtimeError(vm, "GLShadeModel argument must be 'flat', 'smooth', or a GLenum value.");
+        return makeVoid();
+    }
+
+    glShadeModel(mode);
+    return makeVoid();
+}
+
+Value vmBuiltinGllightfv(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 6) {
+        runtimeError(vm, "GLLightfv expects 6 arguments (light, pname, x, y, z, w).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLLightfv")) return makeVoid();
+
+    GLenum light;
+    if (!parseLight(args[0], &light)) {
+        runtimeError(vm, "GLLightfv light must be 'light0'..'light7' or a GLenum value.");
+        return makeVoid();
+    }
+
+    GLenum pname;
+    if (!parseLightParam(args[1], &pname)) {
+        runtimeError(vm, "GLLightfv pname must be 'position', 'ambient', 'diffuse', 'specular', or a GLenum value.");
+        return makeVoid();
+    }
+
+    float values[4];
+    for (int i = 0; i < 4; ++i) {
+        if (!valueToFloat(args[2 + i], &values[i])) {
+            runtimeError(vm, "GLLightfv component %d must be numeric.", i + 1);
+            return makeVoid();
+        }
+    }
+
+    glLightfv(light, pname, values);
+    return makeVoid();
+}
+
+Value vmBuiltinGlmaterialfv(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 6) {
+        runtimeError(vm, "GLMaterialfv expects 6 arguments (face, pname, r, g, b, a).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLMaterialfv")) return makeVoid();
+
+    GLenum face;
+    if (!parseMaterialFace(args[0], &face)) {
+        runtimeError(vm, "GLMaterialfv face must be 'front', 'back', 'front_and_back', or a GLenum value.");
+        return makeVoid();
+    }
+
+    GLenum pname;
+    if (!parseMaterialParam(args[1], &pname)) {
+        runtimeError(vm, "GLMaterialfv pname must be 'ambient', 'diffuse', 'specular', 'emission', 'ambient_and_diffuse', or a GLenum value.");
+        return makeVoid();
+    }
+
+    float values[4];
+    for (int i = 0; i < 4; ++i) {
+        if (!valueToFloat(args[2 + i], &values[i])) {
+            runtimeError(vm, "GLMaterialfv component %d must be numeric.", i + 1);
+            return makeVoid();
+        }
+    }
+
+    glMaterialfv(face, pname, values);
+    return makeVoid();
+}
+
+Value vmBuiltinGlmaterialf(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) {
+        runtimeError(vm, "GLMaterialf expects 3 arguments (face, pname, value).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLMaterialf")) return makeVoid();
+
+    GLenum face;
+    if (!parseMaterialFace(args[0], &face)) {
+        runtimeError(vm, "GLMaterialf face must be 'front', 'back', 'front_and_back', or a GLenum value.");
+        return makeVoid();
+    }
+
+    GLenum pname;
+    if (!parseMaterialParam(args[1], &pname)) {
+        runtimeError(vm, "GLMaterialf pname must be 'shininess' or a GLenum value.");
+        return makeVoid();
+    }
+    if (pname != GL_SHININESS) {
+        runtimeError(vm, "GLMaterialf currently supports only the 'shininess' parameter.");
+        return makeVoid();
+    }
+
+    float value;
+    if (!valueToFloat(args[2], &value)) {
+        runtimeError(vm, "GLMaterialf value must be numeric.");
+        return makeVoid();
+    }
+
+    glMaterialf(face, pname, value);
+    return makeVoid();
+}
+
+Value vmBuiltinGlcolormaterial(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "GLColorMaterial expects 2 arguments (face, mode).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLColorMaterial")) return makeVoid();
+
+    GLenum face;
+    if (!parseMaterialFace(args[0], &face)) {
+        runtimeError(vm, "GLColorMaterial face must be 'front', 'back', 'front_and_back', or a GLenum value.");
+        return makeVoid();
+    }
+
+    GLenum mode;
+    if (!parseColorMaterialMode(args[1], &mode)) {
+        runtimeError(vm, "GLColorMaterial mode must be 'ambient', 'diffuse', 'ambient_and_diffuse', 'specular', 'emission', or a GLenum value.");
+        return makeVoid();
+    }
+
+    glColorMaterial(face, mode);
+    return makeVoid();
+}
+
+Value vmBuiltinGlblendfunc(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "GLBlendFunc expects 2 arguments (sfactor, dfactor).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLBlendFunc")) return makeVoid();
+
+    GLenum sfactor;
+    if (!parseBlendFactor(args[0], &sfactor)) {
+        runtimeError(vm, "GLBlendFunc sfactor must be a known blend factor name or GLenum value.");
+        return makeVoid();
+    }
+
+    GLenum dfactor;
+    if (!parseBlendFactor(args[1], &dfactor)) {
+        runtimeError(vm, "GLBlendFunc dfactor must be a known blend factor name or GLenum value.");
+        return makeVoid();
+    }
+
+    glBlendFunc(sfactor, dfactor);
     return makeVoid();
 }
 
