@@ -498,8 +498,17 @@ class BallSystem extends Renderable {
         float rim = myself.rimIntensity[index];
         float highlight = myself.highlightStrength[index];
 
+        if (lit < 0.0) lit = 0.0;
+        if (lit > 1.0) lit = 1.0;
+        if (rim < 0.0) rim = 0.0;
+        if (rim > 1.0) rim = 1.0;
+        if (highlight < 0.0) highlight = 0.0;
+        if (highlight > 1.0) highlight = 1.0;
+
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
-        color.scale(0.28 + 0.62 * lit);
+        float brightness = 0.28 + 0.62 * lit;
+        if (brightness < 0.06) brightness = 0.06;
+        color.scale(brightness);
 
         ColorRGB rimColor = new ColorRGB(0.08, 0.10, 0.16);
         rimColor.scale(rim * 1.75);
