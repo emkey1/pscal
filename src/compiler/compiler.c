@@ -5193,6 +5193,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                       strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
                     ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
                       strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15)
+                    || ((strcasecmp(calleeName, "bouncingballs3daccelerate") == 0 ||
+                         strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
                 )) {
                     is_var_param = true;
                 }
