@@ -3,12 +3,12 @@
 // This version uses the fixed-function pipeline (lighting, materials,
 // blending) instead of the 2D circle impostor trick.
 
-const int WindowWidth = 1600;
-const int WindowHeight = 1000;
+const int WindowWidth = 800;
+const int WindowHeight = 500;
 
 float TargetFPS = 60.0;
 
-const int NumBalls = 10;
+const int NumBalls = 8;
 const float BoxWidth = 720.0;
 const float BoxHeight = 420.0;
 const float BoxDepth = 300.0;
@@ -192,7 +192,7 @@ void drawGlassBox() {
 
     // Draw the floor before the back wall so depth testing keeps it visible
     // when viewed through the glass from behind.
-    GLColor4f(0.08, 0.12, 0.20, 0.35);
+    GLColor4f(0.08, 0.12, 0.20, 1.00);
     GLBegin("quads");
         GLVertex3f(-halfWidth, -halfHeight, frontZ);
         GLVertex3f(halfWidth, -halfHeight, frontZ);
@@ -214,14 +214,6 @@ void drawGlassBox() {
             GLVertex3f(halfWidth, -halfHeight + 0.2, z);
             i = i + 1;
         }
-    GLEnd();
-
-    GLColor4f(0.12, 0.18, 0.26, 0.06);
-    GLBegin("quads");
-        GLVertex3f(-halfWidth, halfHeight, backZ);
-        GLVertex3f(halfWidth, halfHeight, backZ);
-        GLVertex3f(halfWidth, -halfHeight, backZ);
-        GLVertex3f(-halfWidth, -halfHeight, backZ);
     GLEnd();
 
     GLDisable("blend");
@@ -251,6 +243,17 @@ void drawGlassBox() {
         GLVertex3f(-halfWidth, -halfHeight, frontZ);
         GLVertex3f(-halfWidth, -halfHeight, backZ);
     GLEnd();
+
+    GLEnable("blend");
+    GLColor4f(0.12, 0.18, 0.26, 0.26);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLDisable("blend");
 
     GLEnable("lighting");
 }
