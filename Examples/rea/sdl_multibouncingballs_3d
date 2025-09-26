@@ -34,6 +34,10 @@ const int SphereStacks = 20;
 const int SphereSlices = 36;
 const float Pi = 3.1415926535;
 
+const int NumStars = 260;
+const float StarInnerRadiusScale = 1.45;
+const float StarOuterRadiusScale = 2.85;
+
 const float LightDirX = -0.55;
 const float LightDirY = -0.35;
 const float LightDirZ = 0.78;
@@ -53,6 +57,14 @@ float depthShade[NumBalls];
 int colorR[NumBalls];
 int colorG[NumBalls];
 int colorB[NumBalls];
+
+float starX[NumStars];
+float starY[NumStars];
+float starZ[NumStars];
+float starSize[NumStars];
+float starBaseBrightness[NumStars];
+float starTwinkleRate[NumStars];
+float starPhase[NumStars];
 
 bool quit;
 bool paused;
@@ -97,6 +109,39 @@ void initBalls() {
         colorR[i] = 90 + random(150);
         colorG[i] = 90 + random(150);
         colorB[i] = 90 + random(150);
+        i = i + 1;
+    }
+}
+
+void initStars() {
+    int i = 0;
+    float boxRadius = BoxWidth;
+    if (BoxHeight > boxRadius) boxRadius = BoxHeight;
+    if (BoxDepth > boxRadius) boxRadius = BoxDepth;
+    float innerRadius = boxRadius * StarInnerRadiusScale;
+    float cameraGuard = CameraDistance * 1.05;
+    if (cameraGuard > innerRadius) innerRadius = cameraGuard;
+    float outerRadius = boxRadius * StarOuterRadiusScale;
+    if (outerRadius < innerRadius + 1.0) outerRadius = innerRadius + 1.0;
+    while (i < NumStars) {
+        float cosTheta = 2.0 * randomUnit() - 1.0;
+        if (cosTheta > 1.0) cosTheta = 1.0;
+        if (cosTheta < -1.0) cosTheta = -1.0;
+        float sinSq = 1.0 - cosTheta * cosTheta;
+        if (sinSq < 0.0) sinSq = 0.0;
+        float sinTheta = sqrt(sinSq);
+        float phi = randomUnit() * 2.0 * Pi;
+        float dirX = sinTheta * cos(phi);
+        float dirY = sinTheta * sin(phi);
+        float dirZ = cosTheta;
+        float distance = innerRadius + randomUnit() * (outerRadius - innerRadius);
+        starX[i] = dirX * distance;
+        starY[i] = dirY * distance;
+        starZ[i] = dirZ * distance;
+        starSize[i] = 6.0 + randomUnit() * 6.0;
+        starBaseBrightness[i] = 0.45 + randomUnit() * 0.45;
+        starTwinkleRate[i] = 0.8 + randomUnit() * 1.6;
+        starPhase[i] = randomUnit() * 2.0 * Pi;
         i = i + 1;
     }
 }
@@ -177,6 +222,39 @@ void drawBalls() {
         drawBall(i);
         i = i + 1;
     }
+}
+
+void drawStarField() {
+    float time = elapsedSeconds;
+    GLDisable("lighting");
+    GLDepthTest(false);
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one");
+    GLBegin("lines");
+        int i = 0;
+        while (i < NumStars) {
+            float sparklePhase = starPhase[i] + time * starTwinkleRate[i];
+            float sparkle = 0.55 + 0.45 * sin(sparklePhase);
+            if (sparkle < 0.0) sparkle = 0.0;
+            float brightness = starBaseBrightness[i] * sparkle;
+            float alpha = 0.35 + 0.45 * sparkle;
+            if (alpha > 1.0) alpha = 1.0;
+            float size = starSize[i];
+            float depthSize = size * 0.6;
+            GLColor4f(brightness, brightness, brightness + 0.10, alpha);
+            GLVertex3f(starX[i] - size, starY[i], starZ[i]);
+            GLVertex3f(starX[i] + size, starY[i], starZ[i]);
+            GLVertex3f(starX[i], starY[i] - size, starZ[i]);
+            GLVertex3f(starX[i], starY[i] + size, starZ[i]);
+            GLVertex3f(starX[i], starY[i], starZ[i] - depthSize);
+            GLVertex3f(starX[i], starY[i], starZ[i] + depthSize);
+            i = i + 1;
+        }
+    GLEnd();
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLDisable("blend");
+    GLDepthTest(true);
+    GLEnable("lighting");
 }
 
 void drawGlassBox() {
@@ -275,6 +353,7 @@ void drawScene() {
 
     GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
 
+    drawStarField();
     drawBalls();
     drawGlassBox();
 
@@ -350,6 +429,7 @@ void initApp() {
 
     randomize();
     initBalls();
+    initStars();
 
     quit = false;
     paused = false;
