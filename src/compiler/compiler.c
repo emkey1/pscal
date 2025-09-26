@@ -5187,7 +5187,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "gettime") == 0) ||
                     /* MandelbrotRow returns results via the sixth VAR parameter */
                     ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
-                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5)
+                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5) ||
+                    /* BouncingBalls3D builtins write simulation data back via VAR arrays */
+                    ((strcasecmp(calleeName, "bouncingballs3dstep") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15)
                 )) {
                     is_var_param = true;
                 }

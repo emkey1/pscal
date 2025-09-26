@@ -1,0 +1,390 @@
+#!/usr/bin/env rea
+// Compare manual physics against BouncingBalls3DStepAdvanced builtin for one frame.
+
+const int NumBalls = 3;
+const float BoxWidth = 720.0;
+const float BoxHeight = 420.0;
+const float BoxDepth = 3000.0;
+const float WallElasticity = 1.08;
+const float MinSpeed = 90.0;
+const float MaxSpeed = 360.0;
+const float VelocityDrag = 0.995;
+const float CameraDistance = 720.0;
+const float DeltaTime = 1.0 / 60.0;
+const float LightDirX = -0.45;
+const float LightDirY = -0.35;
+const float LightDirZ = 0.82;
+const float ScreenWidth = 1280.0 - 48.0 * 2.0;
+const float ScreenHeight = 720.0 - 48.0 * 2.0;
+
+float posXBase[NumBalls];
+float posYBase[NumBalls];
+float posZBase[NumBalls];
+float velXBase[NumBalls];
+float velYBase[NumBalls];
+float velZBase[NumBalls];
+float radiusBase[NumBalls];
+
+float posXManual[NumBalls];
+float posYManual[NumBalls];
+float posZManual[NumBalls];
+float velXManual[NumBalls];
+float velYManual[NumBalls];
+float velZManual[NumBalls];
+float radiusManual[NumBalls];
+float screenXManual[NumBalls];
+float screenYManual[NumBalls];
+float screenRadiusManual[NumBalls];
+float depthShadeManual[NumBalls];
+
+float posXBuiltin[NumBalls];
+float posYBuiltin[NumBalls];
+float posZBuiltin[NumBalls];
+float velXBuiltin[NumBalls];
+float velYBuiltin[NumBalls];
+float velZBuiltin[NumBalls];
+float radiusBuiltin[NumBalls];
+float screenXBuiltin[NumBalls];
+float screenYBuiltin[NumBalls];
+float screenRadiusBuiltin[NumBalls];
+float depthShadeBuiltin[NumBalls];
+float lightIntensity[NumBalls];
+float rimIntensity[NumBalls];
+float highlightX[NumBalls];
+float highlightY[NumBalls];
+float highlightRadius[NumBalls];
+float highlightStrength[NumBalls];
+
+float enforceSpeed(float value, float minSpeed, float maxSpeed) {
+  float absVal = abs(value);
+  if (absVal < minSpeed) {
+    if (value < 0.0) {
+      value = -minSpeed;
+    } else {
+      value = minSpeed;
+    }
+  }
+  if (value > maxSpeed) value = maxSpeed;
+  if (value < -maxSpeed) value = -maxSpeed;
+  return value;
+}
+
+void initBaseState() {
+  posXBase[0] = -120.0;
+  posYBase[0] = -60.0;
+  posZBase[0] = -360.0;
+  velXBase[0] = 120.0;
+  velYBase[0] = 180.0;
+  velZBase[0] = 240.0;
+  radiusBase[0] = 18.0;
+
+  posXBase[1] = 96.0;
+  posYBase[1] = 42.0;
+  posZBase[1] = -820.0;
+  velXBase[1] = -180.0;
+  velYBase[1] = 210.0;
+  velZBase[1] = -150.0;
+  radiusBase[1] = 22.0;
+
+  posXBase[2] = 0.0;
+  posYBase[2] = -120.0;
+  posZBase[2] = -1440.0;
+  velXBase[2] = 90.0;
+  velYBase[2] = -60.0;
+  velZBase[2] = -330.0;
+  radiusBase[2] = 26.0;
+}
+
+void copyBaseToManual() {
+  int i = 0;
+  while (i < NumBalls) {
+    posXManual[i] = posXBase[i];
+    posYManual[i] = posYBase[i];
+    posZManual[i] = posZBase[i];
+    velXManual[i] = velXBase[i];
+    velYManual[i] = velYBase[i];
+    velZManual[i] = velZBase[i];
+    radiusManual[i] = radiusBase[i];
+    screenXManual[i] = 0.0;
+    screenYManual[i] = 0.0;
+    screenRadiusManual[i] = 0.0;
+    depthShadeManual[i] = -1.0;
+    i = i + 1;
+  }
+}
+
+void copyBaseToBuiltin() {
+  int i = 0;
+  while (i < NumBalls) {
+    posXBuiltin[i] = posXBase[i];
+    posYBuiltin[i] = posYBase[i];
+    posZBuiltin[i] = posZBase[i];
+    velXBuiltin[i] = velXBase[i];
+    velYBuiltin[i] = velYBase[i];
+    velZBuiltin[i] = velZBase[i];
+    radiusBuiltin[i] = radiusBase[i];
+    screenXBuiltin[i] = 0.0;
+    screenYBuiltin[i] = 0.0;
+    screenRadiusBuiltin[i] = 0.0;
+    depthShadeBuiltin[i] = -1.0;
+    lightIntensity[i] = 0.0;
+    rimIntensity[i] = 0.0;
+    highlightX[i] = 0.0;
+    highlightY[i] = 0.0;
+    highlightRadius[i] = 0.0;
+    highlightStrength[i] = 0.0;
+    i = i + 1;
+  }
+}
+
+void manualStep() {
+  float halfWidth = BoxWidth * 0.5;
+  float halfHeight = BoxHeight * 0.5;
+  float nearPlane = 0.0;
+  float backPlane = -BoxDepth;
+  float viewScaleX = ScreenWidth / BoxWidth;
+  float viewScaleY = ScreenHeight / BoxHeight;
+
+  int i = 0;
+  while (i < NumBalls) {
+    float x = posXManual[i];
+    float y = posYManual[i];
+    float z = posZManual[i];
+    float vx = velXManual[i];
+    float vy = velYManual[i];
+    float vz = velZManual[i];
+    float r = radiusManual[i];
+    if (r <= 0.0) r = 1.0;
+
+    float minX = -halfWidth + r;
+    float maxX = halfWidth - r;
+    float minY = -halfHeight + r;
+    float maxY = halfHeight - r;
+    float minZ = backPlane + r;
+    float maxZ = nearPlane - r;
+
+    vx = vx * VelocityDrag;
+    vy = vy * VelocityDrag;
+    vz = vz * VelocityDrag;
+
+    x = x + vx * DeltaTime;
+    y = y + vy * DeltaTime;
+    z = z + vz * DeltaTime;
+
+    if (x < minX) {
+      x = minX;
+      vx = abs(vx) * WallElasticity;
+      if (vx < MinSpeed) vx = MinSpeed;
+    } else if (x > maxX) {
+      x = maxX;
+      vx = -abs(vx) * WallElasticity;
+      if (-vx < MinSpeed) vx = -MinSpeed;
+    }
+    if (y < minY) {
+      y = minY;
+      vy = abs(vy) * WallElasticity;
+      if (vy < MinSpeed) vy = MinSpeed;
+    } else if (y > maxY) {
+      y = maxY;
+      vy = -abs(vy) * WallElasticity;
+      if (-vy < MinSpeed) vy = -MinSpeed;
+    }
+    if (z < minZ) {
+      z = minZ;
+      vz = abs(vz) * WallElasticity;
+      if (vz < MinSpeed) vz = MinSpeed;
+    } else if (z > maxZ) {
+      z = maxZ;
+      vz = -abs(vz) * WallElasticity;
+      if (-vz < MinSpeed) vz = -MinSpeed;
+    }
+
+    vx = enforceSpeed(vx, MinSpeed, MaxSpeed);
+    vy = enforceSpeed(vy, MinSpeed, MaxSpeed);
+    vz = enforceSpeed(vz, MinSpeed, MaxSpeed);
+
+    posXManual[i] = x;
+    posYManual[i] = y;
+    posZManual[i] = z;
+    velXManual[i] = vx;
+    velYManual[i] = vy;
+    velZManual[i] = vz;
+    i = i + 1;
+  }
+
+  i = 0;
+  while (i < NumBalls) {
+    int j = i + 1;
+    while (j < NumBalls) {
+      float xi = posXManual[i];
+      float yi = posYManual[i];
+      float zi = posZManual[i];
+      float vxi = velXManual[i];
+      float vyi = velYManual[i];
+      float vzi = velZManual[i];
+      float ri = radiusManual[i];
+      float mi = ri * ri * ri;
+      if (mi <= 0.0) mi = 1.0;
+
+      float xj = posXManual[j];
+      float yj = posYManual[j];
+      float zj = posZManual[j];
+      float vxj = velXManual[j];
+      float vyj = velYManual[j];
+      float vzj = velZManual[j];
+      float rj = radiusManual[j];
+      float mj = rj * rj * rj;
+      if (mj <= 0.0) mj = 1.0;
+
+      float dx = xj - xi;
+      float dy = yj - yi;
+      float dz = zj - zi;
+      float sumR = ri + rj;
+      float distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < sumR * sumR) {
+        float dist = sqrt(distSq);
+        float nx;
+        float ny;
+        float nz;
+        if (dist > 0.000001) {
+          nx = dx / dist;
+          ny = dy / dist;
+          nz = dz / dist;
+        } else {
+          nx = 1.0;
+          ny = 0.0;
+          nz = 0.0;
+          dist = sumR;
+        }
+
+        float viN = vxi * nx + vyi * ny + vzi * nz;
+        float vjN = vxj * nx + vyj * ny + vzj * nz;
+
+        float viT_x = vxi - viN * nx;
+        float viT_y = vyi - viN * ny;
+        float viT_z = vzi - viN * nz;
+
+        float vjT_x = vxj - vjN * nx;
+        float vjT_y = vyj - vjN * ny;
+        float vjT_z = vzj - vjN * nz;
+
+        float newViN = (viN * (mi - mj) + 2.0 * mj * vjN) / (mi + mj);
+        float newVjN = (vjN * (mj - mi) + 2.0 * mi * viN) / (mi + mj);
+
+        vxi = viT_x + newViN * nx;
+        vyi = viT_y + newViN * ny;
+        vzi = viT_z + newViN * nz;
+
+        vxj = vjT_x + newVjN * nx;
+        vyj = vjT_y + newVjN * ny;
+        vzj = vjT_z + newVjN * nz;
+
+        float overlap = sumR - dist;
+        if (overlap > 0.0) {
+          float correction = overlap * 0.5;
+          xi = xi - correction * nx;
+          yi = yi - correction * ny;
+          zi = zi - correction * nz;
+          xj = xj + correction * nx;
+          yj = yj + correction * ny;
+          zj = zj + correction * nz;
+        }
+
+        vxi = enforceSpeed(vxi, MinSpeed, MaxSpeed);
+        vyi = enforceSpeed(vyi, MinSpeed, MaxSpeed);
+        vzi = enforceSpeed(vzi, MinSpeed, MaxSpeed);
+        vxj = enforceSpeed(vxj, MinSpeed, MaxSpeed);
+        vyj = enforceSpeed(vyj, MinSpeed, MaxSpeed);
+        vzj = enforceSpeed(vzj, MinSpeed, MaxSpeed);
+
+        posXManual[i] = xi;
+        posYManual[i] = yi;
+        posZManual[i] = zi;
+        velXManual[i] = vxi;
+        velYManual[i] = vyi;
+        velZManual[i] = vzi;
+
+        posXManual[j] = xj;
+        posYManual[j] = yj;
+        posZManual[j] = zj;
+        velXManual[j] = vxj;
+        velYManual[j] = vyj;
+        velZManual[j] = vzj;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+
+  i = 0;
+  while (i < NumBalls) {
+    float x = posXManual[i];
+    float y = posYManual[i];
+    float z = posZManual[i];
+    float r = radiusManual[i];
+    if (z > nearPlane - r) {
+      z = nearPlane - r;
+      posZManual[i] = z;
+    }
+    if (z < backPlane + r) {
+      z = backPlane + r;
+      posZManual[i] = z;
+    }
+
+    float denom = CameraDistance - z;
+    if (denom <= 0.000001) {
+      depthShadeManual[i] = -1.0;
+      i = i + 1;
+      continue;
+    }
+    float perspective = CameraDistance / denom;
+    float sx = ScreenWidth * 0.5 + x * perspective * viewScaleX;
+    float sy = ScreenHeight * 0.5 - y * perspective * viewScaleY;
+    float sr = r * perspective * (viewScaleX + viewScaleY) * 0.5;
+    if (sr < 1.0) sr = 1.0;
+
+    float depthFactor = -z / BoxDepth;
+    if (depthFactor < 0.0) depthFactor = 0.0;
+    if (depthFactor > 1.0) depthFactor = 1.0;
+    float shade = 0.25 + 0.75 * depthFactor;
+
+    screenXManual[i] = sx;
+    screenYManual[i] = sy;
+    screenRadiusManual[i] = sr;
+    depthShadeManual[i] = shade;
+    i = i + 1;
+  }
+}
+
+void builtinStep() {
+  BouncingBalls3DStepAdvanced(NumBalls, DeltaTime, BoxWidth, BoxHeight, BoxDepth,
+    WallElasticity, MinSpeed, MaxSpeed, VelocityDrag, CameraDistance,
+    ScreenWidth, ScreenHeight, LightDirX, LightDirY, LightDirZ,
+    posXBuiltin, posYBuiltin, posZBuiltin, velXBuiltin, velYBuiltin, velZBuiltin,
+    radiusBuiltin, screenXBuiltin, screenYBuiltin, screenRadiusBuiltin,
+    depthShadeBuiltin, lightIntensity, rimIntensity, highlightX, highlightY,
+    highlightRadius, highlightStrength);
+}
+
+void printDifferences() {
+  writeln("Index | posX (manual vs builtin) | posY | posZ | screenR | depthShade");
+  int i = 0;
+  while (i < NumBalls) {
+    writeln(i, " | ",
+      formatfloat(posXManual[i], 3), " vs ", formatfloat(posXBuiltin[i], 3), " | ",
+      formatfloat(posYManual[i], 3), " vs ", formatfloat(posYBuiltin[i], 3), " | ",
+      formatfloat(posZManual[i], 3), " vs ", formatfloat(posZBuiltin[i], 3), " | ",
+      formatfloat(screenRadiusManual[i], 3), " vs ",
+      formatfloat(screenRadiusBuiltin[i], 3), " | ",
+      formatfloat(depthShadeManual[i], 3), " vs ",
+      formatfloat(depthShadeBuiltin[i], 3));
+    i = i + 1;
+  }
+}
+
+initBaseState();
+copyBaseToManual();
+copyBaseToBuiltin();
+manualStep();
+builtinStep();
+printDifferences();
