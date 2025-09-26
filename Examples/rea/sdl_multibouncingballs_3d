@@ -318,6 +318,10 @@ void run() {
     initApp();
     writeln("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause.");
     while (!quit) {
+        if (QuitRequested()) {
+            quit = true;
+            break;
+        }
         handleInput();
         updateSimulation(DeltaTime);
         drawScene();
