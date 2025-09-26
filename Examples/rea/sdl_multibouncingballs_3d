@@ -483,6 +483,19 @@ class BallSystem extends Renderable {
     }
 
     void draw() {
+        // Ensure the fixed-function lighting state is restored before drawing
+        // the per-ball geometry. Some drivers keep `GL_LIGHTING` disabled after
+        // the blended highlight overlay runs, which caused the sphere mesh to
+        // render fully black. Reset the material tracking and disable texturing
+        // so the vertex colors coming from the material show up reliably.
+        GLEnable("lighting");
+        GLEnable("light0");
+        GLEnable("color_material");
+        GLColorMaterial("front", "ambient_and_diffuse");
+        GLShadeModel("smooth");
+        GLEnable("normalize");
+        GLDisable("texture_2d");
+
         int i = 0;
         while (i < NumBalls) {
             myself.drawBall(i);
@@ -509,10 +522,18 @@ class BallSystem extends Renderable {
         specColor.scale(highlight * 0.85);
         color.add(specColor);
 
+        if (color.r < 0.0) color.r = 0.0;
+        if (color.r > 1.0) color.r = 1.0;
+        if (color.g < 0.0) color.g = 0.0;
+        if (color.g > 1.0) color.g = 1.0;
+        if (color.b < 0.0) color.b = 0.0;
+        if (color.b > 1.0) color.b = 1.0;
+
         GLPushMatrix();
         GLTranslatef(myself.posX[index], myself.posY[index], myself.posZ[index]);
         GLScalef(myself.radius[index], myself.radius[index], myself.radius[index]);
-        GLColor3f(color.r, color.g, color.b);
+        GLMaterialfv("front", "ambient_and_diffuse", color.r, color.g, color.b, 1.0);
+        GLColor4f(color.r, color.g, color.b, 1.0);
         myself.mesh.drawUnit();
         myself.drawSpecularHighlight(index);
         GLPopMatrix();
