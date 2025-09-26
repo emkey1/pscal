@@ -473,6 +473,7 @@ class BallSystem extends Renderable {
         BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
             WallElasticity, myself.minSpeedValue, myself.maxSpeedValue, VelocityDrag,
             myself.cameraDistanceValue, WindowWidth, WindowHeight,
+            LightDirX, LightDirY, LightDirZ,
             myself.posX, myself.posY, myself.posZ,
             myself.velX, myself.velY, myself.velZ, myself.radius,
             myself.screenX, myself.screenY, myself.screenRadius, myself.depthShade,
