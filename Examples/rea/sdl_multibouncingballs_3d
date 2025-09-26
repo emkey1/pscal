@@ -1,8 +1,7 @@
 #!/usr/bin/env rea
-// SDL Multi Bouncing Balls 3D demo for Rea with extended builtin acceleration.
+// SDL Multi Bouncing Balls 3D demo for Rea with a manual physics step.
 // Renders a field of spheres bouncing inside a glass box using one face as the
-// viewing window. Requires building Pscal with SDL support and the user
-// extended builtins enabled so the BouncingBalls3DStep helper is available.
+// viewing window. Requires building Pscal with SDL support.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
@@ -33,6 +32,20 @@ int drawOrder[NumBalls];
 int colorR[NumBalls];
 int colorG[NumBalls];
 int colorB[NumBalls];
+
+float enforceSpeed(float value, float minSpeed, float maxSpeed) {
+  float absVal = abs(value);
+  if (absVal < minSpeed) {
+    if (value < 0.0) {
+      return -minSpeed;
+    } else {
+      return minSpeed;
+    }
+  }
+  if (value > maxSpeed) return maxSpeed;
+  if (value < -maxSpeed) return -maxSpeed;
+  return value;
+}
 
 int FrameDelay;
 bool quit;
@@ -208,14 +221,225 @@ void drawHud() {
 
 void updateSimulation(float deltaTime) {
   if (paused) return;
-  bouncingballs3dstep(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
-                      WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
-                      CameraDistance, WindowWidth - FrameMargin * 2,
-                      WindowHeight - FrameMargin * 2,
-                      posX, posY, posZ,
-                      velX, velY, velZ,
-                      radii,
-                      screenX, screenY, screenRadius, depthShade);
+  float halfWidth = BoxWidth * 0.5;
+  float halfHeight = BoxHeight * 0.5;
+  float nearPlane = 0.0;
+  float backPlane = -BoxDepth;
+  float screenWidth = WindowWidth - FrameMargin * 2;
+  float screenHeight = WindowHeight - FrameMargin * 2;
+  float viewScaleX = screenWidth / BoxWidth;
+  float viewScaleY = screenHeight / BoxHeight;
+
+  int i = 0;
+  while (i < NumBalls) {
+    float x = posX[i];
+    float y = posY[i];
+    float z = posZ[i];
+    float vx = velX[i];
+    float vy = velY[i];
+    float vz = velZ[i];
+    float r = radii[i];
+    if (r <= 0.0) r = 1.0;
+
+    float minX = -halfWidth + r;
+    float maxX = halfWidth - r;
+    float minY = -halfHeight + r;
+    float maxY = halfHeight - r;
+    float minZ = backPlane + r;
+    float maxZ = nearPlane - r;
+
+    vx = vx * VelocityDrag;
+    vy = vy * VelocityDrag;
+    vz = vz * VelocityDrag;
+
+    x = x + vx * deltaTime;
+    y = y + vy * deltaTime;
+    z = z + vz * deltaTime;
+
+    if (x < minX) {
+      x = minX;
+      vx = abs(vx) * WallElasticity;
+      if (vx < MinSpeed) vx = MinSpeed;
+    } else if (x > maxX) {
+      x = maxX;
+      vx = -abs(vx) * WallElasticity;
+      if (-vx < MinSpeed) vx = -MinSpeed;
+    }
+    if (y < minY) {
+      y = minY;
+      vy = abs(vy) * WallElasticity;
+      if (vy < MinSpeed) vy = MinSpeed;
+    } else if (y > maxY) {
+      y = maxY;
+      vy = -abs(vy) * WallElasticity;
+      if (-vy < MinSpeed) vy = -MinSpeed;
+    }
+    if (z < minZ) {
+      z = minZ;
+      vz = abs(vz) * WallElasticity;
+      if (vz < MinSpeed) vz = MinSpeed;
+    } else if (z > maxZ) {
+      z = maxZ;
+      vz = -abs(vz) * WallElasticity;
+      if (-vz < MinSpeed) vz = -MinSpeed;
+    }
+
+    vx = enforceSpeed(vx, MinSpeed, MaxSpeed);
+    vy = enforceSpeed(vy, MinSpeed, MaxSpeed);
+    vz = enforceSpeed(vz, MinSpeed, MaxSpeed);
+
+    posX[i] = x;
+    posY[i] = y;
+    posZ[i] = z;
+    velX[i] = vx;
+    velY[i] = vy;
+    velZ[i] = vz;
+    i = i + 1;
+  }
+
+  i = 0;
+  while (i < NumBalls) {
+    int j = i + 1;
+    while (j < NumBalls) {
+      float xi = posX[i];
+      float yi = posY[i];
+      float zi = posZ[i];
+      float vxi = velX[i];
+      float vyi = velY[i];
+      float vzi = velZ[i];
+      float ri = radii[i];
+      float mi = ri * ri * ri;
+      if (mi <= 0.0) mi = 1.0;
+
+      float xj = posX[j];
+      float yj = posY[j];
+      float zj = posZ[j];
+      float vxj = velX[j];
+      float vyj = velY[j];
+      float vzj = velZ[j];
+      float rj = radii[j];
+      float mj = rj * rj * rj;
+      if (mj <= 0.0) mj = 1.0;
+
+      float dx = xj - xi;
+      float dy = yj - yi;
+      float dz = zj - zi;
+      float sumR = ri + rj;
+      float distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < sumR * sumR) {
+        float dist = sqrt(distSq);
+        float nx;
+        float ny;
+        float nz;
+        if (dist > 0.000001) {
+          nx = dx / dist;
+          ny = dy / dist;
+          nz = dz / dist;
+        } else {
+          nx = 1.0;
+          ny = 0.0;
+          nz = 0.0;
+          dist = sumR;
+        }
+
+        float viN = vxi * nx + vyi * ny + vzi * nz;
+        float vjN = vxj * nx + vyj * ny + vzj * nz;
+
+        float viT_x = vxi - viN * nx;
+        float viT_y = vyi - viN * ny;
+        float viT_z = vzi - viN * nz;
+
+        float vjT_x = vxj - vjN * nx;
+        float vjT_y = vyj - vjN * ny;
+        float vjT_z = vzj - vjN * nz;
+
+        float newViN = (viN * (mi - mj) + 2.0 * mj * vjN) / (mi + mj);
+        float newVjN = (vjN * (mj - mi) + 2.0 * mi * viN) / (mi + mj);
+
+        vxi = viT_x + newViN * nx;
+        vyi = viT_y + newViN * ny;
+        vzi = viT_z + newViN * nz;
+
+        vxj = vjT_x + newVjN * nx;
+        vyj = vjT_y + newVjN * ny;
+        vzj = vjT_z + newVjN * nz;
+
+        float overlap = sumR - dist;
+        if (overlap > 0.0) {
+          float correction = overlap * 0.5;
+          xi = xi - correction * nx;
+          yi = yi - correction * ny;
+          zi = zi - correction * nz;
+          xj = xj + correction * nx;
+          yj = yj + correction * ny;
+          zj = zj + correction * nz;
+        }
+
+        vxi = enforceSpeed(vxi, MinSpeed, MaxSpeed);
+        vyi = enforceSpeed(vyi, MinSpeed, MaxSpeed);
+        vzi = enforceSpeed(vzi, MinSpeed, MaxSpeed);
+        vxj = enforceSpeed(vxj, MinSpeed, MaxSpeed);
+        vyj = enforceSpeed(vyj, MinSpeed, MaxSpeed);
+        vzj = enforceSpeed(vzj, MinSpeed, MaxSpeed);
+
+        posX[i] = xi;
+        posY[i] = yi;
+        posZ[i] = zi;
+        velX[i] = vxi;
+        velY[i] = vyi;
+        velZ[i] = vzi;
+
+        posX[j] = xj;
+        posY[j] = yj;
+        posZ[j] = zj;
+        velX[j] = vxj;
+        velY[j] = vyj;
+        velZ[j] = vzj;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+
+  i = 0;
+  while (i < NumBalls) {
+    float x = posX[i];
+    float y = posY[i];
+    float z = posZ[i];
+    float r = radii[i];
+    if (z > nearPlane - r) {
+      z = nearPlane - r;
+      posZ[i] = z;
+    }
+    if (z < backPlane + r) {
+      z = backPlane + r;
+      posZ[i] = z;
+    }
+
+    float denom = CameraDistance - z;
+    if (denom <= 0.000001) {
+      depthShade[i] = -1.0;
+      i = i + 1;
+      continue;
+    }
+    float perspective = CameraDistance / denom;
+    float sx = screenWidth * 0.5 + x * perspective * viewScaleX;
+    float sy = screenHeight * 0.5 - y * perspective * viewScaleY;
+    float sr = r * perspective * (viewScaleX + viewScaleY) * 0.5;
+    if (sr < 1.0) sr = 1.0;
+
+    float depthFactor = -z / BoxDepth;
+    if (depthFactor < 0.0) depthFactor = 0.0;
+    if (depthFactor > 1.0) depthFactor = 1.0;
+    float shade = 0.25 + 0.75 * depthFactor;
+
+    screenX[i] = sx;
+    screenY[i] = sy;
+    screenRadius[i] = sr;
+    depthShade[i] = shade;
+    i = i + 1;
+  }
+
   sortDrawOrderByDepth();
   elapsedSeconds = elapsedSeconds + deltaTime;
 }
@@ -239,11 +463,6 @@ void drawScene() {
 }
 
 void initApp() {
-  if (!hasextbuiltin("user", "BouncingBalls3DStep")) {
-    writeln("Error: BouncingBalls3DStep extended builtin not available.");
-    writeln("Rebuild with ENABLE_EXT_BUILTIN_USER=ON to run this demo.");
-    halt();
-  }
   initgraph(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D");
   string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
   string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
