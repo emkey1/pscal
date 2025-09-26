@@ -519,12 +519,18 @@ class BallSystem extends Renderable {
     }
 
     void drawSpecularHighlight(int index) {
-        float radiusScale = myself.highlightRadius[index];
+        float sr = myself.screenRadius[index];
+        if (sr <= 0.001) return;
+
+        float radiusScale = myself.highlightRadius[index] / sr;
         if (radiusScale <= 0.001) return;
+
         float strength = myself.highlightStrength[index];
         if (strength <= 0.001) return;
-        float hx = myself.highlightX[index];
-        float hy = myself.highlightY[index];
+
+        float hx = (myself.highlightX[index] - myself.screenX[index]) / sr;
+        float hy = (myself.highlightY[index] - myself.screenY[index]) / sr;
+
         GLDisable("lighting");
         GLEnable("blend");
         GLBlendFunc("src_alpha", "one_minus_src_alpha");
