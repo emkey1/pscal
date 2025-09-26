@@ -51,7 +51,7 @@ float randomUnit() {
     return random(10000) / 10000.0;
 }
 
-float clamp01(float value) {
+float clampFloat01(float value) {
     if (value < 0.0) return 0.0;
     if (value > 1.0) return 1.0;
     return value;
@@ -509,12 +509,12 @@ class BallSystem extends Renderable {
         float baseR = myself.colorR[index] / 255.0;
         float baseG = myself.colorG[index] / 255.0;
         float baseB = myself.colorB[index] / 255.0;
-        float lit = clamp01(myself.lightIntensity[index]);
-        float rim = clamp01(myself.rimIntensity[index]);
-        float highlight = clamp01(myself.highlightStrength[index]);
+        float lit = clampFloat01(myself.lightIntensity[index]);
+        float rim = clampFloat01(myself.rimIntensity[index]);
+        float highlight = clampFloat01(myself.highlightStrength[index]);
         float depth = myself.depthShade[index];
         if (depth < 0.0) depth = 0.5;
-        depth = clamp01(depth);
+        depth = clampFloat01(depth);
 
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
         float ambientFactor = 0.32 + 0.36 * depth;
