@@ -297,25 +297,15 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"glclearcolor", SDL_HANDLER(vmBuiltinGlclearcolor)},
     {"glcleardepth", SDL_HANDLER(vmBuiltinGlcleardepth)},
     {"glcolor3f", SDL_HANDLER(vmBuiltinGlcolor3f)},
-    {"glcolor4f", SDL_HANDLER(vmBuiltinGlcolor4f)},
-    {"glenable", SDL_HANDLER(vmBuiltinGlenable)},
-    {"gldisable", SDL_HANDLER(vmBuiltinGldisable)},
     {"gldepthtest", SDL_HANDLER(vmBuiltinGldepthtest)},
-    {"glnormal3f", SDL_HANDLER(vmBuiltinGlnormal3f)},
     {"glend", SDL_HANDLER(vmBuiltinGlend)},
     {"glfrustum", SDL_HANDLER(vmBuiltinGlfrustum)},
-    {"gllightfv", SDL_HANDLER(vmBuiltinGllightfv)},
-    {"glmaterialfv", SDL_HANDLER(vmBuiltinGlmaterialfv)},
-    {"glmaterialf", SDL_HANDLER(vmBuiltinGlmaterialf)},
     {"glloadidentity", SDL_HANDLER(vmBuiltinGlloadidentity)},
-    {"glcolormaterial", SDL_HANDLER(vmBuiltinGlcolormaterial)},
     {"glmatrixmode", SDL_HANDLER(vmBuiltinGlmatrixmode)},
-    {"glblendfunc", SDL_HANDLER(vmBuiltinGlblendfunc)},
     {"glpopmatrix", SDL_HANDLER(vmBuiltinGlpopmatrix)},
     {"glpushmatrix", SDL_HANDLER(vmBuiltinGlpushmatrix)},
     {"glrotatef", SDL_HANDLER(vmBuiltinGlrotatef)},
     {"glscalef", SDL_HANDLER(vmBuiltinGlscalef)},
-    {"glshademodel", SDL_HANDLER(vmBuiltinGlshademodel)},
     {"glperspective", SDL_HANDLER(vmBuiltinGlperspective)},
     {"glsetswapinterval", SDL_HANDLER(vmBuiltinGlsetswapinterval)},
     {"glswapwindow", SDL_HANDLER(vmBuiltinGlswapwindow)},
@@ -3906,42 +3896,55 @@ BuiltinRoutineType getBuiltinType(const char *name) {
 }
 
 #ifdef SDL
-static const char *const sdl_gl_builtin_names[] = {
+static const char *const sdl_gl_static_builtin_names[] = {
     "GLBegin",
     "GLClear",
     "GLClearColor",
     "GLClearDepth",
     "GLColor3f",
-    "GLColor4f",
-    "GLEnable",
-    "GLDisable",
     "GLDepthTest",
     "GLEnd",
     "GLFrustum",
-    "GLLightfv",
     "GLLoadIdentity",
-    "GLMaterialfv",
-    "GLMaterialf",
     "GLMatrixMode",
-    "GLNormal3f",
     "GLPopMatrix",
     "GLPushMatrix",
-    "GLShadeModel",
     "GLRotatef",
     "GLScalef",
-    "GLColorMaterial",
-    "GLBlendFunc",
+    "GLPerspective",
     "GLSetSwapInterval",
     "GLSwapWindow",
     "GLTranslatef",
-    "GLPerspective",
     "GLVertex3f",
     "GLViewport",
 };
 
+typedef struct {
+    const char *display_name;
+    const char *vm_name;
+    VmBuiltinFn handler;
+} SdlGlDynamicBuiltin;
+
+static const SdlGlDynamicBuiltin sdl_gl_dynamic_builtins[] = {
+    {"GLColor4f", "glcolor4f", vmBuiltinGlcolor4f},
+    {"GLNormal3f", "glnormal3f", vmBuiltinGlnormal3f},
+    {"GLEnable", "glenable", vmBuiltinGlenable},
+    {"GLDisable", "gldisable", vmBuiltinGldisable},
+    {"GLShadeModel", "glshademodel", vmBuiltinGlshademodel},
+    {"GLLightfv", "gllightfv", vmBuiltinGllightfv},
+    {"GLMaterialfv", "glmaterialfv", vmBuiltinGlmaterialfv},
+    {"GLMaterialf", "glmaterialf", vmBuiltinGlmaterialf},
+    {"GLColorMaterial", "glcolormaterial", vmBuiltinGlcolormaterial},
+    {"GLBlendFunc", "glblendfunc", vmBuiltinGlblendfunc},
+};
+
 void registerSdlGlBuiltins(void) {
-    for (size_t i = 0; i < sizeof(sdl_gl_builtin_names) / sizeof(sdl_gl_builtin_names[0]); ++i) {
-        registerBuiltinFunction(sdl_gl_builtin_names[i], AST_PROCEDURE_DECL, NULL);
+    for (size_t i = 0; i < sizeof(sdl_gl_static_builtin_names) / sizeof(sdl_gl_static_builtin_names[0]); ++i) {
+        registerBuiltinFunction(sdl_gl_static_builtin_names[i], AST_PROCEDURE_DECL, NULL);
+    }
+    for (size_t i = 0; i < sizeof(sdl_gl_dynamic_builtins) / sizeof(sdl_gl_dynamic_builtins[0]); ++i) {
+        const SdlGlDynamicBuiltin *entry = &sdl_gl_dynamic_builtins[i];
+        registerVmBuiltin(entry->vm_name, entry->handler, BUILTIN_TYPE_PROCEDURE, entry->display_name);
     }
 }
 #endif
