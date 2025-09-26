@@ -2,9 +2,11 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 
+#include <limits.h>
 #include <math.h>
 
-static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower, int* upper) {
+static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower,
+                              int* upper) {
     Value* arrVal = arg;
     if (arg->type == TYPE_POINTER) {
         arrVal = (Value*)arg->ptr_val;
@@ -21,8 +23,10 @@ static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower, 
         runtimeError(vm, "%s arrays must be single dimensional.", name);
         return NULL;
     }
-    int l = (arrVal->dimensions > 0 && arrVal->lower_bounds) ? arrVal->lower_bounds[0] : arrVal->lower_bound;
-    int u = (arrVal->dimensions > 0 && arrVal->upper_bounds) ? arrVal->upper_bounds[0] : arrVal->upper_bound;
+    int l = (arrVal->dimensions > 0 && arrVal->lower_bounds) ? arrVal->lower_bounds[0]
+                                                             : arrVal->lower_bound;
+    int u = (arrVal->dimensions > 0 && arrVal->upper_bounds) ? arrVal->upper_bounds[0]
+                                                             : arrVal->upper_bound;
     if (lower) *lower = l;
     if (upper) *upper = u;
     if (!arrVal->array_val) {
@@ -54,190 +58,137 @@ static inline double enforceSpeed(double value, double minSpeed, double maxSpeed
     return value;
 }
 
-static Value vmBuiltinBouncingBalls3DStep(VM* vm, int arg_count, Value* args) {
-    const char* name = "BouncingBalls3DStep";
-    if (arg_count != 23) {
-        runtimeError(vm, "%s expects 23 arguments.", name);
-        return makeVoid();
-    }
+typedef struct Balls3DParams {
+    int ballCount;
+    double deltaTime;
+    double boxWidth;
+    double boxHeight;
+    double boxDepth;
+    double wallElasticity;
+    double minSpeed;
+    double maxSpeed;
+    double drag;
+    double cameraDistance;
+    double screenWidth;
+    double screenHeight;
+    double lightDir[3];
+    bool hasLight;
+    Value* posX;
+    Value* posY;
+    Value* posZ;
+    Value* velX;
+    Value* velY;
+    Value* velZ;
+    Value* radius;
+    Value* screenX;
+    Value* screenY;
+    Value* screenRadius;
+    Value* depthShade;
+    Value* lightIntensity;
+    Value* rimIntensity;
+    Value* highlightX;
+    Value* highlightY;
+    Value* highlightRadius;
+    Value* highlightStrength;
+} Balls3DParams;
 
-    if (!IS_INTLIKE(args[0])) {
-        runtimeError(vm, "%s expects integer ball count.", name);
-        return makeVoid();
-    }
-    int ballCount = (int)asI64(args[0]);
-    if (ballCount <= 0) {
-        runtimeError(vm, "%s requires positive ball count.", name);
-        return makeVoid();
-    }
-
-    for (int i = 1; i <= 9; ++i) {
-        if (!IS_NUMERIC(args[i])) {
-            runtimeError(vm, "%s expects numeric arguments in positions 2-10.", name);
-            return makeVoid();
-        }
-    }
-    for (int i = 10; i <= 11; ++i) {
-        if (!IS_NUMERIC(args[i])) {
-            runtimeError(vm, "%s expects numeric screen dimension arguments.", name);
-            return makeVoid();
-        }
-    }
-
-    double deltaTime = (double)asLd(args[1]);
-    double boxWidth = (double)asLd(args[2]);
-    double boxHeight = (double)asLd(args[3]);
-    double boxDepth = (double)asLd(args[4]);
-    double wallElasticity = (double)asLd(args[5]);
-    double minSpeed = fabs((double)asLd(args[6]));
-    double maxSpeed = fabs((double)asLd(args[7]));
-    double drag = (double)asLd(args[8]);
-    double cameraDistance = (double)asLd(args[9]);
-    double screenWidth = (double)asLd(args[10]);
-    double screenHeight = (double)asLd(args[11]);
-
-    if (deltaTime <= 0.0) {
-        runtimeError(vm, "%s requires positive delta time.", name);
-        return makeVoid();
-    }
-    if (boxWidth <= 0.0 || boxHeight <= 0.0 || boxDepth <= 0.0) {
-        runtimeError(vm, "%s requires positive box dimensions.", name);
-        return makeVoid();
-    }
-    if (wallElasticity < 0.0) {
-        runtimeError(vm, "%s requires non-negative wall elasticity.", name);
-        return makeVoid();
-    }
-    if (maxSpeed < 1e-6) {
-        runtimeError(vm, "%s requires a positive maximum speed.", name);
-        return makeVoid();
-    }
-    if (minSpeed > maxSpeed) {
-        runtimeError(vm, "%s minimum speed exceeds maximum speed.", name);
-        return makeVoid();
-    }
-    if (drag <= 0.0 || drag > 1.0) {
-        runtimeError(vm, "%s expects drag between 0 and 1.", name);
-        return makeVoid();
-    }
-    if (cameraDistance <= 0.0) {
-        runtimeError(vm, "%s requires positive camera distance.", name);
-        return makeVoid();
-    }
-    if (screenWidth <= 0.0 || screenHeight <= 0.0) {
-        runtimeError(vm, "%s requires positive screen dimensions.", name);
-        return makeVoid();
-    }
-
-    int lower = 0, upper = 0;
-    Value* posX = resolveArrayArg(vm, &args[12], name, &lower, &upper);
-    if (!posX) return makeVoid();
+static Value* fetchZeroBasedArray(VM* vm, Value* arg, const char* name,
+                                  int* arrayUpper) {
+    int lower = 0;
+    int upper = 0;
+    Value* arr = resolveArrayArg(vm, arg, name, &lower, &upper);
+    if (!arr) return NULL;
     if (lower != 0) {
-        runtimeError(vm, "%s position arrays must start at index 0.", name);
-        return makeVoid();
+        runtimeError(vm, "%s arrays must start at index 0.", name);
+        return NULL;
     }
-    int arrayUpper = upper;
+    if (upper < *arrayUpper) *arrayUpper = upper;
+    return arr;
+}
 
-    Value* posY = resolveArrayArg(vm, &args[13], name, &lower, &upper);
-    if (!posY) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s position arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
+static void writeDefaultLightingOutputs(const Balls3DParams* params, int index) {
+    if (params->lightIntensity) assignFloatValue(&params->lightIntensity[index], 0.0);
+    if (params->rimIntensity) assignFloatValue(&params->rimIntensity[index], 0.0);
+    if (params->highlightX) assignFloatValue(&params->highlightX[index], 0.0);
+    if (params->highlightY) assignFloatValue(&params->highlightY[index], 0.0);
+    if (params->highlightRadius) assignFloatValue(&params->highlightRadius[index], 1.0);
+    if (params->highlightStrength)
+        assignFloatValue(&params->highlightStrength[index], 0.0);
+}
 
-    Value* posZ = resolveArrayArg(vm, &args[14], name, &lower, &upper);
-    if (!posZ) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s position arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
+static void projectHighlight(const Balls3DParams* params, double centerX, double centerY,
+                             double centerZ, double radius, double screenRadius,
+                             double viewScaleX, double viewScaleY, double rim,
+                             const double viewDir[3], const double halfVec[3], int index) {
+    if (!params->highlightX || !params->highlightY || !params->highlightRadius ||
+        !params->highlightStrength)
+        return;
 
-    Value* velX = resolveArrayArg(vm, &args[15], name, &lower, &upper);
-    if (!velX) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s velocity arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
+    double highlightScale = 0.6;
+    double hx = centerX + halfVec[0] * radius * highlightScale;
+    double hy = centerY + halfVec[1] * radius * highlightScale;
+    double hz = centerZ + halfVec[2] * radius * highlightScale;
 
-    Value* velY = resolveArrayArg(vm, &args[16], name, &lower, &upper);
-    if (!velY) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s velocity arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* velZ = resolveArrayArg(vm, &args[17], name, &lower, &upper);
-    if (!velZ) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s velocity arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* radiusArr = resolveArrayArg(vm, &args[18], name, &lower, &upper);
-    if (!radiusArr) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s radius array must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* screenX = resolveArrayArg(vm, &args[19], name, &lower, &upper);
-    if (!screenX) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s output arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* screenY = resolveArrayArg(vm, &args[20], name, &lower, &upper);
-    if (!screenY) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s output arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* screenRadius = resolveArrayArg(vm, &args[21], name, &lower, &upper);
-    if (!screenRadius) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s output arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    Value* shadeArr = resolveArrayArg(vm, &args[22], name, &lower, &upper);
-    if (!shadeArr) return makeVoid();
-    if (lower != 0) {
-        runtimeError(vm, "%s output arrays must start at index 0.", name);
-        return makeVoid();
-    }
-    if (upper < arrayUpper) arrayUpper = upper;
-
-    if (arrayUpper < ballCount - 1) {
-        runtimeError(vm, "%s arrays are smaller than the requested ball count.", name);
-        return makeVoid();
+    double denom = params->cameraDistance - hz;
+    double highlightSX = params->screenWidth * 0.5 + (centerX * viewScaleX);
+    double highlightSY = params->screenHeight * 0.5 - (centerY * viewScaleY);
+    if (denom > 1e-6) {
+        double perspective = params->cameraDistance / denom;
+        highlightSX = params->screenWidth * 0.5 + hx * perspective * viewScaleX;
+        highlightSY = params->screenHeight * 0.5 - hy * perspective * viewScaleY;
     }
 
-    double halfWidth = boxWidth * 0.5;
-    double halfHeight = boxHeight * 0.5;
+    double rimClamped = clampd(1.0 - rim, 0.0, 1.0);
+    double highlightRadius = screenRadius * clampd(0.2 + 0.3 * rimClamped, 0.18, 0.45);
+    double specDot = clampd(viewDir[0] * halfVec[0] + viewDir[1] * halfVec[1] +
+                                viewDir[2] * halfVec[2],
+                            0.0, 1.0);
+    double highlightStrength = pow(specDot, 12.0);
+
+    assignFloatValue(&params->highlightX[index], highlightSX);
+    assignFloatValue(&params->highlightY[index], highlightSY);
+    assignFloatValue(&params->highlightRadius[index], highlightRadius);
+    assignFloatValue(&params->highlightStrength[index], highlightStrength);
+}
+
+static void writeLightingOutputs(const Balls3DParams* params, int index, double diffuse,
+                                 double rim, double viewScaleX, double viewScaleY,
+                                 double x, double y, double z, double radius,
+                                 double screenRadius, const double viewDir[3],
+                                 const double halfVec[3]) {
+    if (params->lightIntensity)
+        assignFloatValue(&params->lightIntensity[index], diffuse);
+    if (params->rimIntensity)
+        assignFloatValue(&params->rimIntensity[index], clampd(rim, 0.0, 1.0));
+    projectHighlight(params, x, y, z, radius, screenRadius, viewScaleX, viewScaleY,
+                     clampd(rim, 0.0, 1.0), viewDir, halfVec, index);
+}
+
+static Value runBalls3DStep(VM* vm, const char* name, const Balls3DParams* params) {
+    int ballCount = params->ballCount;
+    double deltaTime = params->deltaTime;
+    double halfWidth = params->boxWidth * 0.5;
+    double halfHeight = params->boxHeight * 0.5;
     double nearPlane = 0.0;
-    double backPlane = -boxDepth;
-    double viewScaleX = screenWidth / boxWidth;
-    double viewScaleY = screenHeight / boxHeight;
+    double backPlane = -params->boxDepth;
+    double viewScaleX = params->screenWidth / params->boxWidth;
+    double viewScaleY = params->screenHeight / params->boxHeight;
+    bool computeLighting = params->hasLight &&
+                           (params->lightIntensity || params->rimIntensity ||
+                            params->highlightX || params->highlightY ||
+                            params->highlightRadius || params->highlightStrength);
+    double lightDirX = params->lightDir[0];
+    double lightDirY = params->lightDir[1];
+    double lightDirZ = params->lightDir[2];
 
     for (int i = 0; i < ballCount; ++i) {
-        double x = (double)asLd(posX[i]);
-        double y = (double)asLd(posY[i]);
-        double z = (double)asLd(posZ[i]);
-        double vx = (double)asLd(velX[i]);
-        double vy = (double)asLd(velY[i]);
-        double vz = (double)asLd(velZ[i]);
-        double r = (double)asLd(radiusArr[i]);
+        double x = (double)asLd(params->posX[i]);
+        double y = (double)asLd(params->posY[i]);
+        double z = (double)asLd(params->posZ[i]);
+        double vx = (double)asLd(params->velX[i]);
+        double vy = (double)asLd(params->velY[i]);
+        double vz = (double)asLd(params->velZ[i]);
+        double r = (double)asLd(params->radius[i]);
 
         if (r <= 0.0) r = 1.0;
         double minX = -halfWidth + r;
@@ -247,9 +198,9 @@ static Value vmBuiltinBouncingBalls3DStep(VM* vm, int arg_count, Value* args) {
         double minZ = backPlane + r;
         double maxZ = nearPlane - r;
 
-        vx *= drag;
-        vy *= drag;
-        vz *= drag;
+        vx *= params->drag;
+        vy *= params->drag;
+        vz *= params->drag;
 
         x += vx * deltaTime;
         y += vy * deltaTime;
@@ -257,63 +208,63 @@ static Value vmBuiltinBouncingBalls3DStep(VM* vm, int arg_count, Value* args) {
 
         if (x < minX) {
             x = minX;
-            vx = fabs(vx) * wallElasticity;
-            if (vx < minSpeed) vx = minSpeed;
+            vx = fabs(vx) * params->wallElasticity;
+            if (vx < params->minSpeed) vx = params->minSpeed;
         } else if (x > maxX) {
             x = maxX;
-            vx = -fabs(vx) * wallElasticity;
-            if (-vx < minSpeed) vx = -minSpeed;
+            vx = -fabs(vx) * params->wallElasticity;
+            if (-vx < params->minSpeed) vx = -params->minSpeed;
         }
         if (y < minY) {
             y = minY;
-            vy = fabs(vy) * wallElasticity;
-            if (vy < minSpeed) vy = minSpeed;
+            vy = fabs(vy) * params->wallElasticity;
+            if (vy < params->minSpeed) vy = params->minSpeed;
         } else if (y > maxY) {
             y = maxY;
-            vy = -fabs(vy) * wallElasticity;
-            if (-vy < minSpeed) vy = -minSpeed;
+            vy = -fabs(vy) * params->wallElasticity;
+            if (-vy < params->minSpeed) vy = -params->minSpeed;
         }
         if (z < minZ) {
             z = minZ;
-            vz = fabs(vz) * wallElasticity;
-            if (vz < minSpeed) vz = minSpeed;
+            vz = fabs(vz) * params->wallElasticity;
+            if (vz < params->minSpeed) vz = params->minSpeed;
         } else if (z > maxZ) {
             z = maxZ;
-            vz = -fabs(vz) * wallElasticity;
-            if (-vz < minSpeed) vz = -minSpeed;
+            vz = -fabs(vz) * params->wallElasticity;
+            if (-vz < params->minSpeed) vz = -params->minSpeed;
         }
 
-        vx = enforceSpeed(vx, minSpeed, maxSpeed);
-        vy = enforceSpeed(vy, minSpeed, maxSpeed);
-        vz = enforceSpeed(vz, minSpeed, maxSpeed);
+        vx = enforceSpeed(vx, params->minSpeed, params->maxSpeed);
+        vy = enforceSpeed(vy, params->minSpeed, params->maxSpeed);
+        vz = enforceSpeed(vz, params->minSpeed, params->maxSpeed);
 
-        assignFloatValue(&posX[i], x);
-        assignFloatValue(&posY[i], y);
-        assignFloatValue(&posZ[i], z);
-        assignFloatValue(&velX[i], vx);
-        assignFloatValue(&velY[i], vy);
-        assignFloatValue(&velZ[i], vz);
+        assignFloatValue(&params->posX[i], x);
+        assignFloatValue(&params->posY[i], y);
+        assignFloatValue(&params->posZ[i], z);
+        assignFloatValue(&params->velX[i], vx);
+        assignFloatValue(&params->velY[i], vy);
+        assignFloatValue(&params->velZ[i], vz);
     }
 
     for (int i = 0; i < ballCount; ++i) {
-        double xi = (double)asLd(posX[i]);
-        double yi = (double)asLd(posY[i]);
-        double zi = (double)asLd(posZ[i]);
-        double vxi = (double)asLd(velX[i]);
-        double vyi = (double)asLd(velY[i]);
-        double vzi = (double)asLd(velZ[i]);
-        double ri = (double)asLd(radiusArr[i]);
+        double xi = (double)asLd(params->posX[i]);
+        double yi = (double)asLd(params->posY[i]);
+        double zi = (double)asLd(params->posZ[i]);
+        double vxi = (double)asLd(params->velX[i]);
+        double vyi = (double)asLd(params->velY[i]);
+        double vzi = (double)asLd(params->velZ[i]);
+        double ri = (double)asLd(params->radius[i]);
         double mi = ri * ri * ri;
         if (mi <= 0.0) mi = 1.0;
 
         for (int j = i + 1; j < ballCount; ++j) {
-            double xj = (double)asLd(posX[j]);
-            double yj = (double)asLd(posY[j]);
-            double zj = (double)asLd(posZ[j]);
-            double vxj = (double)asLd(velX[j]);
-            double vyj = (double)asLd(velY[j]);
-            double vzj = (double)asLd(velZ[j]);
-            double rj = (double)asLd(radiusArr[j]);
+            double xj = (double)asLd(params->posX[j]);
+            double yj = (double)asLd(params->posY[j]);
+            double zj = (double)asLd(params->posZ[j]);
+            double vxj = (double)asLd(params->velX[j]);
+            double vyj = (double)asLd(params->velY[j]);
+            double vzj = (double)asLd(params->velZ[j]);
+            double rj = (double)asLd(params->radius[j]);
             double mj = rj * rj * rj;
             if (mj <= 0.0) mj = 1.0;
 
@@ -372,68 +323,365 @@ static Value vmBuiltinBouncingBalls3DStep(VM* vm, int arg_count, Value* args) {
                 zj += correction * nz;
             }
 
-            vxi = enforceSpeed(vxi, minSpeed, maxSpeed);
-            vyi = enforceSpeed(vyi, minSpeed, maxSpeed);
-            vzi = enforceSpeed(vzi, minSpeed, maxSpeed);
-            vxj = enforceSpeed(vxj, minSpeed, maxSpeed);
-            vyj = enforceSpeed(vyj, minSpeed, maxSpeed);
-            vzj = enforceSpeed(vzj, minSpeed, maxSpeed);
+            vxi = enforceSpeed(vxi, params->minSpeed, params->maxSpeed);
+            vyi = enforceSpeed(vyi, params->minSpeed, params->maxSpeed);
+            vzi = enforceSpeed(vzi, params->minSpeed, params->maxSpeed);
+            vxj = enforceSpeed(vxj, params->minSpeed, params->maxSpeed);
+            vyj = enforceSpeed(vyj, params->minSpeed, params->maxSpeed);
+            vzj = enforceSpeed(vzj, params->minSpeed, params->maxSpeed);
 
-            assignFloatValue(&posX[i], xi);
-            assignFloatValue(&posY[i], yi);
-            assignFloatValue(&posZ[i], zi);
-            assignFloatValue(&velX[i], vxi);
-            assignFloatValue(&velY[i], vyi);
-            assignFloatValue(&velZ[i], vzi);
+            assignFloatValue(&params->posX[i], xi);
+            assignFloatValue(&params->posY[i], yi);
+            assignFloatValue(&params->posZ[i], zi);
+            assignFloatValue(&params->velX[i], vxi);
+            assignFloatValue(&params->velY[i], vyi);
+            assignFloatValue(&params->velZ[i], vzi);
 
-            assignFloatValue(&posX[j], xj);
-            assignFloatValue(&posY[j], yj);
-            assignFloatValue(&posZ[j], zj);
-            assignFloatValue(&velX[j], vxj);
-            assignFloatValue(&velY[j], vyj);
-            assignFloatValue(&velZ[j], vzj);
+            assignFloatValue(&params->posX[j], xj);
+            assignFloatValue(&params->posY[j], yj);
+            assignFloatValue(&params->posZ[j], zj);
+            assignFloatValue(&params->velX[j], vxj);
+            assignFloatValue(&params->velY[j], vyj);
+            assignFloatValue(&params->velZ[j], vzj);
         }
     }
 
     for (int i = 0; i < ballCount; ++i) {
-        double x = (double)asLd(posX[i]);
-        double y = (double)asLd(posY[i]);
-        double z = (double)asLd(posZ[i]);
-        double r = (double)asLd(radiusArr[i]);
+        double x = (double)asLd(params->posX[i]);
+        double y = (double)asLd(params->posY[i]);
+        double z = (double)asLd(params->posZ[i]);
+        double r = (double)asLd(params->radius[i]);
 
         if (z > nearPlane - r) {
             z = nearPlane - r;
-            assignFloatValue(&posZ[i], z);
+            assignFloatValue(&params->posZ[i], z);
         }
         if (z < backPlane + r) {
             z = backPlane + r;
-            assignFloatValue(&posZ[i], z);
+            assignFloatValue(&params->posZ[i], z);
         }
 
-        double denom = cameraDistance - z;
+        double denom = params->cameraDistance - z;
         if (denom <= 1e-6) {
-            assignFloatValue(&shadeArr[i], -1.0);
+            assignFloatValue(&params->depthShade[i], -1.0);
+            writeDefaultLightingOutputs(params, i);
             continue;
         }
-        double perspective = cameraDistance / denom;
-        double sx = screenWidth * 0.5 + x * perspective * viewScaleX;
-        double sy = screenHeight * 0.5 - y * perspective * viewScaleY;
+
+        double perspective = params->cameraDistance / denom;
+        double sx = params->screenWidth * 0.5 + x * perspective * viewScaleX;
+        double sy = params->screenHeight * 0.5 - y * perspective * viewScaleY;
         double sr = r * perspective * (viewScaleX + viewScaleY) * 0.5;
         if (sr < 1.0) sr = 1.0;
 
-        double depthFactor = clampd(-z / boxDepth, 0.0, 1.0);
+        double depthFactor = clampd(-z / params->boxDepth, 0.0, 1.0);
         double shade = 0.25 + 0.75 * depthFactor;
 
-        assignFloatValue(&screenX[i], sx);
-        assignFloatValue(&screenY[i], sy);
-        assignFloatValue(&screenRadius[i], sr);
-        assignFloatValue(&shadeArr[i], shade);
+        assignFloatValue(&params->screenX[i], sx);
+        assignFloatValue(&params->screenY[i], sy);
+        assignFloatValue(&params->screenRadius[i], sr);
+        assignFloatValue(&params->depthShade[i], shade);
+
+        if (computeLighting) {
+            double viewVecX = -x;
+            double viewVecY = -y;
+            double viewVecZ = params->cameraDistance - z;
+            double viewLenSq = viewVecX * viewVecX + viewVecY * viewVecY +
+                               viewVecZ * viewVecZ;
+            double viewDir[3];
+            if (viewLenSq < 1e-9) {
+                viewDir[0] = 0.0;
+                viewDir[1] = 0.0;
+                viewDir[2] = 1.0;
+            } else {
+                double invLen = 1.0 / sqrt(viewLenSq);
+                viewDir[0] = viewVecX * invLen;
+                viewDir[1] = viewVecY * invLen;
+                viewDir[2] = viewVecZ * invLen;
+            }
+
+            double diffuse = clampd(viewDir[0] * lightDirX + viewDir[1] * lightDirY +
+                                        viewDir[2] * lightDirZ,
+                                    0.0, 1.0);
+            double rim = clampd(1.0 - viewDir[2], 0.0, 1.0);
+
+            double halfVec[3] = {viewDir[0] + lightDirX, viewDir[1] + lightDirY,
+                                 viewDir[2] + lightDirZ};
+            double halfLenSq = halfVec[0] * halfVec[0] + halfVec[1] * halfVec[1] +
+                               halfVec[2] * halfVec[2];
+            if (halfLenSq < 1e-9) {
+                halfVec[0] = viewDir[0];
+                halfVec[1] = viewDir[1];
+                halfVec[2] = viewDir[2];
+            } else {
+                double invLen = 1.0 / sqrt(halfLenSq);
+                halfVec[0] *= invLen;
+                halfVec[1] *= invLen;
+                halfVec[2] *= invLen;
+            }
+
+            writeLightingOutputs(params, i, diffuse, rim, viewScaleX, viewScaleY, x,
+                                 y, z, r, sr, viewDir, halfVec);
+        } else {
+            writeDefaultLightingOutputs(params, i);
+        }
     }
 
     return makeVoid();
 }
 
+static Value vmBuiltinBouncingBalls3DStep(VM* vm, int arg_count, Value* args) {
+    const char* name = "BouncingBalls3DStep";
+    if (arg_count != 23) {
+        runtimeError(vm, "%s expects 23 arguments.", name);
+        return makeVoid();
+    }
+
+    if (!IS_INTLIKE(args[0])) {
+        runtimeError(vm, "%s expects integer ball count.", name);
+        return makeVoid();
+    }
+    int ballCount = (int)asI64(args[0]);
+    if (ballCount <= 0) {
+        runtimeError(vm, "%s requires positive ball count.", name);
+        return makeVoid();
+    }
+
+    for (int i = 1; i <= 11; ++i) {
+        if (!IS_NUMERIC(args[i])) {
+            runtimeError(vm, "%s expects numeric arguments in positions 2-12.",
+                         name);
+            return makeVoid();
+        }
+    }
+
+    Balls3DParams params;
+    params.ballCount = ballCount;
+    params.deltaTime = (double)asLd(args[1]);
+    params.boxWidth = (double)asLd(args[2]);
+    params.boxHeight = (double)asLd(args[3]);
+    params.boxDepth = (double)asLd(args[4]);
+    params.wallElasticity = (double)asLd(args[5]);
+    params.minSpeed = fabs((double)asLd(args[6]));
+    params.maxSpeed = fabs((double)asLd(args[7]));
+    params.drag = (double)asLd(args[8]);
+    params.cameraDistance = (double)asLd(args[9]);
+    params.screenWidth = (double)asLd(args[10]);
+    params.screenHeight = (double)asLd(args[11]);
+    params.lightDir[0] = 0.0;
+    params.lightDir[1] = 0.0;
+    params.lightDir[2] = 1.0;
+    params.hasLight = false;
+
+    if (params.deltaTime <= 0.0) {
+        runtimeError(vm, "%s requires positive delta time.", name);
+        return makeVoid();
+    }
+    if (params.boxWidth <= 0.0 || params.boxHeight <= 0.0 || params.boxDepth <= 0.0) {
+        runtimeError(vm, "%s requires positive box dimensions.", name);
+        return makeVoid();
+    }
+    if (params.wallElasticity < 0.0) {
+        runtimeError(vm, "%s requires non-negative wall elasticity.", name);
+        return makeVoid();
+    }
+    if (params.maxSpeed < 1e-6) {
+        runtimeError(vm, "%s requires a positive maximum speed.", name);
+        return makeVoid();
+    }
+    if (params.minSpeed > params.maxSpeed) {
+        runtimeError(vm, "%s minimum speed exceeds maximum speed.", name);
+        return makeVoid();
+    }
+    if (params.drag <= 0.0 || params.drag > 1.0) {
+        runtimeError(vm, "%s expects drag between 0 and 1.", name);
+        return makeVoid();
+    }
+    if (params.cameraDistance <= 0.0) {
+        runtimeError(vm, "%s requires positive camera distance.", name);
+        return makeVoid();
+    }
+    if (params.screenWidth <= 0.0 || params.screenHeight <= 0.0) {
+        runtimeError(vm, "%s requires positive screen dimensions.", name);
+        return makeVoid();
+    }
+
+    int arrayUpper = INT_MAX;
+    params.posX = fetchZeroBasedArray(vm, &args[12], name, &arrayUpper);
+    if (!params.posX) return makeVoid();
+    params.posY = fetchZeroBasedArray(vm, &args[13], name, &arrayUpper);
+    if (!params.posY) return makeVoid();
+    params.posZ = fetchZeroBasedArray(vm, &args[14], name, &arrayUpper);
+    if (!params.posZ) return makeVoid();
+    params.velX = fetchZeroBasedArray(vm, &args[15], name, &arrayUpper);
+    if (!params.velX) return makeVoid();
+    params.velY = fetchZeroBasedArray(vm, &args[16], name, &arrayUpper);
+    if (!params.velY) return makeVoid();
+    params.velZ = fetchZeroBasedArray(vm, &args[17], name, &arrayUpper);
+    if (!params.velZ) return makeVoid();
+    params.radius = fetchZeroBasedArray(vm, &args[18], name, &arrayUpper);
+    if (!params.radius) return makeVoid();
+    params.screenX = fetchZeroBasedArray(vm, &args[19], name, &arrayUpper);
+    if (!params.screenX) return makeVoid();
+    params.screenY = fetchZeroBasedArray(vm, &args[20], name, &arrayUpper);
+    if (!params.screenY) return makeVoid();
+    params.screenRadius = fetchZeroBasedArray(vm, &args[21], name, &arrayUpper);
+    if (!params.screenRadius) return makeVoid();
+    params.depthShade = fetchZeroBasedArray(vm, &args[22], name, &arrayUpper);
+    if (!params.depthShade) return makeVoid();
+
+    params.lightIntensity = NULL;
+    params.rimIntensity = NULL;
+    params.highlightX = NULL;
+    params.highlightY = NULL;
+    params.highlightRadius = NULL;
+    params.highlightStrength = NULL;
+
+    if (arrayUpper < ballCount - 1) {
+        runtimeError(vm, "%s arrays are smaller than the requested ball count.",
+                     name);
+        return makeVoid();
+    }
+
+    return runBalls3DStep(vm, name, &params);
+}
+
+static Value vmBuiltinBouncingBalls3DStepAdvanced(VM* vm, int arg_count,
+                                                  Value* args) {
+    const char* name = "BouncingBalls3DStepAdvanced";
+    if (arg_count != 32) {
+        runtimeError(vm, "%s expects 32 arguments.", name);
+        return makeVoid();
+    }
+
+    if (!IS_INTLIKE(args[0])) {
+        runtimeError(vm, "%s expects integer ball count.", name);
+        return makeVoid();
+    }
+    int ballCount = (int)asI64(args[0]);
+    if (ballCount <= 0) {
+        runtimeError(vm, "%s requires positive ball count.", name);
+        return makeVoid();
+    }
+
+    for (int i = 1; i <= 14; ++i) {
+        if (!IS_NUMERIC(args[i])) {
+            runtimeError(vm, "%s expects numeric arguments in positions 2-15.",
+                         name);
+            return makeVoid();
+        }
+    }
+
+    Balls3DParams params;
+    params.ballCount = ballCount;
+    params.deltaTime = (double)asLd(args[1]);
+    params.boxWidth = (double)asLd(args[2]);
+    params.boxHeight = (double)asLd(args[3]);
+    params.boxDepth = (double)asLd(args[4]);
+    params.wallElasticity = (double)asLd(args[5]);
+    params.minSpeed = fabs((double)asLd(args[6]));
+    params.maxSpeed = fabs((double)asLd(args[7]));
+    params.drag = (double)asLd(args[8]);
+    params.cameraDistance = (double)asLd(args[9]);
+    params.screenWidth = (double)asLd(args[10]);
+    params.screenHeight = (double)asLd(args[11]);
+    double lx = (double)asLd(args[12]);
+    double ly = (double)asLd(args[13]);
+    double lz = (double)asLd(args[14]);
+
+    if (params.deltaTime <= 0.0) {
+        runtimeError(vm, "%s requires positive delta time.", name);
+        return makeVoid();
+    }
+    if (params.boxWidth <= 0.0 || params.boxHeight <= 0.0 || params.boxDepth <= 0.0) {
+        runtimeError(vm, "%s requires positive box dimensions.", name);
+        return makeVoid();
+    }
+    if (params.wallElasticity < 0.0) {
+        runtimeError(vm, "%s requires non-negative wall elasticity.", name);
+        return makeVoid();
+    }
+    if (params.maxSpeed < 1e-6) {
+        runtimeError(vm, "%s requires a positive maximum speed.", name);
+        return makeVoid();
+    }
+    if (params.minSpeed > params.maxSpeed) {
+        runtimeError(vm, "%s minimum speed exceeds maximum speed.", name);
+        return makeVoid();
+    }
+    if (params.drag <= 0.0 || params.drag > 1.0) {
+        runtimeError(vm, "%s expects drag between 0 and 1.", name);
+        return makeVoid();
+    }
+    if (params.cameraDistance <= 0.0) {
+        runtimeError(vm, "%s requires positive camera distance.", name);
+        return makeVoid();
+    }
+    if (params.screenWidth <= 0.0 || params.screenHeight <= 0.0) {
+        runtimeError(vm, "%s requires positive screen dimensions.", name);
+        return makeVoid();
+    }
+
+    double lightLenSq = lx * lx + ly * ly + lz * lz;
+    if (lightLenSq < 1e-9) {
+        runtimeError(vm, "%s requires a non-zero light direction.", name);
+        return makeVoid();
+    }
+    double invLightLen = 1.0 / sqrt(lightLenSq);
+    params.lightDir[0] = lx * invLightLen;
+    params.lightDir[1] = ly * invLightLen;
+    params.lightDir[2] = lz * invLightLen;
+    params.hasLight = true;
+
+    int arrayUpper = INT_MAX;
+    params.posX = fetchZeroBasedArray(vm, &args[15], name, &arrayUpper);
+    if (!params.posX) return makeVoid();
+    params.posY = fetchZeroBasedArray(vm, &args[16], name, &arrayUpper);
+    if (!params.posY) return makeVoid();
+    params.posZ = fetchZeroBasedArray(vm, &args[17], name, &arrayUpper);
+    if (!params.posZ) return makeVoid();
+    params.velX = fetchZeroBasedArray(vm, &args[18], name, &arrayUpper);
+    if (!params.velX) return makeVoid();
+    params.velY = fetchZeroBasedArray(vm, &args[19], name, &arrayUpper);
+    if (!params.velY) return makeVoid();
+    params.velZ = fetchZeroBasedArray(vm, &args[20], name, &arrayUpper);
+    if (!params.velZ) return makeVoid();
+    params.radius = fetchZeroBasedArray(vm, &args[21], name, &arrayUpper);
+    if (!params.radius) return makeVoid();
+    params.screenX = fetchZeroBasedArray(vm, &args[22], name, &arrayUpper);
+    if (!params.screenX) return makeVoid();
+    params.screenY = fetchZeroBasedArray(vm, &args[23], name, &arrayUpper);
+    if (!params.screenY) return makeVoid();
+    params.screenRadius = fetchZeroBasedArray(vm, &args[24], name, &arrayUpper);
+    if (!params.screenRadius) return makeVoid();
+    params.depthShade = fetchZeroBasedArray(vm, &args[25], name, &arrayUpper);
+    if (!params.depthShade) return makeVoid();
+    params.lightIntensity = fetchZeroBasedArray(vm, &args[26], name, &arrayUpper);
+    if (!params.lightIntensity) return makeVoid();
+    params.rimIntensity = fetchZeroBasedArray(vm, &args[27], name, &arrayUpper);
+    if (!params.rimIntensity) return makeVoid();
+    params.highlightX = fetchZeroBasedArray(vm, &args[28], name, &arrayUpper);
+    if (!params.highlightX) return makeVoid();
+    params.highlightY = fetchZeroBasedArray(vm, &args[29], name, &arrayUpper);
+    if (!params.highlightY) return makeVoid();
+    params.highlightRadius = fetchZeroBasedArray(vm, &args[30], name, &arrayUpper);
+    if (!params.highlightRadius) return makeVoid();
+    params.highlightStrength = fetchZeroBasedArray(vm, &args[31], name, &arrayUpper);
+    if (!params.highlightStrength) return makeVoid();
+
+    if (arrayUpper < ballCount - 1) {
+        runtimeError(vm, "%s arrays are smaller than the requested ball count.",
+                     name);
+        return makeVoid();
+    }
+
+    return runBalls3DStep(vm, name, &params);
+}
+
 void registerBalls3DBuiltins(void) {
     registerVmBuiltin("bouncingballs3dstep", vmBuiltinBouncingBalls3DStep,
                       BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DStep");
+    registerVmBuiltin("bouncingballs3dstepadvanced",
+                      vmBuiltinBouncingBalls3DStepAdvanced, BUILTIN_TYPE_PROCEDURE,
+                      "BouncingBalls3DStepAdvanced");
 }

@@ -11,6 +11,7 @@ void registerUserBuiltins(void) {
     extBuiltinRegisterFunction("user", "LandscapePrecomputeWorldCoords");
     extBuiltinRegisterFunction("user", "LandscapePrecomputeWaterOffsets");
     extBuiltinRegisterFunction("user", "BouncingBalls3DStep");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DStepAdvanced");
 
     registerLandscapeBuiltins();
     registerBalls3DBuiltins();
