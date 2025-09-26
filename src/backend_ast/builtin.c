@@ -362,12 +362,12 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
     {"printf", vmBuiltinPrintf},
-    {"fprintf", vmBuiltinFprintf},
     {"fopen", vmBuiltinFopen},
     {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
     {"putpixel", SDL_HANDLER(vmBuiltinPutpixel)},
     {"write", vmBuiltinWrite}, // Preserve legacy builtin id for write
+    {"fprintf", vmBuiltinFprintf}, // Registered after write to avoid shifting legacy id 176
     {"quitsoundsystem", SDL_HANDLER(vmBuiltinQuitsoundsystem)},
     {"quittextsystem", SDL_HANDLER(vmBuiltinQuittextsystem)},
     {"random", vmBuiltinRandom},
