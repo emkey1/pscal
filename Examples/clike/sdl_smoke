@@ -9,36 +9,42 @@ const int HEIGHT = 600;
 void draw_cube() {
     glbegin("quads");
 
+    glnormal3f(0.0, 0.0, 1.0);
     glcolor3f(1.0, 0.0, 0.0);
     glvertex3f(-0.5, -0.5,  0.5);
     glvertex3f( 0.5, -0.5,  0.5);
     glvertex3f( 0.5,  0.5,  0.5);
     glvertex3f(-0.5,  0.5,  0.5);
 
+    glnormal3f(0.0, 0.0, -1.0);
     glcolor3f(0.0, 1.0, 0.0);
     glvertex3f(-0.5, -0.5, -0.5);
     glvertex3f(-0.5,  0.5, -0.5);
     glvertex3f( 0.5,  0.5, -0.5);
     glvertex3f( 0.5, -0.5, -0.5);
 
+    glnormal3f(-1.0, 0.0, 0.0);
     glcolor3f(0.0, 0.0, 1.0);
     glvertex3f(-0.5, -0.5, -0.5);
     glvertex3f(-0.5, -0.5,  0.5);
     glvertex3f(-0.5,  0.5,  0.5);
     glvertex3f(-0.5,  0.5, -0.5);
 
+    glnormal3f(1.0, 0.0, 0.0);
     glcolor3f(1.0, 1.0, 0.0);
     glvertex3f(0.5, -0.5, -0.5);
     glvertex3f(0.5,  0.5, -0.5);
     glvertex3f(0.5,  0.5,  0.5);
     glvertex3f(0.5, -0.5,  0.5);
 
+    glnormal3f(0.0, 1.0, 0.0);
     glcolor3f(0.0, 1.0, 1.0);
     glvertex3f(-0.5,  0.5, -0.5);
     glvertex3f(-0.5,  0.5,  0.5);
     glvertex3f( 0.5,  0.5,  0.5);
     glvertex3f( 0.5,  0.5, -0.5);
 
+    glnormal3f(0.0, -1.0, 0.0);
     glcolor3f(1.0, 0.0, 1.0);
     glvertex3f(-0.5, -0.5, -0.5);
     glvertex3f( 0.5, -0.5, -0.5);
@@ -48,6 +54,24 @@ void draw_cube() {
     glend();
 }
 
+void setup_lighting() {
+    glcleardepth(1.0);
+    gldepthtest(1);
+    glenable("lighting");
+    glenable("light0");
+    glenable("color_material");
+    glenable("normalize");
+    glshademodel("smooth");
+    glcolormaterial("front", "ambient_and_diffuse");
+
+    gllightfv("light0", "ambient", 0.20, 0.22, 0.28, 1.0);
+    gllightfv("light0", "diffuse", 0.85, 0.85, 0.92, 1.0);
+    gllightfv("light0", "specular", 0.70, 0.70, 0.78, 1.0);
+
+    glmaterialfv("front", "specular", 0.45, 0.45, 0.50, 1.0);
+    glmaterialf("front", "shininess", 36.0);
+}
+
 int main() {
     int frame;
     double angle;
@@ -55,8 +79,7 @@ int main() {
 
     initgraph3d(WIDTH, HEIGHT, "CLike SDL GL Cube", 24, 8);
     glviewport(0, 0, WIDTH, HEIGHT);
-    glcleardepth(1.0);
-    gldepthtest(1);
+    setup_lighting();
     glsetswapinterval(1);
 
     for (frame = 0; frame < 600; frame = frame + 1) {
@@ -76,6 +99,7 @@ int main() {
 
         glmatrixmode("modelview");
         glloadidentity();
+        gllightfv("light0", "position", 0.3, 0.7, 1.0, 0.0);
         gltranslatef(0.0, 0.0, -0.2);
         glrotatef(angle, 1.0, 1.0, 0.0);
 

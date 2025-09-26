@@ -273,6 +273,8 @@ imported from each front end (Pascal, CLike, and Rea).
 | pollkey | () | Integer | Poll for key press. |
 | iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
 
+For OpenGL programs, PSCAL now exposes additional fixed-function helpers alongside the existing pipeline calls: `GLColor4f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, and `GLBlendFunc` simplify configuring lighting, materials, and blending directly from Pascal, Rea, and the other front ends.
+
 ### Basic OpenGL render loop
 
 ```pascal

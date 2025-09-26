@@ -1,11 +1,12 @@
 #!/usr/bin/env rea
-// SDL Multi Bouncing Balls 3D demo for Rea using an accelerated extended builtin.
-// Renders a field of spheres bouncing inside a glass box using one face as the
-// viewing window. Requires building Pscal with SDL support.
+// SDL Multi Bouncing Balls 3D demo rendered with the OpenGL helpers.
+// This version uses the fixed-function pipeline (lighting, materials,
+// blending) instead of the 2D circle impostor trick.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 720;
 const int TargetFPS = 60;
+
 const int NumBalls = 90;
 const float BoxWidth = 720.0;
 const float BoxHeight = 420.0;
@@ -14,11 +15,19 @@ const float WallElasticity = 1.08;
 const float MinSpeed = 90.0;
 const float MaxSpeed = 360.0;
 const float VelocityDrag = 0.995;
-const float CameraDistance = 720.0;
-const float LightDirX = -0.45;
+
+const float CameraDistance = 1150.0;
+const float CameraPitch = -12.0;
+const float CameraOrbitSpeed = 10.0;
+
+const int SphereStacks = 20;
+const int SphereSlices = 36;
+const float Pi = 3.1415926535;
+
+const float LightDirX = -0.55;
 const float LightDirY = -0.35;
-const float LightDirZ = 0.82;
-const int FrameMargin = 48;
+const float LightDirZ = 0.78;
+const float AmbientLevel = 0.18;
 
 float posX[NumBalls];
 float posY[NumBalls];
@@ -31,309 +40,281 @@ float screenX[NumBalls];
 float screenY[NumBalls];
 float screenRadius[NumBalls];
 float depthShade[NumBalls];
-float lightIntensity[NumBalls];
-float rimIntensity[NumBalls];
-float highlightX[NumBalls];
-float highlightY[NumBalls];
-float highlightRadius[NumBalls];
-float highlightStrength[NumBalls];
-int drawOrder[NumBalls];
 int colorR[NumBalls];
 int colorG[NumBalls];
 int colorB[NumBalls];
 
-int FrameDelay;
 bool quit;
 bool paused;
+int FrameDelay;
 float elapsedSeconds;
+float cameraYaw;
 
 float randomUnit() {
-  return random(10000) / 10000.0;
-}
-
-float clampFloat(float value, float minValue, float maxValue) {
-  if (value < minValue) return minValue;
-  if (value > maxValue) return maxValue;
-  return value;
-}
-
-int clampColor(int value) {
-  if (value < 0) return 0;
-  if (value > 255) return 255;
-  return value;
-}
-
-int shadeComponent(int base, float factor, float lift) {
-  float value = base * factor + lift;
-  int result = trunc(value);
-  return clampColor(result);
-}
-
-void bar(int left, int top, int right, int bottom) {
-  if (left > right) {
-    int temp = left;
-    left = right;
-    right = temp;
-  }
-  if (top > bottom) {
-    int temp = top;
-    top = bottom;
-    bottom = temp;
-  }
-  int y = top;
-  while (y <= bottom) {
-    drawline(left, y, right, y);
-    y = y + 1;
-  }
-}
-
-void initDrawOrder() {
-  int i = 0;
-  while (i < NumBalls) {
-    drawOrder[i] = i;
-    i = i + 1;
-  }
-}
-
-void sortDrawOrderByDepth() {
-  int i = 1;
-  while (i < NumBalls) {
-    int currentIndex = drawOrder[i];
-    float currentShade = depthShade[currentIndex];
-    int j = i - 1;
-    while (j >= 0 && depthShade[drawOrder[j]] > currentShade) {
-      drawOrder[j + 1] = drawOrder[j];
-      j = j - 1;
-    }
-    drawOrder[j + 1] = currentIndex;
-    i = i + 1;
-  }
+    return random(10000) / 10000.0;
 }
 
 void initBalls() {
-  int i = 0;
-  float halfWidth = BoxWidth * 0.5;
-  float halfHeight = BoxHeight * 0.5;
-  while (i < NumBalls) {
-    float r = 12.0 + random(26);
-    float availX = (BoxWidth - 2.0 * r);
-    float availY = (BoxHeight - 2.0 * r);
-    float availZ = (BoxDepth - 2.0 * r);
-    if (availX < 4.0) availX = 4.0;
-    if (availY < 4.0) availY = 4.0;
-    if (availZ < 4.0) availZ = 4.0;
-    radii[i] = r;
-    posX[i] = -halfWidth + r + randomUnit() * availX;
-    posY[i] = -halfHeight + r + randomUnit() * availY;
-    posZ[i] = -r - randomUnit() * (BoxDepth - 2.0 * r);
-    int speedRange = trunc(MaxSpeed - MinSpeed);
-    float speed = MinSpeed + random(speedRange + 1) + randomUnit();
-    float yaw = random(360);
-    float pitch = random(121) - 60.0;
-    float dirXY = cos(pitch);
-    velX[i] = cos(yaw) * dirXY * speed;
-    velY[i] = sin(pitch) * speed;
-    velZ[i] = sin(yaw) * dirXY * speed;
-    colorR[i] = 90 + random(150);
-    colorG[i] = 90 + random(150);
-    colorB[i] = 90 + random(150);
-    screenRadius[i] = 0.0;
-    screenX[i] = 0.0;
-    screenY[i] = 0.0;
-    depthShade[i] = -1.0;
-    lightIntensity[i] = 0.0;
-    rimIntensity[i] = 0.0;
-    highlightX[i] = 0.0;
-    highlightY[i] = 0.0;
-    highlightRadius[i] = 1.0;
-    highlightStrength[i] = 0.0;
-    i = i + 1;
-  }
-  initDrawOrder();
+    int i = 0;
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    while (i < NumBalls) {
+        float r = 12.0 + random(26);
+        float availX = BoxWidth - 2.0 * r;
+        float availY = BoxHeight - 2.0 * r;
+        float availZ = BoxDepth - 2.0 * r;
+        if (availX < 4.0) availX = 4.0;
+        if (availY < 4.0) availY = 4.0;
+        if (availZ < 4.0) availZ = 4.0;
+
+        radii[i] = r;
+        posX[i] = -halfWidth + r + randomUnit() * availX;
+        posY[i] = -halfHeight + r + randomUnit() * availY;
+        posZ[i] = -r - randomUnit() * (BoxDepth - 2.0 * r);
+
+        int speedRange = trunc(MaxSpeed - MinSpeed);
+        float speed = MinSpeed + random(speedRange + 1) + randomUnit();
+        float yaw = random(360) * (Pi / 180.0);
+        float pitch = (random(121) - 60.0) * (Pi / 180.0);
+        float dirXY = cos(pitch);
+        velX[i] = cos(yaw) * dirXY * speed;
+        velY[i] = sin(pitch) * speed;
+        velZ[i] = sin(yaw) * dirXY * speed;
+
+        colorR[i] = 90 + random(150);
+        colorG[i] = 90 + random(150);
+        colorB[i] = 90 + random(150);
+        i = i + 1;
+    }
 }
 
-void drawFrameOverlay() {
-  int left = FrameMargin;
-  int top = FrameMargin;
-  int right = WindowWidth - FrameMargin;
-  int bottom = WindowHeight - FrameMargin;
-  setrgbcolor(24, 28, 42);
-  bar(0, 0, WindowWidth, WindowHeight);
-  setrgbcolor(40, 48, 70);
-  bar(left - 6, top - 6, right + 6, bottom + 6);
-  setrgbcolor(12, 16, 26);
-  bar(left - 2, top - 2, right + 2, bottom + 2);
-  setrgbcolor(18, 28, 42);
-  bar(left, top, right, bottom);
-  setrgbcolor(64, 84, 120);
-  drawline(left, top, right, top);
-  drawline(right, top, right, bottom);
-  drawline(right, bottom, left, bottom);
-  drawline(left, bottom, left, top);
-  setrgbcolor(110, 130, 170);
-  drawline(left, top, left + 120, top - 36);
-  drawline(right, top, right + 120, top - 36);
-  drawline(right, bottom, right + 120, bottom + 36);
-  drawline(left, bottom, left + 120, bottom + 36);
+void setupLighting() {
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLEnable("lighting");
+    GLEnable("light0");
+    GLEnable("color_material");
+    GLEnable("normalize");
+
+    GLShadeModel("smooth");
+    GLColorMaterial("front", "ambient_and_diffuse");
+
+    float ambient = AmbientLevel;
+    GLLightfv("light0", "ambient", ambient, ambient, ambient, 1.0);
+    GLLightfv("light0", "diffuse", 0.90, 0.92, 0.95, 1.0);
+    GLLightfv("light0", "specular", 0.85, 0.90, 0.95, 1.0);
+
+    GLMaterialfv("front", "specular", 0.55, 0.60, 0.70, 1.0);
+    GLMaterialf("front", "shininess", 42.0);
+}
+
+void drawUnitSphere() {
+    int stack = 0;
+    while (stack < SphereStacks) {
+        float phi0 = -Pi * 0.5 + Pi * stack / SphereStacks;
+        float phi1 = -Pi * 0.5 + Pi * (stack + 1) / SphereStacks;
+        float cosPhi0 = cos(phi0);
+        float sinPhi0 = sin(phi0);
+        float cosPhi1 = cos(phi1);
+        float sinPhi1 = sin(phi1);
+
+        GLBegin("triangle_strip");
+        int slice = 0;
+        while (slice <= SphereSlices) {
+            float theta = 2.0 * Pi * slice / SphereSlices;
+            float cosTheta = cos(theta);
+            float sinTheta = sin(theta);
+
+            float n0x = cosPhi0 * cosTheta;
+            float n0y = sinPhi0;
+            float n0z = cosPhi0 * sinTheta;
+            float n1x = cosPhi1 * cosTheta;
+            float n1y = sinPhi1;
+            float n1z = cosPhi1 * sinTheta;
+
+            GLNormal3f(n1x, n1y, n1z);
+            GLVertex3f(n1x, n1y, n1z);
+
+            GLNormal3f(n0x, n0y, n0z);
+            GLVertex3f(n0x, n0y, n0z);
+
+            slice = slice + 1;
+        }
+        GLEnd();
+        stack = stack + 1;
+    }
+}
+
+void drawBall(int index) {
+    float baseR = colorR[index] / 255.0;
+    float baseG = colorG[index] / 255.0;
+    float baseB = colorB[index] / 255.0;
+
+    GLPushMatrix();
+    GLTranslatef(posX[index], posY[index], posZ[index]);
+    GLScalef(radii[index], radii[index], radii[index]);
+    GLColor3f(baseR, baseG, baseB);
+    drawUnitSphere();
+    GLPopMatrix();
 }
 
 void drawBalls() {
-  int i = 0;
-  int left = FrameMargin;
-  int top = FrameMargin;
-  int right = WindowWidth - FrameMargin;
-  int bottom = WindowHeight - FrameMargin;
-  while (i < NumBalls) {
-    int ballIndex = drawOrder[i];
-    float shade = depthShade[ballIndex];
-    if (shade >= 0.0) {
-      int sx = FrameMargin + trunc(screenX[ballIndex]);
-      int sy = FrameMargin + trunc(screenY[ballIndex]);
-      int sr = trunc(screenRadius[ballIndex]);
-      if (sr < 1) sr = 1;
-      if (sx >= left - sr && sx <= right + sr && sy >= top - sr && sy <= bottom + sr) {
-        float light = lightIntensity[ballIndex];
-        float rim = rimIntensity[ballIndex];
-        float spec = highlightStrength[ballIndex];
-        float baseFactor = clampFloat(0.35 + 0.45 * shade + 0.35 * light, 0.25, 1.25);
-        float rimFactor = clampFloat(baseFactor * (0.55 + 0.45 * rim), 0.20, 1.20);
-        float midFactor = clampFloat(baseFactor * 0.92, 0.20, 1.10);
-        float coreFactor = clampFloat(baseFactor * (1.05 + light * 0.25), 0.30, 1.45);
-        float highlightFactor = clampFloat(0.70 + spec * 0.50, 0.70, 1.45);
-        float highlightLift = spec * 160.0;
-
-        int outerR = shadeComponent(colorR[ballIndex], rimFactor, -18.0);
-        int outerG = shadeComponent(colorG[ballIndex], rimFactor, -18.0);
-        int outerB = shadeComponent(colorB[ballIndex], rimFactor, -20.0);
-        setrgbcolor(outerR, outerG, outerB);
-        fillcircle(sx, sy, sr);
-
-        int midRadius = trunc(sr * 0.85);
-        if (midRadius > 0) {
-          int midR = shadeComponent(colorR[ballIndex], midFactor, 4.0);
-          int midG = shadeComponent(colorG[ballIndex], midFactor, 4.0);
-          int midB = shadeComponent(colorB[ballIndex], midFactor, 4.0);
-          setrgbcolor(midR, midG, midB);
-          fillcircle(sx, sy, midRadius);
-        }
-
-        float offsetX = highlightX[ballIndex] - screenX[ballIndex];
-        float offsetY = highlightY[ballIndex] - screenY[ballIndex];
-        int coreX = sx + trunc(offsetX * 0.35);
-        int coreY = sy + trunc(offsetY * 0.35);
-        int coreRadius = trunc(sr * 0.68);
-        if (coreRadius > 0) {
-          int coreR = shadeComponent(colorR[ballIndex], coreFactor, 18.0 * light);
-          int coreG = shadeComponent(colorG[ballIndex], coreFactor, 18.0 * light);
-          int coreB = shadeComponent(colorB[ballIndex], coreFactor, 22.0 * light);
-          setrgbcolor(coreR, coreG, coreB);
-          fillcircle(coreX, coreY, coreRadius);
-        }
-
-        int highlightScreenX = FrameMargin + trunc(highlightX[ballIndex]);
-        int highlightScreenY = FrameMargin + trunc(highlightY[ballIndex]);
-        int highlightRadiusPixels = trunc(highlightRadius[ballIndex]);
-        if (highlightRadiusPixels < 1) highlightRadiusPixels = 1;
-
-        int highlightR = shadeComponent(colorR[ballIndex], highlightFactor,
-                                        highlightLift + 70.0);
-        int highlightG = shadeComponent(colorG[ballIndex], highlightFactor,
-                                        highlightLift + 70.0);
-        int highlightB = shadeComponent(colorB[ballIndex], highlightFactor,
-                                        highlightLift + 90.0);
-        setrgbcolor(highlightR, highlightG, highlightB);
-        fillcircle(highlightScreenX, highlightScreenY, highlightRadiusPixels);
-
-        int rimR = shadeComponent(colorR[ballIndex], baseFactor, 24.0);
-        int rimG = shadeComponent(colorG[ballIndex], baseFactor, 24.0);
-        int rimB = shadeComponent(colorB[ballIndex], baseFactor, 26.0);
-        setrgbcolor(rimR, rimG, rimB);
-        drawcircle(sx, sy, sr);
-
-        int sparkleRadius = highlightRadiusPixels - 1;
-        if (sparkleRadius < 1) sparkleRadius = 1;
-        setrgbcolor(235, 240, 250);
-        drawcircle(highlightScreenX, highlightScreenY, sparkleRadius);
-      }
+    int i = 0;
+    while (i < NumBalls) {
+        drawBall(i);
+        i = i + 1;
     }
-    i = i + 1;
-  }
 }
 
-void drawHud() {
-  setrgbcolor(200, 215, 235);
-  int textX = FrameMargin + 12;
-  int hudTop = FrameMargin + 24;
-  string label = "Multi Bouncing Balls 3D - Press Q to quit, Space to pause";
-  outtextxy(textX, hudTop, label);
-  string timeLabel = "Elapsed: " + formatfloat(elapsedSeconds, 1) + "s";
-  outtextxy(textX, FrameMargin + 48, timeLabel);
-}
+void drawGlassBox() {
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    float frontZ = -12.0;
+    float backZ = -BoxDepth;
 
-void updateSimulation(float deltaTime) {
-  if (paused) return;
-  float screenWidth = WindowWidth - FrameMargin * 2;
-  float screenHeight = WindowHeight - FrameMargin * 2;
-  BouncingBalls3DStepAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
-    WallElasticity, MinSpeed, MaxSpeed, VelocityDrag, CameraDistance,
-    screenWidth, screenHeight, LightDirX, LightDirY, LightDirZ,
-    posX, posY, posZ, velX, velY, velZ, radii,
-    screenX, screenY, screenRadius, depthShade, lightIntensity,
-    rimIntensity, highlightX, highlightY, highlightRadius, highlightStrength);
-  sortDrawOrderByDepth();
-  elapsedSeconds = elapsedSeconds + deltaTime;
-}
+    GLDisable("lighting");
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
 
-void handleInput() {
-  if (keypressed()) {
-    char key = readkey();
-    if (key == 'q' || key == 'Q') {
-      quit = true;
-    } else if (key == ' ') {
-      paused = !paused;
-    }
-  }
+    GLColor4f(0.10, 0.18, 0.28, 0.45);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLColor4f(0.08, 0.12, 0.20, 0.35);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    int gridSteps = 12;
+    int i = 0;
+    GLColor4f(0.18, 0.26, 0.38, 0.30);
+    GLBegin("lines");
+        while (i <= gridSteps) {
+            float t = (float)i / gridSteps;
+            float x = -halfWidth + t * BoxWidth;
+            GLVertex3f(x, -halfHeight + 0.2, frontZ);
+            GLVertex3f(x, -halfHeight + 0.2, backZ);
+            float z = frontZ + t * (backZ - frontZ);
+            GLVertex3f(-halfWidth, -halfHeight + 0.2, z);
+            GLVertex3f(halfWidth, -halfHeight + 0.2, z);
+            i = i + 1;
+        }
+    GLEnd();
+
+    GLDisable("blend");
+    GLColor3f(0.32, 0.46, 0.66);
+
+    GLBegin("line_loop");
+        GLVertex3f(-halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+    GLEnd();
+
+    GLBegin("line_loop");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLBegin("lines");
+        GLVertex3f(-halfWidth, halfHeight, frontZ);
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLEnable("lighting");
 }
 
 void drawScene() {
-  drawFrameOverlay();
-  drawBalls();
-  drawHud();
-  updatescreen();
+    GLClearColor(0.05, 0.07, 0.12, 1.0);
+    GLClear();
+
+    GLMatrixMode("projection");
+    GLLoadIdentity();
+    float aspect = WindowWidth * 1.0 / WindowHeight;
+    GLPerspective(55.0, aspect, 24.0, 8000.0);
+
+    GLMatrixMode("modelview");
+    GLLoadIdentity();
+    GLTranslatef(0.0, 0.0, -CameraDistance);
+    GLRotatef(CameraPitch, 1.0, 0.0, 0.0);
+    GLRotatef(cameraYaw, 0.0, 1.0, 0.0);
+
+    GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
+
+    drawGlassBox();
+    drawBalls();
+
+    GLSwapWindow();
+}
+
+void updateSimulation(float deltaTime) {
+    if (paused) return;
+    BouncingBalls3DStep(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
+        WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
+        CameraDistance, WindowWidth, WindowHeight,
+        posX, posY, posZ, velX, velY, velZ, radii,
+        screenX, screenY, screenRadius, depthShade);
+    elapsedSeconds = elapsedSeconds + deltaTime;
+    cameraYaw = cameraYaw + deltaTime * CameraOrbitSpeed;
+    if (cameraYaw >= 360.0) {
+        cameraYaw = cameraYaw - 360.0;
+    }
+}
+
+void handleInput() {
+    if (keypressed()) {
+        char key = readkey();
+        if (key == 'q' || key == 'Q') {
+            quit = true;
+        } else if (key == ' ') {
+            paused = !paused;
+        }
+    }
 }
 
 void initApp() {
-  initgraph(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D");
-  string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
-  string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
-  string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
-  if (fileexists(systemFontPath)) {
-    inittextsystem(systemFontPath, 18);
-  } else if (fileexists(repoFontPath1)) {
-    inittextsystem(repoFontPath1, 18);
-  } else {
-    inittextsystem(repoFontPath2, 18);
-  }
-  randomize();
-  FrameDelay = trunc(1000 / TargetFPS);
-  quit = false;
-  paused = false;
-  elapsedSeconds = 0.0;
-  initBalls();
+    InitGraph3D(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D", 24, 8);
+    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLSetSwapInterval(1);
+    setupLighting();
+
+    randomize();
+    initBalls();
+
+    FrameDelay = trunc(1000 / TargetFPS);
+    quit = false;
+    paused = false;
+    elapsedSeconds = 0.0;
+    cameraYaw = 0.0;
 }
 
 void run() {
-  initApp();
-  writeln("Multi Bouncing Balls 3D... Press Q to quit.");
-  float deltaTime = 1.0 / TargetFPS;
-  while (!quit) {
-    handleInput();
-    updateSimulation(deltaTime);
-    drawScene();
-    graphloop(FrameDelay);
-  }
-  closegraph();
-  writeln("Demo finished.");
+    initApp();
+    writeln("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause.");
+    float deltaTime = 1.0 / TargetFPS;
+    while (!quit) {
+        handleInput();
+        updateSimulation(deltaTime);
+        drawScene();
+        GraphLoop(FrameDelay);
+    }
+    CloseGraph3D();
+    writeln("Demo finished.");
 }
 
 run();

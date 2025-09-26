@@ -507,27 +507,20 @@ class LandscapeDemo {
       }
 
       if (!underwater) {
-        float nx = my.vertexNormalX[idx];
-        float ny = my.vertexNormalY[idx];
-        float nz = my.vertexNormalZ[idx];
-        float sunDot = nx * my.sunDirX + ny * my.sunDirY + nz * my.sunDirZ;
-        if (sunDot < 0.0) sunDot = 0.0;
-        float slope = 1.0 - ny;
+        float slope = 1.0 - my.vertexNormalY[idx];
         if (slope < 0.0) slope = 0.0;
         if (slope > 1.0) slope = 1.0;
-        float shade = (0.38 + sunDot * 0.62) * (1.0 - 0.28 * slope);
-        if (shade < 0.25) shade = 0.25;
-        if (shade > 1.1) shade = 1.1;
-        r = r * shade;
-        g = g * shade;
-        b = b * (shade + 0.05 * sunDot);
         float cool = my.saturate((0.58 - t) * 3.5);
-        g = g + cool * 0.05;
-        b = b + cool * 0.07;
+        g = g + cool * 0.04;
+        b = b + cool * 0.06;
         float alpine = my.saturate((t - 0.68) * 2.2);
-        r = my.lerp(r, r * 0.9, alpine * 0.4);
-        g = my.lerp(g, g * 0.88, alpine * 0.3);
-        b = my.lerp(b, b * 1.08, alpine * 0.3);
+        r = my.lerp(r, r * 0.92, alpine * 0.3);
+        g = my.lerp(g, g * 0.90, alpine * 0.26);
+        b = my.lerp(b, b * 1.05, alpine * 0.24);
+        float slopeTint = slope * 0.6;
+        r = my.lerp(r, r * 0.78, slopeTint);
+        g = my.lerp(g, g * 0.74, slopeTint);
+        b = my.lerp(b, b * 0.86, slopeTint);
       }
 
       r = my.saturate(r);
@@ -553,7 +546,7 @@ class LandscapeDemo {
     int segments = 48;
 
     GLBegin("triangle_fan");
-    GLColor3f(1.0, 0.90, 0.58);
+    GLColor4f(1.0, 0.90, 0.58, 0.65);
     GLVertex3f(sunX, sunY, sunZ);
     int i = 0;
     while (i <= segments) {
@@ -563,14 +556,14 @@ class LandscapeDemo {
       float offsetX = rightX * (cosA * SunHaloRadius) + upX * (sinA * SunHaloRadius);
       float offsetY = rightY * (cosA * SunHaloRadius) + upY * (sinA * SunHaloRadius);
       float offsetZ = rightZ * (cosA * SunHaloRadius) + upZ * (sinA * SunHaloRadius);
-      GLColor3f(1.0, 0.78, 0.36);
+      GLColor4f(1.0, 0.78, 0.36, 0.0);
       GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
       i = i + 1;
     }
     GLEnd();
 
     GLBegin("triangle_fan");
-    GLColor3f(1.0, 0.98, 0.86);
+    GLColor4f(1.0, 0.98, 0.86, 0.9);
     GLVertex3f(sunX, sunY, sunZ);
     i = 0;
     while (i <= segments) {
@@ -580,7 +573,7 @@ class LandscapeDemo {
       float offsetX = rightX * (cosA * SunCoreRadius) + upX * (sinA * SunCoreRadius);
       float offsetY = rightY * (cosA * SunCoreRadius) + upY * (sinA * SunCoreRadius);
       float offsetZ = rightZ * (cosA * SunCoreRadius) + upZ * (sinA * SunCoreRadius);
-      GLColor3f(1.0, 0.94, 0.72);
+      GLColor4f(1.0, 0.94, 0.72, 0.35);
       GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
       i = i + 1;
     }
@@ -603,7 +596,7 @@ class LandscapeDemo {
     float highlight = my.saturate(0.86 + brightness * 0.18);
     float rim = my.saturate(0.80 + brightness * 0.16);
     GLBegin("triangle_fan");
-    GLColor3f(highlight, highlight, highlight + 0.05);
+    GLColor4f(highlight, highlight, highlight + 0.05, 0.75);
     GLVertex3f(centerX, centerY, centerZ);
     int i = 0;
     while (i <= segments) {
@@ -613,7 +606,7 @@ class LandscapeDemo {
       float px = centerX + rightX * (cosA * radiusX) + upX * (sinA * radiusY);
       float py = centerY + rightY * (cosA * radiusX) + upY * (sinA * radiusY);
       float pz = centerZ + rightZ * (cosA * radiusX) + upZ * (sinA * radiusY);
-      GLColor3f(rim, rim, rim + 0.03);
+      GLColor4f(rim, rim, rim + 0.03, 0.0);
       GLVertex3f(px, py, pz);
       i = i + 1;
     }
@@ -741,12 +734,31 @@ class LandscapeDemo {
     my.drawCloudLayer(timeSeconds, rightX, rightY, rightZ, upX, upY, upZ);
   }
 
+  void setupLighting() {
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLEnable("lighting");
+    GLEnable("light0");
+    GLEnable("color_material");
+    GLEnable("normalize");
+    GLShadeModel("smooth");
+    GLColorMaterial("front", "ambient_and_diffuse");
+
+    GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
+    GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
+    GLLightfv("light0", "specular", 0.55, 0.60, 0.70, 1.0);
+
+    GLMaterialfv("front", "specular", 0.32, 0.34, 0.38, 1.0);
+    GLMaterialf("front", "shininess", 26.0);
+
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+  }
+
   void initGraphics() {
     InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
     GLViewport(0, 0, WindowWidth, WindowHeight);
-    GLClearDepth(1.0);
-    GLDepthTest(true);
     GLSetSwapInterval(1);
+    my.setupLighting();
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
     if (my.useFastTerrain ||
         my.useFastWater ||
@@ -834,8 +846,14 @@ class LandscapeDemo {
         int idx0 = rowIndex + x;
         int idx1 = nextRowIndex + x;
         float worldX = my.worldXCoords[x];
+        GLNormal3f(my.vertexNormalX[idx0],
+                   my.vertexNormalY[idx0],
+                   my.vertexNormalZ[idx0]);
         GLColor3f(my.vertexColorR[idx0], my.vertexColorG[idx0], my.vertexColorB[idx0]);
         GLVertex3f(worldX, my.vertexHeights[idx0], worldZ0);
+        GLNormal3f(my.vertexNormalX[idx1],
+                   my.vertexNormalY[idx1],
+                   my.vertexNormalZ[idx1]);
         GLColor3f(my.vertexColorR[idx1], my.vertexColorG[idx1], my.vertexColorB[idx1]);
         GLVertex3f(worldX, my.vertexHeights[idx1], worldZ1);
         x = x + 1;
@@ -872,11 +890,17 @@ class LandscapeDemo {
     r = my.saturate(r);
     g = my.saturate(g);
     b = my.saturate(b);
-    GLColor3f(r, g, b);
+    float alpha = 0.35 + 0.30 * shallow + sparkle * 0.4;
+    if (alpha < 0.18) alpha = 0.18;
+    if (alpha > 0.82) alpha = 0.82;
+    GLColor4f(r, g, b, alpha);
+    GLNormal3f(0.0, 1.0, 0.0);
     GLVertex3f(worldX, surfaceHeight, worldZ);
   }
 
   void drawWater(float timeSeconds) {
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
     if (my.useFastWater) {
       landscapedrawwater(my.vertexHeights,
                          my.worldXCoords,
@@ -888,6 +912,7 @@ class LandscapeDemo {
                          timeSeconds,
                          TerrainSize,
                          VertexStride);
+      GLDisable("blend");
       return;
     }
     float allowance = 0.18;
@@ -929,6 +954,7 @@ class LandscapeDemo {
       z = z + 1;
     }
     GLEnd();
+    GLDisable("blend");
   }
 
   void updateCamera(float dt) {
@@ -1013,9 +1039,15 @@ class LandscapeDemo {
 
     GLMatrixMode("modelview");
     GLLoadIdentity();
+    GLLightfv("light0", "position", my.sunDirX, my.sunDirY, my.sunDirZ, 0.0);
     GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
     GLRotatef(-my.yaw, 0.0, 1.0, 0.0);
+    GLDisable("lighting");
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
     my.drawSky(my.elapsedSeconds);
+    GLDisable("blend");
+    GLEnable("lighting");
     float half = TerrainSize * 0.5;
     float worldX = (my.camX - half) * TileScale;
     float worldZ = (my.camZ - half) * TileScale;
