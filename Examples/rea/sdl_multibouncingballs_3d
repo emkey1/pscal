@@ -51,12 +51,6 @@ float randomUnit() {
     return random(10000) / 10000.0;
 }
 
-float clampFloat01(float value) {
-    if (value < 0.0) return 0.0;
-    if (value > 1.0) return 1.0;
-    return value;
-}
-
 class Vec3 {
     float x;
     float y;
@@ -106,15 +100,6 @@ class ColorRGB {
         myself.r = myself.r + other.r;
         myself.g = myself.g + other.g;
         myself.b = myself.b + other.b;
-    }
-
-    void clamp01() {
-        if (myself.r < 0.0) myself.r = 0.0;
-        if (myself.r > 1.0) myself.r = 1.0;
-        if (myself.g < 0.0) myself.g = 0.0;
-        if (myself.g > 1.0) myself.g = 1.0;
-        if (myself.b < 0.0) myself.b = 0.0;
-        if (myself.b > 1.0) myself.b = 1.0;
     }
 }
 
@@ -509,30 +494,20 @@ class BallSystem extends Renderable {
         float baseR = myself.colorR[index] / 255.0;
         float baseG = myself.colorG[index] / 255.0;
         float baseB = myself.colorB[index] / 255.0;
-        float lit = clampFloat01(myself.lightIntensity[index]);
-        float rim = clampFloat01(myself.rimIntensity[index]);
-        float highlight = clampFloat01(myself.highlightStrength[index]);
-        float depth = myself.depthShade[index];
-        if (depth < 0.0) depth = 0.5;
-        depth = clampFloat01(depth);
+        float lit = myself.lightIntensity[index];
+        float rim = myself.rimIntensity[index];
+        float highlight = myself.highlightStrength[index];
 
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
-        float ambientFactor = 0.32 + 0.36 * depth;
-        color.scale(ambientFactor);
+        color.scale(0.28 + 0.62 * lit);
 
-        ColorRGB diffuseBoost = new ColorRGB(baseR, baseG, baseB);
-        diffuseBoost.scale(0.42 * lit);
-        color.add(diffuseBoost);
-
-        ColorRGB rimColor = new ColorRGB(0.18, 0.22, 0.30);
-        rimColor.scale(rim * 0.9);
+        ColorRGB rimColor = new ColorRGB(0.08, 0.10, 0.16);
+        rimColor.scale(rim * 1.75);
         color.add(rimColor);
 
-        ColorRGB specColor = new ColorRGB(0.92, 0.95, 0.99);
-        specColor.scale(highlight * 0.75);
+        ColorRGB specColor = new ColorRGB(0.90, 0.92, 0.95);
+        specColor.scale(highlight * 0.85);
         color.add(specColor);
-
-        color.clamp01();
 
         GLPushMatrix();
         GLTranslatef(myself.posX[index], myself.posY[index], myself.posZ[index]);
@@ -544,12 +519,18 @@ class BallSystem extends Renderable {
     }
 
     void drawSpecularHighlight(int index) {
-        float radiusScale = myself.highlightRadius[index];
+        float sr = myself.screenRadius[index];
+        if (sr <= 0.001) return;
+
+        float radiusScale = myself.highlightRadius[index] / sr;
         if (radiusScale <= 0.001) return;
+
         float strength = myself.highlightStrength[index];
         if (strength <= 0.001) return;
-        float hx = myself.highlightX[index];
-        float hy = myself.highlightY[index];
+
+        float hx = (myself.highlightX[index] - myself.screenX[index]) / sr;
+        float hy = (myself.highlightY[index] - myself.screenY[index]) / sr;
+
         GLDisable("lighting");
         GLEnable("blend");
         GLBlendFunc("src_alpha", "one_minus_src_alpha");
