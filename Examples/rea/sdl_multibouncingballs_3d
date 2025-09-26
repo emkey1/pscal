@@ -18,8 +18,17 @@ float MaxSpeed = 360.0;
 const float VelocityDrag = 0.995;
 
 float CameraDistance = 1050.0;
-const float CameraPitch = -12.0;
+const float InitialCameraPitch = -12.0;
 const float CameraOrbitSpeed = 85.0;
+const float ManualYawSpeed = 160.0;
+const float ManualPitchSpeed = 90.0;
+const float MinCameraPitch = -60.0;
+const float MaxCameraPitch = 25.0;
+
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
 
 const int SphereStacks = 20;
 const int SphereSlices = 36;
@@ -51,6 +60,8 @@ int FrameDelay;
 float DeltaTime;
 float elapsedSeconds;
 float cameraYaw;
+float cameraPitch;
+float cameraYawVelocity;
 
 float randomUnit() {
     return random(10000) / 10000.0;
@@ -178,7 +189,7 @@ void drawGlassBox() {
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
 
-    GLColor4f(0.10, 0.18, 0.28, 0.45);
+    GLColor4f(0.10, 0.18, 0.28, 0.22);
     GLBegin("quads");
         GLVertex3f(-halfWidth, halfHeight, backZ);
         GLVertex3f(halfWidth, halfHeight, backZ);
@@ -253,7 +264,7 @@ void drawScene() {
     GLMatrixMode("modelview");
     GLLoadIdentity();
     GLTranslatef(0.0, 0.0, -CameraDistance);
-    GLRotatef(CameraPitch, 1.0, 0.0, 0.0);
+    GLRotatef(cameraPitch, 1.0, 0.0, 0.0);
     GLRotatef(cameraYaw, 0.0, 1.0, 0.0);
 
     GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
@@ -272,13 +283,39 @@ void updateSimulation(float deltaTime) {
         posX, posY, posZ, velX, velY, velZ, radii,
         screenX, screenY, screenRadius, depthShade);
     elapsedSeconds = elapsedSeconds + deltaTime;
-    cameraYaw = cameraYaw + deltaTime * CameraOrbitSpeed;
+    cameraYaw = cameraYaw + deltaTime * cameraYawVelocity;
     if (cameraYaw >= 360.0) {
         cameraYaw = cameraYaw - 360.0;
+    }
+    if (cameraYaw < 0.0) {
+        cameraYaw = cameraYaw + 360.0;
     }
 }
 
 void handleInput() {
+    bool leftDown = IsKeyDown(ScanCodeLeft);
+    bool rightDown = IsKeyDown(ScanCodeRight);
+    bool upDown = IsKeyDown(ScanCodeUp);
+    bool downDown = IsKeyDown(ScanCodeDown);
+
+    float yawInput = 0.0;
+    if (leftDown) yawInput = yawInput - 1.0;
+    if (rightDown) yawInput = yawInput + 1.0;
+    if (yawInput == 0.0) {
+        cameraYawVelocity = CameraOrbitSpeed;
+    } else {
+        cameraYawVelocity = yawInput * ManualYawSpeed;
+    }
+
+    if (upDown && !downDown) {
+        cameraPitch = cameraPitch + DeltaTime * ManualPitchSpeed;
+    } else if (downDown && !upDown) {
+        cameraPitch = cameraPitch - DeltaTime * ManualPitchSpeed;
+    }
+
+    if (cameraPitch > MaxCameraPitch) cameraPitch = MaxCameraPitch;
+    if (cameraPitch < MinCameraPitch) cameraPitch = MinCameraPitch;
+
     if (keypressed()) {
         char key = readkey();
         if (key == 'q' || key == 'Q') {
@@ -312,6 +349,8 @@ void initApp() {
     paused = false;
     elapsedSeconds = 0.0;
     cameraYaw = 0.0;
+    cameraPitch = InitialCameraPitch;
+    cameraYawVelocity = CameraOrbitSpeed;
 }
 
 void run() {
