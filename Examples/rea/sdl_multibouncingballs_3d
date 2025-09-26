@@ -3,21 +3,21 @@
 // This version uses the fixed-function pipeline (lighting, materials,
 // blending) instead of the 2D circle impostor trick.
 
-const int WindowWidth = 800;
-const int WindowHeight = 500;
+const int WindowWidth = 1024;
+const int WindowHeight = 768;
 
-float TargetFPS = 60.0;
+float TargetFPS = 90.0;
 
-const int NumBalls = 8;
+const int NumBalls = 9;
 const float BoxWidth = 720.0;
 const float BoxHeight = 420.0;
 const float BoxDepth = 300.0;
 const float WallElasticity = 1.08;
 float MinSpeed = 90.0;
-float MaxSpeed = 360.0;
+float MaxSpeed = 560.0;
 const float VelocityDrag = 0.995;
 
-float CameraDistance = 1050.0;
+float CameraDistance = 1850.0;
 const float InitialCameraPitch = -12.0;
 const float CameraOrbitSpeed = 85.0;
 const float ManualYawSpeed = 160.0;
@@ -34,7 +34,7 @@ const int SphereStacks = 20;
 const int SphereSlices = 36;
 const float Pi = 3.1415926535;
 
-const int NumStars = 261;
+const int NumStars = 361;
 const float StarInnerRadiusScale = 1.45;
 const float StarOuterRadiusScale = 2.85;
 const float LightStarSize = 22.0;
