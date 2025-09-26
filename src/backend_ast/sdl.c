@@ -79,9 +79,13 @@ static void handleSysWmEvent(const SDL_Event* event) {
         return;
     }
 
-    Display* display = msg->msg.x11.display;
     XEvent* xevent = &msg->msg.x11.event;
-    if (!display || !xevent || xevent->type != ClientMessage) {
+    if (!xevent || xevent->type != ClientMessage) {
+        return;
+    }
+
+    Display* display = xevent->xclient.display;
+    if (!display) {
         return;
     }
 
