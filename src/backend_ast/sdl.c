@@ -1475,7 +1475,13 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         Uint32 targetTime = startTime + (Uint32)ms;
         SDL_Event event;
 
-        while (SDL_GetTicks() < targetTime) {
+        /*
+         * Always process at least one batch of window events.  Some window
+         * managers (e.g. GNOME on Linux) show an "application is not
+         * responding" dialog if we miss several compositor pings, which
+         * happens whenever the frame takes longer than the requested delay.
+         */
+        for (;;) {
             SDL_PumpEvents();
 
             while (SDL_PollEvent(&event)) {
@@ -1503,7 +1509,19 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 return makeVoid();
             }
 
-            SDL_Delay(1); // Prevent 100% CPU usage
+            Uint32 now = SDL_GetTicks();
+            if (now >= targetTime) {
+                break;
+            }
+
+            Uint32 remaining = targetTime - now;
+            if (remaining > 10) {
+                remaining = 10;
+            }
+
+            if (remaining > 0) {
+                SDL_Delay(remaining);
+            }
         }
     }
     return makeVoid();
