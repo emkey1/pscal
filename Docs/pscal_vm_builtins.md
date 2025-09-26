@@ -227,6 +227,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | glfrustum | (left: Real, right: Real, bottom: Real, top: Real, near: Real, far: Real) | void | Configure a perspective frustum using `glFrustum`. |
 | glperspective | (fovY: Real, aspect: Real, near: Real, far: Real) | void | Convenience helper that computes a symmetric frustum from a field of view and aspect ratio. |
 | glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
+| glishardwareaccelerated | () | Boolean | Returns `true` when the current OpenGL context reports hardware acceleration via `SDL_GL_ACCELERATED_VISUAL`. |
 | glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
 | gltranslatef | (x: Real, y: Real, z: Real) | void | Apply a translation to the current matrix. |
 | glvertex3f | (x: Real, y: Real, z: Real) | void | Emit a vertex for the active primitive. |
