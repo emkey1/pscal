@@ -2780,7 +2780,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !defer_vtable) {
+            if (hasVTable) {
+                if (defer_vtable) {
+                    // Constructors executed during global initialisation may immediately
+                    // invoke virtual methods (for example, via `myself.setupLighting()`),
+                    // so make sure the vtable pointer is installed right away even when
+                    // we plan to refresh it later once all vtables have been emitted.
+                }
                 // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
@@ -5400,7 +5406,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !defer_vtable) {
+            if (hasVTable) {
+                if (defer_vtable) {
+                    // See compileLValue(): global initialisers still require the vtable
+                    // immediately so constructors can dispatch virtual calls safely.
+                }
                 // Store class vtable pointer into hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
