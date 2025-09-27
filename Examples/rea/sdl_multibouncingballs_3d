@@ -487,7 +487,10 @@ class BallSystem extends Renderable {
         // the per-ball geometry. Some drivers keep `GL_LIGHTING` disabled after
         // the blended highlight overlay runs, which caused the sphere mesh to
         // render fully black. Reset the material tracking and disable texturing
-        // so the vertex colors coming from the material show up reliably.
+        // so the vertex colors coming from the material show up reliably. This
+        // also mirrors the older working sample by explicitly disabling
+        // blending before the sphere pass so driver-specific blending state
+        // cannot wash out the lit geometry.
         GLEnable("lighting");
         GLEnable("light0");
         GLEnable("color_material");
@@ -495,6 +498,7 @@ class BallSystem extends Renderable {
         GLShadeModel("smooth");
         GLEnable("normalize");
         GLDisable("texture_2d");
+        GLDisable("blend");
 
         int i = 0;
         while (i < NumBalls) {
@@ -532,7 +536,9 @@ class BallSystem extends Renderable {
         GLPushMatrix();
         GLTranslatef(myself.posX[index], myself.posY[index], myself.posZ[index]);
         GLScalef(myself.radius[index], myself.radius[index], myself.radius[index]);
-        GLMaterialfv("front", "ambient_and_diffuse", color.r, color.g, color.b, 1.0);
+        // Match the original immediate-mode sample: drive the material through
+        // GL_COLOR_MATERIAL so the diffuse color sticks even on drivers that
+        // ignore GLMaterialfv when color tracking is enabled.
         GLColor4f(color.r, color.g, color.b, 1.0);
         myself.mesh.drawUnit();
         myself.drawSpecularHighlight(index);
