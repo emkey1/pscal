@@ -60,7 +60,7 @@ case $BUILD_DIR in
     *)
         BIN_SRC=$REPO_ROOT/$BUILD_DIR
         ;;
-fi
+esac
 
 if ! mkdir -p "$PREFIX" 2>/dev/null; then
     echo "Error: unable to create or access $PREFIX" >&2
@@ -111,6 +111,7 @@ copy_dir_contents "$REPO_ROOT/lib/rea" "$PREFIX/lib/rea" "Rea import library"
 copy_dir_contents "$REPO_ROOT/lib/misc" "$PS_PREFIX/misc" "miscellaneous library"
 copy_dir_contents "$REPO_ROOT/fonts" "$PS_PREFIX/fonts" "fonts"
 copy_dir_contents "$REPO_ROOT/etc" "$PS_PREFIX/etc" "configuration files"
+copy_dir_contents "$REPO_ROOT/etc/tests" "$PS_PREFIX/etc/tests" "test configuration files"
 copy_dir_contents "$REPO_ROOT/lib/misc/simple_web_server/htdocs" "$PS_PREFIX/misc/htdocs" "web server htdocs"
 
 # Ensure expected binaries are executable when installed
