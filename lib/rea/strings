@@ -1,0 +1,242 @@
+module Strings {
+
+    export bool contains(str haystack, str needle) {
+        if (needle == "") {
+            return true;
+        }
+        if (haystack == "") {
+            return false;
+        }
+        return pos(needle, haystack) > 0;
+    }
+
+    export bool startsWith(str value, str prefix) {
+        int prefixLen = length(prefix);
+        if (prefixLen == 0) {
+            return true;
+        }
+        if (length(value) < prefixLen) {
+            return false;
+        }
+        int i = 1;
+        while (i <= prefixLen) {
+            if (value[i] != prefix[i]) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    export bool endsWith(str value, str suffix) {
+        int suffixLen = length(suffix);
+        if (suffixLen == 0) {
+            return true;
+        }
+        int valueLen = length(value);
+        if (valueLen < suffixLen) {
+            return false;
+        }
+        int offset = valueLen - suffixLen;
+        int i = 1;
+        while (i <= suffixLen) {
+            if (value[offset + i] != suffix[i]) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    export str trimLeft(str value) {
+        int left = 1;
+        int len = length(value);
+        while (left <= len) {
+            char ch = value[left];
+            if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+                break;
+            }
+            left = left + 1;
+        }
+        if (left > len) {
+            return "";
+        }
+        int newLen = len - left + 1;
+        str result;
+        setlength(result, newLen);
+        int i = 0;
+        while (i < newLen) {
+            result[i + 1] = value[left + i];
+            i = i + 1;
+        }
+        return result;
+    }
+
+    export str trimRight(str value) {
+        int right = length(value);
+        while (right >= 1) {
+            char ch = value[right];
+            if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+                break;
+            }
+            right = right - 1;
+        }
+        if (right <= 0) {
+            return "";
+        }
+        str result;
+        setlength(result, right);
+        int i = 1;
+        while (i <= right) {
+            result[i] = value[i];
+            i = i + 1;
+        }
+        return result;
+    }
+
+    export str trim(str value) {
+        return trimRight(trimLeft(value));
+    }
+
+    char resolvePadChar(str padding) {
+        if (padding == "") {
+            return ' ';
+        }
+        return padding[1];
+    }
+
+    export str padLeft(str value, int width, str padding) {
+        int valueLen = length(value);
+        if (width <= valueLen) {
+            return value;
+        }
+        int padLen = width - valueLen;
+        char padChar = resolvePadChar(padding);
+        str result;
+        setlength(result, width);
+        int i = 1;
+        while (i <= padLen) {
+            result[i] = padChar;
+            i = i + 1;
+        }
+        int j = 1;
+        while (j <= valueLen) {
+            result[padLen + j] = value[j];
+            j = j + 1;
+        }
+        return result;
+    }
+
+    export str padRight(str value, int width, str padding) {
+        int valueLen = length(value);
+        if (width <= valueLen) {
+            return value;
+        }
+        int padLen = width - valueLen;
+        char padChar = resolvePadChar(padding);
+        str result;
+        setlength(result, width);
+        int i = 1;
+        while (i <= valueLen) {
+            result[i] = value[i];
+            i = i + 1;
+        }
+        int j = 1;
+        while (j <= padLen) {
+            result[valueLen + j] = padChar;
+            j = j + 1;
+        }
+        return result;
+    }
+
+    export str toUpper(str value) {
+        int len = length(value);
+        if (len == 0) {
+            return value;
+        }
+        str result;
+        setlength(result, len);
+        int i = 1;
+        while (i <= len) {
+            char ch = value[i];
+            int code = ord(ch);
+            if (code >= ord('a') && code <= ord('z')) {
+                code = code - 32;
+            }
+            result[i] = chr(code);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    export str toLower(str value) {
+        int len = length(value);
+        if (len == 0) {
+            return value;
+        }
+        str result;
+        setlength(result, len);
+        int i = 1;
+        while (i <= len) {
+            char ch = value[i];
+            int code = ord(ch);
+            if (code >= ord('A') && code <= ord('Z')) {
+                code = code + 32;
+            }
+            result[i] = chr(code);
+            i = i + 1;
+        }
+        return result;
+    }
+
+    export str sortCharacters(str value) {
+        int len = length(value);
+        if (len <= 1) {
+            return value;
+        }
+        str result;
+        setlength(result, len);
+        int i = 1;
+        while (i <= len) {
+            result[i] = value[i];
+            i = i + 1;
+        }
+        int j = 1;
+        while (j <= len) {
+            int minIndex = j;
+            int k = j + 1;
+            while (k <= len) {
+                if (result[k] < result[minIndex]) {
+                    minIndex = k;
+                }
+                k = k + 1;
+            }
+            if (minIndex != j) {
+                char temp = result[j];
+                result[j] = result[minIndex];
+                result[minIndex] = temp;
+            }
+            j = j + 1;
+        }
+        return result;
+    }
+
+    export str repeat(str value, int count) {
+        if (count <= 0 || value == "") {
+            return "";
+        }
+        int valueLen = length(value);
+        str result;
+        setlength(result, valueLen * count);
+        int i = 0;
+        while (i < count) {
+            int j = 1;
+            while (j <= valueLen) {
+                result[i * valueLen + j] = value[j];
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+}

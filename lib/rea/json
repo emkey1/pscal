@@ -1,0 +1,179 @@
+module Json {
+
+    export bool isAvailable() {
+        return hasextbuiltin("yyjson", "YyjsonRead");
+    }
+
+    export int parse(str source) {
+        if (!isAvailable()) {
+            return -1;
+        }
+        return YyjsonRead(source);
+    }
+
+    export int parseFile(str path) {
+        if (!isAvailable()) {
+            return -1;
+        }
+        return YyjsonReadFile(path);
+    }
+
+    export void closeDocument(int doc) {
+        if (doc >= 0) {
+            YyjsonDocFree(doc);
+        }
+    }
+
+    export int root(int doc) {
+        if (doc < 0) {
+            return -1;
+        }
+        return YyjsonGetRoot(doc);
+    }
+
+    export void free(int valueHandle) {
+        if (valueHandle >= 0) {
+            YyjsonFreeValue(valueHandle);
+        }
+    }
+
+    export bool hasKey(int objectHandle, str key) {
+        if (objectHandle < 0) {
+            return false;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle >= 0) {
+            YyjsonFreeValue(handle);
+            return true;
+        }
+        return false;
+    }
+
+    export str getString(int objectHandle, str key, str fallback) {
+        if (objectHandle < 0) {
+            return fallback;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle < 0) {
+            return fallback;
+        }
+        str value = YyjsonGetString(handle);
+        YyjsonFreeValue(handle);
+        return value;
+    }
+
+    export int getInt(int objectHandle, str key, int fallback) {
+        if (objectHandle < 0) {
+            return fallback;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle < 0) {
+            return fallback;
+        }
+        int result = (int)YyjsonGetInt(handle);
+        YyjsonFreeValue(handle);
+        return result;
+    }
+
+    export float getNumber(int objectHandle, str key, float fallback) {
+        if (objectHandle < 0) {
+            return fallback;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle < 0) {
+            return fallback;
+        }
+        float result = YyjsonGetNumber(handle);
+        YyjsonFreeValue(handle);
+        return result;
+    }
+
+    export bool getBool(int objectHandle, str key, bool fallback) {
+        if (objectHandle < 0) {
+            return fallback;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle < 0) {
+            return fallback;
+        }
+        int value = YyjsonGetBool(handle);
+        YyjsonFreeValue(handle);
+        if (value != 0) {
+            return true;
+        }
+        return false;
+    }
+
+    export bool isNull(int objectHandle, str key) {
+        if (objectHandle < 0) {
+            return true;
+        }
+        int handle = YyjsonGetKey(objectHandle, key);
+        if (handle < 0) {
+            return true;
+        }
+        int result = YyjsonIsNull(handle);
+        YyjsonFreeValue(handle);
+        return result != 0;
+    }
+
+    export int arrayLength(int arrayHandle) {
+        if (arrayHandle < 0) {
+            return 0;
+        }
+        return YyjsonGetLength(arrayHandle);
+    }
+
+    export int arrayIndex(int arrayHandle, int index) {
+        if (arrayHandle < 0) {
+            return -1;
+        }
+        if (index < 0) {
+            return -1;
+        }
+        return YyjsonGetIndex(arrayHandle, index);
+    }
+
+    export str getStringAt(int arrayHandle, int index, str fallback) {
+        int handle = arrayIndex(arrayHandle, index);
+        if (handle < 0) {
+            return fallback;
+        }
+        str value = YyjsonGetString(handle);
+        YyjsonFreeValue(handle);
+        return value;
+    }
+
+    export int getIntAt(int arrayHandle, int index, int fallback) {
+        int handle = arrayIndex(arrayHandle, index);
+        if (handle < 0) {
+            return fallback;
+        }
+        int result = (int)YyjsonGetInt(handle);
+        YyjsonFreeValue(handle);
+        return result;
+    }
+
+    export float getNumberAt(int arrayHandle, int index, float fallback) {
+        int handle = arrayIndex(arrayHandle, index);
+        if (handle < 0) {
+            return fallback;
+        }
+        float result = YyjsonGetNumber(handle);
+        YyjsonFreeValue(handle);
+        return result;
+    }
+
+    export bool getBoolAt(int arrayHandle, int index, bool fallback) {
+        int handle = arrayIndex(arrayHandle, index);
+        if (handle < 0) {
+            return fallback;
+        }
+        int value = YyjsonGetBool(handle);
+        YyjsonFreeValue(handle);
+        if (value != 0) {
+            return true;
+        }
+        return false;
+    }
+}
