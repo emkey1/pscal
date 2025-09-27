@@ -21,6 +21,7 @@ The project currently ships several optional built‑in groups:
 | **Yyjson** | `src/ext_builtins/yyjson` | `document` (`YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`), `query` (`YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`), `primitives` (`YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull`) |
 | **Sqlite** | `src/ext_builtins/sqlite` | `connection` (`SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges`), `statement` (`SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteClearBindings`), `metadata` (`SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`), `results` (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`), `binding` (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) |
 | **3D** | `src/ext_builtins/threed` | `physics` (`BouncingBalls3DStep`, `BouncingBalls3DStepUltra`, `BouncingBalls3DStepAdvanced`, `BouncingBalls3DStepUltraAdvanced`, `BouncingBalls3DAccelerate`), `rendering` (`BouncingBalls3DDrawUnitSphereFast`) |
+| **Graphics** | `src/ext_builtins/graphics` | `window` (`InitGraph`, `CloseGraph`, `ClearDevice`, `UpdateScreen`, `GraphLoop`), `drawing` (`SetColor`, `DrawLine`, `FillRect`, `DrawCircle`, `GetPixelColor`), `textures` (`CreateTexture`, `LoadImageToTexture`, `RenderCopyEx`, `UpdateTexture`), `text` (`InitTextSystem`, `OutTextXY`, `RenderTextToTexture`), `input` (`PollKey`, `IsKeyDown`, `GetMouseState`, `WaitKeyEvent`), `audio` (`InitSoundSystem`, `LoadSound`, `PlaySound`, `StopAllSounds`, `IsSoundPlaying`), `opengl` (`GLBegin`, `GLRotatef`, `GLColor4f`, `GLIsHardwareAccelerated`) |
 | **User** | `src/ext_builtins/user` | `landscape` (`LandscapeDrawTerrain`, `LandscapeDrawWater`, `LandscapePrecomputeWorldCoords`, `LandscapePrecomputeWaterOffsets`) |
 
 Individual categories can be enabled or disabled at configure time with
@@ -34,6 +35,7 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_YYJSON=ON/OFF
 -DENABLE_EXT_BUILTIN_SQLITE=ON/OFF
 -DENABLE_EXT_BUILTIN_3D=ON/OFF
+-DENABLE_EXT_BUILTIN_GRAPHICS=ON/OFF
 ```
 
 ### Yyjson built-ins
