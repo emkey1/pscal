@@ -1,0 +1,116 @@
+module Http {
+
+    int lastStatus = 0;
+
+    void resetStatus(int status) {
+        lastStatus = status;
+    }
+
+    str requestWithBody(str method, str url, bool hasBody, str body, str contentType, str accept) {
+        mstream out = mstreamcreate();
+        str response = "";
+        int session = httpsession();
+        if (session < 0) {
+            resetStatus(-1);
+            mstreamfree(out);
+            return "";
+        }
+
+        if (contentType != "") {
+            httpsetheader(session, "Content-Type", contentType);
+        }
+        if (accept != "") {
+            httpsetheader(session, "Accept", accept);
+        }
+
+        int status;
+        if (hasBody) {
+            status = httprequest(session, method, url, body, out);
+        } else {
+            status = httprequest(session, method, url, nil, out);
+        }
+        resetStatus(status);
+
+        if (status >= 0) {
+            response = mstreambuffer(out);
+        }
+
+        httpclose(session);
+        mstreamfree(out);
+        return response;
+    }
+
+    export int lastResponseStatus() {
+        return lastStatus;
+    }
+
+    export str get(str url) {
+        return requestWithBody("GET", url, false, "", "", "");
+    }
+
+    export str getJson(str url) {
+        return requestWithBody("GET", url, false, "", "", "application/json");
+    }
+
+    export str post(str url, str body, str contentType) {
+        return requestWithBody("POST", url, true, body, contentType, "");
+    }
+
+    export str postJson(str url, str body) {
+        return requestWithBody("POST", url, true, body, "application/json", "application/json");
+    }
+
+    export str put(str url, str body, str contentType) {
+        return requestWithBody("PUT", url, true, body, contentType, "");
+    }
+
+    export bool wasSuccessful() {
+        if (lastStatus >= 200 && lastStatus < 300) {
+            return true;
+        }
+        return false;
+    }
+
+    export bool downloadToFile(str url, str path) {
+        mstream out = mstreamcreate();
+        int session = httpsession();
+        if (session < 0) {
+            resetStatus(-1);
+            mstreamfree(out);
+            return false;
+        }
+
+        int status = httprequest(session, "GET", url, nil, out);
+        resetStatus(status);
+        if (status < 0) {
+            httpclose(session);
+            mstreamfree(out);
+            return false;
+        }
+
+        str body = mstreambuffer(out);
+        httpclose(session);
+        mstreamfree(out);
+
+        text f;
+        assign(f, path);
+        rewrite(f);
+        int err = ioresult();
+        if (err != 0) {
+            return false;
+        }
+        write(f, body);
+        err = ioresult();
+        if (err != 0) {
+            close(f);
+            ioresult();
+            return false;
+        }
+        close(f);
+        err = ioresult();
+        if (err != 0) {
+            return false;
+        }
+        return true;
+    }
+}

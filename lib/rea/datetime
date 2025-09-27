@@ -1,0 +1,178 @@
+module DateTime {
+
+    str pad2(int value) {
+        if (value < 10 && value >= 0) {
+            return "0" + inttostr(value);
+        }
+        return inttostr(value);
+    }
+
+    export str formatUtcOffset(int offsetSeconds) {
+        int absSeconds = offsetSeconds;
+        str sign = "+";
+        if (absSeconds < 0) {
+            sign = "-";
+            absSeconds = -absSeconds;
+        }
+        int hours = absSeconds / 3600;
+        int minutes = (absSeconds % 3600) / 60;
+        return sign + pad2(hours) + ":" + pad2(minutes);
+    }
+
+    export str formatUnix(int epochSeconds, int offsetSeconds) {
+        int total = epochSeconds + offsetSeconds;
+        if (total < 0) {
+            total = 0;
+        }
+        int days = total / 86400;
+        int secondsOfDay = total % 86400;
+        int hour = secondsOfDay / 3600;
+        int minute = (secondsOfDay % 3600) / 60;
+        int second = secondsOfDay % 60;
+
+        int z = days + 719468;
+        int era;
+        if (z >= 0) {
+            era = z / 146097;
+        } else {
+            era = (z - 146096) / 146097;
+        }
+        int doe = z - era * 146097;
+        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int year = yoe + era * 400;
+        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        int mp = (5 * doy + 2) / 153;
+        int day = doy - (153 * mp + 2) / 5 + 1;
+        int month;
+        if (mp < 10) {
+            month = mp + 3;
+        } else {
+            month = mp - 9;
+        }
+        if (month <= 2) {
+            year = year + 1;
+        }
+
+        str date = inttostr(year) + "-" + pad2(month) + "-" + pad2(day);
+        str time = pad2(hour) + ":" + pad2(minute) + ":" + pad2(second);
+        return date + " " + time;
+    }
+
+    export str iso8601(int epochSeconds, int offsetSeconds) {
+        int total = epochSeconds + offsetSeconds;
+        if (total < 0) {
+            total = 0;
+        }
+        int days = total / 86400;
+        int secondsOfDay = total % 86400;
+        int hour = secondsOfDay / 3600;
+        int minute = (secondsOfDay % 3600) / 60;
+        int second = secondsOfDay % 60;
+
+        int z = days + 719468;
+        int era;
+        if (z >= 0) {
+            era = z / 146097;
+        } else {
+            era = (z - 146096) / 146097;
+        }
+        int doe = z - era * 146097;
+        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int year = yoe + era * 400;
+        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        int mp = (5 * doy + 2) / 153;
+        int day = doy - (153 * mp + 2) / 5 + 1;
+        int month;
+        if (mp < 10) {
+            month = mp + 3;
+        } else {
+            month = mp - 9;
+        }
+        if (month <= 2) {
+            year = year + 1;
+        }
+
+        str date = inttostr(year) + "-" + pad2(month) + "-" + pad2(day);
+        str time = pad2(hour) + ":" + pad2(minute) + ":" + pad2(second);
+        return date + "T" + time + formatUtcOffset(offsetSeconds);
+    }
+
+    export int startOfDay(int epochSeconds, int offsetSeconds) {
+        int total = epochSeconds + offsetSeconds;
+        int days;
+        if (total >= 0) {
+            days = total / 86400;
+        } else {
+            days = (total - 86399) / 86400;
+        }
+        return days * 86400 - offsetSeconds;
+    }
+
+    export int endOfDay(int epochSeconds, int offsetSeconds) {
+        int start = startOfDay(epochSeconds, offsetSeconds);
+        return start + 86399;
+    }
+
+    export int addDays(int epochSeconds, int days) {
+        return epochSeconds + days * 86400;
+    }
+
+    export int addHours(int epochSeconds, int hours) {
+        return epochSeconds + hours * 3600;
+    }
+
+    export int addMinutes(int epochSeconds, int minutes) {
+        return epochSeconds + minutes * 60;
+    }
+
+    export int daysBetween(int startEpoch, int endEpoch) {
+        int diff = endEpoch - startEpoch;
+        if (diff >= 0) {
+            return diff / 86400;
+        }
+        int positive = -diff;
+        return -((positive + 86399) / 86400);
+    }
+
+    export str describeDifference(int startEpoch, int endEpoch) {
+        int diff = endEpoch - startEpoch;
+        int sign = 1;
+        if (diff < 0) {
+            sign = -1;
+            diff = -diff;
+        }
+        int days = diff / 86400;
+        int remainder = diff % 86400;
+        int hours = remainder / 3600;
+        remainder = remainder % 3600;
+        int minutes = remainder / 60;
+        int seconds = remainder % 60;
+
+        str result = "";
+        if (days > 0) {
+            result = inttostr(days) + "d";
+        }
+        if (hours > 0 || (days > 0 && (minutes > 0 || seconds > 0))) {
+            if (result != "") {
+                result = result + " ";
+            }
+            result = result + inttostr(hours) + "h";
+        }
+        if (minutes > 0 || (result != "" && seconds > 0)) {
+            if (result != "") {
+                result = result + " ";
+            }
+            result = result + inttostr(minutes) + "m";
+        }
+        if (seconds > 0 || result == "") {
+            if (result != "") {
+                result = result + " ";
+            }
+            result = result + inttostr(seconds) + "s";
+        }
+        if (sign < 0) {
+            result = "-" + result;
+        }
+        return result;
+    }
+}

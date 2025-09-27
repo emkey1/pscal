@@ -1,0 +1,229 @@
+module Filesystem {
+
+    bool lastReadOk = false;
+    int lastReadError = 0;
+    int lastWriteError = 0;
+
+    void markReadFailure(int code) {
+        lastReadOk = false;
+        lastReadError = code;
+    }
+
+    void markReadSuccess() {
+        lastReadOk = true;
+        lastReadError = 0;
+    }
+
+    export bool lastReadSucceeded() {
+        return lastReadOk;
+    }
+
+    export int lastReadErrorCode() {
+        return lastReadError;
+    }
+
+    export int lastWriteErrorCode() {
+        return lastWriteError;
+    }
+
+    export str readAllText(str path) {
+        str result = "";
+        text f;
+        bool firstLine = true;
+
+        assign(f, path);
+        reset(f);
+        int err = ioresult();
+        if (err != 0) {
+            markReadFailure(err);
+            return "";
+        }
+
+        while (!eof(f)) {
+            str line;
+            readln(f, line);
+            if (firstLine) {
+                result = line;
+                firstLine = false;
+            } else {
+                result = result + "\n" + line;
+            }
+        }
+
+        close(f);
+        err = ioresult();
+        if (err != 0) {
+            markReadFailure(err);
+            return result;
+        }
+
+        markReadSuccess();
+        return result;
+    }
+
+    export bool writeAllText(str path, str contents) {
+        text f;
+
+        assign(f, path);
+        rewrite(f);
+        int err = ioresult();
+        if (err != 0) {
+            lastWriteError = err;
+            return false;
+        }
+
+        write(f, contents);
+        err = ioresult();
+        if (err != 0) {
+            lastWriteError = err;
+            close(f);
+            ioresult();
+            return false;
+        }
+
+        close(f);
+        err = ioresult();
+        if (err != 0) {
+            lastWriteError = err;
+            return false;
+        }
+
+        lastWriteError = 0;
+        return true;
+    }
+
+    export str joinPath(str left, str right) {
+        if (left == "") {
+            return right;
+        }
+        if (right == "") {
+            return left;
+        }
+
+        bool leftEndsSlash = false;
+        char lastChar = left[length(left)];
+        if (lastChar == '/' || lastChar == '\\') {
+            leftEndsSlash = true;
+        }
+
+        bool rightStartsSlash = false;
+        char firstChar = right[1];
+        if (firstChar == '/' || firstChar == '\\') {
+            rightStartsSlash = true;
+        }
+
+        if (leftEndsSlash && rightStartsSlash) {
+            int rightLen = length(right);
+            if (rightLen <= 1) {
+                return left;
+            }
+            str trimmed;
+            setlength(trimmed, rightLen - 1);
+            int i = 2;
+            while (i <= rightLen) {
+                trimmed[i - 1] = right[i];
+                i = i + 1;
+            }
+            return left + trimmed;
+        }
+
+        if (!leftEndsSlash && !rightStartsSlash) {
+            return left + "/" + right;
+        }
+
+        return left + right;
+    }
+
+    export str expandUser(str path) {
+        if (path == "") {
+            return path;
+        }
+        if (path[1] != '~') {
+            return path;
+        }
+
+        str home = getenv("HOME");
+        if (home == "") {
+            home = getenv("USERPROFILE");
+        }
+        if (home == "") {
+            return path;
+        }
+
+        int pathLen = length(path);
+        if (pathLen == 1) {
+            return home;
+        }
+
+        char next = path[2];
+        if (next != '/' && next != '\\') {
+            return path;
+        }
+
+        bool homeEndsSlash = false;
+        char homeLast = home[length(home)];
+        if (homeLast == '/' || homeLast == '\\') {
+            homeEndsSlash = true;
+        }
+
+        str remainder;
+        int remainderLen = pathLen - 1;
+        setlength(remainder, remainderLen);
+        int i = 2;
+        while (i <= pathLen) {
+            remainder[i - 1] = path[i];
+            i = i + 1;
+        }
+
+        if (homeEndsSlash) {
+            if (remainderLen == 0) {
+                return home;
+            }
+            if (remainder[1] == '/' || remainder[1] == '\\') {
+                int trimmedLen = remainderLen - 1;
+                str trimmed;
+                setlength(trimmed, trimmedLen);
+                int j = 2;
+                while (j <= remainderLen) {
+                    trimmed[j - 1] = remainder[j];
+                    j = j + 1;
+                }
+                return home + trimmed;
+            }
+            return home + remainder;
+        }
+
+        if (remainderLen == 0) {
+            return home;
+        }
+
+        if (remainder[1] == '/' || remainder[1] == '\\') {
+            return home + remainder;
+        }
+
+        return home + "/" + remainder;
+    }
+
+    export str readFirstLine(str path) {
+        str contents = readAllText(path);
+        if (!lastReadSucceeded()) {
+            return "";
+        }
+        int len = length(contents);
+        int i = 1;
+        while (i <= len) {
+            if (contents[i] == '\n' || contents[i] == '\r') {
+                str line;
+                setlength(line, i - 1);
+                int j = 1;
+                while (j < i) {
+                    line[j] = contents[j];
+                    j = j + 1;
+                }
+                return line;
+            }
+            i = i + 1;
+        }
+        return contents;
+    }
+}
