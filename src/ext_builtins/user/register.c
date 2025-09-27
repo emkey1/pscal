@@ -15,6 +15,7 @@ void registerUserBuiltins(void) {
     extBuiltinRegisterFunction("user", "BouncingBalls3DStepAdvanced");
     extBuiltinRegisterFunction("user", "BouncingBalls3DStepUltraAdvanced");
     extBuiltinRegisterFunction("user", "BouncingBalls3DAccelerate");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DDrawUnitSphereFast");
 
     registerLandscapeBuiltins();
     registerBalls3DBuiltins();

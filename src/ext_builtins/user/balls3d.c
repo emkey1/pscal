@@ -2,6 +2,11 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 
+#ifdef SDL
+#include "backend_ast/sdl.h"
+#include <SDL2/SDL_opengl.h>
+#endif
+
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -212,6 +217,131 @@ static bool fetchNumericVarRef(VM* vm, Value* arg, const char* name,
     out->isInteger = IS_INTLIKE(*slot);
     return true;
 }
+
+#ifdef SDL
+typedef struct SphereDisplayListCache {
+    GLuint displayListId;
+    int stacks;
+    int slices;
+    bool initialized;
+} SphereDisplayListCache;
+
+static SphereDisplayListCache gSphereDisplayListCache = {0, 0, 0, false};
+
+static bool ensureGlContext(VM* vm, const char* name) {
+    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
+        runtimeError(vm, "%s requires an active OpenGL window. Call InitGraph3D first.",
+                     name);
+        return false;
+    }
+    return true;
+}
+
+static void destroySphereDisplayList(void) {
+    if (gSphereDisplayListCache.initialized && gSphereDisplayListCache.displayListId != 0) {
+        glDeleteLists(gSphereDisplayListCache.displayListId, 1);
+    }
+    gSphereDisplayListCache.displayListId = 0;
+    gSphereDisplayListCache.initialized = false;
+}
+
+static bool ensureSphereDisplayList(VM* vm, const char* name, int stacks, int slices) {
+    if (stacks < 3 || slices < 3) {
+        runtimeError(vm, "%s received invalid tessellation parameters.", name);
+        return false;
+    }
+
+    if (gSphereDisplayListCache.initialized && gSphereDisplayListCache.stacks == stacks &&
+        gSphereDisplayListCache.slices == slices &&
+        gSphereDisplayListCache.displayListId != 0) {
+        return true;
+    }
+
+    GLuint newList = glGenLists(1);
+    if (newList == 0) {
+        runtimeError(vm, "%s could not allocate an OpenGL display list.", name);
+        return false;
+    }
+
+    const double pi = 3.14159265358979323846;
+    glNewList(newList, GL_COMPILE);
+    for (int stack = 0; stack < stacks; ++stack) {
+        double phi0 = -pi * 0.5 + pi * stack / (double)stacks;
+        double phi1 = -pi * 0.5 + pi * (stack + 1) / (double)stacks;
+        double cosPhi0 = cos(phi0);
+        double sinPhi0 = sin(phi0);
+        double cosPhi1 = cos(phi1);
+        double sinPhi1 = sin(phi1);
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for (int slice = 0; slice <= slices; ++slice) {
+            double theta = 2.0 * pi * slice / (double)slices;
+            double cosTheta = cos(theta);
+            double sinTheta = sin(theta);
+
+            float n1x = (float)(cosPhi1 * cosTheta);
+            float n1y = (float)sinPhi1;
+            float n1z = (float)(cosPhi1 * sinTheta);
+            glNormal3f(n1x, n1y, n1z);
+            glVertex3f(n1x, n1y, n1z);
+
+            float n0x = (float)(cosPhi0 * cosTheta);
+            float n0y = (float)sinPhi0;
+            float n0z = (float)(cosPhi0 * sinTheta);
+            glNormal3f(n0x, n0y, n0z);
+            glVertex3f(n0x, n0y, n0z);
+        }
+        glEnd();
+    }
+    glEndList();
+
+    destroySphereDisplayList();
+    gSphereDisplayListCache.displayListId = newList;
+    gSphereDisplayListCache.stacks = stacks;
+    gSphereDisplayListCache.slices = slices;
+    gSphereDisplayListCache.initialized = true;
+    return true;
+}
+
+static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
+                                                        Value* args) {
+    const char* name = "BouncingBalls3DDrawUnitSphereFast";
+    if (arg_count != 2) {
+        runtimeError(vm, "%s expects 2 arguments.", name);
+        return makeVoid();
+    }
+    if (!IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "%s expects integer stack and slice counts.", name);
+        return makeVoid();
+    }
+
+    int stacks = (int)asI64(args[0]);
+    int slices = (int)asI64(args[1]);
+
+    if (!ensureGlContext(vm, name)) {
+        return makeVoid();
+    }
+
+    if (!ensureSphereDisplayList(vm, name, stacks, slices)) {
+        return makeVoid();
+    }
+
+    if (gSphereDisplayListCache.displayListId != 0) {
+        glCallList(gSphereDisplayListCache.displayListId);
+    }
+
+    return makeVoid();
+}
+#else
+static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
+                                                        Value* args) {
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm,
+                 "BouncingBalls3DDrawUnitSphereFast requires SDL/OpenGL support to be built.");
+    return makeVoid();
+}
+#endif
 
 static void assignNumericVar(const NumericVarRef* ref, long double value) {
     if (!ref || !ref->slot) return;
@@ -1438,4 +1568,7 @@ void registerBalls3DBuiltins(void) {
                       BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DStepUltraAdvanced");
     registerVmBuiltin("bouncingballs3daccelerate", vmBuiltinBouncingBalls3DAccelerate,
                       BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DAccelerate");
+    registerVmBuiltin("bouncingballs3ddrawunitspherefast",
+                      vmBuiltinBouncingBalls3DDrawUnitSphereFast,
+                      BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DDrawUnitSphereFast");
 }
