@@ -127,12 +127,47 @@ def stop_server(server: socketserver.TCPServer) -> None:
         server.server_close()
 
 
+def _resolve_rea_executable(root: Path) -> Path | None:
+    """Return a usable path to the Rea executable.
+
+    ``REA_BIN`` may point either directly to the executable or to a directory
+    that contains it (common when users export ``REA_BIN=/usr/local/bin``).
+    This helper normalises those inputs, falls back to the build output and
+    finally checks the ``PATH`` using :func:`shutil.which`.
+    """
+
+    env_value = os.environ.get("REA_BIN")
+    candidates: list[Path] = []
+
+    if env_value:
+        env_path = Path(env_value)
+        if env_path.is_dir():
+            candidates.append(env_path / "rea")
+        candidates.append(env_path)
+
+    candidates.append(root / "build" / "bin" / "rea")
+
+    which_path = shutil.which("rea")
+    if which_path:
+        candidates.append(Path(which_path))
+
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
+
+
 def main() -> int:
     script_path = Path(__file__).resolve()
     root = find_repo_root(script_path)
-    rea_bin = Path(os.environ.get("REA_BIN", root / "build" / "bin" / "rea"))
-    if not rea_bin.exists():
-        print(f"Rea executable not found at {rea_bin}. Build the project or set REA_BIN.", file=sys.stderr)
+    rea_bin = _resolve_rea_executable(root)
+    if rea_bin is None:
+        print(
+            "Rea executable not found. Build the project or set REA_BIN to "
+            "a valid executable path.",
+            file=sys.stderr,
+        )
         return 1
 
     server, base_url = start_server()
