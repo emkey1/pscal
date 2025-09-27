@@ -1563,6 +1563,21 @@ static Value vmBuiltinBouncingBalls3DAccelerate(VM* vm, int arg_count,
     return makeVoid();
 }
 
+void cleanupBalls3DRenderingResources(void) {
+#ifdef SDL
+    if (gSphereDisplayListCache.initialized) {
+        if (gSdlGLContext) {
+            destroySphereDisplayList();
+        } else {
+            gSphereDisplayListCache.displayListId = 0;
+            gSphereDisplayListCache.initialized = false;
+        }
+    }
+    gSphereDisplayListSupported = true;
+#endif
+    freeBalls3DWorkBuffers(&balls3dWorkBuffers);
+}
+
 void registerBalls3DBuiltins(void) {
     registerVmBuiltin("bouncingballs3dstep", vmBuiltinBouncingBalls3DStep,
                       BUILTIN_TYPE_PROCEDURE, "BouncingBalls3DStep");
