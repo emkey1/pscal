@@ -250,7 +250,6 @@ has_ext_builtin_category() {
   local status=$?
   set -e
   return $status
-=
 }
 
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
@@ -285,6 +284,12 @@ else
   CLIKE_SQLITE_AVAILABLE=0
 fi
 
+if has_ext_builtin_category "$CLIKE_BIN" graphics; then
+  CLIKE_GRAPHICS_AVAILABLE=1
+else
+  CLIKE_GRAPHICS_AVAILABLE=0
+fi
+
 for src in "$SCRIPT_DIR"/clike/*.cl; do
   test_name=$(basename "$src" .cl)
   in_file="$SCRIPT_DIR/clike/$test_name.in"
@@ -296,10 +301,18 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   disasm_stdout=""
   disasm_stderr=""
   # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
-  if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
-    echo "Skipping $test_name (SDL dummy driver)"
-    echo
-    continue
+  if [ "$test_name" = "graphics" ]; then
+    if [ "$CLIKE_GRAPHICS_AVAILABLE" -ne 1 ]; then
+      echo "Skipping $test_name (graphics builtins unavailable)"
+      echo
+      continue
+    fi
+
+    if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; then
+      echo "Skipping $test_name (SDL dummy driver)"
+      echo
+      continue
+    fi
   fi
 
   if [ -f "$SCRIPT_DIR/clike/$test_name.sqlite" ] && [ "$CLIKE_SQLITE_AVAILABLE" -ne 1 ]; then
