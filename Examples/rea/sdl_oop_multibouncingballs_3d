@@ -7,7 +7,7 @@ const int WindowHeight = 1000;
 
 float TargetFPS = 90.0;
 
-const int NumBalls = 120;
+const int NumBalls = 620;
 const float BoxWidth = 1440.0;
 const float BoxHeight = 820.0;
 const float BoxDepth = 600.0;
