@@ -9,6 +9,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower,
@@ -226,7 +227,23 @@ typedef struct SphereDisplayListCache {
     bool initialized;
 } SphereDisplayListCache;
 
+typedef struct SphereMeshCacheEntry {
+    GLuint vertexBuffer;
+    GLuint indexBuffer;
+    GLsizei indexCount;
+    GLenum indexType;
+    GLsizei vertexStride;
+    size_t normalOffset;
+    int stacks;
+    int slices;
+    struct SphereMeshCacheEntry* next;
+} SphereMeshCacheEntry;
+
 static SphereDisplayListCache gSphereDisplayListCache = {0, 0, 0, false};
+static SphereMeshCacheEntry* gSphereMeshCacheHead = NULL;
+static bool gSphereDisplayListSupportKnown = false;
+static bool gSphereDisplayListSupported = false;
+static bool gSphereContextIsES = false;
 
 static bool ensureGlContext(VM* vm, const char* name) {
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
@@ -237,12 +254,343 @@ static bool ensureGlContext(VM* vm, const char* name) {
     return true;
 }
 
+typedef void(APIENTRY* PFNGLGENBUFFERSPROC)(GLsizei n, GLuint* buffers);
+typedef void(APIENTRY* PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint* buffers);
+typedef void(APIENTRY* PFNGLBINDBUFFERPROC)(GLenum target, GLuint buffer);
+typedef void(APIENTRY* PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size,
+                                            const void* data, GLenum usage);
+
+static PFNGLGENBUFFERSPROC glGenBuffersProc = NULL;
+static PFNGLDELETEBUFFERSPROC glDeleteBuffersProc = NULL;
+static PFNGLBINDBUFFERPROC glBindBufferProc = NULL;
+static PFNGLBUFFERDATAPROC glBufferDataProc = NULL;
+static bool gGlBufferFuncsLoaded = false;
+static bool gGlBufferFuncsAvailable = false;
+
+static bool ensureGlBufferFunctions(void) {
+    if (!gGlBufferFuncsLoaded) {
+        gGlBufferFuncsLoaded = true;
+        glGenBuffersProc = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
+        glDeleteBuffersProc =
+            (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffers");
+        glBindBufferProc = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
+        glBufferDataProc = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
+        if (!glGenBuffersProc)
+            glGenBuffersProc =
+                (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffersARB");
+        if (!glDeleteBuffersProc)
+            glDeleteBuffersProc =
+                (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffersARB");
+        if (!glBindBufferProc)
+            glBindBufferProc =
+                (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBufferARB");
+        if (!glBufferDataProc)
+            glBufferDataProc =
+                (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferDataARB");
+        gGlBufferFuncsAvailable = glGenBuffersProc && glDeleteBuffersProc &&
+                                  glBindBufferProc && glBufferDataProc;
+    }
+    return gGlBufferFuncsAvailable;
+}
+
+static void detectDisplayListSupport(void) {
+    if (gSphereDisplayListSupportKnown) {
+        return;
+    }
+
+    gSphereDisplayListSupportKnown = true;
+    gSphereDisplayListSupported = true;
+    gSphereContextIsES = false;
+
+    int profileMask = 0;
+    if (SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &profileMask) == 0) {
+        if ((profileMask & SDL_GL_CONTEXT_PROFILE_CORE) != 0 ||
+            (profileMask & SDL_GL_CONTEXT_PROFILE_ES) != 0) {
+            gSphereDisplayListSupported = false;
+        }
+        if ((profileMask & SDL_GL_CONTEXT_PROFILE_ES) != 0) {
+            gSphereContextIsES = true;
+        }
+    }
+
+    if (gSphereDisplayListSupported) {
+        int flags = 0;
+        if (SDL_GL_GetAttribute(SDL_GL_CONTEXT_FLAGS, &flags) == 0) {
+            if ((flags & SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG) != 0) {
+                gSphereDisplayListSupported = false;
+            }
+        }
+    }
+
+    if (gSphereDisplayListSupported) {
+        GLuint probe = glGenLists(1);
+        if (probe == 0) {
+            gSphereDisplayListSupported = false;
+        } else {
+            glDeleteLists(probe, 1);
+        }
+    }
+}
+
 static void destroySphereDisplayList(void) {
     if (gSphereDisplayListCache.initialized && gSphereDisplayListCache.displayListId != 0) {
         glDeleteLists(gSphereDisplayListCache.displayListId, 1);
     }
     gSphereDisplayListCache.displayListId = 0;
     gSphereDisplayListCache.initialized = false;
+}
+
+static void destroySphereMeshEntry(SphereMeshCacheEntry* entry) {
+    if (!entry) {
+        return;
+    }
+    if (glDeleteBuffersProc) {
+        if (entry->vertexBuffer) {
+            glDeleteBuffersProc(1, &entry->vertexBuffer);
+        }
+        if (entry->indexBuffer) {
+            glDeleteBuffersProc(1, &entry->indexBuffer);
+        }
+    }
+    free(entry);
+}
+
+static void destroySphereMeshCache(void) {
+    SphereMeshCacheEntry* entry = gSphereMeshCacheHead;
+    while (entry) {
+        SphereMeshCacheEntry* next = entry->next;
+        destroySphereMeshEntry(entry);
+        entry = next;
+    }
+    gSphereMeshCacheHead = NULL;
+}
+
+static SphereMeshCacheEntry* findSphereMeshEntry(int stacks, int slices) {
+    SphereMeshCacheEntry* entry = gSphereMeshCacheHead;
+    while (entry) {
+        if (entry->stacks == stacks && entry->slices == slices) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+static SphereMeshCacheEntry* createSphereMeshEntry(VM* vm, const char* name, int stacks,
+                                                  int slices) {
+    if (!ensureGlBufferFunctions()) {
+        runtimeError(vm,
+                     "%s requires OpenGL buffer object support in this context.", name);
+        return NULL;
+    }
+
+    const size_t vertexCount = (size_t)(stacks + 1) * (size_t)(slices + 1);
+    const size_t componentsPerVertex = 6u;
+    if (vertexCount > SIZE_MAX / componentsPerVertex) {
+        runtimeError(vm, "%s tessellation parameters are too large.", name);
+        return NULL;
+    }
+    const size_t vertexComponentCount = vertexCount * componentsPerVertex;
+    if (vertexComponentCount > SIZE_MAX / sizeof(float)) {
+        runtimeError(vm, "%s tessellation parameters are too large.", name);
+        return NULL;
+    }
+    const size_t indexCount = (size_t)stacks * (size_t)slices * 6u;
+    const bool canUseU16 = vertexCount <= 0xFFFFu;
+
+    if (vertexComponentCount / componentsPerVertex != vertexCount ||
+        indexCount / 6u != (size_t)stacks * (size_t)slices) {
+        runtimeError(vm, "%s tessellation parameters are too large.", name);
+        return NULL;
+    }
+
+    if (indexCount > (size_t)INT_MAX) {
+        runtimeError(vm, "%s tessellation parameters are too large.", name);
+        return NULL;
+    }
+
+    if (!canUseU16 && gSphereContextIsES) {
+        runtimeError(vm,
+                     "%s tessellation exceeds 65k vertices, which is not supported on this "
+                     "OpenGL ES context.",
+                     name);
+        return NULL;
+    }
+
+    float* vertexData = (float*)malloc(sizeof(float) * vertexComponentCount);
+    size_t indexComponentSize = canUseU16 ? sizeof(GLushort) : sizeof(GLuint);
+    if (indexCount > SIZE_MAX / indexComponentSize) {
+        free(vertexData);
+        runtimeError(vm, "%s tessellation parameters are too large.", name);
+        return NULL;
+    }
+
+    void* indices = malloc(indexComponentSize * indexCount);
+    GLushort* indicesU16 = canUseU16 ? (GLushort*)indices : NULL;
+    GLuint* indicesU32 = canUseU16 ? NULL : (GLuint*)indices;
+
+    if (!vertexData || !indices) {
+        free(vertexData);
+        free(indices);
+        runtimeError(vm, "%s could not allocate sphere mesh buffers.", name);
+        return NULL;
+    }
+
+    const double pi = 3.14159265358979323846;
+    size_t vertexOffset = 0;
+    for (int stack = 0; stack <= stacks; ++stack) {
+        double phi = -pi * 0.5 + pi * stack / (double)stacks;
+        double cosPhi = cos(phi);
+        double sinPhi = sin(phi);
+        for (int slice = 0; slice <= slices; ++slice) {
+            double theta = 2.0 * pi * slice / (double)slices;
+            double cosTheta = cos(theta);
+            double sinTheta = sin(theta);
+            float x = (float)(cosPhi * cosTheta);
+            float y = (float)sinPhi;
+            float z = (float)(cosPhi * sinTheta);
+            vertexData[vertexOffset++] = x;
+            vertexData[vertexOffset++] = y;
+            vertexData[vertexOffset++] = z;
+            vertexData[vertexOffset++] = x;
+            vertexData[vertexOffset++] = y;
+            vertexData[vertexOffset++] = z;
+        }
+    }
+
+    size_t indexOffset = 0;
+    int rowStride = slices + 1;
+    for (int stack = 0; stack < stacks; ++stack) {
+        for (int slice = 0; slice < slices; ++slice) {
+            size_t baseIndex = (size_t)(stack * rowStride + slice);
+            size_t nextRowBase = (size_t)((stack + 1) * rowStride + slice);
+            size_t topLeft = baseIndex;
+            size_t bottomLeft = nextRowBase;
+            size_t topRight = baseIndex + 1u;
+            size_t bottomRight = nextRowBase + 1u;
+
+            if (canUseU16) {
+                indicesU16[indexOffset++] = (GLushort)topLeft;
+                indicesU16[indexOffset++] = (GLushort)bottomLeft;
+                indicesU16[indexOffset++] = (GLushort)bottomRight;
+
+                indicesU16[indexOffset++] = (GLushort)topLeft;
+                indicesU16[indexOffset++] = (GLushort)bottomRight;
+                indicesU16[indexOffset++] = (GLushort)topRight;
+            } else {
+                indicesU32[indexOffset++] = (GLuint)topLeft;
+                indicesU32[indexOffset++] = (GLuint)bottomLeft;
+                indicesU32[indexOffset++] = (GLuint)bottomRight;
+
+                indicesU32[indexOffset++] = (GLuint)topLeft;
+                indicesU32[indexOffset++] = (GLuint)bottomRight;
+                indicesU32[indexOffset++] = (GLuint)topRight;
+            }
+        }
+    }
+
+    GLuint buffers[2] = {0, 0};
+    glGenBuffersProc(2, buffers);
+    GLuint vertexBuffer = buffers[0];
+    GLuint indexBuffer = buffers[1];
+
+    if (vertexBuffer == 0 || indexBuffer == 0) {
+        if (vertexBuffer) glDeleteBuffersProc(1, &vertexBuffer);
+        if (indexBuffer) glDeleteBuffersProc(1, &indexBuffer);
+        free(vertexData);
+        free(indices);
+        runtimeError(vm, "%s could not create OpenGL buffer objects.", name);
+        return NULL;
+    }
+
+    glBindBufferProc(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferDataProc(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * vertexComponentCount),
+                     vertexData,
+                     GL_STATIC_DRAW);
+    glBindBufferProc(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferDataProc(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(indexComponentSize * indexCount), indices,
+                     GL_STATIC_DRAW);
+
+    glBindBufferProc(GL_ARRAY_BUFFER, 0);
+    glBindBufferProc(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    free(vertexData);
+    free(indices);
+
+    SphereMeshCacheEntry* entry =
+        (SphereMeshCacheEntry*)malloc(sizeof(SphereMeshCacheEntry));
+    if (!entry) {
+        glDeleteBuffersProc(1, &vertexBuffer);
+        glDeleteBuffersProc(1, &indexBuffer);
+        runtimeError(vm, "%s could not allocate mesh cache entry.", name);
+        return NULL;
+    }
+
+    entry->vertexBuffer = vertexBuffer;
+    entry->indexBuffer = indexBuffer;
+    entry->indexCount = (GLsizei)indexCount;
+    entry->indexType = canUseU16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
+    entry->vertexStride = (GLsizei)(sizeof(float) * componentsPerVertex);
+    entry->normalOffset = sizeof(float) * 3u;
+    entry->stacks = stacks;
+    entry->slices = slices;
+    entry->next = gSphereMeshCacheHead;
+    gSphereMeshCacheHead = entry;
+    return entry;
+}
+
+static SphereMeshCacheEntry* ensureSphereMeshEntry(VM* vm, const char* name, int stacks,
+                                                  int slices) {
+    if (stacks < 3 || slices < 3) {
+        runtimeError(vm, "%s received invalid tessellation parameters.", name);
+        return NULL;
+    }
+
+    SphereMeshCacheEntry* entry = findSphereMeshEntry(stacks, slices);
+    if (entry) {
+        return entry;
+    }
+
+    return createSphereMeshEntry(vm, name, stacks, slices);
+}
+
+static void drawSphereMesh(SphereMeshCacheEntry* entry) {
+    if (!entry) {
+        return;
+    }
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_NORMAL_ARRAY);
+
+    glBindBufferProc(GL_ARRAY_BUFFER, entry->vertexBuffer);
+    glVertexPointer(3, GL_FLOAT, entry->vertexStride, (const void*)(uintptr_t)0);
+    glNormalPointer(GL_FLOAT, entry->vertexStride,
+                    (const void*)(uintptr_t)entry->normalOffset);
+
+    glBindBufferProc(GL_ELEMENT_ARRAY_BUFFER, entry->indexBuffer);
+    glDrawElements(GL_TRIANGLES, entry->indexCount, entry->indexType, (const void*)0);
+
+    glBindBufferProc(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glBindBufferProc(GL_ARRAY_BUFFER, 0);
+
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+}
+
+void cleanupBalls3DRenderingResources(void) {
+    destroySphereDisplayList();
+    destroySphereMeshCache();
+
+    gSphereDisplayListSupportKnown = false;
+    gSphereDisplayListSupported = false;
+    gSphereContextIsES = false;
+
+    gGlBufferFuncsLoaded = false;
+    gGlBufferFuncsAvailable = false;
+    glGenBuffersProc = NULL;
+    glDeleteBuffersProc = NULL;
+    glBindBufferProc = NULL;
+    glBufferDataProc = NULL;
 }
 
 static bool ensureSphereDisplayList(VM* vm, const char* name, int stacks, int slices) {
@@ -259,7 +607,7 @@ static bool ensureSphereDisplayList(VM* vm, const char* name, int stacks, int sl
 
     GLuint newList = glGenLists(1);
     if (newList == 0) {
-        runtimeError(vm, "%s could not allocate an OpenGL display list.", name);
+        gSphereDisplayListSupported = false;
         return false;
     }
 
@@ -322,12 +670,19 @@ static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
         return makeVoid();
     }
 
-    if (!ensureSphereDisplayList(vm, name, stacks, slices)) {
-        return makeVoid();
+    detectDisplayListSupport();
+
+    if (gSphereDisplayListSupported) {
+        if (ensureSphereDisplayList(vm, name, stacks, slices) &&
+            gSphereDisplayListCache.displayListId != 0) {
+            glCallList(gSphereDisplayListCache.displayListId);
+            return makeVoid();
+        }
     }
 
-    if (gSphereDisplayListCache.displayListId != 0) {
-        glCallList(gSphereDisplayListCache.displayListId);
+    SphereMeshCacheEntry* meshEntry = ensureSphereMeshEntry(vm, name, stacks, slices);
+    if (meshEntry) {
+        drawSphereMesh(meshEntry);
     }
 
     return makeVoid();
@@ -341,6 +696,8 @@ static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
                  "BouncingBalls3DDrawUnitSphereFast requires SDL/OpenGL support to be built.");
     return makeVoid();
 }
+
+void cleanupBalls3DRenderingResources(void) {}
 #endif
 
 static void assignNumericVar(const NumericVarRef* ref, long double value) {
