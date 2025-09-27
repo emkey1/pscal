@@ -22,7 +22,8 @@ static Value graphicsUnavailableStub(struct VM_s* vm, int arg_count, Value* args
     (void)arg_count;
     (void)args;
     runtimeError(vm, "Graphics built-ins require SDL support. Rebuild with -DSDL=ON.");
-    return makeVoid();
+    vm->abort_requested = true;
+    return makeNil();
 }
 #endif
 
