@@ -330,9 +330,6 @@ int main(int argc, char **argv) {
     gSuppressWriteSpacing = 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
-#ifdef SDL
-    registerSdlGlBuiltins();
-#endif
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);

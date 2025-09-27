@@ -237,6 +237,12 @@ else
   PASCAL_SQLITE_AVAILABLE=0
 fi
 
+if has_ext_builtin_category "$PASCAL_BIN" graphics; then
+  PASCAL_GRAPHICS_AVAILABLE=1
+else
+  PASCAL_GRAPHICS_AVAILABLE=0
+fi
+
 # Iterate over Pascal test sources (files without extensions)
 for src in "$SCRIPT_DIR"/Pascal/*; do
   test_name=$(basename "$src")
@@ -244,10 +250,18 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
     continue
   fi
   # Skip SDL-dependent test unless RUN_SDL=1 forces it
-  if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
-    echo "Skipping $test_name (SDL disabled)"
-    echo
-    continue
+  if [ "$test_name" = "SDLFeaturesTest" ]; then
+    if [ "$PASCAL_GRAPHICS_AVAILABLE" -ne 1 ]; then
+      echo "Skipping $test_name (graphics builtins unavailable)"
+      echo
+      continue
+    fi
+
+    if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; }; then
+      echo "Skipping $test_name (SDL disabled)"
+      echo
+      continue
+    fi
   fi
 
   if [ -f "$SCRIPT_DIR/Pascal/$test_name.sqlite" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then

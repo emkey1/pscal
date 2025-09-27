@@ -38,9 +38,6 @@ int clikeGetBuiltinID(const char *name) {
 
 void clikeRegisterBuiltins(void) {
     registerAllBuiltins();
-#ifdef SDL
-    registerSdlGlBuiltins();
-#endif
     registerBuiltinFunction("scanf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("itoa", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("atoi", AST_FUNCTION_DECL, NULL);
