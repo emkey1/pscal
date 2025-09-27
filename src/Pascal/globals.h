@@ -5,6 +5,7 @@
 #include <stdio.h>  // For fprintf, stderr
 #include <stdlib.h> // For exit, EXIT_FAILURE
 #include <pthread.h> // For mutex guarding of global tables
+#include <stdatomic.h> // For atomic flags shared across threads
 
 #include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
@@ -76,7 +77,7 @@ extern int dumpExec;
 extern List *inserted_global_names;
 #endif
 
-extern int break_requested;
+extern atomic_int break_requested;
 extern int exit_requested; // Flag set by builtin 'exit' to unwind the current routine
 extern int gSuppressWriteSpacing; // Non-zero disables automatic spacing between write arguments
 extern int gUppercaseBooleans;    // Non-zero prints TRUE/FALSE instead of true/false

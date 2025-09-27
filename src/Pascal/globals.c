@@ -53,7 +53,7 @@ int gWindowBottom          = 24;
 // --- End CRT State Variables ---
 
 // Flag used by builtins like GraphLoop to signal a quit request from the user.
-int break_requested = 0;
+atomic_int break_requested = ATOMIC_VAR_INIT(0);
 // Flag used by builtin 'exit' to request unwinding the current routine (not program termination).
 int exit_requested = 0;
 int gSuppressWriteSpacing = 0;

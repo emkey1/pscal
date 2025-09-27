@@ -1337,11 +1337,11 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
         }
 
         if (event.type == SDL_QUIT) {
-            break_requested = 1;
+            atomic_store(&break_requested, 1);
             return makeInt(0);
         } else if (event.type == SDL_KEYDOWN) {
             if (event.key.keysym.sym == SDLK_q) {
-                break_requested = 1;
+                atomic_store(&break_requested, 1);
             }
             enqueuePendingKeycode(event.key.keysym.sym);
             if (dequeuePendingKeycode(&queuedCode)) {
