@@ -23,6 +23,8 @@
 #include <string.h>
 #include <strings.h>
 
+extern void cleanupBalls3DRenderingResources(void);
+
 #ifdef SDL_VIDEO_DRIVER_X11
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -298,6 +300,7 @@ void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
 
     if (gSdlGLContext) {
+        cleanupBalls3DRenderingResources();
         SDL_GL_DeleteContext(gSdlGLContext);
         gSdlGLContext = NULL;
         #ifdef DEBUG
