@@ -150,9 +150,6 @@ int runProgram(const char *source, const char *programName, const char *frontend
 
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
-#ifdef SDL
-    registerSdlGlBuiltins();
-#endif
 
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");

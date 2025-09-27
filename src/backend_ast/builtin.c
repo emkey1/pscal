@@ -2,11 +2,6 @@
 #include "core/utils.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
-#ifdef SDL
-#include "backend_ast/sdl.h"
-#include "backend_ast/audio.h"
-#include "backend_ast/gl.h"
-#endif
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
@@ -33,22 +28,6 @@
 
 // Maximum number of arguments allowed for write/writeln
 #define MAX_WRITE_ARGS_VM 32
-
-#ifndef SDL
-static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
-    (void)arg_count;
-    (void)args;
-    const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
-    runtimeError(vm, "Built-in '%s' requires SDL support. Rebuild with -DSDL=ON to enable it.", name);
-    if (vm) {
-        vm->abort_requested = true;
-    }
-    return makeNil();
-}
-#define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
-#else
-#define SDL_HANDLER(fn) fn
-#endif
 
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
@@ -235,24 +214,18 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
     {"chr", vmBuiltinChr},
-    {"cleardevice", SDL_HANDLER(vmBuiltinCleardevice)},
     {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
-    {"closegraph", SDL_HANDLER(vmBuiltinClosegraph)},
-    {"closegraph3d", SDL_HANDLER(vmBuiltinClosegraph3d)},
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
     {"cosh", vmBuiltinCosh},
     {"cotan", vmBuiltinCotan},
     {"cursoroff", vmBuiltinCursoroff},
     {"cursoron", vmBuiltinCursoron},
-    {"createtargettexture", SDL_HANDLER(vmBuiltinCreatetargettexture)}, // Moved
-    {"createtexture", SDL_HANDLER(vmBuiltinCreatetexture)}, // Moved
     {"dec", vmBuiltinDec},
     {"delay", vmBuiltinDelay},
     {"deline", vmBuiltinDeline},
-    {"destroytexture", SDL_HANDLER(vmBuiltinDestroytexture)},
     {"dispose", vmBuiltinDispose},
     {"dnslookup", vmBuiltinDnsLookup},
     {"dosExec", vmBuiltinDosExec},
@@ -265,77 +238,36 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"dosMkdir", vmBuiltinDosMkdir},
     {"dosRmdir", vmBuiltinDosRmdir},
     {"double", vmBuiltinToDouble},
-    {"drawcircle", SDL_HANDLER(vmBuiltinDrawcircle)}, // Moved
-    {"drawline", SDL_HANDLER(vmBuiltinDrawline)}, // Moved
-    {"drawpolygon", SDL_HANDLER(vmBuiltinDrawpolygon)}, // Moved
-    {"drawrect", SDL_HANDLER(vmBuiltinDrawrect)}, // Moved
     {"eof", vmBuiltinEof},
     {"erase", vmBuiltinErase},
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-    {"fillcircle", SDL_HANDLER(vmBuiltinFillcircle)},
-    {"fillrect", SDL_HANDLER(vmBuiltinFillrect)},
     {"findfirst", vmBuiltinDosFindfirst},
     {"findnext", vmBuiltinDosFindnext},
     {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
     {"formatfloat", vmBuiltinFormatfloat},
-    {"freesound", SDL_HANDLER(vmBuiltinFreesound)},
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
     {"getfattr", vmBuiltinDosGetfattr},
-    {"getmaxx", SDL_HANDLER(vmBuiltinGetmaxx)},
-    {"getmaxy", SDL_HANDLER(vmBuiltinGetmaxy)},
-    {"getmousestate", SDL_HANDLER(vmBuiltinGetmousestate)},
-    {"getpixelcolor", SDL_HANDLER(vmBuiltinGetpixelcolor)}, // Moved
-    {"gettextsize", SDL_HANDLER(vmBuiltinGettextsize)},
-    {"getticks", SDL_HANDLER(vmBuiltinGetticks)},
-    {"glbegin", SDL_HANDLER(vmBuiltinGlbegin)},
-    {"glclear", SDL_HANDLER(vmBuiltinGlclear)},
-    {"glclearcolor", SDL_HANDLER(vmBuiltinGlclearcolor)},
-    {"glcleardepth", SDL_HANDLER(vmBuiltinGlcleardepth)},
-    {"glcolor3f", SDL_HANDLER(vmBuiltinGlcolor3f)},
-    {"gldepthtest", SDL_HANDLER(vmBuiltinGldepthtest)},
-    {"glend", SDL_HANDLER(vmBuiltinGlend)},
-    {"glfrustum", SDL_HANDLER(vmBuiltinGlfrustum)},
-    {"glloadidentity", SDL_HANDLER(vmBuiltinGlloadidentity)},
-    {"glmatrixmode", SDL_HANDLER(vmBuiltinGlmatrixmode)},
-    {"glpopmatrix", SDL_HANDLER(vmBuiltinGlpopmatrix)},
-    {"glpushmatrix", SDL_HANDLER(vmBuiltinGlpushmatrix)},
-    {"glrotatef", SDL_HANDLER(vmBuiltinGlrotatef)},
-    {"glscalef", SDL_HANDLER(vmBuiltinGlscalef)},
-    {"glperspective", SDL_HANDLER(vmBuiltinGlperspective)},
-    {"glsetswapinterval", SDL_HANDLER(vmBuiltinGlsetswapinterval)},
-    {"glswapwindow", SDL_HANDLER(vmBuiltinGlswapwindow)},
-    {"gltranslatef", SDL_HANDLER(vmBuiltinGltranslatef)},
-    {"glvertex3f", SDL_HANDLER(vmBuiltinGlvertex3f)},
-    {"glviewport", SDL_HANDLER(vmBuiltinGlviewport)},
     {"gettime", vmBuiltinDosGettime},
-    {"graphloop", SDL_HANDLER(vmBuiltinGraphloop)},
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
     {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
-    {"initgraph", SDL_HANDLER(vmBuiltinInitgraph)},
-    {"initgraph3d", SDL_HANDLER(vmBuiltinInitgraph3d)},
-    {"initsoundsystem", SDL_HANDLER(vmBuiltinInitsoundsystem)},
-    {"inittextsystem", SDL_HANDLER(vmBuiltinInittextsystem)},
     {"insline", vmBuiltinInsline},
     {"int", vmBuiltinToInt},
     {"inttostr", vmBuiltinInttostr},
     {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
-    {"issoundplaying", SDL_HANDLER(vmBuiltinIssoundplaying)}, // Moved
     {"keypressed", vmBuiltinKeypressed},
     {"length", vmBuiltinLength},
     {"ln", vmBuiltinLn},
     {"log10", vmBuiltinLog10},
-    {"loadimagetotexture", SDL_HANDLER(vmBuiltinLoadimagetotexture)}, // Moved
-    {"loadsound", SDL_HANDLER(vmBuiltinLoadsound)},
     {"low", vmBuiltinLow},
     {"lowvideo", vmBuiltinLowvideo},
     {"max", vmBuiltinMax},
@@ -351,13 +283,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
-    {"outtextxy", SDL_HANDLER(vmBuiltinOuttextxy)}, // Moved
     {"paramcount", vmBuiltinParamcount},
     {"paramstr", vmBuiltinParamstr},
-    {"playsound", SDL_HANDLER(vmBuiltinPlaysound)},
-    {"stopallsounds", SDL_HANDLER(vmBuiltinStopallsounds)},
-    {"pollkey", SDL_HANDLER(vmBuiltinPollkey)},
-    {"iskeydown", SDL_HANDLER(vmBuiltinIskeydown)},
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
@@ -365,11 +292,8 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fopen", vmBuiltinFopen},
     {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
-    {"putpixel", SDL_HANDLER(vmBuiltinPutpixel)},
     {"write", vmBuiltinWrite}, // Preserve legacy builtin id for write
     {"fprintf", vmBuiltinFprintf}, // Registered after write to avoid shifting legacy id 176
-    {"quitsoundsystem", SDL_HANDLER(vmBuiltinQuitsoundsystem)},
-    {"quittextsystem", SDL_HANDLER(vmBuiltinQuittextsystem)},
     {"random", vmBuiltinRandom},
     {"randomize", vmBuiltinRandomize},
     {"read", vmBuiltinRead},
@@ -378,10 +302,6 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"real", vmBuiltinReal},
     {"realtostr", vmBuiltinRealtostr},
     {"rename", vmBuiltinRename},
-    {"rendercopy", SDL_HANDLER(vmBuiltinRendercopy)}, // Moved
-    {"rendercopyex", SDL_HANDLER(vmBuiltinRendercopyex)}, // Moved
-    {"rendercopyrect", SDL_HANDLER(vmBuiltinRendercopyrect)},
-    {"rendertexttotexture", SDL_HANDLER(vmBuiltinRendertexttotexture)},
     {"reset", vmBuiltinReset},
     {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
@@ -391,10 +311,6 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
     {"setlength", vmBuiltinSetlength},
-    {"setalphablend", SDL_HANDLER(vmBuiltinSetalphablend)},
-    {"setcolor", SDL_HANDLER(vmBuiltinSetcolor)}, // Moved
-    {"setrendertarget", SDL_HANDLER(vmBuiltinSetrendertarget)}, // Moved
-    {"setrgbcolor", SDL_HANDLER(vmBuiltinSetrgbcolor)},
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
@@ -424,12 +340,9 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
     {"toupper", vmBuiltinUpcase},
-    {"updatescreen", SDL_HANDLER(vmBuiltinUpdatescreen)},
-    {"updatetexture", SDL_HANDLER(vmBuiltinUpdatetexture)},
     {"val", vmBuiltinVal},
     {"valreal", vmBuiltinValreal},
     {"vmversion", vmBuiltinVMVersion},
-    {"waitkeyevent", SDL_HANDLER(vmBuiltinWaitkeyevent)}, // Moved
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
@@ -437,7 +350,6 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"to be filled", NULL}
 };
 
-#undef SDL_HANDLER
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
 
@@ -3818,12 +3730,6 @@ int getBuiltinIDForCompiler(const char *name) {
     pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-#ifndef SDL
-            if (vmBuiltinDispatchTable[i].handler == vmBuiltinSDLUnavailable) {
-                pthread_mutex_unlock(&builtin_registry_mutex);
-                return -1;
-            }
-#endif
             pthread_mutex_unlock(&builtin_registry_mutex);
             return (int)i;
         }
@@ -3895,62 +3801,6 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
-#ifdef SDL
-static const char *const sdl_gl_static_builtin_names[] = {
-    "GLBegin",
-    "GLClear",
-    "GLClearColor",
-    "GLClearDepth",
-    "GLColor3f",
-    "GLDepthTest",
-    "GLEnd",
-    "GLFrustum",
-    "GLLoadIdentity",
-    "GLMatrixMode",
-    "GLPopMatrix",
-    "GLPushMatrix",
-    "GLRotatef",
-    "GLScalef",
-    "GLPerspective",
-    "GLSetSwapInterval",
-    "GLSwapWindow",
-    "GLTranslatef",
-    "GLVertex3f",
-    "GLViewport",
-};
-
-typedef struct {
-    const char *display_name;
-    const char *vm_name;
-    VmBuiltinFn handler;
-    BuiltinRoutineType type;
-} SdlGlDynamicBuiltin;
-
-static const SdlGlDynamicBuiltin sdl_gl_dynamic_builtins[] = {
-    {"GLColor4f", "glcolor4f", vmBuiltinGlcolor4f, BUILTIN_TYPE_PROCEDURE},
-    {"GLNormal3f", "glnormal3f", vmBuiltinGlnormal3f, BUILTIN_TYPE_PROCEDURE},
-    {"GLEnable", "glenable", vmBuiltinGlenable, BUILTIN_TYPE_PROCEDURE},
-    {"GLDisable", "gldisable", vmBuiltinGldisable, BUILTIN_TYPE_PROCEDURE},
-    {"GLShadeModel", "glshademodel", vmBuiltinGlshademodel, BUILTIN_TYPE_PROCEDURE},
-    {"GLLightfv", "gllightfv", vmBuiltinGllightfv, BUILTIN_TYPE_PROCEDURE},
-    {"GLMaterialfv", "glmaterialfv", vmBuiltinGlmaterialfv, BUILTIN_TYPE_PROCEDURE},
-    {"GLMaterialf", "glmaterialf", vmBuiltinGlmaterialf, BUILTIN_TYPE_PROCEDURE},
-    {"GLColorMaterial", "glcolormaterial", vmBuiltinGlcolormaterial, BUILTIN_TYPE_PROCEDURE},
-    {"GLBlendFunc", "glblendfunc", vmBuiltinGlblendfunc, BUILTIN_TYPE_PROCEDURE},
-    {"GLIsHardwareAccelerated", "glishardwareaccelerated", vmBuiltinGlishardwareaccelerated, BUILTIN_TYPE_FUNCTION},
-};
-
-void registerSdlGlBuiltins(void) {
-    for (size_t i = 0; i < sizeof(sdl_gl_static_builtin_names) / sizeof(sdl_gl_static_builtin_names[0]); ++i) {
-        registerBuiltinFunction(sdl_gl_static_builtin_names[i], AST_PROCEDURE_DECL, NULL);
-    }
-    for (size_t i = 0; i < sizeof(sdl_gl_dynamic_builtins) / sizeof(sdl_gl_dynamic_builtins[0]); ++i) {
-        const SdlGlDynamicBuiltin *entry = &sdl_gl_dynamic_builtins[i];
-        registerVmBuiltin(entry->vm_name, entry->handler, entry->type, entry->display_name);
-    }
-}
-#endif
-
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
@@ -3976,59 +3826,6 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("tochar",   AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobool",   AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobyte",   AST_FUNCTION_DECL, NULL);
-
-    /* Graphics stubs (usable even without SDL) */
-    registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMaxX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetMaxY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GraphLoop", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRGBColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateScreen", AST_PROCEDURE_DECL, NULL);
-
-#ifdef SDL
-    /* Additional SDL graphics and sound built-ins */
-    registerBuiltinFunction("CloseGraph3D", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawPolygon", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FreeSound", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMouseState", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-    registerSdlGlBuiltins();
-    registerBuiltinFunction("InitGraph3D", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadImageToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("StopAllSounds", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("IsKeyDown", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopy", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyEx", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderTextToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SetAlphaBlend", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRenderTarget", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("WaitKeyEvent", AST_PROCEDURE_DECL, NULL);
-#endif
 
     /* General built-in functions and procedures */
     // Rea/CLike: object allocation helper
