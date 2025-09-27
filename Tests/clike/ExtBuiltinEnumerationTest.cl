@@ -10,16 +10,28 @@ int main() {
       ok = 0;
     }
     int fnCount = extbuiltinfunctioncount(name);
+    int groupCount = extbuiltingroupcount(name);
     int j = 0;
-    while (j < fnCount) {
-      str fnName = extbuiltinfunctionname(name, j);
-      if (fnName == "") {
-        ok = 0;
-      }
-      if (name == "system" && fnName == "GetPid") {
-        foundGetPid = 1;
+    int groupTotal = 0;
+    while (j < groupCount) {
+      str groupName = extbuiltingroupname(name, j);
+      int groupFnCount = extbuiltingroupfunctioncount(name, groupName);
+      int k = 0;
+      groupTotal = groupTotal + groupFnCount;
+      while (k < groupFnCount) {
+        str fnName = extbuiltingroupfunctionname(name, groupName, k);
+        if (fnName == "") {
+          ok = 0;
+        }
+        if (name == "system" && groupName == "process" && fnName == "GetPid") {
+          foundGetPid = 1;
+        }
+        k = k + 1;
       }
       j = j + 1;
+    }
+    if (groupTotal != fnCount) {
+      ok = 0;
     }
     if (name == "system") {
       foundSystem = 1;

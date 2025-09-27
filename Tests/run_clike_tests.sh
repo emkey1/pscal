@@ -117,6 +117,8 @@ import sys
 
 path = sys.argv[1]
 seen = set()
+groups = {}
+DEFAULT_GROUP = 'default'
 with open(path, 'r', encoding='utf-8') as fh:
     for idx, raw_line in enumerate(fh, 1):
         line = raw_line.rstrip('\n')
@@ -131,12 +133,25 @@ with open(path, 'r', encoding='utf-8') as fh:
                 print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             seen.add(parts[1])
-        elif tag == 'function':
+            groups.setdefault(parts[1], set())
+        elif tag == 'group':
             if len(parts) != 3:
-                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                print(f"Invalid group line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             if parts[1] not in seen:
+                print(f"Group references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            groups.setdefault(parts[1], set()).add(parts[2])
+        elif tag == 'function':
+            if len(parts) != 4:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            category, group = parts[1], parts[2]
+            if category not in seen:
                 print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if group != DEFAULT_GROUP and group not in groups.get(category, set()):
+                print(f"Function references unknown group on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
         else:
             print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)

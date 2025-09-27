@@ -7,11 +7,16 @@ void registerRealTimeClockBuiltin(void);
 void registerSwapBuiltin(void);
 
 void registerSystemBuiltins(void) {
-  extBuiltinRegisterCategory("system");
-  extBuiltinRegisterFunction("system", "FileExists");
-  extBuiltinRegisterFunction("system", "GetPid");
-  extBuiltinRegisterFunction("system", "RealTimeClock");
-  extBuiltinRegisterFunction("system", "Swap");
+  const char *category = "system";
+  extBuiltinRegisterCategory(category);
+  extBuiltinRegisterGroup(category, "filesystem");
+  extBuiltinRegisterGroup(category, "process");
+  extBuiltinRegisterGroup(category, "timing");
+  extBuiltinRegisterGroup(category, "utility");
+  extBuiltinRegisterFunction(category, "filesystem", "FileExists");
+  extBuiltinRegisterFunction(category, "process", "GetPid");
+  extBuiltinRegisterFunction(category, "timing", "RealTimeClock");
+  extBuiltinRegisterFunction(category, "utility", "Swap");
 
   registerFileExistsBuiltin();
   registerGetPidBuiltin();

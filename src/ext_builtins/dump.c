@@ -14,13 +14,36 @@ void extBuiltinDumpInventory(FILE *out) {
             continue;
         }
         fprintf(out, "category %s\n", category);
-        size_t fn_count = extBuiltinGetFunctionCount(category);
-        for (size_t j = 0; j < fn_count; ++j) {
-            const char *fn = extBuiltinGetFunctionName(category, j);
-            if (!fn) {
+
+        if (extBuiltinHasGroup(category, NULL)) {
+            const char *default_group = "default";
+            fprintf(out, "group %s %s\n", category, default_group);
+            size_t fn_count = extBuiltinGetFunctionCount(category, NULL);
+            for (size_t j = 0; j < fn_count; ++j) {
+                const char *fn = extBuiltinGetFunctionName(category, NULL, j);
+                if (!fn) {
+                    continue;
+                }
+                fprintf(out, "function %s %s %s\n", category, default_group, fn);
+            }
+        }
+
+        size_t group_count = extBuiltinGetGroupCount(category);
+        for (size_t g = 0; g < group_count; ++g) {
+            const char *group = extBuiltinGetGroupName(category, g);
+            if (!group) {
                 continue;
             }
-            fprintf(out, "function %s %s\n", category, fn);
+            fprintf(out, "group %s %s\n", category, group);
+            size_t fn_count = extBuiltinGetFunctionCount(category, group);
+            for (size_t j = 0; j < fn_count; ++j) {
+                const char *fn =
+                    extBuiltinGetFunctionName(category, group, j);
+                if (!fn) {
+                    continue;
+                }
+                fprintf(out, "function %s %s %s\n", category, group, fn);
+            }
         }
     }
     fflush(out);

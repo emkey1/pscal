@@ -290,6 +290,10 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltinfunctioncount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltinfunctionname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupcount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupfunctioncount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_STRING, 0, 0, 0);
 }
 
 static VarType getFunctionType(const char *name) {
