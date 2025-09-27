@@ -1,5 +1,5 @@
-accelerated fps=153.000 dt=0.006536 frameDelay=6 min=294.000 max=1666.000 camera=1201.200
-ball# 0 posX=-178.572 posY=-68.799 posZ=-138.313 screenR=30.876 depth=0.574 light=0.671 rim=0.010 highlight=0.340
-ball# 1 posX=138.313 posY=48.974 posZ=-211.233 screenR=37.268 depth=0.745 light=0.828 rim=0.005 highlight=0.583
-ball# 2 posX=-10.832 posY=94.572 posZ=-259.221 screenR=30.895 depth=0.858 light=0.784 rim=0.002 highlight=0.504
-ok
+After Accelerate: targetFps=153.000 frameDelay=6.000 deltaTime=0.006536 minSpeed=294.000 maxSpeed=1666.000 cameraDistance=1201.200
+Ball 0: pos=( -120.000 -> -118.183, -60.000 -> -58.962, -180.000 -> -178.442) vel=( 294.000, 294.000, 294.000) screenR=( 0.000 -> 33.444) depthShade=( -1.000 -> 0.668) light=0.000 -> 0.764 highlight=0.000 -> 0.471 highlightPos=( 451.353, 452.086) highlightRadius=15.050
+Ball 1: pos=( 96.000 -> 94.702, 42.000 -> 43.363, -220.000 -> -220.584) vel=( -294.000, 294.000, -294.000) screenR=( 0.000 -> 26.553) depthShade=( -1.000 -> 0.767) light=0.000 -> 0.859 highlight=0.000 -> 0.646 highlightPos=( 778.885, 299.855) highlightRadius=11.949
+Ball 2: pos=( 0.000 -> 1.038, -120.000 -> -120.389, -260.000 -> -262.142) vel=( 294.000, -294.000, -327.690) screenR=( 0.000 -> 37.264) depthShade=( -1.000 -> 0.864) light=0.000 -> 0.790 highlight=0.000 -> 0.514 highlightPos=( 636.045, 534.311) highlightRadius=16.769
+Mutation flags: pos=true screenRadius=true depthShade=true lightIntensity=true highlight=true
