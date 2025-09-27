@@ -3,23 +3,23 @@
 // This version uses the fixed-function pipeline (lighting, materials,
 // blending) instead of the 2D circle impostor trick.
 
-const int WindowWidth = 1024;
-const int WindowHeight = 768;
+const int WindowWidth = 1600;
+const int WindowHeight = 1000;
 
 float TargetFPS = 90.0;
 
-const int NumBalls = 9;
-const float BoxWidth = 720.0;
-const float BoxHeight = 420.0;
-const float BoxDepth = 300.0;
+const int NumBalls = 79;
+const float BoxWidth = 1440.0;
+const float BoxHeight = 820.0;
+const float BoxDepth = 600.0;
 const float WallElasticity = 1.08;
-float MinSpeed = 90.0;
-float MaxSpeed = 560.0;
+float MinSpeed = 180.0;
+float MaxSpeed = 1000.0;
 const float VelocityDrag = 0.995;
 
-float CameraDistance = 1850.0;
+float CameraDistance = 2200.0;
 const float InitialCameraPitch = -12.0;
-const float CameraOrbitSpeed = 85.0;
+const float CameraOrbitSpeed = 0.0;
 const float ManualYawSpeed = 160.0;
 const float ManualPitchSpeed = 90.0;
 const float MinCameraPitch = -60.0;
