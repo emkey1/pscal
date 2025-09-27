@@ -87,6 +87,7 @@ static char *reaDupString(const char *s);
 static char *duplicateDirName(const char *path);
 static char *tryResolveFromRepository(const char *relative, bool *out_exists);
 static char *tryResolveRepoLibFromBase(const char *baseDir, const char *relative, bool *out_exists);
+static char *joinPaths(const char *base, const char *relative);
 
 static char **gEnvImportPaths = NULL;
 static int gEnvImportPathCount = 0;

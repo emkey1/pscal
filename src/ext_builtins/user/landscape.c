@@ -43,6 +43,7 @@ static inline void assignFloatValue(Value* target, double value) {
     SET_REAL_VALUE(target, value);
 }
 
+#ifdef SDL
 static void computeTerrainNormal(Value* vertexHeights,
                                  Value* worldXCoords,
                                  Value* worldZCoords,
@@ -92,6 +93,7 @@ static void computeTerrainNormal(Value* vertexHeights,
     if (ny) *ny = nyTemp / length;
     if (nz) *nz = nzTemp / length;
 }
+#endif
 
 static Value vmBuiltinLandscapePrecomputeWorldCoords(VM* vm, int arg_count, Value* args) {
     if (arg_count != 5) {
