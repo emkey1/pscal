@@ -1,0 +1,5 @@
+accelerated fps=153.000 dt=0.006536 frameDelay=6 min=294.000 max=1666.000 camera=1201.200
+ball# 0 posX=-178.572 posY=-68.799 posZ=-138.313 screenR=30.876 depth=0.574 light=0.671 rim=0.010 highlight=0.340
+ball# 1 posX=138.313 posY=48.974 posZ=-211.233 screenR=37.268 depth=0.745 light=0.828 rim=0.005 highlight=0.583
+ball# 2 posX=-10.832 posY=94.572 posZ=-259.221 screenR=30.895 depth=0.858 light=0.784 rim=0.002 highlight=0.504
+ok
