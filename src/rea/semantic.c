@@ -11,6 +11,12 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <limits.h>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 
 // Forward declaration from core/utils.c
 Token *newToken(TokenType type, const char *value, int line, int column);
@@ -78,6 +84,9 @@ static ReaModuleBindingList *gActiveBindings = NULL;
 static char **gModuleDirStack = NULL;
 static int gModuleDirDepth = 0;
 static char *reaDupString(const char *s);
+static char *duplicateDirName(const char *path);
+static char *tryResolveFromRepository(const char *relative, bool *out_exists);
+static char *tryResolveRepoLibFromBase(const char *baseDir, const char *relative, bool *out_exists);
 
 static char **gEnvImportPaths = NULL;
 static int gEnvImportPathCount = 0;
@@ -320,6 +329,86 @@ static char *tryResolveFromDirectory(const char *dir, const char *relative, bool
     return NULL;
 }
 
+static char *tryResolveRepoLibFromBase(const char *baseDir, const char *relative, bool *out_exists) {
+    if (!baseDir || !*baseDir || !relative || !*relative) {
+        return NULL;
+    }
+
+    char *cursor = reaDupString(baseDir);
+    if (!cursor) {
+        return NULL;
+    }
+
+    while (cursor && *cursor) {
+        char *libDir = joinPaths(cursor, "lib/rea");
+        if (libDir) {
+            char *resolved = tryResolveFromDirectory(libDir, relative, out_exists);
+            free(libDir);
+            if (resolved) {
+                free(cursor);
+                return resolved;
+            }
+        }
+
+        char *parent = duplicateDirName(cursor);
+        if (!parent) {
+            break;
+        }
+        if (strcmp(parent, cursor) == 0) {
+            free(parent);
+            break;
+        }
+        free(cursor);
+        cursor = parent;
+    }
+
+    free(cursor);
+    return NULL;
+}
+
+static char *tryResolveFromRepository(const char *relative, bool *out_exists) {
+    if (!relative || !*relative) {
+        return NULL;
+    }
+
+    for (int idx = gModuleDirDepth - 1; idx >= 0; idx--) {
+        const char *base = gModuleDirStack ? gModuleDirStack[idx] : NULL;
+        char *resolved = tryResolveRepoLibFromBase(base, relative, out_exists);
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+#if defined(_WIN32)
+    char *cwd = _getcwd(NULL, 0);
+#else
+    char *cwd = getcwd(NULL, 0);
+    if (!cwd) {
+#if defined(PATH_MAX)
+        char buffer[PATH_MAX];
+        if (getcwd(buffer, sizeof(buffer))) {
+            cwd = reaDupString(buffer);
+        }
+#endif
+    }
+#endif
+    if (cwd) {
+        char *resolved = tryResolveRepoLibFromBase(cwd, relative, out_exists);
+        if (resolved) {
+            free(cwd);
+            return resolved;
+        }
+        free(cwd);
+    }
+
+    char *resolved = tryResolveRepoLibFromBase(".", relative, out_exists);
+    if (resolved) {
+        return resolved;
+    }
+
+    return NULL;
+}
+
 static void popModuleDir(void) {
     if (gModuleDirDepth <= 0) return;
     gModuleDirDepth--;
@@ -501,6 +590,11 @@ static char *tryResolveRelativePath(const char *relative, bool *out_exists) {
         if (resolved) {
             return resolved;
         }
+    }
+
+    char *repoResolved = tryResolveFromRepository(relative, out_exists);
+    if (repoResolved) {
+        return repoResolved;
     }
 
     char *defaultResolved = tryResolveFromDirectory(REA_DEFAULT_IMPORT_DIR, relative, out_exists);
