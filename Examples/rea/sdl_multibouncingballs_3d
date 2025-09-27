@@ -692,6 +692,8 @@ class DemoApp extends Renderable {
     void init() {
         randomize();
         myself.configureGraphics();
+        // Prime the unit-sphere cache once the GL context is alive so the first frame stays smooth.
+        BouncingBalls3DDrawUnitSphereFast(SphereStacks, SphereSlices);
         float fpsBoost = 1.7;
         float speedBoost = 2.45;
         float cameraPull = 0.66;
