@@ -9,6 +9,7 @@ VM. For instructions on adding your own routines, see
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
 | inttostr | (i: Integer) | String | Convert integer to string. |
+| formatfloat | (x: Numeric [, precision: Integer]) | String | Convert numeric value to string with fixed decimal precision. |
 | realtostr | (r: Real) | String | Convert real to string. |
 | real | (x: Ordinal or Real) | Real | Convert value to real. |
 | length | (s: String or Array) | Integer | Length of string or array. |
@@ -226,6 +227,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | glfrustum | (left: Real, right: Real, bottom: Real, top: Real, near: Real, far: Real) | void | Configure a perspective frustum using `glFrustum`. |
 | glperspective | (fovY: Real, aspect: Real, near: Real, far: Real) | void | Convenience helper that computes a symmetric frustum from a field of view and aspect ratio. |
 | glsetswapinterval | (interval: Integer) | void | Set the OpenGL swap interval (0 disables vsync, 1 enables it). |
+| glishardwareaccelerated | () | Boolean | Returns `true` when the current OpenGL context reports hardware acceleration via `SDL_GL_ACCELERATED_VISUAL`. |
 | glswapwindow | () | void | Swap the OpenGL window buffers to present the rendered frame. |
 | gltranslatef | (x: Real, y: Real, z: Real) | void | Apply a translation to the current matrix. |
 | glvertex3f | (x: Real, y: Real, z: Real) | void | Emit a vertex for the active primitive. |
@@ -271,6 +273,8 @@ imported from each front end (Pascal, CLike, and Rea).
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
 | iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
+
+For OpenGL programs, PSCAL now exposes additional fixed-function helpers alongside the existing pipeline calls: `GLColor4f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, and `GLBlendFunc` simplify configuring lighting, materials, and blending directly from Pascal, Rea, and the other front ends.
 
 ### Basic OpenGL render loop
 

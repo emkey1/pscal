@@ -1,0 +1,451 @@
+#!/usr/bin/env rea
+// SDL Multi Bouncing Balls 3D demo rendered with the OpenGL helpers.
+// This version uses the fixed-function pipeline (lighting, materials,
+// blending) instead of the 2D circle impostor trick.
+
+const int WindowWidth = 1600;
+const int WindowHeight = 1000;
+
+float TargetFPS = 90.0;
+
+const int NumBalls = 120;
+const float BoxWidth = 1440.0;
+const float BoxHeight = 820.0;
+const float BoxDepth = 600.0;
+const float WallElasticity = 1.08;
+float MinSpeed = 180.0;
+float MaxSpeed = 1000.0;
+const float VelocityDrag = 0.995;
+
+float CameraDistance = 2200.0;
+const float InitialCameraPitch = -12.0;
+const float CameraOrbitSpeed = 0.0;
+const float ManualYawSpeed = 160.0;
+const float ManualPitchSpeed = 90.0;
+const float MinCameraPitch = -60.0;
+const float MaxCameraPitch = 25.0;
+
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+
+const int SphereStacks = 20;
+const int SphereSlices = 36;
+const float Pi = 3.1415926535;
+
+const int NumStars = 361;
+const float StarInnerRadiusScale = 1.45;
+const float StarOuterRadiusScale = 2.85;
+const float LightStarSize = 22.0;
+const float LightStarBrightness = 1.0;
+const float LightStarTwinkleRate = 0.22;
+
+const float LightDirX = -0.55;
+const float LightDirY = -0.35;
+const float LightDirZ = 0.78;
+const float AmbientLevel = 0.18;
+
+float posX[NumBalls];
+float posY[NumBalls];
+float posZ[NumBalls];
+float velX[NumBalls];
+float velY[NumBalls];
+float velZ[NumBalls];
+float radii[NumBalls];
+float screenX[NumBalls];
+float screenY[NumBalls];
+float screenRadius[NumBalls];
+float depthShade[NumBalls];
+int colorR[NumBalls];
+int colorG[NumBalls];
+int colorB[NumBalls];
+
+float starX[NumStars];
+float starY[NumStars];
+float starZ[NumStars];
+float starSize[NumStars];
+float starBaseBrightness[NumStars];
+float starTwinkleRate[NumStars];
+float starPhase[NumStars];
+
+bool quit;
+bool paused;
+int FrameDelay;
+float DeltaTime;
+float elapsedSeconds;
+float cameraYaw;
+float cameraPitch;
+float cameraYawVelocity;
+
+float randomUnit() {
+    return random(10000) / 10000.0;
+}
+
+void initBalls() {
+    int i = 0;
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    while (i < NumBalls) {
+        float r = 12.0 + random(26);
+        float availX = BoxWidth - 2.0 * r;
+        float availY = BoxHeight - 2.0 * r;
+        float availZ = BoxDepth - 2.0 * r;
+        if (availX < 4.0) availX = 4.0;
+        if (availY < 4.0) availY = 4.0;
+        if (availZ < 4.0) availZ = 4.0;
+
+        radii[i] = r;
+        posX[i] = -halfWidth + r + randomUnit() * availX;
+        posY[i] = -halfHeight + r + randomUnit() * availY;
+        posZ[i] = -r - randomUnit() * (BoxDepth - 2.0 * r);
+
+        int speedRange = trunc(MaxSpeed - MinSpeed);
+        float speed = MinSpeed + random(speedRange + 1) + randomUnit();
+        float yaw = random(360) * (Pi / 180.0);
+        float pitch = (random(121) - 60.0) * (Pi / 180.0);
+        float dirXY = cos(pitch);
+        velX[i] = cos(yaw) * dirXY * speed;
+        velY[i] = sin(pitch) * speed;
+        velZ[i] = sin(yaw) * dirXY * speed;
+
+        colorR[i] = 90 + random(150);
+        colorG[i] = 90 + random(150);
+        colorB[i] = 90 + random(150);
+        i = i + 1;
+    }
+}
+
+void initStars() {
+    int i = 0;
+    float boxRadius = BoxWidth;
+    if (BoxHeight > boxRadius) boxRadius = BoxHeight;
+    if (BoxDepth > boxRadius) boxRadius = BoxDepth;
+    float innerRadius = boxRadius * StarInnerRadiusScale;
+    float cameraGuard = CameraDistance * 1.05;
+    if (cameraGuard > innerRadius) innerRadius = cameraGuard;
+    float outerRadius = boxRadius * StarOuterRadiusScale;
+    if (outerRadius < innerRadius + 1.0) outerRadius = innerRadius + 1.0;
+    // Anchor a bright "sun" star roughly where the scene's directional light originates.
+    float lightConstX = LightDirX;
+    float lightConstY = LightDirY;
+    float lightConstZ = LightDirZ;
+    float lightDirLength = sqrt(lightConstX * lightConstX + lightConstY * lightConstY + lightConstZ * lightConstZ);
+    if (lightDirLength < 0.00001) lightDirLength = 1.0;
+    float highlightDistance = innerRadius + 0.78 * (outerRadius - innerRadius);
+    float highlightScale = highlightDistance / lightDirLength;
+    starX[0] = 0.0 - lightConstX * highlightScale;
+    starY[0] = 0.0 - lightConstY * highlightScale;
+    starZ[0] = 0.0 - lightConstZ * highlightScale;
+    starSize[0] = LightStarSize;
+    starBaseBrightness[0] = LightStarBrightness;
+    starTwinkleRate[0] = LightStarTwinkleRate;
+    starPhase[0] = 0.0;
+    i = 1;
+    while (i < NumStars) {
+        float cosTheta = 2.0 * randomUnit() - 1.0;
+        if (cosTheta > 1.0) cosTheta = 1.0;
+        if (cosTheta < -1.0) cosTheta = -1.0;
+        float sinSq = 1.0 - cosTheta * cosTheta;
+        if (sinSq < 0.0) sinSq = 0.0;
+        float sinTheta = sqrt(sinSq);
+        float phi = randomUnit() * 2.0 * Pi;
+        float dirX = sinTheta * cos(phi);
+        float dirY = sinTheta * sin(phi);
+        float dirZ = cosTheta;
+        float distance = innerRadius + randomUnit() * (outerRadius - innerRadius);
+        starX[i] = dirX * distance;
+        starY[i] = dirY * distance;
+        starZ[i] = dirZ * distance;
+        starSize[i] = 6.0 + randomUnit() * 6.0;
+        starBaseBrightness[i] = 0.45 + randomUnit() * 0.45;
+        starTwinkleRate[i] = 0.8 + randomUnit() * 1.6;
+        starPhase[i] = randomUnit() * 2.0 * Pi;
+        i = i + 1;
+    }
+}
+
+void setupLighting() {
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLEnable("lighting");
+    GLEnable("light0");
+    GLEnable("color_material");
+    GLEnable("normalize");
+
+    GLShadeModel("smooth");
+    GLColorMaterial("front", "ambient_and_diffuse");
+
+    float ambient = AmbientLevel;
+    GLLightfv("light0", "ambient", ambient, ambient, ambient, 1.0);
+    GLLightfv("light0", "diffuse", 0.90, 0.92, 0.95, 1.0);
+    GLLightfv("light0", "specular", 0.85, 0.90, 0.95, 1.0);
+
+    GLMaterialfv("front", "specular", 0.55, 0.60, 0.70, 1.0);
+    GLMaterialf("front", "shininess", 42.0);
+}
+
+void drawUnitSphere() {
+    BouncingBalls3DDrawUnitSphereFast(SphereStacks, SphereSlices);
+}
+
+void drawBall(int index) {
+    float baseR = colorR[index] / 255.0;
+    float baseG = colorG[index] / 255.0;
+    float baseB = colorB[index] / 255.0;
+
+    GLPushMatrix();
+    GLTranslatef(posX[index], posY[index], posZ[index]);
+    GLScalef(radii[index], radii[index], radii[index]);
+    GLColor3f(baseR, baseG, baseB);
+    drawUnitSphere();
+    GLPopMatrix();
+}
+
+void drawBalls() {
+    int i = 0;
+    while (i < NumBalls) {
+        drawBall(i);
+        i = i + 1;
+    }
+}
+
+void drawStarField() {
+    float time = elapsedSeconds;
+    GLDisable("lighting");
+    GLDepthTest(false);
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one");
+    GLBegin("lines");
+        int i = 0;
+        while (i < NumStars) {
+            float sparklePhase = starPhase[i] + time * starTwinkleRate[i];
+            float sparkle = 0.55 + 0.45 * sin(sparklePhase);
+            if (sparkle < 0.0) sparkle = 0.0;
+            float brightness = starBaseBrightness[i] * sparkle;
+            float alpha = 0.35 + 0.45 * sparkle;
+            if (alpha > 1.0) alpha = 1.0;
+            float size = starSize[i];
+            float depthSize = size * 0.6;
+            GLColor4f(brightness, brightness, brightness + 0.10, alpha);
+            GLVertex3f(starX[i] - size, starY[i], starZ[i]);
+            GLVertex3f(starX[i] + size, starY[i], starZ[i]);
+            GLVertex3f(starX[i], starY[i] - size, starZ[i]);
+            GLVertex3f(starX[i], starY[i] + size, starZ[i]);
+            GLVertex3f(starX[i], starY[i], starZ[i] - depthSize);
+            GLVertex3f(starX[i], starY[i], starZ[i] + depthSize);
+            i = i + 1;
+        }
+    GLEnd();
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLDisable("blend");
+    GLDepthTest(true);
+    GLEnable("lighting");
+}
+
+void drawGlassBox() {
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    float frontZ = -12.0;
+    float backZ = -BoxDepth;
+    float floorBackZ = backZ + 1.0;
+
+    GLDisable("lighting");
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+
+    // Draw the floor before the back wall so depth testing keeps it visible
+    // when viewed through the glass from behind.
+    GLColor4f(0.08, 0.12, 0.20, 1.00);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, floorBackZ);
+        GLVertex3f(-halfWidth, -halfHeight, floorBackZ);
+    GLEnd();
+
+    int gridSteps = 12;
+    int i = 0;
+    GLColor4f(0.18, 0.26, 0.38, 0.30);
+    GLBegin("lines");
+        while (i <= gridSteps) {
+            float t = (i * 1.0) / gridSteps;
+            float x = -halfWidth + t * BoxWidth;
+            GLVertex3f(x, -halfHeight + 0.2, frontZ);
+            GLVertex3f(x, -halfHeight + 0.2, floorBackZ);
+            float z = frontZ + t * (floorBackZ - frontZ);
+            GLVertex3f(-halfWidth, -halfHeight + 0.2, z);
+            GLVertex3f(halfWidth, -halfHeight + 0.2, z);
+            i = i + 1;
+        }
+    GLEnd();
+
+    GLDisable("blend");
+    GLColor3f(0.32, 0.46, 0.66);
+
+    GLBegin("line_loop");
+        GLVertex3f(-halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+    GLEnd();
+
+    GLBegin("line_loop");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLBegin("lines");
+        GLVertex3f(-halfWidth, halfHeight, frontZ);
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, frontZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, frontZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, frontZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLEnable("blend");
+    GLColor4f(0.12, 0.18, 0.26, 0.26);
+    GLBegin("quads");
+        GLVertex3f(-halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, halfHeight, backZ);
+        GLVertex3f(halfWidth, -halfHeight, backZ);
+        GLVertex3f(-halfWidth, -halfHeight, backZ);
+    GLEnd();
+
+    GLDisable("blend");
+
+    GLEnable("lighting");
+}
+
+void drawScene() {
+    GLClearColor(0.05, 0.07, 0.12, 1.0);
+    GLClear();
+
+    GLMatrixMode("projection");
+    GLLoadIdentity();
+    float aspect = WindowWidth * 1.0 / WindowHeight;
+    GLPerspective(55.0, aspect, 24.0, 8000.0);
+
+    GLMatrixMode("modelview");
+    GLLoadIdentity();
+    GLTranslatef(0.0, 0.0, -CameraDistance);
+    GLRotatef(cameraPitch, 1.0, 0.0, 0.0);
+    GLRotatef(cameraYaw, 0.0, 1.0, 0.0);
+
+    GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
+
+    drawStarField();
+    drawBalls();
+    drawGlassBox();
+
+    GLSwapWindow();
+}
+
+void updateSimulation(float deltaTime) {
+    if (paused) return;
+    BouncingBalls3DStepUltra(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
+        WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
+        CameraDistance, WindowWidth, WindowHeight,
+        posX, posY, posZ, velX, velY, velZ, radii,
+        screenX, screenY, screenRadius, depthShade);
+    elapsedSeconds = elapsedSeconds + deltaTime;
+    cameraYaw = cameraYaw + deltaTime * cameraYawVelocity;
+    if (cameraYaw >= 360.0) {
+        cameraYaw = cameraYaw - 360.0;
+    }
+    if (cameraYaw < 0.0) {
+        cameraYaw = cameraYaw + 360.0;
+    }
+}
+
+void handleInput() {
+    bool leftDown = IsKeyDown(ScanCodeLeft);
+    bool rightDown = IsKeyDown(ScanCodeRight);
+    bool upDown = IsKeyDown(ScanCodeUp);
+    bool downDown = IsKeyDown(ScanCodeDown);
+
+    float yawInput = 0.0;
+    if (leftDown) yawInput = yawInput - 1.0;
+    if (rightDown) yawInput = yawInput + 1.0;
+    if (yawInput == 0.0) {
+        cameraYawVelocity = CameraOrbitSpeed;
+    } else {
+        cameraYawVelocity = yawInput * ManualYawSpeed;
+    }
+
+    if (upDown && !downDown) {
+        cameraPitch = cameraPitch + DeltaTime * ManualPitchSpeed;
+    } else if (downDown && !upDown) {
+        cameraPitch = cameraPitch - DeltaTime * ManualPitchSpeed;
+    }
+
+    if (cameraPitch > MaxCameraPitch) cameraPitch = MaxCameraPitch;
+    if (cameraPitch < MinCameraPitch) cameraPitch = MinCameraPitch;
+
+    if (keypressed()) {
+        char key = readkey();
+        if (key == 'q' || key == 'Q') {
+            quit = true;
+        } else if (key == ' ') {
+            paused = !paused;
+        }
+    }
+}
+
+void initApp() {
+    InitGraph3D(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D", 24, 8);
+    bool gpuAccelerated = GLIsHardwareAccelerated();
+    if (gpuAccelerated) {
+        writeln("OpenGL acceleration: hardware (GPU).");
+    } else {
+        writeln("OpenGL acceleration: software fallback.");
+    }
+    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLSetSwapInterval(1);
+    setupLighting();
+
+    FrameDelay = trunc(1000 / TargetFPS);
+    DeltaTime = 1.0 / TargetFPS;
+
+    float fpsBoost = 1.6;
+    float speedBoost = 2.3;
+    float cameraPull = 0.7;
+    BouncingBalls3DAccelerate(TargetFPS, FrameDelay, DeltaTime,
+        MinSpeed, MaxSpeed, CameraDistance,
+        fpsBoost, speedBoost, cameraPull);
+
+    randomize();
+    initBalls();
+    initStars();
+
+    quit = false;
+    paused = false;
+    elapsedSeconds = 0.0;
+    cameraYaw = 0.0;
+    cameraPitch = InitialCameraPitch;
+    cameraYawVelocity = CameraOrbitSpeed;
+}
+
+void run() {
+    initApp();
+    writeln("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause.");
+    while (!quit) {
+        if (QuitRequested()) {
+            quit = true;
+            break;
+        }
+        handleInput();
+        updateSimulation(DeltaTime);
+        drawScene();
+        GraphLoop(FrameDelay);
+    }
+    CloseGraph3D();
+    writeln("Demo finished.");
+}
+
+run();

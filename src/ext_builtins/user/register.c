@@ -2,6 +2,7 @@
 #include "ext_builtins/registry.h"
 
 void registerLandscapeBuiltins(void);
+void registerBalls3DBuiltins(void);
 
 void registerUserBuiltins(void) {
     extBuiltinRegisterCategory("user");
@@ -9,6 +10,13 @@ void registerUserBuiltins(void) {
     extBuiltinRegisterFunction("user", "LandscapeDrawWater");
     extBuiltinRegisterFunction("user", "LandscapePrecomputeWorldCoords");
     extBuiltinRegisterFunction("user", "LandscapePrecomputeWaterOffsets");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DStep");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DStepUltra");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DStepAdvanced");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DStepUltraAdvanced");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DAccelerate");
+    extBuiltinRegisterFunction("user", "BouncingBalls3DDrawUnitSphereFast");
 
     registerLandscapeBuiltins();
+    registerBalls3DBuiltins();
 }

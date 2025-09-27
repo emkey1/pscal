@@ -68,7 +68,7 @@ end.
 Builtins are implemented in C and exposed to Pascal through a lookup table【F:src/backend_ast/builtin.c†L35-L176】. They cover:
 
 * **Math** – `abs`, `cos`, `sin`, `tan`, `exp`, `ln`, `sqrt`, `sqr`, `round`, `trunc`.
-* **Strings** – `length`, `copy`, `pos`, `chr`, `ord`, `inttostr`, `realtostr`, `upcase`.
+* **Strings** – `length`, `copy`, `pos`, `chr`, `ord`, `inttostr`, `formatfloat`, `realtostr`, `upcase`.
 * **I/O** – `readln`, `writeln`, `readkey` (optional char parameter), `halt`, `gotoxy`, `whereX`, `textcolor`.
 * **Files & streams** – `assign`, `reset`, `rewrite`, `close`, `eof`, memory stream helpers (`mstreamcreate`, `mstreamloadfromfile`, etc.).
 * **Random numbers** – `randomize`, `random`.

@@ -37,7 +37,7 @@ static VarType builtinReturnType(const char* name) {
     }
 
     static const char *const stringFuncs[] = {
-        "inttostr", "realtostr", "paramstr", "copy", "getenv", "dosgetenv",
+        "inttostr", "realtostr", "formatfloat", "paramstr", "copy", "getenv", "dosgetenv",
         "findfirst", "findnext", "dosfindfirst", "dosfindnext", "mstreambuffer",
         "dnslookup", "apireceive", "jsonget", "httpgetheader",
         "httpgetlastheaders", "httplasterror"

@@ -43,6 +43,58 @@ static inline void assignFloatValue(Value* target, double value) {
     SET_REAL_VALUE(target, value);
 }
 
+#ifdef SDL
+static void computeTerrainNormal(Value* vertexHeights,
+                                 Value* worldXCoords,
+                                 Value* worldZCoords,
+                                 int vertexStride,
+                                 int terrainSize,
+                                 int x,
+                                 int z,
+                                 float* nx,
+                                 float* ny,
+                                 float* nz) {
+    int leftX = (x > 0) ? x - 1 : x;
+    int rightX = (x < terrainSize) ? x + 1 : x;
+    int downZ = (z > 0) ? z - 1 : z;
+    int upZ = (z < terrainSize) ? z + 1 : z;
+
+    float left = (float)asLd(vertexHeights[z * vertexStride + leftX]);
+    float right = (float)asLd(vertexHeights[z * vertexStride + rightX]);
+    float down = (float)asLd(vertexHeights[downZ * vertexStride + x]);
+    float up = (float)asLd(vertexHeights[upZ * vertexStride + x]);
+
+    float worldLeft = (float)asLd(worldXCoords[leftX]);
+    float worldRight = (float)asLd(worldXCoords[rightX]);
+    float worldDown = (float)asLd(worldZCoords[downZ]);
+    float worldUp = (float)asLd(worldZCoords[upZ]);
+
+    float dx = 0.0f;
+    float spanX = worldRight - worldLeft;
+    if (fabsf(spanX) > 1e-6f) {
+        dx = (right - left) / spanX;
+    }
+
+    float dz = 0.0f;
+    float spanZ = worldUp - worldDown;
+    if (fabsf(spanZ) > 1e-6f) {
+        dz = (up - down) / spanZ;
+    }
+
+    float nxTemp = -dx;
+    float nyTemp = 1.0f;
+    float nzTemp = -dz;
+    float length = sqrtf(nxTemp * nxTemp + nyTemp * nyTemp + nzTemp * nzTemp);
+    if (length <= 1e-6f) {
+        length = 1.0f;
+    }
+
+    if (nx) *nx = nxTemp / length;
+    if (ny) *ny = nyTemp / length;
+    if (nz) *nz = nzTemp / length;
+}
+#endif
+
 static Value vmBuiltinLandscapePrecomputeWorldCoords(VM* vm, int arg_count, Value* args) {
     if (arg_count != 5) {
         runtimeError(vm, "LandscapePrecomputeWorldCoords expects 5 arguments.");
@@ -263,6 +315,11 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
             float g0 = clampf((float)asLd(vertexColorG[idx0]), 0.0f, 1.0f);
             float b0 = clampf((float)asLd(vertexColorB[idx0]), 0.0f, 1.0f);
             float h0 = (float)asLd(vertexHeights[idx0]);
+            float nx0, ny0, nz0;
+            computeTerrainNormal(vertexHeights, worldXCoords, worldZCoords,
+                                 vertexStride, terrainSize, x, z,
+                                 &nx0, &ny0, &nz0);
+            glNormal3f(nx0, ny0, nz0);
             glColor3f(r0, g0, b0);
             glVertex3f(worldX, h0, worldZ0);
 
@@ -270,6 +327,11 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
             float g1 = clampf((float)asLd(vertexColorG[idx1]), 0.0f, 1.0f);
             float b1 = clampf((float)asLd(vertexColorB[idx1]), 0.0f, 1.0f);
             float h1 = (float)asLd(vertexHeights[idx1]);
+            float nx1, ny1, nz1;
+            computeTerrainNormal(vertexHeights, worldXCoords, worldZCoords,
+                                 vertexStride, terrainSize, x, z + 1,
+                                 &nx1, &ny1, &nz1);
+            glNormal3f(nx1, ny1, nz1);
             glColor3f(r1, g1, b1);
             glVertex3f(worldX, h1, worldZ1);
         }
@@ -305,7 +367,11 @@ static void emitWaterVertex(float waterHeight,
     r = clampf(r, 0.0f, 1.0f);
     g = clampf(g, 0.0f, 1.0f);
     b = clampf(b, 0.0f, 1.0f);
-    glColor3f(r, g, b);
+    float alpha = 0.35f + 0.30f * shallow + sparkle * 0.4f;
+    if (alpha < 0.18f) alpha = 0.18f;
+    if (alpha > 0.82f) alpha = 0.82f;
+    glColor4f(r, g, b, alpha);
+    glNormal3f(0.0f, 1.0f, 0.0f);
     glVertex3f(worldX, surfaceHeight, worldZ);
 }
 

@@ -18,6 +18,7 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
         gSdlInitialized = true;
 
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+        SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
     }
 
     cleanupSdlWindowResources();

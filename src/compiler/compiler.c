@@ -2780,7 +2780,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !defer_vtable) {
+            if (hasVTable) {
+                if (defer_vtable) {
+                    // Constructors executed during global initialisation may immediately
+                    // invoke virtual methods (for example, via `myself.setupLighting()`),
+                    // so make sure the vtable pointer is installed right away even when
+                    // we plan to refresh it later once all vtables have been emitted.
+                }
                 // Initialise hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
@@ -5187,7 +5193,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (strcasecmp(calleeName, "gettime") == 0) ||
                     /* MandelbrotRow returns results via the sixth VAR parameter */
                     ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
-                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5)
+                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5) ||
+                    /* BouncingBalls3D builtins write simulation data back via VAR arrays */
+                    ((strcasecmp(calleeName, "bouncingballs3dstep") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepultra") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepUltra") == 0) && param_index >= 12) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15) ||
+                    ((strcasecmp(calleeName, "bouncingballs3dstepultraadvanced") == 0 ||
+                      strcasecmp(calleeName, "BouncingBalls3DStepUltraAdvanced") == 0) && param_index >= 15)
+                    || ((strcasecmp(calleeName, "bouncingballs3daccelerate") == 0 ||
+                         strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
                 )) {
                     is_var_param = true;
                 }
@@ -5389,7 +5406,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitShort(chunk, (uint16_t)fieldCount, line);
             }
 
-            if (hasVTable && !defer_vtable) {
+            if (hasVTable) {
+                if (defer_vtable) {
+                    // See compileLValue(): global initialisers still require the vtable
+                    // immediately so constructors can dispatch virtual calls safely.
+                }
                 // Store class vtable pointer into hidden __vtable field (offset 0)
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);

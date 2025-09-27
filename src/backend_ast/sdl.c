@@ -9,6 +9,7 @@
 #include <SDL2/SDL_ttf.h>
 // Include SDL_mixer header directly
 #include <SDL2/SDL_mixer.h>
+#include <SDL2/SDL_syswm.h>
 // Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
 #include "audio.h"
 
@@ -21,6 +22,13 @@
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
+
+extern void cleanupBalls3DRenderingResources(void);
+
+#ifdef SDL_VIDEO_DRIVER_X11
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#endif
 
 // SDL Global Variable Definitions
 SDL_Window* gSdlWindow = NULL;
@@ -40,10 +48,108 @@ bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG 
 
 static bool gSdlInputWatchInstalled = false;
 
+#ifdef SDL_VIDEO_DRIVER_X11
+static Atom gX11WmPingAtom = None;
+static bool gX11WmAtomsInitialized = false;
+#endif
+
+#define MAX_PENDING_KEYCODES 128
+
+static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
+static int gPendingKeyStart = 0;
+static int gPendingKeyCount = 0;
+
+static void enqueuePendingKeycode(SDL_Keycode code) {
+    if (gPendingKeyCount == MAX_PENDING_KEYCODES) {
+        gPendingKeyStart = (gPendingKeyStart + 1) % MAX_PENDING_KEYCODES;
+        gPendingKeyCount--;
+    }
+
+    int tail = (gPendingKeyStart + gPendingKeyCount) % MAX_PENDING_KEYCODES;
+    gPendingKeycodes[tail] = code;
+    gPendingKeyCount++;
+}
+
+static void handleSysWmEvent(const SDL_Event* event) {
+#ifdef SDL_VIDEO_DRIVER_X11
+    if (!event || event->type != SDL_SYSWMEVENT) {
+        return;
+    }
+
+    SDL_SysWMmsg* msg = event->syswm.msg;
+    if (!msg || msg->subsystem != SDL_SYSWM_X11) {
+        return;
+    }
+
+    XEvent* xevent = &msg->msg.x11.event;
+    if (!xevent || xevent->type != ClientMessage) {
+        return;
+    }
+
+    Display* display = xevent->xclient.display;
+    if (!display) {
+        return;
+    }
+
+    if (!gX11WmAtomsInitialized) {
+        gX11WmPingAtom = XInternAtom(display, "_NET_WM_PING", False);
+        gX11WmAtomsInitialized = true;
+    }
+
+    if (gX11WmPingAtom == None) {
+        return;
+    }
+
+    if ((Atom)xevent->xclient.message_type != gX11WmPingAtom) {
+        return;
+    }
+
+    Window clientWindow = xevent->xclient.window;
+
+    XEvent reply = *xevent;
+    reply.xclient.window = DefaultRootWindow(display);
+    reply.xclient.data.l[1] = clientWindow;
+
+    XSendEvent(display, reply.xclient.window, False,
+        SubstructureNotifyMask | SubstructureRedirectMask, &reply);
+    XFlush(display);
+#else
+    (void)event;
+#endif
+}
+
+static bool dequeuePendingKeycode(SDL_Keycode* outCode) {
+    if (gPendingKeyCount == 0) {
+        return false;
+    }
+
+    if (outCode) {
+        *outCode = gPendingKeycodes[gPendingKeyStart];
+    }
+
+    gPendingKeyStart = (gPendingKeyStart + 1) % MAX_PENDING_KEYCODES;
+    gPendingKeyCount--;
+    return true;
+}
+
+static bool hasPendingKeycode(void) {
+    return gPendingKeyCount > 0;
+}
+
+static void resetPendingKeycodes(void) {
+    gPendingKeyStart = 0;
+    gPendingKeyCount = 0;
+}
+
 static int sdlInputWatch(void* userdata, SDL_Event* event) {
     (void)userdata;
 
     if (!event) {
+        return 0;
+    }
+
+    if (event->type == SDL_SYSWMEVENT) {
+        handleSysWmEvent(event);
         return 0;
     }
 
@@ -191,7 +297,10 @@ void sdlEnsureInputWatch(void) {
 }
 
 void cleanupSdlWindowResources(void) {
+    resetPendingKeycodes();
+
     if (gSdlGLContext) {
+        cleanupBalls3DRenderingResources();
         SDL_GL_DeleteContext(gSdlGLContext);
         gSdlGLContext = NULL;
         #ifdef DEBUG
@@ -333,6 +442,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 
         // Allow clicks to focus the window on macOS and avoid dropped initial events
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+        SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
     }
 
     cleanupSdlWindowResources();
@@ -375,6 +485,8 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
+
+    sdlEnsureInputWatch();
 
     return makeVoid();
 }
@@ -1209,8 +1321,21 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
         return makeInt(0);
     }
 
+    SDL_Keycode queuedCode;
+    if (dequeuePendingKeycode(&queuedCode)) {
+        if (queuedCode == SDLK_q) {
+            break_requested = 1;
+        }
+        return makeInt((int)queuedCode);
+    }
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
         if (event.type == SDL_QUIT) {
             atomic_store(&break_requested, 1);
             return makeInt(0);
@@ -1218,7 +1343,10 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
             if (event.key.keysym.sym == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
-            return makeInt((int)event.key.keysym.sym);
+            enqueuePendingKeycode(event.key.keysym.sym);
+            if (dequeuePendingKeycode(&queuedCode)) {
+                return makeInt((int)queuedCode);
+            }
         }
     }
     return makeInt(0);
@@ -1228,12 +1356,28 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
 
+    if (hasPendingKeycode()) {
+        return makeVoid();
+    }
+
     SDL_Event event;
     int waiting = 1;
     while (waiting) {
         if (SDL_WaitEvent(&event)) {
-            if (event.type == SDL_QUIT) { waiting = 0; }
-            else if (event.type == SDL_KEYDOWN) { waiting = 0; }
+            if (event.type == SDL_SYSWMEVENT) {
+                handleSysWmEvent(&event);
+                continue;
+            }
+
+            if (event.type == SDL_QUIT) {
+                break_requested = 1;
+                waiting = 0;
+            } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                continue;
+            } else if (event.type == SDL_KEYDOWN) {
+                enqueuePendingKeycode(event.key.keysym.sym);
+                waiting = 0;
+            }
         } else {
             runtimeError(vm, "SDL_WaitEvent failed: %s", SDL_GetError());
             waiting = 0;
@@ -1334,26 +1478,53 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         Uint32 targetTime = startTime + (Uint32)ms;
         SDL_Event event;
 
-        while (SDL_GetTicks() < targetTime) {
+        /*
+         * Always process at least one batch of window events.  Some window
+         * managers (e.g. GNOME on Linux) show an "application is not
+         * responding" dialog if we miss several compositor pings, which
+         * happens whenever the frame takes longer than the requested delay.
+         */
+        for (;;) {
             SDL_PumpEvents();
 
-            /*
-             * Earlier versions of GraphLoop consumed the entire SDL event
-             * queue.  This meant that key press events – including the 'q'
-             * used by many demos to exit – were removed before routines such
-             * as PollKey had a chance to inspect them.  As a result, pressing
-             * 'q' or 'Q' would have no effect.
-             *
-             * Here we only remove SDL_QUIT events (which request application
-             * shutdown) and leave all other events untouched so that front-end
-             * code can process them on the next iteration.
-             */
-            if (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0) {
-                atomic_store(&break_requested, 1);
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_SYSWMEVENT) {
+                    handleSysWmEvent(&event);
+                    continue;
+                }
+
+                if (event.type == SDL_QUIT) {
+                    break_requested = 1;
+                    return makeVoid();
+                }
+
+                if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                    /* Swallow window close requests; _NET_WM_PING is handled separately in handleSysWmEvent. */
+                    continue;
+                }
+
+                if (event.type == SDL_KEYDOWN) {
+                    enqueuePendingKeycode(event.key.keysym.sym);
+                }
+            }
+
+            if (break_requested) {
                 return makeVoid();
             }
 
-            SDL_Delay(1); // Prevent 100% CPU usage
+            Uint32 now = SDL_GetTicks();
+            if (now >= targetTime) {
+                break;
+            }
+
+            Uint32 remaining = targetTime - now;
+            if (remaining > 10) {
+                remaining = 10;
+            }
+
+            if (remaining > 0) {
+                SDL_Delay(remaining);
+            }
         }
     }
     return makeVoid();

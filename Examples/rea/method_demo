@@ -3,8 +3,15 @@
 
 class Counter {
   int n;
-  void inc() { myself.n = myself.n + 1; }
-  int set(int v) { myself.n = v; return myself.n; }
+
+  void inc() { 
+    myself.n = myself.n + 1; 
+  }
+
+  int set(int v) {
+    myself.n = v; 
+    return myself.n; 
+  }
 }
 
 Counter c = new Counter();
@@ -15,7 +22,6 @@ writeln("c=", c.n);
 
 // new-expression receiver
 Counter d = new Counter();
-new Counter().set(7); // temporary; not printed
 d.set(5);
 writeln("d=", d.n);
 

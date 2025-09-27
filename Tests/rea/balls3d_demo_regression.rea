@@ -1,0 +1,234 @@
+#!/usr/bin/env rea
+// Regression test modeled after the SDL multi bouncing balls 3D demo.
+// Ensures that the Rea front end correctly wires VAR arguments for the
+// ultra advanced physics builtins so that simulation data and tuning
+// controls round-trip between user code and the VM.
+
+const int NumBalls = 3;
+const float BoxWidth = 720.0;
+const float BoxHeight = 420.0;
+const float BoxDepth = 320.0;
+const float WallElasticity = 1.12;
+const float VelocityDrag = 0.993;
+const float ScreenWidth = 1280.0;
+const float ScreenHeight = 720.0;
+const float LightDirX = -0.45;
+const float LightDirY = -0.35;
+const float LightDirZ = 0.82;
+
+float posX[NumBalls];
+float posY[NumBalls];
+float posZ[NumBalls];
+float velX[NumBalls];
+float velY[NumBalls];
+float velZ[NumBalls];
+float radius[NumBalls];
+
+float screenX[NumBalls];
+float screenY[NumBalls];
+float screenRadius[NumBalls];
+float depthShade[NumBalls];
+float lightIntensity[NumBalls];
+float rimIntensity[NumBalls];
+float highlightX[NumBalls];
+float highlightY[NumBalls];
+float highlightRadius[NumBalls];
+float highlightStrength[NumBalls];
+
+float prevPosX[NumBalls];
+float prevPosY[NumBalls];
+float prevPosZ[NumBalls];
+float prevScreenRadius[NumBalls];
+float prevDepthShade[NumBalls];
+float prevLightIntensity[NumBalls];
+float prevHighlightStrength[NumBalls];
+
+bool observedPosChange;
+bool observedScreenRadius;
+bool observedDepthShade;
+bool observedLightIntensity;
+bool observedHighlight;
+
+void initBallState() {
+  posX[0] = -120.0; posY[0] = -60.0; posZ[0] = -180.0;
+  velX[0] = 280.0;  velY[0] = 160.0;  velZ[0] = 240.0;
+  radius[0] = 22.0;
+
+  posX[1] = 96.0;   posY[1] = 42.0;  posZ[1] = -220.0;
+  velX[1] = -200.0; velY[1] = 210.0; velZ[1] = -90.0;
+  radius[1] = 18.0;
+
+  posX[2] = 0.0;    posY[2] = -120.0; posZ[2] = -260.0;
+  velX[2] = 160.0;  velY[2] = -60.0;  velZ[2] = -330.0;
+  radius[2] = 26.0;
+
+  int i = 0;
+  while (i < NumBalls) {
+    screenX[i] = 0.0;
+    screenY[i] = 0.0;
+    screenRadius[i] = 0.0;
+    depthShade[i] = -1.0;
+    lightIntensity[i] = 0.0;
+    rimIntensity[i] = 0.0;
+    highlightX[i] = 0.0;
+    highlightY[i] = 0.0;
+    highlightRadius[i] = 0.0;
+    highlightStrength[i] = 0.0;
+    prevPosX[i] = posX[i];
+    prevPosY[i] = posY[i];
+    prevPosZ[i] = posZ[i];
+    prevScreenRadius[i] = screenRadius[i];
+    prevDepthShade[i] = depthShade[i];
+    prevLightIntensity[i] = lightIntensity[i];
+    prevHighlightStrength[i] = highlightStrength[i];
+    i = i + 1;
+  }
+}
+
+bool approxDifferent(float lhs, float rhs) {
+  float diff = lhs - rhs;
+  if (diff < 0.0) diff = -diff;
+  return diff > 0.0005;
+}
+
+void printAcceleratedValues(float targetFps, float frameDelay,
+    float deltaTime, float minSpeed, float maxSpeed,
+    float cameraDistance) {
+  writeln("After Accelerate: targetFps=", formatfloat(targetFps, 3),
+    " frameDelay=", formatfloat(frameDelay, 3),
+    " deltaTime=", formatfloat(deltaTime, 6),
+    " minSpeed=", formatfloat(minSpeed, 3),
+    " maxSpeed=", formatfloat(maxSpeed, 3),
+    " cameraDistance=", formatfloat(cameraDistance, 3));
+}
+
+void resetObservations() {
+  observedPosChange = false;
+  observedScreenRadius = false;
+  observedDepthShade = false;
+  observedLightIntensity = false;
+  observedHighlight = false;
+}
+
+void updateObservations(int index, float newPosX, float newPosY,
+    float newPosZ, float newScreenRadius, float newDepthShade,
+    float newLight, float newHighlight, float newHighlightRadius) {
+  if (approxDifferent(prevPosX[index], newPosX) ||
+      approxDifferent(prevPosY[index], newPosY) ||
+      approxDifferent(prevPosZ[index], newPosZ)) {
+    observedPosChange = true;
+  }
+  if (approxDifferent(prevScreenRadius[index], newScreenRadius) ||
+      newScreenRadius > 0.001) {
+    observedScreenRadius = true;
+  }
+  if (approxDifferent(prevDepthShade[index], newDepthShade) ||
+      newDepthShade > 0.001) {
+    observedDepthShade = true;
+  }
+  if (newLight > 0.001) {
+    observedLightIntensity = true;
+  }
+  if (newHighlight > 0.001 || newHighlightRadius > 0.001 ||
+      approxDifferent(0.0, highlightX[index]) ||
+      approxDifferent(0.0, highlightY[index])) {
+    observedHighlight = true;
+  }
+}
+
+void printBallRow(int index) {
+  float newPosX = posX[index];
+  float newPosY = posY[index];
+  float newPosZ = posZ[index];
+  float newScreenRadius = screenRadius[index];
+  float newDepthShade = depthShade[index];
+  float newLight = lightIntensity[index];
+  float newHighlight = highlightStrength[index];
+  float newHighlightRadius = highlightRadius[index];
+
+  updateObservations(index, newPosX, newPosY, newPosZ,
+    newScreenRadius, newDepthShade, newLight, newHighlight,
+    newHighlightRadius);
+
+  printf("Ball %d: pos=(%.3f -> %.3f, %.3f -> %.3f, %.3f -> %.3f) ",
+    index,
+    prevPosX[index], newPosX,
+    prevPosY[index], newPosY,
+    prevPosZ[index], newPosZ);
+  printf("vel=(%.3f, %.3f, %.3f) ",
+    velX[index], velY[index], velZ[index]);
+  printf("screenR=(%.3f -> %.3f) depthShade=(%.3f -> %.3f) ",
+    prevScreenRadius[index], newScreenRadius,
+    prevDepthShade[index], newDepthShade);
+  printf("light=%.3f -> %.3f highlight=%.3f -> %.3f ",
+    prevLightIntensity[index], newLight,
+    prevHighlightStrength[index], newHighlight);
+  printf("highlightPos=(%.3f, %.3f) highlightRadius=%.3f\n",
+    highlightX[index], highlightY[index],
+    newHighlightRadius);
+}
+
+void writeBool(bool value) {
+  if (value) {
+    write("true");
+  } else {
+    write("false");
+  }
+}
+
+void printMutationSummary() {
+  write("Mutation flags: pos=");
+  writeBool(observedPosChange);
+  write(" screenRadius=");
+  writeBool(observedScreenRadius);
+  write(" depthShade=");
+  writeBool(observedDepthShade);
+  write(" lightIntensity=");
+  writeBool(observedLightIntensity);
+  write(" highlight=");
+  writeBool(observedHighlight);
+  writeln("");
+}
+
+void runDemoRegression() {
+  float targetFps = 90.0;
+  float frameDelay = trunc(1000.0 / targetFps);
+  float deltaTime = 1.0 / targetFps;
+  float minSpeed = 120.0;
+  float maxSpeed = 680.0;
+  float cameraDistance = 1820.0;
+  float fpsBoost = 1.7;
+  float speedBoost = 2.45;
+  float cameraPull = 0.66;
+
+  BouncingBalls3DAccelerate(targetFps, frameDelay, deltaTime,
+    minSpeed, maxSpeed, cameraDistance,
+    fpsBoost, speedBoost, cameraPull);
+  printAcceleratedValues(targetFps, frameDelay, deltaTime,
+    minSpeed, maxSpeed, cameraDistance);
+
+  initBallState();
+  resetObservations();
+
+  BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime,
+    BoxWidth, BoxHeight, BoxDepth, WallElasticity,
+    minSpeed, maxSpeed, VelocityDrag, cameraDistance,
+    ScreenWidth, ScreenHeight,
+    LightDirX, LightDirY, LightDirZ,
+    posX, posY, posZ,
+    velX, velY, velZ, radius,
+    screenX, screenY, screenRadius, depthShade,
+    lightIntensity, rimIntensity,
+    highlightX, highlightY,
+    highlightRadius, highlightStrength);
+
+  int idx = 0;
+  while (idx < NumBalls) {
+    printBallRow(idx);
+    idx = idx + 1;
+  }
+
+  printMutationSummary();
+}
+
+runDemoRegression();
