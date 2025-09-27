@@ -514,16 +514,33 @@ class BallSystem extends Renderable {
         float lit = myself.lightIntensity[index];
         float rim = myself.rimIntensity[index];
         float highlight = myself.highlightStrength[index];
+        float shade = myself.depthShade[index];
+
+        if (lit < 0.0) lit = 0.0;
+        if (lit > 1.0) lit = 1.0;
+        if (rim < 0.0) rim = 0.0;
+        if (rim > 1.0) rim = 1.0;
+        if (highlight < 0.0) highlight = 0.0;
+        if (highlight > 1.0) highlight = 1.0;
+        if (shade < 0.0) shade = 0.25;
+        if (shade > 1.0) shade = 1.0;
+
+        float ambientMix = 0.55 + 0.45 * shade;
+        float diffuseMix = 0.35 + 0.65 * lit;
 
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
-        color.scale(0.28 + 0.62 * lit);
+        color.scale(ambientMix * diffuseMix);
 
-        ColorRGB rimColor = new ColorRGB(0.08, 0.10, 0.16);
-        rimColor.scale(rim * 1.75);
-        color.add(rimColor);
+        ColorRGB rimTint = new ColorRGB(baseR, baseG, baseB);
+        rimTint.scale(0.35 * rim);
+        color.add(rimTint);
 
-        ColorRGB specColor = new ColorRGB(0.90, 0.92, 0.95);
-        specColor.scale(highlight * 0.85);
+        ColorRGB rimFill = new ColorRGB(0.12, 0.18, 0.28);
+        rimFill.scale(rim * 0.55);
+        color.add(rimFill);
+
+        ColorRGB specColor = new ColorRGB(0.90, 0.95, 1.00);
+        specColor.scale((0.45 + 0.45 * lit) * highlight);
         color.add(specColor);
 
         if (color.r < 0.0) color.r = 0.0;
