@@ -79,6 +79,14 @@ static char **gModuleDirStack = NULL;
 static int gModuleDirDepth = 0;
 static char *reaDupString(const char *s);
 
+static char **gEnvImportPaths = NULL;
+static int gEnvImportPathCount = 0;
+static int gEnvImportPathCapacity = 0;
+static bool gEnvImportPathsLoaded = false;
+
+#define REA_IMPORT_PATH_ENV "REA_IMPORT_PATH"
+#define REA_DEFAULT_IMPORT_DIR "/usr/local/lib/rea"
+
 static char **gGenericTypeNames = NULL;
 static int gGenericTypeCount = 0;
 static int gGenericTypeCapacity = 0;
@@ -203,6 +211,113 @@ static bool pushModuleDir(const char *dir) {
     }
     gModuleDirStack[gModuleDirDepth++] = dir ? reaDupString(dir) : NULL;
     return true;
+}
+
+static bool ensureEnvImportPathCapacity(int needed) {
+    if (gEnvImportPathCapacity >= needed) {
+        return true;
+    }
+    int newCap = gEnvImportPathCapacity ? gEnvImportPathCapacity * 2 : 4;
+    while (newCap < needed) {
+        newCap *= 2;
+    }
+    char **resized = (char **)realloc(gEnvImportPaths, (size_t)newCap * sizeof(char *));
+    if (!resized) {
+        fprintf(stderr, "Memory allocation failure expanding import search path list.\n");
+        return false;
+    }
+    for (int i = gEnvImportPathCapacity; i < newCap; i++) {
+        resized[i] = NULL;
+    }
+    gEnvImportPaths = resized;
+    gEnvImportPathCapacity = newCap;
+    return true;
+}
+
+static void appendEnvImportPath(const char *path) {
+    if (!path || !*path) {
+        return;
+    }
+    if (!ensureEnvImportPathCapacity(gEnvImportPathCount + 1)) {
+        EXIT_FAILURE_HANDLER();
+    }
+    gEnvImportPaths[gEnvImportPathCount] = reaDupString(path);
+    gEnvImportPathCount++;
+}
+
+static void loadEnvImportPaths(void) {
+    if (gEnvImportPathsLoaded) {
+        return;
+    }
+    gEnvImportPathsLoaded = true;
+
+    const char *raw = getenv(REA_IMPORT_PATH_ENV);
+    if (!raw || !*raw) {
+        return;
+    }
+
+    char *cursor = reaDupString(raw);
+    if (!cursor) {
+        return;
+    }
+
+#if defined(_WIN32)
+    const char *delims = ";";
+#else
+    const char *delims = ":;";
+#endif
+
+    char *iter = cursor;
+    while (*iter) {
+        while (*iter == ' ' || *iter == '\t') {
+            iter++;
+        }
+        char *start = iter;
+        while (*iter && strchr(delims, *iter) == NULL) {
+            iter++;
+        }
+        char saved = *iter;
+        if (*iter) {
+            *iter = '\0';
+            iter++;
+        }
+
+        char *end = start + strlen(start);
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
+            end--;
+        }
+        *end = '\0';
+
+        if (*start) {
+            appendEnvImportPath(start);
+        }
+
+        if (!saved) {
+            break;
+        }
+    }
+
+    free(cursor);
+}
+
+static char *tryResolveFromDirectory(const char *dir, const char *relative, bool *out_exists) {
+    if (!dir || !*dir || !relative || !*relative) {
+        return NULL;
+    }
+    char *candidate = joinPaths(dir, relative);
+    if (!candidate) {
+        return NULL;
+    }
+    FILE *fp = fopen(candidate, "rb");
+    if (fp) {
+        if (out_exists) {
+            *out_exists = true;
+        }
+        fclose(fp);
+        return candidate;
+    }
+    free(candidate);
+    return NULL;
 }
 
 static void popModuleDir(void) {
@@ -379,6 +494,20 @@ static char *tryResolveRelativePath(const char *relative, bool *out_exists) {
         return candidate;
     }
     free(candidate);
+
+    loadEnvImportPaths();
+    for (int i = 0; i < gEnvImportPathCount; i++) {
+        char *resolved = tryResolveFromDirectory(gEnvImportPaths[i], relative, out_exists);
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+    char *defaultResolved = tryResolveFromDirectory(REA_DEFAULT_IMPORT_DIR, relative, out_exists);
+    if (defaultResolved) {
+        return defaultResolved;
+    }
+
     return NULL;
 }
 

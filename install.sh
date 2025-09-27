@@ -1,62 +1,124 @@
 #!/bin/sh
 set -eu
 
-# Ensure we can write to /usr/local
-if [ "$(id -u)" -ne 0 ] && [ ! -w /usr/local ]; then
-    echo "Error: must run as root or have write permission to /usr/local" >&2
+usage() {
+    cat <<'USAGE'
+Usage: install.sh [--prefix DIR] [--build-dir DIR]
+
+Options:
+  --prefix DIR      Installation prefix (default: /usr/local)
+  --build-dir DIR   Location of built binaries relative to the repository
+                    root or as an absolute path (default: build/bin)
+  -h, --help        Show this help message and exit
+USAGE
+}
+
+PREFIX=/usr/local
+BUILD_DIR=build/bin
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --prefix=*)
+            PREFIX=${1#*=}
+            ;;
+        --prefix)
+            shift
+            [ "$#" -gt 0 ] || { echo "Error: missing value for --prefix" >&2; exit 1; }
+            PREFIX=$1
+            ;;
+        --build-dir=*)
+            BUILD_DIR=${1#*=}
+            ;;
+        --build-dir)
+            shift
+            [ "$#" -gt 0 ] || { echo "Error: missing value for --build-dir" >&2; exit 1; }
+            BUILD_DIR=$1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Error: unknown option $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+PREFIX=${PREFIX%/}
+[ -n "$PREFIX" ] || PREFIX="/"
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$SCRIPT_DIR
+
+case $BUILD_DIR in
+    /*)
+        BIN_SRC=$BUILD_DIR
+        ;;
+    *)
+        BIN_SRC=$REPO_ROOT/$BUILD_DIR
+        ;;
+fi
+
+if ! mkdir -p "$PREFIX" 2>/dev/null; then
+    echo "Error: unable to create or access $PREFIX" >&2
     exit 1
 fi
 
-# Ensure /usr/local/bin exists
-mkdir -p /usr/local/bin
+if [ "$(id -u)" -ne 0 ]; then
+    TEST_DIR=$PREFIX/.pscal-install-test.$$ 
+    if ! mkdir -p "$TEST_DIR" 2>/dev/null; then
+        echo "Error: insufficient permissions to write to $PREFIX" >&2
+        exit 1
+    fi
+    rmdir "$TEST_DIR"
+fi
 
-# Copy binaries to /usr/local/bin
-if [ -d "build/bin" ]; then
-    cp -r build/bin/* /usr/local/bin/
+BINDIR=$PREFIX/bin
+PS_PREFIX=$PREFIX/pscal
+
+copy_dir_contents() {
+    src=$1
+    dest=$2
+    description=$3
+
+    if [ -d "$src" ]; then
+        mkdir -p "$dest"
+        if [ -n "$(find "$src" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+            cp -R "$src"/. "$dest"/
+        fi
+    else
+        echo "Notice: skipping $description (not found: $src)" >&2
+    fi
+}
+
+# Install binaries if available
+if [ -d "$BIN_SRC" ]; then
+    mkdir -p "$BINDIR"
+    cp -R "$BIN_SRC"/. "$BINDIR"/
 else
-    echo "Warning: build/bin directory not found; skipping binary installation" >&2
+    echo "Notice: skipping binary installation (not found: $BIN_SRC)" >&2
 fi
 
-# Copy sound files
-mkdir -p /usr/local/pscal/lib/sounds
-cp -r lib/sounds/* /usr/local/pscal/lib/sounds
+# Shared libraries and assets
+copy_dir_contents "$REPO_ROOT/lib/sounds" "$PS_PREFIX/lib/sounds" "sound library"
+copy_dir_contents "$REPO_ROOT/lib/pascal" "$PS_PREFIX/pascal/lib" "Pascal library"
+copy_dir_contents "$REPO_ROOT/lib/clike" "$PS_PREFIX/clike/lib" "C-like library"
+copy_dir_contents "$REPO_ROOT/lib/rea" "$PS_PREFIX/rea/lib" "Rea library"
+copy_dir_contents "$REPO_ROOT/lib/rea" "$PREFIX/lib/rea" "Rea import library"
+copy_dir_contents "$REPO_ROOT/lib/misc" "$PS_PREFIX/misc" "miscellaneous library"
+copy_dir_contents "$REPO_ROOT/fonts" "$PS_PREFIX/fonts" "fonts"
+copy_dir_contents "$REPO_ROOT/etc" "$PS_PREFIX/etc" "configuration files"
+copy_dir_contents "$REPO_ROOT/lib/misc/simple_web_server/htdocs" "$PS_PREFIX/misc/htdocs" "web server htdocs"
 
-# Install Pascal library
-mkdir -p /usr/local/pscal/pascal/lib
-cp -r lib/pascal/* /usr/local/pscal/pascal/lib/
-
-# Install C-like library
-mkdir -p /usr/local/pscal/clike/lib
-cp -r lib/clike/* /usr/local/pscal/clike/lib/
-
-# Install Rea library if present
-mkdir -p /usr/local/pscal/rea/lib
-if [ -d "lib/rea" ]; then
-    cp -r lib/rea/* /usr/local/pscal/rea/lib/
-fi
-
-# Install misc library if present
-mkdir -p /usr/local/pscal/misc
-if [ -d "lib/misc" ]; then
-    cp -r lib/misc/* /usr/local/pscal/misc
-fi
-
-# Install fonts
-mkdir -p /usr/local/pscal/fonts
-cp -r fonts/* /usr/local/pscal/fonts
-
-# Install etc
-mkdir -p /usr/local/pscal/etc
-cp -r etc/* /usr/local/pscal/etc
-
-# Install simple web server files
-mkdir -p /usr/local/pscal/misc/htdocs
-cp -r lib/misc/simple_web_server/htdocs /usr/local/pscal/misc
-
-# Set group to executable for any installed binaries
+# Ensure expected binaries are executable when installed
 for bin in clike clike-repl dascal pascal pscalvm rea pscaljson2bc pscald; do
-    if [ -f "/usr/local/bin/$bin" ]; then
-        chmod go+x "/usr/local/bin/$bin"
+    candidate=$BINDIR/$bin
+    if [ -f "$candidate" ]; then
+        chmod go+x "$candidate"
     fi
 done
 
+exit 0
