@@ -1,7 +1,7 @@
 program ExtBuiltinEnumerationTest;
 var
-  catCount, fnCount, i, j: integer;
-  catName, fnName: string;
+  catCount, fnCount, i, j, k, groupCount, groupFnCount, groupTotal: integer;
+  catName, fnName, groupName: string;
   success, foundSystem, foundGetPid: boolean;
 begin
   success := true;
@@ -14,14 +14,25 @@ begin
     if catName = '' then
       success := false;
     fnCount := ExtBuiltinFunctionCount(catName);
-    for j := 0 to fnCount - 1 do
+    groupCount := ExtBuiltinGroupCount(catName);
+    groupTotal := 0;
+    for j := 0 to groupCount - 1 do
     begin
-      fnName := ExtBuiltinFunctionName(catName, j);
-      if fnName = '' then
-        success := false;
-      if (catName = 'system') and (fnName = 'GetPid') then
-        foundGetPid := true;
+      groupName := ExtBuiltinGroupName(catName, j);
+      groupFnCount := ExtBuiltinGroupFunctionCount(catName, groupName);
+      groupTotal := groupTotal + groupFnCount;
+      for k := 0 to groupFnCount - 1 do
+      begin
+        fnName := ExtBuiltinGroupFunctionName(catName, groupName, k);
+        if fnName = '' then
+          success := false;
+        if (catName = 'system') and (groupName = 'process') and
+           (fnName = 'GetPid') then
+          foundGetPid := true;
+      end;
     end;
+    if groupTotal <> fnCount then
+      success := false;
     if catName = 'system' then
       foundSystem := true;
   end;

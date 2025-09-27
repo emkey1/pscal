@@ -4,7 +4,9 @@
 void registerAtoiBuiltin(void);
 
 void registerStringBuiltins(void) {
-    extBuiltinRegisterCategory("strings");
-    extBuiltinRegisterFunction("strings", "Atoi");
+    const char *category = "strings";
+    extBuiltinRegisterCategory(category);
+    extBuiltinRegisterGroup(category, "conversion");
+    extBuiltinRegisterFunction(category, "conversion", "Atoi");
     registerAtoiBuiltin();
 }

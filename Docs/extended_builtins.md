@@ -3,7 +3,8 @@
 Pscal allows additional built‑in routines to be linked into the virtual
 machine at build time.  This makes it easy to expose host functionality
 without modifying the core source tree.  Optional built‑ins live under
-`src/ext_builtins` and are grouped into categories.
+`src/ext_builtins`, organised into categories that contain named groups of
+related routines.
 
 For a catalog of existing VM routines, see
 [`pscal_vm_builtins.md`](pscal_vm_builtins.md).
@@ -12,14 +13,15 @@ For a catalog of existing VM routines, see
 
 The project currently ships several optional built‑in groups:
 
-| Category | Location | Built-ins |
-| -------- | -------- | --------- |
-| **Math** | `src/ext_builtins/math` | `Factorial`, `Fibonacci`, `MandelbrotRow`, `Chudnovsky` |
-| **System** | `src/ext_builtins/system` | `FileExists`, `GetPid`, `RealTimeClock`, `Swap` |
-| **Strings** | `src/ext_builtins/strings` | (none yet) |
-| **Yyjson** | `src/ext_builtins/yyjson` | `YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`, `YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`, `YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull` |
-| **Sqlite** | `src/ext_builtins/sqlite` | `SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`, `SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`, `SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`, `SqliteClearBindings`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges` |
-| **User** | `src/ext_builtins/user` | (user-defined) |
+| Category | Location | Groups |
+| -------- | -------- | ------ |
+| **Math** | `src/ext_builtins/math` | `series` (`Factorial`, `Fibonacci`), `fractal` (`MandelbrotRow`), `constants` (`Chudnovsky`) |
+| **System** | `src/ext_builtins/system` | `filesystem` (`FileExists`), `process` (`GetPid`), `timing` (`RealTimeClock`), `utility` (`Swap`) |
+| **Strings** | `src/ext_builtins/strings` | `conversion` (`Atoi`) |
+| **Yyjson** | `src/ext_builtins/yyjson` | `document` (`YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`), `query` (`YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`), `primitives` (`YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull`) |
+| **Sqlite** | `src/ext_builtins/sqlite` | `connection` (`SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges`), `statement` (`SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteClearBindings`), `metadata` (`SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`), `results` (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`), `binding` (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) |
+| **3D** | `src/ext_builtins/threed` | `physics` (`BouncingBalls3DStep`, `BouncingBalls3DStepUltra`, `BouncingBalls3DStepAdvanced`, `BouncingBalls3DStepUltraAdvanced`, `BouncingBalls3DAccelerate`), `rendering` (`BouncingBalls3DDrawUnitSphereFast`) |
+| **User** | `src/ext_builtins/user` | `landscape` (`LandscapeDrawTerrain`, `LandscapeDrawWater`, `LandscapePrecomputeWorldCoords`, `LandscapePrecomputeWaterOffsets`) |
 
 Individual categories can be enabled or disabled at configure time with
 the following CMake options (all default to `ON`):
@@ -31,6 +33,7 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_USER=ON/OFF
 -DENABLE_EXT_BUILTIN_YYJSON=ON/OFF
 -DENABLE_EXT_BUILTIN_SQLITE=ON/OFF
+-DENABLE_EXT_BUILTIN_3D=ON/OFF
 ```
 
 ### Yyjson built-ins
@@ -50,8 +53,16 @@ the following helpers:
 - `ExtBuiltinCategoryCount()` returns the number of registered categories.
 - `ExtBuiltinCategoryName(index)` returns the name for a zero-based category
   index.
+- `ExtBuiltinGroupCount(category)` reports how many groups belong to a category
+  (the count includes the implicit `default` bucket when ungrouped routines are
+  present).
+- `ExtBuiltinGroupName(category, index)` retrieves a group's name.
+- `ExtBuiltinGroupFunctionCount(category, group)` returns the number of routines
+  within a group.
+- `ExtBuiltinGroupFunctionName(category, group, index)` yields the name for a
+  zero-based index inside a group.
 - `ExtBuiltinFunctionCount(category)` reports how many functions belong to a
-  category.
+  category across all groups.
 - `ExtBuiltinFunctionName(category, index)` returns the name for a zero-based
   function index within the given category.
 - `HasExtBuiltin(category, function)` checks for a specific routine.
@@ -65,17 +76,22 @@ present:
 
 ```pascal
 var
-  i, j: integer;
-  cat, fn: string;
+  i, j, k: integer;
+  cat, grp, fn: string;
 begin
   for i := 0 to ExtBuiltinCategoryCount() - 1 do
   begin
     cat := ExtBuiltinCategoryName(i);
     writeln('Category: ', cat);
-    for j := 0 to ExtBuiltinFunctionCount(cat) - 1 do
+    for j := 0 to ExtBuiltinGroupCount(cat) - 1 do
     begin
-      fn := ExtBuiltinFunctionName(cat, j);
-      writeln('  ', fn);
+      grp := ExtBuiltinGroupName(cat, j);
+      writeln('  Group: ', grp);
+      for k := 0 to ExtBuiltinGroupFunctionCount(cat, grp) - 1 do
+      begin
+        fn := ExtBuiltinGroupFunctionName(cat, grp, k);
+        writeln('    ', fn);
+      end;
     end;
   end;
 end;
@@ -90,8 +106,10 @@ line-oriented format that is easy for regression harnesses to parse:
 ```
 $ pascal --dump-ext-builtins
 category system
-function system FileExists
-function system GetPid
+group system filesystem
+function system filesystem FileExists
+group system process
+function system process GetPid
 ```
 
 The `clike` and `rea` binaries expose the identical option and format, making

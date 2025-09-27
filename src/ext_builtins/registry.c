@@ -5,9 +5,15 @@
 #include <pthread.h>
 
 typedef struct {
-    char *name;
+    char *name; /* NULL indicates the default/ungrouped bucket. */
     char **functions;
     size_t function_count;
+} ExtBuiltinGroup;
+
+typedef struct {
+    char *name;
+    ExtBuiltinGroup *groups;
+    size_t group_count;
 } ExtBuiltinCategory;
 
 /* Global registry of extended builtins.  Access is protected by
@@ -31,15 +37,87 @@ static ExtBuiltinCategory *findCategory(const char *name) {
 static ExtBuiltinCategory *ensureCategory(const char *name) {
     ExtBuiltinCategory *cat = findCategory(name);
     if (cat) return cat;
-    ExtBuiltinCategory *new_array = realloc(categories, sizeof(ExtBuiltinCategory) * (category_count + 1));
+    ExtBuiltinCategory *new_array =
+        realloc(categories, sizeof(ExtBuiltinCategory) * (category_count + 1));
     if (!new_array) return NULL;
     categories = new_array;
     cat = &categories[category_count];
-    cat->name = strdup(name ? name : "");
-    cat->functions = NULL;
-    cat->function_count = 0;
+    cat->name = NULL;
+    cat->groups = NULL;
+    cat->group_count = 0;
+
+    const char *source_name = name ? name : "";
+    cat->name = strdup(source_name);
+    if (!cat->name) {
+        ExtBuiltinCategory *shrunk =
+            realloc(categories, sizeof(ExtBuiltinCategory) * category_count);
+        if (shrunk || category_count == 0) {
+            categories = shrunk;
+        }
+        return NULL;
+    }
+
     category_count++;
     return cat;
+}
+
+static int isDefaultGroup(const char *group) {
+    return !group || *group == '\0';
+}
+
+static int groupNameEquals(const ExtBuiltinGroup *group, const char *name) {
+    if (!group) return 0;
+    if (isDefaultGroup(name)) {
+        return group->name == NULL;
+    }
+    if (!group->name) {
+        return 0;
+    }
+    return strcasecmp(group->name, name) == 0;
+}
+
+static ExtBuiltinGroup *findGroup(ExtBuiltinCategory *category,
+                                  const char *group_name) {
+    if (!category) return NULL;
+    for (size_t i = 0; i < category->group_count; ++i) {
+        if (groupNameEquals(&category->groups[i], group_name)) {
+            return &category->groups[i];
+        }
+    }
+    return NULL;
+}
+
+static ExtBuiltinGroup *ensureGroup(ExtBuiltinCategory *category,
+                                    const char *group_name) {
+    if (!category) return NULL;
+    ExtBuiltinGroup *group = findGroup(category, group_name);
+    if (group) return group;
+
+    ExtBuiltinGroup *new_groups =
+        realloc(category->groups,
+                sizeof(ExtBuiltinGroup) * (category->group_count + 1));
+    if (!new_groups) {
+        return NULL;
+    }
+    category->groups = new_groups;
+    group = &category->groups[category->group_count];
+    group->name = NULL;
+    group->functions = NULL;
+    group->function_count = 0;
+    if (!isDefaultGroup(group_name)) {
+        group->name = strdup(group_name);
+        if (!group->name) {
+            ExtBuiltinGroup *shrunk =
+                realloc(category->groups,
+                        sizeof(ExtBuiltinGroup) * category->group_count);
+            if (shrunk || category->group_count == 0) {
+                category->groups = shrunk;
+            }
+            return NULL;
+        }
+    }
+    category->group_count++;
+    return group;
 }
 
 void extBuiltinRegisterCategory(const char *name) {
@@ -49,7 +127,18 @@ void extBuiltinRegisterCategory(const char *name) {
     pthread_mutex_unlock(&registry_mutex);
 }
 
-void extBuiltinRegisterFunction(const char *category, const char *func) {
+void extBuiltinRegisterGroup(const char *category, const char *group) {
+    if (!category) return;
+    pthread_mutex_lock(&registry_mutex);
+    ExtBuiltinCategory *cat = ensureCategory(category);
+    if (cat) {
+        ensureGroup(cat, group);
+    }
+    pthread_mutex_unlock(&registry_mutex);
+}
+
+void extBuiltinRegisterFunction(const char *category, const char *group,
+                                const char *func) {
     if (!category || !func) return;
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = ensureCategory(category);
@@ -57,20 +146,37 @@ void extBuiltinRegisterFunction(const char *category, const char *func) {
         pthread_mutex_unlock(&registry_mutex);
         return;
     }
-    for (size_t i = 0; i < cat->function_count; ++i) {
-        if (strcasecmp(cat->functions[i], func) == 0) {
+    ExtBuiltinGroup *grp = ensureGroup(cat, group);
+    if (!grp) {
+        pthread_mutex_unlock(&registry_mutex);
+        return;
+    }
+    for (size_t i = 0; i < grp->function_count; ++i) {
+        if (strcasecmp(grp->functions[i], func) == 0) {
             pthread_mutex_unlock(&registry_mutex);
             return; /* already registered */
         }
     }
-    char **new_funcs = realloc(cat->functions, sizeof(char*) * (cat->function_count + 1));
+    char **new_funcs = realloc(grp->functions,
+                               sizeof(char *) * (grp->function_count + 1));
     if (!new_funcs) {
         pthread_mutex_unlock(&registry_mutex);
         return;
     }
-    cat->functions = new_funcs;
-    cat->functions[cat->function_count] = strdup(func);
-    cat->function_count++;
+    grp->functions = new_funcs;
+    grp->functions[grp->function_count] = NULL;
+    char *copy = strdup(func);
+    if (!copy) {
+        char **shrunk =
+            realloc(grp->functions, sizeof(char *) * grp->function_count);
+        if (shrunk || grp->function_count == 0) {
+            grp->functions = shrunk;
+        }
+        pthread_mutex_unlock(&registry_mutex);
+        return;
+    }
+    grp->functions[grp->function_count] = copy;
+    grp->function_count++;
     pthread_mutex_unlock(&registry_mutex);
 }
 
@@ -95,18 +201,70 @@ int extBuiltinHasCategory(const char *category) {
     return present;
 }
 
-size_t extBuiltinGetFunctionCount(const char *category) {
+size_t extBuiltinGetGroupCount(const char *category) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
-    size_t count = cat ? cat->function_count : 0;
+    size_t count = 0;
+    if (cat) {
+        for (size_t i = 0; i < cat->group_count; ++i) {
+            if (cat->groups[i].name) {
+                ++count;
+            }
+        }
+    }
     pthread_mutex_unlock(&registry_mutex);
     return count;
 }
 
-const char *extBuiltinGetFunctionName(const char *category, size_t index) {
+const char *extBuiltinGetGroupName(const char *category, size_t index) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
-    const char *name = (!cat || index >= cat->function_count) ? NULL : cat->functions[index];
+    const char *name = NULL;
+    if (cat) {
+        size_t seen = 0;
+        for (size_t i = 0; i < cat->group_count; ++i) {
+            if (!cat->groups[i].name) {
+                continue;
+            }
+            if (seen == index) {
+                name = cat->groups[i].name;
+                break;
+            }
+            ++seen;
+        }
+    }
+    pthread_mutex_unlock(&registry_mutex);
+    return name;
+}
+
+int extBuiltinHasGroup(const char *category, const char *group) {
+    pthread_mutex_lock(&registry_mutex);
+    ExtBuiltinCategory *cat = findCategory(category);
+    int present = 0;
+    if (cat) {
+        ExtBuiltinGroup *grp = findGroup(cat, group);
+        present = grp != NULL;
+    }
+    pthread_mutex_unlock(&registry_mutex);
+    return present;
+}
+
+size_t extBuiltinGetFunctionCount(const char *category, const char *group) {
+    pthread_mutex_lock(&registry_mutex);
+    ExtBuiltinCategory *cat = findCategory(category);
+    ExtBuiltinGroup *grp = findGroup(cat, group);
+    size_t count = grp ? grp->function_count : 0;
+    pthread_mutex_unlock(&registry_mutex);
+    return count;
+}
+
+const char *extBuiltinGetFunctionName(const char *category, const char *group,
+                                      size_t index) {
+    pthread_mutex_lock(&registry_mutex);
+    ExtBuiltinCategory *cat = findCategory(category);
+    ExtBuiltinGroup *grp = findGroup(cat, group);
+    const char *name =
+        (!grp || index >= grp->function_count) ? NULL : grp->functions[index];
     pthread_mutex_unlock(&registry_mutex);
     return name;
 }
@@ -116,14 +274,16 @@ int extBuiltinHasFunction(const char *category, const char *func) {
     ExtBuiltinCategory *cat = findCategory(category);
     int present = 0;
     if (cat && func) {
-        for (size_t i = 0; i < cat->function_count; ++i) {
-            if (strcasecmp(cat->functions[i], func) == 0) {
-                present = 1;
-                break;
+        for (size_t i = 0; i < cat->group_count && !present; ++i) {
+            ExtBuiltinGroup *grp = &cat->groups[i];
+            for (size_t j = 0; j < grp->function_count; ++j) {
+                if (strcasecmp(grp->functions[j], func) == 0) {
+                    present = 1;
+                    break;
+                }
             }
         }
     }
     pthread_mutex_unlock(&registry_mutex);
     return present;
 }
-

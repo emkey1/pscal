@@ -7,11 +7,15 @@ void registerMandelbrotRowBuiltin(void);
 void registerChudnovskyBuiltin(void);
 
 void registerMathBuiltins(void) {
-    extBuiltinRegisterCategory("math");
-    extBuiltinRegisterFunction("math", "Factorial");
-    extBuiltinRegisterFunction("math", "Fibonacci");
-    extBuiltinRegisterFunction("math", "MandelbrotRow");
-    extBuiltinRegisterFunction("math", "Chudnovsky");
+    const char *category = "math";
+    extBuiltinRegisterCategory(category);
+    extBuiltinRegisterGroup(category, "series");
+    extBuiltinRegisterGroup(category, "fractal");
+    extBuiltinRegisterGroup(category, "constants");
+    extBuiltinRegisterFunction(category, "series", "Factorial");
+    extBuiltinRegisterFunction(category, "series", "Fibonacci");
+    extBuiltinRegisterFunction(category, "fractal", "MandelbrotRow");
+    extBuiltinRegisterFunction(category, "constants", "Chudnovsky");
 
     registerFactorialBuiltin();
     registerFibonacciBuiltin();
