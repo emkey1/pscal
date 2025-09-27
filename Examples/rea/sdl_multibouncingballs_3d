@@ -400,12 +400,6 @@ class BallSystem extends Renderable {
     float screenY[NumBalls];
     float screenRadius[NumBalls];
     float depthShade[NumBalls];
-    float lightIntensity[NumBalls];
-    float rimIntensity[NumBalls];
-    float highlightX[NumBalls];
-    float highlightY[NumBalls];
-    float highlightRadius[NumBalls];
-    float highlightStrength[NumBalls];
     SphereMesh mesh;
     float minSpeedValue;
     float maxSpeedValue;
@@ -459,38 +453,29 @@ class BallSystem extends Renderable {
             myself.screenY[i] = 0.0;
             myself.screenRadius[i] = 0.0;
             myself.depthShade[i] = -1.0;
-            myself.lightIntensity[i] = 0.0;
-            myself.rimIntensity[i] = 0.0;
-            myself.highlightX[i] = 0.0;
-            myself.highlightY[i] = 0.0;
-            myself.highlightRadius[i] = 0.0;
-            myself.highlightStrength[i] = 0.0;
             i = i + 1;
         }
     }
 
     void update(float deltaTime) {
-        BouncingBalls3DStepUltraAdvanced(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
+        BouncingBalls3DStepUltra(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
             WallElasticity, myself.minSpeedValue, myself.maxSpeedValue, VelocityDrag,
             myself.cameraDistanceValue, WindowWidth, WindowHeight,
-            LightDirX, LightDirY, LightDirZ,
             myself.posX, myself.posY, myself.posZ,
             myself.velX, myself.velY, myself.velZ, myself.radius,
-            myself.screenX, myself.screenY, myself.screenRadius, myself.depthShade,
-            myself.lightIntensity, myself.rimIntensity,
-            myself.highlightX, myself.highlightY,
-            myself.highlightRadius, myself.highlightStrength);
+            myself.screenX, myself.screenY, myself.screenRadius,
+            myself.depthShade);
     }
 
     void draw() {
         // Ensure the fixed-function lighting state is restored before drawing
         // the per-ball geometry. Some drivers keep `GL_LIGHTING` disabled after
-        // the blended highlight overlay runs, which caused the sphere mesh to
-        // render fully black. Reset the material tracking and disable texturing
-        // so the vertex colors coming from the material show up reliably. This
-        // also mirrors the older working sample by explicitly disabling
-        // blending before the sphere pass so driver-specific blending state
-        // cannot wash out the lit geometry.
+        // blended overlays, which caused the sphere mesh to render fully black.
+        // Reset the material tracking and disable texturing so the vertex
+        // colors coming from the material show up reliably. This mirrors the
+        // older working sample by explicitly disabling blending before the
+        // sphere pass so driver-specific blending state cannot wash out the lit
+        // geometry.
         GLEnable("lighting");
         GLEnable("light0");
         GLEnable("color_material");
@@ -511,37 +496,16 @@ class BallSystem extends Renderable {
         float baseR = myself.colorR[index] / 255.0;
         float baseG = myself.colorG[index] / 255.0;
         float baseB = myself.colorB[index] / 255.0;
-        float lit = myself.lightIntensity[index];
-        float rim = myself.rimIntensity[index];
-        float highlight = myself.highlightStrength[index];
         float shade = myself.depthShade[index];
 
-        if (lit < 0.0) lit = 0.0;
-        if (lit > 1.0) lit = 1.0;
-        if (rim < 0.0) rim = 0.0;
-        if (rim > 1.0) rim = 1.0;
-        if (highlight < 0.0) highlight = 0.0;
-        if (highlight > 1.0) highlight = 1.0;
         if (shade < 0.0) shade = 0.25;
         if (shade > 1.0) shade = 1.0;
 
-        float ambientMix = 0.55 + 0.45 * shade;
-        float diffuseMix = 0.35 + 0.65 * lit;
-
+        // Mix in the simulated depth shading so balls further from the camera
+        // appear slightly dimmer, mirroring the classic sample.
+        float brightness = 0.35 + 0.65 * shade;
         ColorRGB color = new ColorRGB(baseR, baseG, baseB);
-        color.scale(ambientMix * diffuseMix);
-
-        ColorRGB rimTint = new ColorRGB(baseR, baseG, baseB);
-        rimTint.scale(0.35 * rim);
-        color.add(rimTint);
-
-        ColorRGB rimFill = new ColorRGB(0.12, 0.18, 0.28);
-        rimFill.scale(rim * 0.55);
-        color.add(rimFill);
-
-        ColorRGB specColor = new ColorRGB(0.90, 0.95, 1.00);
-        specColor.scale((0.45 + 0.45 * lit) * highlight);
-        color.add(specColor);
+        color.scale(brightness);
 
         if (color.r < 0.0) color.r = 0.0;
         if (color.r > 1.0) color.r = 1.0;
@@ -558,44 +522,7 @@ class BallSystem extends Renderable {
         // ignore GLMaterialfv when color tracking is enabled.
         GLColor4f(color.r, color.g, color.b, 1.0);
         myself.mesh.drawUnit();
-        myself.drawSpecularHighlight(index);
         GLPopMatrix();
-    }
-
-    void drawSpecularHighlight(int index) {
-        float sr = myself.screenRadius[index];
-        if (sr <= 0.001) return;
-
-        float radiusScale = myself.highlightRadius[index] / sr;
-        if (radiusScale <= 0.001) return;
-
-        float strength = myself.highlightStrength[index];
-        if (strength <= 0.001) return;
-
-        float hx = (myself.highlightX[index] - myself.screenX[index]) / sr;
-        float hy = (myself.highlightY[index] - myself.screenY[index]) / sr;
-
-        GLDisable("lighting");
-        GLEnable("blend");
-        GLBlendFunc("src_alpha", "one_minus_src_alpha");
-        GLBegin("triangle_fan");
-        float alpha = strength * 0.75;
-        GLColor4f(0.98, 0.99, 1.0, alpha);
-        GLVertex3f(hx, hy, 1.0);
-        int segments = 24;
-        int i = 0;
-        while (i <= segments) {
-            float angle = 2.0 * Pi * i / segments;
-            float px = hx + cos(angle) * radiusScale;
-            float py = hy + sin(angle) * radiusScale;
-            GLColor4f(0.85, 0.92, 1.0, 0.02);
-            GLVertex3f(px, py, 1.0);
-            i = i + 1;
-        }
-        GLEnd();
-        GLBlendFunc("src_alpha", "one_minus_src_alpha");
-        GLDisable("blend");
-        GLEnable("lighting");
     }
 }
 
