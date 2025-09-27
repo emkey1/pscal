@@ -177,40 +177,7 @@ class Renderable {
 
 class SphereMesh extends Renderable {
     void drawUnit() {
-        int stack = 0;
-        while (stack < SphereStacks) {
-            float phi0 = -Pi * 0.5 + Pi * stack / SphereStacks;
-            float phi1 = -Pi * 0.5 + Pi * (stack + 1) / SphereStacks;
-            float cosPhi0 = cos(phi0);
-            float sinPhi0 = sin(phi0);
-            float cosPhi1 = cos(phi1);
-            float sinPhi1 = sin(phi1);
-
-            GLBegin("triangle_strip");
-            int slice = 0;
-            while (slice <= SphereSlices) {
-                float theta = 2.0 * Pi * slice / SphereSlices;
-                float cosTheta = cos(theta);
-                float sinTheta = sin(theta);
-
-                float n0x = cosPhi0 * cosTheta;
-                float n0y = sinPhi0;
-                float n0z = cosPhi0 * sinTheta;
-                float n1x = cosPhi1 * cosTheta;
-                float n1y = sinPhi1;
-                float n1z = cosPhi1 * sinTheta;
-
-                GLNormal3f(n1x, n1y, n1z);
-                GLVertex3f(n1x, n1y, n1z);
-
-                GLNormal3f(n0x, n0y, n0z);
-                GLVertex3f(n0x, n0y, n0z);
-
-                slice = slice + 1;
-            }
-            GLEnd();
-            stack = stack + 1;
-        }
+        BouncingBalls3DDrawUnitSphereFast(SphereStacks, SphereSlices);
     }
 }
 
