@@ -73,36 +73,6 @@ class Vec3 {
     }
 }
 
-class ColorRGB {
-    float r;
-    float g;
-    float b;
-
-    void ColorRGB(float ir, float ig, float ib) {
-        myself.r = ir;
-        myself.g = ig;
-        myself.b = ib;
-    }
-
-    void setInt(int ir, int ig, int ib) {
-        myself.r = ir / 255.0;
-        myself.g = ig / 255.0;
-        myself.b = ib / 255.0;
-    }
-
-    void scale(float factor) {
-        myself.r = myself.r * factor;
-        myself.g = myself.g * factor;
-        myself.b = myself.b * factor;
-    }
-
-    void add(ColorRGB other) {
-        myself.r = myself.r + other.r;
-        myself.g = myself.g + other.g;
-        myself.b = myself.b + other.b;
-    }
-}
-
 class CameraRig {
     float distance;
     float yaw;
@@ -498,29 +468,26 @@ class BallSystem extends Renderable {
         float baseB = myself.colorB[index] / 255.0;
         float shade = myself.depthShade[index];
 
-        if (shade < 0.0) shade = 0.25;
+        if (shade < 0.0) shade = 0.5;
         if (shade > 1.0) shade = 1.0;
 
-        // Mix in the simulated depth shading so balls further from the camera
-        // appear slightly dimmer, mirroring the classic sample.
-        float brightness = 0.35 + 0.65 * shade;
-        ColorRGB color = new ColorRGB(baseR, baseG, baseB);
-        color.scale(brightness);
+        // Keep a generous ambient contribution so the mesh stays visible even if
+        // the physics helper reports a very dark depth shade. This mirrors the
+        // older procedural sample that always drew the base color without
+        // additional lighting math.
+        float brightness = 0.45 + 0.55 * shade;
+        float litR = baseR * brightness;
+        float litG = baseG * brightness;
+        float litB = baseB * brightness;
 
-        if (color.r < 0.0) color.r = 0.0;
-        if (color.r > 1.0) color.r = 1.0;
-        if (color.g < 0.0) color.g = 0.0;
-        if (color.g > 1.0) color.g = 1.0;
-        if (color.b < 0.0) color.b = 0.0;
-        if (color.b > 1.0) color.b = 1.0;
+        if (litR > 1.0) litR = 1.0;
+        if (litG > 1.0) litG = 1.0;
+        if (litB > 1.0) litB = 1.0;
 
         GLPushMatrix();
         GLTranslatef(myself.posX[index], myself.posY[index], myself.posZ[index]);
         GLScalef(myself.radius[index], myself.radius[index], myself.radius[index]);
-        // Match the original immediate-mode sample: drive the material through
-        // GL_COLOR_MATERIAL so the diffuse color sticks even on drivers that
-        // ignore GLMaterialfv when color tracking is enabled.
-        GLColor4f(color.r, color.g, color.b, 1.0);
+        GLColor3f(litR, litG, litB);
         myself.mesh.drawUnit();
         GLPopMatrix();
     }
