@@ -76,7 +76,7 @@ typedef struct ReaModuleBindingList {
     int capacity;
 } ReaModuleBindingList;
 
-static ReaModuleInfo *gLoadedModules = NULL;
+static ReaModuleInfo **gLoadedModules = NULL;
 static int gLoadedModuleCount = 0;
 static int gLoadedModuleCapacity = 0;
 
@@ -675,8 +675,10 @@ static char *resolveModulePath(const char *path, bool *out_exists) {
 static ReaModuleInfo *findModuleByPath(const char *path) {
     if (!path) return NULL;
     for (int i = 0; i < gLoadedModuleCount; i++) {
-        if (strcasecmp(gLoadedModules[i].path, path) == 0) {
-            return &gLoadedModules[i];
+        ReaModuleInfo *info = gLoadedModules[i];
+        if (!info || !info->path) continue;
+        if (strcasecmp(info->path, path) == 0) {
+            return info;
         }
     }
     return NULL;
@@ -685,20 +687,23 @@ static ReaModuleInfo *findModuleByPath(const char *path) {
 static ReaModuleInfo *appendModuleInfo(void) {
     if (gLoadedModuleCount >= gLoadedModuleCapacity) {
         int newCap = gLoadedModuleCapacity ? gLoadedModuleCapacity * 2 : 4;
-        ReaModuleInfo *resized = (ReaModuleInfo *)realloc(gLoadedModules, (size_t)newCap * sizeof(ReaModuleInfo));
+        ReaModuleInfo **resized = (ReaModuleInfo **)realloc(gLoadedModules, (size_t)newCap * sizeof(ReaModuleInfo *));
         if (!resized) {
             fprintf(stderr, "Memory allocation failure expanding module registry.\n");
             EXIT_FAILURE_HANDLER();
         }
-        // Zero initialise newly added slots
         for (int i = gLoadedModuleCapacity; i < newCap; i++) {
-            memset(&resized[i], 0, sizeof(ReaModuleInfo));
+            resized[i] = NULL;
         }
         gLoadedModules = resized;
         gLoadedModuleCapacity = newCap;
     }
-    ReaModuleInfo *info = &gLoadedModules[gLoadedModuleCount++];
-    memset(info, 0, sizeof(ReaModuleInfo));
+    ReaModuleInfo *info = (ReaModuleInfo *)calloc(1, sizeof(ReaModuleInfo));
+    if (!info) {
+        fprintf(stderr, "Memory allocation failure creating module record.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    gLoadedModules[gLoadedModuleCount++] = info;
     return info;
 }
 
@@ -3635,15 +3640,18 @@ int reaGetLoadedModuleCount(void) {
 
 AST *reaGetModuleAST(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].ast;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->ast : NULL;
 }
 
 const char *reaGetModulePath(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].path;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->path : NULL;
 }
 
 const char *reaGetModuleName(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].name;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->name : NULL;
 }
