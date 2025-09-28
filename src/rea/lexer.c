@@ -35,6 +35,35 @@ static int match(ReaLexer *lexer, char expected) {
     return 1;
 }
 
+static void consumeDigits(ReaLexer *lexer) {
+    while (isDigit(peek(lexer))) advance(lexer);
+}
+
+static void consumeExponent(ReaLexer *lexer) {
+    size_t exponent_start = lexer->pos;
+    advance(lexer); // consume 'e' or 'E'
+    if (peek(lexer) == '+' || peek(lexer) == '-') advance(lexer);
+    if (isDigit(peek(lexer))) {
+        consumeDigits(lexer);
+    } else {
+        lexer->pos = exponent_start;
+    }
+}
+
+static int exponentAfterDotHasDigits(ReaLexer *lexer) {
+    size_t pos = lexer->pos + 1; // position of potential exponent marker
+    char c = lexer->source[pos];
+    if (c != 'e' && c != 'E') return 0;
+    pos++;
+    c = lexer->source[pos];
+    if (c == '+' || c == '-') {
+        pos++;
+        c = lexer->source[pos];
+    }
+    if (c == '\0') return 0;
+    return isDigit(c);
+}
+
 static void skipWhitespace(ReaLexer *lexer) {
     for (;;) {
         char c = peek(lexer);
@@ -190,6 +219,13 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case ',':
             return makeToken(lexer, REA_TOKEN_COMMA, start);
         case '.':
+            if (isDigit(peek(lexer))) {
+                consumeDigits(lexer);
+                if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+                    consumeExponent(lexer);
+                }
+                return makeToken(lexer, REA_TOKEN_NUMBER, start);
+            }
             return makeToken(lexer, REA_TOKEN_DOT, start);
         case ';':
             return makeToken(lexer, REA_TOKEN_SEMICOLON, start);
@@ -268,21 +304,19 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_NUMBER, start);
         }
         while (isDigit(peek(lexer))) advance(lexer);
-        if (peek(lexer) == '.' && isDigit(peekNext(lexer))) {
-            advance(lexer);
-            while (isDigit(peek(lexer))) advance(lexer);
-        }
-        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
-            size_t exponent_start = lexer->pos;
-            advance(lexer);
-            if (peek(lexer) == '+' || peek(lexer) == '-') {
+        if (peek(lexer) == '.') {
+            char next = peekNext(lexer);
+            if (isDigit(next)) {
+                advance(lexer);
+                consumeDigits(lexer);
+            } else if (exponentAfterDotHasDigits(lexer)) {
+                advance(lexer);
+            } else if (!isAlpha(next) && next != '_') {
                 advance(lexer);
             }
-            if (isDigit(peek(lexer))) {
-                while (isDigit(peek(lexer))) advance(lexer);
-            } else {
-                lexer->pos = exponent_start;
-            }
+        }
+        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+            consumeExponent(lexer);
         }
         return makeToken(lexer, REA_TOKEN_NUMBER, start);
     }
