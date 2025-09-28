@@ -476,6 +476,15 @@ void testHttp() {
 }
 
 int main() {
+    int startingAttr = CRT.TextAttr;
+    bool changedStartingAttr = startingAttr != CRT.LightGray;
+    if (changedStartingAttr) {
+        CRT.TextAttr = CRT.LightGray;
+        applyTextAttrToTerminal(CRT.LightGray);
+    } else {
+        applyTextAttrToTerminal(startingAttr);
+    }
+
     writeln("Rea standard library test suite");
     testCRT();
     testStrings();
@@ -487,10 +496,18 @@ int main() {
     writeln("TOTAL ", executedTests);
     writeln("FAILED ", failedTests);
     writeln("SKIPPED ", skippedTests);
+    int exitCode = 0;
     if (failedTests == 0) {
         writeln("OVERALL PASS");
-        return 0;
+    } else {
+        writeln("OVERALL FAIL");
+        exitCode = 1;
     }
-    writeln("OVERALL FAIL");
-    return 1;
+
+    if (changedStartingAttr) {
+        CRT.TextAttr = startingAttr;
+        applyTextAttrToTerminal(startingAttr);
+    }
+
+    return exitCode;
 }
