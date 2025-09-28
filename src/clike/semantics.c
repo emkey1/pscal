@@ -295,28 +295,6 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("extbuiltingroupfunctioncount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_STRING, 0, 0, 0);
 
-    /* SQLite extended builtins */
-    registerFunctionSignature(strdup("SqliteOpen"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteClose"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteExec"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqlitePrepare"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteFinalize"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteStep"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteReset"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteClearBindings"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnCount"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnType"), TYPE_STRING, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnName"), TYPE_STRING, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnInt"), TYPE_INT64, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnDouble"), TYPE_DOUBLE, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteColumnText"), TYPE_STRING, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteBindText"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteBindInt"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteBindDouble"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteBindNull"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteErrMsg"), TYPE_STRING, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteLastInsertRowId"), TYPE_INT64, 0, 0, 0);
-    registerFunctionSignature(strdup("SqliteChanges"), TYPE_INT32, 0, 0, 0);
 }
 
 static VarType getFunctionType(const char *name) {
@@ -349,6 +327,37 @@ static void analyzeScopedStmt(ASTNodeClike *node, ScopeStack *scopes, VarType re
 
 static int isCharPointerDecl(const ASTNodeClike *decl) {
     return decl && decl->var_type == TYPE_POINTER && decl->element_type == TYPE_CHAR;
+}
+
+static int canAssignToType(VarType target, VarType value, int allowStringToCharPointer) {
+    if (target == TYPE_UNKNOWN || value == TYPE_UNKNOWN) {
+        return 1;
+    }
+    if (target == value) {
+        return 1;
+    }
+    if (isRealType(target) && isRealType(value)) {
+        return 1;
+    }
+    if (isRealType(target) && isIntlikeType(value)) {
+        return 1;
+    }
+    if (target == TYPE_STRING && value == TYPE_CHAR) {
+        return 1;
+    }
+    if (target == TYPE_STRING && isIntlikeType(value)) {
+        return 1;
+    }
+    if (isIntlikeType(target) && isIntlikeType(value)) {
+        return 1;
+    }
+    if (isIntlikeType(target) && value == TYPE_POINTER) {
+        return 1;
+    }
+    if (target == TYPE_POINTER && value == TYPE_STRING && allowStringToCharPointer) {
+        return 1;
+    }
+    return 0;
 }
 
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
@@ -520,13 +529,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 }
             }
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
-            if (lt != rt &&
-                !(isRealType(lt) && isRealType(rt)) &&
-                !(isRealType(lt) && isIntlikeType(rt)) &&
-                !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
-                !(isIntlikeType(lt) && isIntlikeType(rt)) &&
-                !(isIntlikeType(lt) && rt == TYPE_POINTER) &&
-                !allowStringToCharPointer) {
+            if (!canAssignToType(lt, rt, allowStringToCharPointer)) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -972,19 +975,14 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     node->left->type == TCAST_STRING) {
                     initType = declType;
                 }
-                if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
-                    if (declType != initType &&
-                        !(isRealType(declType) && isRealType(initType)) &&
-                        !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
-                        !(isIntlikeType(declType) && isIntlikeType(initType)) &&
-                        !(isIntlikeType(declType) && initType == TYPE_POINTER) &&
-                        !(isCharPointerDecl(node) && initType == TYPE_STRING)) {
-                        fprintf(stderr,
-                                "Type error: cannot assign %s to %s at line %d, column %d\n",
-                                varTypeToString(initType), varTypeToString(declType),
-                                node->left->token.line, node->left->token.column);
-                        clike_error_count++;
-                    }
+                if (!canAssignToType(declType,
+                                     initType,
+                                     isCharPointerDecl(node))) {
+                    fprintf(stderr,
+                            "Type error: cannot assign %s to %s at line %d, column %d\n",
+                            varTypeToString(initType), varTypeToString(declType),
+                            node->left->token.line, node->left->token.column);
+                    clike_error_count++;
                 }
             }
             break;
@@ -1055,9 +1053,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                             node->token.line, node->token.column);
                     clike_error_count++;
                 }
-            } else if (t != TYPE_UNKNOWN && t != retType &&
-                       !(isRealType(t) && isRealType(retType)) &&
-                       !(isIntlikeType(t) && isIntlikeType(retType))) {
+            } else if (!canAssignToType(retType, t, 0)) {
                 fprintf(stderr,
                         "Type error: return type %s does not match %s at line %d, column %d\n",
                         varTypeToString(t), varTypeToString(retType),
