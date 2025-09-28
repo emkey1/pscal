@@ -31,6 +31,8 @@ build/bin/clike Examples/Clike/<program>
 - `show_pid` – Uses an extended builtin function to show the process ID
 - `sqlite_yyjson_demo` – Uses extended builtins for SQLite and Yyjson to load
    JSON data into a database after checking availability with `#ifdef`
+- `sqlite_http_import_demo` – Downloads a CSV dataset over HTTP, imports it
+   into SQLite, and runs parameterised summary queries
 - `sort_string` – Shows how to copy and sort a string via a `str*` parameter
 - `vm_version_demo` – Prints VM and bytecode versions and exits on mismatch
 

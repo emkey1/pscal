@@ -356,6 +356,13 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   echo "---- $test_name ----"
 
   server_pid=""
+  if [ "${CLIKE_HTTP_TEST_PORT+x}" = x ]; then
+    prev_http_port="$CLIKE_HTTP_TEST_PORT"
+    had_prev_http_port=1
+  else
+    prev_http_port=""
+    had_prev_http_port=0
+  fi
   server_script="$SCRIPT_DIR/clike/$test_name.net"
   server_ready_file=""
   if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
@@ -373,6 +380,13 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
         stop_server "$server_pid"
         server_pid=""
       fi
+    elif [ -f "$server_ready_file" ]; then
+      while IFS='=' read -r key value; do
+        if [ "$key" = "PORT" ] && [ -n "$value" ]; then
+          CLIKE_HTTP_TEST_PORT="$value"
+          export CLIKE_HTTP_TEST_PORT
+        fi
+      done < "$server_ready_file"
     fi
   fi
 
@@ -432,6 +446,12 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   if [ -n "$server_pid" ]; then
     stop_server "$server_pid"
     server_pid=""
+  fi
+  if [ "$had_prev_http_port" = 1 ]; then
+    CLIKE_HTTP_TEST_PORT="$prev_http_port"
+    export CLIKE_HTTP_TEST_PORT
+  else
+    unset CLIKE_HTTP_TEST_PORT
   fi
   if [ -n "${server_ready_file:-}" ]; then
     rm -f "$server_ready_file"

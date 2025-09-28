@@ -21,11 +21,13 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     ready_file = os.environ.get('PSCAL_NET_READY_FILE')
-    server = HTTPServer(('127.0.0.1', 8081), Handler)
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    port = server.server_address[1]
     if ready_file:
         try:
             with open(ready_file, 'w', encoding='utf-8') as f:
                 f.write('ready\n')
+                f.write(f'PORT={port}\n')
         except OSError:
             pass
     server.serve_forever()
