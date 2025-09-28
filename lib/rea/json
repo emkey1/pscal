@@ -70,7 +70,7 @@ module Json {
         if (handle < 0) {
             return fallback;
         }
-        int result = (int)YyjsonGetInt(handle);
+        int result = YyjsonGetInt(handle);
         YyjsonFreeValue(handle);
         return result;
     }
@@ -149,7 +149,7 @@ module Json {
         if (handle < 0) {
             return fallback;
         }
-        int result = (int)YyjsonGetInt(handle);
+        int result = YyjsonGetInt(handle);
         YyjsonFreeValue(handle);
         return result;
     }

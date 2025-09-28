@@ -3747,6 +3747,10 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
         return makeInt(args[0].s_val ? (long long)strlen(args[0].s_val) : 0);
     }
 
+    if (args[0].type == TYPE_CHAR) {
+        return makeInt(1);
+    }
+
     if (args[0].type == TYPE_ARRAY) {
         long long len = 0;
         if (args[0].dimensions > 0 && args[0].upper_bounds && args[0].lower_bounds) {

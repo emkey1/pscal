@@ -24,6 +24,7 @@ typedef struct {
     bool hadError;
     const char* currentClassName; // non-owning pointer to current class name while parsing class body
     const char* currentParentClassName; // non-owning pointer to current parent class name while in class body
+    const char* currentModuleName; // non-owning pointer to current module name while inside module body
     int currentMethodIndex; // index of next method in current class for vtable
     int functionDepth; // nesting level of function/procedure declarations
     bool inModule;      // parsing module body
@@ -1442,7 +1443,9 @@ static AST *parseAdditive(ReaParser *p) {
         VarType lt = node->var_type;
         VarType rt = right->var_type;
         VarType res;
-        if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) {
+        if (tt == TOKEN_PLUS && (lt == TYPE_STRING || rt == TYPE_STRING || lt == TYPE_CHAR || rt == TYPE_CHAR)) {
+            res = TYPE_STRING;
+        } else if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) {
             res = TYPE_DOUBLE;
         } else if (lt == TYPE_INT64 || rt == TYPE_INT64) {
             res = TYPE_INT64;
@@ -2412,7 +2415,18 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     for (int i = 0; lower_name[i]; i++) lower_name[i] = (char)tolower((unsigned char)lower_name[i]);
 
     HashTable *target_table = outer_proc_table ? outer_proc_table : procedure_table;
-    Symbol *sym = target_table ? hashTableLookup(target_table, lower_name) : NULL;
+
+    char symbol_lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
+    if (target_table == procedure_table && p->inModule && p->currentModuleName && *p->currentModuleName) {
+        snprintf(symbol_lookup_name, sizeof(symbol_lookup_name), "%s.%s", p->currentModuleName, lower_name);
+        symbol_lookup_name[sizeof(symbol_lookup_name) - 1] = '\0';
+        toLowerString(symbol_lookup_name);
+    } else {
+        strncpy(symbol_lookup_name, lower_name, sizeof(symbol_lookup_name) - 1);
+        symbol_lookup_name[sizeof(symbol_lookup_name) - 1] = '\0';
+    }
+
+    Symbol *sym = target_table ? hashTableLookup(target_table, symbol_lookup_name) : NULL;
     if (sym && sym->is_alias && sym->real_symbol) {
         sym = sym->real_symbol;
     }
@@ -2421,7 +2435,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     if (!sym) {
         sym = (Symbol*)calloc(1, sizeof(Symbol));
         if (sym) {
-            sym->name = strdup(lower_name);
+            sym->name = strdup(symbol_lookup_name);
             sym_is_new = true;
             if (target_table) {
                 hashTableInsert(target_table, sym);
@@ -2441,7 +2455,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
     // If inside a class, also add a bare-name alias so 'obj.method(...)' can resolve.
     if (p->currentClassName && sym && sym_is_new && sym->name) {
-        const char* dot = strchr(sym->name, '.');
+        const char* dot = strrchr(sym->name, '.');
         const char* bare = NULL;
         if (dot && *(dot + 1)) bare = dot + 1;
         if (bare) {
@@ -3366,8 +3380,10 @@ static AST *parseModule(ReaParser *p) {
 
     bool prevInModule = p->inModule;
     bool prevMark = p->markExport;
+    const char* prevModuleName = p->currentModuleName;
     p->inModule = true;
     p->markExport = false;
+    p->currentModuleName = nameTok->value;
 
     AST *moduleNode = newASTNode(AST_MODULE, nameTok);
     AST *block = newASTNode(AST_BLOCK, NULL);
@@ -3407,6 +3423,7 @@ static AST *parseModule(ReaParser *p) {
 
     p->inModule = prevInModule;
     p->markExport = prevMark;
+    p->currentModuleName = prevModuleName;
     return moduleNode;
 }
 
@@ -3669,6 +3686,7 @@ AST *parseRea(const char *source) {
     p.hadError = false;
     p.currentClassName = NULL;
     p.currentParentClassName = NULL;
+    p.currentModuleName = NULL;
     p.currentMethodIndex = 0;
     p.functionDepth = 0;
     p.inModule = false;
