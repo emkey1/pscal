@@ -87,6 +87,7 @@ void assertFloatNear(str name, float expected, float actual, float tolerance) {
 void testCRT() {
     writeln();
     writeln("-- CRT --");
+    int originalAttr = CRT.TextAttr;
     assertEqualInt("CRT.Black", 0, CRT.Black);
     assertEqualInt("CRT.Blue", 1, CRT.Blue);
     assertEqualInt("CRT.Green", 2, CRT.Green);
@@ -108,6 +109,11 @@ void testCRT() {
     CRT.TextAttr = CRT.Green;
     assertEqualInt("CRT.TextAttr assignment", CRT.Green, CRT.TextAttr);
     CRT.TextAttr = 0;
+    if (originalAttr == CRT.Black) {
+        CRT.TextAttr = CRT.LightGray;
+    } else {
+        CRT.TextAttr = originalAttr;
+    }
 }
 
 void testStrings() {
