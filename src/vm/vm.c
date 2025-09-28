@@ -3499,6 +3499,15 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                if (!gTextAttrInitialized && name_val->s_val &&
+                    (strcasecmp(name_val->s_val, "CRT.TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "crt.textattr") == 0 ||
+                     strcasecmp(name_val->s_val, "textattr") == 0)) {
+                    gTextAttrInitialized = true;
+                    SET_INT_VALUE(sym->value, 7);
+                }
+
                 push(vm, copyValueForStack(sym->value));
                 break;
             }
