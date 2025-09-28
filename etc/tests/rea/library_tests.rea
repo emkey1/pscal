@@ -84,6 +84,64 @@ void assertFloatNear(str name, float expected, float actual, float tolerance) {
     }
 }
 
+str charToString(char value) {
+    str result;
+    setlength(result, 1);
+    result[1] = value;
+    return result;
+}
+
+int mapPscalColorToAnsiBase(int color) {
+    int normalized = color % 8;
+    if (normalized < 0) {
+        normalized = normalized + 8;
+    }
+    if (normalized == 0) { return 0; }
+    if (normalized == 1) { return 4; }
+    if (normalized == 2) { return 2; }
+    if (normalized == 3) { return 6; }
+    if (normalized == 4) { return 1; }
+    if (normalized == 5) { return 5; }
+    if (normalized == 6) { return 3; }
+    return 7;
+}
+
+str buildAnsiSequenceForAttr(int attr) {
+    int fg = attr % 16;
+    if (fg < 0) {
+        fg = fg + 16;
+    }
+    bool isBright = fg >= 8;
+    int fgBase = fg % 8;
+    int bg = (attr / 16) % 8;
+    if (bg < 0) {
+        bg = bg + 8;
+    }
+    bool isBlink = (attr / 128) % 2 == 1;
+
+    int fgCode = (isBright ? 90 : 30) + mapPscalColorToAnsiBase(fgBase);
+    int bgCode = 40 + mapPscalColorToAnsiBase(bg);
+
+    str sequence = charToString(chr(27)) + "[0";
+    if (isBright) {
+        sequence = sequence + ";1";
+    }
+    if (isBlink) {
+        sequence = sequence + ";5";
+    }
+    sequence = sequence + ";" + inttostr(fgCode);
+    sequence = sequence + ";" + inttostr(bgCode);
+    sequence = sequence + "m";
+    return sequence;
+}
+
+void applyTextAttrToTerminal(int attr) {
+    str sequence = buildAnsiSequenceForAttr(attr);
+    if (sequence != "") {
+        write(sequence);
+    }
+}
+
 void testCRT() {
     writeln();
     writeln("-- CRT --");
@@ -109,10 +167,13 @@ void testCRT() {
     CRT.TextAttr = CRT.Green;
     assertEqualInt("CRT.TextAttr assignment", CRT.Green, CRT.TextAttr);
     CRT.TextAttr = 0;
-    if (originalAttr == CRT.Black) {
-        CRT.TextAttr = CRT.LightGray;
+    bool zeroAssignmentStored = CRT.TextAttr == 0;
+    CRT.TextAttr = originalAttr;
+    applyTextAttrToTerminal(originalAttr);
+    if (zeroAssignmentStored) {
+        markPass("CRT.TextAttr zero assignment");
     } else {
-        CRT.TextAttr = originalAttr;
+        markFail("CRT.TextAttr zero assignment", "expected zero to be stored");
     }
 }
 
