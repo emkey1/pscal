@@ -1,6 +1,6 @@
 module DateTime {
 
-    str pad2(int value) {
+    export str pad2(int value) {
         if (value < 10 && value >= 0) {
             return "0" + inttostr(value);
         }
@@ -16,7 +16,7 @@ module DateTime {
         }
         int hours = absSeconds / 3600;
         int minutes = (absSeconds % 3600) / 60;
-        return sign + pad2(hours) + ":" + pad2(minutes);
+        return sign + DateTime.pad2(hours) + ":" + DateTime.pad2(minutes);
     }
 
     export str formatUnix(int epochSeconds, int offsetSeconds) {
@@ -53,8 +53,8 @@ module DateTime {
             year = year + 1;
         }
 
-        str date = inttostr(year) + "-" + pad2(month) + "-" + pad2(day);
-        str time = pad2(hour) + ":" + pad2(minute) + ":" + pad2(second);
+        str date = inttostr(year) + "-" + DateTime.pad2(month) + "-" + DateTime.pad2(day);
+        str time = DateTime.pad2(hour) + ":" + DateTime.pad2(minute) + ":" + DateTime.pad2(second);
         return date + " " + time;
     }
 
@@ -92,9 +92,9 @@ module DateTime {
             year = year + 1;
         }
 
-        str date = inttostr(year) + "-" + pad2(month) + "-" + pad2(day);
-        str time = pad2(hour) + ":" + pad2(minute) + ":" + pad2(second);
-        return date + "T" + time + formatUtcOffset(offsetSeconds);
+        str date = inttostr(year) + "-" + DateTime.pad2(month) + "-" + DateTime.pad2(day);
+        str time = DateTime.pad2(hour) + ":" + DateTime.pad2(minute) + ":" + DateTime.pad2(second);
+        return date + "T" + time + DateTime.formatUtcOffset(offsetSeconds);
     }
 
     export int startOfDay(int epochSeconds, int offsetSeconds) {
@@ -109,7 +109,7 @@ module DateTime {
     }
 
     export int endOfDay(int epochSeconds, int offsetSeconds) {
-        int start = startOfDay(epochSeconds, offsetSeconds);
+        int start = DateTime.startOfDay(epochSeconds, offsetSeconds);
         return start + 86399;
     }
 
