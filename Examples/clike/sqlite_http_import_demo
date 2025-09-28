@@ -28,7 +28,7 @@ int importStocksCsv(int db, str csv) {
     int lineNo;
     int inserted;
 
-    insertStmt = SqlitePrepare(db, "INSERT INTO quotes(symbol, trade_date, close_price) VALUES (?1, ?2, ?3);");
+    insertStmt = SqlitePrepare(db, "INSERT INTO quotes(symbol, trade_date, close_price) VALUES (?1, ?2, CAST(?3 AS REAL));");
     if (insertStmt < 0) {
         printf("prepare_insert_failed=%s\n", SqliteErrMsg(db));
         return 0;
@@ -97,10 +97,9 @@ int importStocksCsv(int db, str csv) {
             continue;
         }
 
-        double price = tofloat(priceText);
         SqliteBindText(insertStmt, 1, symbol);
         SqliteBindText(insertStmt, 2, tradeDate);
-        SqliteBindDouble(insertStmt, 3, price);
+        SqliteBindText(insertStmt, 3, priceText);
         int stepRc = SqliteStep(insertStmt);
         if (stepRc == 101) {
             inserted = inserted + 1;
