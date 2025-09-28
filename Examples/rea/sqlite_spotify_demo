@@ -1,0 +1,568 @@
+#!/usr/bin/env rea
+// Spotify dataset + SQLite demo for the Rea front end.
+// Downloads the CSV if necessary, imports it into SQLite, and offers
+// interactive queries that surface interesting insights.
+
+const str DATA_URL = "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-01-21/spotify_songs.csv";
+const str CSV_PATH = "spotify_songs.csv";
+const str DB_PATH = "spotify_songs.sqlite";
+const int EXPECTED_FIELD_COUNT = 23;
+
+bool ensureDataset(str path);
+bool downloadDataset(str url, str path);
+bool setupDatabase(int db);
+int importSpotifyCsv(str path, int db);
+int parseCsvLine(str line, str fields[], int maxFields);
+bool bindField(int stmt, int index, str value);
+void showTopArtists(int db);
+void showGenreOverview(int db);
+void showDanceableTracks(int db);
+void showReleaseYearSummary(int db);
+void showGenreBreakdown(int db);
+void runMenu(int db);
+
+bool ensureDataset(str path) {
+  if (fileexists(path)) {
+    writeln("Found existing dataset at ", path, ".");
+    return true;
+  }
+  writeln("Dataset not found locally. Downloading from network ...");
+  return downloadDataset(DATA_URL, path);
+}
+
+bool downloadDataset(str url, str path) {
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Unable to allocate an HTTP session.");
+    return false;
+  }
+  httpsetoption(session, "timeout_ms", 10000);
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "GET", url, nil, out);
+  if (status != 200) {
+    writeln("HTTP request failed with status ", status, ".");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return false;
+  }
+
+  str body = mstreambuffer(out);
+  mstreamfree(out);
+  httpclose(session);
+
+  text f;
+  assign(f, path);
+  rewrite(f);
+  int err = ioresult();
+  if (err != 0) {
+    writeln("Failed to open ", path, " for writing (error ", err, ").");
+    return false;
+  }
+
+  write(f, body);
+  err = ioresult();
+  if (err != 0) {
+    writeln("Failed while writing dataset (error ", err, ").");
+    close(f);
+    ioresult();
+    return false;
+  }
+
+  close(f);
+  err = ioresult();
+  if (err != 0) {
+    writeln("Failed while closing dataset file (error ", err, ").");
+    return false;
+  }
+
+  writeln("Saved dataset to ", path, " (", length(body), " bytes).");
+  return true;
+}
+
+bool setupDatabase(int db) {
+  int rc = SqliteExec(db, "DROP TABLE IF EXISTS spotify_songs;");
+  if (rc != 0) {
+    writeln("Failed to drop prior table: ", SqliteErrMsg(db));
+    return false;
+  }
+
+  rc = SqliteExec(db,
+    "CREATE TABLE spotify_songs ("
+    " track_id TEXT NOT NULL,"
+    " track_name TEXT NOT NULL,"
+    " track_artist TEXT NOT NULL,"
+    " track_popularity INTEGER,"
+    " track_album_id TEXT,"
+    " track_album_name TEXT,"
+    " track_album_release_date TEXT,"
+    " playlist_name TEXT,"
+    " playlist_id TEXT,"
+    " playlist_genre TEXT,"
+    " playlist_subgenre TEXT,"
+    " danceability REAL,"
+    " energy REAL,"
+    " key INTEGER,"
+    " loudness REAL,"
+    " mode INTEGER,"
+    " speechiness REAL,"
+    " acousticness REAL,"
+    " instrumentalness REAL,"
+    " liveness REAL,"
+    " valence REAL,"
+    " tempo REAL,"
+    " duration_ms INTEGER,"
+    " PRIMARY KEY (track_id, playlist_id)"
+    ");");
+  if (rc != 0) {
+    writeln("Failed to create table: ", SqliteErrMsg(db));
+    return false;
+  }
+
+  rc = SqliteExec(db, "CREATE INDEX idx_spotify_artist ON spotify_songs(track_artist);");
+  if (rc != 0) {
+    writeln("Warning: failed to create artist index: ", SqliteErrMsg(db));
+  }
+
+  rc = SqliteExec(db, "CREATE INDEX idx_spotify_genre ON spotify_songs(playlist_genre);");
+  if (rc != 0) {
+    writeln("Warning: failed to create genre index: ", SqliteErrMsg(db));
+  }
+
+  rc = SqliteExec(db, "CREATE INDEX idx_spotify_release ON spotify_songs(track_album_release_date);");
+  if (rc != 0) {
+    writeln("Warning: failed to create release date index: ", SqliteErrMsg(db));
+  }
+
+  return true;
+}
+
+int importSpotifyCsv(str path, int db) {
+  text f;
+  assign(f, path);
+  reset(f);
+  int err = ioresult();
+  if (err != 0) {
+    writeln("Unable to open ", path, " (error ", err, ").");
+    return -1;
+  }
+
+  if (eof(f)) {
+    writeln("Dataset file was empty.");
+    close(f);
+    ioresult();
+    return -1;
+  }
+
+  str header;
+  readln(f, header);
+
+  str fields[EXPECTED_FIELD_COUNT];
+  str line;
+  int lineNumber = 1;
+  int inserted = 0;
+
+  int stmt = SqlitePrepare(db,
+    "INSERT INTO spotify_songs ("
+    " track_id, track_name, track_artist, track_popularity, track_album_id,"
+    " track_album_name, track_album_release_date, playlist_name, playlist_id,"
+    " playlist_genre, playlist_subgenre, danceability, energy, key, loudness,"
+    " mode, speechiness, acousticness, instrumentalness, liveness, valence,"
+    " tempo, duration_ms"
+    ") VALUES ("
+    " ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,"
+    " ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23");");
+  if (stmt < 0) {
+    writeln("Failed to prepare insert statement: ", SqliteErrMsg(db));
+    close(f);
+    ioresult();
+    return -1;
+  }
+
+  bool ok = true;
+  while (!eof(f)) {
+    readln(f, line);
+    lineNumber = lineNumber + 1;
+    if (line == "") {
+      continue;
+    }
+    int fieldCount = parseCsvLine(line, fields, EXPECTED_FIELD_COUNT);
+    if (fieldCount != EXPECTED_FIELD_COUNT) {
+      writeln("Skipping line ", lineNumber, ": expected ", EXPECTED_FIELD_COUNT,
+              " fields but saw ", fieldCount, ".");
+      continue;
+    }
+
+    int i = 1;
+    while (i <= EXPECTED_FIELD_COUNT && ok) {
+      ok = bindField(stmt, i, fields[i]);
+      i = i + 1;
+    }
+    if (!ok) {
+      break;
+    }
+
+    int rc = SqliteStep(stmt);
+    if (rc != 101) {
+      writeln("Insert failed at line ", lineNumber, ": rc=", rc, " msg=", SqliteErrMsg(db));
+      ok = false;
+      break;
+    }
+    inserted = inserted + 1;
+
+    rc = SqliteReset(stmt);
+    if (rc != 0) {
+      writeln("SqliteReset failed with rc=", rc, ".");
+      ok = false;
+      break;
+    }
+    rc = SqliteClearBindings(stmt);
+    if (rc != 0) {
+      writeln("SqliteClearBindings failed with rc=", rc, ".");
+      ok = false;
+      break;
+    }
+  }
+
+  close(f);
+  ioresult();
+
+  int finalizeRc = SqliteFinalize(stmt);
+  if (finalizeRc != 0) {
+    writeln("SqliteFinalize returned rc=", finalizeRc, ".");
+    ok = false;
+  }
+
+  if (!ok) {
+    return -1;
+  }
+  return inserted;
+}
+
+int parseCsvLine(str line, str fields[], int maxFields) {
+  int len = length(line);
+  int idx = 1;
+  int fieldIndex = 1;
+  bool inQuotes = false;
+  str current = "";
+
+  while (idx <= len) {
+    char ch = line[idx];
+    if (inQuotes) {
+      if (ch == '"') {
+        if (idx < len && line[idx + 1] == '"') {
+          current = current + "\"";
+          idx = idx + 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current = current + ch;
+      }
+    } else {
+      if (ch == '"') {
+        inQuotes = true;
+      } else if (ch == ',') {
+        if (fieldIndex <= maxFields) {
+          fields[fieldIndex] = current;
+        }
+        fieldIndex = fieldIndex + 1;
+        current = "";
+      } else {
+        current = current + ch;
+      }
+    }
+    idx = idx + 1;
+  }
+
+  if (fieldIndex <= maxFields) {
+    fields[fieldIndex] = current;
+  }
+
+  return fieldIndex;
+}
+
+bool bindField(int stmt, int index, str value) {
+  int rc;
+  if (value == "") {
+    rc = SqliteBindNull(stmt, index);
+  } else {
+    rc = SqliteBindText(stmt, index, value);
+  }
+  if (rc != 0) {
+    writeln("Failed to bind parameter ", index, " (rc=", rc, ").");
+    return false;
+  }
+  return true;
+}
+
+void showTopArtists(int db) {
+  writeln();
+  writeln("Top artists by track count:");
+  int stmt = SqlitePrepare(db,
+    "SELECT track_artist, COUNT(*) AS track_count,"
+    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity"
+    " FROM spotify_songs"
+    " GROUP BY track_artist"
+    " ORDER BY track_count DESC, avg_popularity DESC"
+    " LIMIT 10;");
+  if (stmt < 0) {
+    writeln("Query preparation failed: ", SqliteErrMsg(db));
+    return;
+  }
+  printf("%-32s %10s %16s\n", "Artist", "Tracks", "Avg Popularity");
+  printf("%-32s %10s %16s\n", "--------------------------------", "----------", "----------------");
+  int rc = SqliteStep(stmt);
+  while (rc == 100) {
+    str artist = SqliteColumnText(stmt, 0);
+    int trackCount = SqliteColumnInt(stmt, 1);
+    double avgPopularity = SqliteColumnDouble(stmt, 2);
+    printf("%-32s %10d %16.1f\n", artist, trackCount, avgPopularity);
+    rc = SqliteStep(stmt);
+  }
+  if (rc != 101) {
+    writeln("Query ended with rc=", rc, " msg=", SqliteErrMsg(db));
+  }
+  SqliteFinalize(stmt);
+}
+
+void showGenreOverview(int db) {
+  writeln();
+  writeln("Playlist genres ranked by energy and popularity:");
+  int stmt = SqlitePrepare(db,
+    "SELECT playlist_genre, COUNT(*) AS track_count,"
+    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity,"
+    " ROUND(AVG(CAST(danceability AS REAL)), 3) AS avg_danceability,"
+    " ROUND(AVG(CAST(energy AS REAL)), 3) AS avg_energy"
+    " FROM spotify_songs"
+    " GROUP BY playlist_genre"
+    " ORDER BY avg_popularity DESC;");
+  if (stmt < 0) {
+    writeln("Query preparation failed: ", SqliteErrMsg(db));
+    return;
+  }
+  printf("%-16s %10s %16s %18s %14s\n", "Genre", "Tracks", "Avg Popularity", "Avg Danceability", "Avg Energy");
+  printf("%-16s %10s %16s %18s %14s\n", "----------------", "----------", "----------------", "------------------", "--------------");
+  int rc = SqliteStep(stmt);
+  while (rc == 100) {
+    str genre = SqliteColumnText(stmt, 0);
+    int trackCount = SqliteColumnInt(stmt, 1);
+    double avgPopularity = SqliteColumnDouble(stmt, 2);
+    double avgDance = SqliteColumnDouble(stmt, 3);
+    double avgEnergy = SqliteColumnDouble(stmt, 4);
+    printf("%-16s %10d %16.1f %18.3f %14.3f\n", genre, trackCount, avgPopularity, avgDance, avgEnergy);
+    rc = SqliteStep(stmt);
+  }
+  if (rc != 101) {
+    writeln("Query ended with rc=", rc, " msg=", SqliteErrMsg(db));
+  }
+  SqliteFinalize(stmt);
+}
+
+void showDanceableTracks(int db) {
+  writeln();
+  writeln("Most danceable tracks in the dataset:");
+  int stmt = SqlitePrepare(db,
+    "SELECT track_name, track_artist,"
+    " ROUND(CAST(danceability AS REAL), 3) AS danceability,"
+    " ROUND(CAST(energy AS REAL), 3) AS energy,"
+    " ROUND(CAST(track_popularity AS REAL), 1) AS popularity"
+    " FROM spotify_songs"
+    " ORDER BY CAST(danceability AS REAL) DESC, CAST(track_popularity AS REAL) DESC"
+    " LIMIT 10;");
+  if (stmt < 0) {
+    writeln("Query preparation failed: ", SqliteErrMsg(db));
+    return;
+  }
+  printf("%-40s %-24s %12s %10s %12s\n", "Track", "Artist", "Danceability", "Energy", "Popularity");
+  printf("%-40s %-24s %12s %10s %12s\n", "----------------------------------------", "------------------------", "------------", "----------", "------------");
+  int rc = SqliteStep(stmt);
+  while (rc == 100) {
+    str name = SqliteColumnText(stmt, 0);
+    str artist = SqliteColumnText(stmt, 1);
+    double dance = SqliteColumnDouble(stmt, 2);
+    double energy = SqliteColumnDouble(stmt, 3);
+    double pop = SqliteColumnDouble(stmt, 4);
+    printf("%-40s %-24s %12.3f %10.3f %12.1f\n", name, artist, dance, energy, pop);
+    rc = SqliteStep(stmt);
+  }
+  if (rc != 101) {
+    writeln("Query ended with rc=", rc, " msg=", SqliteErrMsg(db));
+  }
+  SqliteFinalize(stmt);
+}
+
+void showReleaseYearSummary(int db) {
+  writeln();
+  writeln("Years with the most releases in this snapshot:");
+  int stmt = SqlitePrepare(db,
+    "SELECT release_year, track_count, ROUND(avg_popularity, 1)"
+    " FROM ("
+    "   SELECT substr(track_album_release_date, 1, 4) AS release_year,"
+    "          COUNT(*) AS track_count,"
+    "          AVG(CAST(track_popularity AS REAL)) AS avg_popularity"
+    "   FROM spotify_songs"
+    "   WHERE length(track_album_release_date) >= 4"
+    "   GROUP BY release_year"
+    " )"
+    " WHERE release_year != ''"
+    " ORDER BY track_count DESC, release_year DESC"
+    " LIMIT 10;");
+  if (stmt < 0) {
+    writeln("Query preparation failed: ", SqliteErrMsg(db));
+    return;
+  }
+  printf("%-8s %12s %18s\n", "Year", "Tracks", "Avg Popularity");
+  printf("%-8s %12s %18s\n", "--------", "------------", "------------------");
+  int rc = SqliteStep(stmt);
+  while (rc == 100) {
+    str year = SqliteColumnText(stmt, 0);
+    int trackCount = SqliteColumnInt(stmt, 1);
+    double avgPopularity = SqliteColumnDouble(stmt, 2);
+    printf("%-8s %12d %18.1f\n", year, trackCount, avgPopularity);
+    rc = SqliteStep(stmt);
+  }
+  if (rc != 101) {
+    writeln("Query ended with rc=", rc, " msg=", SqliteErrMsg(db));
+  }
+  SqliteFinalize(stmt);
+}
+
+void showGenreBreakdown(int db) {
+  writeln();
+  writeln("Enter a playlist genre (e.g., pop, latin, rock). Leave empty to cancel:");
+  str genre;
+  readln(genre);
+  if (genre == "") {
+    writeln("No genre entered. Returning to menu.");
+    return;
+  }
+
+  int stmt = SqlitePrepare(db,
+    "SELECT playlist_subgenre, COUNT(*) AS track_count,"
+    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity,"
+    " ROUND(AVG(CAST(danceability AS REAL)), 3) AS avg_danceability,"
+    " ROUND(AVG(CAST(energy AS REAL)), 3) AS avg_energy"
+    " FROM spotify_songs"
+    " WHERE playlist_genre = ?1"
+    " GROUP BY playlist_subgenre"
+    " ORDER BY track_count DESC, avg_popularity DESC"
+    " LIMIT 15;");
+  if (stmt < 0) {
+    writeln("Query preparation failed: ", SqliteErrMsg(db));
+    return;
+  }
+
+  int bindRc = SqliteBindText(stmt, 1, genre);
+  if (bindRc != 0) {
+    writeln("Failed to bind genre parameter (rc=", bindRc, ").");
+    SqliteFinalize(stmt);
+    return;
+  }
+
+  printf("Breakdown for playlist genre '%s':\n", genre);
+  printf("%-28s %10s %16s %18s %14s\n", "Subgenre", "Tracks", "Avg Popularity", "Avg Danceability", "Avg Energy");
+  printf("%-28s %10s %16s %18s %14s\n", "----------------------------", "----------", "----------------", "------------------", "--------------");
+  bool any = false;
+  int rc = SqliteStep(stmt);
+  while (rc == 100) {
+    any = true;
+    str subgenre = SqliteColumnText(stmt, 0);
+    int trackCount = SqliteColumnInt(stmt, 1);
+    double avgPopularity = SqliteColumnDouble(stmt, 2);
+    double avgDance = SqliteColumnDouble(stmt, 3);
+    double avgEnergy = SqliteColumnDouble(stmt, 4);
+    printf("%-28s %10d %16.1f %18.3f %14.3f\n", subgenre, trackCount, avgPopularity, avgDance, avgEnergy);
+    rc = SqliteStep(stmt);
+  }
+  if (rc != 101) {
+    writeln("Query ended with rc=", rc, " msg=", SqliteErrMsg(db));
+  } else if (!any) {
+    writeln("No matches for playlist genre '", genre, "'.");
+  }
+
+  SqliteFinalize(stmt);
+}
+
+void runMenu(int db) {
+  bool keepGoing = true;
+  while (keepGoing) {
+    writeln();
+    writeln("Choose an insight to display:");
+    writeln("  1) Top artists by track count");
+    writeln("  2) Playlist genre overview");
+    writeln("  3) Most danceable tracks");
+    writeln("  4) Release year summary");
+    writeln("  5) Playlist subgenre breakdown");
+    writeln("  q) Quit");
+    writeln("Enter choice: ");
+    str choice;
+    readln(choice);
+    if (choice == "1") {
+      showTopArtists(db);
+    } else if (choice == "2") {
+      showGenreOverview(db);
+    } else if (choice == "3") {
+      showDanceableTracks(db);
+    } else if (choice == "4") {
+      showReleaseYearSummary(db);
+    } else if (choice == "5") {
+      showGenreBreakdown(db);
+    } else if (choice == "q" || choice == "Q" || choice == "quit" || choice == "exit") {
+      keepGoing = false;
+    } else {
+      writeln("Unrecognised choice. Please try again.");
+    }
+  }
+}
+
+int main() {
+  writeln("Spotify + SQLite demo (Rea front end).");
+  if (!hasextbuiltin("sqlite", "SqliteOpen")) {
+    writeln("This build of Rea does not include the SQLite extended built-ins.");
+    writeln("Rebuild with ENABLE_EXT_BUILTIN_SQLITE=ON to run this demo.");
+    return 1;
+  }
+
+  if (!ensureDataset(CSV_PATH)) {
+    writeln("Unable to ensure dataset availability. Exiting.");
+    return 1;
+  }
+
+  int db = SqliteOpen(DB_PATH);
+  if (db < 0) {
+    writeln("Failed to open SQLite database at ", DB_PATH, ".");
+    return 1;
+  }
+
+  if (!setupDatabase(db)) {
+    SqliteClose(db);
+    return 1;
+  }
+
+  writeln("Importing Spotify tracks into SQLite ...");
+  int inserted = importSpotifyCsv(CSV_PATH, db);
+  if (inserted < 0) {
+    writeln("Import failed. See messages above for details.");
+    SqliteClose(db);
+    return 1;
+  }
+  writeln("Imported ", inserted, " rows into spotify_songs.");
+
+  runMenu(db);
+
+  int closeRc = SqliteClose(db);
+  if (closeRc != 0) {
+    writeln("Warning: SqliteClose returned rc=", closeRc, ".");
+  }
+  writeln("Goodbye!");
+  return 0;
+}
