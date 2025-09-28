@@ -270,6 +270,7 @@ int importSpotifyCsv(str path, int db) {
 
     int rc = SqliteStep(stmt);
     bool handled = false;
+    bool constraintViolation = rc == 19;
     if (rc == 101) {
       inserted = inserted + 1;
       handled = true;
@@ -289,6 +290,9 @@ int importSpotifyCsv(str path, int db) {
     }
 
     rc = SqliteReset(stmt);
+    if (constraintViolation && rc == 19) {
+      rc = 0;
+    }
     if (rc != 0) {
       writeln("SqliteReset failed with rc=", rc, ".");
       ok = false;
