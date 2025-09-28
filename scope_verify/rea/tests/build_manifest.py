@@ -53,7 +53,7 @@ add({
                 int outer = 2;
                 printf("inner=%d, ", outer);
             }
-            printf("outer_after=%d\n", outer);
+            printf("outer_after=%d", outer);
             return 0;
         }
     """,
