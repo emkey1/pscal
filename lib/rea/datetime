@@ -113,12 +113,7 @@ module DateTime {
 
     export int startOfDay(int epochSeconds, int offsetSeconds) {
         int total = epochSeconds + offsetSeconds;
-        int days;
-        if (total >= 0) {
-            days = divInt(total, 86400);
-        } else {
-            days = divInt(total - 86399, 86400);
-        }
+        int days = divInt(total, 86400);
         return days * 86400 - offsetSeconds;
     }
 
