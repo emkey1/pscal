@@ -165,7 +165,9 @@ int importSpotifyCsv(str path, int db) {
   str header;
   readln(f, header);
 
-  str fields[EXPECTED_FIELD_COUNT];
+  // Fields are indexed starting at 1 so we allocate one extra slot to
+  // accommodate the highest index without triggering bounds checks.
+  str fields[EXPECTED_FIELD_COUNT + 1];
   str line;
   int lineNumber = 1;
   int inserted = 0;
