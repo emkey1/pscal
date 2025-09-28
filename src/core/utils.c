@@ -89,6 +89,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_LESS_EQUAL:    return "LESS_EQUAL";
         case TOKEN_LESS:          return "LESS";
         case TOKEN_COLON:         return "COLON";
+        case TOKEN_QUESTION:      return "QUESTION";
         case TOKEN_COMMA:         return "COMMA";
         case TOKEN_PERIOD:        return "PERIOD";
         case TOKEN_ASSIGN:        return "ASSIGN";
@@ -151,6 +152,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_ASSIGN:         return "ASSIGN";
         case AST_BINARY_OP:      return "BINARY_OP";
         case AST_UNARY_OP:       return "UNARY_OP";
+        case AST_TERNARY:        return "TERNARY";
         case AST_NUMBER:         return "NUMBER";
         case AST_STRING:         return "STRING";
         case AST_VARIABLE:       return "VARIABLE";

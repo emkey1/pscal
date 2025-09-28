@@ -233,7 +233,7 @@ static const char* clikeTokenTypeToPascalString(ClikeTokenType type) {
         case CLIKE_TOKEN_GREATER_EQUAL:return "GREATER_EQUAL";
         case CLIKE_TOKEN_AND_AND:      return "AND";
         case CLIKE_TOKEN_OR_OR:        return "OR";
-        case CLIKE_TOKEN_QUESTION:     return "UNKNOWN";
+        case CLIKE_TOKEN_QUESTION:     return "QUESTION";
         case CLIKE_TOKEN_COLON:        return "COLON";
         case CLIKE_TOKEN_DOT:          return "PERIOD";
         case CLIKE_TOKEN_ARROW:        return "UNKNOWN";

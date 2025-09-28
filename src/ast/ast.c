@@ -880,6 +880,71 @@ resolved_field: ;
                  }
                 break;
             }
+            case AST_TERNARY: {
+                VarType thenType = node->right ? node->right->var_type : TYPE_UNKNOWN;
+                VarType elseType = node->extra ? node->extra->var_type : TYPE_UNKNOWN;
+
+                if (thenType == TYPE_POINTER || elseType == TYPE_POINTER) {
+                    node->var_type = TYPE_POINTER;
+                } else if (isRealType(thenType) && isIntlikeType(elseType)) {
+                    node->var_type = thenType;
+                } else if (isRealType(elseType) && isIntlikeType(thenType)) {
+                    node->var_type = elseType;
+                } else if (isRealType(thenType) && isRealType(elseType)) {
+                    if (thenType == TYPE_LONG_DOUBLE || elseType == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
+                    else if (thenType == TYPE_DOUBLE || elseType == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
+                    else node->var_type = TYPE_FLOAT;
+                } else if (thenType == TYPE_STRING || elseType == TYPE_STRING) {
+                    node->var_type = TYPE_STRING;
+                } else if (thenType == TYPE_BOOLEAN && elseType == TYPE_BOOLEAN) {
+                    node->var_type = TYPE_BOOLEAN;
+                } else if (thenType != TYPE_UNKNOWN && thenType != TYPE_VOID) {
+                    node->var_type = thenType;
+                } else {
+                    node->var_type = elseType;
+                }
+
+                AST *preferredTypeDef = NULL;
+                if (node->var_type == TYPE_POINTER) {
+                    AST *thenDef = (node->right && node->right->var_type == TYPE_POINTER) ? node->right->type_def : NULL;
+                    AST *elseDef = (node->extra && node->extra->var_type == TYPE_POINTER) ? node->extra->type_def : NULL;
+                    if (thenDef && elseDef) {
+                        AST *resolvedThen = resolveTypeAlias(thenDef);
+                        AST *resolvedElse = resolveTypeAlias(elseDef);
+                        if (resolvedThen && resolvedElse && resolvedThen->type == resolvedElse->type) {
+                            if (resolvedThen->type == AST_POINTER_TYPE) {
+                                AST *thenTarget = resolveTypeAlias(resolvedThen->right);
+                                AST *elseTarget = resolveTypeAlias(resolvedElse->right);
+                                if (thenTarget == elseTarget || !elseTarget) {
+                                    preferredTypeDef = thenDef;
+                                } else if (!thenTarget) {
+                                    preferredTypeDef = elseDef;
+                                } else {
+                                    preferredTypeDef = thenDef;
+                                }
+                            } else {
+                                preferredTypeDef = thenDef;
+                            }
+                        } else {
+                            preferredTypeDef = thenDef;
+                        }
+                    } else {
+                        preferredTypeDef = thenDef ? thenDef : elseDef;
+                    }
+                } else {
+                    if (node->right && node->right->type_def && node->right->var_type == node->var_type) {
+                        preferredTypeDef = node->right->type_def;
+                    }
+                    if ((!preferredTypeDef || preferredTypeDef == NULL) && node->extra && node->extra->type_def && node->extra->var_type == node->var_type) {
+                        preferredTypeDef = node->extra->type_def;
+                    }
+                }
+
+                if (preferredTypeDef) {
+                    node->type_def = preferredTypeDef;
+                }
+                break;
+            }
             case AST_UNARY_OP:
                 node->var_type = (node->token && node->token->type == TOKEN_NOT) ? TYPE_BOOLEAN : (node->left ? node->left->var_type : TYPE_VOID);
                 break;

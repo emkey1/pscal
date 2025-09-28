@@ -379,7 +379,21 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             VarType ft = analyzeExpr(node->third, scopes);
-            if (isRealType(rt) && isIntlikeType(ft)) {
+            if (rt == TYPE_POINTER || ft == TYPE_POINTER) {
+                node->var_type = TYPE_POINTER;
+                node->element_type = TYPE_UNKNOWN;
+                if (rt == TYPE_POINTER && node->right) {
+                    node->element_type = node->right->element_type;
+                }
+                if (ft == TYPE_POINTER && node->third) {
+                    if (node->element_type == TYPE_UNKNOWN) {
+                        node->element_type = node->third->element_type;
+                    } else if (node->third->element_type != TYPE_UNKNOWN &&
+                               node->element_type != node->third->element_type) {
+                        node->element_type = TYPE_UNKNOWN;
+                    }
+                }
+            } else if (isRealType(rt) && isIntlikeType(ft)) {
                 node->var_type = rt;
             } else if (isRealType(ft) && isIntlikeType(rt)) {
                 node->var_type = ft;
@@ -389,6 +403,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 else node->var_type = TYPE_FLOAT;
             } else if (rt == TYPE_STRING || ft == TYPE_STRING) {
                 node->var_type = TYPE_STRING;
+            } else if (rt == TYPE_BOOLEAN && ft == TYPE_BOOLEAN) {
+                node->var_type = TYPE_BOOLEAN;
             } else {
                 node->var_type = rt != TYPE_UNKNOWN ? rt : ft;
             }

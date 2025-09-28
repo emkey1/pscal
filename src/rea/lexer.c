@@ -195,6 +195,8 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_SEMICOLON, start);
         case ':':
             return makeToken(lexer, REA_TOKEN_COLON, start);
+        case '?':
+            return makeToken(lexer, REA_TOKEN_QUESTION, start);
         case '+':
             if (match(lexer, '+')) return makeToken(lexer, REA_TOKEN_PLUS_PLUS, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
@@ -334,6 +336,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_DOT: return "DOT";
         case REA_TOKEN_SEMICOLON: return "SEMICOLON";
         case REA_TOKEN_COLON: return "COLON";
+        case REA_TOKEN_QUESTION: return "QUESTION";
         case REA_TOKEN_ARROW: return "ARROW";
         case REA_TOKEN_PLUS: return "PLUS";
         case REA_TOKEN_PLUS_PLUS: return "PLUS_PLUS";

@@ -5987,6 +5987,30 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
             break;
         }
+        case AST_TERNARY: {
+            if (!node->left || !node->right || !node->extra) {
+                fprintf(stderr, "L%d: Compiler error: Incomplete ternary expression.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            compileRValue(node->left, chunk, getLine(node->left));
+            int jumpToElse = chunk->count;
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            compileRValue(node->right, chunk, getLine(node->right));
+            int jumpToEnd = chunk->count;
+            writeBytecodeChunk(chunk, JUMP, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            uint16_t elseOffset = (uint16_t)(chunk->count - (jumpToElse + 3));
+            patchShort(chunk, jumpToElse + 1, elseOffset);
+
+            compileRValue(node->extra, chunk, getLine(node->extra));
+            uint16_t endOffset = (uint16_t)(chunk->count - (jumpToEnd + 3));
+            patchShort(chunk, jumpToEnd + 1, endOffset);
+            break;
+        }
         case AST_BOOLEAN: {
             // The check for node_token is still useful for malformed ASTs,
             // though the first 'if' condition was unusual. We can simplify the check.
