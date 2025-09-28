@@ -7,6 +7,20 @@ module DateTime {
         return inttostr(value);
     }
 
+    int divInt(int numerator, int denominator) {
+        if (denominator == 0) {
+            return 0;
+        }
+        float numeratorFloat = numerator * 1.0;
+        float denominatorFloat = denominator * 1.0;
+        float quotient = numeratorFloat / denominatorFloat;
+        int truncated = int(quotient);
+        if (quotient < 0 && quotient != truncated) {
+            return truncated - 1;
+        }
+        return truncated;
+    }
+
     export str formatUtcOffset(int offsetSeconds) {
         int absSeconds = offsetSeconds;
         str sign = "+";
@@ -14,8 +28,8 @@ module DateTime {
             sign = "-";
             absSeconds = -absSeconds;
         }
-        int hours = absSeconds / 3600;
-        int minutes = (absSeconds % 3600) / 60;
+        int hours = divInt(absSeconds, 3600);
+        int minutes = divInt(absSeconds % 3600, 60);
         return sign + pad2(hours) + ":" + pad2(minutes);
     }
 
@@ -24,25 +38,25 @@ module DateTime {
         if (total < 0) {
             total = 0;
         }
-        int days = total / 86400;
+        int days = divInt(total, 86400);
         int secondsOfDay = total % 86400;
-        int hour = secondsOfDay / 3600;
-        int minute = (secondsOfDay % 3600) / 60;
+        int hour = divInt(secondsOfDay, 3600);
+        int minute = divInt(secondsOfDay % 3600, 60);
         int second = secondsOfDay % 60;
 
         int z = days + 719468;
         int era;
         if (z >= 0) {
-            era = z / 146097;
+            era = divInt(z, 146097);
         } else {
-            era = (z - 146096) / 146097;
+            era = divInt(z - 146096, 146097);
         }
         int doe = z - era * 146097;
-        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int yoe = divInt(doe - divInt(doe, 1460) + divInt(doe, 36524) - divInt(doe, 146096), 365);
         int year = yoe + era * 400;
-        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        int mp = (5 * doy + 2) / 153;
-        int day = doy - (153 * mp + 2) / 5 + 1;
+        int doy = doe - (365 * yoe + divInt(yoe, 4) - divInt(yoe, 100));
+        int mp = divInt(5 * doy + 2, 153);
+        int day = doy - divInt(153 * mp + 2, 5) + 1;
         int month;
         if (mp < 10) {
             month = mp + 3;
@@ -63,25 +77,25 @@ module DateTime {
         if (total < 0) {
             total = 0;
         }
-        int days = total / 86400;
+        int days = divInt(total, 86400);
         int secondsOfDay = total % 86400;
-        int hour = secondsOfDay / 3600;
-        int minute = (secondsOfDay % 3600) / 60;
+        int hour = divInt(secondsOfDay, 3600);
+        int minute = divInt(secondsOfDay % 3600, 60);
         int second = secondsOfDay % 60;
 
         int z = days + 719468;
         int era;
         if (z >= 0) {
-            era = z / 146097;
+            era = divInt(z, 146097);
         } else {
-            era = (z - 146096) / 146097;
+            era = divInt(z - 146096, 146097);
         }
         int doe = z - era * 146097;
-        int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int yoe = divInt(doe - divInt(doe, 1460) + divInt(doe, 36524) - divInt(doe, 146096), 365);
         int year = yoe + era * 400;
-        int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        int mp = (5 * doy + 2) / 153;
-        int day = doy - (153 * mp + 2) / 5 + 1;
+        int doy = doe - (365 * yoe + divInt(yoe, 4) - divInt(yoe, 100));
+        int mp = divInt(5 * doy + 2, 153);
+        int day = doy - divInt(153 * mp + 2, 5) + 1;
         int month;
         if (mp < 10) {
             month = mp + 3;
@@ -99,12 +113,7 @@ module DateTime {
 
     export int startOfDay(int epochSeconds, int offsetSeconds) {
         int total = epochSeconds + offsetSeconds;
-        int days;
-        if (total >= 0) {
-            days = total / 86400;
-        } else {
-            days = (total - 86399) / 86400;
-        }
+        int days = divInt(total, 86400);
         return days * 86400 - offsetSeconds;
     }
 
@@ -128,10 +137,10 @@ module DateTime {
     export int daysBetween(int startEpoch, int endEpoch) {
         int diff = endEpoch - startEpoch;
         if (diff >= 0) {
-            return diff / 86400;
+            return divInt(diff, 86400);
         }
         int positive = -diff;
-        return -((positive + 86399) / 86400);
+        return -divInt(positive + 86399, 86400);
     }
 
     export str describeDifference(int startEpoch, int endEpoch) {
@@ -141,38 +150,38 @@ module DateTime {
             sign = -1;
             diff = -diff;
         }
-        int days = diff / 86400;
+        int days = divInt(diff, 86400);
         int remainder = diff % 86400;
-        int hours = remainder / 3600;
+        int hours = divInt(remainder, 3600);
         remainder = remainder % 3600;
-        int minutes = remainder / 60;
+        int minutes = divInt(remainder, 60);
         int seconds = remainder % 60;
 
-        str result = "";
+        str buffer = "";
         if (days > 0) {
-            result = inttostr(days) + "d";
+            buffer = inttostr(days) + "d";
         }
         if (hours > 0 || (days > 0 && (minutes > 0 || seconds > 0))) {
-            if (result != "") {
-                result = result + " ";
+            if (buffer != "") {
+                buffer = buffer + " ";
             }
-            result = result + inttostr(hours) + "h";
+            buffer = buffer + inttostr(hours) + "h";
         }
-        if (minutes > 0 || (result != "" && seconds > 0)) {
-            if (result != "") {
-                result = result + " ";
+        if (minutes > 0 || (buffer != "" && seconds > 0)) {
+            if (buffer != "") {
+                buffer = buffer + " ";
             }
-            result = result + inttostr(minutes) + "m";
+            buffer = buffer + inttostr(minutes) + "m";
         }
-        if (seconds > 0 || result == "") {
-            if (result != "") {
-                result = result + " ";
+        if (seconds > 0 || buffer == "") {
+            if (buffer != "") {
+                buffer = buffer + " ";
             }
-            result = result + inttostr(seconds) + "s";
+            buffer = buffer + inttostr(seconds) + "s";
         }
         if (sign < 0) {
-            result = "-" + result;
+            buffer = "-" + buffer;
         }
-        return result;
+        return buffer;
     }
 }

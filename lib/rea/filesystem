@@ -27,7 +27,7 @@ module Filesystem {
     }
 
     export str readAllText(str path) {
-        str result = "";
+        str contents = "";
         text f;
         bool firstLine = true;
 
@@ -43,10 +43,10 @@ module Filesystem {
             str line;
             readln(f, line);
             if (firstLine) {
-                result = line;
+                contents = line;
                 firstLine = false;
             } else {
-                result = result + "\n" + line;
+                contents = contents + "\n" + line;
             }
         }
 
@@ -54,11 +54,11 @@ module Filesystem {
         err = ioresult();
         if (err != 0) {
             markReadFailure(err);
-            return result;
+            return contents;
         }
 
         markReadSuccess();
-        return result;
+        return contents;
     }
 
     export bool writeAllText(str path, str contents) {
