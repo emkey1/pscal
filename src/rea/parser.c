@@ -456,11 +456,13 @@ static AST *parseAssignment(ReaParser *p);
 static AST *parseConditional(ReaParser *p);
 static AST *parseEquality(ReaParser *p);
 static AST *parseComparison(ReaParser *p);
+static AST *parseShift(ReaParser *p);
 static AST *parseAdditive(ReaParser *p);
 static AST *parseTerm(ReaParser *p);
 static AST *parseFactor(ReaParser *p);
 static AST *parseBitwiseAnd(ReaParser *p);
 static AST *parseBitwiseXor(ReaParser *p);
+static AST *parseBitwiseOr(ReaParser *p);
 static AST *parseLogicalAnd(ReaParser *p);
 static AST *parseLogicalOr(ReaParser *p);
 static AST *parseStatement(ReaParser *p);
@@ -1463,14 +1465,37 @@ static AST *parseAdditive(ReaParser *p) {
     return node;
 }
 
-static AST *parseComparison(ReaParser *p) {
+static AST *parseShift(ReaParser *p) {
     AST *node = parseAdditive(p);
+    if (!node) return NULL;
+    while (p->current.type == REA_TOKEN_SHIFT_LEFT ||
+           p->current.type == REA_TOKEN_SHIFT_RIGHT) {
+        ReaToken op = p->current;
+        reaAdvance(p);
+        AST *right = parseAdditive(p);
+        if (!right) return NULL;
+        TokenType tt = (op.type == REA_TOKEN_SHIFT_LEFT) ? TOKEN_SHL : TOKEN_SHR;
+        Token *tok = newToken(tt, tt == TOKEN_SHL ? "<<" : ">>", op.line, 0);
+        AST *bin = newASTNode(AST_BINARY_OP, tok);
+        setLeft(bin, node);
+        setRight(bin, right);
+        VarType lt = node->var_type;
+        VarType rt = right->var_type;
+        VarType res = (lt == TYPE_INT64 || rt == TYPE_INT64) ? TYPE_INT64 : TYPE_INT32;
+        setTypeAST(bin, res);
+        node = bin;
+    }
+    return node;
+}
+
+static AST *parseComparison(ReaParser *p) {
+    AST *node = parseShift(p);
     if (!node) return NULL;
     while (p->current.type == REA_TOKEN_GREATER || p->current.type == REA_TOKEN_GREATER_EQUAL ||
            p->current.type == REA_TOKEN_LESS || p->current.type == REA_TOKEN_LESS_EQUAL) {
         ReaToken op = p->current;
         reaAdvance(p);
-        AST *right = parseAdditive(p);
+        AST *right = parseShift(p);
         if (!right) return NULL;
         TokenType tt = mapOp(op.type);
         Token *tok = newToken(tt, opLexeme(tt), op.line, 0);
@@ -1730,13 +1755,42 @@ static AST *parseExpression(ReaParser *p) {
     return parseAssignment(p);
 }
 
-static AST *parseLogicalAnd(ReaParser *p) {
+static AST *parseBitwiseOr(ReaParser *p) {
     AST *node = parseBitwiseXor(p);
+    if (!node) return NULL;
+    while (p->current.type == REA_TOKEN_OR) {
+        ReaToken op = p->current;
+        reaAdvance(p);
+        AST *right = parseBitwiseXor(p);
+        if (!right) return NULL;
+        const char *lexeme = (strncmp(op.start, "or", op.length) == 0) ? "or" : "|";
+        Token *tok = newToken(TOKEN_OR, lexeme, op.line, 0);
+        AST *bin = newASTNode(AST_BINARY_OP, tok);
+        setLeft(bin, node);
+        setRight(bin, right);
+        VarType lt = node->var_type;
+        VarType rt = right->var_type;
+        VarType res;
+        if (lt == TYPE_BOOLEAN && rt == TYPE_BOOLEAN) {
+            res = TYPE_BOOLEAN;
+        } else if (lt == TYPE_INT64 || rt == TYPE_INT64) {
+            res = TYPE_INT64;
+        } else {
+            res = TYPE_INT32;
+        }
+        setTypeAST(bin, res);
+        node = bin;
+    }
+    return node;
+}
+
+static AST *parseLogicalAnd(ReaParser *p) {
+    AST *node = parseBitwiseOr(p);
     if (!node) return NULL;
     while (p->current.type == REA_TOKEN_AND_AND) {
         ReaToken op = p->current;
         reaAdvance(p);
-        AST *right = parseBitwiseXor(p);
+        AST *right = parseBitwiseOr(p);
         if (!right) return NULL;
         Token *tok = newToken(TOKEN_AND, "&&", op.line, 0);
         AST *bin = newASTNode(AST_BINARY_OP, tok);

@@ -223,8 +223,14 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':
+            if (match(lexer, '<')) {
+                return makeToken(lexer, REA_TOKEN_SHIFT_LEFT, start);
+            }
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_LESS_EQUAL : REA_TOKEN_LESS, start);
         case '>':
+            if (match(lexer, '>')) {
+                return makeToken(lexer, REA_TOKEN_SHIFT_RIGHT, start);
+            }
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_GREATER_EQUAL : REA_TOKEN_GREATER, start);
         case '#':
             while (isAlpha(peek(lexer))) advance(lexer);
@@ -356,6 +362,8 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_OR: return "OR";
         case REA_TOKEN_OR_OR: return "OR_OR";
         case REA_TOKEN_XOR: return "XOR";
+        case REA_TOKEN_SHIFT_LEFT: return "SHIFT_LEFT";
+        case REA_TOKEN_SHIFT_RIGHT: return "SHIFT_RIGHT";
         case REA_TOKEN_GREATER: return "GREATER";
         case REA_TOKEN_GREATER_EQUAL: return "GREATER_EQUAL";
         case REA_TOKEN_LESS: return "LESS";
