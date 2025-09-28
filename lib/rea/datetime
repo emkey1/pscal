@@ -1,16 +1,5 @@
 module DateTime {
 
-    export str formatUtcOffset(int offsetSeconds);
-    export str formatUnix(int epochSeconds, int offsetSeconds);
-    export str iso8601(int epochSeconds, int offsetSeconds);
-    export int startOfDay(int epochSeconds, int offsetSeconds);
-    export int endOfDay(int epochSeconds, int offsetSeconds);
-    export int addDays(int epochSeconds, int days);
-    export int addHours(int epochSeconds, int hours);
-    export int addMinutes(int epochSeconds, int minutes);
-    export int daysBetween(int startEpoch, int endEpoch);
-    export str describeDifference(int startEpoch, int endEpoch);
-
     str pad2(int value) {
         if (value < 10 && value >= 0) {
             return "0" + inttostr(value);
@@ -18,7 +7,7 @@ module DateTime {
         return inttostr(value);
     }
 
-    str formatUtcOffset(int offsetSeconds) {
+    export str formatUtcOffset(int offsetSeconds) {
         int absSeconds = offsetSeconds;
         str sign = "+";
         if (absSeconds < 0) {
@@ -30,7 +19,7 @@ module DateTime {
         return sign + pad2(hours) + ":" + pad2(minutes);
     }
 
-    str formatUnix(int epochSeconds, int offsetSeconds) {
+    export str formatUnix(int epochSeconds, int offsetSeconds) {
         int total = epochSeconds + offsetSeconds;
         if (total < 0) {
             total = 0;
@@ -69,7 +58,7 @@ module DateTime {
         return date + " " + time;
     }
 
-    str iso8601(int epochSeconds, int offsetSeconds) {
+    export str iso8601(int epochSeconds, int offsetSeconds) {
         int total = epochSeconds + offsetSeconds;
         if (total < 0) {
             total = 0;
@@ -108,7 +97,7 @@ module DateTime {
         return date + "T" + time + formatUtcOffset(offsetSeconds);
     }
 
-    int startOfDay(int epochSeconds, int offsetSeconds) {
+    export int startOfDay(int epochSeconds, int offsetSeconds) {
         int total = epochSeconds + offsetSeconds;
         int days;
         if (total >= 0) {
@@ -119,24 +108,24 @@ module DateTime {
         return days * 86400 - offsetSeconds;
     }
 
-    int endOfDay(int epochSeconds, int offsetSeconds) {
+    export int endOfDay(int epochSeconds, int offsetSeconds) {
         int start = startOfDay(epochSeconds, offsetSeconds);
         return start + 86399;
     }
 
-    int addDays(int epochSeconds, int days) {
+    export int addDays(int epochSeconds, int days) {
         return epochSeconds + days * 86400;
     }
 
-    int addHours(int epochSeconds, int hours) {
+    export int addHours(int epochSeconds, int hours) {
         return epochSeconds + hours * 3600;
     }
 
-    int addMinutes(int epochSeconds, int minutes) {
+    export int addMinutes(int epochSeconds, int minutes) {
         return epochSeconds + minutes * 60;
     }
 
-    int daysBetween(int startEpoch, int endEpoch) {
+    export int daysBetween(int startEpoch, int endEpoch) {
         int diff = endEpoch - startEpoch;
         if (diff >= 0) {
             return diff / 86400;
@@ -145,7 +134,7 @@ module DateTime {
         return -((positive + 86399) / 86400);
     }
 
-    str describeDifference(int startEpoch, int endEpoch) {
+    export str describeDifference(int startEpoch, int endEpoch) {
         int diff = endEpoch - startEpoch;
         int sign = 1;
         if (diff < 0) {
