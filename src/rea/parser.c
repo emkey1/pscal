@@ -367,6 +367,7 @@ Value evaluateCompileTimeValue(AST *node); // from compiler/compiler.c
 void freeValue(Value *v);                  // from core/utils.c
 void addCompilerConstant(const char* name, const Value* value, int line); // from compiler/compiler.h
 static AST *parseExpression(ReaParser *p); // forward for array helpers
+static AST *parseStringLiteralSequence(ReaParser *p);
 static AST *parseWriteArgument(ReaParser *p); // forward
 static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList);
 
@@ -631,6 +632,94 @@ static char *reaUnescapeString(const char *src, size_t len, size_t *out_len) {
     buf[j] = '\0';
     if (out_len) *out_len = j;
     return buf;
+}
+
+static AST *parseStringLiteralSequence(ReaParser *p) {
+    int startLine = p->current.line;
+    size_t totalLen = 0;
+    size_t capacity = 0;
+    char *buffer = NULL;
+    bool haveSegment = false;
+    bool charCandidate = false;
+
+    while (p->current.type == REA_TOKEN_STRING) {
+        size_t tokenLen = p->current.length;
+        if (tokenLen < 2) {
+            free(buffer);
+            return NULL;
+        }
+        size_t innerLen = tokenLen - 2;
+        size_t unescapedLen = 0;
+        char *segment = reaUnescapeString(p->current.start + 1, innerLen, &unescapedLen);
+        if (!segment) {
+            free(buffer);
+            return NULL;
+        }
+
+        size_t required = totalLen + unescapedLen + 1;
+        if (required > capacity) {
+            size_t newCap = capacity ? capacity : 16;
+            while (required > newCap) {
+                newCap *= 2;
+            }
+            char *resized = (char *)realloc(buffer, newCap);
+            if (!resized) {
+                free(buffer);
+                free(segment);
+                return NULL;
+            }
+            buffer = resized;
+            capacity = newCap;
+        }
+
+        if (unescapedLen > 0) {
+            memcpy(buffer + totalLen, segment, unescapedLen);
+        }
+        totalLen += unescapedLen;
+        free(segment);
+
+        if (!haveSegment) {
+            charCandidate = (p->current.start[0] == '\'' && unescapedLen == 1);
+            haveSegment = true;
+        } else {
+            charCandidate = false;
+        }
+
+        reaAdvance(p);
+    }
+
+    if (!haveSegment) {
+        free(buffer);
+        return NULL;
+    }
+
+    if (capacity == 0) {
+        buffer = (char *)malloc(1);
+        if (!buffer) {
+            return NULL;
+        }
+        capacity = 1;
+    }
+    buffer[totalLen] = '\0';
+    if (totalLen != 1) {
+        charCandidate = false;
+    }
+
+    Token *tok = (Token *)malloc(sizeof(Token));
+    if (!tok) {
+        free(buffer);
+        return NULL;
+    }
+    tok->type = TOKEN_STRING_CONST;
+    tok->value = buffer;
+    tok->length = totalLen;
+    tok->line = startLine;
+    tok->column = 0;
+
+    AST *node = newASTNode(AST_STRING, tok);
+    node->i_val = (int)totalLen;
+    setTypeAST(node, charCandidate ? TYPE_CHAR : TYPE_STRING);
+    return node;
 }
 
 // Parses an expression optionally followed by formatting specifiers.
@@ -1109,25 +1198,7 @@ static AST *parseFactor(ReaParser *p) {
         reaAdvance(p);
         return node;
     } else if (p->current.type == REA_TOKEN_STRING) {
-        size_t len = p->current.length;
-        if (len < 2) return NULL;
-        size_t inner_len = len - 2;
-        size_t unesc_len = 0;
-        char *lex = reaUnescapeString(p->current.start + 1, inner_len, &unesc_len);
-        if (!lex) return NULL;
-        Token *tok = (Token*)malloc(sizeof(Token));
-        if (!tok) { free(lex); return NULL; }
-        tok->type = TOKEN_STRING_CONST;
-        tok->value = lex; // already NUL-terminated by reaUnescapeString
-        tok->length = unesc_len;
-        tok->line = p->current.line;
-        tok->column = 0;
-        AST *node = newASTNode(AST_STRING, tok);
-        node->i_val = (int)unesc_len; // track literal length explicitly
-        VarType vtype = (p->current.start[0] == '\'' && unesc_len == 1) ? TYPE_CHAR : TYPE_STRING;
-        setTypeAST(node, vtype);
-        reaAdvance(p);
-        return node;
+        return parseStringLiteralSequence(p);
     } else if (p->current.type == REA_TOKEN_TRUE || p->current.type == REA_TOKEN_FALSE) {
         TokenType tt = (p->current.type == REA_TOKEN_TRUE) ? TOKEN_TRUE : TOKEN_FALSE;
         char *lex = (char *)malloc(p->current.length + 1);

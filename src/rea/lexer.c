@@ -274,7 +274,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '"':
             while (peek(lexer) != '\0') {
                 char ch = peek(lexer);
-                if (ch == '\n') lexer->line++;
+                if (ch == '\n') {
+                    // Implicitly terminate the string at newline if no closing quote
+                    break;
+                }
                 if (ch == '\\') {
                     advance(lexer);
                     if (peek(lexer) != '\0') advance(lexer);
@@ -284,12 +287,16 @@ ReaToken reaNextToken(ReaLexer *lexer) {
                     advance(lexer);
                 }
             }
-            if (peek(lexer) == '"') advance(lexer);
+            if (peek(lexer) == '"') {
+                advance(lexer);
+            }
             return makeToken(lexer, REA_TOKEN_STRING, start);
         case '\'':
             while (peek(lexer) != '\0') {
                 char ch = peek(lexer);
-                if (ch == '\n') lexer->line++;
+                if (ch == '\n') {
+                    break;
+                }
                 if (ch == '\\') {
                     advance(lexer);
                     if (peek(lexer) != '\0') advance(lexer);
@@ -299,7 +306,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
                     advance(lexer);
                 }
             }
-            if (peek(lexer) == '\'') advance(lexer);
+            if (peek(lexer) == '\'') {
+                advance(lexer);
+            }
             return makeToken(lexer, REA_TOKEN_STRING, start);
         default:
             break;
