@@ -870,9 +870,8 @@ static int countFunctionParams(AST *decl) {
     for (int i = 0; i < decl->child_count; i++) {
         AST *paramGroup = decl->children[i];
         if (!paramGroup || paramGroup->type != AST_VAR_DECL) continue;
-        if (paramGroup->child_count > 0) {
-            total += paramGroup->child_count;
-        }
+        int groupCount = paramGroup->child_count > 0 ? paramGroup->child_count : 1;
+        total += groupCount;
     }
     if (total > 255) {
         total = 255;
@@ -2242,17 +2241,6 @@ static ClassInfo *lookupClass(const char *name) {
     Symbol *sym = hashTableLookup(class_table, lower);
     if (!sym || !sym->value) return NULL;
     return (ClassInfo *)sym->value->ptr_val;
-}
-
-static int countFunctionParams(AST *func) {
-    if (!func) return 0;
-    int count = 0;
-    for (int i = 0; i < func->child_count; i++) {
-        AST *param = func->children[i];
-        if (!param || param->type != AST_VAR_DECL) continue;
-        count += param->child_count > 0 ? param->child_count : 1;
-    }
-    return count;
 }
 
 static AST *getFunctionParam(AST *func, int index) {
