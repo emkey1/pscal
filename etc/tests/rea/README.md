@@ -28,6 +28,10 @@ python3 etc/tests/rea/run_tests.py
 
 The helper script starts a small HTTP server for exercising the networking
 helpers, wires up the import path so the bundled libraries are visible, and then
-launches the Rea program that performs the assertions.  At the end of the run a
-summary is printed showing the number of passing, failing, and skipped checks.
-The script exits with a non-zero status if any checks fail.
+launches the Rea program that performs the assertions.  Before running the
+program it inspects the compiler's optional extended built-ins via
+``--dump-ext-builtins`` and exports the results through
+``REA_TEST_EXT_BUILTINS`` (along with ``REA_TEST_HAS_YYJSON``) so JSON checks can
+be skipped automatically when yyjson support is not present.  At the end of the
+run a summary is printed showing the number of passing, failing, and skipped
+checks.  The script exits with a non-zero status if any checks fail.

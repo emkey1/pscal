@@ -339,6 +339,11 @@ void testFilesystem() {
 void testJson() {
     writeln();
     writeln("-- Json --");
+    str hasYyjson = getenv("REA_TEST_HAS_YYJSON");
+    if (hasYyjson != "" && hasYyjson != "1") {
+        markSkip("Json suite", "yyjson extended built-ins disabled");
+        return;
+    }
     if (!Json.isAvailable()) {
         markSkip("Json suite", "yyjson built-ins not available");
         return;
