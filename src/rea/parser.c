@@ -403,20 +403,36 @@ static AST *parseArrayAccess(ReaParser *p, AST *base) {
 // `int a[10];`  Returns a new AST_ARRAY_TYPE node wrapping the provided
 // base type.  The resulting node's children are AST_SUBRANGE bounds with
 // 0-based indexing, and *vtype_out is set to TYPE_ARRAY.
-static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out) {
+static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out, bool allowOpen) {
     AST *arrType = newASTNode(AST_ARRAY_TYPE, NULL);
     setTypeAST(arrType, TYPE_ARRAY);
     setRight(arrType, baseType);
     while (p->current.type == REA_TOKEN_LEFT_BRACKET) {
         int line = p->current.line;
         reaAdvance(p); // consume '['
+        bool openDimension = false;
         AST *dimExpr = NULL;
-        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+        if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+            openDimension = true;
+        } else {
             dimExpr = parseExpression(p);
         }
         if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
             reaAdvance(p);
+        } else {
+            fprintf(stderr, "L%d: Expected ']' to close array bounds.\n", p->current.line);
+            p->hadError = true;
+            break;
         }
+
+        if (openDimension) {
+            if (!allowOpen) {
+                fprintf(stderr, "L%d: Missing array size.\n", line);
+                p->hadError = true;
+            }
+            continue;
+        }
+
         // Evaluate dimension to a constant upper bound
         int high = -1;
         if (dimExpr) {
@@ -428,8 +444,6 @@ static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out) {
             }
             freeValue(&v);
             freeAST(dimExpr);
-        } else {
-            fprintf(stderr, "L%d: Missing array size.\n", line);
         }
 
         Token *lowTok = newToken(TOKEN_INTEGER_CONST, "0", line, 0);
@@ -2374,7 +2388,7 @@ static AST *parseVarDecl(ReaParser *p) {
         VarType vtype_local = vtype;
         AST *varType = first ? typeNode : copyAST(baseType);
         if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
-            varType = parseArrayType(p, varType, &vtype_local);
+            varType = parseArrayType(p, varType, &vtype_local, false);
         }
 
         if (first && (p->current.type == REA_TOKEN_LEFT_PAREN || p->current.type == REA_TOKEN_LESS)) {
@@ -2526,8 +2540,17 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         Token *paramNameTok = newToken(TOKEN_IDENTIFIER, lex, p->current.line, 0);
         free(lex);
         AST *paramVar = newASTNode(AST_VARIABLE, paramNameTok);
-        setTypeAST(paramVar, pvtype);
         reaAdvance(p); // consume param name
+
+        AST *paramTypeNode = ptypeNode;
+        VarType paramVarType = pvtype;
+        if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+            paramTypeNode = parseArrayType(p, paramTypeNode, &paramVarType, true);
+            if (!paramTypeNode) {
+                p->hadError = true;
+            }
+        }
+        setTypeAST(paramVar, paramVarType);
 
         bool duplicateParam = false;
         for (int pi = 0; pi < params->child_count && !duplicateParam; pi++) {
@@ -2548,8 +2571,8 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
 
         AST *paramDecl = newASTNode(AST_VAR_DECL, NULL);
         addChild(paramDecl, paramVar);
-        setRight(paramDecl, ptypeNode);
-        setTypeAST(paramDecl, pvtype);
+        setRight(paramDecl, paramTypeNode);
+        setTypeAST(paramDecl, paramVarType);
 
         if (p->current.type == REA_TOKEN_EQUAL) {
             reaAdvance(p); // consume '='
