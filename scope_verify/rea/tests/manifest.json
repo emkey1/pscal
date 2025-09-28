@@ -9,7 +9,7 @@
       "category": "block_scope",
       "description": "Inner block shadows outer variable without mutating the outer binding.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int outer = 1;\n            printf(\"outer=%d, \", outer);\n            {\n                int outer = 2;\n                printf(\"inner=%d, \", outer);\n            }\n            printf(\"outer_after=%d\n\", outer);\n            return 0;\n        }",
+      "code": "int main() {\n    int outer = 1;\n    printf(\"outer=%d, \", outer);\n    {\n        int outer = 2;\n        printf(\"inner=%d, \", outer);\n    }\n    printf(\"outer_after=%d\", outer);\n    return 0;\n}",
       "expected_stdout": "outer=1, inner=2, outer_after=1"
     },
     {
