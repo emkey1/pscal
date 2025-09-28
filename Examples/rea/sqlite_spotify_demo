@@ -165,9 +165,9 @@ int importSpotifyCsv(str path, int db) {
   str header;
   readln(f, header);
 
-  // Fields are indexed starting at 1 so we allocate one extra slot to
-  // accommodate the highest index without triggering bounds checks.
-  str fields[EXPECTED_FIELD_COUNT + 1];
+  // Fields are stored using zero-based indexing; the array is sized to
+  // hold exactly the expected column count.
+  str fields[EXPECTED_FIELD_COUNT];
   str line;
   int lineNumber = 1;
   int inserted = 0;
@@ -203,9 +203,9 @@ int importSpotifyCsv(str path, int db) {
       continue;
     }
 
-    int i = 1;
-    while (i <= EXPECTED_FIELD_COUNT && ok) {
-      ok = bindField(stmt, i, fields[i]);
+    int i = 0;
+    while (i < EXPECTED_FIELD_COUNT && ok) {
+      ok = bindField(stmt, i + 1, fields[i]);
       i = i + 1;
     }
     if (!ok) {
@@ -252,7 +252,7 @@ int importSpotifyCsv(str path, int db) {
 int parseCsvLine(str line, str fields[], int maxFields) {
   int len = length(line);
   int idx = 1;
-  int fieldIndex = 1;
+  int fieldCount = 0;
   bool inQuotes = false;
   str current = "";
 
@@ -273,10 +273,10 @@ int parseCsvLine(str line, str fields[], int maxFields) {
       if (ch == '"') {
         inQuotes = true;
       } else if (ch == ',') {
-        if (fieldIndex <= maxFields) {
-          fields[fieldIndex] = current;
+        if (fieldCount < maxFields) {
+          fields[fieldCount] = current;
         }
-        fieldIndex = fieldIndex + 1;
+        fieldCount = fieldCount + 1;
         current = "";
       } else {
         current = current + ch;
@@ -285,16 +285,17 @@ int parseCsvLine(str line, str fields[], int maxFields) {
     idx = idx + 1;
   }
 
-  if (fieldIndex <= maxFields) {
-    fields[fieldIndex] = current;
+  if (fieldCount < maxFields) {
+    fields[fieldCount] = current;
   }
 
-  return fieldIndex;
+  fieldCount = fieldCount + 1;
+  return fieldCount;
 }
 
 bool bindField(int stmt, int index, str value) {
   int rc;
-  if (value == "") {
+  if (value == nil || value == "") {
     rc = SqliteBindNull(stmt, index);
   } else {
     rc = SqliteBindText(stmt, index, value);
