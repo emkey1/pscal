@@ -256,6 +256,12 @@ int parseCsvLine(str line, str fields[], int maxFields) {
   bool inQuotes = false;
   str current = "";
 
+  int resetIndex = 0;
+  while (resetIndex < maxFields) {
+    fields[resetIndex] = "";
+    resetIndex = resetIndex + 1;
+  }
+
   while (idx <= len) {
     char ch = line[idx];
     if (inQuotes) {
@@ -295,7 +301,7 @@ int parseCsvLine(str line, str fields[], int maxFields) {
 
 bool bindField(int stmt, int index, str value) {
   int rc;
-  if (value == nil || value == "") {
+  if (value == "") {
     rc = SqliteBindNull(stmt, index);
   } else {
     rc = SqliteBindText(stmt, index, value);
