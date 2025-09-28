@@ -44,7 +44,7 @@ add_compile_definitions(
 )
 
 # Optionally build additional binaries
-option(BUILD_DASCAL "Build the dascal debugging binary" ON)
+option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features

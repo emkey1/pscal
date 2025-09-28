@@ -1,0 +1,386 @@
+#!/usr/bin/env rea
+// Tetris Clone in Rea
+// Uses SDL for graphics and input handling
+
+const int BoardWidth = 10;
+const int BoardHeight = 20;
+const int CellSize = 30;
+
+class Tetromino {
+    str shape;
+    int colorR;
+    int colorG;
+    int colorB;
+    int rotation;
+    
+    void Tetromino(str s, int r, int g, int b) {
+        myself.shape = s;
+        myself.colorR = r;
+        myself.colorG = g;
+        myself.colorB = b;
+        myself.rotation = 0;
+    }
+    
+    void rotate() {
+        myself.rotation = (myself.rotation + 1) % 4;
+    }
+    
+    int getShape(int rot, int x, int y) {
+        // Simplified shape representation
+        if (rot == 0) {
+            return myself.shape[y * 4 + x];
+        }
+        return 0;
+    }
+}
+
+class Board {
+    int grid[BoardHeight][BoardWidth];
+    int score;
+    int level;
+    int lines;
+    
+    void Board() {
+        myself.score = 0;
+        myself.level = 1;
+        myself.lines = 0;
+        int i, j;
+        for (i = 0; i < BoardHeight; i = i + 1) {
+            for (j = 0; j < BoardWidth; j = j + 1) {
+                myself.grid[i][j] = 0;
+            }
+        }
+    }
+    
+    bool isValidPosition(int x, int y) {
+        return (x >= 0 && x < BoardWidth && y >= 0 && y < BoardHeight);
+    }
+    
+    bool isCollision(int x, int y, str shape) {
+        int i, j;
+        for (i = 0; i < 4; i = i + 1) {
+            for (j = 0; j < 4; j = j + 1) {
+                if (shape[i * 4 + j] == '1') {
+                    int newX = x + j;
+                    int newY = y + i;
+                    if (!myself.isValidPosition(newX, newY) || myself.grid[newY][newX] != 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    void placePiece(int x, int y, str shape, int color) {
+        int i, j;
+        for (i = 0; i < 4; i = i + 1) {
+            for (j = 0; j < 4; j = j + 1) {
+                if (shape[i * 4 + j] == '1') {
+                    int newX = x + j;
+                    int newY = y + i;
+                    if (myself.isValidPosition(newX, newY)) {
+                        myself.grid[newY][newX] = color;
+                    }
+                }
+            }
+        }
+    }
+    
+    void clearLines() {
+        int linesCleared = 0;
+        int i, j, k;
+        
+        for (i = BoardHeight - 1; i >= 0; i = i - 1) {
+            bool fullLine = true;
+            for (j = 0; j < BoardWidth; j = j + 1) {
+                if (myself.grid[i][j] == 0) {
+                    fullLine = false;
+                    break;
+                }
+            }
+            
+            if (fullLine) {
+                linesCleared = linesCleared + 1;
+                // Shift all lines above down
+                for (k = i; k > 0; k = k - 1) {
+                    for (j = 0; j < BoardWidth; j = j + 1) {
+                        myself.grid[k][j] = myself.grid[k-1][j];
+                    }
+                }
+                // Clear top line
+                for (j = 0; j < BoardWidth; j = j + 1) {
+                    myself.grid[0][j] = 0;
+                }
+                i = i + 1; // Check same row again
+            }
+        }
+        
+        if (linesCleared > 0) {
+            myself.lines = myself.lines + linesCleared;
+            myself.score = myself.score + linesCleared * 100 * myself.level;
+            if (myself.lines >= myself.level * 10) {
+                myself.level = myself.level + 1;
+            }
+        }
+    }
+    
+    void draw() {
+        int i, j;
+        for (i = 0; i < BoardHeight; i = i + 1) {
+            for (j = 0; j < BoardWidth; j = j + 1) {
+                if (myself.grid[i][j] != 0) {
+                    setrgbcolor(
+                        myself.grid[i][j] & 0xFF,
+                        (myself.grid[i][j] >> 8) & 0xFF,
+                        (myself.grid[i][j] >> 16) & 0xFF
+                    );
+                    fillrect(j * CellSize, i * CellSize, CellSize - 1, CellSize - 1);
+                }
+            }
+        }
+    }
+    
+    int getScore() { return myself.score; }
+    int getLevel() { return myself.level; }
+    int getLines() { return myself.lines; }
+}
+
+class Game {
+    const int WindowWidth = 400;
+    const int WindowHeight = 600;
+    const int BoardX = 50;
+    const int BoardY = 20;
+    
+    Board board;
+    str currentShape;
+    int currentColor;
+    int currentX;
+    int currentY;
+    int nextShape;
+    bool gameOver;
+    int frameDelay;
+    float dropTime;
+    float lastDrop;
+    
+    void Game() {
+        myself.board = new Board();
+        myself.gameOver = false;
+        myself.frameDelay = 1000 / 60; // ~60 FPS
+        myself.dropTime = 0.5; // seconds per drop
+        myself.lastDrop = 0.0;
+        myself.currentX = BoardWidth / 2 - 2;
+        myself.currentY = 0;
+        myself.nextShape = random(7);
+        myself.spawnPiece();
+    }
+    
+    void spawnPiece() {
+        // Simplified tetromino shapes
+        str shapes[7] = [
+            "0000011110000", // I
+            "000011110000",  // O
+            "000001110100",  // T
+            "000001101100",  // S
+            "000011001100",  // Z
+            "000000111100",  // J
+            "000001111000"   // L
+        ];
+        
+        int colors[7][3] = [
+            [0, 255, 255],   // Cyan
+            [255, 255, 0],   // Yellow
+            [128, 0, 128],   // Purple
+            [0, 255, 0],     // Green
+            [255, 0, 0],     // Red
+            [0, 0, 255],     // Blue
+            [255, 165, 0]    // Orange
+        ];
+        
+        myself.currentShape = shapes[myself.nextShape];
+        myself.currentColor = (colors[myself.nextShape][0] & 0xFF) |
+                              ((colors[myself.nextShape][1] & 0xFF) << 8) |
+                              ((colors[myself.nextShape][2] & 0xFF) << 16);
+        myself.nextShape = random(7);
+        myself.currentX = BoardWidth / 2 - 2;
+        myself.currentY = 0;
+        
+        if (myself.board.isCollision(myself.currentX, myself.currentY, myself.currentShape)) {
+            myself.gameOver = true;
+        }
+    }
+    
+    void movePiece(int dx, int dy) {
+        if (!myself.gameOver && !myself.board.isCollision(myself.currentX + dx, myself.currentY + dy, myself.currentShape)) {
+            myself.currentX = myself.currentX + dx;
+            myself.currentY = myself.currentY + dy;
+        }
+    }
+    
+    void rotatePiece() {
+        if (!myself.gameOver) {
+            // Simplified rotation - we'll just use the same shape for now
+            // In a full implementation, this would rotate the piece's pattern
+        }
+    }
+    
+    void hardDrop() {
+        if (!myself.gameOver) {
+            while (!myself.board.isCollision(myself.currentX, myself.currentY + 1, myself.currentShape)) {
+                myself.currentY = myself.currentY + 1;
+            }
+            myself.lockPiece();
+        }
+    }
+    
+    void lockPiece() {
+        myself.board.placePiece(myself.currentX, myself.currentY, myself.currentShape, myself.currentColor);
+        myself.board.clearLines();
+        myself.spawnPiece();
+    }
+    
+    void update(float deltaTime) {
+        if (myself.gameOver) return;
+        
+        myself.lastDrop = myself.lastDrop + deltaTime;
+        if (myself.lastDrop >= myself.dropTime) {
+            if (!myself.board.isCollision(myself.currentX, myself.currentY + 1, myself.currentShape)) {
+                myself.currentY = myself.currentY + 1;
+            } else {
+                myself.lockPiece();
+            }
+            myself.lastDrop = 0.0;
+        }
+    }
+    
+    void draw() {
+        cleardevice();
+        
+        // Draw board background
+        setrgbcolor(30, 30, 30);
+        fillrect(BoardX - 5, BoardY - 5, BoardWidth * CellSize + 10, BoardHeight * CellSize + 10);
+        
+        // Draw grid lines
+        setrgbcolor(60, 60, 60);
+        int i;
+        for (i = 0; i <= BoardWidth; i = i + 1) {
+            drawline(BoardX + i * CellSize, BoardY, BoardX + i * CellSize, BoardY + BoardHeight * CellSize);
+        }
+        for (i = 0; i <= BoardHeight; i = i + 1) {
+            drawline(BoardX, BoardY + i * CellSize, BoardX + BoardWidth * CellSize, BoardY + i * CellSize);
+        }
+        
+        // Draw placed pieces
+        myself.board.draw();
+        
+        // Draw current piece
+        if (!myself.gameOver) {
+            int x, y;
+            setrgbcolor(
+                myself.currentColor & 0xFF,
+                (myself.currentColor >> 8) & 0xFF,
+                (myself.currentColor >> 16) & 0xFF
+            );
+            for (y = 0; y < 4; y = y + 1) {
+                for (x = 0; x < 4; x = x + 1) {
+                    if (myself.currentShape[y * 4 + x] == '1') {
+                        fillrect(
+                            BoardX + (myself.currentX + x) * CellSize,
+                            BoardY + (myself.currentY + y) * CellSize,
+                            CellSize - 1, CellSize - 1
+                        );
+                    }
+                }
+            }
+        }
+        
+        // Draw score info
+        setrgbcolor(255, 255, 255);
+        str scoreStr = "Score: " + inttostr(myself.board.getScore());
+        outtextxy(20, 20, scoreStr);
+        
+        str levelStr = "Level: " + inttostr(myself.board.getLevel());
+        outtextxy(20, 40, levelStr);
+        
+        str linesStr = "Lines: " + inttostr(myself.board.getLines());
+        outtextxy(20, 60, linesStr);
+        
+        if (myself.gameOver) {
+            str gameOverStr = "GAME OVER - Press Q to quit";
+            outtextxy(BoardX + 10, BoardY + BoardHeight * CellSize / 2 - 20, gameOverStr);
+        }
+        
+        updatescreen();
+    }
+    
+    bool handleInput() {
+        if (keypressed()) {
+            char c = readkey();
+            if (c == 'q' || c == 'Q') {
+                return true; // Quit
+            }
+            if (myself.gameOver) return false;
+            
+            switch (c) {
+                case 'a':
+                case 'A':
+                    myself.movePiece(-1, 0);
+                    break;
+                case 'd':
+                case 'D':
+                    myself.movePiece(1, 0);
+                    break;
+                case 's':
+                case 'S':
+                    myself.movePiece(0, 1);
+                    break;
+                case 'w':
+                case 'W':
+                    myself.rotatePiece();
+                    break;
+                case ' ':
+                    myself.hardDrop();
+                    break;
+            }
+        }
+        
+        return false; // Continue running
+    }
+    
+    void run() {
+        initgraph(WindowWidth, WindowHeight, "Rea Tetris");
+        randomize();
+        
+        writeln("Tetris - Use A/D to move, S to drop, W to rotate, Space for hard drop. Press Q to quit.");
+        
+        float lastTime = 0.0;
+        bool quit = false;
+        
+        while (!quit && !myself.gameOver) {
+            float currentTime = getticks() / 1000.0;
+            float deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+            
+            if (deltaTime > 0.1) deltaTime = 0.1; // Cap at 100ms
+            
+            myself.update(deltaTime);
+            
+            if (myself.handleInput()) {
+                quit = true;
+            }
+            
+            myself.draw();
+            graphloop(myself.frameDelay);
+        }
+        
+        if (myself.gameOver) {
+            writeln("Game Over! Final Score: ", myself.board.getScore());
+        }
+        
+        closegraph();
+        writeln("Thanks for playing Tetris!");
+    }
+}
+
+Game game = new Game();
+game.run();
