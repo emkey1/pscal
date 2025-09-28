@@ -12,7 +12,6 @@ bool ensureDataset(str path);
 bool downloadDataset(str url, str path);
 bool setupDatabase(int db);
 int importSpotifyCsv(str path, int db);
-int parseCsvLine(str line, str fields[], int maxFields);
 bool bindField(int stmt, int index, str value);
 void showTopArtists(int db);
 void showGenreOverview(int db);
@@ -197,7 +196,52 @@ int importSpotifyCsv(str path, int db) {
     if (line == "") {
       continue;
     }
-    int fieldCount = parseCsvLine(line, fields, EXPECTED_FIELD_COUNT);
+    // Parse the CSV line in place to populate the local fields array.
+    int resetIndex = 0;
+    while (resetIndex < EXPECTED_FIELD_COUNT) {
+      fields[resetIndex] = "";
+      resetIndex = resetIndex + 1;
+    }
+
+    int len = length(line);
+    int idx = 1;
+    int fieldCount = 0;
+    bool inQuotes = false;
+    str current = "";
+
+    while (idx <= len) {
+      char ch = line[idx];
+      if (inQuotes) {
+        if (ch == '"') {
+          if (idx < len && line[idx + 1] == '"') {
+            current = current + "\"";
+            idx = idx + 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          current = current + ch;
+        }
+      } else {
+        if (ch == '"') {
+          inQuotes = true;
+        } else if (ch == ',') {
+          if (fieldCount < EXPECTED_FIELD_COUNT) {
+            fields[fieldCount] = current;
+          }
+          fieldCount = fieldCount + 1;
+          current = "";
+        } else {
+          current = current + ch;
+        }
+      }
+      idx = idx + 1;
+    }
+
+    if (fieldCount < EXPECTED_FIELD_COUNT) {
+      fields[fieldCount] = current;
+    }
+    fieldCount = fieldCount + 1;
     if (fieldCount != EXPECTED_FIELD_COUNT) {
       writeln("Skipping line ", lineNumber, ": expected ", EXPECTED_FIELD_COUNT,
               " fields but saw ", fieldCount, ".");
@@ -261,56 +305,6 @@ int importSpotifyCsv(str path, int db) {
     return -1;
   }
   return inserted;
-}
-
-int parseCsvLine(str line, str fields[], int maxFields) {
-  int len = length(line);
-  int idx = 1;
-  int fieldCount = 0;
-  bool inQuotes = false;
-  str current = "";
-
-  int resetIndex = 0;
-  while (resetIndex < maxFields) {
-    fields[resetIndex] = "";
-    resetIndex = resetIndex + 1;
-  }
-
-  while (idx <= len) {
-    char ch = line[idx];
-    if (inQuotes) {
-      if (ch == '"') {
-        if (idx < len && line[idx + 1] == '"') {
-          current = current + "\"";
-          idx = idx + 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current = current + ch;
-      }
-    } else {
-      if (ch == '"') {
-        inQuotes = true;
-      } else if (ch == ',') {
-        if (fieldCount < maxFields) {
-          fields[fieldCount] = current;
-        }
-        fieldCount = fieldCount + 1;
-        current = "";
-      } else {
-        current = current + ch;
-      }
-    }
-    idx = idx + 1;
-  }
-
-  if (fieldCount < maxFields) {
-    fields[fieldCount] = current;
-  }
-
-  fieldCount = fieldCount + 1;
-  return fieldCount;
 }
 
 bool bindField(int stmt, int index, str value) {
