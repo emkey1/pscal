@@ -1,6 +1,6 @@
 module DateTime {
 
-    export str pad2(int value) {
+    str pad2(int value) {
         if (value < 10 && value >= 0) {
             return "0" + inttostr(value);
         }
