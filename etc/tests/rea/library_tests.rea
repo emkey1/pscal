@@ -91,6 +91,20 @@ str charToString(char value) {
     return result;
 }
 
+int safeDivInt(int numerator, int denominator) {
+    if (denominator == 0) {
+        return 0;
+    }
+    float numeratorFloat = numerator * 1.0;
+    float denominatorFloat = denominator * 1.0;
+    float quotient = numeratorFloat / denominatorFloat;
+    int truncated = int(quotient);
+    if (quotient < 0 && quotient != truncated) {
+        return truncated - 1;
+    }
+    return truncated;
+}
+
 int mapPscalColorToAnsiBase(int color) {
     int normalized = color % 8;
     if (normalized < 0) {
@@ -113,11 +127,11 @@ str buildAnsiSequenceForAttr(int attr) {
     }
     bool isBright = fg >= 8;
     int fgBase = fg % 8;
-    int bg = (attr / 16) % 8;
+    int bg = safeDivInt(attr, 16) % 8;
     if (bg < 0) {
         bg = bg + 8;
     }
-    bool isBlink = (attr / 128) % 2 == 1;
+    bool isBlink = safeDivInt(attr, 128) % 2 == 1;
 
     int fgCode = (isBright ? 90 : 30) + mapPscalColorToAnsiBase(fgBase);
     int bgCode = 40 + mapPscalColorToAnsiBase(bg);
@@ -163,7 +177,7 @@ void testCRT() {
     assertEqualInt("CRT.Yellow", 14, CRT.Yellow);
     assertEqualInt("CRT.White", 15, CRT.White);
     assertEqualInt("CRT.Blink", 128, CRT.Blink);
-    assertEqualInt("CRT.TextAttr default", 0, CRT.TextAttr);
+    assertEqualInt("CRT.TextAttr default", CRT.LightGray, CRT.TextAttr);
     CRT.TextAttr = CRT.Green;
     assertEqualInt("CRT.TextAttr assignment", CRT.Green, CRT.TextAttr);
     CRT.TextAttr = 0;

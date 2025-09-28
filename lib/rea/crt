@@ -17,5 +17,5 @@ module CRT {
   export const int White = 15;
   export const int Blink = 128;
 
-  export int TextAttr = 0;
+  export int TextAttr = LightGray;
 }
