@@ -703,6 +703,14 @@ Token *getNextToken(Lexer *lexer) {
             }
         }
 
+        if (lexer->current_char == '?') {
+            advance(lexer);
+#ifdef DEBUG
+            fprintf(stderr, "LEXER_DEBUG: getNextToken(return TOKEN_QUESTION)\n"); fflush(stderr);
+#endif
+            return newToken(TOKEN_QUESTION, "?", start_line, start_column);
+        }
+
         // Semicolon
         if (lexer->current_char == ';') {
             advance(lexer);

@@ -2696,6 +2696,46 @@ AST *expression(Parser *parser) {
         // If followed by AND/OR, that's handled at a different precedence level.
         break; // Exit loop after processing one relational operator
     }
+    if (parser->current_token && parser->current_token->type == TOKEN_QUESTION) {
+        Token *questionOriginal = parser->current_token;
+        Token *questionCopy = copyToken(questionOriginal);
+        if (!questionCopy) { EXIT_FAILURE_HANDLER(); }
+        eat(parser, TOKEN_QUESTION);
+
+        AST *thenExpr = expression(parser);
+        if (!thenExpr || thenExpr->type == AST_NOOP) {
+            if (questionCopy) freeToken(questionCopy);
+            if (thenExpr && thenExpr->type == AST_NOOP) freeAST(thenExpr);
+            if (node) freeAST(node);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' in ternary expression");
+            if (questionCopy) freeToken(questionCopy);
+            freeAST(thenExpr);
+            if (node) freeAST(node);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_COLON);
+
+        AST *elseExpr = expression(parser);
+        if (!elseExpr || elseExpr->type == AST_NOOP) {
+            if (questionCopy) freeToken(questionCopy);
+            if (elseExpr && elseExpr->type == AST_NOOP) freeAST(elseExpr);
+            freeAST(thenExpr);
+            if (node) freeAST(node);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *ternaryNode = newASTNode(AST_TERNARY, questionCopy);
+        if (questionCopy) freeToken(questionCopy);
+        setLeft(ternaryNode, node);
+        setRight(ternaryNode, thenExpr);
+        setExtra(ternaryNode, elseExpr);
+        setTypeAST(ternaryNode, TYPE_UNKNOWN);
+        node = ternaryNode;
+    }
     return node;
 }
 

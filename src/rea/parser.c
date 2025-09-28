@@ -453,6 +453,7 @@ static AST *parseArrayType(ReaParser *p, AST *baseType, VarType *vtype_out) {
 }
 
 static AST *parseAssignment(ReaParser *p);
+static AST *parseConditional(ReaParser *p);
 static AST *parseEquality(ReaParser *p);
 static AST *parseComparison(ReaParser *p);
 static AST *parseAdditive(ReaParser *p);
@@ -1354,6 +1355,7 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_MINUS: return "-";
         case TOKEN_MUL: return "*";
         case TOKEN_SLASH: return "/";
+        case TOKEN_INT_DIV: return "/";
         case TOKEN_MOD: return "%";
         case TOKEN_EQUAL: return "==";
         case TOKEN_NOT_EQUAL: return "!=";
@@ -1406,13 +1408,16 @@ static AST *parseTerm(ReaParser *p) {
         reaAdvance(p);
         AST *right = parseFactor(p);
         if (!right) return NULL;
+        VarType lt = node->var_type;
+        VarType rt = right->var_type;
         TokenType tt = mapOp(op.type);
+        if (tt == TOKEN_SLASH && isIntlikeType(lt) && isIntlikeType(rt)) {
+            tt = TOKEN_INT_DIV;
+        }
         Token *tok = newToken(tt, opLexeme(tt), op.line, 0);
         AST *bin = newASTNode(AST_BINARY_OP, tok);
         setLeft(bin, node);
         setRight(bin, right);
-        VarType lt = node->var_type;
-        VarType rt = right->var_type;
         VarType res;
         if (tt == TOKEN_SLASH || lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) {
             res = TYPE_DOUBLE;
@@ -1547,9 +1552,159 @@ static AST *parseBitwiseXor(ReaParser *p) {
     return node;
 }
 
+static VarType promoteConditionalNumericType(VarType a, VarType b) {
+    static const VarType order[] = {
+        TYPE_LONG_DOUBLE,
+        TYPE_DOUBLE,
+        TYPE_FLOAT,
+        TYPE_INT64,
+        TYPE_UINT64,
+        TYPE_INT32,
+        TYPE_UINT32,
+        TYPE_INT16,
+        TYPE_UINT16,
+        TYPE_INT8,
+        TYPE_UINT8,
+        TYPE_WORD,
+        TYPE_BYTE
+    };
+    size_t count = sizeof(order) / sizeof(order[0]);
+    for (size_t i = 0; i < count; i++) {
+        VarType t = order[i];
+        if (a == t || b == t) {
+            return t;
+        }
+    }
+    return TYPE_UNKNOWN;
+}
+
+static VarType resolveConditionalType(AST *thenExpr, AST *elseExpr, AST **typeDefSource) {
+    VarType thenType = thenExpr ? thenExpr->var_type : TYPE_UNKNOWN;
+    VarType elseType = elseExpr ? elseExpr->var_type : TYPE_UNKNOWN;
+
+    if (thenType == elseType) {
+        if (typeDefSource) {
+            if (thenExpr && thenExpr->type_def) {
+                *typeDefSource = thenExpr;
+            } else if (elseExpr && elseExpr->type_def) {
+                *typeDefSource = elseExpr;
+            }
+        }
+        return thenType;
+    }
+
+    if (thenType == TYPE_UNKNOWN) {
+        if (typeDefSource && elseExpr && elseExpr->type_def) {
+            *typeDefSource = elseExpr;
+        }
+        return elseType;
+    }
+    if (elseType == TYPE_UNKNOWN) {
+        if (typeDefSource && thenExpr && thenExpr->type_def) {
+            *typeDefSource = thenExpr;
+        }
+        return thenType;
+    }
+
+    if ((thenType == TYPE_POINTER && elseType == TYPE_NIL) ||
+        (thenType == TYPE_NIL && elseType == TYPE_POINTER)) {
+        if (typeDefSource) {
+            AST *source = (thenType == TYPE_POINTER) ? thenExpr : elseExpr;
+            if (source && source->type_def) {
+                *typeDefSource = source;
+            }
+        }
+        return TYPE_POINTER;
+    }
+
+    if (thenType == TYPE_POINTER && elseType == TYPE_POINTER) {
+        if (typeDefSource) {
+            if (thenExpr && thenExpr->type_def) {
+                *typeDefSource = thenExpr;
+            } else if (elseExpr && elseExpr->type_def) {
+                *typeDefSource = elseExpr;
+            }
+        }
+        return TYPE_POINTER;
+    }
+
+    if (thenType == TYPE_STRING || elseType == TYPE_STRING ||
+        (thenType == TYPE_CHAR && elseType == TYPE_STRING) ||
+        (thenType == TYPE_STRING && elseType == TYPE_CHAR)) {
+        return TYPE_STRING;
+    }
+
+    if (thenType == TYPE_CHAR && elseType == TYPE_CHAR) {
+        return TYPE_CHAR;
+    }
+
+    if (thenType == TYPE_BOOLEAN && elseType == TYPE_BOOLEAN) {
+        return TYPE_BOOLEAN;
+    }
+
+    VarType numeric = promoteConditionalNumericType(thenType, elseType);
+    if (numeric != TYPE_UNKNOWN) {
+        return numeric;
+    }
+
+    return thenType;
+}
+
+static AST *parseConditional(ReaParser *p) {
+    AST *condition = parseLogicalOr(p);
+    if (!condition) {
+        return NULL;
+    }
+
+    if (p->current.type != REA_TOKEN_QUESTION) {
+        return condition;
+    }
+
+    ReaToken question = p->current;
+    reaAdvance(p); // consume '?'
+
+    AST *thenBranch = parseAssignment(p);
+    if (!thenBranch) {
+        return NULL;
+    }
+
+    if (p->current.type != REA_TOKEN_COLON) {
+        fprintf(stderr, "L%d: Expected ':' in conditional expression.\n", p->current.line);
+        p->hadError = true;
+        return NULL;
+    }
+    reaAdvance(p); // consume ':'
+
+    AST *elseBranch = parseAssignment(p);
+    if (!elseBranch) {
+        return NULL;
+    }
+
+    Token *tok = newToken(TOKEN_IF, "?", question.line, 0);
+    AST *node = newASTNode(AST_TERNARY, tok);
+    setLeft(node, condition);
+    setRight(node, thenBranch);
+    setExtra(node, elseBranch);
+
+    AST *typeDefSource = NULL;
+    VarType resolved = resolveConditionalType(thenBranch, elseBranch, &typeDefSource);
+    setTypeAST(node, resolved);
+    if (typeDefSource && typeDefSource->type_def) {
+        node->type_def = copyAST(typeDefSource->type_def);
+    } else if (resolved == TYPE_POINTER) {
+        if (thenBranch && thenBranch->type_def) {
+            node->type_def = copyAST(thenBranch->type_def);
+        } else if (elseBranch && elseBranch->type_def) {
+            node->type_def = copyAST(elseBranch->type_def);
+        }
+    }
+
+    return node;
+}
+
 static AST *parseAssignment(ReaParser *p) {
     // Highest precedence: handle assignment right-associatively
-    AST *left = parseLogicalOr(p);
+    AST *left = parseConditional(p);
     if (!left) return NULL;
     if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS || left->type == AST_ARRAY_ACCESS) &&
         (p->current.type == REA_TOKEN_EQUAL || p->current.type == REA_TOKEN_PLUS_EQUAL || p->current.type == REA_TOKEN_MINUS_EQUAL)) {

@@ -27,6 +27,7 @@ typedef enum {
     REA_TOKEN_DOT,
     REA_TOKEN_SEMICOLON,
     REA_TOKEN_COLON,
+    REA_TOKEN_QUESTION,
     REA_TOKEN_ARROW,
 
     // Operators

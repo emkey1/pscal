@@ -5951,7 +5951,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_PLUS:          writeBytecodeChunk(chunk, ADD, line); break;
                         case TOKEN_MINUS:         writeBytecodeChunk(chunk, SUBTRACT, line); break;
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
-                        case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
+                        case TOKEN_SLASH:
+                            if (node->left && node->right &&
+                                isIntlikeType(node->left->var_type) &&
+                                isIntlikeType(node->right->var_type)) {
+                                writeBytecodeChunk(chunk, INT_DIV, line);
+                            } else {
+                                writeBytecodeChunk(chunk, DIVIDE, line);
+                            }
+                            break;
                         case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, INT_DIV, line); break;
                         case TOKEN_MOD:           writeBytecodeChunk(chunk, MOD, line); break;
                         // AND and OR are now handled above
@@ -5985,6 +5993,30 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         break;
                 }
             }
+            break;
+        }
+        case AST_TERNARY: {
+            if (!node->left || !node->right || !node->extra) {
+                fprintf(stderr, "L%d: Compiler error: Incomplete ternary expression.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            compileRValue(node->left, chunk, getLine(node->left));
+            int jumpToElse = chunk->count;
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            compileRValue(node->right, chunk, getLine(node->right));
+            int jumpToEnd = chunk->count;
+            writeBytecodeChunk(chunk, JUMP, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            uint16_t elseOffset = (uint16_t)(chunk->count - (jumpToElse + 3));
+            patchShort(chunk, jumpToElse + 1, elseOffset);
+
+            compileRValue(node->extra, chunk, getLine(node->extra));
+            uint16_t endOffset = (uint16_t)(chunk->count - (jumpToEnd + 3));
+            patchShort(chunk, jumpToEnd + 1, endOffset);
             break;
         }
         case AST_BOOLEAN: {
