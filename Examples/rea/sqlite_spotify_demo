@@ -269,12 +269,24 @@ int importSpotifyCsv(str path, int db) {
     }
 
     int rc = SqliteStep(stmt);
-    if (rc != 101) {
+    bool handled = false;
+    if (rc == 101) {
+      inserted = inserted + 1;
+      handled = true;
+    } else if (rc == 19) {
+      writeln("Skipping line ", lineNumber,
+              ": duplicate track/playlist combination (track_id=", fields[0],
+              ", playlist_id=", fields[8], ").");
+      skipped = skipped + 1;
+      handled = true;
+    } else {
       writeln("Insert failed at line ", lineNumber, ": rc=", rc, " msg=", SqliteErrMsg(db));
       ok = false;
+    }
+
+    if (!handled) {
       break;
     }
-    inserted = inserted + 1;
 
     rc = SqliteReset(stmt);
     if (rc != 0) {
