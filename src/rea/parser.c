@@ -1024,6 +1024,45 @@ static AST *parseFactor(ReaParser *p) {
         }
         return node;
     }
+    if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        int line = p->current.line;
+        reaAdvance(p); // consume '['
+        AST *literal = newASTNode(AST_ARRAY_LITERAL, NULL);
+        setTypeAST(literal, TYPE_ARRAY);
+
+        bool expectElement = true;
+        while (p->current.type != REA_TOKEN_RIGHT_BRACKET &&
+               p->current.type != REA_TOKEN_EOF) {
+            AST *element = parseExpression(p);
+            if (!element) {
+                expectElement = false;
+                break;
+            }
+            addChild(literal, element);
+            if (p->current.type == REA_TOKEN_COMMA) {
+                reaAdvance(p);
+                if (p->current.type == REA_TOKEN_RIGHT_BRACKET) {
+                    // Trailing comma; allow and break after consuming ']'
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        if (p->current.type != REA_TOKEN_RIGHT_BRACKET) {
+            fprintf(stderr, "L%d: Expected ']' to close array literal.\n", line);
+            p->hadError = true;
+        } else {
+            reaAdvance(p);
+        }
+
+        if (!expectElement && literal->child_count == 0) {
+            freeAST(literal);
+            return NULL;
+        }
+        return literal;
+    }
     if (p->current.type == REA_TOKEN_NUMBER) {
         size_t len = p->current.length;
         const char *start = p->current.start;
