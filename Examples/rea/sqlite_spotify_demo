@@ -171,6 +171,7 @@ int importSpotifyCsv(str path, int db) {
   str line;
   int lineNumber = 1;
   int inserted = 0;
+  int skipped = 0;
 
   int stmt = SqlitePrepare(db,
     "INSERT INTO spotify_songs ("
@@ -200,6 +201,17 @@ int importSpotifyCsv(str path, int db) {
     if (fieldCount != EXPECTED_FIELD_COUNT) {
       writeln("Skipping line ", lineNumber, ": expected ", EXPECTED_FIELD_COUNT,
               " fields but saw ", fieldCount, ".");
+      skipped = skipped + 1;
+      continue;
+    }
+
+    bool missingRequired =
+      fields[0] == "" || fields[1] == "" || fields[2] == "" || fields[8] == "";
+    if (missingRequired) {
+      writeln("Skipping line ", lineNumber,
+              ": required fields (track_id, track_name, track_artist, playlist_id) "
+              "must be present.");
+      skipped = skipped + 1;
       continue;
     }
 
@@ -242,6 +254,8 @@ int importSpotifyCsv(str path, int db) {
     writeln("SqliteFinalize returned rc=", finalizeRc, ".");
     ok = false;
   }
+
+  writeln("Import summary: ", inserted, " valid rows, ", skipped, " skipped.");
 
   if (!ok) {
     return -1;
