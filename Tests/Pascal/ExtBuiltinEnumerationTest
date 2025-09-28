@@ -2,11 +2,15 @@ program ExtBuiltinEnumerationTest;
 var
   catCount, fnCount, i, j, k, groupCount, groupFnCount, groupTotal: integer;
   catName, fnName, groupName: string;
-  success, foundSystem, foundGetPid: boolean;
+  success, foundSystem, foundGetPid, foundUser, foundLandscapeRendering,
+  foundLandscapePrecompute: boolean;
 begin
   success := true;
   foundSystem := false;
   foundGetPid := false;
+  foundUser := false;
+  foundLandscapeRendering := false;
+  foundLandscapePrecompute := false;
   catCount := ExtBuiltinCategoryCount();
   for i := 0 to catCount - 1 do
   begin
@@ -29,16 +33,35 @@ begin
         if (catName = 'system') and (groupName = 'process') and
            (fnName = 'GetPid') then
           foundGetPid := true;
+        if (catName = 'user') then
+        begin
+          if groupName = 'landscape/rendering' then
+            foundLandscapeRendering := true
+          else if groupName = 'landscape/precompute' then
+            foundLandscapePrecompute := true;
+        end;
       end;
     end;
     if groupTotal <> fnCount then
       success := false;
     if catName = 'system' then
       foundSystem := true;
+    if catName = 'user' then
+      foundUser := true;
   end;
   if HasExtBuiltin('system', 'GetPid') then
   begin
     if not (foundSystem and foundGetPid) then
+      success := false;
+  end;
+  if HasExtBuiltin('user', 'LandscapeDrawTerrain') then
+  begin
+    if not (foundUser and foundLandscapeRendering) then
+      success := false;
+  end;
+  if HasExtBuiltin('user', 'LandscapePrecomputeWorldCoords') then
+  begin
+    if not (foundUser and foundLandscapePrecompute) then
       success := false;
   end;
   if success then

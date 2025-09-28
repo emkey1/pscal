@@ -7,10 +7,16 @@ void registerUserBuiltins(void) {
     const char *category = "user";
     extBuiltinRegisterCategory(category);
     extBuiltinRegisterGroup(category, "landscape");
-    extBuiltinRegisterFunction(category, "landscape", "LandscapeDrawTerrain");
-    extBuiltinRegisterFunction(category, "landscape", "LandscapeDrawWater");
-    extBuiltinRegisterFunction(category, "landscape", "LandscapePrecomputeWorldCoords");
-    extBuiltinRegisterFunction(category, "landscape", "LandscapePrecomputeWaterOffsets");
+    extBuiltinRegisterGroup(category, "landscape/rendering");
+    extBuiltinRegisterGroup(category, "landscape/precompute");
+    extBuiltinRegisterFunction(category, "landscape/rendering",
+                               "LandscapeDrawTerrain");
+    extBuiltinRegisterFunction(category, "landscape/rendering",
+                               "LandscapeDrawWater");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapePrecomputeWorldCoords");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapePrecomputeWaterOffsets");
 
     registerLandscapeBuiltins();
 }

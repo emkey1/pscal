@@ -6,7 +6,9 @@
 /* Register a category of extended built-in functions. */
 void extBuiltinRegisterCategory(const char *name);
 
-/* Register a named group within a category. */
+/* Register a named group within a category.  Groups may be specified using
+ * a '/'-delimited path (e.g., "user/profiles/pat").  Intermediate groups are
+ * created on demand. */
 void extBuiltinRegisterGroup(const char *category, const char *group);
 
 /* Register a function within a group. */

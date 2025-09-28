@@ -4,16 +4,21 @@
 #include <strings.h>
 #include <pthread.h>
 
-typedef struct {
+typedef struct ExtBuiltinGroup_s {
     char *name; /* NULL indicates the default/ungrouped bucket. */
+    char *full_name; /* Cached fully qualified group name for nested groups. */
     char **functions;
     size_t function_count;
+    struct ExtBuiltinGroup_s *children;
+    size_t child_count;
 } ExtBuiltinGroup;
 
 typedef struct {
     char *name;
     ExtBuiltinGroup *groups;
     size_t group_count;
+    ExtBuiltinGroup default_group;
+    int has_default_group;
 } ExtBuiltinCategory;
 
 /* Global registry of extended builtins.  Access is protected by
@@ -45,6 +50,13 @@ static ExtBuiltinCategory *ensureCategory(const char *name) {
     cat->name = NULL;
     cat->groups = NULL;
     cat->group_count = 0;
+    cat->default_group.name = NULL;
+    cat->default_group.full_name = NULL;
+    cat->default_group.functions = NULL;
+    cat->default_group.function_count = 0;
+    cat->default_group.children = NULL;
+    cat->default_group.child_count = 0;
+    cat->has_default_group = 0;
 
     const char *source_name = name ? name : "";
     cat->name = strdup(source_name);
@@ -65,59 +77,209 @@ static int isDefaultGroup(const char *group) {
     return !group || *group == '\0';
 }
 
-static int groupNameEquals(const ExtBuiltinGroup *group, const char *name) {
-    if (!group) return 0;
-    if (isDefaultGroup(name)) {
-        return group->name == NULL;
-    }
-    if (!group->name) {
+static int segmentEqualsLen(const char *component, size_t component_len,
+                            const char *name) {
+    if (!component || !name) return 0;
+    size_t name_len = strlen(name);
+    if (name_len != component_len) {
         return 0;
     }
-    return strcasecmp(group->name, name) == 0;
+    return strncasecmp(name, component, component_len) == 0;
 }
 
-static ExtBuiltinGroup *findGroup(ExtBuiltinCategory *category,
-                                  const char *group_name) {
-    if (!category) return NULL;
-    for (size_t i = 0; i < category->group_count; ++i) {
-        if (groupNameEquals(&category->groups[i], group_name)) {
-            return &category->groups[i];
+static ExtBuiltinGroup *findChild(ExtBuiltinGroup *groups, size_t count,
+                                  const char *component, size_t component_len) {
+    if (!groups || !component || component_len == 0) {
+        return NULL;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (segmentEqualsLen(component, component_len, groups[i].name)) {
+            return &groups[i];
         }
     }
     return NULL;
 }
 
-static ExtBuiltinGroup *ensureGroup(ExtBuiltinCategory *category,
-                                    const char *group_name) {
-    if (!category) return NULL;
-    ExtBuiltinGroup *group = findGroup(category, group_name);
-    if (group) return group;
+static char *buildFullName(const ExtBuiltinGroup *parent,
+                           const char *component) {
+    size_t component_len = strlen(component);
+    size_t prefix_len = (parent && parent->full_name) ? strlen(parent->full_name) : 0;
+    size_t total = component_len + (prefix_len ? prefix_len + 1 : 0);
+    char *full = malloc(total + 1);
+    if (!full) {
+        return NULL;
+    }
+    if (prefix_len) {
+        memcpy(full, parent->full_name, prefix_len);
+        full[prefix_len] = '/';
+        memcpy(full + prefix_len + 1, component, component_len);
+        full[total] = '\0';
+    } else {
+        memcpy(full, component, component_len);
+        full[component_len] = '\0';
+    }
+    return full;
+}
+
+static ExtBuiltinGroup *ensureChild(ExtBuiltinGroup **groups, size_t *count,
+                                    ExtBuiltinGroup *parent,
+                                    const char *component,
+                                    size_t component_len) {
+    if (!groups || !count || !component || component_len == 0) {
+        return NULL;
+    }
+    ExtBuiltinGroup *existing = findChild(*groups, *count, component, component_len);
+    if (existing) {
+        return existing;
+    }
 
     ExtBuiltinGroup *new_groups =
-        realloc(category->groups,
-                sizeof(ExtBuiltinGroup) * (category->group_count + 1));
+        realloc(*groups, sizeof(ExtBuiltinGroup) * (*count + 1));
     if (!new_groups) {
         return NULL;
     }
-    category->groups = new_groups;
-    group = &category->groups[category->group_count];
-    group->name = NULL;
-    group->functions = NULL;
-    group->function_count = 0;
-    if (!isDefaultGroup(group_name)) {
-        group->name = strdup(group_name);
-        if (!group->name) {
-            ExtBuiltinGroup *shrunk =
-                realloc(category->groups,
-                        sizeof(ExtBuiltinGroup) * category->group_count);
-            if (shrunk || category->group_count == 0) {
-                category->groups = shrunk;
-            }
+    *groups = new_groups;
+    ExtBuiltinGroup *child = &new_groups[*count];
+    child->name = NULL;
+    child->full_name = NULL;
+    child->functions = NULL;
+    child->function_count = 0;
+    child->children = NULL;
+    child->child_count = 0;
+
+    child->name = strndup(component, component_len);
+    if (!child->name) {
+        ExtBuiltinGroup *shrunk = realloc(*groups, sizeof(ExtBuiltinGroup) * (*count));
+        if (shrunk || *count == 0) {
+            *groups = shrunk;
+        }
+        return NULL;
+    }
+    child->full_name = buildFullName(parent, component);
+    if (!child->full_name) {
+        free(child->name);
+        child->name = NULL;
+        ExtBuiltinGroup *shrunk = realloc(*groups, sizeof(ExtBuiltinGroup) * (*count));
+        if (shrunk || *count == 0) {
+            *groups = shrunk;
+        }
+        return NULL;
+    }
+
+    (*count)++;
+    return child;
+}
+
+static ExtBuiltinGroup *findGroup(ExtBuiltinCategory *category,
+                                  const char *group_name) {
+    if (!category || isDefaultGroup(group_name)) {
+        return NULL;
+    }
+    const char *cursor = group_name;
+    ExtBuiltinGroup *current = NULL;
+    ExtBuiltinGroup *children = category->groups;
+    size_t child_count = category->group_count;
+    while (*cursor) {
+        while (*cursor == '/') {
+            ++cursor;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+        const char *start = cursor;
+        while (*cursor && *cursor != '/') {
+            ++cursor;
+        }
+        size_t len = (size_t)(cursor - start);
+        current = findChild(children, child_count, start, len);
+        if (!current) {
             return NULL;
         }
+        children = current->children;
+        child_count = current->child_count;
     }
-    category->group_count++;
-    return group;
+    return current;
+}
+
+static ExtBuiltinGroup *ensureGroup(ExtBuiltinCategory *category,
+                                    const char *group_name) {
+    if (!category) return NULL;
+    if (isDefaultGroup(group_name)) {
+        category->has_default_group = 1;
+        return &category->default_group;
+    }
+
+    const char *cursor = group_name;
+    ExtBuiltinGroup *current = NULL;
+    ExtBuiltinGroup **children = &category->groups;
+    size_t *child_count = &category->group_count;
+
+    while (*cursor) {
+        while (*cursor == '/') {
+            ++cursor;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+        const char *start = cursor;
+        while (*cursor && *cursor != '/') {
+            ++cursor;
+        }
+        size_t len = (size_t)(cursor - start);
+        ExtBuiltinGroup *next =
+            ensureChild(children, child_count, current, start, len);
+        if (!next) {
+            return NULL;
+        }
+        current = next;
+        children = &current->children;
+        child_count = &current->child_count;
+    }
+    return current;
+}
+
+static size_t countGroupsRecursive(const ExtBuiltinGroup *groups,
+                                   size_t count) {
+    size_t total = 0;
+    for (size_t i = 0; i < count; ++i) {
+        ++total;
+        total += countGroupsRecursive(groups[i].children, groups[i].child_count);
+    }
+    return total;
+}
+
+static const char *getGroupNameAtRecursive(const ExtBuiltinGroup *groups,
+                                           size_t count, size_t *index) {
+    for (size_t i = 0; i < count; ++i) {
+        if (*index == 0) {
+            return groups[i].full_name;
+        }
+        --(*index);
+        const char *child =
+            getGroupNameAtRecursive(groups[i].children, groups[i].child_count,
+                                     index);
+        if (child) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
+static int groupHasFunction(const ExtBuiltinGroup *group, const char *func) {
+    if (!group || !func) {
+        return 0;
+    }
+    for (size_t j = 0; j < group->function_count; ++j) {
+        if (strcasecmp(group->functions[j], func) == 0) {
+            return 1;
+        }
+    }
+    for (size_t i = 0; i < group->child_count; ++i) {
+        if (groupHasFunction(&group->children[i], func)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void extBuiltinRegisterCategory(const char *name) {
@@ -204,14 +366,7 @@ int extBuiltinHasCategory(const char *category) {
 size_t extBuiltinGetGroupCount(const char *category) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
-    size_t count = 0;
-    if (cat) {
-        for (size_t i = 0; i < cat->group_count; ++i) {
-            if (cat->groups[i].name) {
-                ++count;
-            }
-        }
-    }
+    size_t count = cat ? countGroupsRecursive(cat->groups, cat->group_count) : 0;
     pthread_mutex_unlock(&registry_mutex);
     return count;
 }
@@ -221,17 +376,8 @@ const char *extBuiltinGetGroupName(const char *category, size_t index) {
     ExtBuiltinCategory *cat = findCategory(category);
     const char *name = NULL;
     if (cat) {
-        size_t seen = 0;
-        for (size_t i = 0; i < cat->group_count; ++i) {
-            if (!cat->groups[i].name) {
-                continue;
-            }
-            if (seen == index) {
-                name = cat->groups[i].name;
-                break;
-            }
-            ++seen;
-        }
+        size_t idx = index;
+        name = getGroupNameAtRecursive(cat->groups, cat->group_count, &idx);
     }
     pthread_mutex_unlock(&registry_mutex);
     return name;
@@ -242,8 +388,12 @@ int extBuiltinHasGroup(const char *category, const char *group) {
     ExtBuiltinCategory *cat = findCategory(category);
     int present = 0;
     if (cat) {
-        ExtBuiltinGroup *grp = findGroup(cat, group);
-        present = grp != NULL;
+        if (isDefaultGroup(group)) {
+            present = cat->has_default_group;
+        } else {
+            ExtBuiltinGroup *grp = findGroup(cat, group);
+            present = grp != NULL;
+        }
     }
     pthread_mutex_unlock(&registry_mutex);
     return present;
@@ -252,8 +402,15 @@ int extBuiltinHasGroup(const char *category, const char *group) {
 size_t extBuiltinGetFunctionCount(const char *category, const char *group) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
-    ExtBuiltinGroup *grp = findGroup(cat, group);
-    size_t count = grp ? grp->function_count : 0;
+    size_t count = 0;
+    if (cat) {
+        if (isDefaultGroup(group)) {
+            count = cat->has_default_group ? cat->default_group.function_count : 0;
+        } else {
+            ExtBuiltinGroup *grp = findGroup(cat, group);
+            count = grp ? grp->function_count : 0;
+        }
+    }
     pthread_mutex_unlock(&registry_mutex);
     return count;
 }
@@ -262,9 +419,19 @@ const char *extBuiltinGetFunctionName(const char *category, const char *group,
                                       size_t index) {
     pthread_mutex_lock(&registry_mutex);
     ExtBuiltinCategory *cat = findCategory(category);
-    ExtBuiltinGroup *grp = findGroup(cat, group);
-    const char *name =
-        (!grp || index >= grp->function_count) ? NULL : grp->functions[index];
+    const char *name = NULL;
+    if (cat) {
+        if (isDefaultGroup(group)) {
+            if (cat->has_default_group && index < cat->default_group.function_count) {
+                name = cat->default_group.functions[index];
+            }
+        } else {
+            ExtBuiltinGroup *grp = findGroup(cat, group);
+            if (grp && index < grp->function_count) {
+                name = grp->functions[index];
+            }
+        }
+    }
     pthread_mutex_unlock(&registry_mutex);
     return name;
 }
@@ -274,13 +441,17 @@ int extBuiltinHasFunction(const char *category, const char *func) {
     ExtBuiltinCategory *cat = findCategory(category);
     int present = 0;
     if (cat && func) {
-        for (size_t i = 0; i < cat->group_count && !present; ++i) {
-            ExtBuiltinGroup *grp = &cat->groups[i];
-            for (size_t j = 0; j < grp->function_count; ++j) {
-                if (strcasecmp(grp->functions[j], func) == 0) {
+        if (cat->has_default_group) {
+            for (size_t j = 0; j < cat->default_group.function_count; ++j) {
+                if (strcasecmp(cat->default_group.functions[j], func) == 0) {
                     present = 1;
                     break;
                 }
+            }
+        }
+        for (size_t i = 0; i < cat->group_count && !present; ++i) {
+            if (groupHasFunction(&cat->groups[i], func)) {
+                present = 1;
             }
         }
     }

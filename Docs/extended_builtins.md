@@ -4,7 +4,10 @@ Pscal allows additional built‑in routines to be linked into the virtual
 machine at build time.  This makes it easy to expose host functionality
 without modifying the core source tree.  Optional built‑ins live under
 `src/ext_builtins`, organised into categories that contain named groups of
-related routines.
+related routines.  Groups may be organised hierarchically using `/`-delimited
+paths (for example, `user/landscape/rendering`).  Intermediate groups are
+created automatically when nested paths are registered, so extensions can
+describe deep inventories without extra bookkeeping.
 
 For a catalog of existing VM routines, see
 [`pscal_vm_builtins.md`](pscal_vm_builtins.md).
@@ -22,7 +25,7 @@ The project currently ships several optional built‑in groups:
 | **Sqlite** | `src/ext_builtins/sqlite` | `connection` (`SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges`), `statement` (`SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteClearBindings`), `metadata` (`SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`), `results` (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`), `binding` (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) |
 | **3D** | `src/ext_builtins/threed` | `physics` (`BouncingBalls3DStep`, `BouncingBalls3DStepUltra`, `BouncingBalls3DStepAdvanced`, `BouncingBalls3DStepUltraAdvanced`, `BouncingBalls3DAccelerate`), `rendering` (`BouncingBalls3DDrawUnitSphereFast`) |
 | **Graphics** | `src/ext_builtins/graphics` | `window` (`InitGraph`, `CloseGraph`, `ClearDevice`, `UpdateScreen`, `GraphLoop`), `drawing` (`SetColor`, `DrawLine`, `FillRect`, `DrawCircle`, `GetPixelColor`), `textures` (`CreateTexture`, `LoadImageToTexture`, `RenderCopyEx`, `UpdateTexture`), `text` (`InitTextSystem`, `OutTextXY`, `RenderTextToTexture`), `input` (`PollKey`, `IsKeyDown`, `GetMouseState`, `WaitKeyEvent`), `audio` (`InitSoundSystem`, `LoadSound`, `PlaySound`, `StopAllSounds`, `IsSoundPlaying`), `opengl` (`GLBegin`, `GLRotatef`, `GLColor4f`, `GLIsHardwareAccelerated`) |
-| **User** | `src/ext_builtins/user` | `landscape` (`LandscapeDrawTerrain`, `LandscapeDrawWater`, `LandscapePrecomputeWorldCoords`, `LandscapePrecomputeWaterOffsets`) |
+| **User** | `src/ext_builtins/user` | `landscape` → `landscape/rendering` (`LandscapeDrawTerrain`, `LandscapeDrawWater`), `landscape/precompute` (`LandscapePrecomputeWorldCoords`, `LandscapePrecomputeWaterOffsets`) |
 
 Individual categories can be enabled or disabled at configure time with
 the following CMake options (all default to `ON`):
