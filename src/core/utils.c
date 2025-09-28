@@ -2431,6 +2431,7 @@ void setCurrentTextAttrFromByte(uint8_t attr) {
     gCurrentTextBackground = bg;
     gCurrentBgIsExt = false;
     gCurrentTextBlink = blink;
+    gTextAttrInitialized = true;
 
     markTextAttrDirty();
     syncTextAttrSymbol();

@@ -1362,6 +1362,9 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
 
     // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
+    if (sym->name && strcmp(sym->name, "textattr") == 0) {
+        SET_INT_VALUE(sym->value, 7);
+    }
     // (debug logging removed)
 
     sym->is_alias = false;
@@ -3452,6 +3455,15 @@ comparison_error_label:
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!gTextAttrInitialized && name_val->s_val &&
+                    (strcasecmp(name_val->s_val, "CRT.TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "crt.textattr") == 0 ||
+                     strcasecmp(name_val->s_val, "textattr") == 0)) {
+                    gTextAttrInitialized = true;
+                    SET_INT_VALUE(sym->value, 7);
                 }
 
                 push(vm, copyValueForStack(sym->value));

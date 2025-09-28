@@ -46,6 +46,7 @@ bool gCurrentTextUnderline = false;   // Default underline state.
 bool gCurrentTextBlink     = false;   // Default blink state.
 bool gConsoleAttrDirty     = false;   // Start with host terminal colors.
 bool gConsoleAttrDirtyFromReset = false; // Track resets that need a reapply of custom colors.
+bool gTextAttrInitialized  = false;   // Tracks if CRT.TextAttr has been explicitly set.
 int gWindowLeft            = 1;
 int gWindowTop             = 1;
 int gWindowRight           = 80;

@@ -824,6 +824,28 @@ void updateSymbol(const char *name, Value val) {
     // --- End Type Compatibility Check ---
 
 
+    bool isTextAttrSymbol = false;
+    if (sym->name) {
+        if (strcasecmp(sym->name, "crt.textattr") == 0) {
+            isTextAttrSymbol = true;
+        }
+    }
+    if (!isTextAttrSymbol && name) {
+        if (strcasecmp(name, "crt.textattr") == 0) {
+            isTextAttrSymbol = true;
+        }
+    }
+    if (isTextAttrSymbol && !gTextAttrInitialized) {
+        gTextAttrInitialized = true;
+        if (isIntlikeType(val.type) && asI64(val) == 0) {
+            freeValue(sym->value);
+            SET_INT_VALUE(sym->value, 7);
+            setCurrentTextAttrFromByte(7);
+            freeValue(&val);
+            return;
+        }
+    }
+
     // --- Free Old Value Contents (if necessary) ---
     // **CRITICAL EXCEPTION**: Do NOT free the buffer for a fixed-length string,
     // as we are about to write into it. For all other types, freeing the
@@ -987,7 +1009,7 @@ void updateSymbol(const char *name, Value val) {
             break;
     }
 
-    if (sym->name && strcmp(sym->name, "textattr") == 0) {
+    if (isTextAttrSymbol) {
         uint8_t attr_byte = (uint8_t)(sym->value->i_val & 0xFF);
         setCurrentTextAttrFromByte(attr_byte);
     }
