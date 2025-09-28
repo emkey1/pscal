@@ -97,7 +97,7 @@ bool setupDatabase(int db) {
 
   rc = SqliteExec(db,
     "CREATE TABLE spotify_songs ("
-    " track_id TEXT PRIMARY KEY,"
+    " track_id TEXT NOT NULL,"
     " track_name TEXT NOT NULL,"
     " track_artist TEXT NOT NULL,"
     " track_popularity INTEGER,"
@@ -119,7 +119,8 @@ bool setupDatabase(int db) {
     " liveness REAL,"
     " valence REAL,"
     " tempo REAL,"
-    " duration_ms INTEGER"
+    " duration_ms INTEGER,"
+    " PRIMARY KEY (track_id, playlist_id)"
     ");");
   if (rc != 0) {
     writeln("Failed to create table: ", SqliteErrMsg(db));
@@ -170,7 +171,7 @@ int importSpotifyCsv(str path, int db) {
   int inserted = 0;
 
   int stmt = SqlitePrepare(db,
-    "INSERT OR REPLACE INTO spotify_songs ("
+    "INSERT INTO spotify_songs ("
     " track_id, track_name, track_artist, track_popularity, track_album_id,"
     " track_album_name, track_album_release_date, playlist_name, playlist_id,"
     " playlist_genre, playlist_subgenre, danceability, energy, key, loudness,"
