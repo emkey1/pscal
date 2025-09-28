@@ -294,6 +294,29 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("extbuiltingroupname"), TYPE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltingroupfunctioncount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_STRING, 0, 0, 0);
+
+    /* SQLite extended builtins */
+    registerFunctionSignature(strdup("SqliteOpen"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteClose"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteExec"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqlitePrepare"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteFinalize"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteStep"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteReset"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteClearBindings"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnCount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnType"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnName"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnInt"), TYPE_INT64, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnDouble"), TYPE_DOUBLE, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteColumnText"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteBindText"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteBindInt"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteBindDouble"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteBindNull"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteErrMsg"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteLastInsertRowId"), TYPE_INT64, 0, 0, 0);
+    registerFunctionSignature(strdup("SqliteChanges"), TYPE_INT32, 0, 0, 0);
 }
 
 static VarType getFunctionType(const char *name) {
