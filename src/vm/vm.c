@@ -2175,7 +2175,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     push(vm, makeInt(ia / ib));
                 } else {
-                    runtimeError(vm, "Runtime Error: Operands for 'div' must be integers. Got %s and %s.",
+                    runtimeError(vm, "Runtime Error: Operands for 'int_div' must be integers. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
