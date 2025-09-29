@@ -1090,6 +1090,7 @@ static Value vmHostPrintf(VM* vm) {
                     }
                     fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
                 }
+                bool expects_wide_char = (lenmod[0] != '\0' && strpbrk(lenmod, "lL") != NULL);
                 switch (spec) {
                     case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': {
                         unsigned long long u = 0ULL; long long s = 0LL;
@@ -1155,13 +1156,37 @@ static Value vmHostPrintf(VM* vm) {
                     }
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)AS_INTEGER(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, (unsigned int)ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (expects_wide_char) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, lenmod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(lenmod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, (unsigned int)ch);
                         fputs(buf, stdout);
                         break;
                     }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (expects_wide_char) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, lenmod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(lenmod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, stdout);
                         break;
                     }

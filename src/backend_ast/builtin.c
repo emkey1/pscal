@@ -752,6 +752,7 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                     j++;
                 }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -794,6 +795,13 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 fmtbuf[pos++] = spec;
             }
             fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
+            }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
                 switch (spec) {
@@ -826,13 +834,37 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                         break;
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, stdout);
                         break;
                     }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, stdout);
                         break;
                     }
@@ -947,6 +979,7 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                     j++;
                 }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
@@ -985,6 +1018,13 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 fmtbuf[pos++] = spec;
             }
             fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
+            }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
                 switch (spec) {
@@ -1006,12 +1046,36 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                         break; }
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, output_stream);
                         break; }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, output_stream);
                         break; }
                     case 'p': {
