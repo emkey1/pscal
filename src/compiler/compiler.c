@@ -2129,7 +2129,10 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (isRealType(left_val.type) && isRealType(right_val.type)) {
+                bool left_is_real = isRealType(left_val.type);
+                bool right_is_real = isRealType(right_val.type);
+
+                if (left_is_real && right_is_real) {
                     double a = (double)AS_REAL(left_val);
                     double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
@@ -2149,7 +2152,14 @@ Value evaluateCompileTimeValue(AST* node) {
                                 result = makeReal(a / b);
                             }
                             break;
-        case TOKEN_MOD:
+                        case TOKEN_INT_DIV:
+                            if (b == 0.0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeReal(a / b);
+                            }
+                            break;
+                        case TOKEN_MOD:
                             if (b == 0.0) {
                                 fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
                             } else {
@@ -2159,7 +2169,15 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
-                } else if (isRealType(left_val.type) || isRealType(right_val.type)) {
+                } else if (node->token->type == TOKEN_INT_DIV && (left_is_real || right_is_real)) {
+                    double a = left_is_real ? (double)AS_REAL(left_val) : (double)AS_INTEGER(left_val);
+                    double b = right_is_real ? (double)AS_REAL(right_val) : (double)AS_INTEGER(right_val);
+                    if (b == 0.0) {
+                        fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                    } else {
+                        result = makeReal(a / b);
+                    }
+                } else if (left_is_real || right_is_real) {
                     fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
@@ -5952,7 +5970,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_MINUS:         writeBytecodeChunk(chunk, SUBTRACT, line); break;
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
                         case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
-                        case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, INT_DIV, line); break;
+                        case TOKEN_INT_DIV: {
+                            bool emit_real_div = isRealType(node->var_type);
+                            if (!emit_real_div && node->left) {
+                                emit_real_div = isRealType(node->left->var_type);
+                            }
+                            if (!emit_real_div && node->right) {
+                                emit_real_div = isRealType(node->right->var_type);
+                            }
+                            writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
+                            break;
+                        }
                         case TOKEN_MOD:           writeBytecodeChunk(chunk, MOD, line); break;
                         // AND and OR are now handled above
                         case TOKEN_SHL:           writeBytecodeChunk(chunk, SHL, line); break;
