@@ -588,6 +588,15 @@
       "failure_reason": "Constant shadow should not permit reassignment."
     },
     {
+      "id": "const_class_member_initializer_uses_prior_const",
+      "name": "Class const initialisers see earlier consts",
+      "category": "const_scope",
+      "description": "Constants declared inside a class may reference earlier constants from the same class.",
+      "expect": "runtime_ok",
+      "code": "const int GLOBAL_SHIFT = 3;\n\nclass Layout {\n    const int BaseY = 10;\n    const int Height = BaseY + GLOBAL_SHIFT + 2;\n    int captured;\n\n    void Layout() {\n        myself.captured = Height;\n    }\n\n    int combined() {\n        return Height + BaseY;\n    }\n}\n\nint main() {\n    Layout layout = new Layout();\n    writeln(\"captured=\", layout.captured);\n    writeln(\"combined=\", layout.combined());\n    return 0;\n}",
+      "expected_stdout": "captured=15\ncombined=25"
+    },
+    {
       "id": "const_random_shadow_pass",
       "name": "Randomised const shadow allowed",
       "category": "const_scope",

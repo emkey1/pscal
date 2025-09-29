@@ -3611,10 +3611,19 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         return;
     }
 
-    if (node->left) validateNodeInternal(node->left, clsContext);
-    if (node->right) validateNodeInternal(node->right, clsContext);
-    if (node->extra) validateNodeInternal(node->extra, clsContext);
-    for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], clsContext);
+    ClassInfo *recurseContext = clsContext;
+    if (node->type == AST_TYPE_DECL && node->left && node->left->type == AST_RECORD_TYPE &&
+        node->token && node->token->value) {
+        ClassInfo *declClass = lookupClass(node->token->value);
+        if (declClass) {
+            recurseContext = declClass;
+        }
+    }
+
+    if (node->left) validateNodeInternal(node->left, recurseContext);
+    if (node->right) validateNodeInternal(node->right, recurseContext);
+    if (node->extra) validateNodeInternal(node->extra, recurseContext);
+    for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], recurseContext);
 
     if (pushedGenericFrame) popGenericFrame();
 }
