@@ -1,7 +1,7 @@
 #!/usr/bin/env clike
 
 int main() {
-  const char *host = "echo.websocket.events";
+  const char *host = "ws.postman-echo.com";
   int port = 80;
 
   int s = socketcreate(0);
@@ -33,8 +33,9 @@ int main() {
   }
 
   if (socketsend(s,
-        "GET / HTTP/1.1\r\n"
-        "Host: echo.websocket.events\r\n"
+        "GET /raw HTTP/1.1\r\n"
+        "Host: ws.postman-echo.com\r\n"
+        "Origin: http://ws.postman-echo.com\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Version: 13\r\n"
