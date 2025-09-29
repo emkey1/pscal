@@ -73,7 +73,7 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument(
         "--library-args",
         default="",
-        help="Extra arguments (shlex-split) forwarded to Tests/etc/run_all_tests.py.",
+        help="Extra arguments (shlex-split) forwarded to Tests/libs/run_all_tests.py.",
     )
     parser.add_argument(
         "--scope-args",
@@ -97,7 +97,7 @@ def main(argv: Sequence[str]) -> int:
         commands["core"] = (["bash", str(core_script), *extra], core_script.parent)
 
     if "library" in selected:
-        library_script = tests_root / "etc" / "run_all_tests.py"
+        library_script = tests_root / "libs" / "run_all_tests.py"
         extra = shlex_split(args.library_args)
         commands["library"] = ([args.python, str(library_script), *extra], repo_root)
 

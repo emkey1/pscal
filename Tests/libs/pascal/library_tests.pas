@@ -15,11 +15,8 @@ var
   SkippedTests: integer = 0;
 
 function RealToString(value: real): string;
-var
-  buffer: string;
 begin
-  Str(value:0:6, buffer);
-  RealToString := buffer;
+  RealToString := FormatFloat('0.000000', value);
 end;
 
 function JoinPath(dir, name: string): string;
