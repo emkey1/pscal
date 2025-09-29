@@ -124,6 +124,14 @@ class Board {
     int score;
     int level;
     int lines;
+
+    void fillCell(int offsetX, int offsetY, int gridX, int gridY) {
+        int cellLeft = offsetX + gridX * CellSize;
+        int cellTop = offsetY + gridY * CellSize;
+        int cellRight = cellLeft + CellSize - 1;
+        int cellBottom = cellTop + CellSize - 1;
+        fillrect(cellLeft, cellTop, cellRight, cellBottom);
+    }
     
     void Board() {
         myself.score = 0;
@@ -225,12 +233,27 @@ class Board {
                     int g = int(value / 256) % 256;
                     int b = int(value / 65536);
                     setrgbcolor(r, g, b);
-                    int cellLeft = offsetX + j * CellSize;
-                    int cellTop = offsetY + i * CellSize;
-                    int cellRight = cellLeft + CellSize - 1;
-                    int cellBottom = cellTop + CellSize - 1;
-                    fillrect(cellLeft, cellTop, cellRight, cellBottom);
+                    myself.fillCell(offsetX, offsetY, j, i);
                 }
+            }
+        }
+    }
+
+    void drawActivePiece(int offsetX, int offsetY, int x, int y,
+                         int shapeIndex, int rotation, int color) {
+        int activeR = color % 256;
+        int activeG = int(color / 256) % 256;
+        int activeB = int(color / 65536);
+        setrgbcolor(activeR, activeG, activeB);
+
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetXBlock = TetrominoOffsets[shapeIndex][rotation][block * 2];
+            int offsetYBlock = TetrominoOffsets[shapeIndex][rotation][block * 2 + 1];
+            int drawX = x + offsetXBlock;
+            int drawY = y + offsetYBlock;
+            if (drawX >= 0 && drawX < BoardWidth && drawY >= 0 && drawY < BoardHeight) {
+                myself.fillCell(offsetX, offsetY, drawX, drawY);
             }
         }
     }
@@ -265,14 +288,29 @@ class Game {
         myself.frameDelay = 1000 / 60; // ~60 FPS
         myself.dropTime = 0.5; // seconds per drop
         myself.lastDrop = 0.0;
-        myself.currentX = BoardWidth / 2 - 2;
-        myself.currentY = -2;
         myself.currentShapeIndex = 0;
         myself.currentRotation = 0;
         myself.nextShapeIndex = random(TetrominoCount);
         myself.spawnPiece();
     }
-    
+
+    int computeSpawnX(int shapeIndex) {
+        int block;
+        int maxX = 0;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = TetrominoOffsets[shapeIndex][0][block * 2];
+            if (offsetX > maxX) {
+                maxX = offsetX;
+            }
+        }
+        int pieceWidth = maxX + 1;
+        int spawnX = (BoardWidth - pieceWidth) / 2;
+        if (spawnX < 0) {
+            spawnX = 0;
+        }
+        return spawnX;
+    }
+
     void spawnPiece() {
         myself.currentShapeIndex = myself.nextShapeIndex;
         myself.currentRotation = 0;
@@ -280,7 +318,7 @@ class Game {
                               TetrominoColorG[myself.currentShapeIndex] * 256 +
                               TetrominoColorB[myself.currentShapeIndex] * 65536;
         myself.nextShapeIndex = random(TetrominoCount);
-        myself.currentX = BoardWidth / 2 - 2;
+        myself.currentX = myself.computeSpawnX(myself.currentShapeIndex);
         myself.currentY = -2;
 
         if (myself.board.isCollision(myself.currentX, myself.currentY,
@@ -374,27 +412,12 @@ class Game {
         
         // Draw placed pieces
         myself.board.draw(BoardX, BoardY);
-        
+
         // Draw current piece
         if (!myself.gameOver) {
-            int block;
-            int currentR = myself.currentColor % 256;
-            int currentG = int(myself.currentColor / 256) % 256;
-            int currentB = int(myself.currentColor / 65536);
-            setrgbcolor(currentR, currentG, currentB);
-            for (block = 0; block < BlocksPerPiece; block = block + 1) {
-                int offsetX = TetrominoOffsets[myself.currentShapeIndex][myself.currentRotation][block * 2];
-                int offsetY = TetrominoOffsets[myself.currentShapeIndex][myself.currentRotation][block * 2 + 1];
-                int drawX = myself.currentX + offsetX;
-                int drawY = myself.currentY + offsetY;
-                if (drawY >= 0) {
-                    int pieceLeft = BoardX + drawX * CellSize;
-                    int pieceTop = BoardY + drawY * CellSize;
-                    int pieceRight = pieceLeft + CellSize - 1;
-                    int pieceBottom = pieceTop + CellSize - 1;
-                    fillrect(pieceLeft, pieceTop, pieceRight, pieceBottom);
-                }
-            }
+            myself.board.drawActivePiece(BoardX, BoardY, myself.currentX, myself.currentY,
+                                         myself.currentShapeIndex, myself.currentRotation,
+                                         myself.currentColor);
         }
         
         // Draw score info
