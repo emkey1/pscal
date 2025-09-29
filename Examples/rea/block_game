@@ -160,17 +160,21 @@ class Board {
         return false;
     }
 
-    void placePiece(int x, int y, int shapeIndex, int rotation, int color) {
+    bool placePiece(int x, int y, int shapeIndex, int rotation, int color) {
+        bool lockedOut = false;
         int block;
         for (block = 0; block < BlocksPerPiece; block = block + 1) {
             int offsetX = TetrominoOffsets[shapeIndex][rotation][block * 2];
             int offsetY = TetrominoOffsets[shapeIndex][rotation][block * 2 + 1];
             int newX = x + offsetX;
             int newY = y + offsetY;
-            if (newY >= 0 && newY < BoardHeight && newX >= 0 && newX < BoardWidth) {
+            if (newY < 0) {
+                lockedOut = true;
+            } else if (newY < BoardHeight && newX >= 0 && newX < BoardWidth) {
                 myself.grid[newY * BoardWidth + newX] = color;
             }
         }
+        return lockedOut;
     }
     
     void clearLines() {
@@ -323,11 +327,15 @@ class Game {
     }
 
     void lockPiece() {
-        myself.board.placePiece(myself.currentX, myself.currentY,
-                                myself.currentShapeIndex, myself.currentRotation,
-                                myself.currentColor);
+        bool lockedOut = myself.board.placePiece(myself.currentX, myself.currentY,
+                                                myself.currentShapeIndex, myself.currentRotation,
+                                                myself.currentColor);
         myself.board.clearLines();
-        myself.spawnPiece();
+        if (lockedOut) {
+            myself.gameOver = true;
+        } else {
+            myself.spawnPiece();
+        }
     }
 
     void update(float deltaTime) {
