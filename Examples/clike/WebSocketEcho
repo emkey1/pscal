@@ -1,7 +1,7 @@
 #!/usr/bin/env clike
 
 int main() {
-  const char *host = "yahoo.com";
+  const char *host = "echo.websocket.events";
   int port = 80;
 
   int s = socketcreate(0);
