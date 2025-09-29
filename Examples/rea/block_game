@@ -134,7 +134,11 @@ class Board {
                     int g = int(value / 256) % 256;
                     int b = int(value / 65536);
                     setrgbcolor(r, g, b);
-                    fillrect(offsetX + j * CellSize, offsetY + i * CellSize, CellSize - 1, CellSize - 1);
+                    int cellLeft = offsetX + j * CellSize;
+                    int cellTop = offsetY + i * CellSize;
+                    int cellRight = cellLeft + CellSize - 1;
+                    int cellBottom = cellTop + CellSize - 1;
+                    fillrect(cellLeft, cellTop, cellRight, cellBottom);
                 }
             }
         }
@@ -257,7 +261,9 @@ class Game {
         
         // Draw board background
         setrgbcolor(30, 30, 30);
-        fillrect(BoardX - 5, BoardY - 5, BoardWidth * CellSize + 10, BoardHeight * CellSize + 10);
+        int boardRight = BoardX + BoardWidth * CellSize + 5;
+        int boardBottom = BoardY + BoardHeight * CellSize + 5;
+        fillrect(BoardX - 5, BoardY - 5, boardRight, boardBottom);
         
         // Draw grid lines
         setrgbcolor(60, 60, 60);
@@ -283,11 +289,11 @@ class Game {
                 for (x = 0; x < 4; x = x + 1) {
                     int index = y * 4 + x + 1;
                     if (myself.currentShape[index] == '1') {
-                        fillrect(
-                            BoardX + (myself.currentX + x) * CellSize,
-                            BoardY + (myself.currentY + y) * CellSize,
-                            CellSize - 1, CellSize - 1
-                        );
+                        int pieceLeft = BoardX + (myself.currentX + x) * CellSize;
+                        int pieceTop = BoardY + (myself.currentY + y) * CellSize;
+                        int pieceRight = pieceLeft + CellSize - 1;
+                        int pieceBottom = pieceTop + CellSize - 1;
+                        fillrect(pieceLeft, pieceTop, pieceRight, pieceBottom);
                     }
                 }
             }
