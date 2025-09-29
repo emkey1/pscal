@@ -28,7 +28,7 @@ class Tetromino {
     int getShape(int rot, int x, int y) {
         // Simplified shape representation
         if (rot == 0) {
-            return myself.shape[y * 4 + x];
+            return myself.shape[y * 4 + x + 1];
         }
         return 0;
     }
@@ -58,7 +58,8 @@ class Board {
         int i, j;
         for (i = 0; i < 4; i = i + 1) {
             for (j = 0; j < 4; j = j + 1) {
-                if (shape[i * 4 + j] == '1') {
+                int index = i * 4 + j + 1;
+                if (shape[index] == '1') {
                     int newX = x + j;
                     int newY = y + i;
                     if (!myself.isValidPosition(newX, newY) || myself.grid[newY * BoardWidth + newX] != 0) {
@@ -74,7 +75,8 @@ class Board {
         int i, j;
         for (i = 0; i < 4; i = i + 1) {
             for (j = 0; j < 4; j = j + 1) {
-                if (shape[i * 4 + j] == '1') {
+                int index = i * 4 + j + 1;
+                if (shape[index] == '1') {
                     int newX = x + j;
                     int newY = y + i;
                     if (myself.isValidPosition(newX, newY)) {
@@ -174,15 +176,15 @@ class Game {
     }
     
     void spawnPiece() {
-        // Simplified tetromino shapes
+        // Simplified tetromino shapes: 4x4 grids stored row-major with '1' marking filled cells
         str shapes[7];
-        shapes[0] = "0000011110000"; // I
-        shapes[1] = "000011110000";  // O
-        shapes[2] = "000001110100";  // T
-        shapes[3] = "000001101100";  // S
-        shapes[4] = "000011001100";  // Z
-        shapes[5] = "000000111100";  // J
-        shapes[6] = "000001111000";  // L
+        shapes[0] = "0000111100000000"; // I
+        shapes[1] = "0110011000000000";  // O
+        shapes[2] = "0100111000000000";  // T
+        shapes[3] = "0110110000000000";  // S
+        shapes[4] = "1100011000000000";  // Z
+        shapes[5] = "1000111000000000";  // J
+        shapes[6] = "0010111000000000";  // L
 
         int colorR[7];
         int colorG[7];
@@ -280,7 +282,8 @@ class Game {
             setrgbcolor(currentR, currentG, currentB);
             for (y = 0; y < 4; y = y + 1) {
                 for (x = 0; x < 4; x = x + 1) {
-                    if (myself.currentShape[y * 4 + x] == '1') {
+                    int index = y * 4 + x + 1;
+                    if (myself.currentShape[index] == '1') {
                         fillrect(
                             BoardX + (myself.currentX + x) * CellSize,
                             BoardY + (myself.currentY + y) * CellSize,
