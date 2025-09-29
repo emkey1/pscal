@@ -46,7 +46,7 @@ class MandelbrotApp {
     myself.minRe = -2.0;
     myself.maxRe = 1.0;
     myself.minIm = -1.2;
-    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
+    myself.maxIm = myself.minIm + int(myself.maxRe - myself.minRe) * myself.Height / myself.Width;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
     string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
     string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
@@ -143,9 +143,9 @@ class MandelbrotApp {
     int tid[ThreadCount];
     int i, y;
     // Avoid clearing the entire buffer up-front; rows overwrite their regions as they complete.
-    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * myself.Height / myself.Width;
-    myself.reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
-    myself.imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
+    myself.maxIm = myself.minIm + int(myself.maxRe - myself.minRe) * myself.Height / myself.Width;
+    myself.reFactor = int(myself.maxRe - myself.minRe) / (myself.Width - 1);
+    myself.imFactor = int(myself.maxIm - myself.minIm) / (myself.Height - 1);
     for (i = 0; i < myself.Height; i = i + 1) { myself.rowDone[i] = false; }
 
     int rowsPerThread = myself.Height / myself.ThreadCount;
@@ -218,8 +218,8 @@ class MandelbrotApp {
   }
 
   void zoom(int px, int py, double factor) {
-    double reFactor = (myself.maxRe - myself.minRe) / (myself.Width - 1);
-    double imFactor = (myself.maxIm - myself.minIm) / (myself.Height - 1);
+    double reFactor = int(myself.maxRe - myself.minRe) / (myself.Width - 1);
+    double imFactor = int(myself.maxIm - myself.minIm) / (myself.Height - 1);
     double centerRe = myself.minRe + (px + 0.5) * reFactor;
     double centerIm = myself.maxIm - (py + 0.5) * imFactor;
     double widthRe = (myself.maxRe - myself.minRe) * factor;
