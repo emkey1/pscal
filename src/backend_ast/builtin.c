@@ -696,12 +696,24 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 continue;
             }
             size_t j = i + 1;
+            char flags[8];
+            size_t flag_len = 0;
+            const char* flag_chars = "-+ #0'";
+            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                if (flag_len + 1 < sizeof(flags)) {
+                    flags[flag_len++] = fmt[j];
+                }
+                j++;
+            }
+            flags[flag_len] = '\0';
+            bool width_specified = false;
             int width = 0;
-            int precision = -1;
             while (isdigit((unsigned char)fmt[j])) {
+                width_specified = true;
                 width = width * 10 + (fmt[j] - '0');
                 j++;
             }
+            int precision = -1;
             if (fmt[j] == '.') {
                 j++;
                 precision = 0;
@@ -712,24 +724,35 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
             }
             // Parse length modifiers and record small-width flags; we normalize by truncating manually
             bool mod_h = false, mod_hh = false;
+            char length_mod[3] = {0};
+            size_t length_len = 0;
             if (fmt[j] == 'h') {
                 mod_h = true;
+                length_mod[length_len++] = 'h';
                 j++;
                 if (fmt[j] == 'h') {
                     mod_hh = true;
                     mod_h = false;
+                    length_mod[length_len++] = 'h';
                     j++;
                 }
             } else if (fmt[j] == 'l') {
-                // We currently ignore 'l' and 'll' modifiers but need to consume them
+                length_mod[length_len++] = 'l';
                 j++;
                 if (fmt[j] == 'l') {
+                    length_mod[length_len++] = 'l';
                     j++;
                 }
             } else {
                 const char* length_mods = "Ljzt";
-                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                    if (length_len + 1 < sizeof(length_mod)) {
+                        length_mod[length_len++] = fmt[j];
+                    }
+                    j++;
+                }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -737,14 +760,47 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
             }
             char fmtbuf[32];
             char buf[256];
-            if (width > 0 && precision >= 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
-            } else if (width > 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
-            } else if (precision >= 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
-            } else {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            size_t pos = 0;
+            fmtbuf[pos++] = '%';
+            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], flags, flag_len);
+                pos += flag_len;
+            }
+            if (width_specified) {
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = '.';
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], length_mod, length_len);
+                pos += length_len;
+            }
+            if (pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = spec;
+            }
+            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
             }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
@@ -778,13 +834,37 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                         break;
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, stdout);
                         break;
                     }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, stdout);
                         break;
                     }
@@ -852,39 +932,99 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 continue;
             }
             size_t j = i + 1;
+            char flags[8];
+            size_t flag_len = 0;
+            const char* flag_chars = "-+ #0'";
+            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                if (flag_len + 1 < sizeof(flags)) {
+                    flags[flag_len++] = fmt[j];
+                }
+                j++;
+            }
+            flags[flag_len] = '\0';
+            bool width_specified = false;
             int width = 0;
+            while (isdigit((unsigned char)fmt[j])) { width_specified = true; width = width * 10 + (fmt[j]-'0'); j++; }
             int precision = -1;
-            while (isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
             if (fmt[j] == '.') {
                 j++; precision = 0;
                 while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
             }
             bool mod_h = false, mod_hh = false;
+            char length_mod[3] = {0};
+            size_t length_len = 0;
             if (fmt[j] == 'h') {
                 mod_h = true;
+                length_mod[length_len++] = 'h';
                 j++;
                 if (fmt[j] == 'h') {
                     mod_hh = true;
                     mod_h = false;
+                    length_mod[length_len++] = 'h';
                     j++;
                 }
             } else if (fmt[j] == 'l') {
-                // Ignore 'l' and 'll' modifiers but consume them
+                length_mod[length_len++] = 'l';
                 j++;
                 if (fmt[j] == 'l') {
+                    length_mod[length_len++] = 'l';
                     j++;
                 }
             } else {
                 const char* length_mods = "Ljzt";
-                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                    if (length_len + 1 < sizeof(length_mod)) {
+                        length_mod[length_len++] = fmt[j];
+                    }
+                    j++;
+                }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
-            if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
-            else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
-            else if (precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
-            else snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            size_t pos = 0;
+            fmtbuf[pos++] = '%';
+            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], flags, flag_len);
+                pos += flag_len;
+            }
+            if (width_specified) {
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = '.';
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], length_mod, length_len);
+                pos += length_len;
+            }
+            if (pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = spec;
+            }
+            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
+            }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
                 switch (spec) {
@@ -906,12 +1046,36 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                         break; }
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, output_stream);
                         break; }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, output_stream);
                         break; }
                     case 'p': {
