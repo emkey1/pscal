@@ -5,31 +5,117 @@ const int BoardWidth = 10;
 const int BoardHeight = 20;
 const int CellSize = 30;
 
-class Tetromino {
-    str shape;
-    int colorR;
-    int colorG;
-    int colorB;
-    int rotation;
-    
-    void Tetromino(str s, int r, int g, int b) {
-        myself.shape = s;
-        myself.colorR = r;
-        myself.colorG = g;
-        myself.colorB = b;
-        myself.rotation = 0;
+const int TetrominoCount = 7;
+const int RotationCount = 4;
+const int BlocksPerPiece = 4;
+
+int TetrominoOffsets[TetrominoCount][RotationCount][BlocksPerPiece * 2];
+int TetrominoColorR[TetrominoCount];
+int TetrominoColorG[TetrominoCount];
+int TetrominoColorB[TetrominoCount];
+bool TetrominoDataInitialized = false;
+
+void initializeTetrominoData() {
+    if (TetrominoDataInitialized) {
+        return;
     }
-    
-    void rotate() {
-        myself.rotation = (myself.rotation + 1) % 4;
-    }
-    
-    int getShape(int rot, int x, int y) {
-        // Simplified shape representation
-        if (rot == 0) {
-            return myself.shape[y * 4 + x + 1];
+    TetrominoDataInitialized = true;
+
+    TetrominoColorR[0] = 0;   TetrominoColorG[0] = 255; TetrominoColorB[0] = 255; // I - Cyan
+    TetrominoColorR[1] = 255; TetrominoColorG[1] = 255; TetrominoColorB[1] = 0;   // O - Yellow
+    TetrominoColorR[2] = 128; TetrominoColorG[2] = 0;   TetrominoColorB[2] = 128; // T - Purple
+    TetrominoColorR[3] = 0;   TetrominoColorG[3] = 255; TetrominoColorB[3] = 0;   // S - Green
+    TetrominoColorR[4] = 255; TetrominoColorG[4] = 0;   TetrominoColorB[4] = 0;   // Z - Red
+    TetrominoColorR[5] = 0;   TetrominoColorG[5] = 0;   TetrominoColorB[5] = 255; // J - Blue
+    TetrominoColorR[6] = 255; TetrominoColorG[6] = 165; TetrominoColorB[6] = 0;   // L - Orange
+
+    int baseOffsets[TetrominoCount][BlocksPerPiece * 2];
+
+    // I piece (horizontal)
+    baseOffsets[0][0] = 0; baseOffsets[0][1] = 1;
+    baseOffsets[0][2] = 1; baseOffsets[0][3] = 1;
+    baseOffsets[0][4] = 2; baseOffsets[0][5] = 1;
+    baseOffsets[0][6] = 3; baseOffsets[0][7] = 1;
+
+    // O piece
+    baseOffsets[1][0] = 1; baseOffsets[1][1] = 0;
+    baseOffsets[1][2] = 2; baseOffsets[1][3] = 0;
+    baseOffsets[1][4] = 1; baseOffsets[1][5] = 1;
+    baseOffsets[1][6] = 2; baseOffsets[1][7] = 1;
+
+    // T piece
+    baseOffsets[2][0] = 1; baseOffsets[2][1] = 0;
+    baseOffsets[2][2] = 0; baseOffsets[2][3] = 1;
+    baseOffsets[2][4] = 1; baseOffsets[2][5] = 1;
+    baseOffsets[2][6] = 2; baseOffsets[2][7] = 1;
+
+    // S piece
+    baseOffsets[3][0] = 1; baseOffsets[3][1] = 0;
+    baseOffsets[3][2] = 2; baseOffsets[3][3] = 0;
+    baseOffsets[3][4] = 0; baseOffsets[3][5] = 1;
+    baseOffsets[3][6] = 1; baseOffsets[3][7] = 1;
+
+    // Z piece
+    baseOffsets[4][0] = 0; baseOffsets[4][1] = 0;
+    baseOffsets[4][2] = 1; baseOffsets[4][3] = 0;
+    baseOffsets[4][4] = 1; baseOffsets[4][5] = 1;
+    baseOffsets[4][6] = 2; baseOffsets[4][7] = 1;
+
+    // J piece
+    baseOffsets[5][0] = 0; baseOffsets[5][1] = 0;
+    baseOffsets[5][2] = 0; baseOffsets[5][3] = 1;
+    baseOffsets[5][4] = 1; baseOffsets[5][5] = 1;
+    baseOffsets[5][6] = 2; baseOffsets[5][7] = 1;
+
+    // L piece
+    baseOffsets[6][0] = 2; baseOffsets[6][1] = 0;
+    baseOffsets[6][2] = 0; baseOffsets[6][3] = 1;
+    baseOffsets[6][4] = 1; baseOffsets[6][5] = 1;
+    baseOffsets[6][6] = 2; baseOffsets[6][7] = 1;
+
+    int shape;
+    for (shape = 0; shape < TetrominoCount; shape = shape + 1) {
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int baseX = baseOffsets[shape][block * 2];
+            int baseY = baseOffsets[shape][block * 2 + 1];
+
+            // Rotation 0 (spawn)
+            TetrominoOffsets[shape][0][block * 2] = baseX;
+            TetrominoOffsets[shape][0][block * 2 + 1] = baseY;
+
+            // Rotation 1 (90 degrees clockwise)
+            TetrominoOffsets[shape][1][block * 2] = 3 - baseY;
+            TetrominoOffsets[shape][1][block * 2 + 1] = baseX;
+
+            // Rotation 2 (180 degrees)
+            TetrominoOffsets[shape][2][block * 2] = 3 - baseX;
+            TetrominoOffsets[shape][2][block * 2 + 1] = 3 - baseY;
+
+            // Rotation 3 (270 degrees)
+            TetrominoOffsets[shape][3][block * 2] = baseY;
+            TetrominoOffsets[shape][3][block * 2 + 1] = 3 - baseX;
         }
-        return 0;
+
+        int rotation;
+        for (rotation = 0; rotation < RotationCount; rotation = rotation + 1) {
+            int minX = TetrominoOffsets[shape][rotation][0];
+            int minY = TetrominoOffsets[shape][rotation][1];
+            for (block = 0; block < BlocksPerPiece; block = block + 1) {
+                int idx = block * 2;
+                if (TetrominoOffsets[shape][rotation][idx] < minX) {
+                    minX = TetrominoOffsets[shape][rotation][idx];
+                }
+                if (TetrominoOffsets[shape][rotation][idx + 1] < minY) {
+                    minY = TetrominoOffsets[shape][rotation][idx + 1];
+                }
+            }
+            for (block = 0; block < BlocksPerPiece; block = block + 1) {
+                int idx = block * 2;
+                TetrominoOffsets[shape][rotation][idx] = TetrominoOffsets[shape][rotation][idx] - minX;
+                TetrominoOffsets[shape][rotation][idx + 1] = TetrominoOffsets[shape][rotation][idx + 1] - minY;
+            }
+        }
     }
 }
 
@@ -53,35 +139,36 @@ class Board {
         return (x >= 0 && x < BoardWidth && y >= 0 && y < BoardHeight);
     }
     
-    bool isCollision(int x, int y, str shape) {
-        int i, j;
-        for (i = 0; i < 4; i = i + 1) {
-            for (j = 0; j < 4; j = j + 1) {
-                int index = i * 4 + j + 1;
-                if (shape[index] == '1') {
-                    int newX = x + j;
-                    int newY = y + i;
-                    if (!myself.isValidPosition(newX, newY) || myself.grid[newY * BoardWidth + newX] != 0) {
-                        return true;
-                    }
-                }
+    bool isCollision(int x, int y, int shapeIndex, int rotation) {
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = TetrominoOffsets[shapeIndex][rotation][block * 2];
+            int offsetY = TetrominoOffsets[shapeIndex][rotation][block * 2 + 1];
+            int newX = x + offsetX;
+            int newY = y + offsetY;
+
+            if (newX < 0 || newX >= BoardWidth) {
+                return true;
+            }
+            if (newY >= BoardHeight) {
+                return true;
+            }
+            if (newY >= 0 && myself.grid[newY * BoardWidth + newX] != 0) {
+                return true;
             }
         }
         return false;
     }
-    
-    void placePiece(int x, int y, str shape, int color) {
-        int i, j;
-        for (i = 0; i < 4; i = i + 1) {
-            for (j = 0; j < 4; j = j + 1) {
-                int index = i * 4 + j + 1;
-                if (shape[index] == '1') {
-                    int newX = x + j;
-                    int newY = y + i;
-                    if (myself.isValidPosition(newX, newY)) {
-                        myself.grid[newY * BoardWidth + newX] = color;
-                    }
-                }
+
+    void placePiece(int x, int y, int shapeIndex, int rotation, int color) {
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = TetrominoOffsets[shapeIndex][rotation][block * 2];
+            int offsetY = TetrominoOffsets[shapeIndex][rotation][block * 2 + 1];
+            int newX = x + offsetX;
+            int newY = y + offsetY;
+            if (newY >= 0 && newY < BoardHeight && newX >= 0 && newX < BoardWidth) {
+                myself.grid[newY * BoardWidth + newX] = color;
             }
         }
     }
@@ -150,104 +237,106 @@ class Board {
 }
 
 class Game {
-    const int WindowWidth = 400;
-    const int WindowHeight = 600;
     const int BoardX = 50;
     const int BoardY = 20;
+    const int WindowWidth = 420;
+    const int WindowHeight = BoardY + BoardHeight * CellSize + 60;
     
     Board board;
-    str currentShape;
+    int currentShapeIndex;
+    int currentRotation;
     int currentColor;
     int currentX;
     int currentY;
-    int nextShape;
+    int nextShapeIndex;
     bool gameOver;
     int frameDelay;
     float dropTime;
     float lastDrop;
     
     void Game() {
+        initializeTetrominoData();
         myself.board = new Board();
         myself.gameOver = false;
         myself.frameDelay = 1000 / 60; // ~60 FPS
         myself.dropTime = 0.5; // seconds per drop
         myself.lastDrop = 0.0;
         myself.currentX = BoardWidth / 2 - 2;
-        myself.currentY = 0;
-        myself.nextShape = random(7);
+        myself.currentY = -2;
+        myself.currentShapeIndex = 0;
+        myself.currentRotation = 0;
+        myself.nextShapeIndex = random(TetrominoCount);
         myself.spawnPiece();
     }
     
     void spawnPiece() {
-        // Simplified tetromino shapes: 4x4 grids stored row-major with '1' marking filled cells
-        str shapes[7];
-        shapes[0] = "0000111100000000"; // I
-        shapes[1] = "0110011000000000";  // O
-        shapes[2] = "0100111000000000";  // T
-        shapes[3] = "0110110000000000";  // S
-        shapes[4] = "1100011000000000";  // Z
-        shapes[5] = "1000111000000000";  // J
-        shapes[6] = "0010111000000000";  // L
-
-        int colorR[7];
-        int colorG[7];
-        int colorB[7];
-        colorR[0] = 0;   colorG[0] = 255; colorB[0] = 255; // Cyan
-        colorR[1] = 255; colorG[1] = 255; colorB[1] = 0;   // Yellow
-        colorR[2] = 128; colorG[2] = 0;   colorB[2] = 128; // Purple
-        colorR[3] = 0;   colorG[3] = 255; colorB[3] = 0;   // Green
-        colorR[4] = 255; colorG[4] = 0;   colorB[4] = 0;   // Red
-        colorR[5] = 0;   colorG[5] = 0;   colorB[5] = 255; // Blue
-        colorR[6] = 255; colorG[6] = 165; colorB[6] = 0;   // Orange
-
-        myself.currentShape = shapes[myself.nextShape];
-        myself.currentColor = colorR[myself.nextShape] +
-                              colorG[myself.nextShape] * 256 +
-                              colorB[myself.nextShape] * 65536;
-        myself.nextShape = random(7);
+        myself.currentShapeIndex = myself.nextShapeIndex;
+        myself.currentRotation = 0;
+        myself.currentColor = TetrominoColorR[myself.currentShapeIndex] +
+                              TetrominoColorG[myself.currentShapeIndex] * 256 +
+                              TetrominoColorB[myself.currentShapeIndex] * 65536;
+        myself.nextShapeIndex = random(TetrominoCount);
         myself.currentX = BoardWidth / 2 - 2;
-        myself.currentY = 0;
-        
-        if (myself.board.isCollision(myself.currentX, myself.currentY, myself.currentShape)) {
+        myself.currentY = -2;
+
+        if (myself.board.isCollision(myself.currentX, myself.currentY,
+                                     myself.currentShapeIndex, myself.currentRotation)) {
             myself.gameOver = true;
         }
     }
-    
+
     void movePiece(int dx, int dy) {
-        if (!myself.gameOver && !myself.board.isCollision(myself.currentX + dx, myself.currentY + dy, myself.currentShape)) {
+        if (!myself.gameOver &&
+            !myself.board.isCollision(myself.currentX + dx, myself.currentY + dy,
+                                      myself.currentShapeIndex, myself.currentRotation)) {
             myself.currentX = myself.currentX + dx;
             myself.currentY = myself.currentY + dy;
         }
     }
-    
+
     void rotatePiece() {
         if (!myself.gameOver) {
-            // Simplified rotation - we'll just use the same shape for now
-            // In a full implementation, this would rotate the piece's pattern
+            int newRotation = (myself.currentRotation + 1) % RotationCount;
+            if (!myself.board.isCollision(myself.currentX, myself.currentY,
+                                          myself.currentShapeIndex, newRotation)) {
+                myself.currentRotation = newRotation;
+            } else if (!myself.board.isCollision(myself.currentX - 1, myself.currentY,
+                                                 myself.currentShapeIndex, newRotation)) {
+                myself.currentX = myself.currentX - 1;
+                myself.currentRotation = newRotation;
+            } else if (!myself.board.isCollision(myself.currentX + 1, myself.currentY,
+                                                 myself.currentShapeIndex, newRotation)) {
+                myself.currentX = myself.currentX + 1;
+                myself.currentRotation = newRotation;
+            }
         }
     }
     
     void hardDrop() {
         if (!myself.gameOver) {
-            while (!myself.board.isCollision(myself.currentX, myself.currentY + 1, myself.currentShape)) {
+            while (!myself.board.isCollision(myself.currentX, myself.currentY + 1,
+                                             myself.currentShapeIndex, myself.currentRotation)) {
                 myself.currentY = myself.currentY + 1;
             }
             myself.lockPiece();
         }
     }
-    
+
     void lockPiece() {
-        myself.board.placePiece(myself.currentX, myself.currentY, myself.currentShape, myself.currentColor);
+        myself.board.placePiece(myself.currentX, myself.currentY,
+                                myself.currentShapeIndex, myself.currentRotation,
+                                myself.currentColor);
         myself.board.clearLines();
         myself.spawnPiece();
     }
-    
+
     void update(float deltaTime) {
         if (myself.gameOver) return;
-        
+
         myself.lastDrop = myself.lastDrop + deltaTime;
         if (myself.lastDrop >= myself.dropTime) {
-            if (!myself.board.isCollision(myself.currentX, myself.currentY + 1, myself.currentShape)) {
+            if (!myself.board.isCollision(myself.currentX, myself.currentY + 1,
+                                          myself.currentShapeIndex, myself.currentRotation)) {
                 myself.currentY = myself.currentY + 1;
             } else {
                 myself.lockPiece();
@@ -280,21 +369,22 @@ class Game {
         
         // Draw current piece
         if (!myself.gameOver) {
-            int x, y;
+            int block;
             int currentR = myself.currentColor % 256;
             int currentG = int(myself.currentColor / 256) % 256;
             int currentB = int(myself.currentColor / 65536);
             setrgbcolor(currentR, currentG, currentB);
-            for (y = 0; y < 4; y = y + 1) {
-                for (x = 0; x < 4; x = x + 1) {
-                    int index = y * 4 + x + 1;
-                    if (myself.currentShape[index] == '1') {
-                        int pieceLeft = BoardX + (myself.currentX + x) * CellSize;
-                        int pieceTop = BoardY + (myself.currentY + y) * CellSize;
-                        int pieceRight = pieceLeft + CellSize - 1;
-                        int pieceBottom = pieceTop + CellSize - 1;
-                        fillrect(pieceLeft, pieceTop, pieceRight, pieceBottom);
-                    }
+            for (block = 0; block < BlocksPerPiece; block = block + 1) {
+                int offsetX = TetrominoOffsets[myself.currentShapeIndex][myself.currentRotation][block * 2];
+                int offsetY = TetrominoOffsets[myself.currentShapeIndex][myself.currentRotation][block * 2 + 1];
+                int drawX = myself.currentX + offsetX;
+                int drawY = myself.currentY + offsetY;
+                if (drawY >= 0) {
+                    int pieceLeft = BoardX + drawX * CellSize;
+                    int pieceTop = BoardY + drawY * CellSize;
+                    int pieceRight = pieceLeft + CellSize - 1;
+                    int pieceBottom = pieceTop + CellSize - 1;
+                    fillrect(pieceLeft, pieceTop, pieceRight, pieceBottom);
                 }
             }
         }
@@ -321,31 +411,45 @@ class Game {
     bool handleInput() {
         if (keypressed()) {
             char c = readkey();
-            if (c == 'q' || c == 'Q') {
+            int code = ord(c);
+            if (code == 0 || code == 224) {
+                char extended = readkey();
+                int extCode = ord(extended);
+                if (extCode == 75) {
+                    myself.movePiece(-1, 0); // Left arrow
+                } else if (extCode == 77) {
+                    myself.movePiece(1, 0); // Right arrow
+                } else if (extCode == 72) {
+                    myself.rotatePiece(); // Up arrow
+                } else if (extCode == 80) {
+                    myself.movePiece(0, 1); // Down arrow
+                }
+                return false;
+            }
+
+            char key = toupper(c);
+            if (key == 'Q') {
                 return true; // Quit
             }
             if (myself.gameOver) return false;
-            
-            switch (c) {
-                case 'a':
+
+            switch (key) {
                 case 'A':
                     myself.movePiece(-1, 0);
                     break;
-                case 'd':
                 case 'D':
                     myself.movePiece(1, 0);
                     break;
-                case 's':
                 case 'S':
                     myself.movePiece(0, 1);
                     break;
-                case 'w':
                 case 'W':
                     myself.rotatePiece();
                     break;
-                case ' ':
-                    myself.hardDrop();
-                    break;
+            }
+
+            if (c == ' ') {
+                myself.hardDrop();
             }
         }
         
@@ -366,7 +470,8 @@ class Game {
         }
         randomize();
 
-        writeln("Block Game - Use A/D to move, S to drop, W to rotate, Space for hard drop. Press Q to quit.");
+        writeln("Block Game - Use A/D or "+
+                "Left/Right to move, S or Down to drop, W or Up to rotate, Space for hard drop. Press Q to quit.");
         
         float lastTime = 0.0;
         bool quit = false;
