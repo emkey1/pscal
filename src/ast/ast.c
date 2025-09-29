@@ -848,51 +848,36 @@ resolved_field: ;
                 break;
             }
             case AST_BINARY_OP: {
-                VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
-                VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
-                TokenType op = node->token ? node->token->type : TOKEN_UNKNOWN;
-
-                if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
-                    op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL ||
-                    op == TOKEN_IN) {
-                    node->var_type = TYPE_BOOLEAN;
-                }
-                else if (op == TOKEN_AND || op == TOKEN_OR ) {
-                    if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
-                        node->var_type = TYPE_INTEGER;
-                    } else {
-                        node->var_type = TYPE_BOOLEAN; // Default to boolean for mixed or boolean types
-                    }
-                }
-                else if (op == TOKEN_SLASH) {
-                    if (leftType == TYPE_LONG_DOUBLE || rightType == TYPE_LONG_DOUBLE) {
-                        node->var_type = TYPE_LONG_DOUBLE;
-                    } else if (leftType == TYPE_DOUBLE || rightType == TYPE_DOUBLE) {
-                        node->var_type = TYPE_DOUBLE;
-                    } else if (leftType == TYPE_FLOAT || rightType == TYPE_FLOAT) {
-                        node->var_type = TYPE_FLOAT;
-                    } else {
-                        node->var_type = TYPE_DOUBLE; // Default for integer / integer
-                    }
-                }
-                else if (isRealType(leftType) || isRealType(rightType)) {
-                    if (leftType == TYPE_LONG_DOUBLE || rightType == TYPE_LONG_DOUBLE) {
-                        node->var_type = TYPE_LONG_DOUBLE;
-                    } else if (leftType == TYPE_DOUBLE || rightType == TYPE_DOUBLE) {
-                        node->var_type = TYPE_DOUBLE;
-                    } else {
-                        node->var_type = TYPE_FLOAT;
-                    }
-                }
-                else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
-                    node->var_type = TYPE_STRING;
-                }
-                else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
-                    node->var_type = TYPE_INTEGER;
-                }
-                else {
-                    node->var_type = TYPE_VOID;
-                }
+                 VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
+                 VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
+                 TokenType op = node->token ? node->token->type : TOKEN_UNKNOWN;
+                 if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
+                     op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL ||
+                     op == TOKEN_IN) {
+                     node->var_type = TYPE_BOOLEAN;
+                 }
+                 else if (op == TOKEN_AND || op == TOKEN_OR ) {
+                     if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                         node->var_type = TYPE_INTEGER;
+                     } else {
+                         node->var_type = TYPE_BOOLEAN; // Default to boolean for mixed or boolean types
+                     }
+                 }
+                 else if (op == TOKEN_SLASH) {
+                     node->var_type = TYPE_REAL;
+                 }
+                 else if (leftType == TYPE_REAL || rightType == TYPE_REAL) {
+                      node->var_type = TYPE_REAL;
+                 }
+                 else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
+                      node->var_type = TYPE_STRING;
+                 }
+                 else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                     node->var_type = TYPE_INTEGER;
+                 }
+                 else {
+                     node->var_type = TYPE_VOID;
+                 }
                 break;
             }
             case AST_TERNARY: {
