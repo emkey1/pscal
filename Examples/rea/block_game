@@ -379,5 +379,5 @@ class Game {
     }
 }
 
-Game game = new Game();
-game.run();
+Game mygame = new Game();
+mygame.run();
