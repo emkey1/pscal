@@ -618,7 +618,7 @@ void runMenu(int db) {
     writeln("  4) Release year summary");
     writeln("  5) Playlist subgenre breakdown");
     writeln("  q) Quit");
-    writeln("Enter choice: ");
+    write("Enter choice: ");
     str choice;
     readln(choice);
     if (choice == "1") {
