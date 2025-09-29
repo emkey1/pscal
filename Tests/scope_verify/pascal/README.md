@@ -26,8 +26,8 @@ Pascal source snippet alongside the expected outcome (`runtime_ok`,
   `build/bin/pascal --no-cache`).
 - Invoke the harness from the repository root:
   ```sh
-  python3 scope_verify/pascal/pascal_scope_test_harness.py \
-      --manifest scope_verify/pascal/tests/manifest.json
+  python3 Tests/scope_verify/pascal/pascal_scope_test_harness.py \
+      --manifest Tests/scope_verify/pascal/tests/manifest.json
   ```
 - Key flags:
   - `--cmd "<command template with {source}>"` to point at a different
@@ -36,17 +36,17 @@ Pascal source snippet alongside the expected outcome (`runtime_ok`,
   - `--list` to preview selected tests without executing.
   - `--seed N` to drive deterministic randomised variants (default `1337`).
   - `--update` to materialise `.pas` fixtures under
-    `scope_verify/pascal/tests/<category>/` alongside generated helpers.
+    `Tests/scope_verify/pascal/tests/<category>/` alongside generated helpers.
   - `--out-dir PATH` to redirect generated snippets and reports
     (`out/report.csv`, failure repros under `out/min/`).
 
 ## Adding or editing tests
 
-1. Edit `scope_verify/pascal/tests/build_manifest.py` to add or update entries.
+1. Edit `Tests/scope_verify/pascal/tests/build_manifest.py` to add or update entries.
    The helper normalises indentation and writes `manifest.json` when run.
 2. Regenerate the manifest:
    ```sh
-   python3 scope_verify/pascal/tests/build_manifest.py
+   python3 Tests/scope_verify/pascal/tests/build_manifest.py
    ```
 3. Run the harness (ideally with `--only` while iterating) and refresh
    materialised fixtures with `--update` if you want checked-in `.pas` files to
@@ -78,11 +78,11 @@ document the decision inline so future contributors understand the expectations.
 
 ## Artefacts
 
-- Harness: `scope_verify/pascal/pascal_scope_test_harness.py`
-- Manifest: `scope_verify/pascal/tests/manifest.json`
-- Generator helper: `scope_verify/pascal/tests/build_manifest.py`
-- Generated reports: `scope_verify/pascal/out/report.csv`, repro snippets in
-  `scope_verify/pascal/out/min/`
+- Harness: `Tests/scope_verify/pascal/pascal_scope_test_harness.py`
+- Manifest: `Tests/scope_verify/pascal/tests/manifest.json`
+- Generator helper: `Tests/scope_verify/pascal/tests/build_manifest.py`
+- Generated reports: `Tests/scope_verify/pascal/out/report.csv`, repro snippets in
+  `Tests/scope_verify/pascal/out/min/`
 
 Run the harness (full suite or focused subsets) before publishing changes to
 confirm that scoping behaviour matches the Pascal front end's specification.

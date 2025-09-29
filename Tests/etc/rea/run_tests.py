@@ -17,7 +17,7 @@ from pathlib import Path
 
 def find_repo_root(script_path: Path) -> Path:
     """Return the repository root based on this script's location."""
-    # etc/tests/rea/run_tests.py -> repo root is three levels up from "rea".
+    # Tests/etc/rea/run_tests.py -> repo root is three levels up from "rea".
     return script_path.resolve().parents[3]
 
 

@@ -23,7 +23,7 @@ available.
 From the repository root:
 
 ```bash
-python3 etc/tests/rea/run_tests.py
+  python3 Tests/etc/rea/run_tests.py
 ```
 
 The helper script starts a small HTTP server for exercising the networking

@@ -7,24 +7,24 @@ This package provides a manifest-driven regression suite and a standalone Python
 - Ensure a Rea compiler/runtime binary is available (defaults to `build/bin/rea`).
 - Invoke the harness from the repository root:
   ```sh
-  python3 scope_verify/rea/rea_scope_test_harness.py \
-      --manifest scope_verify/rea/tests/manifest.json
+  python3 Tests/scope_verify/rea/rea_scope_test_harness.py \
+      --manifest Tests/scope_verify/rea/tests/manifest.json
   ```
 - Key flags:
   - `--cmd "<command template with {source}>"` to point at a different compiler.
   - `--only PATTERN` to filter tests by substring.
   - `--list` to preview selected tests without executing.
   - `--seed N` to drive deterministic randomised variants (default `1337`).
-  - `--update` to materialise `.rea` fixtures under `scope_verify/rea/tests/<category>/` alongside generated modules.
+  - `--update` to materialise `.rea` fixtures under `Tests/scope_verify/rea/tests/<category>/` alongside generated modules.
   - `--out-dir PATH` to redirect generated snippets and reports (`out/report.csv`, failure repros under `out/min/`).
 
 ## Adding or editing tests
 
-1. Edit `scope_verify/rea/tests/build_manifest.py` to add or update entries. The helper normalises indentation and writes `manifest.json` when run.
+1. Edit `Tests/scope_verify/rea/tests/build_manifest.py` to add or update entries. The helper normalises indentation and writes `manifest.json` when run.
 2. Optionally add supporting module files via the `files` array on a test entry.
 3. Regenerate the manifest:
    ```sh
-   python3 scope_verify/rea/tests/build_manifest.py
+   python3 Tests/scope_verify/rea/tests/build_manifest.py
    ```
 4. Run the harness (ideally with `--only` while iterating) and refresh materialised fixtures with `--update` if you want checked-in `.rea` files to match the manifest versions.
 
@@ -55,10 +55,10 @@ If any of these assumptions diverge from the actual implementation, adjust the m
 
 ## Artefacts
 
-- Harness: `scope_verify/rea/rea_scope_test_harness.py`
-- Manifest: `scope_verify/rea/tests/manifest.json`
-- Generator helper: `scope_verify/rea/tests/build_manifest.py`
+- Harness: `Tests/scope_verify/rea/rea_scope_test_harness.py`
+- Manifest: `Tests/scope_verify/rea/tests/manifest.json`
+- Generator helper: `Tests/scope_verify/rea/tests/build_manifest.py`
 - Category directories with `.gitkeep` placeholders for optional materialised fixtures
-- Generated reports: `scope_verify/rea/out/report.csv`, repro snippets in `scope_verify/rea/out/min/`
+- Generated reports: `Tests/scope_verify/rea/out/report.csv`, repro snippets in `Tests/scope_verify/rea/out/min/`
 
 Before publishing changes, run the harness (full suite and any targeted subsets) and include refreshed outputs if expectations change.
