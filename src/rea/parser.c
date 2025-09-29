@@ -1484,9 +1484,6 @@ static AST *parseTerm(ReaParser *p) {
         TokenType tt = mapOp(op.type);
         bool leftReal = isRealType(lt);
         bool rightReal = isRealType(rt);
-        if (tt == TOKEN_SLASH && isIntlikeType(lt) && isIntlikeType(rt)) {
-            tt = TOKEN_INT_DIV;
-        }
         Token *tok = newToken(tt, opLexeme(tt), op.line, 0);
         AST *bin = newASTNode(AST_BINARY_OP, tok);
         setLeft(bin, node);

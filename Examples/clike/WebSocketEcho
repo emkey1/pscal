@@ -20,7 +20,7 @@ int openSocket(const char *host, int port, int family) {
 }
 
 int main() {
-    const char *host = "ws.postman-echo.com";
+    const char *host = "ws.ifelse.io";
     int port = 80;
 
     int s = openSocket(host, port, 6);

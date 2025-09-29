@@ -5973,14 +5973,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_INT_DIV: {
                             bool left_is_real = node->left && isRealType(node->left->var_type);
                             bool right_is_real = node->right && isRealType(node->right->var_type);
+                            bool expr_is_real = isRealType(node->var_type);
+                            
+                            bool emit_real_div = left_is_real || right_is_real || expr_is_real;
 
-                            bool emit_real_div = false;
-
-                            if ((left_is_real) || (right_is_real)) {
-                                emit_real_div = true;
-                            } else {
-                                emit_real_div = false;
-                            }
 
                             writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
                             break;
