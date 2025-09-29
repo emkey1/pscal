@@ -13,7 +13,7 @@ class MandelbrotApp {
   const double ZoomFactor = 2.0;
   const int ButtonLeft = 1;
   const int ButtonRight = 4;
-  const int ThreadCount = 8;
+  const int ThreadCount = 6;
   const int KEY_LEFT = 1073741904;
   const int KEY_RIGHT = 1073741903;
   const int KEY_UP = 1073741906;
