@@ -1334,10 +1334,11 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
     s->last_status = http_code;
     s->last_error_code = 1;
     if (s->last_error_msg) free(s->last_error_msg);
-    s->last_error_msg = strdup("HTTP error");
+    char errbuf[64];
+    snprintf(errbuf, sizeof(errbuf), "HTTP status %ld", http_code);
+    s->last_error_msg = strdup(errbuf);
     if (tmp_out_file) fclose(tmp_out_file);
-    runtimeError(vm, "httpRequest: HTTP status %ld", http_code);
-    return makeInt(-1);
+    return makeInt((int)http_code);
 }
 
 // httpRequestToFile(session, method, url, bodyStrOrMStreamOrNil, outFilename): Integer (status)
