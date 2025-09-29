@@ -44,7 +44,9 @@ class MandelbrotApp {
     myself.minRe = -2.0;
     myself.maxRe = 1.0;
     myself.minIm = -1.2;
-    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * double(myself.Height) / double(myself.Width);
+    double widthSpan = myself.maxRe - myself.minRe;
+    double aspect = double(myself.Height) / double(myself.Width);
+    myself.maxIm = myself.minIm + widthSpan * aspect;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot (ext)");
     string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
     string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
@@ -123,9 +125,12 @@ class MandelbrotApp {
     int i;
     int y;
     // Avoid clearing the entire pixel buffer at once; rows will overwrite their regions.
-    myself.maxIm = myself.minIm + (myself.maxRe - myself.minRe) * double(myself.Height) / double(myself.Width);
-    myself.reFactor = (myself.maxRe - myself.minRe) / double(myself.Width - 1);
-    myself.imFactor = (myself.maxIm - myself.minIm) / double(myself.Height - 1);
+    double widthSpan = myself.maxRe - myself.minRe;
+    double aspect = double(myself.Height) / double(myself.Width);
+    myself.maxIm = myself.minIm + widthSpan * aspect;
+    double heightSpan = myself.maxIm - myself.minIm;
+    myself.reFactor = widthSpan / double(myself.Width - 1);
+    myself.imFactor = heightSpan / double(myself.Height - 1);
     for (i = 0; i < myself.Height; i = i + 1) { myself.rowDone[i] = false; }
 
     int rowsPerThread = myself.Height / myself.ThreadCount;
