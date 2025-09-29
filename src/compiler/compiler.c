@@ -5980,7 +5980,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                             bool emit_real_div = false;
 
-                            if (left_is_real || right_is_real) {
+                            if (!left_is_real && !right_is_real) {
                                 emit_real_div = true;
                             } else if (!(left_is_intlike && right_is_intlike && result_is_intlike)) {
                                 // If we can't prove both operands (and the result) are integer-like,

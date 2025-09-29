@@ -405,7 +405,7 @@ void showTopArtists(int db) {
     "   GROUP BY track_artist"
     " )"
     " ORDER BY track_count DESC, avg_popularity DESC"
-    " LIMIT 20;");
+    " LIMIT 5;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
@@ -479,7 +479,7 @@ void showDanceableTracks(int db) {
     " printf('%.1f', CAST(track_popularity AS REAL)) AS popularity"
     " FROM spotify_songs"
     " ORDER BY CAST(danceability AS REAL) DESC, CAST(track_popularity AS REAL) DESC"
-    " LIMIT 20;");
+    " LIMIT 5;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
@@ -520,7 +520,7 @@ void showReleaseYearSummary(int db) {
     " )"
     " WHERE release_year != ''"
     " ORDER BY track_count DESC, release_year DESC"
-    " LIMIT 20;");
+    " LIMIT 5;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
@@ -567,7 +567,7 @@ void showGenreBreakdown(int db) {
     "   GROUP BY playlist_subgenre"
     " )"
     " ORDER BY track_count DESC, avg_popularity DESC"
-    " LIMIT 25;");
+    " LIMIT 5;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
