@@ -1553,7 +1553,96 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
     
     // Draw the point
     SDL_RenderDrawPoint(gSdlRenderer, x, y);
-    
+
     return makeVoid();
+}
+
+bool sdlIsGraphicsActive(void) {
+    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+}
+
+static void pumpKeyEvents(void) {
+    if (!sdlIsGraphicsActive()) {
+        return;
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
+        if (event.type == SDL_QUIT) {
+            atomic_store(&break_requested, 1);
+            continue;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                atomic_store(&break_requested, 1);
+            }
+            enqueuePendingKeycode(event.key.keysym.sym);
+        }
+    }
+}
+
+bool sdlHasPendingKeycode(void) {
+    if (!sdlIsGraphicsActive()) {
+        return false;
+    }
+
+    if (hasPendingKeycode()) {
+        return true;
+    }
+
+    pumpKeyEvents();
+    return hasPendingKeycode();
+}
+
+SDL_Keycode sdlWaitNextKeycode(void) {
+    if (!sdlIsGraphicsActive()) {
+        return SDLK_UNKNOWN;
+    }
+
+    SDL_Keycode code;
+    if (dequeuePendingKeycode(&code)) {
+        return code;
+    }
+
+    SDL_Event event;
+    while (SDL_WaitEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
+        if (event.type == SDL_QUIT) {
+            atomic_store(&break_requested, 1);
+            return SDLK_UNKNOWN;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                atomic_store(&break_requested, 1);
+            }
+
+            enqueuePendingKeycode(event.key.keysym.sym);
+
+            if (dequeuePendingKeycode(&code)) {
+                return code;
+            }
+        }
+    }
+
+    return SDLK_UNKNOWN;
 }
 #endif
