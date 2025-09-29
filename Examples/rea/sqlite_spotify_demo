@@ -647,9 +647,12 @@ int main() {
     return 1;
   }
 
-  if (!ensureDataset(CSV_PATH)) {
-    writeln("Unable to ensure dataset availability. Exiting.");
-    return 1;
+  bool dbExists = fileexists(DB_PATH);
+  if (!dbExists) {
+    if (!ensureDataset(CSV_PATH)) {
+      writeln("Unable to ensure dataset availability. Exiting.");
+      return 1;
+    }
   }
 
   int db = SqliteOpen(DB_PATH);
@@ -658,19 +661,23 @@ int main() {
     return 1;
   }
 
-  if (!setupDatabase(db)) {
-    SqliteClose(db);
-    return 1;
-  }
+  if (!dbExists) {
+    if (!setupDatabase(db)) {
+      SqliteClose(db);
+      return 1;
+    }
 
-  writeln("Importing Spotify tracks into SQLite ...");
-  int inserted = importSpotifyCsv(CSV_PATH, db);
-  if (inserted < 0) {
-    writeln("Import failed. See messages above for details.");
-    SqliteClose(db);
-    return 1;
+    writeln("Importing Spotify tracks into SQLite ...");
+    int inserted = importSpotifyCsv(CSV_PATH, db);
+    if (inserted < 0) {
+      writeln("Import failed. See messages above for details.");
+      SqliteClose(db);
+      return 1;
+    }
+    writeln("Imported ", inserted, " rows into spotify_songs.");
+  } else {
+    writeln("Found existing SQLite database at ", DB_PATH, ". Skipping rebuild.");
   }
-  writeln("Imported ", inserted, " rows into spotify_songs.");
 
   runMenu(db);
 
