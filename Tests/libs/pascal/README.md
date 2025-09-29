@@ -23,7 +23,7 @@ whenever the Pascal front end is built and available.
 From the repository root:
 
 ```bash
-  python3 Tests/etc/pascal/run_tests.py
+  python3 Tests/libs/pascal/run_tests.py
 ```
 
 The helper script configures the import path so the bundled libraries are

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every optional library test suite shipped under ``Tests/etc``.
+"""Run every optional library test suite shipped under ``Tests/libs``.
 
 This helper mirrors ``Tests/scope_verify/run_all_scope_tests.py`` but targets the
 legacy library regression suites that previously lived under ``etc/tests``.  The
@@ -56,8 +56,8 @@ def run_suite(
 
 def main(argv: Sequence[str]) -> int:
     script_path = Path(__file__).resolve()
-    etc_root = script_path.parent
-    repo_root = locate_repo_root(etc_root)
+    libs_root = script_path.parent
+    repo_root = locate_repo_root(libs_root)
 
     parser = argparse.ArgumentParser(
         description="Run all optional library regression suites.",
@@ -93,7 +93,7 @@ def main(argv: Sequence[str]) -> int:
     summary: List[Tuple[str, int]] = []
     for key in selected:
         subdir, filename = LANGUAGE_SCRIPTS[key]
-        suite_path = etc_root / subdir / filename
+        suite_path = libs_root / subdir / filename
         if not suite_path.exists():
             print(f"Skipping {key}: missing suite at {suite_path}")
             summary.append((key, 127))

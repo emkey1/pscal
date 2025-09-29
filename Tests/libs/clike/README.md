@@ -21,7 +21,7 @@ They can be run manually whenever the CLike front end is built and available.
 From the repository root:
 
 ```bash
-  python3 Tests/etc/clike/run_tests.py
+  python3 Tests/libs/clike/run_tests.py
 ```
 
 The helper script starts a small HTTP server for exercising the networking

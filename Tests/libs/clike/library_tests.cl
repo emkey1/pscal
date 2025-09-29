@@ -9,6 +9,11 @@ import "math_utils.cl";
 int executedTests = 0;
 int failedTests = 0;
 int skippedTests = 0;
+str DOUBLE_QUOTE = tochar(34);
+
+str quote(str value) {
+    return DOUBLE_QUOTE + value + DOUBLE_QUOTE;
+}
 
 void markPass(str name) {
     executedTests = executedTests + 1;
@@ -54,7 +59,7 @@ void assertEqualStr(str name, str expected, str actual) {
     if (expected == actual) {
         markPass(name);
     } else {
-        markFail(name, "expected \"" + expected + "\" but got \"" + actual + "\"");
+        markFail(name, "expected " + quote(expected) + " but got " + quote(actual));
     }
 }
 
@@ -133,7 +138,8 @@ void testHttp(str baseUrl, str tmpDir) {
     str jsonBody = http_getJson(baseUrl + "/json");
     assertTrue("http.getJson accept header", strings_contains(jsonBody, "application/json"), "expected Accept header to be echoed");
 
-    str postSummary = http_postJson(baseUrl + "/post-json", "{\"hello\": \"world\"}");
+    str postPayload = "{" + quote("hello") + ": " + quote("world") + "}";
+    str postSummary = http_postJson(baseUrl + "/post-json", postPayload);
     assertTrue("http.postJson response", strings_contains(postSummary, "method: POST"), "unexpected POST summary");
 
     str putSummary = http_put(baseUrl + "/text", "payload", "text/plain");
@@ -167,7 +173,14 @@ void testJson(str jsonPath) {
     }
 
     printf("\n-- json --\n");
-    int doc = json_parse('{"name":"pscal","version":3,"enabled":true,"values":[1,2],"missing":null}');
+    str inlineJson =
+        "{" +
+        quote("name") + ":" + quote("pscal") + "," +
+        quote("version") + ":3," +
+        quote("enabled") + ":true," +
+        quote("values") + ":[1,2]," +
+        quote("missing") + ":null}";
+    int doc = json_parse(inlineJson);
     assertTrue("json.parse", doc >= 0, "expected parse to succeed");
     int root = json_root(doc);
     assertTrue("json.root", root >= 0, "expected root handle");
