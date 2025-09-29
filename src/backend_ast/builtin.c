@@ -202,7 +202,12 @@ static int sdlFetchReadKeyChar(void) {
 }
 #endif
 #ifndef SDL
-static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
+#if defined(__GNUC__) || defined(__clang__)
+#define SDL_UNUSED_FUNC __attribute__((unused))
+#else
+#define SDL_UNUSED_FUNC
+#endif
+static Value SDL_UNUSED_FUNC vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     (void)arg_count;
     (void)args;
     const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
@@ -213,10 +218,10 @@ static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     return makeNil();
 }
 #define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
+#undef SDL_UNUSED_FUNC
 #else
 #define SDL_HANDLER(fn) fn
 #endif
->>>>>>> origin/codex/fix-keystroke-registration-in-game-window
 
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
@@ -1946,8 +1951,8 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
+    int c = 0;
 #ifdef SDL
-    int c;
     if (sdlIsGraphicsActive()) {
         c = sdlFetchReadKeyChar();
         if (c < 0) {
