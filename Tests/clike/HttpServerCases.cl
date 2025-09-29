@@ -26,6 +26,12 @@ int main() {
   printf("E %d\n", code);
   mstreamfree(&e);
 
+  // Test server error without runtime crash
+  mstream se = mstreamcreate();
+  code = httprequest(s, "GET", base + "/error503", NULL, se);
+  printf("S %d %s\n", code, httplasterror(s));
+  mstreamfree(&se);
+
   httpclose(s);
   return 0;
 }
