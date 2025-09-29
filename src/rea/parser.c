@@ -369,7 +369,6 @@ void addCompilerConstant(const char* name, const Value* value, int line); // fro
 static AST *parseExpression(ReaParser *p); // forward for array helpers
 static AST *parseStringLiteralSequence(ReaParser *p);
 static AST *parseWriteArgument(ReaParser *p); // forward
-static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList);
 
 // Debug tracing for parser steps (enabled with REA_DEBUG_PARSE=1)
 /* parser debug tracing removed */
@@ -760,109 +759,6 @@ static AST *parseWriteArgument(ReaParser *p) {
         return fmtNode;
     }
     return expr;
-}
-
-// Transform printf-style calls into a sequence of write arguments.
-static void transformPrintfArgs(ReaParser *p, AST *call, AST *argList) {
-    size_t nextArg = 0;
-    if (!call || !argList) return;
-    if (argList->child_count > 0 && argList->children[0] &&
-        argList->children[0]->type == AST_STRING &&
-        argList->children[0]->token && argList->children[0]->token->value) {
-        AST *fmtNode = argList->children[0];
-        char *fmt = fmtNode->token->value;
-        int line = fmtNode->token->line;
-        size_t flen = strlen(fmt);
-        char *seg = (char*)malloc(flen + 1);
-        size_t seglen = 0;
-        nextArg = 1;
-        for (size_t i = 0; i < flen; ++i) {
-            if (fmt[i] == '%' && i + 1 < flen) {
-                if (fmt[i + 1] == '%') {
-                    seg[seglen++] = '%';
-                    i++;
-                } else {
-                    size_t j = i + 1;
-                    int width = 0;
-                    int precision = -1;
-                    while (j < flen && isdigit((unsigned char)fmt[j])) {
-                        width = width * 10 + (fmt[j] - '0');
-                        j++;
-                    }
-                    if (j < flen && fmt[j] == '.') {
-                        j++;
-                        precision = 0;
-                        while (j < flen && isdigit((unsigned char)fmt[j])) {
-                            precision = precision * 10 + (fmt[j] - '0');
-                            j++;
-                        }
-                    }
-                    const char *length_mods = "hlLjzt";
-                    while (j < flen && strchr(length_mods, fmt[j]) != NULL) {
-                        j++;
-                    }
-                    const char *specifiers = "cdiuoxXfFeEgGaAspn";
-                    if (j < flen && strchr(specifiers, fmt[j]) != NULL) {
-                        char spec = fmt[j];
-                        const char *supported = "cdiufFeEgGaAsc";
-                        if (!strchr(supported, spec)) {
-                            fprintf(stderr, "L%d: Unsupported printf format specifier '%c'.\n", line, spec);
-                            if (p) p->hadError = true;
-                            for (size_t k = i; k <= j && k < flen; ++k) {
-                                seg[seglen++] = fmt[k];
-                            }
-                            i = j; // skip specifier
-                        } else if (nextArg < (size_t)argList->child_count) {
-                            if (seglen > 0) {
-                                seg[seglen] = '\0';
-                                Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
-                                AST *segNode = newASTNode(AST_STRING, segTok);
-                                segNode->i_val = (int)seglen;
-                                setTypeAST(segNode, TYPE_STRING);
-                                addChild(call, segNode);
-                                seglen = 0;
-                            }
-                            AST *expr = argList->children[nextArg++];
-                            if (width > 0 || precision >= 0) {
-                                char fmtbuf[32];
-                                snprintf(fmtbuf, sizeof(fmtbuf), "%d,%d", width, precision);
-                                Token *fmtTok = newToken(TOKEN_STRING_CONST, fmtbuf, line, 0);
-                                AST *fmtExpr = newASTNode(AST_FORMATTED_EXPR, fmtTok);
-                                setLeft(fmtExpr, expr);
-                                setTypeAST(fmtExpr, TYPE_UNKNOWN);
-                                addChild(call, fmtExpr);
-                            } else {
-                                addChild(call, expr);
-                            }
-                            i = j; // skip specifier
-                        } else {
-                            seg[seglen++] = '%';
-                        }
-                    } else {
-                        seg[seglen++] = '%';
-                    }
-                }
-            } else {
-                seg[seglen++] = fmt[i];
-            }
-        }
-        if (seglen > 0) {
-            seg[seglen] = '\0';
-            Token *segTok = newToken(TOKEN_STRING_CONST, seg, line, 0);
-            AST *segNode = newASTNode(AST_STRING, segTok);
-            segNode->i_val = (int)seglen;
-            setTypeAST(segNode, TYPE_STRING);
-            addChild(call, segNode);
-        }
-        free(seg);
-        freeAST(fmtNode);
-    }
-    for (; nextArg < (size_t)argList->child_count; ++nextArg) {
-        if (argList->children[nextArg]) addChild(call, argList->children[nextArg]);
-    }
-    argList->children = NULL;
-    argList->child_count = 0;
-    argList->child_capacity = 0;
 }
 
 static int isTypeKeywordToken(ReaTokenType t) {
@@ -1266,11 +1162,25 @@ static AST *parseFactor(ReaParser *p) {
             }
             AST *call = NULL;
             if (isPrintf) {
-                call = newASTNode(AST_WRITE, NULL);
-                transformPrintfArgs(p, call, call_args);
+                call = newASTNode(AST_PROCEDURE_CALL, tok);
+                if (call_args && call_args->child_count > 0) {
+                    call->children = call_args->children;
+                    call->child_count = call_args->child_count;
+                    call->child_capacity = call_args->child_capacity;
+                    for (int i = 0; i < call->child_count; i++) {
+                        if (call->children[i]) call->children[i]->parent = call;
+                    }
+                    call_args->children = NULL;
+                    call_args->child_count = 0;
+                    call_args->child_capacity = 0;
+                }
                 if (call_args) freeAST(call_args);
-                freeToken(tok);
-                if (callTypeArgs) freeAST(callTypeArgs);
+                if (callTypeArgs && call) {
+                    call->extra = callTypeArgs;
+                    callTypeArgs->parent = call;
+                } else if (callTypeArgs) {
+                    freeAST(callTypeArgs);
+                }
             } else {
                 if (tok && tok->value && strcasecmp(tok->value, "writeln") == 0) {
                     call = newASTNode(AST_WRITELN, NULL);

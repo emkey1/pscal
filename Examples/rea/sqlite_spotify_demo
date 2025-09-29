@@ -13,6 +13,9 @@ bool downloadDataset(str url, str path);
 bool setupDatabase(int db);
 int importSpotifyCsv(str path, int db);
 bool bindField(int stmt, int index, str value);
+str repeatChar(char ch, int count);
+str padRight(str value, int width);
+str padLeft(str value, int width);
 void showTopArtists(int db);
 void showGenreOverview(int db);
 void showDanceableTracks(int db);
@@ -85,6 +88,57 @@ bool downloadDataset(str url, str path) {
 
   writeln("Saved dataset to ", path, " (", length(body), " bytes).");
   return true;
+}
+
+str repeatChar(char ch, int count) {
+  if (count <= 0) {
+    return "";
+  }
+  str result;
+  setlength(result, count);
+  int i = 0;
+  while (i < count) {
+    result[i + 1] = ch;
+    i = i + 1;
+  }
+  return result;
+}
+
+str padRight(str value, int width) {
+  int len = length(value);
+  if (len >= width) {
+    if (len == width) {
+      return value;
+    }
+    str truncated;
+    setlength(truncated, width);
+    int i = 0;
+    while (i < width) {
+      truncated[i + 1] = value[i + 1];
+      i = i + 1;
+    }
+    return truncated;
+  }
+  return value + repeatChar(' ', width - len);
+}
+
+str padLeft(str value, int width) {
+  int len = length(value);
+  if (len >= width) {
+    if (len == width) {
+      return value;
+    }
+    str truncated;
+    setlength(truncated, width);
+    int start = len - width + 1;
+    int i = 0;
+    while (i < width) {
+      truncated[i + 1] = value[start + i];
+      i = i + 1;
+    }
+    return truncated;
+  }
+  return repeatChar(' ', width - len) + value;
 }
 
 bool setupDatabase(int db) {
@@ -341,24 +395,29 @@ void showTopArtists(int db) {
   writeln();
   writeln("Top artists by track count:");
   int stmt = SqlitePrepare(db,
-    "SELECT track_artist, COUNT(*) AS track_count,"
-    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity"
-    " FROM spotify_songs"
-    " GROUP BY track_artist"
+    "SELECT track_artist, track_count,"
+    " printf('%.1f', avg_popularity) AS avg_popularity_str"
+    " FROM ("
+    "   SELECT track_artist,"
+    "          COUNT(*) AS track_count,"
+    "          AVG(CAST(track_popularity AS REAL)) AS avg_popularity"
+    "   FROM spotify_songs"
+    "   GROUP BY track_artist"
+    " )"
     " ORDER BY track_count DESC, avg_popularity DESC"
     " LIMIT 10;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
   }
-  printf("%-32s %10s %16s\n", "Artist", "Tracks", "Avg Popularity");
-  printf("%-32s %10s %16s\n", "--------------------------------", "----------", "----------------");
+  writeln(padRight("Artist", 32), " ", padLeft("Tracks", 10), " ", padLeft("Avg Popularity", 16));
+  writeln(padRight(repeatChar('-', 32), 32), " ", padLeft(repeatChar('-', 10), 10), " ", padLeft(repeatChar('-', 16), 16));
   int rc = SqliteStep(stmt);
   while (rc == 100) {
     str artist = SqliteColumnText(stmt, 0);
     int trackCount = SqliteColumnInt(stmt, 1);
-    double avgPopularity = SqliteColumnDouble(stmt, 2);
-    printf("%-32s %10d %16.1f\n", artist, trackCount, avgPopularity);
+    str avgPopularity = SqliteColumnText(stmt, 2);
+    writeln(padRight(artist, 32), " ", padLeft(inttostr(trackCount), 10), " ", padLeft(avgPopularity, 16));
     rc = SqliteStep(stmt);
   }
   if (rc != 101) {
@@ -371,27 +430,37 @@ void showGenreOverview(int db) {
   writeln();
   writeln("Playlist genres ranked by energy and popularity:");
   int stmt = SqlitePrepare(db,
-    "SELECT playlist_genre, COUNT(*) AS track_count,"
-    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity,"
-    " ROUND(AVG(CAST(danceability AS REAL)), 3) AS avg_danceability,"
-    " ROUND(AVG(CAST(energy AS REAL)), 3) AS avg_energy"
-    " FROM spotify_songs"
-    " GROUP BY playlist_genre"
-    " ORDER BY avg_popularity DESC;");
+    "SELECT playlist_genre, track_count,"
+    " printf('%.1f', avg_popularity) AS avg_popularity_str,"
+    " printf('%.3f', avg_danceability) AS avg_danceability_str,"
+    " printf('%.3f', avg_energy) AS avg_energy_str"
+    " FROM ("
+    "   SELECT playlist_genre,"
+    "          COUNT(*) AS track_count,"
+    "          AVG(CAST(track_popularity AS REAL)) AS avg_popularity,"
+    "          AVG(CAST(danceability AS REAL)) AS avg_danceability,"
+    "          AVG(CAST(energy AS REAL)) AS avg_energy"
+    "   FROM spotify_songs"
+    "   GROUP BY playlist_genre"
+    " )"
+    " ORDER BY avg_energy DESC, avg_popularity DESC;");
   if (stmt < 0) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
   }
-  printf("%-16s %10s %16s %18s %14s\n", "Genre", "Tracks", "Avg Popularity", "Avg Danceability", "Avg Energy");
-  printf("%-16s %10s %16s %18s %14s\n", "----------------", "----------", "----------------", "------------------", "--------------");
+  writeln(padRight("Genre", 16), " ", padLeft("Tracks", 10), " ", padLeft("Avg Popularity", 16),
+         " ", padLeft("Avg Danceability", 18), " ", padLeft("Avg Energy", 14));
+  writeln(padRight(repeatChar('-', 16), 16), " ", padLeft(repeatChar('-', 10), 10), " ", padLeft(repeatChar('-', 16), 16),
+         " ", padLeft(repeatChar('-', 18), 18), " ", padLeft(repeatChar('-', 14), 14));
   int rc = SqliteStep(stmt);
   while (rc == 100) {
     str genre = SqliteColumnText(stmt, 0);
     int trackCount = SqliteColumnInt(stmt, 1);
-    double avgPopularity = SqliteColumnDouble(stmt, 2);
-    double avgDance = SqliteColumnDouble(stmt, 3);
-    double avgEnergy = SqliteColumnDouble(stmt, 4);
-    printf("%-16s %10d %16.1f %18.3f %14.3f\n", genre, trackCount, avgPopularity, avgDance, avgEnergy);
+    str avgPopularity = SqliteColumnText(stmt, 2);
+    str avgDance = SqliteColumnText(stmt, 3);
+    str avgEnergy = SqliteColumnText(stmt, 4);
+    writeln(padRight(genre, 16), " ", padLeft(inttostr(trackCount), 10), " ", padLeft(avgPopularity, 16),
+           " ", padLeft(avgDance, 18), " ", padLeft(avgEnergy, 14));
     rc = SqliteStep(stmt);
   }
   if (rc != 101) {
@@ -405,9 +474,9 @@ void showDanceableTracks(int db) {
   writeln("Most danceable tracks in the dataset:");
   int stmt = SqlitePrepare(db,
     "SELECT track_name, track_artist,"
-    " ROUND(CAST(danceability AS REAL), 3) AS danceability,"
-    " ROUND(CAST(energy AS REAL), 3) AS energy,"
-    " ROUND(CAST(track_popularity AS REAL), 1) AS popularity"
+    " printf('%.3f', CAST(danceability AS REAL)) AS danceability,"
+    " printf('%.3f', CAST(energy AS REAL)) AS energy,"
+    " printf('%.1f', CAST(track_popularity AS REAL)) AS popularity"
     " FROM spotify_songs"
     " ORDER BY CAST(danceability AS REAL) DESC, CAST(track_popularity AS REAL) DESC"
     " LIMIT 10;");
@@ -415,16 +484,19 @@ void showDanceableTracks(int db) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
   }
-  printf("%-40s %-24s %12s %10s %12s\n", "Track", "Artist", "Danceability", "Energy", "Popularity");
-  printf("%-40s %-24s %12s %10s %12s\n", "----------------------------------------", "------------------------", "------------", "----------", "------------");
+  writeln(padRight("Track", 40), " ", padRight("Artist", 24), " ", padLeft("Danceability", 12),
+         " ", padLeft("Energy", 10), " ", padLeft("Popularity", 12));
+  writeln(padRight(repeatChar('-', 40), 40), " ", padRight(repeatChar('-', 24), 24), " ", padLeft(repeatChar('-', 12), 12),
+         " ", padLeft(repeatChar('-', 10), 10), " ", padLeft(repeatChar('-', 12), 12));
   int rc = SqliteStep(stmt);
   while (rc == 100) {
     str name = SqliteColumnText(stmt, 0);
     str artist = SqliteColumnText(stmt, 1);
-    double dance = SqliteColumnDouble(stmt, 2);
-    double energy = SqliteColumnDouble(stmt, 3);
-    double pop = SqliteColumnDouble(stmt, 4);
-    printf("%-40s %-24s %12.3f %10.3f %12.1f\n", name, artist, dance, energy, pop);
+    str dance = SqliteColumnText(stmt, 2);
+    str energy = SqliteColumnText(stmt, 3);
+    str pop = SqliteColumnText(stmt, 4);
+    writeln(padRight(name, 40), " ", padRight(artist, 24), " ", padLeft(dance, 12),
+           " ", padLeft(energy, 10), " ", padLeft(pop, 12));
     rc = SqliteStep(stmt);
   }
   if (rc != 101) {
@@ -437,7 +509,7 @@ void showReleaseYearSummary(int db) {
   writeln();
   writeln("Years with the most releases in this snapshot:");
   int stmt = SqlitePrepare(db,
-    "SELECT release_year, track_count, ROUND(avg_popularity, 1)"
+    "SELECT release_year, track_count, printf('%.1f', avg_popularity) AS avg_popularity_str"
     " FROM ("
     "   SELECT substr(track_album_release_date, 1, 4) AS release_year,"
     "          COUNT(*) AS track_count,"
@@ -453,14 +525,14 @@ void showReleaseYearSummary(int db) {
     writeln("Query preparation failed: ", SqliteErrMsg(db));
     return;
   }
-  printf("%-8s %12s %18s\n", "Year", "Tracks", "Avg Popularity");
-  printf("%-8s %12s %18s\n", "--------", "------------", "------------------");
+  writeln(padRight("Year", 8), " ", padLeft("Tracks", 12), " ", padLeft("Avg Popularity", 18));
+  writeln(padRight(repeatChar('-', 8), 8), " ", padLeft(repeatChar('-', 12), 12), " ", padLeft(repeatChar('-', 18), 18));
   int rc = SqliteStep(stmt);
   while (rc == 100) {
     str year = SqliteColumnText(stmt, 0);
     int trackCount = SqliteColumnInt(stmt, 1);
-    double avgPopularity = SqliteColumnDouble(stmt, 2);
-    printf("%-8s %12d %18.1f\n", year, trackCount, avgPopularity);
+    str avgPopularity = SqliteColumnText(stmt, 2);
+    writeln(padRight(year, 8), " ", padLeft(inttostr(trackCount), 12), " ", padLeft(avgPopularity, 18));
     rc = SqliteStep(stmt);
   }
   if (rc != 101) {
@@ -480,13 +552,20 @@ void showGenreBreakdown(int db) {
   }
 
   int stmt = SqlitePrepare(db,
-    "SELECT playlist_subgenre, COUNT(*) AS track_count,"
-    " ROUND(AVG(CAST(track_popularity AS REAL)), 1) AS avg_popularity,"
-    " ROUND(AVG(CAST(danceability AS REAL)), 3) AS avg_danceability,"
-    " ROUND(AVG(CAST(energy AS REAL)), 3) AS avg_energy"
-    " FROM spotify_songs"
-    " WHERE playlist_genre = ?1"
-    " GROUP BY playlist_subgenre"
+    "SELECT playlist_subgenre, track_count,"
+    " printf('%.1f', avg_popularity) AS avg_popularity_str,"
+    " printf('%.3f', avg_danceability) AS avg_danceability_str,"
+    " printf('%.3f', avg_energy) AS avg_energy_str"
+    " FROM ("
+    "   SELECT playlist_subgenre,"
+    "          COUNT(*) AS track_count,"
+    "          AVG(CAST(track_popularity AS REAL)) AS avg_popularity,"
+    "          AVG(CAST(danceability AS REAL)) AS avg_danceability,"
+    "          AVG(CAST(energy AS REAL)) AS avg_energy"
+    "   FROM spotify_songs"
+    "   WHERE playlist_genre = ?1"
+    "   GROUP BY playlist_subgenre"
+    " )"
     " ORDER BY track_count DESC, avg_popularity DESC"
     " LIMIT 15;");
   if (stmt < 0) {
@@ -501,19 +580,22 @@ void showGenreBreakdown(int db) {
     return;
   }
 
-  printf("Breakdown for playlist genre '%s':\n", genre);
-  printf("%-28s %10s %16s %18s %14s\n", "Subgenre", "Tracks", "Avg Popularity", "Avg Danceability", "Avg Energy");
-  printf("%-28s %10s %16s %18s %14s\n", "----------------------------", "----------", "----------------", "------------------", "--------------");
+  writeln("Breakdown for playlist genre '", genre, "':");
+  writeln(padRight("Subgenre", 28), " ", padLeft("Tracks", 10), " ", padLeft("Avg Popularity", 16),
+         " ", padLeft("Avg Danceability", 18), " ", padLeft("Avg Energy", 14));
+  writeln(padRight(repeatChar('-', 28), 28), " ", padLeft(repeatChar('-', 10), 10), " ", padLeft(repeatChar('-', 16), 16),
+         " ", padLeft(repeatChar('-', 18), 18), " ", padLeft(repeatChar('-', 14), 14));
   bool any = false;
   int rc = SqliteStep(stmt);
   while (rc == 100) {
     any = true;
     str subgenre = SqliteColumnText(stmt, 0);
     int trackCount = SqliteColumnInt(stmt, 1);
-    double avgPopularity = SqliteColumnDouble(stmt, 2);
-    double avgDance = SqliteColumnDouble(stmt, 3);
-    double avgEnergy = SqliteColumnDouble(stmt, 4);
-    printf("%-28s %10d %16.1f %18.3f %14.3f\n", subgenre, trackCount, avgPopularity, avgDance, avgEnergy);
+    str avgPopularity = SqliteColumnText(stmt, 2);
+    str avgDance = SqliteColumnText(stmt, 3);
+    str avgEnergy = SqliteColumnText(stmt, 4);
+    writeln(padRight(subgenre, 28), " ", padLeft(inttostr(trackCount), 10), " ", padLeft(avgPopularity, 16),
+           " ", padLeft(avgDance, 18), " ", padLeft(avgEnergy, 14));
     rc = SqliteStep(stmt);
   }
   if (rc != 101) {
