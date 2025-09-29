@@ -5971,13 +5971,24 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
                         case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
                         case TOKEN_INT_DIV: {
-                            bool emit_real_div = isRealType(node->var_type);
-                            if (!emit_real_div && node->left) {
-                                emit_real_div = isRealType(node->left->var_type);
+                            bool left_is_real = node->left && isRealType(node->left->var_type);
+                            bool right_is_real = node->right && isRealType(node->right->var_type);
+
+                            bool left_is_intlike = node->left && isIntlikeType(node->left->var_type);
+                            bool right_is_intlike = node->right && isIntlikeType(node->right->var_type);
+                            bool result_is_intlike = isIntlikeType(node->var_type);
+
+                            bool emit_real_div = false;
+
+                            if (left_is_real || right_is_real) {
+                                emit_real_div = true;
+                            } else if (!(left_is_intlike && right_is_intlike && result_is_intlike)) {
+                                // If we can't prove both operands (and the result) are integer-like,
+                                // fall back to real division. The VM's INT_DIV must never receive
+                                // a real operand at runtime.
+                                emit_real_div = true;
                             }
-                            if (!emit_real_div && node->right) {
-                                emit_real_div = isRealType(node->right->var_type);
-                            }
+
                             writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
                             break;
                         }
