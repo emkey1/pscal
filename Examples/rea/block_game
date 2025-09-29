@@ -35,7 +35,7 @@ class Tetromino {
 }
 
 class Board {
-    int grid[BoardHeight][BoardWidth];
+    int grid[BoardWidth * BoardHeight];
     int score;
     int level;
     int lines;
@@ -44,11 +44,9 @@ class Board {
         myself.score = 0;
         myself.level = 1;
         myself.lines = 0;
-        int i, j;
-        for (i = 0; i < BoardHeight; i = i + 1) {
-            for (j = 0; j < BoardWidth; j = j + 1) {
-                myself.grid[i][j] = 0;
-            }
+        int i;
+        for (i = 0; i < BoardWidth * BoardHeight; i = i + 1) {
+            myself.grid[i] = 0;
         }
     }
     
@@ -63,7 +61,7 @@ class Board {
                 if (shape[i * 4 + j] == '1') {
                     int newX = x + j;
                     int newY = y + i;
-                    if (!myself.isValidPosition(newX, newY) || myself.grid[newY][newX] != 0) {
+                    if (!myself.isValidPosition(newX, newY) || myself.grid[newY * BoardWidth + newX] != 0) {
                         return true;
                     }
                 }
@@ -80,7 +78,7 @@ class Board {
                     int newX = x + j;
                     int newY = y + i;
                     if (myself.isValidPosition(newX, newY)) {
-                        myself.grid[newY][newX] = color;
+                        myself.grid[newY * BoardWidth + newX] = color;
                     }
                 }
             }
@@ -90,11 +88,11 @@ class Board {
     void clearLines() {
         int linesCleared = 0;
         int i, j, k;
-        
+
         for (i = BoardHeight - 1; i >= 0; i = i - 1) {
             bool fullLine = true;
             for (j = 0; j < BoardWidth; j = j + 1) {
-                if (myself.grid[i][j] == 0) {
+                if (myself.grid[i * BoardWidth + j] == 0) {
                     fullLine = false;
                     break;
                 }
@@ -105,12 +103,12 @@ class Board {
                 // Shift all lines above down
                 for (k = i; k > 0; k = k - 1) {
                     for (j = 0; j < BoardWidth; j = j + 1) {
-                        myself.grid[k][j] = myself.grid[k-1][j];
+                        myself.grid[k * BoardWidth + j] = myself.grid[(k - 1) * BoardWidth + j];
                     }
                 }
                 // Clear top line
                 for (j = 0; j < BoardWidth; j = j + 1) {
-                    myself.grid[0][j] = 0;
+                    myself.grid[j] = 0;
                 }
                 i = i + 1; // Check same row again
             }
@@ -125,17 +123,17 @@ class Board {
         }
     }
     
-    void draw() {
+    void draw(int offsetX, int offsetY) {
         int i, j;
         for (i = 0; i < BoardHeight; i = i + 1) {
             for (j = 0; j < BoardWidth; j = j + 1) {
-                if (myself.grid[i][j] != 0) {
-                    setrgbcolor(
-                        myself.grid[i][j] & 0xFF,
-                        (myself.grid[i][j] >> 8) & 0xFF,
-                        (myself.grid[i][j] >> 16) & 0xFF
-                    );
-                    fillrect(j * CellSize, i * CellSize, CellSize - 1, CellSize - 1);
+                int value = myself.grid[i * BoardWidth + j];
+                if (value != 0) {
+                    int r = value % 256;
+                    int g = (value / 256) % 256;
+                    int b = value / 65536;
+                    setrgbcolor(r, g, b);
+                    fillrect(offsetX + j * CellSize, offsetY + i * CellSize, CellSize - 1, CellSize - 1);
                 }
             }
         }
@@ -177,30 +175,30 @@ class Game {
     
     void spawnPiece() {
         // Simplified tetromino shapes
-        str shapes[7] = [
-            "0000011110000", // I
-            "000011110000",  // O
-            "000001110100",  // T
-            "000001101100",  // S
-            "000011001100",  // Z
-            "000000111100",  // J
-            "000001111000"   // L
-        ];
-        
-        int colors[7][3] = [
-            [0, 255, 255],   // Cyan
-            [255, 255, 0],   // Yellow
-            [128, 0, 128],   // Purple
-            [0, 255, 0],     // Green
-            [255, 0, 0],     // Red
-            [0, 0, 255],     // Blue
-            [255, 165, 0]    // Orange
-        ];
-        
+        str shapes[7];
+        shapes[0] = "0000011110000"; // I
+        shapes[1] = "000011110000";  // O
+        shapes[2] = "000001110100";  // T
+        shapes[3] = "000001101100";  // S
+        shapes[4] = "000011001100";  // Z
+        shapes[5] = "000000111100";  // J
+        shapes[6] = "000001111000";  // L
+
+        int colorR[7];
+        int colorG[7];
+        int colorB[7];
+        colorR[0] = 0;   colorG[0] = 255; colorB[0] = 255; // Cyan
+        colorR[1] = 255; colorG[1] = 255; colorB[1] = 0;   // Yellow
+        colorR[2] = 128; colorG[2] = 0;   colorB[2] = 128; // Purple
+        colorR[3] = 0;   colorG[3] = 255; colorB[3] = 0;   // Green
+        colorR[4] = 255; colorG[4] = 0;   colorB[4] = 0;   // Red
+        colorR[5] = 0;   colorG[5] = 0;   colorB[5] = 255; // Blue
+        colorR[6] = 255; colorG[6] = 165; colorB[6] = 0;   // Orange
+
         myself.currentShape = shapes[myself.nextShape];
-        myself.currentColor = (colors[myself.nextShape][0] & 0xFF) |
-                              ((colors[myself.nextShape][1] & 0xFF) << 8) |
-                              ((colors[myself.nextShape][2] & 0xFF) << 16);
+        myself.currentColor = colorR[myself.nextShape] +
+                              colorG[myself.nextShape] * 256 +
+                              colorB[myself.nextShape] * 65536;
         myself.nextShape = random(7);
         myself.currentX = BoardWidth / 2 - 2;
         myself.currentY = 0;
@@ -271,16 +269,15 @@ class Game {
         }
         
         // Draw placed pieces
-        myself.board.draw();
+        myself.board.draw(BoardX, BoardY);
         
         // Draw current piece
         if (!myself.gameOver) {
             int x, y;
-            setrgbcolor(
-                myself.currentColor & 0xFF,
-                (myself.currentColor >> 8) & 0xFF,
-                (myself.currentColor >> 16) & 0xFF
-            );
+            int currentR = myself.currentColor % 256;
+            int currentG = (myself.currentColor / 256) % 256;
+            int currentB = myself.currentColor / 65536;
+            setrgbcolor(currentR, currentG, currentB);
             for (y = 0; y < 4; y = y + 1) {
                 for (x = 0; x < 4; x = x + 1) {
                     if (myself.currentShape[y * 4 + x] == '1') {
