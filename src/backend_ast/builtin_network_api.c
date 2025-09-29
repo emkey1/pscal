@@ -1891,21 +1891,23 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     lookupSocketInfo(s, &family, &socktype);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    if (family == AF_INET || family == AF_INET6) {
-        hints.ai_family = family;
-#ifdef AF_INET6
-        if (family == AF_INET6) {
-#ifdef AI_V4MAPPED
-            hints.ai_flags |= AI_V4MAPPED;
-#endif
-#ifdef AI_ALL
-            hints.ai_flags |= AI_ALL;
-#endif
-        }
-#endif
-    } else {
-        hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_UNSPEC;
+    if (family == AF_INET) {
+        hints.ai_family = AF_INET;
     }
+#ifdef AF_INET6
+    else if (family == AF_INET6) {
+#ifdef AI_V4MAPPED
+        hints.ai_family = AF_INET6;
+        hints.ai_flags |= AI_V4MAPPED;
+#ifdef AI_ALL
+        hints.ai_flags |= AI_ALL;
+#endif
+#else
+        hints.ai_family = AF_UNSPEC;
+#endif
+    }
+#endif
     hints.ai_socktype = socktype;
 #ifdef AI_ADDRCONFIG
     if (hints.ai_family == AF_UNSPEC) {
