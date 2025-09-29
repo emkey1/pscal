@@ -1024,6 +1024,42 @@ add({
 })
 
 add({
+    "id": "const_class_member_initializer_uses_prior_const",
+    "name": "Class const initialisers see earlier consts",
+    "category": "const_scope",
+    "description": "Constants declared inside a class may reference earlier constants from the same class.",
+    "expect": "runtime_ok",
+    "code": """
+        const int GLOBAL_SHIFT = 3;
+
+        class Layout {
+            const int BaseY = 10;
+            const int Height = BaseY + GLOBAL_SHIFT + 2;
+            int captured;
+
+            void Layout() {
+                myself.captured = Height;
+            }
+
+            int combined() {
+                return Height + BaseY;
+            }
+        }
+
+        int main() {
+            Layout layout = new Layout();
+            writeln("captured=", layout.captured);
+            writeln("combined=", layout.combined());
+            return 0;
+        }
+    """,
+    "expected_stdout": """
+        captured=15
+        combined=25
+    """,
+})
+
+add({
     "id": "const_random_shadow_pass",
     "name": "Randomised const shadow allowed",
     "category": "const_scope",
