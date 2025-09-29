@@ -1404,6 +1404,41 @@ static const char *opLexeme(TokenType t) {
     }
 }
 
+static VarType promoteRealBinaryType(VarType a, VarType b) {
+    if (a == TYPE_LONG_DOUBLE || b == TYPE_LONG_DOUBLE) return TYPE_LONG_DOUBLE;
+    if (a == TYPE_DOUBLE || b == TYPE_DOUBLE) return TYPE_DOUBLE;
+    if (a == TYPE_FLOAT || b == TYPE_FLOAT) return TYPE_FLOAT;
+    return TYPE_DOUBLE;
+}
+
+static VarType promoteIntegralBinaryType(VarType a, VarType b) {
+    if (a == TYPE_UNKNOWN) return b == TYPE_UNKNOWN ? TYPE_INT32 : b;
+    if (b == TYPE_UNKNOWN) return a;
+
+    static const VarType order[] = {
+        TYPE_INT64,
+        TYPE_UINT64,
+        TYPE_INT32,
+        TYPE_UINT32,
+        TYPE_INT16,
+        TYPE_UINT16,
+        TYPE_INT8,
+        TYPE_UINT8,
+        TYPE_WORD,
+        TYPE_BYTE,
+        TYPE_BOOLEAN,
+        TYPE_CHAR
+    };
+    size_t count = sizeof(order) / sizeof(order[0]);
+    for (size_t i = 0; i < count; i++) {
+        VarType t = order[i];
+        if (a == t || b == t) {
+            return t;
+        }
+    }
+    return TYPE_INT32;
+}
+
 static AST *parseTerm(ReaParser *p) {
     AST *node = parseFactor(p);
     // Handle postfix ++/-- on the parsed primary/lvalue
@@ -1447,6 +1482,8 @@ static AST *parseTerm(ReaParser *p) {
         VarType lt = node->var_type;
         VarType rt = right->var_type;
         TokenType tt = mapOp(op.type);
+        bool leftReal = isRealType(lt);
+        bool rightReal = isRealType(rt);
         if (tt == TOKEN_SLASH && isIntlikeType(lt) && isIntlikeType(rt)) {
             tt = TOKEN_INT_DIV;
         }
@@ -1455,12 +1492,11 @@ static AST *parseTerm(ReaParser *p) {
         setLeft(bin, node);
         setRight(bin, right);
         VarType res;
-        if (tt == TOKEN_SLASH || lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) {
-            res = TYPE_DOUBLE;
-        } else if (lt == TYPE_INT64 || rt == TYPE_INT64) {
-            res = TYPE_INT64;
+        bool forceReal = (tt == TOKEN_SLASH) || leftReal || rightReal;
+        if (forceReal) {
+            res = promoteRealBinaryType(lt, rt);
         } else {
-            res = TYPE_INT32;
+            res = promoteIntegralBinaryType(lt, rt);
         }
         setTypeAST(bin, res);
         node = bin;
@@ -1484,14 +1520,14 @@ static AST *parseAdditive(ReaParser *p) {
         VarType lt = node->var_type;
         VarType rt = right->var_type;
         VarType res;
+        bool leftReal = isRealType(lt);
+        bool rightReal = isRealType(rt);
         if (tt == TOKEN_PLUS && (lt == TYPE_STRING || rt == TYPE_STRING || lt == TYPE_CHAR || rt == TYPE_CHAR)) {
             res = TYPE_STRING;
-        } else if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) {
-            res = TYPE_DOUBLE;
-        } else if (lt == TYPE_INT64 || rt == TYPE_INT64) {
-            res = TYPE_INT64;
+        } else if (leftReal || rightReal) {
+            res = promoteRealBinaryType(lt, rt);
         } else {
-            res = TYPE_INT32;
+            res = promoteIntegralBinaryType(lt, rt);
         }
         setTypeAST(bin, res);
         node = bin;
