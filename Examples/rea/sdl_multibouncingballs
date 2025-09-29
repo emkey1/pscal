@@ -99,7 +99,7 @@ class BallsApp {
     randomize();
     myself.maxX = getmaxx();
     myself.maxY = getmaxy();
-    myself.FrameDelay = trunc(1000 / TargetFPS);
+    myself.FrameDelay = trunc(1000.0 / float(TargetFPS));
     int i = 1;
     while (i <= NumBalls) {
       Ball b = new Ball();
