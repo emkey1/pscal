@@ -30,6 +30,193 @@
 #define MAX_WRITE_ARGS_VM 32
 
 /* SDL-backed builtins are registered dynamically when available. */
+#ifdef SDL
+#define SDL_READKEY_BUFFER_CAPACITY 8
+static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
+static int gSdlReadKeyBufferStart = 0;
+static int gSdlReadKeyBufferCount = 0;
+
+static bool sdlReadKeyBufferHasData(void) {
+    return gSdlReadKeyBufferCount > 0;
+}
+
+static int sdlReadKeyBufferPop(void) {
+    if (!sdlReadKeyBufferHasData()) {
+        return 0;
+    }
+
+    int value = gSdlReadKeyBuffer[gSdlReadKeyBufferStart];
+    gSdlReadKeyBufferStart = (gSdlReadKeyBufferStart + 1) % SDL_READKEY_BUFFER_CAPACITY;
+    gSdlReadKeyBufferCount--;
+    return value & 0xFF;
+}
+
+static void sdlReadKeyBufferPushBytes(const int* bytes, int length) {
+    if (!bytes || length <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < length; ++i) {
+        if (gSdlReadKeyBufferCount >= SDL_READKEY_BUFFER_CAPACITY) {
+            break;
+        }
+        int tail = (gSdlReadKeyBufferStart + gSdlReadKeyBufferCount) % SDL_READKEY_BUFFER_CAPACITY;
+        gSdlReadKeyBuffer[tail] = bytes[i] & 0xFF;
+        gSdlReadKeyBufferCount++;
+    }
+}
+
+static int sdlTranslateKeycode(SDL_Keycode code, int* extraBytes, int* extraCount) {
+    if (extraBytes) {
+        extraBytes[0] = 0;
+        extraBytes[1] = 0;
+        extraBytes[2] = 0;
+        extraBytes[3] = 0;
+    }
+    if (extraCount) {
+        *extraCount = 0;
+    }
+
+    switch (code) {
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            return '\r';
+        case SDLK_BACKSPACE:
+            return '\b';
+        case SDLK_TAB:
+            return '\t';
+        case SDLK_ESCAPE:
+            return 27;
+        case SDLK_DELETE:
+            return 127;
+        case SDLK_LEFT:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'D';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_RIGHT:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'C';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_UP:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'A';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_DOWN:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'B';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_HOME:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'H';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_END:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'F';
+                *extraCount = 2;
+            }
+            return 27;
+        default:
+            break;
+    }
+
+    if (code >= SDLK_KP_0 && code <= SDLK_KP_9) {
+        return '0' + (int)(code - SDLK_KP_0);
+    }
+
+    switch (code) {
+        case SDLK_KP_PERIOD:
+            return '.';
+        case SDLK_KP_DIVIDE:
+            return '/';
+        case SDLK_KP_MULTIPLY:
+            return '*';
+        case SDLK_KP_MINUS:
+            return '-';
+        case SDLK_KP_PLUS:
+            return '+';
+        case SDLK_KP_EQUALS:
+            return '=';
+        default:
+            break;
+    }
+
+    if (code >= 32 && code <= 126) {
+        return (int)code;
+    }
+
+    if (code >= 0 && code <= 255) {
+        return (int)(code & 0xFF);
+    }
+
+    return 0;
+}
+
+static int sdlFetchReadKeyChar(void) {
+    if (!sdlIsGraphicsActive()) {
+        return -1;
+    }
+
+    if (sdlReadKeyBufferHasData()) {
+        return sdlReadKeyBufferPop();
+    }
+
+    int extraBytes[4];
+    SDL_Keycode keycode;
+
+    for (;;) {
+        keycode = sdlWaitNextKeycode();
+        if (keycode == SDLK_UNKNOWN) {
+            return 0;
+        }
+
+        int extraCount = 0;
+        int translated = sdlTranslateKeycode(keycode, extraBytes, &extraCount);
+        if (extraCount > 0) {
+            sdlReadKeyBufferPushBytes(extraBytes, extraCount);
+        }
+
+        if (translated != 0) {
+            return translated & 0xFF;
+        }
+
+        if (sdlReadKeyBufferHasData()) {
+            return sdlReadKeyBufferPop();
+        }
+    }
+}
+#endif
+#ifndef SDL
+static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
+    (void)arg_count;
+    (void)args;
+    const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
+    runtimeError(vm, "Built-in '%s' requires SDL support. Rebuild with -DSDL=ON to enable it.", name);
+    if (vm) {
+        vm->abort_requested = true;
+    }
+    return makeNil();
+}
+#define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
+#else
+#define SDL_HANDLER(fn) fn
+#endif
+>>>>>>> origin/codex/fix-keystroke-registration-in-game-window
 
 // Per-thread state to keep core builtins thread-safe
 static _Thread_local DIR* dos_dir = NULL; // Used by dosFindfirst/findnext
@@ -1739,6 +1926,14 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
         return makeBoolean(false);
     }
+#ifdef SDL
+    if (sdlIsGraphicsActive()) {
+        if (sdlReadKeyBufferHasData()) {
+            return makeBoolean(true);
+        }
+        return makeBoolean(sdlHasPendingKeycode());
+    }
+#endif
     vmEnableRawMode();
 
     int bytes_available = 0;
@@ -1751,25 +1946,37 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
-    vmEnableRawMode();
+#ifdef SDL
+    int c;
+    if (sdlIsGraphicsActive()) {
+        c = sdlFetchReadKeyChar();
+        if (c < 0) {
+            c = 0;
+        }
+    } else
+#endif
+    {
+        vmEnableRawMode();
 
-    unsigned char ch_byte;
-    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-        ch_byte = '\0';
+        unsigned char ch_byte;
+        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+            ch_byte = '\0';
+        }
+        c = ch_byte;
     }
-    int c = ch_byte;
+    c &= 0xFF;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
             runtimeError(vm, "ReadKey argument must be a VAR char.");
         } else {
             Value* dst = (Value*)args[0].ptr_val;
-                if (dst->type == TYPE_CHAR) {
-                    dst->c_val = c;
-                    SET_INT_VALUE(dst, dst->c_val);
-                } else {
-                    runtimeError(vm, "ReadKey argument must be of type CHAR.");
-                }
+            if (dst->type == TYPE_CHAR) {
+                dst->c_val = c;
+                SET_INT_VALUE(dst, dst->c_val);
+            } else {
+                runtimeError(vm, "ReadKey argument must be of type CHAR.");
+            }
         }
     }
 

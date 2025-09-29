@@ -35,6 +35,9 @@ extern bool gSdlImageInitialized;
 
 void sdlEnsureInputWatch(void);
 bool sdlCachedKeyDown(SDL_Scancode sc);
+bool sdlIsGraphicsActive(void);
+bool sdlHasPendingKeycode(void);
+SDL_Keycode sdlWaitNextKeycode(void);
 
 
 // System Functions
