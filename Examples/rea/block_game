@@ -1,5 +1,4 @@
 #!/usr/bin/env rea
-// Tetris Clone in Rea
 // Uses SDL for graphics and input handling
 
 const int BoardWidth = 10;
@@ -348,10 +347,10 @@ class Game {
     }
     
     void run() {
-        initgraph(WindowWidth, WindowHeight, "Rea Tetris");
+        initgraph(WindowWidth, WindowHeight, "Rea Block Game");
         randomize();
         
-        writeln("Tetris - Use A/D to move, S to drop, W to rotate, Space for hard drop. Press Q to quit.");
+        writeln("Block Game - Use A/D to move, S to drop, W to rotate, Space for hard drop. Press Q to quit.");
         
         float lastTime = 0.0;
         bool quit = false;
@@ -378,7 +377,7 @@ class Game {
         }
         
         closegraph();
-        writeln("Thanks for playing Tetris!");
+        writeln("Thanks for playing Block Game!");
     }
 }
 
