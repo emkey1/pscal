@@ -132,8 +132,8 @@ class Board {
                 int value = myself.grid[i * BoardWidth + j];
                 if (value != 0) {
                     int r = value % 256;
-                    int g = (value / 256) % 256;
-                    int b = value / 65536;
+                    int g = int(value / 256) % 256;
+                    int b = int(value / 65536);
                     setrgbcolor(r, g, b);
                     fillrect(offsetX + j * CellSize, offsetY + i * CellSize, CellSize - 1, CellSize - 1);
                 }
@@ -277,8 +277,8 @@ class Game {
         if (!myself.gameOver) {
             int x, y;
             int currentR = myself.currentColor % 256;
-            int currentG = (myself.currentColor / 256) % 256;
-            int currentB = myself.currentColor / 65536;
+            int currentG = int(myself.currentColor / 256) % 256;
+            int currentB = int(myself.currentColor / 65536);
             setrgbcolor(currentR, currentG, currentB);
             for (y = 0; y < 4; y = y + 1) {
                 for (x = 0; x < 4; x = x + 1) {
