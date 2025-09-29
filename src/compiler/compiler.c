@@ -33,34 +33,6 @@ static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
 
-static bool nodeDefinitelyIntlike(const AST *node) {
-    if (!node) return false;
-    if (isIntlikeType(node->var_type)) {
-        return true;
-    }
-    if (node->type == AST_NUMBER && node->token) {
-        switch (node->token->type) {
-            case TOKEN_INTEGER_CONST:
-            case TOKEN_HEX_CONST:
-                return true;
-            default:
-                break;
-        }
-    }
-    return false;
-}
-
-static bool nodeDefinitelyReal(const AST *node) {
-    if (!node) return false;
-    if (isRealType(node->var_type)) {
-        return true;
-    }
-    if (node->type == AST_NUMBER && node->token && node->token->type == TOKEN_REAL_CONST) {
-        return true;
-    }
-    return false;
-}
-
 typedef struct {
     int constant_index;
     int original_address;
@@ -5999,20 +5971,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
                         case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
                         case TOKEN_INT_DIV: {
-                            bool left_intlike = nodeDefinitelyIntlike(node->left);
-                            bool right_intlike = nodeDefinitelyIntlike(node->right);
-                            bool result_intlike = isIntlikeType(node->var_type);
-
-                            if (!result_intlike && node->var_type == TYPE_UNKNOWN && left_intlike && right_intlike) {
-                                result_intlike = true;
+                            bool emit_real_div = isRealType(node->var_type);
+                            if (!emit_real_div && node->left) {
+                                emit_real_div = isRealType(node->left->var_type);
                             }
-
-                            bool emit_real_div = true;
-                            if (result_intlike && left_intlike && right_intlike &&
-                                !nodeDefinitelyReal(node->left) && !nodeDefinitelyReal(node->right)) {
-                                emit_real_div = false;
+                            if (!emit_real_div && node->right) {
+                                emit_real_div = isRealType(node->right->var_type);
                             }
-
                             writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
                             break;
                         }
