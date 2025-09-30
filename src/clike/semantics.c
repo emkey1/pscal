@@ -1227,6 +1227,20 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
     globalVars.count = 0;
     ScopeStack globalsScope = {0};
     ssPush(&globalsScope);
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_VAR_DECL) {
+                char *name = tokenToCString(decl->token);
+                if (ssAdd(&globalsScope, name, decl->var_type, decl, decl->is_const)) {
+                    vtAdd(&globalVars, name, decl->var_type, decl, decl->is_const);
+                }
+                if (decl->left) analyzeExpr(decl->left, &globalsScope);
+                free(name);
+            }
+        }
+    }
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {

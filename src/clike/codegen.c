@@ -1662,6 +1662,23 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
     globalVarCount = 0;
 
+    typedef struct {
+        ASTNodeClike *prog;
+        char *source;
+        char *allocated_path;
+    } LoadedModule;
+
+    LoadedModule *modules = NULL;
+    size_t moduleCapacity = (size_t)clike_import_count;
+    if (moduleCapacity > 0) {
+        modules = (LoadedModule*)calloc(moduleCapacity, sizeof(LoadedModule));
+        if (!modules) {
+            fprintf(stderr, "CLike codegen error: failed to allocate module cache.\n");
+            EXIT_FAILURE_HANDLER();
+            return;
+        }
+    }
+
     // Compile global variable declarations first so they are initialized
     // before main is invoked.
     for (int i = 0; i < program->child_count; ++i) {
@@ -1671,22 +1688,21 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
         }
     }
 
-    // Predeclare all functions so forward references are recognized.
-    predeclareFunctions(program);
-
-    // Emit a call to main after globals have been defined.
-    writeBytecodeChunk(chunk, CALL_USER_PROC, 0);
-    int mainNameIdx = addStringConstant(chunk, "main");
-    emitShort(chunk, (uint16_t)mainNameIdx, 0);
-    int mainArityPatch = chunk->count;
-    writeBytecodeChunk(chunk, 0, 0);
-    writeBytecodeChunk(chunk, HALT, 0);
-
-    bool mainDefined = false;
-    uint8_t mainArity = 0;
-
-    // Compile imported modules before the main program
+    // Load imported modules so their globals can be defined before main runs.
     for (int i = 0; i < clike_import_count; ++i) {
+        if ((size_t)i >= moduleCapacity) {
+            size_t newCapacity = (size_t)clike_import_count;
+            LoadedModule *resized = (LoadedModule*)realloc(modules, newCapacity * sizeof(LoadedModule));
+            if (!resized) {
+                fprintf(stderr, "CLike codegen error: failed to expand module cache.\n");
+                EXIT_FAILURE_HANDLER();
+                return;
+            }
+            modules = resized;
+            memset(modules + moduleCapacity, 0, (newCapacity - moduleCapacity) * sizeof(LoadedModule));
+            moduleCapacity = newCapacity;
+        }
+        LoadedModule *mod = &modules[i];
         const char *orig_path = clike_imports[i];
         const char *path = orig_path;
         char *allocated_path = NULL;
@@ -1696,33 +1712,39 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
             if (lib_dir && *lib_dir) {
                 size_t len = strlen(lib_dir) + 1 + strlen(orig_path) + 1;
                 allocated_path = (char*)malloc(len);
-                snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
-                f = fopen(allocated_path, "rb");
-                if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+                if (allocated_path) {
+                    snprintf(allocated_path, len, "%s/%s", lib_dir, orig_path);
+                    f = fopen(allocated_path, "rb");
+                    if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+                }
             }
         }
         if (!f) {
             const char *default_dir = "/usr/local/pscal/clike/lib";
             size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
             allocated_path = (char*)malloc(len);
-            snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
-            f = fopen(allocated_path, "rb");
-            if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+            if (allocated_path) {
+                snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);
+                f = fopen(allocated_path, "rb");
+                if (f) path = allocated_path; else { free(allocated_path); allocated_path = NULL; }
+            }
         }
         if (!f) {
             fprintf(stderr, "Could not open import '%s'\n", orig_path);
+            if (allocated_path) free(allocated_path);
             continue;
         }
         fseek(f, 0, SEEK_END);
         long len = ftell(f);
         rewind(f);
         char *src = (char*)malloc(len + 1);
-        if (!src) { fclose(f); continue; }
+        if (!src) { fclose(f); if (allocated_path) free(allocated_path); continue; }
         size_t bytes_read = fread(src, 1, len, f);
         if (bytes_read != (size_t)len) {
             fprintf(stderr, "Error reading import '%s'\n", orig_path);
             free(src);
             fclose(f);
+            if (allocated_path) free(allocated_path);
             continue;
         }
         src[len] = '\0';
@@ -1736,6 +1758,7 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
             fprintf(stderr, "AST verification failed for module '%s' after parsing.\n", path);
             freeASTClike(modProg);
             free(src);
+            if (allocated_path) free(allocated_path);
             EXIT_FAILURE_HANDLER();
             return;
         }
@@ -1746,19 +1769,50 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
             fprintf(stderr, "AST verification failed for module '%s' after semantic analysis.\n", path);
             freeASTClike(modProg);
             free(src);
+            if (allocated_path) free(allocated_path);
             EXIT_FAILURE_HANDLER();
             return;
         }
-        predeclareFunctions(modProg);
+
         for (int j = 0; j < modProg->child_count; ++j) {
             ASTNodeClike *decl = modProg->children[j];
+            if (decl->type == TCAST_VAR_DECL) {
+                compileGlobalVar(decl, chunk);
+            }
+        }
+
+        mod->prog = modProg;
+        mod->source = src;
+        mod->allocated_path = allocated_path;
+    }
+
+    // Predeclare all functions so forward references are recognized.
+    predeclareFunctions(program);
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (modules[i].prog) {
+            predeclareFunctions(modules[i].prog);
+        }
+    }
+
+    // Emit a call to main after globals have been defined.
+    writeBytecodeChunk(chunk, CALL_USER_PROC, 0);
+    int mainNameIdx = addStringConstant(chunk, "main");
+    emitShort(chunk, (uint16_t)mainNameIdx, 0);
+    int mainArityPatch = chunk->count;
+    writeBytecodeChunk(chunk, 0, 0);
+    writeBytecodeChunk(chunk, HALT, 0);
+
+    bool mainDefined = false;
+    uint8_t mainArity = 0;
+
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
             if (decl->type == TCAST_FUN_DECL) {
                 compileFunction(decl, chunk);
             }
         }
-        freeASTClike(modProg);
-        free(src);
-        if (allocated_path) free(allocated_path);
     }
 
     for (int i = 0; i < program->child_count; ++i) {
@@ -1784,8 +1838,12 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     patchForwardCalls(chunk);
 
     for (int i = 0; i < clike_import_count; ++i) {
+        if (modules && modules[i].prog) freeASTClike(modules[i].prog);
+        if (modules && modules[i].source) free(modules[i].source);
+        if (modules && modules[i].allocated_path) free(modules[i].allocated_path);
         free(clike_imports[i]);
     }
+    if (modules) free(modules);
     free(clike_imports);
     clike_imports = NULL;
     clike_import_count = 0;

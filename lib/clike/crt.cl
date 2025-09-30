@@ -17,3 +17,36 @@ int CRT_LIGHT_MAGENTA() { return 13; }
 int CRT_YELLOW() { return 14; }
 int CRT_WHITE() { return 15; }
 int CRT_BLINK() { return 128; }
+
+int CRT_currentTextAttr = 7;
+
+int CRT_normalizeTextAttr(int attr) {
+    int normalized = attr % 256;
+    if (normalized < 0) {
+        normalized = normalized + 256;
+    }
+    return normalized;
+}
+
+void CRT_applyTextAttrToTerminal(int attr) {
+    int foreground = attr % 16;
+    int background = (attr / 16) % 8;
+    int blink = attr / 128;
+
+    normvideo();
+    textcolor(foreground);
+    textbackground(background);
+    if (blink != 0) {
+        blinktext();
+    }
+}
+
+int CRT_getTextAttr() {
+    return CRT_currentTextAttr;
+}
+
+void CRT_setTextAttr(int attr) {
+    int normalized = CRT_normalizeTextAttr(attr);
+    CRT_currentTextAttr = normalized;
+    CRT_applyTextAttrToTerminal(normalized);
+}

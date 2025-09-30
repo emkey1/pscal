@@ -67,7 +67,16 @@ void testCRT() {
     printf("\n-- CRT --\n");
     assertEqualInt("CRT.BLACK", 0, CRT_BLACK());
     assertEqualInt("CRT.LIGHT_RED", 12, CRT_LIGHT_RED());
-    markSkip("CRT.TextAttr", "mutable TextAttr not available in module-safe runtime");
+    int originalAttr = CRT_getTextAttr();
+    assertEqualInt("CRT.TextAttr default", CRT_LIGHT_GRAY(), originalAttr);
+
+    CRT_setTextAttr(CRT_GREEN());
+    assertEqualInt("CRT.TextAttr assignment", CRT_GREEN(), CRT_getTextAttr());
+
+    CRT_setTextAttr(0);
+    assertEqualInt("CRT.TextAttr zero assignment", 0, CRT_getTextAttr());
+
+    CRT_setTextAttr(originalAttr);
 }
 
 void testMathUtils() {
