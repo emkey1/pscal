@@ -20,6 +20,8 @@
 #include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
 #include <ctype.h>
+#include <limits.h>
+#include <math.h>
 #include <string.h>
 #include <strings.h>
 
@@ -1465,12 +1467,25 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
     }
-    if (!IS_INTLIKE(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
+    long long ms;
+    if (IS_INTLIKE(args[0]) || args[0].type == TYPE_WORD || args[0].type == TYPE_BYTE) {
+        ms = AS_INTEGER(args[0]);
+    } else if (isRealType(args[0].type)) {
+        double delay = AS_REAL(args[0]);
+        if (!isfinite(delay)) {
+            runtimeError(vm, "GraphLoop delay must be finite.");
+            return makeVoid();
+        }
+        if (delay > (double)LLONG_MAX || delay < (double)LLONG_MIN) {
+            runtimeError(vm, "GraphLoop delay is out of range.");
+            return makeVoid();
+        }
+        ms = (long long)delay;
+    } else {
         runtimeError(vm, "GraphLoop argument must be an integer-like type.");
         return makeVoid();
     }
 
-    long long ms = AS_INTEGER(args[0]);
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
