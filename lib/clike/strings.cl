@@ -126,12 +126,12 @@ str strings_toUpper(str value) {
     str result = "";
     int i = 1;
     while (i <= len) {
-        str ch = copy(value, i, 1);
+        char ch = value[i];
         int code = ord(ch);
-        if (code >= ord("a") && code <= ord("z")) {
-            code = code - 32;
+        if (code >= ord('a') && code <= ord('z')) {
+            ch = tochar(code - 32);
         }
-        result = result + tochar(code);
+        result = result + ch;
         i = i + 1;
     }
     return result;
@@ -145,12 +145,12 @@ str strings_toLower(str value) {
     str result = "";
     int i = 1;
     while (i <= len) {
-        str ch = copy(value, i, 1);
+        char ch = value[i];
         int code = ord(ch);
-        if (code >= ord("A") && code <= ord("Z")) {
-            code = code + 32;
+        if (code >= ord('A') && code <= ord('Z')) {
+            ch = tochar(code + 32);
         }
-        result = result + tochar(code);
+        result = result + ch;
         i = i + 1;
     }
     return result;
