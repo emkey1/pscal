@@ -64,6 +64,81 @@ static int exponentAfterDotHasDigits(ReaLexer *lexer) {
     return isDigit(c);
 }
 
+static int isExpressionTailChar(char c) {
+    return isAlphaNumeric(c) || c == '_' || c == ')' || c == ']';
+}
+
+static int hasExpressionSuffix(ReaLexer *lexer, size_t pos) {
+    for (size_t i = pos; ; i++) {
+        char c = lexer->source[i];
+        if (c == '\0' || c == '\n') return 0;
+        if (c == ' ' || c == '\t' || c == '\r') continue;
+        switch (c) {
+            case ';':
+            case ',':
+            case ')':
+            case ']':
+            case '}':
+            case '+':
+            case '-':
+            case '*':
+            case '%':
+            case '<':
+            case '>':
+            case '=':
+            case '&':
+            case '|':
+            case '^':
+            case '?':
+            case ':':
+            case '{':
+            case '.':
+                return 1;
+            default:
+                break;
+        }
+    }
+}
+
+static int slashStartsComment(ReaLexer *lexer) {
+    if (lexer->pos == 0) return 1;
+
+    size_t lookahead = lexer->pos + 2;
+    while (1) {
+        char next = lexer->source[lookahead];
+        if (next == ' ' || next == '\t' || next == '\r') {
+            lookahead++;
+            continue;
+        }
+        if (next == '\n' || next == '\0') {
+            lookahead = 0;
+        }
+        break;
+    }
+
+    int rightLooksLikeExpression = 0;
+    if (lookahead != 0) {
+        rightLooksLikeExpression = hasExpressionSuffix(lexer, lookahead);
+    }
+
+    size_t idx = lexer->pos;
+    while (idx > 0) {
+        char prev = lexer->source[idx - 1];
+        if (prev == ' ' || prev == '\t' || prev == '\r') {
+            idx--;
+            continue;
+        }
+        if (prev == '\n') {
+            return 1;
+        }
+        if (isExpressionTailChar(prev) && rightLooksLikeExpression) {
+            return 0;
+        }
+        return 1;
+    }
+    return 1;
+}
+
 static void skipWhitespace(ReaLexer *lexer) {
     for (;;) {
         char c = peek(lexer);
@@ -87,6 +162,9 @@ static void skipWhitespace(ReaLexer *lexer) {
                 break;
             case '/':
                 if (peekNext(lexer) == '/') {
+                    if (!slashStartsComment(lexer)) {
+                        return;
+                    }
                     lexer->pos += 2;
                     while (peek(lexer) != '\n' && peek(lexer) != '\0') {
                         lexer->pos++;
@@ -243,6 +321,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
+            if (match(lexer, '/')) {
+                return makeToken(lexer, REA_TOKEN_INT_DIV, start);
+            }
             return makeToken(lexer, REA_TOKEN_SLASH, start);
         case '%':
             return makeToken(lexer, REA_TOKEN_PERCENT, start);
@@ -395,6 +476,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
         case REA_TOKEN_STAR: return "STAR";
         case REA_TOKEN_SLASH: return "SLASH";
+        case REA_TOKEN_INT_DIV: return "INT_DIV";
         case REA_TOKEN_PERCENT: return "PERCENT";
         case REA_TOKEN_EQUAL: return "EQUAL";
         case REA_TOKEN_EQUAL_EQUAL: return "EQUAL_EQUAL";
