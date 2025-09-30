@@ -4076,7 +4076,7 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[1].type != TYPE_POINTER) {
-        runtimeError(vm, "Str expects (numeric, var string).");
+        runtimeError(vm, "Str expects (value, var string).");
         return makeVoid();
     }
     Value val = args[0];
@@ -4085,23 +4085,33 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Str received a nil pointer.");
         return makeVoid();
     }
-    char buffer[64];
-    switch (val.type) {
-        case TYPE_CHAR:
-            snprintf(buffer, sizeof(buffer), "%c", val.c_val);
-            break;
-        default:
-            if (IS_INTLIKE(val)) {
-                snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
-            } else if (isRealType(val.type)) {
-                snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
-            } else {
-                runtimeError(vm, "Str expects a numeric or char argument.");
-                return makeVoid();
-            }
-            break;
+
+    char* new_buf = NULL;
+    if (val.type == TYPE_STRING) {
+        const char* src = val.s_val ? val.s_val : "";
+        new_buf = strdup(src);
+    } else {
+        char buffer[64];
+        switch (val.type) {
+            case TYPE_CHAR:
+                snprintf(buffer, sizeof(buffer), "%c", val.c_val);
+                break;
+            case TYPE_BOOLEAN:
+                snprintf(buffer, sizeof(buffer), "%s", val.i_val ? "TRUE" : "FALSE");
+                break;
+            default:
+                if (IS_INTLIKE(val)) {
+                    snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
+                } else if (isRealType(val.type)) {
+                    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
+                } else {
+                    runtimeError(vm, "Str expects a numeric, char, or formatted string argument.");
+                    return makeVoid();
+                }
+                break;
+        }
+        new_buf = strdup(buffer);
     }
-    char* new_buf = strdup(buffer);
     if (!new_buf) {
         runtimeError(vm, "Str: memory allocation failed.");
         return makeVoid();
