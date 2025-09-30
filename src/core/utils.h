@@ -63,10 +63,8 @@ static const int pscalToAnsiBase[8] = {
     7  // Pscal LtGray  -> ANSI White (30/40 + 7)
 };
 
-static inline bool isIntlikeType(VarType t) {
+static inline bool isIntegerFamilyType(VarType t) {
     switch (t) {
-        case TYPE_WORD:
-        case TYPE_BYTE:
         case TYPE_INT8:
         case TYPE_UINT8:
         case TYPE_INT16:
@@ -75,7 +73,19 @@ static inline bool isIntlikeType(VarType t) {
         case TYPE_UINT32:
         case TYPE_INT64:
         case TYPE_UINT64:
+        case TYPE_BYTE:
+        case TYPE_WORD:
             return true;
+        default:
+            return false;
+    }
+}
+
+static inline bool isIntlikeType(VarType t) {
+    if (isIntegerFamilyType(t)) {
+        return true;
+    }
+    switch (t) {
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
             return true;
