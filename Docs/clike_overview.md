@@ -116,10 +116,10 @@ specification is available in
 ## Examples
 
 - Simple Web Server:
-  - Source: `Examples/clike/simple_web_server`
+  - Source: `Examples/clike/base/simple_web_server`
   - Serves static files from a root directory with a small worker pool and safe path handling.
   - Usage and details: see `Docs/simple_web_server.md`.
   - A basic `htdocs` tree is provided in the PSCAL clone at `lib/misc/simple_web_server/htdocs`.
 
 - HTTP client and sockets:
-  - See `Examples/clike/Http*` for HTTP demos and `Examples/clike/SocketEchoDemo` for a TCP echo server/client.
+  - See `Examples/clike/base/Http*` for HTTP demos and `Examples/clike/base/SocketEchoDemo` for a TCP echo server/client.

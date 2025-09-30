@@ -19,7 +19,7 @@ Date: 2025-09-18
   - Virtual dispatch for methods; `my`/`myself` for instance access; `super` for parent calls.
   - Familiar control flow and expressions (C-like precedence), plus access to VM built-ins.
   - Docs: `Docs/rea_overview.md`, `Docs/rea_language_reference.md`, `Docs/rea_tutorial.md`.
-  - Examples: `Examples/rea/hello`, `showcase`, `method_demo`, plus SDL demos (`sdl_*`).
+  - Examples: `Examples/rea/base/hello`, `Examples/rea/base/showcase`, `Examples/rea/base/method_demo`, plus SDL demos under `Examples/rea/sdl`.
 - VM/Threads
   - Indirect call opcodes; thread entry supports an initial pointer argument.
 - Tools
@@ -27,8 +27,8 @@ Date: 2025-09-18
   - `pscaljson2bc`: compile AST JSON to bytecode; supports `--dump-bytecode` and `--dump-bytecode-only`.
   - Shell completions for `pscaljson2bc` (Bash/Zsh), optionally installed via CMake.
 - Examples
-  - Threads + procedure pointers demo: `Examples/Pascal/ThreadsProcPtrDemo`.
-  - CLike minimal HTTP server and docs: `Examples/clike/simple_web_server` + `Docs/simple_web_server.md`.
+  - Threads + procedure pointers demo: `Examples/pascal/base/ThreadsProcPtrDemo`.
+  - CLike minimal HTTP server and docs: `Examples/clike/base/simple_web_server` + `Docs/simple_web_server.md`.
 
 ## Improvements
 - Bytecode cache

@@ -1,5 +1,5 @@
 #!/usr/bin/env pascal
-PROGRAM SDLMandelbrotWithStatus;
+PROGRAM MandelbrotWithStatus;
 
 // USES System; // Implicit for Sqrt, Trunc, WriteLn etc. if not global
 

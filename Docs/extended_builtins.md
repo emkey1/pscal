@@ -283,7 +283,7 @@ end.
 Running the program prints:
 
 ```sh
-$ build/bin/pascal Examples/Pascal/ShowExtendedBuiltins
+$ build/bin/pascal Examples/pascal/base/ShowExtendedBuiltins
 PID = 12345
 After Swap: a=2 b=1
 ```
@@ -305,7 +305,7 @@ int main() {
 ```
 
 ```
-$ build/bin/clike Examples/clike/docs_examples/ShowExtendedBuiltins
+$ build/bin/clike Examples/clike/base/docs_examples/ShowExtendedBuiltins
 PID = 98106
 After Swap: a=2 b=1
 ```

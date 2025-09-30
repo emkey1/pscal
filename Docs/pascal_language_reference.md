@@ -343,4 +343,4 @@ end.
 Assignments and parameter passing perform signature checks (arity and simple parameter/return types).
 
 See also
-- A compact, runnable demo combining procedure/function pointers (including indirect calls) with the new thread helpers is available at `Examples/Pascal/ThreadsProcPtrDemo`.
+- A compact, runnable demo combining procedure/function pointers (including indirect calls) with the new thread helpers is available at `Examples/pascal/base/ThreadsProcPtrDemo`.

@@ -18,7 +18,7 @@ keys:
 - `args` – shell-style argument string.  Add multiple `args` entries if you want
   to append more pieces of the command line.
 - When launching the `pascal` front end pass the source file path directly as an
-  argument (`args = "Examples/Pascal/ThreadsProcPtrDemo.pas"`).  VM-specific
+  argument (`args = "Examples/pascal/base/ThreadsProcPtrDemo"`).  VM-specific
   flags such as `--input` are only accepted by binaries like `pscalvm` or
   `pscald`.
 - `working_dir` – optional working directory.  Relative paths are resolved from

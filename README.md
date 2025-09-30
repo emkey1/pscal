@@ -76,7 +76,7 @@ cd Tests;./run_all_tests
   If `RUN_SDL=1` is not set, the scripts may export `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` and skip SDL-specific tests to remain deterministic in CI.
 
 - Network tests: to keep CI deterministic, tests that require outbound network are guarded.
-  - Pascal examples include a demo (`Examples/Pascal/HttpHeadersNetDemo`) that only runs when `RUN_NET_TESTS=1` is set.
+  - Pascal examples include a demo (`Examples/pascal/base/HttpHeadersNetDemo`) that only runs when `RUN_NET_TESTS=1` is set.
   - The CLike test runner will skip any test with a `.net` sentinel file unless `RUN_NET_TESTS=1` is set.
 
 Note: On macOS, you may see benign LaunchServices/XPC warnings on stderr when running SDL tests in some environments.
@@ -97,7 +97,7 @@ cmake --build build --target run_threads_procptr_demo
 make -C Examples threads-procptr-demo
 ```
 
-The example source lives at `Examples/Pascal/ThreadsProcPtrDemo`.
+The example source lives at `Examples/pascal/base/ThreadsProcPtrDemo`.
 
 ## Tiny language front end (Written in Python)
 
@@ -135,29 +135,29 @@ build/bin/clike program.cl
 ```
 
 Sample programs demonstrating the C like front end are available in
-`Examples/clike`. For a step-by-step guide see
+`Examples/clike/base`. For a step-by-step guide see
 [Docs/clike_tutorial.md](Docs/clike_tutorial.md).
 
 ### Simple Web Server (CLike)
 
 A minimal HTTP server written in CLike is available at
-`Examples/clike/simple_web_server`. It serves files from a specified directory,
+`Examples/clike/base/simple_web_server`. It serves files from a specified directory,
 with `index.html` auto-detected for `/`, and includes a small worker pool and
 metrics.
 
 - Quick start (default port 5555, ephemeral root):
   ```sh
-  build/bin/clike Examples/clike/simple_web_server
+  build/bin/clike Examples/clike/base/simple_web_server
   ```
 - Serve an existing directory on port 8080:
   ```sh
-  build/bin/clike Examples/clike/simple_web_server 8080 /path/to/htdocs
+  build/bin/clike Examples/clike/base/simple_web_server 8080 /path/to/htdocs
   # or
-  build/bin/clike Examples/clike/simple_web_server /path/to/htdocs 8080
+  build/bin/clike Examples/clike/base/simple_web_server /path/to/htdocs 8080
   ```
 - Optional tuning (threads, queue cap):
   ```sh
-  build/bin/clike Examples/clike/simple_web_server /path 8080 16 128
+  build/bin/clike Examples/clike/base/simple_web_server /path 8080 16 128
   ```
 
 Documentation: see [Docs/simple_web_server.md](Docs/simple_web_server.md).

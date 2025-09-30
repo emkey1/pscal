@@ -31,9 +31,9 @@ writeln("c=", c.n);
 c.inc();
 writeln("c=", c.n);
 ```
-Example program demonstrating field assignment and method calls【F:Examples/rea/method_demo†L3-L19】.
+Example program demonstrating field assignment and method calls【F:Examples/rea/base/method_demo†L3-L19】.
 
-For additional examples and the full specification, see `rea_language_reference.md` and the sample programs under `Examples/rea`.
+For additional examples and the full specification, see `rea_language_reference.md` and the sample programs under `Examples/rea/base` and `Examples/rea/sdl`.
 
 ### The Name
 

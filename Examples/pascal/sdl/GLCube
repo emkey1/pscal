@@ -1,5 +1,5 @@
 #!/usr/bin/env pascal
-program SDLGLCube;
+program GLCube;
 
 const
   Width  = 800;
