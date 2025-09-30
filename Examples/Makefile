@@ -9,6 +9,6 @@ help:
 	@echo "  PASCAL_BIN=$(PASCAL_BIN)"
 
 threads-procptr-demo:
-	@echo "Running ThreadsProcPtrDemo..."
-	@$(PASCAL_BIN) Pascal/ThreadsProcPtrDemo
+        @echo "Running ThreadsProcPtrDemo..."
+        @$(PASCAL_BIN) pascal/base/ThreadsProcPtrDemo
 

@@ -152,9 +152,9 @@ int main() {
 }
 ```
 
-The repository includes `Examples/rea/sdl_demo`, which expands this into a
+The repository includes `Examples/rea/sdl/3demo`, which expands this into a
 complete rotating cube rendered with per-face colors, depth testing, and periodic
-swap-interval toggling. `Examples/rea/sdl_landscape` builds on the same helpers
+swap-interval toggling. `Examples/rea/sdl/landscape` builds on the same helpers
 to generate a seeded terrain height field and lets you roam it with `IsKeyDown`
 and `GLPerspective` for a first-person view.
 

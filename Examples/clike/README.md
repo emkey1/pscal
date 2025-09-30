@@ -24,10 +24,10 @@ build/bin/clike Examples/Clike/<program>
 - `hello` – Hello World!
 - `module_demo` – demonstrates importing `math_utils.cl` from the clike
    library search path.
-- `sdl_multibouncingballs` – SDL multi bouncing balls demo ported from Pascal.
-- `sdl_mandelbrot_interactive` – SDL Mandelbrot renderer using the MandelbrotRow builtin; left click to zoom in, right click to zoom out.
-- `sdl_smoke` – Rotating 3D cube demo that exercises the OpenGL helpers (requires building with SDL support).
-- `sdl_getmousestate` – SDL demo printing mouse coordinates and button states.
+- `multibouncingballs` – SDL multi bouncing balls demo ported from Pascal.
+- `mandelbrot_interactive` – SDL Mandelbrot renderer using the MandelbrotRow builtin; left click to zoom in, right click to zoom out.
+- `smoke` – Rotating 3D cube demo that exercises the OpenGL helpers (requires building with SDL support).
+- `getmousestate` – SDL demo printing mouse coordinates and button states.
 - `show_pid` – Uses an extended builtin function to show the process ID
 - `sqlite_yyjson_demo` – Uses extended builtins for SQLite and Yyjson to load
    JSON data into a database after checking availability with `#ifdef`
