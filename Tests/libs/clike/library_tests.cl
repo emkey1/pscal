@@ -130,8 +130,8 @@ void testHttp(str baseUrl, str tmpDir) {
     }
 
     printf("\n-- http --\n");
-    str text = http_get(baseUrl + "/text");
-    assertEqualStr("http.get", "hello world", text);
+    str getBody = http_get(baseUrl + "/text");
+    assertEqualStr("http.get", "hello world", getBody);
     assertEqualInt("http.get status", 200, http_lastResponseStatus());
     assertEqualInt("http.get success", 1, http_wasSuccessful());
 

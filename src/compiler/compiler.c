@@ -2303,6 +2303,50 @@ static bool globalVariableExists(const char* name) {
     return false;
 }
 
+static bool resolveUnitQualifiedGlobal(AST* node, char* outName, size_t outSize, Symbol** outSymbol) {
+    if (!node || node->type != AST_FIELD_ACCESS || !outName || outSize == 0) {
+        return false;
+    }
+
+    AST* base = node->left;
+    if (!base || base->type != AST_VARIABLE || !base->token || !base->token->value) {
+        return false;
+    }
+
+    if (!node->token || !node->token->value) {
+        return false;
+    }
+
+    char qualified_buf[MAX_SYMBOL_LENGTH * 2 + 2];
+    int written = snprintf(qualified_buf, sizeof(qualified_buf), "%s.%s", base->token->value, node->token->value);
+    if (written < 0 || written >= (int)sizeof(qualified_buf)) {
+        return false;
+    }
+    toLowerString(qualified_buf);
+
+    Symbol* sym = lookupGlobalSymbol(qualified_buf);
+    if (!sym) {
+        return false;
+    }
+
+    sym = resolveSymbolAlias(sym);
+    if (!sym) {
+        return false;
+    }
+
+    strncpy(outName, qualified_buf, outSize - 1);
+    outName[outSize - 1] = '\0';
+
+    node->var_type = sym->type;
+    node->type_def = sym->type_def;
+
+    if (outSymbol) {
+        *outSymbol = sym;
+    }
+
+    return true;
+}
+
 typedef struct {
     long long index;
     long long lower;
@@ -2717,6 +2761,21 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            Symbol* resolved_symbol = NULL;
+            if (resolveUnitQualifiedGlobal(node, qualified_name, sizeof(qualified_name), &resolved_symbol)) {
+                if (resolved_symbol && resolved_symbol->is_const) {
+                    fprintf(stderr, "L%d: Compiler error: Cannot assign to constant '%s'.\n", line, qualified_name);
+                    compiler_had_error = true;
+                    break;
+                }
+
+                int nameIndex = addStringConstant(chunk, qualified_name);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
+                                   nameIndex, line);
+                break;
+            }
+
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
                 if (const_ptr) {
@@ -5723,6 +5782,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            Symbol* resolved_symbol = NULL;
+            if (resolveUnitQualifiedGlobal(node, qualified_name, sizeof(qualified_name), &resolved_symbol)) {
+                if (resolved_symbol && resolved_symbol->is_const && resolved_symbol->value) {
+                    emitConstant(chunk, addConstantToChunk(chunk, resolved_symbol->value), line);
+                } else {
+                    int nameIndex = addStringConstant(chunk, qualified_name);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
+                                       nameIndex, line);
+                }
+                break;
+            }
+
             // If this field is a compile-time constant, embed its value directly.
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);

@@ -39,6 +39,7 @@
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
 #include "core/cache.h"
+#include "symbol/symbol.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,6 +118,10 @@ void initSymbolSystem(void) {
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
 
     insertGlobalSymbol("TextAttr", TYPE_BYTE, NULL);
+    Symbol *textAttrSym = lookupGlobalSymbol("TextAttr");
+    if (textAttrSym) {
+        insertGlobalAlias("CRT.TextAttr", textAttrSym);
+    }
     syncTextAttrSymbol();
 
     constGlobalSymbols = createHashTable();
