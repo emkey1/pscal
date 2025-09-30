@@ -651,8 +651,8 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
         }
     }
     if (range_error) {
-        runtimeError(vm, "Warning: Range check error assigning REAL %Lf to %s.",
-                    real_val, varTypeToString(dest->type));
+        runtimeWarning(vm, "Warning: Range check error assigning REAL %Lf to %s.",
+                       real_val, varTypeToString(dest->type));
     }
 }
 
@@ -758,32 +758,89 @@ void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     }
 }
 
-// runtimeError - Assuming your existing one is fine.
-void runtimeError(VM* vm, const char* format, ...) {
+static void computeRuntimeLocation(VM* vm, size_t* offset_out, int* line_out) {
+    size_t instruction_offset = 0;
+    int source_line = 0;
+
+    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
+        if (vm->lastInstruction >= vm->chunk->code) {
+            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
+            if (instruction_offset < (size_t)vm->chunk->count) {
+                source_line = vm->chunk->lines[instruction_offset];
+            }
+        }
+    } else if (vm && vm->chunk && vm->chunk->count > 0 && vm->chunk->lines) {
+        instruction_offset = 0;
+        source_line = vm->chunk->lines[0];
+    }
+
+    if (offset_out) {
+        *offset_out = instruction_offset;
+    }
+    if (line_out) {
+        *line_out = source_line;
+    }
+}
+
+static void emitRuntimeLocation(VM* vm, const char* label) {
+    size_t instruction_offset = 0;
+    int source_line = 0;
+    computeRuntimeLocation(vm, &instruction_offset, &source_line);
+
+    if (!label) {
+        label = "[Runtime Location]";
+    }
+
+    fprintf(stderr, "%s Offset: %zu, Line: %d\n", label, instruction_offset, source_line);
+}
+
+void runtimeWarning(VM* vm, const char* format, ...) {
+    if (isatty(STDOUT_FILENO)) {
+        fflush(stdout);
+        resetTextAttributes(stdout);
+        fflush(stdout);
+    }
+    if (isatty(STDERR_FILENO)) {
+        resetTextAttributes(stderr);
+    }
+
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
     fputc('\n', stderr);
+    fflush(stderr);
 
-    // Get precise instruction offset and line for the error.
-    // vm->lastInstruction points at the start of the instruction that ran last
-    // (the one that triggered the runtime error).
+    emitRuntimeLocation(vm, "[Warning Location]");
+}
+
+// runtimeError - Assuming your existing one is fine.
+void runtimeError(VM* vm, const char* format, ...) {
+    if (vm) {
+        vm->abort_requested = true;
+    }
+
+    if (isatty(STDOUT_FILENO)) {
+        fflush(stdout);
+        resetTextAttributes(stdout);
+        fflush(stdout);
+    }
+    if (isatty(STDERR_FILENO)) {
+        resetTextAttributes(stderr);
+    }
+
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    fflush(stderr);
+
     size_t instruction_offset = 0;
     int error_line = 0;
-    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
-        if (vm->lastInstruction >= vm->chunk->code) {
-            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
-            if (instruction_offset < (size_t)vm->chunk->count) {
-                error_line = vm->chunk->lines[instruction_offset];
-            }
-        }
-    } else if (vm && vm->chunk && vm->chunk->count > 0) {
-        // Special case: error on the very first instruction
-        instruction_offset = 0;
-        error_line = vm->chunk->lines[0];
-    }
-    fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+    computeRuntimeLocation(vm, &instruction_offset, &error_line);
+    (void)error_line;
+    emitRuntimeLocation(vm, "[Error Location]");
 
     // --- NEW: Dump crash context (instructions and full stack) ---
     fprintf(stderr, "\n--- VM Crash Context ---\n");
@@ -1507,7 +1564,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->upvalue_count = 0;
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
-            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            runtimeWarning(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
             freeValue(sym->value);
             *(sym->value) = array_val;
         }
@@ -1589,7 +1646,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
-            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            runtimeWarning(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
         }
     }
 
@@ -3293,13 +3350,13 @@ comparison_error_label:
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
-                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
+                            runtimeWarning(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
                         }
                         SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
-                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
+                            runtimeWarning(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
                         }
                         SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFFFF);
                     }

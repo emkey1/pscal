@@ -130,6 +130,7 @@ void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, 
 Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex);
 
 void runtimeError(VM* vm, const char* format, ...);
+void runtimeWarning(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
 

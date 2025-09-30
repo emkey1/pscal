@@ -2649,7 +2649,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE: {
             long long next = target->i_val + delta;
             if (next < 0 || next > 255) {
-                runtimeError(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFF);
             break;
@@ -2658,7 +2658,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_WORD: {
             long long next = target->i_val + delta;
             if (next < 0 || next > 65535) {
-                runtimeError(vm, "Warning: Range check error incrementing WORD to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing WORD to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFFFF);
             break;
@@ -2667,7 +2667,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_CHAR: {
             long long next = target->c_val + delta;
             if (next < 0 || next > PASCAL_CHAR_MAX) {
-                runtimeError(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
             SET_INT_VALUE(target, target->c_val);
@@ -2715,7 +2715,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE: {
             long long next = target->i_val - delta;
             if (next < 0 || next > 255) {
-                runtimeError(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFF);
             break;
@@ -2724,7 +2724,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_WORD: {
             long long next = target->i_val - delta;
             if (next < 0 || next > 65535) {
-                runtimeError(vm, "Warning: Range check error decrementing WORD to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing WORD to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFFFF);
             break;
@@ -2733,7 +2733,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_CHAR: {
             long long next = target->c_val - delta;
             if (next < 0 || next > PASCAL_CHAR_MAX) {
-                runtimeError(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
             SET_INT_VALUE(target, target->c_val);
