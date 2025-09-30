@@ -530,7 +530,7 @@ class Game {
             }
             
             myself.draw();
-            graphloop(myself.frameDelay);
+            graphloop(int(myself.frameDelay));
         }
         
         if (myself.gameOver) {
