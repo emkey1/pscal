@@ -53,6 +53,7 @@ void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const ch
 #endif // DEBUG
 
 AST *parseWriteArgument(Parser *parser);
+static AST *parseStrArgumentList(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
 
@@ -2135,7 +2136,12 @@ AST *statement(Parser *parser) {
                 if (has_args) {
                     eat(parser, TOKEN_LPAREN); // Consume '('
                     if (parser->current_token->type != TOKEN_RPAREN) {
-                        AST* args_compound = exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
+                        bool isStrCall = false;
+                        if (proc_call_node_to_use && proc_call_node_to_use->token && proc_call_node_to_use->token->value) {
+                            isStrCall = (strcasecmp(proc_call_node_to_use->token->value, "str") == 0);
+                        }
+
+                        AST* args_compound = isStrCall ? parseStrArgumentList(parser) : exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
 
                         // Argument Transfer Logic (same as your original, applied to proc_call_node_to_use)
                         if (args_compound && args_compound->type == AST_COMPOUND && args_compound->child_count > 0) {
@@ -2617,11 +2623,38 @@ AST *parseWriteArgument(Parser *parser) {
         int w=atoi(widthTok->value); int p=(precTok)?atoi(precTok->value):-1;
         char fs[32]; snprintf(fs,sizeof(fs),"%d,%d",w,p);
         fmt->token=newToken(TOKEN_STRING_CONST,fs, expr_line, expr_column); // Stores "width,precision"
+        setTypeAST(fmt, TYPE_STRING);
         freeToken(widthTok); if(precTok)freeToken(precTok);
         return fmt;
     } else {
         return exprNode; // No formatting
     }
+}
+
+// Parses the STR built-in argument list, allowing optional width/precision on the first argument.
+static AST *parseStrArgumentList(Parser *parser) {
+    AST *args = newASTNode(AST_COMPOUND, NULL);
+    if (!args) { return NULL; }
+
+    AST *first = parseWriteArgument(parser);
+    if (!first || first->type == AST_NOOP) {
+        errorParser(parser, "Expected expression for Str argument");
+        freeAST(args);
+        return NULL;
+    }
+    addChild(args, first);
+
+    while (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+        eat(parser, TOKEN_COMMA);
+        AST *next = expression(parser);
+        if (!next || next->type == AST_NOOP) {
+            errorParser(parser, "Expected expression after comma in Str arguments");
+            return args;
+        }
+        addChild(args, next);
+    }
+
+    return args;
 }
 
 AST *parseArrayInitializer(Parser *parser) {
@@ -2948,8 +2981,9 @@ AST *factor(Parser *parser) {
              node = funcCallNode; // The new procedure call node is now our main node.
 
              eat(parser, TOKEN_LPAREN);      // Eat '('
+             bool isStrCall = (node->token && node->token->value && strcasecmp(node->token->value, "str") == 0);
              if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
-                 AST* args = exprList(parser); // Parse argument list
+                 AST* args = isStrCall ? parseStrArgumentList(parser) : exprList(parser); // Parse argument list
                  if (!args || args->type == AST_NOOP) { errorParser(parser,"Bad arg list"); return node; }
                  // Transfer arguments safely
                  if (args && args->type == AST_COMPOUND && args->child_count > 0) {
