@@ -248,12 +248,16 @@ class Board {
         }
     }
 
-    void drawActivePiece(int offsetX, int offsetY, int x, int y,
-                         int shapeIndex, int rotation, int color) {
-        int activeR = color % 256;
-        int activeG = int(color / 256) % 256;
-        int activeB = int(color / 65536);
-        setrgbcolor(activeR, activeG, activeB);
+    void drawWithActivePiece(int offsetX, int offsetY, bool includeActive,
+                              int x, int y, int shapeIndex, int rotation, int color) {
+        if (!includeActive) {
+            myself.draw(offsetX, offsetY);
+            return;
+        }
+
+        int modifiedIndices[BlocksPerPiece];
+        int previousValues[BlocksPerPiece];
+        int modifiedCount = 0;
 
         int block;
         for (block = 0; block < BlocksPerPiece; block = block + 1) {
@@ -262,8 +266,19 @@ class Board {
             int drawX = x + offsetXBlock;
             int drawY = y + offsetYBlock;
             if (drawX >= 0 && drawX < BoardWidth && drawY >= 0 && drawY < BoardHeight) {
-                myself.fillCell(offsetX, offsetY, drawX, drawY);
+                int cellIndex = drawY * BoardWidth + drawX;
+                modifiedIndices[modifiedCount] = cellIndex;
+                previousValues[modifiedCount] = myself.grid[cellIndex];
+                myself.grid[cellIndex] = color;
+                modifiedCount = modifiedCount + 1;
             }
+        }
+
+        myself.draw(offsetX, offsetY);
+
+        int i;
+        for (i = 0; i < modifiedCount; i = i + 1) {
+            myself.grid[modifiedIndices[i]] = previousValues[i];
         }
     }
     
@@ -419,15 +434,11 @@ class Game {
             drawline(BoardX, BoardY + i * CellSize, BoardX + BoardWidth * CellSize, BoardY + i * CellSize);
         }
         
-        // Draw placed pieces
-        myself.board.draw(BoardX, BoardY);
-
-        // Draw current piece
-        if (!myself.gameOver) {
-            myself.board.drawActivePiece(BoardX, BoardY, myself.currentX, myself.currentY,
+        // Draw the board along with the active falling piece
+        myself.board.drawWithActivePiece(BoardX, BoardY, !myself.gameOver,
+                                         myself.currentX, myself.currentY,
                                          myself.currentShapeIndex, myself.currentRotation,
                                          myself.currentColor);
-        }
         
         // Draw score info
         setrgbcolor(255, 255, 255);
