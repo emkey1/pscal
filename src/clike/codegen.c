@@ -1669,8 +1669,9 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     } LoadedModule;
 
     LoadedModule *modules = NULL;
-    if (clike_import_count > 0) {
-        modules = (LoadedModule*)calloc(clike_import_count, sizeof(LoadedModule));
+    size_t moduleCapacity = (size_t)clike_import_count;
+    if (moduleCapacity > 0) {
+        modules = (LoadedModule*)calloc(moduleCapacity, sizeof(LoadedModule));
         if (!modules) {
             fprintf(stderr, "CLike codegen error: failed to allocate module cache.\n");
             EXIT_FAILURE_HANDLER();
@@ -1689,6 +1690,18 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
 
     // Load imported modules so their globals can be defined before main runs.
     for (int i = 0; i < clike_import_count; ++i) {
+        if ((size_t)i >= moduleCapacity) {
+            size_t newCapacity = (size_t)clike_import_count;
+            LoadedModule *resized = (LoadedModule*)realloc(modules, newCapacity * sizeof(LoadedModule));
+            if (!resized) {
+                fprintf(stderr, "CLike codegen error: failed to expand module cache.\n");
+                EXIT_FAILURE_HANDLER();
+                return;
+            }
+            modules = resized;
+            memset(modules + moduleCapacity, 0, (newCapacity - moduleCapacity) * sizeof(LoadedModule));
+            moduleCapacity = newCapacity;
+        }
         LoadedModule *mod = &modules[i];
         const char *orig_path = clike_imports[i];
         const char *path = orig_path;
