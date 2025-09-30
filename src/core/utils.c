@@ -1489,6 +1489,8 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
         EXIT_FAILURE_HANDLER();
     }
 
+    const char* unit_name_original = unit_ast->token ? unit_ast->token->value : NULL;
+
     // Walk the unit's symbol list and merge ONLY variables/constants into globals.
     Symbol *unit_symbol = unit_ast->symbol_table;
     while (unit_symbol) {
@@ -1518,6 +1520,13 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                 Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
                 updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
                 existing_global->is_const = true;
+            }
+
+            if (unit_name_original && *unit_name_original) {
+                char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+                snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name_original, unit_symbol->name);
+                toLowerString(qualified_name);
+                insertGlobalAlias(qualified_name, existing_global);
             }
 
             unit_symbol = unit_symbol->next;
@@ -1551,6 +1560,13 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
                         unit_symbol->name);
             Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
             updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
+        }
+
+        if (unit_name_original && *unit_name_original) {
+            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name_original, unit_symbol->name);
+            toLowerString(qualified_name);
+            insertGlobalAlias(qualified_name, g);
         }
 
         // NOTE:

@@ -330,6 +330,62 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     // The symbol is now owned by the hash table structure.
 }
 
+void insertGlobalAlias(const char *name, Symbol *target) {
+    if (!name || name[0] == '\0' || !target) {
+        return;
+    }
+
+    if (!globalSymbols) {
+        fprintf(stderr, "Internal error: globalSymbols hash table is NULL during insertGlobalAlias.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (lookupGlobalSymbol(name)) {
+        return;
+    }
+
+    Symbol *resolved = resolveSymbolAlias(target);
+    if (!resolved) {
+        return;
+    }
+
+    Symbol *alias = calloc(1, sizeof(Symbol));
+    if (!alias) {
+        fprintf(stderr, "Memory allocation error in insertGlobalAlias (Symbol struct)\n");
+        EXIT_FAILURE_HANDLER();
+    }
+
+    alias->name = strdup(name);
+    if (!alias->name) {
+        free(alias);
+        fprintf(stderr, "Memory allocation error (strdup name) in insertGlobalAlias\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    toLowerString(alias->name);
+
+    alias->type = resolved->type;
+    alias->value = resolved->value;
+    alias->is_const = resolved->is_const;
+    alias->is_local_var = false;
+    alias->is_inline = resolved->is_inline;
+    alias->type_def = resolved->type_def;
+    alias->next = NULL;
+    alias->enclosing = NULL;
+    alias->is_alias = true;
+    alias->real_symbol = resolved;
+    alias->is_defined = resolved->is_defined;
+    alias->bytecode_address = resolved->bytecode_address;
+    alias->arity = resolved->arity;
+    alias->locals_count = resolved->locals_count;
+    alias->slot_index = resolved->slot_index;
+    alias->upvalue_count = resolved->upvalue_count;
+    if (alias->upvalue_count > 0) {
+        memcpy(alias->upvalues, resolved->upvalues, sizeof(resolved->upvalues));
+    }
+
+    hashTableInsert(globalSymbols, alias);
+}
+
 // Insert a constant symbol into constGlobalSymbols.
 // Stores a copy of the provided Value and marks the symbol as const.
 void insertConstGlobalSymbol(const char *name, Value val) {
