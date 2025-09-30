@@ -32,6 +32,86 @@ begin
     JoinPath := dir + '/' + name;
 end;
 
+function SafeDivInt(numerator, denominator: integer): integer;
+var
+  quotient: double;
+  truncated: integer;
+begin
+  if denominator = 0 then
+  begin
+    SafeDivInt := 0;
+    exit;
+  end;
+  quotient := numerator / denominator;
+  truncated := trunc(quotient);
+  if (quotient < 0) and (quotient <> truncated) then
+    SafeDivInt := truncated - 1
+  else
+    SafeDivInt := truncated;
+end;
+
+function MapPscalColorToAnsiBase(color: integer): integer;
+var
+  normalized: integer;
+begin
+  normalized := color mod 8;
+  if normalized < 0 then
+    normalized := normalized + 8;
+  case normalized of
+    0: MapPscalColorToAnsiBase := 0;
+    1: MapPscalColorToAnsiBase := 4;
+    2: MapPscalColorToAnsiBase := 2;
+    3: MapPscalColorToAnsiBase := 6;
+    4: MapPscalColorToAnsiBase := 1;
+    5: MapPscalColorToAnsiBase := 5;
+    6: MapPscalColorToAnsiBase := 3;
+  else
+    MapPscalColorToAnsiBase := 7;
+  end;
+end;
+
+function BuildAnsiSequenceForAttr(attr: integer): string;
+var
+  fg, fgBase, bg, fgCode, bgCode: integer;
+  isBright, isBlink: boolean;
+begin
+  fg := attr mod 16;
+  if fg < 0 then
+    fg := fg + 16;
+  isBright := fg >= 8;
+  fgBase := fg mod 8;
+
+  bg := SafeDivInt(attr, 16) mod 8;
+  if bg < 0 then
+    bg := bg + 8;
+
+  isBlink := (SafeDivInt(attr, 128) mod 2) = 1;
+
+  if isBright then
+    fgCode := 90 + MapPscalColorToAnsiBase(fgBase)
+  else
+    fgCode := 30 + MapPscalColorToAnsiBase(fgBase);
+  bgCode := 40 + MapPscalColorToAnsiBase(bg);
+
+  BuildAnsiSequenceForAttr := Chr(27) + '[0';
+  if isBright then
+    BuildAnsiSequenceForAttr := BuildAnsiSequenceForAttr + ';1';
+  if isBlink then
+    BuildAnsiSequenceForAttr := BuildAnsiSequenceForAttr + ';5';
+  BuildAnsiSequenceForAttr := BuildAnsiSequenceForAttr + ';' + IntToStr(fgCode);
+  BuildAnsiSequenceForAttr := BuildAnsiSequenceForAttr + ';' + IntToStr(bgCode);
+  BuildAnsiSequenceForAttr := BuildAnsiSequenceForAttr + 'm';
+end;
+
+procedure ApplyTextAttrToTerminal(attr: integer);
+var
+  sequence: string;
+begin
+  sequence := BuildAnsiSequenceForAttr(attr);
+  if Length(sequence) > 0 then
+    write(sequence);
+end;
+
 procedure MarkPass(name: string);
 begin
   ExecutedTests := ExecutedTests + 1;
@@ -112,6 +192,7 @@ begin
   CRT.TextAttr := CRT.Green;
   AssertEqualInt('CRT.TextAttr assignment', CRT.Green, CRT.TextAttr);
   CRT.TextAttr := originalAttr;
+  ApplyTextAttrToTerminal(originalAttr);
 end;
 
 procedure TestMathLib;
@@ -228,7 +309,20 @@ end;
 
 var
   tmpDir: string;
+  originalAttr: integer;
+  changedStartingAttr: boolean;
+  exitCode: integer;
 begin
+  originalAttr := CRT.TextAttr;
+  changedStartingAttr := originalAttr <> CRT.LightGray;
+  if changedStartingAttr then
+  begin
+    CRT.TextAttr := CRT.LightGray;
+    ApplyTextAttrToTerminal(CRT.LightGray);
+  end
+  else
+    ApplyTextAttrToTerminal(originalAttr);
+
   writeln('Pascal Library Test Suite');
   TestCRT;
   TestMathLib;
@@ -242,6 +336,16 @@ begin
   TestFileRoundTrip(tmpDir);
 
   PrintSummary;
+  exitCode := 0;
   if FailedTests > 0 then
-    Halt(1);
+    exitCode := 1;
+
+  if changedStartingAttr then
+  begin
+    CRT.TextAttr := originalAttr;
+    ApplyTextAttrToTerminal(originalAttr);
+  end;
+
+  if exitCode <> 0 then
+    Halt(exitCode);
 end.
