@@ -50,6 +50,18 @@ Then run a pinned request (Pascal):
 RUN_NET_TESTS=1 PIN_SHA256="$PIN_SHA256" pascal Examples/Pascal/HttpPinningDemo
 ```
 
+Successful runs print the HTTP status and any libcurl error context:
+
+```
+Status: 200
+ErrCode: 0
+ErrMsg:
+```
+
+`Status: 200` confirms the request completed and the pinned certificate matched. A
+non-zero `ErrCode` or a populated `ErrMsg` indicates the TLS handshake or pin
+validation failed and you should re-check the hash you exported.
+
 CLike equivalent:
 
 ```
