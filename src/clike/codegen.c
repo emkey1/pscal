@@ -64,6 +64,31 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static void emitConstantOperand(BytecodeChunk* chunk, int constant_index, int line) {
+    if (!chunk) {
+        return;
+    }
+    if (constant_index < 0) {
+        fprintf(stderr, "L%d: Compiler Error: negative constant index.\n", line);
+        return;
+    }
+    if (constant_index <= 0xFF) {
+        writeBytecodeChunk(chunk, CONSTANT, line);
+        writeBytecodeChunk(chunk, (uint8_t)constant_index, line);
+        return;
+    }
+    if (constant_index <= 0xFFFF) {
+        writeBytecodeChunk(chunk, CONSTANT16, line);
+        emitShort(chunk, (uint16_t)constant_index, line);
+        return;
+    }
+
+    fprintf(stderr,
+            "L%d: Compiler Error: too many constants (%d). Limit is 65535.\n",
+            line,
+            constant_index);
+}
+
 static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
                                     uint8_t arg_count, int line) {
     if (!vmName) vmName = "";
@@ -316,8 +341,7 @@ static void emitCharPointerConstant(ASTNodeClike* node, BytecodeChunk* chunk) {
     Value ptrVal = makePointer(chunk->constants[strIdx].s_val, STRING_CHAR_PTR_SENTINEL);
     int ptrIdx = addConstantToChunk(chunk, &ptrVal);
     freeValue(&ptrVal);
-    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-    writeBytecodeChunk(chunk, (uint8_t)ptrIdx, node->token.line);
+    emitConstantOperand(chunk, ptrIdx, node->token.line);
 }
 
 static LocalVar* findLocalEntry(FuncContext* ctx, const char* name) {
@@ -700,8 +724,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     }
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
-                    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                    emitConstantOperand(chunk, cidx, node->token.line);
                 }
                 writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -744,8 +767,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                         Value idxVal = makeInt((long long)i);
                         int idxConst = addConstantToChunk(chunk, &idxVal);
                         freeValue(&idxVal);
-                        writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                        writeBytecodeChunk(chunk, (uint8_t)idxConst, node->token.line);
+                        emitConstantOperand(chunk, idxConst, node->token.line);
                         writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, node->token.line);
                         writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                         writeBytecodeChunk(chunk, GET_ELEMENT_ADDRESS, node->token.line);
@@ -753,8 +775,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                         Value chVal = makeChar(ch);
                         int chConst = addConstantToChunk(chunk, &chVal);
                         freeValue(&chVal);
-                        writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                        writeBytecodeChunk(chunk, (uint8_t)chConst, node->token.line);
+                        emitConstantOperand(chunk, chConst, node->token.line);
                         writeBytecodeChunk(chunk, SET_INDIRECT, node->token.line);
                     }
                     free(str);
@@ -789,8 +810,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     }
                     int cidx = addConstantToChunk(chunk, &init);
                     freeValue(&init);
-                    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                    emitConstantOperand(chunk, cidx, node->token.line);
                 }
                 writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -887,16 +907,14 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 v = makeInt(node->token.int_val);
             }
             int idx = addConstantToChunk(chunk, &v);
-            writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            emitConstantOperand(chunk, idx, node->token.line);
             break;
         }
         case TCAST_SIZEOF: {
             Value v = makeInt(node->token.int_val);
             v.type = TYPE_INT64;
             int idx = addConstantToChunk(chunk, &v);
-            writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-            writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+            emitConstantOperand(chunk, idx, node->token.line);
             break;
         }
         case TCAST_STRING: {
@@ -908,8 +926,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 free(s);
                 int idx = addConstantToChunk(chunk, &v);
                 freeValue(&v);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                emitConstantOperand(chunk, idx, node->token.line);
             }
             break;
         }
@@ -930,8 +947,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 patchShort(chunk, jFalse, offFalse);
                 Value fv = makeBoolean(0);
                 int cFalse = addConstantToChunk(chunk, &fv); freeValue(&fv);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)cFalse, node->token.line);
+                emitConstantOperand(chunk, cFalse, node->token.line);
                 uint16_t offEnd = (uint16_t)(chunk->count - (jEnd + 2));
                 patchShort(chunk, jEnd, offEnd);
                 break;
@@ -943,8 +959,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 // left was true: push true and jump end
                 Value tv = makeBoolean(1);
                 int cTrue = addConstantToChunk(chunk, &tv); freeValue(&tv);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)cTrue, node->token.line);
+                emitConstantOperand(chunk, cTrue, node->token.line);
                 writeBytecodeChunk(chunk, JUMP, node->token.line);
                 int jEnd2 = chunk->count; emitShort(chunk, 0xFFFF, node->token.line);
                 // evalRight target
@@ -1031,8 +1046,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                         writeBytecodeChunk(chunk, NEGATE, node->token.line);
                         Value one = makeInt(1);
                         int c1 = addConstantToChunk(chunk, &one); freeValue(&one);
-                        writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                        writeBytecodeChunk(chunk, (uint8_t)c1, node->token.line);
+                        emitConstantOperand(chunk, c1, node->token.line);
                         writeBytecodeChunk(chunk, SUBTRACT, node->token.line);
                     } else {
                         writeBytecodeChunk(chunk, NOT, node->token.line);
@@ -1055,8 +1069,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                     SET_INT_VALUE(&addr, (long long)sym->bytecode_address);
                     int cidx = addConstantToChunk(chunk, &addr);
                     freeValue(&addr);
-                    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                    emitConstantOperand(chunk, cidx, node->token.line);
                     free(name);
                     break;
                 }
@@ -1140,8 +1153,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 // operations (e.g. dereferencing) would fail.
                 v.type = TYPE_NIL;
                 int cidx = addConstantToChunk(chunk, &v);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                emitConstantOperand(chunk, cidx, node->token.line);
                 free(name);
                 break;
             }
@@ -1300,8 +1312,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 Value nl = makeInt(VM_WRITE_FLAG_SUPPRESS_SPACING);
                 int nlidx = addConstantToChunk(chunk, &nl);
                 freeValue(&nl);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)nlidx, node->token.line);
+                emitConstantOperand(chunk, nlidx, node->token.line);
                 write_arg_count++;
                 if (node->child_count > 0 && node->children[0]->type == TCAST_STRING) {
                     arg_index = 1;
@@ -1341,8 +1352,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                                         Value strv = makeString(seg);
                                         int cidx = addConstantToChunk(chunk, &strv);
                                         freeValue(&strv);
-                                        writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                                        writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                                        emitConstantOperand(chunk, cidx, node->token.line);
                                         write_arg_count++;
                                         seglen = 0;
                                     }
@@ -1374,8 +1384,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                         Value strv = makeString(seg);
                         int cidx = addConstantToChunk(chunk, &strv);
                         freeValue(&strv);
-                        writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                        writeBytecodeChunk(chunk, (uint8_t)cidx, node->token.line);
+                        emitConstantOperand(chunk, cidx, node->token.line);
                         write_arg_count++;
                     }
                     free(seg);
@@ -1391,8 +1400,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 Value zero = makeInt(0);
                 int zidx = addConstantToChunk(chunk, &zero);
                 freeValue(&zero);
-                writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)zidx, node->token.line);
+                emitConstantOperand(chunk, zidx, node->token.line);
             } else if (strcasecmp(name, "scanf") == 0 || strcasecmp(name, "readln") == 0) {
                 // Compile arguments as l-values (addresses) and call the VM's
                 // `readln` builtin. `scanf` returns 0 to mimic C semantics,
@@ -1408,8 +1416,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                     Value zero = makeInt(0);
                     int idx = addConstantToChunk(chunk, &zero);
                     freeValue(&zero);
-                    writeBytecodeChunk(chunk, CONSTANT, node->token.line);
-                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                    emitConstantOperand(chunk, idx, node->token.line);
                 }
             } else if (strcasecmp(name, "assign") == 0 ||
                        strcasecmp(name, "reset") == 0 ||

@@ -60,7 +60,7 @@ int filesystem_writeAllText(str path, str contents, int* outError) {
         return 0;
     }
 
-    write(f, contents);
+    write(0, f, contents);
     err = ioresult();
     if (err != 0) {
         filesystem_resetError(outError, err);
@@ -171,7 +171,7 @@ str filesystem_expandUser(str path) {
         if (remainderLen <= 1) {
             return home;
         }
-        return home + copy(remainder, 2, remainderLen - 1);
+        return home + remainder;
     }
 
     return home + "/" + remainder;
