@@ -15,7 +15,7 @@ The Rea language is a strongly typed, class-based, object-oriented language.
 
 #### 1.1. Lexical Structure
 
-* **Comments:** Supports single-line comments with `//` and multi-line comments
+* **Comments:** Supports single-line comments with `//` (contextually distinguished from integer division) and multi-line comments
   with `/* ... */`.
 * **Identifiers:** Identifiers for variables, classes, and methods are
   case-sensitive. They must begin with a letter or an underscore and can be
@@ -29,7 +29,7 @@ The Rea language is a strongly typed, class-based, object-oriented language.
       `default`, `break`, `continue`, `return`.
     * **Other:** `const`, `#import`.
 * **Operators:** Common arithmetic and comparison operators are supported,
-  including `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, logical
+  including `+`, `-`, `*`, `/`, `//`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, logical
   conjunction/disjunction via `&&` and `||`, and bitwise exclusive-or via `^`
   (or the `xor` keyword).
 * **Boolean Logic:** `&&` and `||` honor short-circuit evaluation—`&&`

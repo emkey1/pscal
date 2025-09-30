@@ -64,6 +64,27 @@ static int exponentAfterDotHasDigits(ReaLexer *lexer) {
     return isDigit(c);
 }
 
+static int isExpressionTailChar(char c) {
+    return isAlphaNumeric(c) || c == '_' || c == ')' || c == ']';
+}
+
+static int slashStartsComment(ReaLexer *lexer) {
+    if (lexer->pos == 0) return 1;
+    size_t idx = lexer->pos;
+    while (idx > 0) {
+        char prev = lexer->source[idx - 1];
+        if (prev == ' ' || prev == '\t' || prev == '\r') {
+            idx--;
+            continue;
+        }
+        if (prev == '\n') {
+            return 1;
+        }
+        return isExpressionTailChar(prev) ? 0 : 1;
+    }
+    return 1;
+}
+
 static void skipWhitespace(ReaLexer *lexer) {
     for (;;) {
         char c = peek(lexer);
@@ -87,6 +108,9 @@ static void skipWhitespace(ReaLexer *lexer) {
                 break;
             case '/':
                 if (peekNext(lexer) == '/') {
+                    if (!slashStartsComment(lexer)) {
+                        return;
+                    }
                     lexer->pos += 2;
                     while (peek(lexer) != '\n' && peek(lexer) != '\0') {
                         lexer->pos++;
@@ -243,6 +267,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
+            if (match(lexer, '/')) {
+                return makeToken(lexer, REA_TOKEN_INT_DIV, start);
+            }
             return makeToken(lexer, REA_TOKEN_SLASH, start);
         case '%':
             return makeToken(lexer, REA_TOKEN_PERCENT, start);
@@ -395,6 +422,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
         case REA_TOKEN_STAR: return "STAR";
         case REA_TOKEN_SLASH: return "SLASH";
+        case REA_TOKEN_INT_DIV: return "INT_DIV";
         case REA_TOKEN_PERCENT: return "PERCENT";
         case REA_TOKEN_EQUAL: return "EQUAL";
         case REA_TOKEN_EQUAL_EQUAL: return "EQUAL_EQUAL";

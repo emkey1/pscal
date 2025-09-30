@@ -82,7 +82,7 @@ The Rea language is a strongly typed, class-based, object-oriented language.
 
 #### 1.1. Lexical Structure
 
-* **Comments:** Supports single-line comments with `//` and multi-line comments with `/* ... */`.
+* **Comments:** Supports single-line comments with `//` (contextually distinguished from integer division) and multi-line comments with `/* ... */`.
 * **Identifiers:** Identifiers for variables, classes, and methods are case-sensitive. They must begin with a letter or an underscore and can be followed by any number of letters, digits, or underscores.
 * **Keywords:**
     * **Data Types:** `int`, `int64`, `int32`, `int16`, `int8`, `float`, `float32`, `long double`, `char`, `byte`, `str`, `text`, `mstream`, `void`, `bool`.

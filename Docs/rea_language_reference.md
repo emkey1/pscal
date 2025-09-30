@@ -13,8 +13,9 @@ bytecode.
 
 #### **Comments**
 
-* `//` introduces a single‑line comment.
-* `/* ... */` encloses a multi‑line comment.
+* `//` introduces a single-line comment. When `//` appears between two expressions it acts as the integer-division operator instead.
+  Place it at the start of a statement (or after punctuation such as `;` or `{`) to keep the comment form.
+* `/* ... */` encloses a multi-line comment.
 
 #### **Identifiers**
 
@@ -69,7 +70,7 @@ const int LIMIT = 10;
 
 ### **Expressions and Operators**
 
-Rea supports the common arithmetic and comparison operators `+ - * / % == != <
+Rea supports the common arithmetic and comparison operators `+ - * / // % == != <
 <= > >=` plus logical `&&` and `||`.  Assignment forms such as `+=` and `-=` are
 also available.  Operator precedence mirrors that of C.
 

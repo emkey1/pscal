@@ -1,0 +1,18 @@
+#!/usr/bin/env rea
+// Ensure comments remain valid alongside integer division
+int main() {
+  // Single-line comment at the start of a block should be ignored
+  int a = 7 // 3;
+  int b = (18) // 5;
+  int c = 10;
+  c = c // 3;
+  writeln(a);
+  writeln(b);
+  writeln(c);
+  int boardY = 10;
+  int boardHeight = 5;
+  int cellSize = 4;
+  int mid = boardY + (boardHeight * cellSize) // 2; // comment after a statement
+  writeln(mid);
+  return 0;
+}
