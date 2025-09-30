@@ -4,10 +4,16 @@ PROGRAM SDLPlasmaRGB;
 // USES System; // Implicit for Sin, Sqrt, Trunc if not global
 
 CONST
-  WindowWidth  = 1024;
-  WindowHeight = 768;
-  WindowTitle  = 'TrueColor Plasma Effect (SDL)';
-  Pi           = 3.1415926535; // For sinusoidal color mapping
+  WindowWidth        = 1024;
+  WindowHeight       = 768;
+  WindowTitle        = 'TrueColor Plasma Effect (SDL)';
+  Pi                 = 3.1415926535; // For sinusoidal color mapping
+  UpdateIntervalRows = 8;            // Update window every N rows
+  BytesPerPixel      = 4;
+  TextureBufferSize  = WindowWidth * WindowHeight * BytesPerPixel;
+
+TYPE
+  PixelBuffer = ARRAY[0..TextureBufferSize - 1] OF Byte;
 
 VAR
   Row, Col            : Integer;
@@ -16,24 +22,57 @@ VAR
   R, G, B             : Byte; // For R, G, B color components (0-255)
   InvWidth, InvHeight : Real;
   CurrentMaxX, CurrentMaxY : Integer;
+  ViewPixelWidth, ViewPixelHeight : Integer;
   TimeOffset          : Real; // For animating the plasma (optional, starting static)
+  TextureID           : Integer;
+  PixelData           : PixelBuffer;
+  BufferBaseIdx       : Integer;
+  TotalBufferElements : Integer;
+  BufferIndex         : Integer;
+  QuitNow             : Boolean;
+  KeyCode             : Integer;
 
 BEGIN
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
   ClearDevice;
+  UpdateScreen;
+  GraphLoop(0);
 
   CurrentMaxX := GetMaxX;
   CurrentMaxY := GetMaxY;
+  ViewPixelWidth  := CurrentMaxX + 1;
+  ViewPixelHeight := CurrentMaxY + 1;
+
+  IF (ViewPixelWidth > WindowWidth) OR (ViewPixelHeight > WindowHeight) THEN
+  BEGIN
+    WriteLn('Error: window dimensions exceed allocated texture buffer.');
+    CloseGraph;
+    Halt;
+  END;
 
   IF (CurrentMaxX + 1) > 0 THEN InvWidth  := 1.0 / (CurrentMaxX + 1) ELSE InvWidth  := 0;
   IF (CurrentMaxY + 1) > 0 THEN InvHeight := 1.0 / (CurrentMaxY + 1) ELSE InvHeight := 0;
 
   TimeOffset := 0.0; // Start with no animation
-  writeln('Window will not display until fully rendered.  This may take a bit');
+  writeln('Rendering RGB plasma...');
 
-  FOR Row := 0 TO CurrentMaxY DO
+  TextureID := CreateTexture(ViewPixelWidth, ViewPixelHeight);
+  IF TextureID < 0 THEN
   BEGIN
-    FOR Col := 0 TO CurrentMaxX DO
+    WriteLn('Error: unable to create SDL texture for plasma rendering.');
+    CloseGraph;
+    Halt;
+  END;
+
+  TotalBufferElements := TextureBufferSize;
+  FOR BufferIndex := 0 TO TotalBufferElements - 1 DO
+    PixelData[BufferIndex] := 0;
+
+  QuitNow := False;
+
+  FOR Row := 0 TO ViewPixelHeight - 1 DO
+  BEGIN
+    FOR Col := 0 TO ViewPixelWidth - 1 DO
     BEGIN
       // Scale coordinates and add time for animation (optional)
       // Experiment with these scaling factors for different plasma looks
@@ -64,21 +103,54 @@ BEGIN
       IF G < 0 THEN G := 0 ELSE IF G > 255 THEN G := 255;
       IF B < 0 THEN B := 0 ELSE IF B > 255 THEN B := 255;
 
-      // Set RGB color and draw the pixel
-      // Assuming a new built-in: SetRGBColor(R, G, B: Byte);
-      SetRGBColor(R, G, B);
-      PutPixel(Col, Row);
-
-      { Alternative: PutPixelRGB(Col, Row, R, G, B) if your built-in supports that }
+      BufferBaseIdx := (Row * ViewPixelWidth + Col) * BytesPerPixel;
+      PixelData[BufferBaseIdx + 0] := R;
+      PixelData[BufferBaseIdx + 1] := G;
+      PixelData[BufferBaseIdx + 2] := B;
+      PixelData[BufferBaseIdx + 3] := Byte(255);
     END;
+
+    // Periodically update the screen so the window shows progress while rendering
+    IF ((Row + 1) MOD UpdateIntervalRows = 0) OR (Row = ViewPixelHeight - 1) THEN
+    BEGIN
+      UpdateTexture(TextureID, PixelData);
+      ClearDevice;
+      RenderCopy(TextureID);
+      UpdateScreen;
+      GraphLoop(0); // Pump events so the OS keeps the window responsive
+
+      IF QuitRequested() THEN
+      BEGIN
+        QuitNow := True;
+        BREAK;
+      END;
+    END;
+    IF QuitNow THEN
+      BREAK;
   END;
 
-  UpdateScreen;
+  IF QuitNow THEN
+    WriteLn('Quit requested while rendering. Displaying last computed frame...')
+  ELSE
+  BEGIN
+    UpdateTexture(TextureID, PixelData);
+    ClearDevice;
+    RenderCopy(TextureID);
+    UpdateScreen;
+  END;
 
-  // Wait for key press
-  WriteLn('RGB Plasma complete. Press any key to exit.');
-  GraphLoop(100); // Process events
-  ReadKey;
+  // Wait for key press or quit request
+  IF QuitNow THEN
+    WriteLn('Press any key or close the window to exit.')
+  ELSE
+    WriteLn('RGB Plasma complete. Press any key or close the window to exit.');
 
+  KeyCode := 0;
+  REPEAT
+    GraphLoop(16);
+    KeyCode := PollKey();
+  UNTIL (KeyCode <> 0) OR QuitRequested();
+
+  DestroyTexture(TextureID);
   CloseGraph;
 END.
