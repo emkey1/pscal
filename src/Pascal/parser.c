@@ -53,6 +53,7 @@ void eatDebugWrapper(Parser *parser_ptr, TokenType expected_token_type, const ch
 #endif // DEBUG
 
 AST *parseWriteArgument(Parser *parser);
+static AST *parseStrArgumentList(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
 
@@ -2135,7 +2136,12 @@ AST *statement(Parser *parser) {
                 if (has_args) {
                     eat(parser, TOKEN_LPAREN); // Consume '('
                     if (parser->current_token->type != TOKEN_RPAREN) {
-                        AST* args_compound = exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
+                        bool isStrCall = false;
+                        if (proc_call_node_to_use && proc_call_node_to_use->token && proc_call_node_to_use->token->value) {
+                            isStrCall = (strcasecmp(proc_call_node_to_use->token->value, "str") == 0);
+                        }
+
+                        AST* args_compound = isStrCall ? parseStrArgumentList(parser) : exprList(parser); // Parse arguments; exprList returns an AST_COMPOUND node
 
                         // Argument Transfer Logic (same as your original, applied to proc_call_node_to_use)
                         if (args_compound && args_compound->type == AST_COMPOUND && args_compound->child_count > 0) {
