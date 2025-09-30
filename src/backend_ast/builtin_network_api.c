@@ -2491,13 +2491,61 @@ static void* httpAsyncThread(void* arg) {
             return NULL;
         }
         size_t total = 0; unsigned char buf[8192]; size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-            if (job->cancel_requested) { fclose(in); job->status = -1; job->last_error_msg = strdup("canceled"); job->done = 1; return NULL; }
+        while (1) {
+            if (job->cancel_requested) {
+                fclose(in);
+                if (job->out_file && job->out_file[0]) remove(job->out_file);
+                job->status = -1;
+                if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                job->last_error_msg = strdup("canceled");
+                job->done = 1;
+                return NULL;
+            }
+            n = fread(buf, 1, sizeof(buf), in);
+            if (n == 0) break;
             writeCallback(buf, 1, n, job->result);
             total += n;
             job->dl_now = (long long)total;
+            if (job->cancel_requested) {
+                fclose(in);
+                if (job->out_file && job->out_file[0]) remove(job->out_file);
+                job->status = -1;
+                if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                job->last_error_msg = strdup("canceled");
+                job->done = 1;
+                return NULL;
+            }
+            if (job->max_recv_speed > 0) {
+                unsigned long long delay_ms = 0;
+                unsigned long long speed = (unsigned long long)job->max_recv_speed;
+                delay_ms = ((unsigned long long)n * 1000ULL) / speed;
+                if (delay_ms == 0) delay_ms = 1; // yield so cancel/polling can progress
+                while (delay_ms > 0) {
+                    unsigned long long slice = delay_ms;
+                    if (slice > 50ULL) slice = 50ULL;
+                    sleep_ms((long)slice);
+                    delay_ms -= slice;
+                    if (job->cancel_requested) {
+                        fclose(in);
+                        if (job->out_file && job->out_file[0]) remove(job->out_file);
+                        job->status = -1;
+                        if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                        job->last_error_msg = strdup("canceled");
+                        job->done = 1;
+                        return NULL;
+                    }
+                }
+            }
         }
         fclose(in);
+        if (job->cancel_requested) {
+            if (job->out_file && job->out_file[0]) remove(job->out_file);
+            job->status = -1;
+            if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+            job->last_error_msg = strdup("canceled");
+            job->done = 1;
+            return NULL;
+        }
         if (job->out_file && job->out_file[0] && job->result && job->result->buffer) {
             FILE* of = fopen(job->out_file, "wb");
             if (of) { fwrite(job->result->buffer, 1, (size_t)job->result->size, of); fclose(of); }

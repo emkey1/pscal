@@ -17,6 +17,7 @@ begin
   url := 'file://' + cwd + '/big_src.txt';
 
   s := HttpSession();
+  HttpSetOption(s, 'max_recv_speed', 500000); { throttle to ~500 KB/s so cancellation can trigger }
   id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'big_dst.txt');
 
   { Poll progress and cancel when some bytes have arrived }
