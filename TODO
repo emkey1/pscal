@@ -40,7 +40,7 @@ This staged approach introduces address-of and procedure pointers, then layers a
 Provide ability to query threads and thread states
 
 ---
-Networking additions:
+Networking additions: (Done)
 
 - Phase 1: Solid HTTP sync API (libcurl easy)
     - Sessions with keep-alive, headers map, redirects, timeouts.
@@ -150,8 +150,27 @@ This is where the translation to PSCAL VM opcodes occurs.
 
 ***
 
-### 3. Summary of Rea Implementation Details
+### 3. Summary of Rea Implementation Details (Done)
 
 * **Compiler:** A new compiler will be developed to translate Rea source code into PSCAL VM bytecode.
 * **Virtual Machine:** The existing PSCAL VM will be extended with minimal changes, primarily in the symbol table and `CallFrame` to support object-oriented constructs like V-tables for dynamic method dispatch.
 * **Opcodes:** The implementation will reuse many existing opcodes for arithmetic and control flow. New bytecode opcodes may be introduced to simplify object and method handling.
+
+### 4. Add additional write/writeln formatting.  Enable the following
+program ZeroPaddingExample;
+
+uses SysUtils; // Required for the Format function
+
+var
+  i: Integer;
+begin
+  for i := 1 to 10 do
+  begin
+    // Pad with leading zeros to a total width of 3
+    WriteLn(Format('%.*d', [3, i]));
+  end;
+
+  // Example with a larger number
+  WriteLn(Format('%.*d', [5, 123])); // Output: 00123
+  WriteLn(Format('%.*d', [2, 123])); // Output: 123 (width ignored if too small)
+end.

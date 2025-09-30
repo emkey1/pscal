@@ -5,12 +5,6 @@ var s, code: integer;
     ms: mstream;
     url, pin: string;
 begin
-  if GetEnv('RUN_NET_TESTS') <> '1' then
-  begin
-    writeln('Set RUN_NET_TESTS=1 and optionally PIN_SHA256, URL to run.');
-    exit;
-  end;
-
   url := GetEnv('URL');
   if url = '' then url := 'https://example.com';
   pin := GetEnv('PIN_SHA256');
