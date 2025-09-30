@@ -4,10 +4,20 @@ uses dos;
 var
   Year, Month, Day, DayOfWeek : Word;
   Hour, Minute, Sec, Sec100 : Word;
+function ZeroPad(Value : Word) : String;
+var
+  S : String;
+begin
+  str(Value:0, S);
+  if Value < 10 then
+    ZeroPad := '0' + S
+  else
+    ZeroPad := S;
+end;
 begin
   getDate(Year, Month, Day, DayOfWeek);
   getTime(Hour, Minute, Sec, Sec100);
-  writeln('Today is: ', Month, '/', Day, '/', Year);
-  writeln('Current time is: ', Hour, ':', Minute, ':', Sec);
+  writeln('Today is: ', ZeroPad(Month), '/', ZeroPad(Day), '/', Year);
+  writeln('Current time is: ', ZeroPad(Hour), ':', ZeroPad(Minute), ':', ZeroPad(Sec));
   writeln('PATH environment variable is: ', getEnv('PATH'));
 end.
