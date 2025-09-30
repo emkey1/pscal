@@ -1326,9 +1326,9 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_error_code = code;
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
+        s->last_status = -code;
         if (tmp_out_file) fclose(tmp_out_file);
-        runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
-        return makeInt(-1);
+        return makeInt(-code);
     }
 
     s->last_status = http_code;
@@ -1659,9 +1659,9 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
         s->last_error_code = code;
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
+        s->last_status = -code;
         if (out) fclose(out);
-        runtimeError(vm, "httpRequestToFile: curl failed: %s", curl_easy_strerror(res));
-        return makeInt(-1);
+        return makeInt(-code);
     }
     s->last_status = http_code;
     s->last_error_code = 1;

@@ -760,11 +760,25 @@ void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
 
 // runtimeError - Assuming your existing one is fine.
 void runtimeError(VM* vm, const char* format, ...) {
+    if (vm) {
+        vm->abort_requested = true;
+    }
+
+    if (isatty(STDOUT_FILENO)) {
+        fflush(stdout);
+        resetTextAttributes(stdout);
+        fflush(stdout);
+    }
+    if (isatty(STDERR_FILENO)) {
+        resetTextAttributes(stderr);
+    }
+
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
     fputc('\n', stderr);
+    fflush(stderr);
 
     // Get precise instruction offset and line for the error.
     // vm->lastInstruction points at the start of the instruction that ran last
