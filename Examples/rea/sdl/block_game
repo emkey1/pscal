@@ -443,13 +443,13 @@ class Game {
         // Draw score info
         setrgbcolor(255, 255, 255);
         str scoreStr = "Score: " + inttostr(myself.board.getScore());
-        outtextxy(20, 20, scoreStr);
+        outtextxy(20, 470, scoreStr);
         
         str levelStr = "Level: " + inttostr(myself.board.getLevel());
-        outtextxy(20, 40, levelStr);
+        outtextxy(150, 470, levelStr);
         
         str linesStr = "Lines: " + inttostr(myself.board.getLines());
-        outtextxy(20, 60, linesStr);
+        outtextxy(250, 470, linesStr);
         
         if (myself.gameOver) {
             str gameOverStr = "GAME OVER - Press Q to quit";
