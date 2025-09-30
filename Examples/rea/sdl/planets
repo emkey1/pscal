@@ -198,7 +198,7 @@ class SolarSystemApp {
     initgraph(WindowWidth, WindowHeight, "Rea SDL Solar System");
     myself.centerX = getmaxx() / 2;
     myself.centerY = getmaxy() / 2;
-    inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    inittextsystem("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();

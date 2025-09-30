@@ -208,7 +208,7 @@ class SolarSystemApp {
       myself.SizeScale = 1.0;
     }
     myself.sunRadius = trunc(rawSun * myself.SizeScale);
-    inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    inittextsystem("/usr/local/pscal//fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();

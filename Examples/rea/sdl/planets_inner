@@ -214,7 +214,7 @@ class SolarSystemApp {
     int minJupiterSize = trunc(SunMinRadius * JupiterRadiusAU / SunRadiusAU);
     if (minJupiterSize < 1) minJupiterSize = 1;
     myself.AUScale = (myself.centerY - SunMinRadius - maxExtra - minJupiterSize - 10) / 5.20;
-    inittextsystem("../../fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    inittextsystem("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();
