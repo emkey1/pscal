@@ -84,6 +84,24 @@ static inline bool isIntlikeType(VarType t) {
     }
 }
 
+static inline bool isIntegerFamilyType(VarType t) {
+    switch (t) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static inline bool isRealType(VarType t) {
     switch (t) {
         case TYPE_FLOAT:

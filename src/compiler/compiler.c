@@ -1471,15 +1471,13 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_ENUM    || arg_vt == TYPE_CHAR)) {
                 return true;
             }
-            // Permit wider integer arguments (e.g. LONGINT/INT64, CARDINAL/UINT32)
-            // to match INTEGER parameters.  Traditional Pascal routinely allows
-            // these values to be passed to routines expecting INTEGER so long as
-            // the caller explicitly requests it.  Our VM stores the value's
-            // actual type in the Value struct, so the callee will still receive
-            // the full precision.
+            // Permit ordinal arguments to satisfy INTEGER parameters.  This
+            // keeps BYTE/WORD and the extended integer family compatible with
+            // routines that declare INTEGER parameters, mirroring traditional
+            // Pascal's treatment of these types as interchangeable integer
+            // values.
             if (param_actual->var_type == TYPE_INTEGER &&
-                (arg_vt == TYPE_INT64 || arg_vt == TYPE_UINT64 ||
-                 arg_vt == TYPE_UINT32)) {
+                isIntegerFamilyType(arg_vt)) {
                 return true;
             }
             if (isRealType(param_actual->var_type) && isIntlikeType(arg_vt)) {
