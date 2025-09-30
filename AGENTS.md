@@ -8,6 +8,9 @@
 ## Build & Test
 - Configure with `cmake -S . -B build [-DSDL=ON] [-DBUILD_DASCAL=ON]`, then `cmake --build build`.
 - Use `Tests/run_all_tests`; set `RUN_SDL=1` or `RUN_NET_TESTS=1` as needed. Prefer targeted scripts in `Tests/` for quicker iteration.
+- Library conformance lives under `Tests/libs/`. Each front end has its own harness; the Rea suite (`Tests/libs/rea/run_tests.py`) spins up an HTTP helper, inspects optional extended built-ins (yyjson, etc.), and exports `REA_TEST_EXT_BUILTINS`/`REA_TEST_HAS_YYJSON` so JSON checks are skipped when support is absent.
+- Scope validation suites live in `Tests/scope_verify/` (`clike`, `pascal`, `rea`). The harnesses are manifest-driven and support `--only`, `--list`, `--seed`, and `--cmd` overrides. Rea's runner (`Tests/scope_verify/rea/rea_scope_test_harness.py`) materialises fixtures via `--update` and records reports under `Tests/scope_verify/rea/out/`.
+- Test manifests (e.g., `Tests/scope_verify/rea/tests/manifest.json`) are generated through the corresponding `build_manifest.py`; regenerate them when adding or editing cases to keep fixtures in sync.
 
 ## Coding Practices
 - C11 style: 4-space indent, braces on same line, camelCase for functions, uppercase snake for macros.
