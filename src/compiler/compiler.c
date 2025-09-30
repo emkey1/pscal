@@ -3658,6 +3658,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         continue;
                     }
 
+                    AST* resolved_local_type = resolveTypeAlias(actual_type_def_node);
+                    if (resolved_local_type && resolved_local_type->type == AST_TYPE_DECL && resolved_local_type->left) {
+                        resolved_local_type = resolveTypeAlias(resolved_local_type->left);
+                    }
+                    bool is_record_type = resolved_local_type && resolved_local_type->type == AST_RECORD_TYPE;
+
                     if (node->var_type == TYPE_ARRAY) {
                         int dimension_count = actual_type_def_node->child_count;
                         if (dimension_count > 255) {
@@ -3705,6 +3711,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                         writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    } else if (is_record_type) {
+                        Value record_init = makeValueForType(TYPE_RECORD, resolved_local_type, NULL);
+                        int const_idx = addConstantToChunk(chunk, &record_init);
+                        freeValue(&record_init);
+                        emitConstant(chunk, const_idx, getLine(varNameNode));
+                        noteLocalSlotUse(current_function_compiler, slot);
+                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     } else if (node->var_type == TYPE_STRING) {
                         int len = 0;
                         if (actual_type_def_node->right) {
