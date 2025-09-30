@@ -2520,7 +2520,21 @@ static void* httpAsyncThread(void* arg) {
                 unsigned long long speed = (unsigned long long)job->max_recv_speed;
                 delay_ms = ((unsigned long long)n * 1000ULL) / speed;
                 if (delay_ms == 0) delay_ms = 1; // yield so cancel/polling can progress
-                sleep_ms((long)delay_ms);
+                while (delay_ms > 0) {
+                    unsigned long long slice = delay_ms;
+                    if (slice > 50ULL) slice = 50ULL;
+                    sleep_ms((long)slice);
+                    delay_ms -= slice;
+                    if (job->cancel_requested) {
+                        fclose(in);
+                        if (job->out_file && job->out_file[0]) remove(job->out_file);
+                        job->status = -1;
+                        if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                        job->last_error_msg = strdup("canceled");
+                        job->done = 1;
+                        return NULL;
+                    }
+                }
             }
         }
         fclose(in);
