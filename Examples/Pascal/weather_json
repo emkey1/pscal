@@ -5,6 +5,19 @@ uses CRT, SysUtils;
 
 const
   DEFAULT_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';
+  TEMPERATURE_DECIMAL_PLACES = 1;
+
+function RoundToDecimalPlaces(value: double; decimals: integer): double;
+var
+  factor: double;
+  i: integer;
+begin
+  factor := 1.0;
+  if decimals > 0 then
+    for i := 1 to decimals do
+      factor := factor * 10.0;
+  RoundToDecimalPlaces := Round(value * factor) / factor;
+end;
 
 function ParseIntOrDefault(value: string; defaultValue: longint): longint;
 var
@@ -457,7 +470,8 @@ begin
     tempHandle := YyjsonGetKey(mainHandle, 'temp');
     if tempHandle >= 0 then
     begin
-      tempC := YyjsonGetNumber(tempHandle);
+      tempC := RoundToDecimalPlaces(YyjsonGetNumber(tempHandle),
+        TEMPERATURE_DECIMAL_PLACES);
       tempFound := True;
       YyjsonFreeValue(tempHandle);
     end;
@@ -465,7 +479,8 @@ begin
     feelsLikeHandle := YyjsonGetKey(mainHandle, 'feels_like');
     if feelsLikeHandle >= 0 then
     begin
-      feelsLikeC := YyjsonGetNumber(feelsLikeHandle);
+      feelsLikeC := RoundToDecimalPlaces(YyjsonGetNumber(feelsLikeHandle),
+        TEMPERATURE_DECIMAL_PLACES);
       feelsLikeFound := True;
       YyjsonFreeValue(feelsLikeHandle);
     end;
@@ -473,7 +488,8 @@ begin
     tempMinHandle := YyjsonGetKey(mainHandle, 'temp_min');
     if tempMinHandle >= 0 then
     begin
-      tempMinC := YyjsonGetNumber(tempMinHandle);
+      tempMinC := RoundToDecimalPlaces(YyjsonGetNumber(tempMinHandle),
+        TEMPERATURE_DECIMAL_PLACES);
       tempMinFound := True;
       YyjsonFreeValue(tempMinHandle);
     end;
@@ -481,7 +497,8 @@ begin
     tempMaxHandle := YyjsonGetKey(mainHandle, 'temp_max');
     if tempMaxHandle >= 0 then
     begin
-      tempMaxC := YyjsonGetNumber(tempMaxHandle);
+      tempMaxC := RoundToDecimalPlaces(YyjsonGetNumber(tempMaxHandle),
+        TEMPERATURE_DECIMAL_PLACES);
       tempMaxFound := True;
       YyjsonFreeValue(tempMaxHandle);
     end;
@@ -597,13 +614,25 @@ begin
   end;
 
   if tempFound then
+  begin
     tempF := tempC * 9.0 / 5.0 + 32.0;
+    tempF := RoundToDecimalPlaces(tempF, TEMPERATURE_DECIMAL_PLACES);
+  end;
   if feelsLikeFound then
+  begin
     feelsLikeF := feelsLikeC * 9.0 / 5.0 + 32.0;
+    feelsLikeF := RoundToDecimalPlaces(feelsLikeF, TEMPERATURE_DECIMAL_PLACES);
+  end;
   if tempMinFound then
+  begin
     tempMinF := tempMinC * 9.0 / 5.0 + 32.0;
+    tempMinF := RoundToDecimalPlaces(tempMinF, TEMPERATURE_DECIMAL_PLACES);
+  end;
   if tempMaxFound then
+  begin
     tempMaxF := tempMaxC * 9.0 / 5.0 + 32.0;
+    tempMaxF := RoundToDecimalPlaces(tempMaxF, TEMPERATURE_DECIMAL_PLACES);
+  end;
 
   writeln('--- Current Weather ---');
 
