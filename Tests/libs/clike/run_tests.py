@@ -29,6 +29,8 @@ def _discover_ext_builtins(executable: Path) -> set[str]:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
         return set()
@@ -213,7 +215,15 @@ def main() -> int:
     cmd = [str(clike_bin), "--no-cache", str(test_program)]
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=str(root))
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            cwd=str(root),
+        )
     finally:
         stop_server(server)
         try:
