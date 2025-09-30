@@ -347,7 +347,7 @@ done
 echo "---- HangmanExample ----"
 hangman_disasm=$(mktemp)
 set +e
-python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/hangman5 \
+python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/base/hangman5 \
   > /dev/null 2> "$hangman_disasm"
 status=$?
 set -e

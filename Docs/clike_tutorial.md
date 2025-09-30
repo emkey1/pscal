@@ -29,14 +29,14 @@ build/bin/clike path/to/program
 For example, run the text-based Hangman game:
 
 ```sh
-build/bin/clike Examples/clike/hangman5
+build/bin/clike Examples/clike/base/hangman5
 ```
 
 The compiler translates the source to VM bytecode and executes it immediately.
 
 ## Sample programs
 
-Additional examples live in `Examples/clike`, including `sdl_multibouncingballs.cl` for an SDL demo and `hangman5` for a console game.
+Additional examples live in `Examples/clike/base` and `Examples/clike/sdl`, including `sdl/multibouncingballs` for an SDL demo and `base/hangman5` for a console game.
 
 ## Compiler options
 
@@ -76,7 +76,7 @@ import "math_utils.cl";
 The compiler searches in the current directory, then in `CLIKE_LIB_DIR` if set, and finally in the built-in default install path. For project-local modules, set:
 
 ```sh
-export CLIKE_LIB_DIR=$(pwd)/Examples/clike
+export CLIKE_LIB_DIR=$(pwd)/Examples/clike/base
 ```
 
 ## Environment variables
@@ -87,8 +87,8 @@ export CLIKE_LIB_DIR=$(pwd)/Examples/clike
 ## Examples
 
 - Simple Web Server (CLike):
-  - Source: `Examples/clike/simple_web_server`
-  - Quick start: `build/bin/clike Examples/clike/simple_web_server /path/to/htdocs 8080`
+  - Source: `Examples/clike/base/simple_web_server`
+  - Quick start: `build/bin/clike Examples/clike/base/simple_web_server /path/to/htdocs 8080`
   - Documentation: `Docs/simple_web_server.md`
   - A basic `htdocs` tree is available in the PSCAL clone at `lib/misc/simple_web_server/htdocs`.
 
@@ -184,4 +184,4 @@ The VM also exposes thin wrappers over BSD sockets:
 - `socketsetblocking(s, bool)` toggles blocking mode; `socketpoll(s, timeout_ms, flags)` polls for read (`1`) or write (`2`).
 - `socketlasterror()` returns the last error code and `dnslookup(host)` resolves hostnames.
 
-See `Examples/clike/SocketEchoDemo` for a complete echo server/client demo.
+See `Examples/clike/base/SocketEchoDemo` for a complete echo server/client demo.

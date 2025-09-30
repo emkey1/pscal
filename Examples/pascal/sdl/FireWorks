@@ -1,5 +1,5 @@
 #!/usr/bin/env pascal
-program SDLFireworksDemo;
+program FireworksDemo;
 
 const
   MAX_PARTICLES = 400;

@@ -27,7 +27,7 @@ Fixed
 Enhancements
 - Pascal: Introduced address-of operator `@` for routines and first-class procedure/function pointer types.
 - Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
-- Rea (experimental): Added a new object‑oriented front end with classes, fields, methods, constructors, single inheritance via `extends`, virtual dispatch, and `my`/`myself`/`super` semantics. See `Docs/rea_*` and `Examples/rea/`.
+- Rea (experimental): Added a new object‑oriented front end with classes, fields, methods, constructors, single inheritance via `extends`, virtual dispatch, and `my`/`myself`/`super` semantics. See `Docs/rea_*` and `Examples/rea/base` or `Examples/rea/sdl`.
 - Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1‑arg form.
 - VM: Implemented indirect call opcodes and support for passing an initial pointer argument to new threads.
 - Tools: Added standalone bytecode decompiler `pscald` and AST JSON → Bytecode compiler `pscaljson2bc` (with optional Bash/Zsh completions).

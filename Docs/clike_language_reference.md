@@ -270,7 +270,7 @@ int main() {
 
 For a fuller walkthrough that renders a shaded, rotating cube with depth
 testing, matrix manipulation, and swap-interval toggling, refer to
-`Examples/clike/sdl_smoke`.
+`Examples/clike/sdl/smoke`.
 
 ### **Example Code**
 

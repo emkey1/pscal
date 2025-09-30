@@ -10,5 +10,5 @@ help:
 
 threads-procptr-demo:
 	@echo "Running ThreadsProcPtrDemo..."
-	@$(PASCAL_BIN) Pascal/ThreadsProcPtrDemo
+        @$(PASCAL_BIN) pascal/base/ThreadsProcPtrDemo
 
