@@ -181,7 +181,11 @@ begin
   AssertEqualInt('mylib.GlobalCounter init', 0, GlobalCounter);
   GlobalCounter := GlobalCounter + 1;
   AssertEqualInt('mylib.GlobalCounter increment', 1, GlobalCounter);
-  MarkSkip('mylib.TPerson', 'record field assignments unavailable');
+
+  person.name := 'Ada Lovelace';
+  person.age := 36;
+  AssertEqualStr('mylib.TPerson.name', 'Ada Lovelace', person.name);
+  AssertEqualInt('mylib.TPerson.age', 36, person.age);
 end;
 
 procedure TestFileRoundTrip(tmpDir: string);
