@@ -4,10 +4,11 @@ PROGRAM SDLPlasmaRGB;
 // USES System; // Implicit for Sin, Sqrt, Trunc if not global
 
 CONST
-  WindowWidth  = 1024;
-  WindowHeight = 768;
-  WindowTitle  = 'TrueColor Plasma Effect (SDL)';
-  Pi           = 3.1415926535; // For sinusoidal color mapping
+  WindowWidth        = 1024;
+  WindowHeight       = 768;
+  WindowTitle        = 'TrueColor Plasma Effect (SDL)';
+  Pi                 = 3.1415926535; // For sinusoidal color mapping
+  UpdateIntervalRows = 8;            // Update window every N rows
 
 VAR
   Row, Col            : Integer;
@@ -29,7 +30,7 @@ BEGIN
   IF (CurrentMaxY + 1) > 0 THEN InvHeight := 1.0 / (CurrentMaxY + 1) ELSE InvHeight := 0;
 
   TimeOffset := 0.0; // Start with no animation
-  writeln('Window will not display until fully rendered.  This may take a bit');
+  writeln('Rendering RGB plasma...');
 
   FOR Row := 0 TO CurrentMaxY DO
   BEGIN
@@ -70,6 +71,13 @@ BEGIN
       PutPixel(Col, Row);
 
       { Alternative: PutPixelRGB(Col, Row, R, G, B) if your built-in supports that }
+    END;
+
+    // Periodically update the screen so the window shows progress while rendering
+    IF (Row MOD UpdateIntervalRows = 0) OR (Row = CurrentMaxY) THEN
+    BEGIN
+      UpdateScreen;
+      GraphLoop(0); // Pump events so the OS keeps the window responsive
     END;
   END;
 
