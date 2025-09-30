@@ -1465,12 +1465,16 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
     }
-    if (!IS_INTLIKE(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
+    long long ms;
+    if (IS_INTLIKE(args[0]) || args[0].type == TYPE_WORD || args[0].type == TYPE_BYTE) {
+        ms = AS_INTEGER(args[0]);
+    } else if (isRealType(args[0].type)) {
+        ms = (long long)AS_REAL(args[0]);
+    } else {
         runtimeError(vm, "GraphLoop argument must be an integer-like type.");
         return makeVoid();
     }
 
-    long long ms = AS_INTEGER(args[0]);
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
