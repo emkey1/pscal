@@ -118,9 +118,9 @@ procedure TestMathLib;
 begin
   writeln;
   writeln('-- MathLib --');
-  AssertFloatNear('MathLib.Pi', 3.141593, MathLib.Pi, 0.000001);
-  AssertFloatNear('MathLib.E', 2.718282, MathLib.E, 0.000001);
-  AssertFloatNear('MathLib.PiOver2', 1.570796, MathLib.PiOver2, 0.000001);
+  AssertFloatNear('MathLib.Pi', 3.141593, MathLib.PiValue, 0.000001);
+  AssertFloatNear('MathLib.E', 2.718282, MathLib.EValue, 0.000001);
+  AssertFloatNear('MathLib.PiOver2', 1.570796, MathLib.PiOver2Value, 0.000001);
 end;
 
 procedure TestCalculateArea;

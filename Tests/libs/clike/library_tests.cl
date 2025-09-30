@@ -65,12 +65,9 @@ void assertEqualStr(str name, str expected, str actual) {
 
 void testCRT() {
     printf("\n-- CRT --\n");
-    assertEqualInt("CRT.BLACK", 0, CRT_BLACK);
-    assertEqualInt("CRT.LIGHT_RED", 12, CRT_LIGHT_RED);
-    int original = CRT_TextAttr;
-    CRT_TextAttr = CRT_GREEN;
-    assertEqualInt("CRT.TextAttr assignment", CRT_GREEN, CRT_TextAttr);
-    CRT_TextAttr = original;
+    assertEqualInt("CRT.BLACK", 0, CRT_BLACK());
+    assertEqualInt("CRT.LIGHT_RED", 12, CRT_LIGHT_RED());
+    markSkip("CRT.TextAttr", "mutable TextAttr not available in module-safe runtime");
 }
 
 void testMathUtils() {
@@ -102,15 +99,23 @@ void testFilesystem(str tmpDir) {
 
     printf("\n-- filesystem --\n");
     str path = filesystem_joinPath(tmpDir, "clike_library_test.txt");
-    int writeOk = filesystem_writeAllText(path, "line1\nline2");
+    int writeErr = 0;
+    int writeOk = filesystem_writeAllText(path, "line1\nline2", &writeErr);
     assertEqualInt("filesystem.writeAllText", 1, writeOk);
-    assertEqualInt("filesystem.lastWriteErrorCode", 0, filesystem_lastWriteErrorCode());
+    assertEqualInt("filesystem.writeAllText error", 0, writeErr);
 
-    str contents = filesystem_readAllText(path);
-    assertEqualInt("filesystem.lastReadSucceeded", 1, filesystem_lastReadSucceeded());
+    str contents;
+    int readErr = 0;
+    int readOk = filesystem_readAllText(path, &contents, &readErr);
+    assertEqualInt("filesystem.readAllText success", 1, readOk);
+    assertEqualInt("filesystem.readAllText error", 0, readErr);
     assertEqualStr("filesystem.readAllText", "line1\nline2", contents);
 
-    str first = filesystem_readFirstLine(path);
+    str first;
+    int firstErr = 0;
+    int firstOk = filesystem_readFirstLine(path, &first, &firstErr);
+    assertEqualInt("filesystem.readFirstLine success", 1, firstOk);
+    assertEqualInt("filesystem.readFirstLine error", 0, firstErr);
     assertEqualStr("filesystem.readFirstLine", "line1", first);
 
     str home = getenv("HOME");
@@ -130,31 +135,55 @@ void testHttp(str baseUrl, str tmpDir) {
     }
 
     printf("\n-- http --\n");
-    str getBody = http_get(baseUrl + "/text");
+    str getBody;
+    int getStatus = 0;
+    int getOk = http_get(baseUrl + "/text", &getBody, &getStatus);
+    assertEqualInt("http.get request", 1, getOk);
+    assertEqualInt("http.get status", 200, getStatus);
     assertEqualStr("http.get", "hello world", getBody);
-    assertEqualInt("http.get status", 200, http_lastResponseStatus());
-    assertEqualInt("http.get success", 1, http_wasSuccessful());
 
-    str jsonBody = http_getJson(baseUrl + "/json");
+    str jsonBody;
+    int jsonStatus = 0;
+    int jsonOk = http_getJson(baseUrl + "/json", &jsonBody, &jsonStatus);
+    assertEqualInt("http.getJson request", 1, jsonOk);
+    assertEqualInt("http.getJson status", 200, jsonStatus);
     assertTrue("http.getJson accept header", strings_contains(jsonBody, "application/json"), "expected Accept header to be echoed");
 
     str postPayload = "{" + quote("hello") + ": " + quote("world") + "}";
-    str postSummary = http_postJson(baseUrl + "/post-json", postPayload);
+    str postSummary;
+    int postStatus = 0;
+    int postOk = http_postJson(baseUrl + "/post-json", postPayload, &postSummary, &postStatus);
+    assertEqualInt("http.postJson request", 1, postOk);
+    assertEqualInt("http.postJson status", 200, postStatus);
     assertTrue("http.postJson response", strings_contains(postSummary, "method: POST"), "unexpected POST summary");
 
-    str putSummary = http_put(baseUrl + "/text", "payload", "text/plain");
+    str putSummary;
+    int putStatus = 0;
+    int putOk = http_put(baseUrl + "/text", "payload", "text/plain", &putSummary, &putStatus);
+    assertEqualInt("http.put request", 1, putOk);
+    assertEqualInt("http.put status", 200, putStatus);
     assertTrue("http.put response", strings_contains(putSummary, "method: PUT"), "unexpected PUT summary");
 
-    str notFound = http_get(baseUrl + "/status/404");
-    assertEqualInt("http.404 status", 404, http_lastResponseStatus());
-    assertEqualInt("http.404 success", 0, http_wasSuccessful());
+    str notFound;
+    int notFoundStatus = 0;
+    int notFoundOk = http_get(baseUrl + "/status/404", &notFound, &notFoundStatus);
+    assertEqualInt("http.404 request", 1, notFoundOk);
+    assertEqualInt("http.404 status", 404, notFoundStatus);
     assertEqualStr("http.404 body", "not found", notFound);
 
     if (length(tmpDir) > 0) {
         str downloadPath = filesystem_joinPath(tmpDir, "download.txt");
-        int ok = http_downloadToFile(baseUrl + "/download", downloadPath);
+        int downloadStatus = 0;
+        int downloadErrCode = 0;
+        int ok = http_downloadToFile(baseUrl + "/download", downloadPath, &downloadStatus, &downloadErrCode);
         assertEqualInt("http.downloadToFile", 1, ok);
-        str downloaded = filesystem_readAllText(downloadPath);
+        assertEqualInt("http.downloadToFile status", 200, downloadStatus);
+        assertEqualInt("http.downloadToFile error", 0, downloadErrCode);
+        str downloaded;
+        int downloadErr = 0;
+        int downloadOk = filesystem_readAllText(downloadPath, &downloaded, &downloadErr);
+        assertEqualInt("http.download read success", 1, downloadOk);
+        assertEqualInt("http.download read error", 0, downloadErr);
         assertEqualStr("http.download contents", "download body", downloaded);
     } else {
         markSkip("http.downloadToFile", "CLIKE_TEST_TMPDIR not set");

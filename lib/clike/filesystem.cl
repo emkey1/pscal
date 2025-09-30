@@ -1,32 +1,17 @@
 // Filesystem helpers modeled after lib/rea/filesystem.
 
-int FS_LastReadOk = 0;
-int FS_LastReadError = 0;
-int FS_LastWriteError = 0;
-
-void filesystem_markReadFailure(int code) {
-    FS_LastReadOk = 0;
-    FS_LastReadError = code;
+void filesystem_resetError(int* outError, int value) {
+    if (outError != NULL) {
+        *outError = value;
+    }
 }
 
-void filesystem_markReadSuccess() {
-    FS_LastReadOk = 1;
-    FS_LastReadError = 0;
-}
+int filesystem_readAllText(str path, str* outContents, int* outError) {
+    if (outContents == NULL) {
+        filesystem_resetError(outError, -1);
+        return 0;
+    }
 
-int filesystem_lastReadSucceeded() {
-    return FS_LastReadOk;
-}
-
-int filesystem_lastReadErrorCode() {
-    return FS_LastReadError;
-}
-
-int filesystem_lastWriteErrorCode() {
-    return FS_LastWriteError;
-}
-
-str filesystem_readAllText(str path) {
     str contents = "";
     text f;
     int firstLine = 1;
@@ -35,8 +20,9 @@ str filesystem_readAllText(str path) {
     reset(f);
     int err = ioresult();
     if (err != 0) {
-        filesystem_markReadFailure(err);
-        return "";
+        filesystem_resetError(outError, err);
+        *outContents = "";
+        return 0;
     }
 
     while (!eof(f)) {
@@ -53,29 +39,31 @@ str filesystem_readAllText(str path) {
     close(f);
     err = ioresult();
     if (err != 0) {
-        filesystem_markReadFailure(err);
-        return contents;
+        filesystem_resetError(outError, err);
+        *outContents = contents;
+        return 0;
     }
 
-    filesystem_markReadSuccess();
-    return contents;
+    filesystem_resetError(outError, 0);
+    *outContents = contents;
+    return 1;
 }
 
-int filesystem_writeAllText(str path, str contents) {
+int filesystem_writeAllText(str path, str contents, int* outError) {
     text f;
 
     assign(f, path);
     rewrite(f);
     int err = ioresult();
     if (err != 0) {
-        FS_LastWriteError = err;
+        filesystem_resetError(outError, err);
         return 0;
     }
 
     write(f, contents);
     err = ioresult();
     if (err != 0) {
-        FS_LastWriteError = err;
+        filesystem_resetError(outError, err);
         close(f);
         ioresult();
         return 0;
@@ -84,11 +72,11 @@ int filesystem_writeAllText(str path, str contents) {
     close(f);
     err = ioresult();
     if (err != 0) {
-        FS_LastWriteError = err;
+        filesystem_resetError(outError, err);
         return 0;
     }
 
-    FS_LastWriteError = 0;
+    filesystem_resetError(outError, 0);
     return 1;
 }
 
@@ -189,21 +177,34 @@ str filesystem_expandUser(str path) {
     return home + "/" + remainder;
 }
 
-str filesystem_readFirstLine(str path) {
-    str contents = filesystem_readAllText(path);
-    if (!filesystem_lastReadSucceeded()) {
-        return "";
+int filesystem_readFirstLine(str path, str* outLine, int* outError) {
+    if (outLine == NULL) {
+        filesystem_resetError(outError, -1);
+        return 0;
     }
+
+    str contents;
+    int readOk = filesystem_readAllText(path, &contents, outError);
+    if (!readOk) {
+        *outLine = "";
+        return 0;
+    }
+
     int len = length(contents);
     int i = 1;
     while (i <= len) {
         if (contents[i] == '\n' || contents[i] == '\r') {
             if (i <= 1) {
-                return "";
+                *outLine = "";
+                return 1;
             }
-            return copy(contents, 1, i - 1);
+            *outLine = copy(contents, 1, i - 1);
+            return 1;
         }
         i = i + 1;
     }
-    return contents;
+
+    *outLine = contents;
+    filesystem_resetError(outError, 0);
+    return 1;
 }

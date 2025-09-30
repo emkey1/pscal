@@ -149,8 +149,8 @@ Provided wrappers:
 - Exponentials: `Power`, `Log10`, `Sinh`, `Cosh`, `Tanh`
 - Helpers: `Max`, `Min`, `Floor`, `Ceil`
 
-Constants exported by MathLib:
-- `Pi`, `E`, `Ln2`, `Ln10`, `TwoPi`, `PiOver2`
+Helpers exported by MathLib for common constants:
+- `PiValue`, `EValue`, `Ln2Value`, `Ln10Value`, `TwoPiValue`, `PiOver2Value`
 
 ### mylib
 Example user unit exporting a record type and routines【F:lib/pascal/mylib.pl†L1-L40】.
