@@ -453,7 +453,9 @@ class Game {
         
         if (myself.gameOver) {
             str gameOverStr = "GAME OVER - Press Q to quit";
-            outtextxy(BoardX + 10, BoardY + BoardHeight * CellSize / 2 - 20, gameOverStr);
+            outtextxy(BoardX + 10,
+                      BoardY + (BoardHeight * CellSize) div 2 - 20,
+                      gameOverStr);
         }
         
         updatescreen();
