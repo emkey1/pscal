@@ -266,6 +266,14 @@ void printSummary() {
 }
 
 int main() {
+    int startingAttr = CRT_getTextAttr();
+    int changedStartingAttr = startingAttr != CRT_LIGHT_GRAY();
+    if (changedStartingAttr) {
+        CRT_setTextAttr(CRT_LIGHT_GRAY());
+    } else {
+        CRT_setTextAttr(startingAttr);
+    }
+
     printf("CLike Library Test Suite\n");
     testCRT();
     testMathUtils();
@@ -282,8 +290,14 @@ int main() {
 
     testDatetime();
     printSummary();
+    int exitCode = 0;
     if (failedTests > 0) {
-        return 1;
+        exitCode = 1;
     }
-    return 0;
+
+    if (changedStartingAttr) {
+        CRT_setTextAttr(startingAttr);
+    }
+
+    return exitCode;
 }
