@@ -95,6 +95,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLNormal3f", "glnormal3f", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlnormal3f},
     {"opengl", "GLEnable", "glenable", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlenable},
     {"opengl", "GLDisable", "gldisable", BUILTIN_TYPE_PROCEDURE, vmBuiltinGldisable},
+    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface},
     {"opengl", "GLShadeModel", "glshademodel", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlshademodel},
     {"opengl", "GLLightfv", "gllightfv", BUILTIN_TYPE_PROCEDURE, vmBuiltinGllightfv},
     {"opengl", "GLMaterialfv", "glmaterialfv", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlmaterialfv},

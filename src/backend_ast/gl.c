@@ -1064,6 +1064,23 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinGlcullface(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLCullFace expects 1 argument (face mode).");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLCullFace")) return makeVoid();
+
+    GLenum mode;
+    if (!parseMaterialFace(args[0], &mode)) {
+        runtimeError(vm, "GLCullFace argument must be 'front', 'back', 'front_and_back', or a GLenum value.");
+        return makeVoid();
+    }
+
+    glCullFace(mode);
+    return makeVoid();
+}
+
 Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "GLIsHardwareAccelerated does not take any arguments.");
