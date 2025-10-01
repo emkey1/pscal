@@ -767,12 +767,13 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
     glGetFloatv(GL_MODELVIEW_MATRIX, modelview);
     glGetFloatv(GL_PROJECTION_MATRIX, projection);
     float mvp[16];
-    for (int row = 0; row < 4; ++row) {
-        for (int col = 0; col < 4; ++col) {
-            mvp[row * 4 + col] = projection[row * 4 + 0] * modelview[0 * 4 + col] +
-                                 projection[row * 4 + 1] * modelview[1 * 4 + col] +
-                                 projection[row * 4 + 2] * modelview[2 * 4 + col] +
-                                 projection[row * 4 + 3] * modelview[3 * 4 + col];
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                sum += projection[k * 4 + row] * modelview[col * 4 + k];
+            }
+            mvp[col * 4 + row] = sum;
         }
     }
 
