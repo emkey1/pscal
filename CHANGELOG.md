@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.3.0 – 2025-10-01
+
+Enhancements
+- Extended built-ins gained full sqlite and yyjson catalogs, a `--dump-ext-builtins` CLI switch, and keep builtin IDs stable across optional modules.
+- Graphics helpers now register `glCullFace`, validate fast landscape rendering data, and let `GraphLoop` accept real delays with SDL and Rea fallbacks.
+- Examples split into base/SDL tracks, fast landscape rendering ships enabled by default, and the Mandelbrot demo picks up a multi-threaded fast path.
+- The project adopted the MIT license to match bundled third-party code.
+
+Stability and correctness
+- Compiler byte/integer coercions were tightened so byte parameters no longer crash integer-only builtins.
+- Network and download helpers tolerate transport failures, cancellation, and Pascal warnings without aborting executions.
+- Module caches handle growing import lists, extended builtin inputs are validated before rendering, and Rea `match` identifiers parse consistently.
+- Rea comment heuristics were refined so integer division fixes no longer strip `//` comments mid-file.
+
+Developer experience
+- Library tests moved under `Tests/libs` with dedicated `run_{pascal,clike,rea}_tests.sh` entrypoints and consistent color baselines.
+- Front ends and docs describe extended builtin discovery, and each binary can enumerate the active inventory.
+- A hand-maintained Xcode project plus generator keeps IDE builds in sync with optional front ends and exposes configurable runners.
+
+Fixed
+- SDL landscape demos clamp water/terrain parameters, repair direction controls, and bake vertex data before rendering.
+- Rea and SDL samples correct `OutTextXY`, falling piece rendering, and other regressions introduced during demo refactors.
+- Plasma and weather demos render frames and report values correctly with progressive color updates and rounded temperatures.
+
 ## v2.21 – 2025-09-21
 
 Enhancements
