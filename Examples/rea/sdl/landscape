@@ -4,9 +4,9 @@
 // the user walk with either WASD or the arrow keys while steering the camera
 // with the mouse.
 
-const int WindowWidth = 1280;
-const int WindowHeight = 1024;
-const int TerrainSize = 192;
+const int WindowWidth = 800;
+const int WindowHeight = 600;
+const int TerrainSize = 128;
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
@@ -24,20 +24,17 @@ const float DegreesToRadians = 0.017453292519943295;
 const float Pi = 3.141592653589793;
 const float TwoPi = 6.283185307179586;
 const int CloudCount = 14;
-const int CloudPuffSegments = 24;
 const float SunDistance = 220.0;
 const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
-const int SunHaloSegments = 96;
-const int SunGlowSegments = 96;
-const int SunCoreSegments = 48;
-const int LensFlareCount = 4;
+const float SkyDomeRadius = 260.0;
+const int LensFlareElementCount = 6;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 const int ScanCodeA = 4;  // SDL_SCANCODE_A
 const int ScanCodeD = 7;  // SDL_SCANCODE_D
-const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
-const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+const int ScanCodeUp = 81;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 82;  // SDL_SCANCODE_DOWN
 const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
@@ -395,20 +392,7 @@ class LandscapeDemo {
   float cloudPrimaryRadius[CloudCount];
   float cloudVerticalRadius[CloudCount];
   float cloudClusterSpread[CloudCount];
-  float cloudCircleCos[CloudPuffSegments + 1];
-  float cloudCircleSin[CloudPuffSegments + 1];
-  float sunHaloCos[SunHaloSegments + 1];
-  float sunHaloSin[SunHaloSegments + 1];
-  float sunHaloJitter[SunHaloSegments + 1];
-  float sunGlowScale[SunGlowSegments + 1];
-  float sunCoreCos[SunCoreSegments + 1];
-  float sunCoreSin[SunCoreSegments + 1];
-  float lensOffsets[LensFlareCount];
-  float lensSizes[LensFlareCount];
-  float lensColorR[LensFlareCount];
-  float lensColorG[LensFlareCount];
-  float lensColorB[LensFlareCount];
-  float lensAlpha[LensFlareCount];
+  float cloudParallaxWeight[CloudCount];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
@@ -607,57 +591,7 @@ class LandscapeDemo {
     return noise * 0.5 + 0.5;
   }
 
-  void initCircleLut(float cosTable[], float sinTable[], int segments) {
-    int i = 0;
-    float step = TwoPi / segments;
-    while (i <= segments) {
-      float angle = i * step;
-      cosTable[i] = cos(angle);
-      sinTable[i] = sin(angle);
-      i = i + 1;
-    }
-  }
-
   void initializeSkyElements() {
-    my.initCircleLut(my.cloudCircleCos, my.cloudCircleSin, CloudPuffSegments);
-    my.initCircleLut(my.sunHaloCos, my.sunHaloSin, SunHaloSegments);
-    my.initCircleLut(my.sunCoreCos, my.sunCoreSin, SunCoreSegments);
-    int haloIndex = 0;
-    while (haloIndex <= SunHaloSegments) {
-      float angle = haloIndex * (TwoPi / SunHaloSegments);
-      my.sunHaloJitter[haloIndex] = 0.92 + sin(angle * 4.0) * 0.04;
-      haloIndex = haloIndex + 1;
-    }
-    int glowIndex = 0;
-    while (glowIndex <= SunGlowSegments) {
-      float angle = glowIndex * (TwoPi / SunGlowSegments);
-      my.sunGlowScale[glowIndex] = 0.90 + cos(angle * 3.0) * 0.05;
-      glowIndex = glowIndex + 1;
-    }
-    my.lensOffsets[0] = -0.32;
-    my.lensSizes[0] = 0.85;
-    my.lensColorR[0] = 1.0;
-    my.lensColorG[0] = 0.78;
-    my.lensColorB[0] = 0.46;
-    my.lensAlpha[0] = 0.42;
-    my.lensOffsets[1] = 0.18;
-    my.lensSizes[1] = 1.55;
-    my.lensColorR[1] = 0.98;
-    my.lensColorG[1] = 0.74;
-    my.lensColorB[1] = 0.52;
-    my.lensAlpha[1] = 0.30;
-    my.lensOffsets[2] = 0.58;
-    my.lensSizes[2] = 0.65;
-    my.lensColorR[2] = 0.76;
-    my.lensColorG[2] = 0.84;
-    my.lensColorB[2] = 1.0;
-    my.lensAlpha[2] = 0.26;
-    my.lensOffsets[3] = 0.92;
-    my.lensSizes[3] = 1.95;
-    my.lensColorR[3] = 0.90;
-    my.lensColorG[3] = 0.82;
-    my.lensColorB[3] = 0.60;
-    my.lensAlpha[3] = 0.18;
     int i = 0;
     while (i < CloudCount) {
       float azNoise = my.skyRandom(i, 11);
@@ -668,18 +602,28 @@ class LandscapeDemo {
       float brightNoise = my.skyRandom(i, 101);
       float rollNoise = my.skyRandom(i, 121);
       float puffNoise = my.skyRandom(i, 151);
+      int layerIndex = i % 2;
+      float parallaxWeight = 0.45 + layerIndex * 0.45 + my.skyRandom(i, 167) * 0.12;
       my.cloudAzimuth[i] = azNoise * TwoPi;
-      my.cloudElevation[i] = 0.16 + elevNoise * 0.20;
-      my.cloudDistance[i] = 150.0 + distNoise * 90.0;
-      my.cloudScale[i] = 15.0 + scaleNoise * 20.0;
-      my.cloudSpeed[i] = 0.002 + speedNoise * 0.006;
-      my.cloudBrightness[i] = 0.68 + brightNoise * 0.26;
+      if (layerIndex == 0) {
+        my.cloudElevation[i] = 0.18 + elevNoise * 0.22;
+        my.cloudDistance[i] = SkyDomeRadius * (0.55 + distNoise * 0.18);
+        my.cloudScale[i] = 22.0 + scaleNoise * 26.0;
+        my.cloudSpeed[i] = 0.0030 + speedNoise * 0.0065;
+      } else {
+        my.cloudElevation[i] = 0.30 + elevNoise * 0.28;
+        my.cloudDistance[i] = SkyDomeRadius * (0.80 + distNoise * 0.26);
+        my.cloudScale[i] = 16.0 + scaleNoise * 20.0;
+        my.cloudSpeed[i] = 0.0015 + speedNoise * 0.0045;
+      }
+      my.cloudBrightness[i] = 0.66 + brightNoise * 0.28 + layerIndex * 0.05;
       my.cloudRoll[i] = rollNoise * TwoPi;
-      my.cloudPuffCount[i] = 3 + floor(puffNoise * 4.0);
+      my.cloudPuffCount[i] = 3 + floor(puffNoise * 5.0);
       if (my.cloudPuffCount[i] < 3) my.cloudPuffCount[i] = 3;
-      my.cloudPrimaryRadius[i] = 0.50 + my.skyRandom(i, 167) * 0.32;
-      my.cloudVerticalRadius[i] = 0.34 + my.skyRandom(i, 181) * 0.28;
-      my.cloudClusterSpread[i] = 0.32 + my.skyRandom(i, 193) * 0.55;
+      my.cloudPrimaryRadius[i] = 0.52 + my.skyRandom(i, 193) * 0.30;
+      my.cloudVerticalRadius[i] = 0.36 + my.skyRandom(i, 181) * 0.30;
+      my.cloudClusterSpread[i] = 0.34 + my.skyRandom(i, 205) * 0.55;
+      my.cloudParallaxWeight[i] = parallaxWeight;
       i = i + 1;
     }
   }
@@ -885,27 +829,22 @@ class LandscapeDemo {
                         float rightZ,
                         float upX,
                         float upY,
-                        float upZ,
-                        float forwardX,
-                        float forwardY,
-                        float forwardZ) {
+                        float upZ) {
     float sunX = my.sunDirX * SunDistance;
     float sunY = my.sunDirY * SunDistance;
     float sunZ = my.sunDirZ * SunDistance;
+    int haloSegments = 96;
     float outerRadius = SunHaloRadius * 1.45;
     float innerHaloRadius = SunHaloRadius * 1.05;
     float glowRadius = SunHaloRadius * 0.82;
-    float dayFactor = my.saturate(0.35 + my.sunDirY * 0.9);
-    float haloCool = my.lerp(0.32, 0.56, dayFactor);
-    float haloWarm = my.lerp(0.78, 1.0, dayFactor);
-    float glowAlpha = my.lerp(0.42, 0.62, dayFactor);
 
     GLBegin("triangle_strip");
     int i = 0;
-    while (i <= SunHaloSegments) {
-      float cosA = my.sunHaloCos[i];
-      float sinA = my.sunHaloSin[i];
-      float jitter = my.sunHaloJitter[i];
+    while (i <= haloSegments) {
+      float angle = i * (TwoPi / haloSegments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float jitter = 0.92 + sin(angle * 4.0) * 0.04;
       float outerX = rightX * (cosA * outerRadius) + upX * (sinA * outerRadius);
       float outerY = rightY * (cosA * outerRadius) + upY * (sinA * outerRadius);
       float outerZ = rightZ * (cosA * outerRadius) + upZ * (sinA * outerRadius);
@@ -915,117 +854,55 @@ class LandscapeDemo {
                      upY * (sinA * innerHaloRadius);
       float innerZ = rightZ * (cosA * innerHaloRadius) +
                      upZ * (sinA * innerHaloRadius);
-      GLColor4f(haloCool, haloCool + 0.14, my.saturate(haloCool + 0.32), 0.0);
+      GLColor4f(1.0, 0.82, 0.46, 0.0);
       GLVertex3f(sunX + outerX, sunY + outerY, sunZ + outerZ);
-      GLColor4f(haloWarm, my.lerp(0.78, 0.92, dayFactor), 0.62 + dayFactor * 0.18,
-                0.16 * jitter);
+      GLColor4f(1.0, 0.90, 0.62, 0.18 * jitter);
       GLVertex3f(sunX + innerX, sunY + innerY, sunZ + innerZ);
       i = i + 1;
     }
     GLEnd();
 
     GLBegin("triangle_fan");
-    GLColor4f(1.0, 0.97 + dayFactor * 0.02, 0.86 + dayFactor * 0.08, glowAlpha);
+    GLColor4f(1.0, 0.97, 0.85, 0.55);
     GLVertex3f(sunX, sunY, sunZ);
     i = 0;
-    while (i <= SunGlowSegments) {
-      float cosA = my.sunHaloCos[i];
-      float sinA = my.sunHaloSin[i];
-      float rimScale = my.sunGlowScale[i];
+    while (i <= haloSegments) {
+      float angle = i * (TwoPi / haloSegments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float rimScale = 0.90 + cos(angle * 3.0) * 0.05;
       float offsetX = rightX * (cosA * glowRadius * rimScale) +
                       upX * (sinA * glowRadius * rimScale);
       float offsetY = rightY * (cosA * glowRadius * rimScale) +
                       upY * (sinA * glowRadius * rimScale);
       float offsetZ = rightZ * (cosA * glowRadius * rimScale) +
                       upZ * (sinA * glowRadius * rimScale);
-      GLColor4f(1.0, 0.92 + dayFactor * 0.05, 0.70 + dayFactor * 0.16, 0.20);
+      GLColor4f(1.0, 0.94, 0.72, 0.16);
       GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
       i = i + 1;
     }
     GLEnd();
 
+    int coreSegments = 48;
     GLBegin("triangle_fan");
     GLColor4f(1.0, 1.0, 0.94, 0.95);
     GLVertex3f(sunX, sunY, sunZ);
     i = 0;
-    while (i <= SunCoreSegments) {
-      float cosA = my.sunCoreCos[i];
-      float sinA = my.sunCoreSin[i];
+    while (i <= coreSegments) {
+      float angle = i * (TwoPi / coreSegments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
       float offsetX = rightX * (cosA * SunCoreRadius * 0.9) +
                       upX * (sinA * SunCoreRadius * 0.9);
       float offsetY = rightY * (cosA * SunCoreRadius * 0.9) +
                       upY * (sinA * SunCoreRadius * 0.9);
       float offsetZ = rightZ * (cosA * SunCoreRadius * 0.9) +
                       upZ * (sinA * SunCoreRadius * 0.9);
-      GLColor4f(1.0, 0.95 + dayFactor * 0.04, 0.70 + dayFactor * 0.22, 0.42);
+      GLColor4f(1.0, 0.95, 0.70, 0.38);
       GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
       i = i + 1;
     }
     GLEnd();
-
-    float sunViewForward = my.sunDirX * forwardX +
-                           my.sunDirY * forwardY +
-                           my.sunDirZ * forwardZ;
-    float sunViewRight = my.sunDirX * rightX +
-                         my.sunDirY * rightY +
-                         my.sunDirZ * rightZ;
-    float sunViewUp = my.sunDirX * upX + my.sunDirY * upY + my.sunDirZ * upZ;
-    float axisLen = sqrt(sunViewRight * sunViewRight + sunViewUp * sunViewUp);
-    float axisRight = 0.0;
-    float axisUp = 0.0;
-    if (axisLen > 0.0001) {
-      axisRight = -sunViewRight / axisLen;
-      axisUp = -sunViewUp / axisLen;
-    }
-    float focus = my.saturate(1.0 - axisLen * 0.85);
-    float baseIntensity = my.saturate(0.3 + sunViewForward * 0.7);
-    float lensIntensity = focus * baseIntensity;
-    if (lensIntensity > 0.001 && sunViewForward > 0.0) {
-      GLBlendFunc("one", "one");
-      int flareIndex = 0;
-      while (flareIndex < LensFlareCount) {
-        float alpha = my.lensAlpha[flareIndex] * lensIntensity;
-        if (alpha > 0.001) {
-          float offset = my.lensOffsets[flareIndex];
-          float offsetDistance = offset * SunHaloRadius * 2.4;
-          float offsetRight = axisRight * offsetDistance;
-          float offsetUp = axisUp * offsetDistance;
-          float centerX = sunX + rightX * offsetRight + upX * offsetUp;
-          float centerY = sunY + rightY * offsetRight + upY * offsetUp;
-          float centerZ = sunZ + rightZ * offsetRight + upZ * offsetUp;
-          float radius = my.lensSizes[flareIndex] * SunCoreRadius;
-          float halfRightX = rightX * radius;
-          float halfRightY = rightY * radius;
-          float halfRightZ = rightZ * radius;
-          float halfUpX = upX * radius;
-          float halfUpY = upY * radius;
-          float halfUpZ = upZ * radius;
-          float colorR = my.lensColorR[flareIndex] * alpha;
-          float colorG = my.lensColorG[flareIndex] * alpha;
-          float colorB = my.lensColorB[flareIndex] * alpha;
-          GLBegin("triangle_strip");
-          GLColor4f(colorR, colorG, colorB, alpha);
-          GLVertex3f(centerX - halfRightX - halfUpX,
-                     centerY - halfRightY - halfUpY,
-                     centerZ - halfRightZ - halfUpZ);
-          GLColor4f(colorR, colorG, colorB, 0.0);
-          GLVertex3f(centerX - halfRightX + halfUpX,
-                     centerY - halfRightY + halfUpY,
-                     centerZ - halfRightZ + halfUpZ);
-          GLColor4f(colorR, colorG, colorB, alpha);
-          GLVertex3f(centerX + halfRightX - halfUpX,
-                     centerY + halfRightY - halfUpY,
-                     centerZ + halfRightZ - halfUpZ);
-          GLColor4f(colorR, colorG, colorB, 0.0);
-          GLVertex3f(centerX + halfRightX + halfUpX,
-                     centerY + halfRightY + halfUpY,
-                     centerZ + halfRightZ + halfUpZ);
-          GLEnd();
-        }
-        flareIndex = flareIndex + 1;
-      }
-      GLBlendFunc("src_alpha", "one_minus_src_alpha");
-    }
   }
 
   void drawCloudPuff(float centerX,
@@ -1039,38 +916,197 @@ class LandscapeDemo {
                      float upX,
                      float upY,
                      float upZ,
-                     float brightness,
-                     float sunRightInfluence,
-                     float sunUpInfluence) {
-    float centerBase = my.saturate(0.68 + brightness * 0.30);
-    float centerR = my.saturate(centerBase + 0.18);
-    float centerG = my.saturate(centerBase + 0.10);
-    float centerB = my.saturate(centerBase + 0.24);
+                     float brightness) {
+    int segments = 28;
+    float highlight = my.saturate(0.82 + brightness * 0.26);
+    float rim = my.saturate(0.72 + brightness * 0.22);
+    float rimAlpha = 0.12 + brightness * 0.16;
     GLBegin("triangle_fan");
-    GLColor4f(centerR, centerG, centerB, 0.68);
+    GLColor4f(highlight, highlight, highlight + 0.06, 0.78);
     GLVertex3f(centerX, centerY, centerZ);
     int i = 0;
-    while (i <= CloudPuffSegments) {
-      float cosA = my.cloudCircleCos[i];
-      float sinA = my.cloudCircleSin[i];
-      float px = centerX + rightX * (cosA * radiusX) + upX * (sinA * radiusY);
-      float py = centerY + rightY * (cosA * radiusX) + upY * (sinA * radiusY);
-      float pz = centerZ + rightZ * (cosA * radiusX) + upZ * (sinA * radiusY);
-      float sunEdge = cosA * sunRightInfluence + sinA * sunUpInfluence;
-      float rimWarm = my.saturate(0.62 + brightness * 0.28 + sunEdge * 0.32);
-      float rimCool = my.saturate(0.56 + brightness * 0.20 - sunEdge * 0.20);
-      float rimR = my.lerp(rimCool, rimWarm, 0.65);
-      float rimG = my.lerp(rimCool, rimWarm, 0.40);
-      float rimB = my.lerp(rimCool + 0.08, rimWarm + 0.12, 0.55);
-      float rimAlpha = my.saturate(0.04 + brightness * 0.06 - sunEdge * 0.05);
-      GLColor4f(rimR, rimG, rimB, rimAlpha);
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float distortion = 1.0 + sin(angle * 2.7 + brightness * 1.4) * 0.08;
+      float px = centerX + rightX * (cosA * radiusX * distortion) +
+                 upX * (sinA * radiusY * distortion);
+      float py = centerY + rightY * (cosA * radiusX * distortion) +
+                 upY * (sinA * radiusY * distortion);
+      float pz = centerZ + rightZ * (cosA * radiusX * distortion) +
+                 upZ * (sinA * radiusY * distortion);
+      float rimTint = my.saturate(rim + sin(angle * 5.0) * 0.04);
+      GLColor4f(rimTint, rimTint, rimTint + 0.04, rimAlpha * 0.25);
       GLVertex3f(px, py, pz);
       i = i + 1;
     }
     GLEnd();
   }
 
+  void drawLensFlare(float timeSeconds,
+                     float forwardX,
+                     float forwardY,
+                     float forwardZ,
+                     float rightX,
+                     float rightY,
+                     float rightZ,
+                     float upX,
+                     float upY,
+                     float upZ) {
+    float sunForward = my.sunDirX * forwardX +
+                       my.sunDirY * forwardY +
+                       my.sunDirZ * forwardZ;
+    if (sunForward <= 0.05) return;
+    float screenX = my.sunDirX * rightX + my.sunDirY * rightY + my.sunDirZ * rightZ;
+    float screenY = my.sunDirX * upX + my.sunDirY * upY + my.sunDirZ * upZ;
+    float lensVecX = -screenX;
+    float lensVecY = -screenY;
+    float lensLen = sqrt(lensVecX * lensVecX + lensVecY * lensVecY);
+    if (lensLen <= 0.0001) {
+      lensVecX = 1.0;
+      lensVecY = 0.0;
+      lensLen = 1.0;
+    }
+    lensVecX = lensVecX / lensLen;
+    lensVecY = lensVecY / lensLen;
+    float lensPerpX = -lensVecY;
+    float lensPerpY = lensVecX;
+    float baseIntensity = my.saturate((sunForward - 0.08) * 1.35);
+    if (baseIntensity <= 0.01) return;
+
+    float offsets[LensFlareElementCount];
+    float scales[LensFlareElementCount];
+    float colorR[LensFlareElementCount];
+    float colorG[LensFlareElementCount];
+    float colorB[LensFlareElementCount];
+    float alphaScale[LensFlareElementCount];
+
+    offsets[0] = 0.0;
+    offsets[1] = 0.32;
+    offsets[2] = 0.68;
+    offsets[3] = -0.28;
+    offsets[4] = 1.08;
+    offsets[5] = -1.36;
+
+    scales[0] = SunHaloRadius * 0.55;
+    scales[1] = SunCoreRadius * 0.45;
+    scales[2] = SunHaloRadius * 0.34;
+    scales[3] = SunCoreRadius * 0.58;
+    scales[4] = SunHaloRadius * 0.48;
+    scales[5] = SunCoreRadius * 0.40;
+
+    colorR[0] = 1.0;   colorG[0] = 0.92;  colorB[0] = 0.70;  alphaScale[0] = 0.38;
+    colorR[1] = 0.95;  colorG[1] = 0.78;  colorB[1] = 0.55;  alphaScale[1] = 0.26;
+    colorR[2] = 0.88;  colorG[2] = 0.72;  colorB[2] = 0.60;  alphaScale[2] = 0.22;
+    colorR[3] = 0.92;  colorG[3] = 0.68;  colorB[3] = 0.90;  alphaScale[3] = 0.20;
+    colorR[4] = 0.80;  colorG[4] = 0.90;  colorB[4] = 1.00;  alphaScale[4] = 0.18;
+    colorR[5] = 0.74;  colorG[5] = 0.84;  colorB[5] = 0.98;  alphaScale[5] = 0.16;
+
+    GLBlendFunc("src_alpha", "one");
+
+    int element = 0;
+    while (element < LensFlareElementCount) {
+      float offset = offsets[element];
+      float flicker = 0.65 + 0.35 * sin(timeSeconds * 1.35 + offset * 4.2);
+      float elementAlpha = baseIntensity * alphaScale[element] * flicker;
+      if (elementAlpha > 0.001) {
+        float elementScreenX = screenX + lensVecX * offset;
+        float elementScreenY = screenY + lensVecY * offset;
+        float elementForward = sunForward + offset * 0.02;
+        float dirX = forwardX * elementForward +
+                     rightX * elementScreenX +
+                     upX * elementScreenY;
+        float dirY = forwardY * elementForward +
+                     rightY * elementScreenX +
+                     upY * elementScreenY;
+        float dirZ = forwardZ * elementForward +
+                     rightZ * elementScreenX +
+                     upZ * elementScreenY;
+        float dirLen = sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        if (dirLen > 0.0001) {
+          dirX = dirX / dirLen;
+          dirY = dirY / dirLen;
+          dirZ = dirZ / dirLen;
+          float distance = SunDistance * (1.0 + absf(offset) * 0.12);
+          float centerX = dirX * distance;
+          float centerY = dirY * distance;
+          float centerZ = dirZ * distance;
+          float flareRightX = rightX * lensVecX + upX * lensVecY;
+          float flareRightY = rightY * lensVecX + upY * lensVecY;
+          float flareRightZ = rightZ * lensVecX + upZ * lensVecY;
+          float rightLen = sqrt(flareRightX * flareRightX +
+                                flareRightY * flareRightY +
+                                flareRightZ * flareRightZ);
+          if (rightLen <= 0.0001) {
+            flareRightX = rightX;
+            flareRightY = rightY;
+            flareRightZ = rightZ;
+            rightLen = 1.0;
+          }
+          flareRightX = flareRightX / rightLen;
+          flareRightY = flareRightY / rightLen;
+          flareRightZ = flareRightZ / rightLen;
+
+          float flareUpX = rightX * lensPerpX + upX * lensPerpY;
+          float flareUpY = rightY * lensPerpX + upY * lensPerpY;
+          float flareUpZ = rightZ * lensPerpX + upZ * lensPerpY;
+          float upLen = sqrt(flareUpX * flareUpX +
+                             flareUpY * flareUpY +
+                             flareUpZ * flareUpZ);
+          if (upLen <= 0.0001) {
+            flareUpX = upX;
+            flareUpY = upY;
+            flareUpZ = upZ;
+            upLen = 1.0;
+          }
+          flareUpX = flareUpX / upLen;
+          flareUpY = flareUpY / upLen;
+          flareUpZ = flareUpZ / upLen;
+
+          float radius = scales[element] * (0.9 + absf(offset) * 0.25);
+          float aspect = 0.85 + absf(offset) * 0.30;
+
+          int segments = 16;
+          GLBegin("triangle_fan");
+          GLColor4f(colorR[element],
+                    colorG[element],
+                    colorB[element],
+                    elementAlpha);
+          GLVertex3f(centerX, centerY, centerZ);
+          int j = 0;
+          while (j <= segments) {
+            float angle = j * (TwoPi / segments);
+            float cosA = cos(angle);
+            float sinA = sin(angle);
+            float offsetX = flareRightX * (cosA * radius) +
+                            flareUpX * (sinA * radius * aspect);
+            float offsetY = flareRightY * (cosA * radius) +
+                            flareUpY * (sinA * radius * aspect);
+            float offsetZ = flareRightZ * (cosA * radius) +
+                            flareUpZ * (sinA * radius * aspect);
+            GLColor4f(colorR[element],
+                      colorG[element],
+                      colorB[element],
+                      0.0);
+            GLVertex3f(centerX + offsetX,
+                       centerY + offsetY,
+                       centerZ + offsetZ);
+            j = j + 1;
+          }
+          GLEnd();
+        }
+      }
+      element = element + 1;
+    }
+
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+  }
+
   void drawCloudLayer(float timeSeconds,
+                      float forwardX,
+                      float forwardY,
+                      float forwardZ,
                       float rightX,
                       float rightY,
                       float rightZ,
@@ -1093,10 +1129,23 @@ class LandscapeDemo {
       float baseScale = my.cloudScale[i];
       float baseBrightness = my.cloudBrightness[i];
       float sunInfluence = my.sunDirX * dirX + my.sunDirY * dirY + my.sunDirZ * dirZ;
-      float puffBrightness = my.saturate(baseBrightness + sunInfluence * 0.18);
+      float horizonLift = my.saturate((elevation - 0.10) * 2.6);
+      float puffBrightness = my.saturate(baseBrightness * (0.72 + horizonLift * 0.28) +
+                                         sunInfluence * 0.24);
+      float parallax = my.cloudParallaxWeight[i];
+      float camOffsetX = (my.camX - TerrainSize * 0.5) * TileScale;
+      float camOffsetZ = (my.camZ - TerrainSize * 0.5) * TileScale;
+      float offsetRight = (camOffsetX * rightX + camOffsetZ * rightZ) * 0.35 * parallax;
+      float offsetForward = (camOffsetX * forwardX + camOffsetZ * forwardZ) * 0.20 * parallax;
+      float offsetUp = (camOffsetX * upX + camOffsetZ * upZ) * 0.08 * parallax;
+      centerX = centerX + rightX * offsetRight + forwardX * offsetForward;
+      centerY = centerY + rightY * offsetRight + forwardY * offsetForward + upY * offsetUp;
+      centerZ = centerZ + rightZ * offsetRight + forwardZ * offsetForward + upZ * offsetUp;
+      float wobble = sin(timeSeconds * 0.25 + my.cloudRoll[i]) * 0.4 * parallax;
+      centerY = centerY + wobble;
       float radiusX = baseScale * my.cloudPrimaryRadius[i];
       float radiusY = baseScale * my.cloudVerticalRadius[i];
-      float clusterSpread = baseScale * my.cloudClusterSpread[i];
+      float clusterSpread = baseScale * my.cloudClusterSpread[i] * (0.85 + parallax * 0.3);
       float roll = my.cloudRoll[i];
       float cosRoll = cos(roll);
       float sinRoll = sin(roll);
@@ -1106,12 +1155,6 @@ class LandscapeDemo {
       float basisUpX = upX * cosRoll - rightX * sinRoll;
       float basisUpY = upY * cosRoll - rightY * sinRoll;
       float basisUpZ = upZ * cosRoll - rightZ * sinRoll;
-      float sunRightInfluence = my.sunDirX * basisRightX +
-                                my.sunDirY * basisRightY +
-                                my.sunDirZ * basisRightZ;
-      float sunUpInfluence = my.sunDirX * basisUpX +
-                             my.sunDirY * basisUpY +
-                             my.sunDirZ * basisUpZ;
 
       my.drawCloudPuff(centerX,
                        centerY,
@@ -1124,9 +1167,7 @@ class LandscapeDemo {
                        basisUpX,
                        basisUpY,
                        basisUpZ,
-                       puffBrightness,
-                       sunRightInfluence,
-                       sunUpInfluence);
+                       puffBrightness);
 
       int puffCount = my.cloudPuffCount[i];
       int puffIndex = 1;
@@ -1174,9 +1215,7 @@ class LandscapeDemo {
                          basisUpX,
                          basisUpY,
                          basisUpZ,
-                         puffLight,
-                         sunRightInfluence,
-                         sunUpInfluence);
+                         puffLight);
         puffIndex = puffIndex + 1;
       }
       i = i + 1;
@@ -1218,16 +1257,27 @@ class LandscapeDemo {
       upY = upY / upLen;
       upZ = upZ / upLen;
     }
-    my.drawSunBillboard(rightX,
-                        rightY,
-                        rightZ,
-                        upX,
-                        upY,
-                        upZ,
-                        forwardX,
-                        forwardY,
-                        forwardZ);
-    my.drawCloudLayer(timeSeconds, rightX, rightY, rightZ, upX, upY, upZ);
+    my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
+    my.drawLensFlare(timeSeconds,
+                     forwardX,
+                     forwardY,
+                     forwardZ,
+                     rightX,
+                     rightY,
+                     rightZ,
+                     upX,
+                     upY,
+                     upZ);
+    my.drawCloudLayer(timeSeconds,
+                      forwardX,
+                      forwardY,
+                      forwardZ,
+                      rightX,
+                      rightY,
+                      rightZ,
+                      upX,
+                      upY,
+                      upZ);
   }
 
   void setupLighting() {
