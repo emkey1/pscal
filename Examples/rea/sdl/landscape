@@ -6,10 +6,12 @@
 
 const int WindowWidth = 1280;
 const int WindowHeight = 1024;
-const int TerrainSize = 192
+const int TerrainSize = 192;
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
+const float InvTileScale = 1.0 / TileScale;
+const float InvTwoTileScale = 0.5 * InvTileScale;
 const int NoiseOctaves = 5;
 const float HeightScale = 16.0;
 const float EyeHeight = 6.5;
@@ -33,6 +35,22 @@ const int ScanCodeUp = 81;    // SDL_SCANCODE_UP
 const int ScanCodeDown = 82;  // SDL_SCANCODE_DOWN
 const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
+
+bool envFlagEnabled(str name) {
+  return getenvint(name, 0) != 0;
+}
+
+bool extendedBuiltinsDisabled() {
+  if (envFlagEnabled("REA_LANDSCAPE_FORCE_SOFTWARE")) return true;
+  if (envFlagEnabled("REA_LANDSCAPE_DISABLE_EXT")) return true;
+  return false;
+}
+
+bool fastDrawRequestedByDefault() {
+  if (envFlagEnabled("REA_LANDSCAPE_ENABLE_FAST_DRAW")) return true;
+  if (envFlagEnabled("REA_LANDSCAPE_FORCE_FAST_DRAW")) return true;
+  return false;
+}
 
 bool hasDigit(str s) {
   int i = 1;
@@ -351,6 +369,10 @@ class LandscapeDemo {
   float waterHeight;
   float waterNormalizedLevel;
   float elapsedSeconds;
+  bool allowExtendedBuiltins;
+  bool fastTerrainAvailable;
+  bool fastWaterAvailable;
+  bool fastDrawEnabled;
   bool useFastTerrain;
   bool useFastWater;
   bool useFastWorldCoords;
@@ -366,16 +388,33 @@ class LandscapeDemo {
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
-    my.useFastWorldCoords = my.tryPrecomputeWorldCoordinates();
-    if (!my.useFastWorldCoords) {
+    bool disableExt = extendedBuiltinsDisabled();
+    my.allowExtendedBuiltins = !disableExt;
+    if (disableExt) {
+      writeln("Extended landscape builtins disabled by environment override.");
+    }
+    my.useFastWorldCoords = false;
+    if (my.allowExtendedBuiltins && my.tryPrecomputeWorldCoordinates()) {
+      my.useFastWorldCoords = true;
+    } else {
       my.precomputeWorldCoordinates();
     }
-    my.useFastWaterOffsets = my.tryPrecomputeWaterOffsets();
-    if (!my.useFastWaterOffsets) {
+    my.useFastWaterOffsets = false;
+    if (my.allowExtendedBuiltins && my.tryPrecomputeWaterOffsets()) {
+      my.useFastWaterOffsets = true;
+    } else {
       my.precomputeWaterOffsets();
     }
-    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
-    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
+    my.fastTerrainAvailable = my.allowExtendedBuiltins &&
+                              hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.fastWaterAvailable = my.allowExtendedBuiltins &&
+                             hasextbuiltin("user", "LandscapeDrawWater");
+    my.fastDrawEnabled = false;
+    my.useFastTerrain = false;
+    my.useFastWater = false;
+    if (my.allowExtendedBuiltins && fastDrawRequestedByDefault()) {
+      my.enableFastDraw("environment override");
+    }
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
     float sunX = 0.45;
@@ -398,6 +437,51 @@ class LandscapeDemo {
     my.lastMouseX = 0;
     my.lastMouseY = 0;
     my.hasMouseSample = false;
+    my.useFastVertexBake = false;
+  }
+
+  void enableFastDraw(str reason) {
+    if (!my.allowExtendedBuiltins) {
+      writeln("Cannot enable fast draw: extended builtins have been disabled.");
+      my.fastDrawEnabled = false;
+      my.useFastTerrain = false;
+      my.useFastWater = false;
+      return;
+    }
+    if (!my.fastTerrainAvailable && !my.fastWaterAvailable) {
+      writeln("Fast draw builtins are not available on this runtime.");
+      my.fastDrawEnabled = false;
+      my.useFastTerrain = false;
+      my.useFastWater = false;
+      return;
+    }
+    my.fastDrawEnabled = true;
+    my.useFastTerrain = my.fastTerrainAvailable;
+    my.useFastWater = my.fastWaterAvailable;
+    writeln("Fast draw enabled (", reason, ").");
+    if (!my.fastTerrainAvailable || !my.fastWaterAvailable) {
+      if (my.fastTerrainAvailable && !my.fastWaterAvailable) {
+        writeln("  Note: water rendering will continue to use the software path.");
+      } else if (!my.fastTerrainAvailable && my.fastWaterAvailable) {
+        writeln("  Note: terrain rendering will continue to use the software path.");
+      }
+    }
+  }
+
+  void disableFastDraw(str reason) {
+    if (!my.fastDrawEnabled) return;
+    my.fastDrawEnabled = false;
+    my.useFastTerrain = false;
+    my.useFastWater = false;
+    writeln("Fast draw disabled (", reason, ").");
+  }
+
+  void toggleFastDraw() {
+    if (my.fastDrawEnabled) {
+      my.disableFastDraw("toggled");
+    } else {
+      my.enableFastDraw("toggled");
+    }
   }
 
   bool tryPrecomputeWorldCoordinates() {
@@ -529,8 +613,8 @@ class LandscapeDemo {
         float right = my.field.rawHeight(x + 1, z);
         float down = my.field.rawHeight(x, z - 1);
         float up = my.field.rawHeight(x, z + 1);
-        float dx = (right - left) / (2.0 * TileScale);
-        float dz = (up - down) / (2.0 * TileScale);
+        float dx = (right - left) * InvTwoTileScale;
+        float dz = (up - down) * InvTwoTileScale;
         float nx = -dx;
         float ny = 1.0;
         float nz = -dz;
@@ -554,9 +638,9 @@ class LandscapeDemo {
       return false;
     }
     // Ensure the water height slot is initialised with a numeric value so the
-    // native helper accepts it as a VAR parameter. We use NaN as a sentinel so
-    // we can detect if the builtin failed to write a result.
-    my.waterHeight = sqrt(0.0);
+    // native helper accepts it as a VAR parameter. We use an out-of-range
+    // sentinel so we can detect if the builtin failed to write a result.
+    my.waterHeight = -1.0e30;
     landscapebakevertexdata(my.field.heights,
                             my.vertexHeights,
                             my.vertexNormalX,
@@ -573,7 +657,7 @@ class LandscapeDemo {
                             TileScale,
                             TerrainSize,
                             VertexStride);
-    if (!floatIsFinite(my.waterHeight)) {
+    if (!floatIsFinite(my.waterHeight) || my.waterHeight <= -1.0e29) {
       return false;
     }
     int total = VertexCount;
@@ -623,7 +707,9 @@ class LandscapeDemo {
   }
 
   void updateVertexData() {
-    if (my.tryBakeVertexData(my.waterNormalizedLevel)) {
+    my.useFastVertexBake = false;
+    if (my.allowExtendedBuiltins &&
+        my.tryBakeVertexData(my.waterNormalizedLevel)) {
       my.useFastVertexBake = true;
       return;
     }
@@ -915,8 +1001,8 @@ class LandscapeDemo {
     GLEnable("normalize");
     GLShadeModel("smooth");
     GLColorMaterial("front", "ambient_and_diffuse");
-    GLEnable("cull_face");
-    GLCullFace("back");
+//    GLEnable("cull_face");
+//    GLCullFace("back");
 
     GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
     GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
@@ -933,7 +1019,10 @@ class LandscapeDemo {
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     my.setupLighting();
-    writeln("Controls: W/S or Up/Down to move, A/D or Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: W/S or Up/Down to move, A/D or Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, F toggles fast draw, Q or Esc exits.");
+    if (my.fastDrawEnabled) {
+      writeln("Fast draw active; press F to switch back to the software renderer.");
+    }
     if (my.useFastTerrain ||
         my.useFastWater ||
         my.useFastWorldCoords ||
@@ -980,6 +1069,8 @@ class LandscapeDemo {
         int tickSeed = getticks();
         if (tickSeed == 0) tickSeed = my.seed + 7;
         my.regenerate(tickSeed);
+      } else if (key == 'f' || key == 'F') {
+        my.toggleFastDraw();
       }
       key = pollkey();
     }
@@ -1172,8 +1263,8 @@ class LandscapeDemo {
         forwardX = forwardX / forwardLen;
         forwardZ = forwardZ / forwardLen;
       }
-      float deltaX = forwardX * (speed / TileScale);
-      float deltaZ = forwardZ * (speed / TileScale);
+      float deltaX = forwardX * speed * InvTileScale;
+      float deltaZ = forwardZ * speed * InvTileScale;
       my.camX = my.camX + deltaX;
       my.camZ = my.camZ + deltaZ;
     }
