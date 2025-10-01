@@ -1,7 +1,7 @@
 #!/usr/bin/env rea
 // OpenWeather One Call forecast demo.
 // Documentation: https://openweathermap.org/api/one-call-3
-// Usage: RUN_NET_TESTS=1 OPENWEATHER_API_KEY=<key> ./openweather_forecast <zip> [country] [units]
+// Usage: OPENWEATHER_API_KEY=<key> ./openweather_forecast <zip> [country] [units]
 
 str pad2(int value) {
   if (value < 10) {
@@ -358,11 +358,6 @@ void printDailyForecast(int dailyHandle, int timezoneOffset, str tempUnitSymbol)
 }
 
 int main() {
-  if (getenvint("RUN_NET_TESTS", 0) != 1) {
-    writeln("RUN_NET_TESTS=1 is required to run this network demo. Exiting without contacting the API.");
-    return 0;
-  }
-
   if (!hasextbuiltin("yyjson", "YyjsonRead")) {
     writeln("Error: yyjson extended built-ins are required. Rebuild with yyjson support enabled.");
     return 1;
