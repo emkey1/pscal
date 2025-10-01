@@ -485,6 +485,10 @@ class LandscapeDemo {
     if (!hasextbuiltin("user", "LandscapeBakeVertexData")) {
       return false;
     }
+    // Ensure the water height slot is initialised with a numeric value so the
+    // native helper accepts it as a VAR parameter. We use NaN as a sentinel so
+    // we can detect if the builtin failed to write a result.
+    my.waterHeight = sqrt(0.0);
     landscapebakevertexdata(my.field.heights,
                             my.vertexHeights,
                             my.vertexNormalX,
