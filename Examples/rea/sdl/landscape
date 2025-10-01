@@ -220,40 +220,6 @@ class TerrainField {
     return t;
   }
 
-  bool tryBakeVertexData(var float vertexHeights[],
-                         var float vertexNormalX[],
-                         var float vertexNormalY[],
-                         var float vertexNormalZ[],
-                         var float vertexColorR[],
-                         var float vertexColorG[],
-                         var float vertexColorB[],
-                         float waterLevel,
-                         var float waterHeightOut) {
-    if (!hasextbuiltin("user", "LandscapeBakeVertexData")) {
-      return false;
-    }
-    landscapebakevertexdata(my.heights,
-                            vertexHeights,
-                            vertexNormalX,
-                            vertexNormalY,
-                            vertexNormalZ,
-                            vertexColorR,
-                            vertexColorG,
-                            vertexColorB,
-                            waterHeightOut,
-                            my.minHeight,
-                            my.maxHeight,
-                            my.normalizationScale,
-                            waterLevel,
-                            TileScale,
-                            TerrainSize,
-                            VertexStride);
-    if (!(waterHeightOut == waterHeightOut)) {
-      return false;
-    }
-    return true;
-  }
-
   float heightAt(float gx, float gz) {
     if (gx < 0.0) gx = 0.0;
     if (gx > TerrainSize) gx = TerrainSize;
@@ -509,16 +475,34 @@ class LandscapeDemo {
     }
   }
 
+  bool tryBakeVertexData(float waterLevel) {
+    if (!hasextbuiltin("user", "LandscapeBakeVertexData")) {
+      return false;
+    }
+    landscapebakevertexdata(my.field.heights,
+                            my.vertexHeights,
+                            my.vertexNormalX,
+                            my.vertexNormalY,
+                            my.vertexNormalZ,
+                            my.vertexColorR,
+                            my.vertexColorG,
+                            my.vertexColorB,
+                            my.waterHeight,
+                            my.field.minHeight,
+                            my.field.maxHeight,
+                            my.field.normalizationScale,
+                            waterLevel,
+                            TileScale,
+                            TerrainSize,
+                            VertexStride);
+    if (!(my.waterHeight == my.waterHeight)) {
+      return false;
+    }
+    return true;
+  }
+
   void updateVertexData() {
-    if (my.field.tryBakeVertexData(my.vertexHeights,
-                                   my.vertexNormalX,
-                                   my.vertexNormalY,
-                                   my.vertexNormalZ,
-                                   my.vertexColorR,
-                                   my.vertexColorG,
-                                   my.vertexColorB,
-                                   my.waterNormalizedLevel,
-                                   my.waterHeight)) {
+    if (my.tryBakeVertexData(my.waterNormalizedLevel)) {
       return;
     }
     my.computeVertexNormals();
