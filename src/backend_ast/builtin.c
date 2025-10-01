@@ -483,6 +483,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"glclearcolor", NULL},
     {"glcleardepth", NULL},
     {"glcolor3f", NULL},
+    {"glcullface", NULL},
     {"gldepthtest", NULL},
     {"glend", NULL},
     {"glfrustum", NULL},

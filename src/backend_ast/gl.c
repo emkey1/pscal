@@ -129,6 +129,12 @@ static bool parseCapability(Value arg, GLenum* cap) {
         return true;
     }
     if (arg.type == TYPE_STRING && arg.s_val) {
+#ifdef GL_CULL_FACE
+        if (strcasecmp(arg.s_val, "cull_face") == 0 || strcasecmp(arg.s_val, "cullface") == 0) {
+            *cap = GL_CULL_FACE;
+            return true;
+        }
+#endif
 #ifdef GL_LIGHTING
         if (strcasecmp(arg.s_val, "lighting") == 0) {
             *cap = GL_LIGHTING;
@@ -222,6 +228,30 @@ static bool parseCapability(Value arg, GLenum* cap) {
         }
         if (strcasecmp(arg.s_val, "texture_2d") == 0) {
             *cap = GL_TEXTURE_2D;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parseCullFaceMode(Value arg, GLenum* mode) {
+    if (IS_INTLIKE(arg)) {
+        *mode = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "front") == 0) {
+            *mode = GL_FRONT;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "back") == 0) {
+            *mode = GL_BACK;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "front_and_back") == 0 ||
+            strcasecmp(arg.s_val, "frontandback") == 0 ||
+            strcasecmp(arg.s_val, "front-and-back") == 0) {
+            *mode = GL_FRONT_AND_BACK;
             return true;
         }
     }
@@ -1034,6 +1064,23 @@ Value vmBuiltinGlblendfunc(VM* vm, int arg_count, Value* args) {
     }
 
     glBlendFunc(sfactor, dfactor);
+    return makeVoid();
+}
+
+Value vmBuiltinGlcullface(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLCullFace expects 1 argument specifying a face to cull.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLCullFace")) return makeVoid();
+
+    GLenum mode;
+    if (!parseCullFaceMode(args[0], &mode)) {
+        runtimeError(vm, "GLCullFace argument must be 'front', 'back', 'front_and_back', or a GLenum value.");
+        return makeVoid();
+    }
+
+    glCullFace(mode);
     return makeVoid();
 }
 

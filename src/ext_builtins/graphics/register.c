@@ -76,6 +76,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLClearColor", "glclearcolor", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlclearcolor},
     {"opengl", "GLClearDepth", "glcleardepth", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcleardepth},
     {"opengl", "GLColor3f", "glcolor3f", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcolor3f},
+    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface},
     {"opengl", "GLDepthTest", "gldepthtest", BUILTIN_TYPE_PROCEDURE, vmBuiltinGldepthtest},
     {"opengl", "GLEnd", "glend", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlend},
     {"opengl", "GLFrustum", "glfrustum", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlfrustum},
