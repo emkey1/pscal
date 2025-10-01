@@ -10,7 +10,7 @@ CONST
 //  MaxIterations = 255;
   MaxIterations = 128;
   StatusUpdateInterval = 20; // Print status every 20 rows
-  ScreenUpdateInterval = 1;  // Refresh SDL window every row
+  ScreenUpdateInterval = 4;  // Refresh SDL window periodically to reduce event overhead
   MandelBytesPerPixel = 4;
   RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
   SystemFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
@@ -18,6 +18,10 @@ CONST
 
 TYPE
   PixelBuffer = ARRAY[0..(WindowWidth * WindowHeight * MandelBytesPerPixel) - 1] OF Byte;
+  MandelColor = RECORD
+    R, G, B : Byte;
+  END;
+  MandelColorTable = ARRAY[0..MaxIterations] OF MandelColor;
 
 VAR
   Px, Py        : Integer; // Pixel coordinates
@@ -25,7 +29,6 @@ VAR
   x, y          : Real;    // Current z value
   xTemp         : Real;
   Iteration     : Integer;
-  R, G, B       : Byte;
 
   MinRe         : Real;
   MaxRe         : Real;
@@ -40,10 +43,16 @@ VAR
   MandelTextureID : Integer;
   PixelData : PixelBuffer;
   BufferBaseIdx : Integer;
+  RowStride : Integer;
+  RowPixelIndex : Integer;
 
   PercentDone : Integer;
   TextSystemInitialized : Boolean;
   SelectedFontPath : String;
+  ColorTable : MandelColorTable;
+  ColorIdx : Integer;
+  CurrentColor : MandelColor;
+  CurrentY0 : Real;
 
 BEGIN
   MinRe := -2.0;
@@ -101,17 +110,36 @@ BEGIN
   IF ViewPixelHeight > 1 THEN ScaleIm := ImRange / (ViewPixelHeight - 1)
   ELSE IF ViewPixelHeight = 1 THEN ScaleIm := ImRange ELSE ScaleIm := 0;
 
+  FOR ColorIdx := 0 TO MaxIterations DO
+  BEGIN
+    IF ColorIdx = MaxIterations THEN
+    BEGIN
+      ColorTable[ColorIdx].R := Byte(0);
+      ColorTable[ColorIdx].G := Byte(0);
+      ColorTable[ColorIdx].B := Byte(0);
+    END
+    ELSE
+    BEGIN
+      ColorTable[ColorIdx].R := Byte((ColorIdx * 5) AND $FF);
+      ColorTable[ColorIdx].G := Byte((ColorIdx * 7 + 85) AND $FF);
+      ColorTable[ColorIdx].B := Byte((ColorIdx * 11 + 170) AND $FF);
+    END;
+  END;
+
   // Initialize progress tracking
   PercentDone := 0;
 
   // Main loop through each pixel, updating texture progressively
+  RowStride := ViewPixelWidth * MandelBytesPerPixel;
+  BufferBaseIdx := 0;
+  y0 := MaxIm;
   FOR Py := 0 TO ViewPixelHeight - 1 DO
   BEGIN
-    y0 := MaxIm - (Py * ScaleIm);
+    CurrentY0 := y0;
+    x0 := MinRe;
+    RowPixelIndex := BufferBaseIdx;
     FOR Px := 0 TO ViewPixelWidth - 1 DO
     BEGIN
-      x0 := MinRe + (Px * ScaleRe);
-
       x := 0.0;
       y := 0.0;
       Iteration := 0;
@@ -119,27 +147,19 @@ BEGIN
       WHILE (x*x + y*y <= 4.0) AND (Iteration < MaxIterations) DO
       BEGIN
         xTemp := x*x - y*y + x0;
-        y     := 2*x*y + y0;
+        y     := 2*x*y + CurrentY0;
         x     := xTemp;
         Iteration := Iteration + 1;
       END;
 
-      IF Iteration = MaxIterations THEN
-      BEGIN
-        R := Byte(0); G := Byte(0); B := Byte(0);
-      END
-      ELSE
-      BEGIN
-        R := Byte((Iteration * 5) MOD 256);
-        G := Byte((Iteration * 7 + 85) MOD 256);
-        B := Byte((Iteration * 11 + 170) MOD 256);
-      END;
+      CurrentColor := ColorTable[Iteration];
+      PixelData[RowPixelIndex + 0] := CurrentColor.R;
+      PixelData[RowPixelIndex + 1] := CurrentColor.G;
+      PixelData[RowPixelIndex + 2] := CurrentColor.B;
+      PixelData[RowPixelIndex + 3] := Byte(255);
 
-      BufferBaseIdx := (Py * ViewPixelWidth + Px) * MandelBytesPerPixel;
-      PixelData[BufferBaseIdx + 0] := R;
-      PixelData[BufferBaseIdx + 1] := G;
-      PixelData[BufferBaseIdx + 2] := B;
-      PixelData[BufferBaseIdx + 3] := Byte(255);
+      RowPixelIndex := RowPixelIndex + MandelBytesPerPixel;
+      x0 := x0 + ScaleRe;
     END; // END FOR Px
 
     // Status Update Logic
@@ -166,6 +186,8 @@ BEGIN
       GraphLoop(0);
     END;
 
+    BufferBaseIdx := BufferBaseIdx + RowStride;
+    y0 := y0 - ScaleIm;
   END; // END FOR Py
 
   WriteLn('-----------------------------------------------------');
