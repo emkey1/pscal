@@ -151,15 +151,21 @@ class TerrainField {
     if (!hasextbuiltin("user", "LandscapeBuildHeightField")) {
       return false;
     }
+    float minHeight = 0.0;
+    float maxHeight = 0.0;
+    float normalizationScale = 0.0;
     landscapebuildheightfield(my.heights,
                               s,
                               TerrainSize,
                               VertexStride,
                               HeightScale,
                               NoiseOctaves,
-                              my.minHeight,
-                              my.maxHeight,
-                              my.normalizationScale);
+                              minHeight,
+                              maxHeight,
+                              normalizationScale);
+    my.minHeight = minHeight;
+    my.maxHeight = maxHeight;
+    my.normalizationScale = normalizationScale;
     float sanity = my.heights[0];
     if (!(sanity == sanity)) return false;
     return true;
