@@ -31,8 +31,8 @@ const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 const int ScanCodeA = 4;  // SDL_SCANCODE_A
 const int ScanCodeD = 7;  // SDL_SCANCODE_D
-const int ScanCodeUp = 81;    // SDL_SCANCODE_UP
-const int ScanCodeDown = 82;  // SDL_SCANCODE_DOWN
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
 const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
@@ -1319,8 +1319,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeUp);
-    bool backward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeDown);
+    bool forward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeUp);
+    bool backward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeDown);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
