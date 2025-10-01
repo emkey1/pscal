@@ -1,7 +1,7 @@
 #!/usr/bin/env rea
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk with W/S while steering the camera with the mouse.
+// the user walk with the arrow keys while steering the camera with the mouse.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 1024;
@@ -16,6 +16,7 @@ const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
+const float KeyTurnSpeed = 90.0;
 const float DegreesToRadians = 0.017453292519943295;
 const float Pi = 3.141592653589793;
 const float TwoPi = 6.283185307179586;
@@ -25,6 +26,10 @@ const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
 bool hasDigit(str s) {
   int i = 1;
@@ -237,6 +242,8 @@ class LandscapeDemo {
   bool hasMouseSample;
   bool forwardKeyDown;
   bool backwardKeyDown;
+  bool turnLeftKeyDown;
+  bool turnRightKeyDown;
   float vertexHeights[VertexCount];
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
@@ -303,6 +310,8 @@ class LandscapeDemo {
     my.hasMouseSample = false;
     my.forwardKeyDown = false;
     my.backwardKeyDown = false;
+    my.turnLeftKeyDown = false;
+    my.turnRightKeyDown = false;
   }
 
   bool tryPrecomputeWorldCoordinates() {
@@ -759,7 +768,7 @@ class LandscapeDemo {
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     my.setupLighting();
-    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: Up/Down to move, Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
     if (my.useFastTerrain ||
         my.useFastWater ||
         my.useFastWorldCoords ||
@@ -797,6 +806,10 @@ class LandscapeDemo {
     // keydown events we are about to consume with pollkey().
     IsKeyDown(ScanCodeW);
     IsKeyDown(ScanCodeS);
+    IsKeyDown(ScanCodeUp);
+    IsKeyDown(ScanCodeDown);
+    IsKeyDown(ScanCodeLeft);
+    IsKeyDown(ScanCodeRight);
 
     int key = pollkey();
     while (key != 0) {
@@ -818,8 +831,14 @@ class LandscapeDemo {
     // Sample the movement keys after pumping events so their latched state
     // reflects the latest SDL keyboard state even while the mouse is inside
     // the window.
-    my.forwardKeyDown = IsKeyDown(ScanCodeW);
-    my.backwardKeyDown = IsKeyDown(ScanCodeS);
+    bool forwardW = IsKeyDown(ScanCodeW);
+    bool backwardS = IsKeyDown(ScanCodeS);
+    bool forwardUp = IsKeyDown(ScanCodeUp);
+    bool backwardDown = IsKeyDown(ScanCodeDown);
+    my.forwardKeyDown = forwardW || forwardUp;
+    my.backwardKeyDown = backwardS || backwardDown;
+    my.turnLeftKeyDown = IsKeyDown(ScanCodeLeft);
+    my.turnRightKeyDown = IsKeyDown(ScanCodeRight);
   }
 
   void drawTerrain() {
@@ -1013,6 +1032,13 @@ class LandscapeDemo {
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
       my.camZ = my.camZ + deltaZ;
+    }
+
+    float turnInput = 0.0;
+    if (my.turnLeftKeyDown) turnInput = turnInput + 1.0;
+    if (my.turnRightKeyDown) turnInput = turnInput - 1.0;
+    if (turnInput != 0.0) {
+      my.yaw = my.yaw + turnInput * KeyTurnSpeed * dt;
     }
 
     if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;

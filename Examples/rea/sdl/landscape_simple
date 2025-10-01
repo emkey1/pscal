@@ -1,7 +1,7 @@
 #!/usr/bin/env rea
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk with W/S while steering the camera with the mouse.
+// the user walk with the arrow keys while steering the camera with the mouse.
 
 const int WindowWidth = 1600;
 const int WindowHeight = 1200;
@@ -16,9 +16,14 @@ const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
+const float KeyTurnSpeed = 90.0;
 const float DegreesToRadians = 0.017453292519943295;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
 bool hasDigit(str s) {
   int i = 1;
@@ -311,7 +316,7 @@ class LandscapeDemo {
     GLClearDepth(1.0);
     GLDepthTest(true);
     GLSetSwapInterval(1);
-    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: Up/Down to move, Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
@@ -408,8 +413,10 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeS);
-    bool backward = IsKeyDown(ScanCodeW);
+    bool forward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeUp);
+    bool backward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeDown);
+    bool turnLeft = IsKeyDown(ScanCodeLeft);
+    bool turnRight = IsKeyDown(ScanCodeRight);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
@@ -423,6 +430,13 @@ class LandscapeDemo {
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
       my.camZ = my.camZ + deltaZ;
+    }
+
+    float turnInput = 0.0;
+    if (turnLeft) turnInput = turnInput + 1.0;
+    if (turnRight) turnInput = turnInput - 1.0;
+    if (turnInput != 0.0) {
+      my.yaw = my.yaw + turnInput * KeyTurnSpeed * dt;
     }
 
     if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
