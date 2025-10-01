@@ -162,6 +162,29 @@ class TerrainField {
                               my.normalizationScale);
     float sanity = my.heights[0];
     if (!(sanity == sanity)) return false;
+    if (VertexCount > 0) {
+      float computedMin = my.heights[0];
+      float computedMax = computedMin;
+      int idx = 1;
+      while (idx < VertexCount) {
+        float h = my.heights[idx];
+        if (h < computedMin) computedMin = h;
+        if (h > computedMax) computedMax = h;
+        idx = idx + 1;
+      }
+      my.minHeight = computedMin;
+      my.maxHeight = computedMax;
+      float span = my.maxHeight - my.minHeight;
+      if (span <= 0.0001) {
+        my.maxHeight = my.minHeight + 0.001;
+        span = my.maxHeight - my.minHeight;
+      }
+      if (span <= 0.0001) {
+        my.normalizationScale = 0.0;
+      } else {
+        my.normalizationScale = 1.0 / span;
+      }
+    }
     return true;
   }
 
@@ -487,7 +510,7 @@ class LandscapeDemo {
                             my.vertexColorR,
                             my.vertexColorG,
                             my.vertexColorB,
-                            my.waterHeight,
+                            0.0,
                             my.field.minHeight,
                             my.field.maxHeight,
                             my.field.normalizationScale,
@@ -495,9 +518,12 @@ class LandscapeDemo {
                             TileScale,
                             TerrainSize,
                             VertexStride);
-    if (!(my.waterHeight == my.waterHeight)) {
-      return false;
-    }
+    if (VertexCount <= 0) return false;
+    float heightSample = my.vertexHeights[0];
+    if (!(heightSample == heightSample)) return false;
+    float span = my.field.maxHeight - my.field.minHeight;
+    if (span <= 0.0001) span = 1.0;
+    my.waterHeight = my.field.minHeight + span * waterLevel;
     return true;
   }
 

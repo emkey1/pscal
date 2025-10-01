@@ -50,24 +50,30 @@ static inline void assignFloatValue(Value* target, double value) {
 static bool fetchNumericVarRef(VM* vm, Value* arg, const char* name, const char* paramDesc,
                                NumericVarRef* out) {
     if (!out) return false;
-    if (arg->type != TYPE_POINTER) {
-        runtimeError(vm, "%s expects VAR parameter for %s.", name, paramDesc);
+    if (arg->type == TYPE_POINTER) {
+        Value* slot = (Value*)arg->ptr_val;
+        if (!slot) {
+            runtimeError(vm, "%s received NIL storage for %s.", name, paramDesc);
+            return false;
+        }
+
+        if (!IS_NUMERIC(*slot)) {
+            runtimeError(vm, "%s %s must be numeric.", name, paramDesc);
+            return false;
+        }
+
+        out->slot = slot;
+        out->isInteger = IS_INTLIKE(*slot);
+        return true;
+    }
+
+    if (!IS_NUMERIC(*arg)) {
+        runtimeError(vm, "%s expects numeric or VAR parameter for %s.", name, paramDesc);
         return false;
     }
 
-    Value* slot = (Value*)arg->ptr_val;
-    if (!slot) {
-        runtimeError(vm, "%s received NIL storage for %s.", name, paramDesc);
-        return false;
-    }
-
-    if (!IS_NUMERIC(*slot)) {
-        runtimeError(vm, "%s %s must be numeric.", name, paramDesc);
-        return false;
-    }
-
-    out->slot = slot;
-    out->isInteger = IS_INTLIKE(*slot);
+    out->slot = NULL;
+    out->isInteger = IS_INTLIKE(*arg);
     return true;
 }
 
