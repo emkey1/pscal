@@ -2,6 +2,11 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 
+#ifdef SDL
+#include "backend_ast/sdl.h"
+#include <SDL2/SDL_opengl.h>
+#endif
+
 #include <float.h>
 #include <math.h>
 
@@ -184,6 +189,130 @@ static float saturatef(float value) {
 static float lerpf(float a, float b, float t) {
     return a + (b - a) * t;
 }
+
+#ifdef SDL
+static bool ensureGlContext(VM* vm, const char* name) {
+    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
+        runtimeError(vm,
+                     "%s requires an active OpenGL window. Call InitGraph3D first.",
+                     name);
+        return false;
+    }
+    return true;
+}
+
+static void computeTerrainNormal(const ArrayArg* vertexHeights,
+                                 const ArrayArg* worldXCoords,
+                                 const ArrayArg* worldZCoords,
+                                 int vertexStride,
+                                 int terrainSize,
+                                 int x,
+                                 int z,
+                                 float* nx,
+                                 float* ny,
+                                 float* nz) {
+    int leftX = x > 0 ? x - 1 : x;
+    int rightX = x < terrainSize ? x + 1 : x;
+    int downZ = z > 0 ? z - 1 : z;
+    int upZ = z < terrainSize ? z + 1 : z;
+
+    int rowIndex = z * vertexStride;
+    int leftIdx = rowIndex + leftX;
+    int rightIdx = rowIndex + rightX;
+    int downIdx = downZ * vertexStride + x;
+    int upIdx = upZ * vertexStride + x;
+
+    float leftHeight = (float)asLd(vertexHeights->values[leftIdx]);
+    float rightHeight = (float)asLd(vertexHeights->values[rightIdx]);
+    float downHeight = (float)asLd(vertexHeights->values[downIdx]);
+    float upHeight = (float)asLd(vertexHeights->values[upIdx]);
+
+    float leftCoord = (float)asLd(worldXCoords->values[leftX]);
+    float rightCoord = (float)asLd(worldXCoords->values[rightX]);
+    float downCoord = (float)asLd(worldZCoords->values[downZ]);
+    float upCoord = (float)asLd(worldZCoords->values[upZ]);
+
+    float dx = rightCoord - leftCoord;
+    if (fabsf(dx) < 1e-6f) {
+        dx = dx >= 0.0f ? 1.0f : -1.0f;
+    }
+    float dz = upCoord - downCoord;
+    if (fabsf(dz) < 1e-6f) {
+        dz = dz >= 0.0f ? 1.0f : -1.0f;
+    }
+
+    float slopeX = (rightHeight - leftHeight) / dx;
+    float slopeZ = (upHeight - downHeight) / dz;
+
+    float nxVal = -slopeX;
+    float nyVal = 1.0f;
+    float nzVal = -slopeZ;
+    float lengthSq = nxVal * nxVal + nyVal * nyVal + nzVal * nzVal;
+    if (!isfinite(lengthSq) || lengthSq < 1.0e-8f) {
+        nxVal = 0.0f;
+        nyVal = 1.0f;
+        nzVal = 0.0f;
+    } else {
+        float invLen = 1.0f / sqrtf(lengthSq);
+        nxVal *= invLen;
+        nyVal *= invLen;
+        nzVal *= invLen;
+    }
+
+    if (nx) *nx = nxVal;
+    if (ny) *ny = nyVal;
+    if (nz) *nz = nzVal;
+}
+
+static void emitWaterVertexGl(const ArrayArg* worldXCoords,
+                              const ArrayArg* worldZCoords,
+                              const ArrayArg* waterPhaseOffset,
+                              const ArrayArg* waterSecondaryOffset,
+                              const ArrayArg* waterSparkleOffset,
+                              double waterHeight,
+                              double basePhase,
+                              double baseSecondary,
+                              double baseSparkle,
+                              int gridX,
+                              int gridZ,
+                              int idx,
+                              float groundHeight) {
+    float depth = (float)(waterHeight - groundHeight);
+    if (depth < 0.0f) depth = 0.0f;
+    if (depth > 6.0f) depth = 6.0f;
+    float depthFactor = depth / 6.0f;
+    float shallow = 1.0f - depthFactor;
+
+    double phase = basePhase + (double)asLd(waterPhaseOffset->values[idx]);
+    double secondary = baseSecondary + (double)asLd(waterSecondaryOffset->values[idx]);
+    double sparklePhase = baseSparkle + (double)asLd(waterSparkleOffset->values[idx]);
+
+    float ripple = (float)sin(phase) * (0.08f + 0.04f * depthFactor);
+    float ripple2 = (float)cos(secondary) * (0.05f + 0.05f * depthFactor);
+    float surfaceHeight = (float)(waterHeight + 0.05) + ripple + ripple2;
+
+    float worldX = (float)asLd(worldXCoords->values[gridX]);
+    float worldZ = (float)asLd(worldZCoords->values[gridZ]);
+
+    float foam = saturatef(1.0f - depth * 0.45f);
+    float sparkle = 0.02f + 0.06f * (float)sin(sparklePhase);
+
+    float r = 0.05f + 0.08f * depthFactor + 0.18f * foam + sparkle * shallow * 0.4f;
+    float g = 0.34f + 0.30f * depthFactor + 0.26f * foam + sparkle * shallow * 0.5f;
+    float b = 0.55f + 0.32f * depthFactor + 0.22f * foam + sparkle * 0.6f;
+    r = saturatef(r);
+    g = saturatef(g);
+    b = saturatef(b);
+
+    float alpha = 0.35f + 0.30f * shallow + sparkle * 0.4f;
+    if (alpha < 0.18f) alpha = 0.18f;
+    if (alpha > 0.82f) alpha = 0.82f;
+
+    glColor4f(r, g, b, alpha);
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glVertex3f(worldX, surfaceHeight, worldZ);
+}
+#endif
 
 static double landscapeBaseNoise(int x, int z, int seed) {
     long long n = (long long)x * 374761393LL + (long long)z * 668265263LL +
@@ -885,6 +1014,64 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+#ifdef SDL
+    if (!ensureGlContext(vm, name)) {
+        return makeVoid();
+    }
+
+    for (int z = 0; z < terrainSize; ++z) {
+        int rowIndex = z * vertexStride;
+        int nextRowIndex = (z + 1) * vertexStride;
+        float worldZ0 = (float)asLd(worldZCoords.values[z]);
+        float worldZ1 = (float)asLd(worldZCoords.values[z + 1]);
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for (int x = 0; x <= terrainSize; ++x) {
+            int idx0 = rowIndex + x;
+            int idx1 = nextRowIndex + x;
+            float worldX = (float)asLd(worldXCoords.values[x]);
+
+            float nx0, ny0, nz0;
+            float nx1, ny1, nz1;
+            if (hasNormals) {
+                nx0 = (float)asLd(vertexNormalX.values[idx0]);
+                ny0 = (float)asLd(vertexNormalY.values[idx0]);
+                nz0 = (float)asLd(vertexNormalZ.values[idx0]);
+                nx1 = (float)asLd(vertexNormalX.values[idx1]);
+                ny1 = (float)asLd(vertexNormalY.values[idx1]);
+                nz1 = (float)asLd(vertexNormalZ.values[idx1]);
+            } else {
+                computeTerrainNormal(&vertexHeights, &worldXCoords, &worldZCoords,
+                                     vertexStride, terrainSize, x, z, &nx0, &ny0, &nz0);
+                computeTerrainNormal(&vertexHeights, &worldXCoords, &worldZCoords,
+                                     vertexStride, terrainSize, x, z + 1, &nx1, &ny1, &nz1);
+            }
+
+            float r0 = (float)asLd(vertexColorR.values[idx0]);
+            float g0 = (float)asLd(vertexColorG.values[idx0]);
+            float b0 = (float)asLd(vertexColorB.values[idx0]);
+            float h0 = (float)asLd(vertexHeights.values[idx0]);
+
+            float r1 = (float)asLd(vertexColorR.values[idx1]);
+            float g1 = (float)asLd(vertexColorG.values[idx1]);
+            float b1 = (float)asLd(vertexColorB.values[idx1]);
+            float h1 = (float)asLd(vertexHeights.values[idx1]);
+
+            glNormal3f(nx0, ny0, nz0);
+            glColor3f(r0, g0, b0);
+            glVertex3f(worldX, h0, worldZ0);
+
+            glNormal3f(nx1, ny1, nz1);
+            glColor3f(r1, g1, b1);
+            glVertex3f(worldX, h1, worldZ1);
+        }
+        glEnd();
+    }
+#else
+    runtimeError(vm, "%s requires SDL/OpenGL support.", name);
+    return makeVoid();
+#endif
+
     return makeVoid();
 }
 
@@ -976,6 +1163,63 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
                                  "water sparkle offsets")) {
         return makeVoid();
     }
+
+#ifdef SDL
+    if (!ensureGlContext(vm, name)) {
+        return makeVoid();
+    }
+
+    float allowance = 0.18f;
+    float maxWaterHeight = (float)(waterHeight + allowance);
+    double basePhase = timeSeconds * 0.7;
+    double baseSecondary = timeSeconds * 1.6;
+    double baseSparkle = timeSeconds * 2.4;
+
+    glBegin(GL_TRIANGLES);
+    for (int z = 0; z < terrainSize; ++z) {
+        int rowIndex = z * vertexStride;
+        int nextRowIndex = (z + 1) * vertexStride;
+        for (int x = 0; x < terrainSize; ++x) {
+            int idx00 = rowIndex + x;
+            int idx10 = rowIndex + x + 1;
+            int idx01 = nextRowIndex + x;
+            int idx11 = nextRowIndex + x + 1;
+
+            float h00 = (float)asLd(vertexHeights.values[idx00]);
+            float h10 = (float)asLd(vertexHeights.values[idx10]);
+            float h01 = (float)asLd(vertexHeights.values[idx01]);
+            float h11 = (float)asLd(vertexHeights.values[idx11]);
+
+            if (h00 <= maxWaterHeight && h10 <= maxWaterHeight && h01 <= maxWaterHeight) {
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x, z, idx00, h00);
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x + 1, z, idx10, h10);
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x, z + 1, idx01, h01);
+            }
+            if (h10 <= maxWaterHeight && h11 <= maxWaterHeight && h01 <= maxWaterHeight) {
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x + 1, z, idx10, h10);
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x + 1, z + 1, idx11,
+                                  h11);
+                emitWaterVertexGl(&worldXCoords, &worldZCoords, &waterPhaseOffset,
+                                  &waterSecondaryOffset, &waterSparkleOffset, waterHeight,
+                                  basePhase, baseSecondary, baseSparkle, x, z + 1, idx01, h01);
+            }
+        }
+    }
+    glEnd();
+#else
+    runtimeError(vm, "%s requires SDL/OpenGL support.", name);
+    return makeVoid();
+#endif
 
     return makeVoid();
 }
