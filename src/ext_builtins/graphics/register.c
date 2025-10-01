@@ -76,7 +76,6 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLClearColor", "glclearcolor", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlclearcolor},
     {"opengl", "GLClearDepth", "glcleardepth", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcleardepth},
     {"opengl", "GLColor3f", "glcolor3f", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcolor3f},
-    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface},
     {"opengl", "GLDepthTest", "gldepthtest", BUILTIN_TYPE_PROCEDURE, vmBuiltinGldepthtest},
     {"opengl", "GLEnd", "glend", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlend},
     {"opengl", "GLFrustum", "glfrustum", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlfrustum},
@@ -102,6 +101,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLMaterialf", "glmaterialf", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlmaterialf},
     {"opengl", "GLColorMaterial", "glcolormaterial", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcolormaterial},
     {"opengl", "GLBlendFunc", "glblendfunc", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlblendfunc},
+    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface}, // Append new builtins to preserve existing IDs.
     {"opengl", "GLIsHardwareAccelerated", "glishardwareaccelerated", BUILTIN_TYPE_FUNCTION, vmBuiltinGlishardwareaccelerated},
 };
 #endif

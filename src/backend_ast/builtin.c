@@ -483,7 +483,6 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"glclearcolor", NULL},
     {"glcleardepth", NULL},
     {"glcolor3f", NULL},
-    {"glcullface", NULL},
     {"gldepthtest", NULL},
     {"glend", NULL},
     {"glfrustum", NULL},
@@ -621,6 +620,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
     {"quitrequested", vmBuiltinQuitrequested},
+    {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
 
