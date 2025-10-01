@@ -147,8 +147,29 @@ class TerrainField {
     return sum / total;
   }
 
+  bool tryBuildFast(int s) {
+    if (!hasextbuiltin("user", "LandscapeBuildHeightField")) {
+      return false;
+    }
+    landscapebuildheightfield(my.heights,
+                              s,
+                              TerrainSize,
+                              VertexStride,
+                              HeightScale,
+                              NoiseOctaves,
+                              my.minHeight,
+                              my.maxHeight,
+                              my.normalizationScale);
+    float sanity = my.heights[0];
+    if (!(sanity == sanity)) return false;
+    return true;
+  }
+
   void build(int s) {
     my.seed = s;
+    if (my.tryBuildFast(s)) {
+      return;
+    }
     my.minHeight = 1e9;
     my.maxHeight = -1e9;
     float baseFrequency = 0.035;
@@ -197,6 +218,40 @@ class TerrainField {
     if (t < 0.0) t = 0.0;
     if (t > 1.0) t = 1.0;
     return t;
+  }
+
+  bool tryBakeVertexData(var float vertexHeights[],
+                         var float vertexNormalX[],
+                         var float vertexNormalY[],
+                         var float vertexNormalZ[],
+                         var float vertexColorR[],
+                         var float vertexColorG[],
+                         var float vertexColorB[],
+                         float waterLevel,
+                         var float waterHeightOut) {
+    if (!hasextbuiltin("user", "LandscapeBakeVertexData")) {
+      return false;
+    }
+    landscapebakevertexdata(my.heights,
+                            vertexHeights,
+                            vertexNormalX,
+                            vertexNormalY,
+                            vertexNormalZ,
+                            vertexColorR,
+                            vertexColorG,
+                            vertexColorB,
+                            waterHeightOut,
+                            my.minHeight,
+                            my.maxHeight,
+                            my.normalizationScale,
+                            waterLevel,
+                            TileScale,
+                            TerrainSize,
+                            VertexStride);
+    if (!(waterHeightOut == waterHeightOut)) {
+      return false;
+    }
+    return true;
   }
 
   float heightAt(float gx, float gz) {
@@ -455,6 +510,17 @@ class LandscapeDemo {
   }
 
   void updateVertexData() {
+    if (my.field.tryBakeVertexData(my.vertexHeights,
+                                   my.vertexNormalX,
+                                   my.vertexNormalY,
+                                   my.vertexNormalZ,
+                                   my.vertexColorR,
+                                   my.vertexColorG,
+                                   my.vertexColorB,
+                                   my.waterNormalizedLevel,
+                                   my.waterHeight)) {
+      return;
+    }
     my.computeVertexNormals();
     float span = my.field.maxHeight - my.field.minHeight;
     if (span <= 0.0001) span = 1.0;
@@ -828,6 +894,9 @@ class LandscapeDemo {
                            my.vertexColorR,
                            my.vertexColorG,
                            my.vertexColorB,
+                           my.vertexNormalX,
+                           my.vertexNormalY,
+                           my.vertexNormalZ,
                            my.worldXCoords,
                            my.worldZCoords,
                            TerrainSize,

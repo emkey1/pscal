@@ -17,6 +17,10 @@ void registerUserBuiltins(void) {
                                "LandscapePrecomputeWorldCoords");
     extBuiltinRegisterFunction(category, "landscape/precompute",
                                "LandscapePrecomputeWaterOffsets");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapeBuildHeightField");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapeBakeVertexData");
 
     registerLandscapeBuiltins();
 }
