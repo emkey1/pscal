@@ -18,12 +18,12 @@ const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
 const float KeyTurnSpeed = 90.0;
 const float DegreesToRadians = 0.017453292519943295;
-const int ScanCodeW = 26; // SDL_SCANCODE_W
-const int ScanCodeS = 22; // SDL_SCANCODE_S
-const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
-const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
-const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
-const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
+const str KeyForwardPrimary = "w";
+const str KeyBackwardPrimary = "s";
+const str KeyForwardAlt = "up";
+const str KeyBackwardAlt = "down";
+const str KeyTurnLeft = "left";
+const str KeyTurnRight = "right";
 
 bool hasDigit(str s) {
   int i = 1;
@@ -316,7 +316,7 @@ class LandscapeDemo {
     GLClearDepth(1.0);
     GLDepthTest(true);
     GLSetSwapInterval(1);
-    writeln("Controls: Up/Down to move, Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    writeln("Controls: Arrow keys steer (Up/Down move, Left/Right turn) while the mouse looks around. N/P change seed, R randomizes, Q or Esc exits.");
     int mouseX = 0;
     int mouseY = 0;
     int mouseButtons = 0;
@@ -345,12 +345,12 @@ class LandscapeDemo {
     // Prime the SDL keyboard state tracker before draining the queue so
     // IsKeyDown observes the latest transitions even if pollkey() consumes
     // the corresponding key events.
-    IsKeyDown(ScanCodeW);
-    IsKeyDown(ScanCodeS);
-    IsKeyDown(ScanCodeUp);
-    IsKeyDown(ScanCodeDown);
-    IsKeyDown(ScanCodeLeft);
-    IsKeyDown(ScanCodeRight);
+    IsKeyDown(KeyForwardPrimary);
+    IsKeyDown(KeyBackwardPrimary);
+    IsKeyDown(KeyForwardAlt);
+    IsKeyDown(KeyBackwardAlt);
+    IsKeyDown(KeyTurnLeft);
+    IsKeyDown(KeyTurnRight);
 
     int key = pollkey();
     while (key != 0) {
@@ -423,10 +423,10 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeUp);
-    bool backward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeDown);
-    bool turnLeft = IsKeyDown(ScanCodeLeft);
-    bool turnRight = IsKeyDown(ScanCodeRight);
+    bool forward = IsKeyDown(KeyForwardPrimary) || IsKeyDown(KeyForwardAlt);
+    bool backward = IsKeyDown(KeyBackwardPrimary) || IsKeyDown(KeyBackwardAlt);
+    bool turnLeft = IsKeyDown(KeyTurnLeft);
+    bool turnRight = IsKeyDown(KeyTurnRight);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
