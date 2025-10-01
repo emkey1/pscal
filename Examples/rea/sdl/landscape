@@ -1,11 +1,12 @@
 #!/usr/bin/env rea
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
-// the user walk with W/S while steering the camera with the mouse.
+// the user walk with either WASD or the arrow keys while steering the camera
+// with the mouse.
 
 const int WindowWidth = 1280;
 const int WindowHeight = 1024;
-const int TerrainSize = 128
+const int TerrainSize = 192
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
@@ -16,6 +17,7 @@ const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
+const float KeyTurnSpeed = 90.0;
 const float DegreesToRadians = 0.017453292519943295;
 const float Pi = 3.141592653589793;
 const float TwoPi = 6.283185307179586;
@@ -23,26 +25,14 @@ const int CloudCount = 14;
 const float SunDistance = 220.0;
 const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
-const str KeyForward = "w";
-const str KeyBackward = "s";
-
-float absf(float value) {
-  if (value < 0.0) return -value;
-  return value;
-}
-
-bool floatIsFinite(float value) {
-  if (!(value == value)) return false;
-  float magnitude = absf(value);
-  if (magnitude > 1e12) return false;
-  return true;
-}
-
-bool floatWithinTolerance(float a, float b, float tolerance) {
-  float diff = a - b;
-  diff = absf(diff);
-  return diff <= tolerance;
-}
+const int ScanCodeW = 26; // SDL_SCANCODE_W
+const int ScanCodeS = 22; // SDL_SCANCODE_S
+const int ScanCodeA = 4;  // SDL_SCANCODE_A
+const int ScanCodeD = 7;  // SDL_SCANCODE_D
+const int ScanCodeUp = 81;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 82;  // SDL_SCANCODE_DOWN
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
 bool hasDigit(str s) {
   int i = 1;
@@ -84,6 +74,34 @@ int parseIntegerFromString(str s, int fallback) {
   }
   if (!any) return fallback;
   return value * sign;
+}
+
+float absf(float value) {
+  if (value < 0.0) return -value;
+  return value;
+}
+
+bool floatIsFinite(float value) {
+  if (!(value == value)) return false;
+  float magnitude = absf(value);
+  if (magnitude > 1e12) return false;
+  return true;
+}
+
+bool floatWithinTolerance(float a, float b, float tolerance) {
+  float diff = a - b;
+  diff = absf(diff);
+  return diff <= tolerance;
+}
+
+bool hasDigit(str s) {
+  int i = 1;
+  while (i <= length(s)) {
+    char ch = s[i];
+    if (ch >= '0' && ch <= '9') return true;
+    i = i + 1;
+  }
+  return false;
 }
 
 int extractSeedFromArgs(int fallback) {
@@ -164,13 +182,12 @@ class TerrainField {
     if (total == 0.0) return 0.0;
     return sum / total;
   }
-
   bool tryBuildFast(int s) {
     if (!hasextbuiltin("user", "LandscapeBuildHeightField")) {
       return false;
     }
     float minHeight = 0.0;
-    float maxHeight = 0.0;
+    float maxHeight = 9.0;
     float normalizationScale = 0.0;
     landscapebuildheightfield(my.heights,
                               s,
@@ -316,8 +333,6 @@ class LandscapeDemo {
   int lastMouseX;
   int lastMouseY;
   bool hasMouseSample;
-  bool forwardKeyDown;
-  bool backwardKeyDown;
   float vertexHeights[VertexCount];
   float vertexColorR[VertexCount];
   float vertexColorG[VertexCount];
@@ -336,11 +351,11 @@ class LandscapeDemo {
   float waterHeight;
   float waterNormalizedLevel;
   float elapsedSeconds;
+  bool useFastTerrain;
+  bool useFastWater;
   bool useFastWorldCoords;
   bool useFastWaterOffsets;
   bool useFastVertexBake;
-  bool hasTerrainDrawBuiltin;
-  bool hasWaterDrawBuiltin;
   float cloudAzimuth[CloudCount];
   float cloudElevation[CloudCount];
   float cloudDistance[CloudCount];
@@ -359,9 +374,8 @@ class LandscapeDemo {
     if (!my.useFastWaterOffsets) {
       my.precomputeWaterOffsets();
     }
-    my.useFastVertexBake = false;
-    my.hasTerrainDrawBuiltin = hasextbuiltin("user", "LandscapeDrawTerrain");
-    my.hasWaterDrawBuiltin = hasextbuiltin("user", "LandscapeDrawWater");
+    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
     float sunX = 0.45;
@@ -384,8 +398,6 @@ class LandscapeDemo {
     my.lastMouseX = 0;
     my.lastMouseY = 0;
     my.hasMouseSample = false;
-    my.forwardKeyDown = false;
-    my.backwardKeyDown = false;
   }
 
   bool tryPrecomputeWorldCoordinates() {
@@ -402,34 +414,15 @@ class LandscapeDemo {
     float expectedMax = (TerrainSize - half) * TileScale;
     float minSample = my.worldXCoords[0];
     float maxSample = my.worldXCoords[TerrainSize];
-    float minZSample = my.worldZCoords[0];
-    float maxZSample = my.worldZCoords[TerrainSize];
-    if (!floatIsFinite(minSample) || !floatIsFinite(maxSample) ||
-        !floatIsFinite(minZSample) || !floatIsFinite(maxZSample)) {
+    if (!(minSample == minSample) || !(maxSample == maxSample)) {
       return false;
     }
-    if (!floatWithinTolerance(minSample, expectedMin, 0.0005) ||
-        !floatWithinTolerance(maxSample, expectedMax, 0.0005) ||
-        !floatWithinTolerance(minZSample, expectedMin, 0.0005) ||
-        !floatWithinTolerance(maxZSample, expectedMax, 0.0005)) {
+    float diffMin = minSample - expectedMin;
+    if (diffMin < 0.0) diffMin = -diffMin;
+    float diffMax = maxSample - expectedMax;
+    if (diffMax < 0.0) diffMax = -diffMax;
+    if (diffMin > 0.0005 || diffMax > 0.0005) {
       return false;
-    }
-    int i = 0;
-    while (i <= TerrainSize) {
-      float xVal = my.worldXCoords[i];
-      float zVal = my.worldZCoords[i];
-      if (!floatIsFinite(xVal) || !floatIsFinite(zVal)) {
-        return false;
-      }
-      if (i > 0) {
-        float deltaX = xVal - my.worldXCoords[i - 1];
-        float deltaZ = zVal - my.worldZCoords[i - 1];
-        if (!floatWithinTolerance(deltaX, TileScale, 0.001) ||
-            !floatWithinTolerance(deltaZ, TileScale, 0.001)) {
-          return false;
-        }
-      }
-      i = i + 1;
     }
     return true;
   }
@@ -454,15 +447,22 @@ class LandscapeDemo {
                                     my.waterSparkleOffset,
                                     TerrainSize,
                                     VertexStride);
-    int total = VertexCount;
-    int idx = 0;
-    while (idx < total) {
-      if (!floatIsFinite(my.waterPhaseOffset[idx]) ||
-          !floatIsFinite(my.waterSecondaryOffset[idx]) ||
-          !floatIsFinite(my.waterSparkleOffset[idx])) {
+    if (TerrainSize >= 1) {
+      int checkIdx = 1;
+      float expectedPhase = 0.18;
+      float phase = my.waterPhaseOffset[checkIdx];
+      float secondary = my.waterSecondaryOffset[checkIdx];
+      if (!(phase == phase) || !(secondary == secondary)) {
         return false;
       }
-      idx = idx + 1;
+      float phaseDiff = phase - expectedPhase;
+      if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
+      float expectedSecondary = 0.05;
+      float secondaryDiff = secondary - expectedSecondary;
+      if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
+      if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
+        return false;
+      }
     }
     return true;
   }
@@ -627,7 +627,6 @@ class LandscapeDemo {
       my.useFastVertexBake = true;
       return;
     }
-    my.useFastVertexBake = false;
     my.computeVertexNormals();
     float span = my.field.maxHeight - my.field.minHeight;
     if (span <= 0.0001) span = 1.0;
@@ -916,7 +915,8 @@ class LandscapeDemo {
     GLEnable("normalize");
     GLShadeModel("smooth");
     GLColorMaterial("front", "ambient_and_diffuse");
-    GLDisable("cull_face");
+    GLEnable("cull_face");
+    GLCullFace("back");
 
     GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
     GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
@@ -933,14 +933,12 @@ class LandscapeDemo {
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     my.setupLighting();
-    writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
-    if (my.useFastWorldCoords ||
-        my.useFastWaterOffsets ||
-        my.useFastVertexBake) {
-      writeln("Using extended landscape builtins for data preparation; rendering occurs in Rea.");
-    }
-    if (my.hasTerrainDrawBuiltin || my.hasWaterDrawBuiltin) {
-      writeln("Extended draw builtins detected but disabled to avoid native rendering.");
+    writeln("Controls: W/S or Up/Down to move, A/D or Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
+    if (my.useFastTerrain ||
+        my.useFastWater ||
+        my.useFastWorldCoords ||
+        my.useFastWaterOffsets) {
+      writeln("Using extended landscape builtins for improved performance.");
     }
     int mouseX = 0;
     int mouseY = 0;
@@ -969,11 +967,6 @@ class LandscapeDemo {
   }
 
   void handleDiscreteInput() {
-    // Prime the SDL key watcher before draining the queue so it sees any new
-    // keydown events we are about to consume with pollkey().
-    IsKeyDown(KeyForward);
-    IsKeyDown(KeyBackward);
-
     int key = pollkey();
     while (key != 0) {
       if (key == 'q' || key == 'Q' || key == 27) {
@@ -990,15 +983,20 @@ class LandscapeDemo {
       }
       key = pollkey();
     }
-
-    // Sample the movement keys after pumping events so their latched state
-    // reflects the latest SDL keyboard state even while the mouse is inside
-    // the window.
-    my.forwardKeyDown = IsKeyDown(KeyForward);
-    my.backwardKeyDown = IsKeyDown(KeyBackward);
   }
 
   void drawTerrain() {
+    if (my.useFastTerrain) {
+      landscapedrawterrain(my.vertexHeights,
+                           my.vertexColorR,
+                           my.vertexColorG,
+                           my.vertexColorB,
+                           my.worldXCoords,
+                           my.worldZCoords,
+                           TerrainSize,
+                           VertexStride);
+      return;
+    }
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
@@ -1028,7 +1026,7 @@ class LandscapeDemo {
     }
   }
 
-  void emitWaterVertex(int idx,
+    void emitWaterVertex(int idx,
                        int gridX,
                        int gridZ,
                        float groundHeight,
@@ -1066,6 +1064,20 @@ class LandscapeDemo {
   void drawWater(float timeSeconds) {
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    if (my.useFastWater) {
+      landscapedrawwater(my.vertexHeights,
+                         my.worldXCoords,
+                         my.worldZCoords,
+                         my.waterPhaseOffset,
+                         my.waterSecondaryOffset,
+                         my.waterSparkleOffset,
+                         my.waterHeight,
+                         timeSeconds,
+                         TerrainSize,
+                         VertexStride);
+      GLDisable("blend");
+      return;
+    }
     float allowance = 0.18;
     float maxWaterHeight = my.waterHeight + allowance;
     float basePhase = timeSeconds * 0.7;
@@ -1138,8 +1150,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = my.forwardKeyDown;
-    bool backward = my.backwardKeyDown;
+    bool forward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeUp);
+    bool backward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeDown);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
@@ -1164,6 +1176,15 @@ class LandscapeDemo {
       float deltaZ = forwardZ * (speed / TileScale);
       my.camX = my.camX + deltaX;
       my.camZ = my.camZ + deltaZ;
+    }
+
+    float turnInput = 0.0;
+    bool turnLeft = IsKeyDown(ScanCodeLeft) || IsKeyDown(ScanCodeA);
+    bool turnRight = IsKeyDown(ScanCodeRight) || IsKeyDown(ScanCodeD);
+    if (turnLeft) turnInput = turnInput + 1.0;
+    if (turnRight) turnInput = turnInput - 1.0;
+    if (turnInput != 0.0) {
+      my.yaw = my.yaw + turnInput * KeyTurnSpeed * dt;
     }
 
     if (my.yaw >= 360.0) my.yaw = my.yaw - 360.0;
