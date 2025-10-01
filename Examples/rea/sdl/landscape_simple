@@ -17,8 +17,8 @@ const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
 const float DegreesToRadians = 0.017453292519943295;
-const str KeyForward = "w";
-const str KeyBackward = "s";
+const int ScanCodeW = 26; // SDL_SCANCODE_W
+const int ScanCodeS = 22; // SDL_SCANCODE_S
 
 bool hasDigit(str s) {
   int i = 1;
@@ -310,7 +310,6 @@ class LandscapeDemo {
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLClearDepth(1.0);
     GLDepthTest(true);
-    GLDisable("cull_face");
     GLSetSwapInterval(1);
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
     int mouseX = 0;
@@ -409,8 +408,8 @@ class LandscapeDemo {
       }
     }
 
-    bool forward = IsKeyDown(KeyForward);
-    bool backward = IsKeyDown(KeyBackward);
+    bool forward = IsKeyDown(ScanCodeS);
+    bool backward = IsKeyDown(ScanCodeW);
 
     float moveForward = 0.0;
     if (forward) moveForward = moveForward + 1.0;
@@ -465,7 +464,6 @@ class LandscapeDemo {
     my.initGraphics();
     my.lastTicks = getticks();
     while (my.running) {
-      GraphLoop(0);
       my.handleDiscreteInput();
       if (QuitRequested()) break;
       int now = getticks();
