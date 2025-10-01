@@ -507,6 +507,7 @@ static bool looksLikeCallTypeArguments(ReaParser *p);
 static AST *parseMatch(ReaParser *p);
 static AST *parseTry(ReaParser *p);
 static AST *parseThrow(ReaParser *p);
+static bool tokenIsIdentifierLike(ReaTokenType t);
 
 // Access to global type table provided by Pascal front end
 AST *lookupType(const char* name);
