@@ -46,10 +46,11 @@ bool extendedBuiltinsDisabled() {
   return false;
 }
 
-bool fastDrawRequestedByDefault() {
-  if (envFlagEnabled("REA_LANDSCAPE_ENABLE_FAST_DRAW")) return true;
+bool fastDrawEnabledByDefault() {
+  if (envFlagEnabled("REA_LANDSCAPE_DISABLE_FAST_DRAW")) return false;
   if (envFlagEnabled("REA_LANDSCAPE_FORCE_FAST_DRAW")) return true;
-  return false;
+  if (envFlagEnabled("REA_LANDSCAPE_ENABLE_FAST_DRAW")) return true;
+  return true;
 }
 
 bool hasDigit(str s) {
@@ -384,6 +385,11 @@ class LandscapeDemo {
   float cloudScale[CloudCount];
   float cloudSpeed[CloudCount];
   float cloudBrightness[CloudCount];
+  float cloudRoll[CloudCount];
+  int cloudPuffCount[CloudCount];
+  float cloudPrimaryRadius[CloudCount];
+  float cloudVerticalRadius[CloudCount];
+  float cloudClusterSpread[CloudCount];
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
@@ -412,8 +418,13 @@ class LandscapeDemo {
     my.fastDrawEnabled = false;
     my.useFastTerrain = false;
     my.useFastWater = false;
-    if (my.allowExtendedBuiltins && fastDrawRequestedByDefault()) {
-      my.enableFastDraw("environment override");
+    if (my.allowExtendedBuiltins && fastDrawEnabledByDefault()) {
+      str reason = "default configuration";
+      if (envFlagEnabled("REA_LANDSCAPE_FORCE_FAST_DRAW") ||
+          envFlagEnabled("REA_LANDSCAPE_ENABLE_FAST_DRAW")) {
+        reason = "environment override";
+      }
+      my.enableFastDraw(reason);
     }
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
@@ -586,12 +597,20 @@ class LandscapeDemo {
       float scaleNoise = my.skyRandom(i, 61);
       float speedNoise = my.skyRandom(i, 83);
       float brightNoise = my.skyRandom(i, 101);
+      float rollNoise = my.skyRandom(i, 121);
+      float puffNoise = my.skyRandom(i, 151);
       my.cloudAzimuth[i] = azNoise * TwoPi;
-      my.cloudElevation[i] = 0.18 + elevNoise * 0.16;
-      my.cloudDistance[i] = 150.0 + distNoise * 70.0;
-      my.cloudScale[i] = 16.0 + scaleNoise * 18.0;
+      my.cloudElevation[i] = 0.16 + elevNoise * 0.20;
+      my.cloudDistance[i] = 150.0 + distNoise * 90.0;
+      my.cloudScale[i] = 15.0 + scaleNoise * 20.0;
       my.cloudSpeed[i] = 0.002 + speedNoise * 0.006;
-      my.cloudBrightness[i] = 0.72 + brightNoise * 0.20;
+      my.cloudBrightness[i] = 0.68 + brightNoise * 0.26;
+      my.cloudRoll[i] = rollNoise * TwoPi;
+      my.cloudPuffCount[i] = 3 + floor(puffNoise * 4.0);
+      if (my.cloudPuffCount[i] < 3) my.cloudPuffCount[i] = 3;
+      my.cloudPrimaryRadius[i] = 0.50 + my.skyRandom(i, 167) * 0.32;
+      my.cloudVerticalRadius[i] = 0.34 + my.skyRandom(i, 181) * 0.28;
+      my.cloudClusterSpread[i] = 0.32 + my.skyRandom(i, 193) * 0.55;
       i = i + 1;
     }
   }
@@ -801,37 +820,72 @@ class LandscapeDemo {
     float sunX = my.sunDirX * SunDistance;
     float sunY = my.sunDirY * SunDistance;
     float sunZ = my.sunDirZ * SunDistance;
-    int segments = 48;
+    int haloSegments = 96;
+    float outerRadius = SunHaloRadius * 1.45;
+    float innerHaloRadius = SunHaloRadius * 1.05;
+    float glowRadius = SunHaloRadius * 0.82;
 
-    GLBegin("triangle_fan");
-    GLColor4f(1.0, 0.90, 0.58, 0.65);
-    GLVertex3f(sunX, sunY, sunZ);
+    GLBegin("triangle_strip");
     int i = 0;
-    while (i <= segments) {
-      float angle = i * (TwoPi / segments);
+    while (i <= haloSegments) {
+      float angle = i * (TwoPi / haloSegments);
       float cosA = cos(angle);
       float sinA = sin(angle);
-      float offsetX = rightX * (cosA * SunHaloRadius) + upX * (sinA * SunHaloRadius);
-      float offsetY = rightY * (cosA * SunHaloRadius) + upY * (sinA * SunHaloRadius);
-      float offsetZ = rightZ * (cosA * SunHaloRadius) + upZ * (sinA * SunHaloRadius);
-      GLColor4f(1.0, 0.78, 0.36, 0.0);
-      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      float jitter = 0.92 + sin(angle * 4.0) * 0.04;
+      float outerX = rightX * (cosA * outerRadius) + upX * (sinA * outerRadius);
+      float outerY = rightY * (cosA * outerRadius) + upY * (sinA * outerRadius);
+      float outerZ = rightZ * (cosA * outerRadius) + upZ * (sinA * outerRadius);
+      float innerX = rightX * (cosA * innerHaloRadius) +
+                     upX * (sinA * innerHaloRadius);
+      float innerY = rightY * (cosA * innerHaloRadius) +
+                     upY * (sinA * innerHaloRadius);
+      float innerZ = rightZ * (cosA * innerHaloRadius) +
+                     upZ * (sinA * innerHaloRadius);
+      GLColor4f(1.0, 0.82, 0.46, 0.0);
+      GLVertex3f(sunX + outerX, sunY + outerY, sunZ + outerZ);
+      GLColor4f(1.0, 0.90, 0.62, 0.18 * jitter);
+      GLVertex3f(sunX + innerX, sunY + innerY, sunZ + innerZ);
       i = i + 1;
     }
     GLEnd();
 
     GLBegin("triangle_fan");
-    GLColor4f(1.0, 0.98, 0.86, 0.9);
+    GLColor4f(1.0, 0.97, 0.85, 0.55);
     GLVertex3f(sunX, sunY, sunZ);
     i = 0;
-    while (i <= segments) {
-      float angle = i * (TwoPi / segments);
+    while (i <= haloSegments) {
+      float angle = i * (TwoPi / haloSegments);
       float cosA = cos(angle);
       float sinA = sin(angle);
-      float offsetX = rightX * (cosA * SunCoreRadius) + upX * (sinA * SunCoreRadius);
-      float offsetY = rightY * (cosA * SunCoreRadius) + upY * (sinA * SunCoreRadius);
-      float offsetZ = rightZ * (cosA * SunCoreRadius) + upZ * (sinA * SunCoreRadius);
-      GLColor4f(1.0, 0.94, 0.72, 0.35);
+      float rimScale = 0.90 + cos(angle * 3.0) * 0.05;
+      float offsetX = rightX * (cosA * glowRadius * rimScale) +
+                      upX * (sinA * glowRadius * rimScale);
+      float offsetY = rightY * (cosA * glowRadius * rimScale) +
+                      upY * (sinA * glowRadius * rimScale);
+      float offsetZ = rightZ * (cosA * glowRadius * rimScale) +
+                      upZ * (sinA * glowRadius * rimScale);
+      GLColor4f(1.0, 0.94, 0.72, 0.16);
+      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+
+    int coreSegments = 48;
+    GLBegin("triangle_fan");
+    GLColor4f(1.0, 1.0, 0.94, 0.95);
+    GLVertex3f(sunX, sunY, sunZ);
+    i = 0;
+    while (i <= coreSegments) {
+      float angle = i * (TwoPi / coreSegments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * SunCoreRadius * 0.9) +
+                      upX * (sinA * SunCoreRadius * 0.9);
+      float offsetY = rightY * (cosA * SunCoreRadius * 0.9) +
+                      upY * (sinA * SunCoreRadius * 0.9);
+      float offsetZ = rightZ * (cosA * SunCoreRadius * 0.9) +
+                      upZ * (sinA * SunCoreRadius * 0.9);
+      GLColor4f(1.0, 0.95, 0.70, 0.38);
       GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
       i = i + 1;
     }
@@ -850,9 +904,9 @@ class LandscapeDemo {
                      float upY,
                      float upZ,
                      float brightness) {
-    int segments = 18;
-    float highlight = my.saturate(0.86 + brightness * 0.18);
-    float rim = my.saturate(0.80 + brightness * 0.16);
+    int segments = 24;
+    float highlight = my.saturate(0.86 + brightness * 0.20);
+    float rim = my.saturate(0.78 + brightness * 0.18);
     GLBegin("triangle_fan");
     GLColor4f(highlight, highlight, highlight + 0.05, 0.75);
     GLVertex3f(centerX, centerY, centerZ);
@@ -895,60 +949,81 @@ class LandscapeDemo {
       float baseBrightness = my.cloudBrightness[i];
       float sunInfluence = my.sunDirX * dirX + my.sunDirY * dirY + my.sunDirZ * dirZ;
       float puffBrightness = my.saturate(baseBrightness + sunInfluence * 0.18);
-      float radiusX = baseScale * 0.55;
-      float radiusY = baseScale * 0.38;
+      float radiusX = baseScale * my.cloudPrimaryRadius[i];
+      float radiusY = baseScale * my.cloudVerticalRadius[i];
+      float clusterSpread = baseScale * my.cloudClusterSpread[i];
+      float roll = my.cloudRoll[i];
+      float cosRoll = cos(roll);
+      float sinRoll = sin(roll);
+      float basisRightX = rightX * cosRoll + upX * sinRoll;
+      float basisRightY = rightY * cosRoll + upY * sinRoll;
+      float basisRightZ = rightZ * cosRoll + upZ * sinRoll;
+      float basisUpX = upX * cosRoll - rightX * sinRoll;
+      float basisUpY = upY * cosRoll - rightY * sinRoll;
+      float basisUpZ = upZ * cosRoll - rightZ * sinRoll;
+
       my.drawCloudPuff(centerX,
                        centerY,
                        centerZ,
                        radiusX,
                        radiusY,
-                       rightX,
-                       rightY,
-                       rightZ,
-                       upX,
-                       upY,
-                       upZ,
+                       basisRightX,
+                       basisRightY,
+                       basisRightZ,
+                       basisUpX,
+                       basisUpY,
+                       basisUpZ,
                        puffBrightness);
 
-      float offset = baseScale * 0.6;
-      my.drawCloudPuff(centerX + rightX * offset * 0.6 + upX * offset * 0.12,
-                       centerY + rightY * offset * 0.6 + upY * offset * 0.12,
-                       centerZ + rightZ * offset * 0.6 + upZ * offset * 0.12,
-                       radiusX * 0.78,
-                       radiusY * 0.82,
-                       rightX,
-                       rightY,
-                       rightZ,
-                       upX,
-                       upY,
-                       upZ,
-                       my.saturate(puffBrightness * 0.97 + 0.02));
+      int puffCount = my.cloudPuffCount[i];
+      int puffIndex = 1;
+      while (puffIndex < puffCount) {
+        int saltBase = 211 + puffIndex * 37;
+        float angle = my.skyRandom(i, saltBase) * TwoPi;
+        float radialNoise = my.skyRandom(i, saltBase + 11);
+        float heightNoise = my.skyRandom(i, saltBase + 19);
+        float forwardNoise = my.skyRandom(i, saltBase + 29);
+        float scaleNoise = my.skyRandom(i, saltBase + 37);
+        float aspectNoise = my.skyRandom(i, saltBase + 43);
+        float brightnessNoise = my.skyRandom(i, saltBase + 53);
 
-      my.drawCloudPuff(centerX - rightX * offset * 0.7 + upX * offset * 0.05,
-                       centerY - rightY * offset * 0.7 + upY * offset * 0.05,
-                       centerZ - rightZ * offset * 0.7 + upZ * offset * 0.05,
-                       radiusX * 0.72,
-                       radiusY * 0.78,
-                       rightX,
-                       rightY,
-                       rightZ,
-                       upX,
-                       upY,
-                       upZ,
-                       my.saturate(puffBrightness * 0.94 + 0.03));
+        float offsetRight = cos(angle) * (clusterSpread * (0.45 + radialNoise * 0.75));
+        float offsetUp = sin(angle) * (clusterSpread * 0.40) +
+                         (heightNoise - 0.5) * baseScale * 0.35;
+        float offsetForward = (forwardNoise - 0.5) * baseScale * 0.25;
 
-      my.drawCloudPuff(centerX + upX * baseScale * 0.14,
-                       centerY + upY * baseScale * 0.14,
-                       centerZ + upZ * baseScale * 0.14,
-                       radiusX * 0.52,
-                       radiusY * 0.70,
-                       rightX,
-                       rightY,
-                       rightZ,
-                       upX,
-                       upY,
-                       upZ,
-                       my.saturate(puffBrightness * 0.90 + 0.05));
+        float puffRadiusX = radiusX * (0.60 + scaleNoise * 0.55);
+        float puffRadiusY = radiusY * (0.75 + aspectNoise * 0.40);
+
+        float puffCenterX = centerX +
+                            basisRightX * offsetRight +
+                            basisUpX * offsetUp +
+                            dirX * offsetForward;
+        float puffCenterY = centerY +
+                            basisRightY * offsetRight +
+                            basisUpY * offsetUp +
+                            dirY * offsetForward;
+        float puffCenterZ = centerZ +
+                            basisRightZ * offsetRight +
+                            basisUpZ * offsetUp +
+                            dirZ * offsetForward;
+
+        float puffLight = my.saturate(puffBrightness + (brightnessNoise - 0.5) * 0.22);
+
+        my.drawCloudPuff(puffCenterX,
+                         puffCenterY,
+                         puffCenterZ,
+                         puffRadiusX,
+                         puffRadiusY,
+                         basisRightX,
+                         basisRightY,
+                         basisRightZ,
+                         basisUpX,
+                         basisUpY,
+                         basisUpZ,
+                         puffLight);
+        puffIndex = puffIndex + 1;
+      }
       i = i + 1;
     }
   }
