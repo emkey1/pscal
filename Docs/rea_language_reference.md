@@ -112,7 +112,7 @@ Rea code can call any PSCAL VM built‑in, including I/O (`writeln`, `printf`),
 string helpers, math functions, and threading primitives such as `spawn`,
 `join`, `mutex`, `lock`, and `unlock`.
 
-When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLPerspective`, `GLFrustum`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
+When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLPerspective`, `GLFrustum`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
 
 ```rea
 int main() {

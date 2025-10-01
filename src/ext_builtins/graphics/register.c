@@ -101,6 +101,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLMaterialf", "glmaterialf", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlmaterialf},
     {"opengl", "GLColorMaterial", "glcolormaterial", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcolormaterial},
     {"opengl", "GLBlendFunc", "glblendfunc", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlblendfunc},
+    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface}, // Append new builtins to preserve existing IDs.
     {"opengl", "GLIsHardwareAccelerated", "glishardwareaccelerated", BUILTIN_TYPE_FUNCTION, vmBuiltinGlishardwareaccelerated},
 };
 #endif

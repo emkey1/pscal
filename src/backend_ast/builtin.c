@@ -620,6 +620,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
     {"quitrequested", vmBuiltinQuitrequested},
+    {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
 

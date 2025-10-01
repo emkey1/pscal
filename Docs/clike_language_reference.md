@@ -225,7 +225,9 @@ join tid;
 
 The C-like front end has access to the rich set of built-in functions provided by the PSCAL VM, including file I/O, string manipulation, mathematical functions, and more. Some common C library functions are also mapped to their Pascal equivalents (e.g., `strlen` is mapped to `length`).
 
-When PSCAL is built with SDL support (`-DSDL=ON`), clike programs can also call the SDL graphics and audio helpers. This includes the 3D routines `initgraph3d`, `glswapwindow`, `glsetswapinterval`, and a suite of fixed-function helpers (`glclearcolor`, `glclear`, `glcleardepth`, `glmatrixmode`, `glloadidentity`, `gltranslatef`, `glrotatef`, `glscalef`, `glbegin`/`glend`, `glcolor3f`, `glcolor4f`, `glnormal3f`, `glenable`/`gldisable`, `glshademodel`, `gllightfv`, `glmaterialfv`, `glmaterialf`, `glcolormaterial`, `glblendfunc`, `glvertex3f`, `glviewport`, `gldepthtest`, ...). A minimal render loop looks like:
+When PSCAL is built with SDL support (`-DSDL=ON`), clike programs can also call the SDL graphics and audio helpers. This includes the 3D routines `initgraph3d`, `glswapwindow`, `glsetswapinterval`, and a suite of fixed-function helpers (`glclearcolor`, `glclear`, `glcleardepth`, `glmatrixmode`, `glloadidentity`, `gltranslatef`, `glrotatef`, `glscalef`, `glbegin`/`glend`, `glcolor3f`, `glcolor4f`, `glnormal3f`, `glenable`/`gldisable`, `glcullface`, `glshademodel`, `gllightfv`, `glmaterialfv`, `glmaterialf`, `glcolormaterial`, `glblendfunc`, `glvertex3f`, `glviewport`, `gldepthtest`, ...). A minimal render loop looks like:
+
+Use `glcullface("back")` (or `"front"`, `"front_and_back"`, or a numeric `GLenum`) to select which faces are discarded during rasterization.
 
 ```c
 #ifdef SDL_ENABLED
