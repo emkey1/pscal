@@ -11,39 +11,56 @@ typedef struct NumericVarRef {
     bool isInteger;
 } NumericVarRef;
 
-static Value* resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower, int* upper) {
-    Value* arrVal = arg;
+typedef struct ArrayArg {
+    Value* values;
+    Value* owner;
+    int lower;
+    int upper;
+} ArrayArg;
+
+static ArrayArg resolveArrayArg(VM* vm, Value* arg, const char* name, int* lower, int* upper) {
+    ArrayArg result = {0};
+    Value* arrVal = NULL;
     if (arg->type == TYPE_POINTER) {
         arrVal = (Value*)arg->ptr_val;
         if (!arrVal) {
             runtimeError(vm, "%s received a NIL pointer.", name);
-            return NULL;
+            return result;
         }
+        result.owner = arrVal;
+    } else {
+        arrVal = arg;
     }
+
     if (!arrVal || arrVal->type != TYPE_ARRAY) {
         runtimeError(vm, "%s expects VAR array arguments.", name);
-        return NULL;
+        return result;
     }
     if (arrVal->dimensions > 1) {
         runtimeError(vm, "%s arrays must be single dimensional.", name);
-        return NULL;
+        return result;
     }
+
     int l = (arrVal->dimensions > 0 && arrVal->lower_bounds) ? arrVal->lower_bounds[0]
                                                             : arrVal->lower_bound;
     int u = (arrVal->dimensions > 0 && arrVal->upper_bounds) ? arrVal->upper_bounds[0]
                                                             : arrVal->upper_bound;
+    result.lower = l;
+    result.upper = u;
     if (lower) *lower = l;
     if (upper) *upper = u;
+
     if (!arrVal->array_val) {
         runtimeError(vm, "%s received an array with NIL storage.", name);
-        return NULL;
+        return result;
     }
-    return arrVal->array_val;
+    result.values = arrVal->array_val;
+    return result;
 }
 
 static inline void assignFloatValue(Value* target, double value) {
     if (!target) return;
-    target->type = TYPE_FLOAT;
+    target->type = TYPE_DOUBLE;
     SET_REAL_VALUE(target, value);
 }
 
@@ -157,25 +174,25 @@ static Value vmBuiltinLandscapePrecomputeWorldCoords(VM* vm, int arg_count, Valu
     }
 
     int lower = 0, upper = 0;
-    Value* worldXCoords =
+    ArrayArg worldX =
         resolveArrayArg(vm, &args[0], "LandscapePrecomputeWorldCoords", &lower, &upper);
-    if (!worldXCoords) return makeVoid();
-    if (lower != 0) {
+    if (!worldX.values) return makeVoid();
+    if (worldX.lower != 0) {
         runtimeError(vm,
                      "LandscapePrecomputeWorldCoords requires coordinate arrays starting at index 0.");
         return makeVoid();
     }
-    int coordUpper = upper;
+    int coordUpper = worldX.upper;
 
-    Value* worldZCoords =
+    ArrayArg worldZ =
         resolveArrayArg(vm, &args[1], "LandscapePrecomputeWorldCoords", &lower, &upper);
-    if (!worldZCoords) return makeVoid();
-    if (lower != 0) {
+    if (!worldZ.values) return makeVoid();
+    if (worldZ.lower != 0) {
         runtimeError(vm,
                      "LandscapePrecomputeWorldCoords requires coordinate arrays starting at index 0.");
         return makeVoid();
     }
-    if (upper < coordUpper) coordUpper = upper;
+    if (worldZ.upper < coordUpper) coordUpper = worldZ.upper;
 
     if (!isRealType(args[2].type) && !IS_INTLIKE(args[2])) {
         runtimeError(vm, "LandscapePrecomputeWorldCoords expects numeric tile scale argument.");
@@ -204,8 +221,19 @@ static Value vmBuiltinLandscapePrecomputeWorldCoords(VM* vm, int arg_count, Valu
     double half = terrainSize * 0.5;
     for (int i = 0; i < vertexStride; ++i) {
         double world = (i - half) * tileScale;
-        assignFloatValue(&worldXCoords[i], world);
-        assignFloatValue(&worldZCoords[i], world);
+        assignFloatValue(&worldX.values[i], world);
+        assignFloatValue(&worldZ.values[i], world);
+    }
+
+    if (worldX.owner && worldX.owner->array_val != worldX.values) {
+        for (int i = 0; i <= coordUpper; ++i) {
+            worldX.owner->array_val[i] = worldX.values[i];
+        }
+    }
+    if (worldZ.owner && worldZ.owner->array_val != worldZ.values) {
+        for (int i = 0; i <= coordUpper; ++i) {
+            worldZ.owner->array_val[i] = worldZ.values[i];
+        }
     }
 
     return makeVoid();
@@ -218,35 +246,35 @@ static Value vmBuiltinLandscapePrecomputeWaterOffsets(VM* vm, int arg_count, Val
     }
 
     int lower = 0, upper = 0;
-    Value* waterPhaseOffset =
+    ArrayArg waterPhase =
         resolveArrayArg(vm, &args[0], "LandscapePrecomputeWaterOffsets", &lower, &upper);
-    if (!waterPhaseOffset) return makeVoid();
-    if (lower != 0) {
+    if (!waterPhase.values) return makeVoid();
+    if (waterPhase.lower != 0) {
         runtimeError(vm,
                      "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
         return makeVoid();
     }
-    int arrayUpper = upper;
+    int arrayUpper = waterPhase.upper;
 
-    Value* waterSecondaryOffset =
+    ArrayArg waterSecondary =
         resolveArrayArg(vm, &args[1], "LandscapePrecomputeWaterOffsets", &lower, &upper);
-    if (!waterSecondaryOffset) return makeVoid();
-    if (lower != 0) {
+    if (!waterSecondary.values) return makeVoid();
+    if (waterSecondary.lower != 0) {
         runtimeError(vm,
                      "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
         return makeVoid();
     }
-    if (upper < arrayUpper) arrayUpper = upper;
+    if (waterSecondary.upper < arrayUpper) arrayUpper = waterSecondary.upper;
 
-    Value* waterSparkleOffset =
+    ArrayArg waterSparkle =
         resolveArrayArg(vm, &args[2], "LandscapePrecomputeWaterOffsets", &lower, &upper);
-    if (!waterSparkleOffset) return makeVoid();
-    if (lower != 0) {
+    if (!waterSparkle.values) return makeVoid();
+    if (waterSparkle.lower != 0) {
         runtimeError(vm,
                      "LandscapePrecomputeWaterOffsets requires offset arrays starting at index 0.");
         return makeVoid();
     }
-    if (upper < arrayUpper) arrayUpper = upper;
+    if (waterSparkle.upper < arrayUpper) arrayUpper = waterSparkle.upper;
 
     if (!IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
         runtimeError(vm, "LandscapePrecomputeWaterOffsets expects integer terrain parameters.");
@@ -275,9 +303,25 @@ static Value vmBuiltinLandscapePrecomputeWaterOffsets(VM* vm, int arg_count, Val
         double zSparkle = z * 0.22;
         for (int x = 0; x <= terrainSize; ++x) {
             int idx = rowIndex + x;
-            assignFloatValue(&waterPhaseOffset[idx], x * 0.18 + zPhase);
-            assignFloatValue(&waterSecondaryOffset[idx], x * 0.05 + zSecondary);
-            assignFloatValue(&waterSparkleOffset[idx], x * 0.22 + zSparkle);
+            assignFloatValue(&waterPhase.values[idx], x * 0.18 + zPhase);
+            assignFloatValue(&waterSecondary.values[idx], x * 0.05 + zSecondary);
+            assignFloatValue(&waterSparkle.values[idx], x * 0.22 + zSparkle);
+        }
+    }
+
+    if (waterPhase.owner && waterPhase.owner->array_val != waterPhase.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            waterPhase.owner->array_val[i] = waterPhase.values[i];
+        }
+    }
+    if (waterSecondary.owner && waterSecondary.owner->array_val != waterSecondary.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            waterSecondary.owner->array_val[i] = waterSecondary.values[i];
+        }
+    }
+    if (waterSparkle.owner && waterSparkle.owner->array_val != waterSparkle.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            waterSparkle.owner->array_val[i] = waterSparkle.values[i];
         }
     }
 
@@ -300,9 +344,9 @@ static Value vmBuiltinLandscapeBuildHeightField(VM* vm, int arg_count, Value* ar
     }
 
     int lower = 0, upper = 0;
-    Value* heightArray = resolveArrayArg(vm, &args[0], name, &lower, &upper);
-    if (!heightArray) return makeVoid();
-    if (lower != 0) {
+    ArrayArg heightArray = resolveArrayArg(vm, &args[0], name, &lower, &upper);
+    if (!heightArray.values) return makeVoid();
+    if (heightArray.lower != 0) {
         runtimeError(vm, "%s requires height arrays starting at index 0.", name);
         return makeVoid();
     }
@@ -342,7 +386,7 @@ static Value vmBuiltinLandscapeBuildHeightField(VM* vm, int arg_count, Value* ar
         runtimeError(vm, "%s received inconsistent terrain parameters.", name);
         return makeVoid();
     }
-    if (upper < vertexStride * vertexStride - 1) {
+    if (heightArray.upper < vertexStride * vertexStride - 1) {
         runtimeError(vm, "%s height array is smaller than required vertex count.", name);
         return makeVoid();
     }
@@ -361,9 +405,16 @@ static Value vmBuiltinLandscapeBuildHeightField(VM* vm, int arg_count, Value* ar
             double sampleX = (x + seedOffsetX) * baseFrequency;
             double height = landscapeFbm(sampleX, sampleZ, octaves, seed) * heightScale;
             int idx = rowIndex + x;
-            assignFloatValue(&heightArray[idx], height);
+            assignFloatValue(&heightArray.values[idx], height);
             if (height < minHeight) minHeight = height;
             if (height > maxHeight) maxHeight = height;
+        }
+    }
+
+    int vertexCount = vertexStride * vertexStride;
+    if (heightArray.owner && heightArray.owner->array_val != heightArray.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            heightArray.owner->array_val[i] = heightArray.values[i];
         }
     }
 
@@ -392,45 +443,45 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
     }
 
     int lower = 0, upper = 0;
-    Value* sourceHeights = resolveArrayArg(vm, &args[0], name, &lower, &upper);
-    if (!sourceHeights) return makeVoid();
-    if (lower != 0) {
+    ArrayArg sourceHeights = resolveArrayArg(vm, &args[0], name, &lower, &upper);
+    if (!sourceHeights.values) return makeVoid();
+    if (sourceHeights.lower != 0) {
         runtimeError(vm, "%s requires source arrays starting at index 0.", name);
         return makeVoid();
     }
-    int heightsUpper = upper;
+    int heightsUpper = sourceHeights.upper;
 
-    Value* vertexHeights = resolveArrayArg(vm, &args[1], name, &lower, &upper);
-    if (!vertexHeights) return makeVoid();
-    if (lower != 0) {
+    ArrayArg vertexHeights = resolveArrayArg(vm, &args[1], name, &lower, &upper);
+    if (!vertexHeights.values) return makeVoid();
+    if (vertexHeights.lower != 0) {
         runtimeError(vm, "%s requires vertex arrays starting at index 0.", name);
         return makeVoid();
     }
-    int vertexUpper = upper;
+    int vertexUpper = vertexHeights.upper;
 
-    Value* vertexNormalX = resolveArrayArg(vm, &args[2], name, NULL, &upper);
-    if (!vertexNormalX) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexNormalX = resolveArrayArg(vm, &args[2], name, NULL, &upper);
+    if (!vertexNormalX.values) return makeVoid();
+    if (vertexNormalX.upper < vertexUpper) vertexUpper = vertexNormalX.upper;
 
-    Value* vertexNormalY = resolveArrayArg(vm, &args[3], name, NULL, &upper);
-    if (!vertexNormalY) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexNormalY = resolveArrayArg(vm, &args[3], name, NULL, &upper);
+    if (!vertexNormalY.values) return makeVoid();
+    if (vertexNormalY.upper < vertexUpper) vertexUpper = vertexNormalY.upper;
 
-    Value* vertexNormalZ = resolveArrayArg(vm, &args[4], name, NULL, &upper);
-    if (!vertexNormalZ) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexNormalZ = resolveArrayArg(vm, &args[4], name, NULL, &upper);
+    if (!vertexNormalZ.values) return makeVoid();
+    if (vertexNormalZ.upper < vertexUpper) vertexUpper = vertexNormalZ.upper;
 
-    Value* vertexColorR = resolveArrayArg(vm, &args[5], name, NULL, &upper);
-    if (!vertexColorR) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexColorR = resolveArrayArg(vm, &args[5], name, NULL, &upper);
+    if (!vertexColorR.values) return makeVoid();
+    if (vertexColorR.upper < vertexUpper) vertexUpper = vertexColorR.upper;
 
-    Value* vertexColorG = resolveArrayArg(vm, &args[6], name, NULL, &upper);
-    if (!vertexColorG) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexColorG = resolveArrayArg(vm, &args[6], name, NULL, &upper);
+    if (!vertexColorG.values) return makeVoid();
+    if (vertexColorG.upper < vertexUpper) vertexUpper = vertexColorG.upper;
 
-    Value* vertexColorB = resolveArrayArg(vm, &args[7], name, NULL, &upper);
-    if (!vertexColorB) return makeVoid();
-    if (upper < vertexUpper) vertexUpper = upper;
+    ArrayArg vertexColorB = resolveArrayArg(vm, &args[7], name, NULL, &upper);
+    if (!vertexColorB.values) return makeVoid();
+    if (vertexColorB.upper < vertexUpper) vertexUpper = vertexColorB.upper;
 
     NumericVarRef waterHeightRef;
     if (!fetchNumericVarRef(vm, &args[8], name, "water height", &waterHeightRef))
@@ -483,13 +534,13 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
     for (int z = 0; z <= terrainSize; ++z) {
         for (int x = 0; x <= terrainSize; ++x) {
             int idx = z * vertexStride + x;
-            double height = asLd(sourceHeights[idx]);
-            assignFloatValue(&vertexHeights[idx], height);
+            double height = asLd(sourceHeights.values[idx]);
+            assignFloatValue(&vertexHeights.values[idx], height);
 
-            float left = landscapeHeightAt(sourceHeights, vertexStride, terrainSize, x - 1, z);
-            float right = landscapeHeightAt(sourceHeights, vertexStride, terrainSize, x + 1, z);
-            float down = landscapeHeightAt(sourceHeights, vertexStride, terrainSize, x, z - 1);
-            float up = landscapeHeightAt(sourceHeights, vertexStride, terrainSize, x, z + 1);
+            float left = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x - 1, z);
+            float right = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x + 1, z);
+            float down = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z - 1);
+            float up = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z + 1);
 
             float dx = 0.0f;
             float dz = 0.0f;
@@ -507,9 +558,9 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
             ny /= length;
             nz /= length;
 
-            assignFloatValue(&vertexNormalX[idx], nx);
-            assignFloatValue(&vertexNormalY[idx], ny);
-            assignFloatValue(&vertexNormalZ[idx], nz);
+            assignFloatValue(&vertexNormalX.values[idx], nx);
+            assignFloatValue(&vertexNormalY.values[idx], ny);
+            assignFloatValue(&vertexNormalZ.values[idx], nz);
 
             double normalized = 0.0;
             if (safeNormScale > 0.0) {
@@ -581,9 +632,50 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
             g = saturatef(g);
             b = saturatef(b);
 
-            assignFloatValue(&vertexColorR[idx], r);
-            assignFloatValue(&vertexColorG[idx], g);
-            assignFloatValue(&vertexColorB[idx], b);
+            assignFloatValue(&vertexColorR.values[idx], r);
+            assignFloatValue(&vertexColorG.values[idx], g);
+            assignFloatValue(&vertexColorB.values[idx], b);
+        }
+    }
+
+    if (sourceHeights.owner && sourceHeights.owner->array_val != sourceHeights.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            sourceHeights.owner->array_val[i] = sourceHeights.values[i];
+        }
+    }
+    if (vertexHeights.owner && vertexHeights.owner->array_val != vertexHeights.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexHeights.owner->array_val[i] = vertexHeights.values[i];
+        }
+    }
+    if (vertexNormalX.owner && vertexNormalX.owner->array_val != vertexNormalX.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexNormalX.owner->array_val[i] = vertexNormalX.values[i];
+        }
+    }
+    if (vertexNormalY.owner && vertexNormalY.owner->array_val != vertexNormalY.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexNormalY.owner->array_val[i] = vertexNormalY.values[i];
+        }
+    }
+    if (vertexNormalZ.owner && vertexNormalZ.owner->array_val != vertexNormalZ.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexNormalZ.owner->array_val[i] = vertexNormalZ.values[i];
+        }
+    }
+    if (vertexColorR.owner && vertexColorR.owner->array_val != vertexColorR.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexColorR.owner->array_val[i] = vertexColorR.values[i];
+        }
+    }
+    if (vertexColorG.owner && vertexColorG.owner->array_val != vertexColorG.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexColorG.owner->array_val[i] = vertexColorG.values[i];
+        }
+    }
+    if (vertexColorB.owner && vertexColorB.owner->array_val != vertexColorB.values) {
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexColorB.owner->array_val[i] = vertexColorB.values[i];
         }
     }
 
@@ -692,55 +784,55 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
     }
 
     int lower = 0, upper = 0;
-    Value* vertexHeights = resolveArrayArg(vm, &args[0], name, &lower, &upper);
-    if (!vertexHeights) return makeVoid();
-    if (lower != 0) {
+    ArrayArg vertexHeights = resolveArrayArg(vm, &args[0], name, &lower, &upper);
+    if (!vertexHeights.values) return makeVoid();
+    if (vertexHeights.lower != 0) {
         runtimeError(vm, "%s requires vertex height arrays starting at index 0.", name);
         return makeVoid();
     }
-    int heightsUpper = upper;
+    int heightsUpper = vertexHeights.upper;
 
-    Value* vertexColorR = resolveArrayArg(vm, &args[1], name, &lower, &upper);
-    if (!vertexColorR) return makeVoid();
-    if (lower != 0) {
+    ArrayArg vertexColorR = resolveArrayArg(vm, &args[1], name, &lower, &upper);
+    if (!vertexColorR.values) return makeVoid();
+    if (vertexColorR.lower != 0) {
         runtimeError(vm, "%s requires vertex color arrays starting at index 0.", name);
         return makeVoid();
     }
-    int colorUpper = upper;
+    int colorUpper = vertexColorR.upper;
 
-    Value* vertexColorG = resolveArrayArg(vm, &args[2], name, NULL, &upper);
-    if (!vertexColorG) return makeVoid();
-    if (upper < colorUpper) colorUpper = upper;
+    ArrayArg vertexColorG = resolveArrayArg(vm, &args[2], name, NULL, &upper);
+    if (!vertexColorG.values) return makeVoid();
+    if (vertexColorG.upper < colorUpper) colorUpper = vertexColorG.upper;
 
-    Value* vertexColorB = resolveArrayArg(vm, &args[3], name, NULL, &upper);
-    if (!vertexColorB) return makeVoid();
-    if (upper < colorUpper) colorUpper = upper;
+    ArrayArg vertexColorB = resolveArrayArg(vm, &args[3], name, NULL, &upper);
+    if (!vertexColorB.values) return makeVoid();
+    if (vertexColorB.upper < colorUpper) colorUpper = vertexColorB.upper;
 
     int argIndex = 4;
-    Value* vertexNormalX = NULL;
-    Value* vertexNormalY = NULL;
-    Value* vertexNormalZ = NULL;
+    ArrayArg vertexNormalX = {0};
+    ArrayArg vertexNormalY = {0};
+    ArrayArg vertexNormalZ = {0};
     if (arg_count == 11) {
         vertexNormalX = resolveArrayArg(vm, &args[argIndex], name, NULL, &upper);
-        if (!vertexNormalX) return makeVoid();
+        if (!vertexNormalX.values) return makeVoid();
         vertexNormalY = resolveArrayArg(vm, &args[argIndex + 1], name, NULL, &upper);
-        if (!vertexNormalY) return makeVoid();
+        if (!vertexNormalY.values) return makeVoid();
         vertexNormalZ = resolveArrayArg(vm, &args[argIndex + 2], name, NULL, &upper);
-        if (!vertexNormalZ) return makeVoid();
+        if (!vertexNormalZ.values) return makeVoid();
         argIndex += 3;
     }
 
-    Value* worldXCoords = resolveArrayArg(vm, &args[argIndex], name, &lower, &upper);
-    if (!worldXCoords) return makeVoid();
-    if (lower != 0) {
+    ArrayArg worldXCoords = resolveArrayArg(vm, &args[argIndex], name, &lower, &upper);
+    if (!worldXCoords.values) return makeVoid();
+    if (worldXCoords.lower != 0) {
         runtimeError(vm, "%s requires coordinate arrays starting at index 0.", name);
         return makeVoid();
     }
-    int worldUpper = upper;
+    int worldUpper = worldXCoords.upper;
 
-    Value* worldZCoords = resolveArrayArg(vm, &args[argIndex + 1], name, NULL, &upper);
-    if (!worldZCoords) return makeVoid();
-    if (upper < worldUpper) worldUpper = upper;
+    ArrayArg worldZCoords = resolveArrayArg(vm, &args[argIndex + 1], name, NULL, &upper);
+    if (!worldZCoords.values) return makeVoid();
+    if (worldZCoords.upper < worldUpper) worldUpper = worldZCoords.upper;
 
     int terrainArgs = argIndex + 2;
     if (!IS_INTLIKE(args[terrainArgs]) || !IS_INTLIKE(args[terrainArgs + 1])) {
@@ -758,6 +850,17 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
     if (heightsUpper < vertexCount - 1 || colorUpper < vertexCount - 1) {
         runtimeError(vm, "%s vertex arrays are smaller than the required vertex count.", name);
         return makeVoid();
+    }
+    if (vertexNormalX.values) {
+        if (vertexNormalX.lower != 0 || vertexNormalY.lower != 0 || vertexNormalZ.lower != 0) {
+            runtimeError(vm, "%s requires normal arrays starting at index 0.", name);
+            return makeVoid();
+        }
+        if (vertexNormalX.upper < vertexCount - 1 || vertexNormalY.upper < vertexCount - 1 ||
+            vertexNormalZ.upper < vertexCount - 1) {
+            runtimeError(vm, "%s normal arrays are smaller than the required vertex count.", name);
+            return makeVoid();
+        }
     }
     if (worldUpper < vertexStride - 1) {
         runtimeError(vm, "%s coordinate arrays are smaller than the required vertex stride.", name);
@@ -783,21 +886,21 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    float worldXMin = (float)asLd(worldXCoords[0]);
-    float worldXMax = (float)asLd(worldXCoords[terrainSize]);
+    float worldXMin = (float)asLd(worldXCoords.values[0]);
+    float worldXMax = (float)asLd(worldXCoords.values[terrainSize]);
 
     for (int z = 0; z < terrainSize; ++z) {
         glBegin(GL_TRIANGLE_STRIP);
-        float worldZ0 = (float)asLd(worldZCoords[z]);
-        float worldZ1 = (float)asLd(worldZCoords[z + 1]);
+        float worldZ0 = (float)asLd(worldZCoords.values[z]);
+        float worldZ1 = (float)asLd(worldZCoords.values[z + 1]);
         int rowIndex = z * vertexStride;
         int nextRowIndex = (z + 1) * vertexStride;
 
         float rowMin = FLT_MAX;
         float rowMax = -FLT_MAX;
         for (int x = 0; x <= terrainSize; ++x) {
-            float h0 = (float)asLd(vertexHeights[rowIndex + x]);
-            float h1 = (float)asLd(vertexHeights[nextRowIndex + x]);
+            float h0 = (float)asLd(vertexHeights.values[rowIndex + x]);
+            float h1 = (float)asLd(vertexHeights.values[nextRowIndex + x]);
             if (h0 < rowMin) rowMin = h0;
             if (h0 > rowMax) rowMax = h0;
             if (h1 < rowMin) rowMin = h1;
@@ -812,19 +915,19 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
         for (int x = 0; x <= terrainSize; ++x) {
             int idx0 = rowIndex + x;
             int idx1 = nextRowIndex + x;
-            float worldX = (float)asLd(worldXCoords[x]);
+            float worldX = (float)asLd(worldXCoords.values[x]);
 
-            float r0 = clampf((float)asLd(vertexColorR[idx0]), 0.0f, 1.0f);
-            float g0 = clampf((float)asLd(vertexColorG[idx0]), 0.0f, 1.0f);
-            float b0 = clampf((float)asLd(vertexColorB[idx0]), 0.0f, 1.0f);
-            float h0 = (float)asLd(vertexHeights[idx0]);
-            if (vertexNormalX) {
-                glNormal3f((float)asLd(vertexNormalX[idx0]),
-                           (float)asLd(vertexNormalY[idx0]),
-                           (float)asLd(vertexNormalZ[idx0]));
+            float r0 = clampf((float)asLd(vertexColorR.values[idx0]), 0.0f, 1.0f);
+            float g0 = clampf((float)asLd(vertexColorG.values[idx0]), 0.0f, 1.0f);
+            float b0 = clampf((float)asLd(vertexColorB.values[idx0]), 0.0f, 1.0f);
+            float h0 = (float)asLd(vertexHeights.values[idx0]);
+            if (vertexNormalX.values) {
+                glNormal3f((float)asLd(vertexNormalX.values[idx0]),
+                           (float)asLd(vertexNormalY.values[idx0]),
+                           (float)asLd(vertexNormalZ.values[idx0]));
             } else {
                 float nx0, ny0, nz0;
-                computeTerrainNormal(vertexHeights, worldXCoords, worldZCoords,
+                computeTerrainNormal(vertexHeights.values, worldXCoords.values, worldZCoords.values,
                                      vertexStride, terrainSize, x, z,
                                      &nx0, &ny0, &nz0);
                 glNormal3f(nx0, ny0, nz0);
@@ -832,17 +935,17 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
             glColor3f(r0, g0, b0);
             glVertex3f(worldX, h0, worldZ0);
 
-            float r1 = clampf((float)asLd(vertexColorR[idx1]), 0.0f, 1.0f);
-            float g1 = clampf((float)asLd(vertexColorG[idx1]), 0.0f, 1.0f);
-            float b1 = clampf((float)asLd(vertexColorB[idx1]), 0.0f, 1.0f);
-            float h1 = (float)asLd(vertexHeights[idx1]);
-            if (vertexNormalX) {
-                glNormal3f((float)asLd(vertexNormalX[idx1]),
-                           (float)asLd(vertexNormalY[idx1]),
-                           (float)asLd(vertexNormalZ[idx1]));
+            float r1 = clampf((float)asLd(vertexColorR.values[idx1]), 0.0f, 1.0f);
+            float g1 = clampf((float)asLd(vertexColorG.values[idx1]), 0.0f, 1.0f);
+            float b1 = clampf((float)asLd(vertexColorB.values[idx1]), 0.0f, 1.0f);
+            float h1 = (float)asLd(vertexHeights.values[idx1]);
+            if (vertexNormalX.values) {
+                glNormal3f((float)asLd(vertexNormalX.values[idx1]),
+                           (float)asLd(vertexNormalY.values[idx1]),
+                           (float)asLd(vertexNormalZ.values[idx1]));
             } else {
                 float nx1, ny1, nz1;
-                computeTerrainNormal(vertexHeights, worldXCoords, worldZCoords,
+                computeTerrainNormal(vertexHeights.values, worldXCoords.values, worldZCoords.values,
                                      vertexStride, terrainSize, x, z + 1,
                                      &nx1, &ny1, &nz1);
                 glNormal3f(nx1, ny1, nz1);
@@ -896,37 +999,37 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
     }
 
     int lower = 0, upper = 0;
-    Value* vertexHeights = resolveArrayArg(vm, &args[0], "LandscapeDrawWater", &lower, &upper);
-    if (!vertexHeights) return makeVoid();
-    if (lower != 0) {
+    ArrayArg vertexHeights = resolveArrayArg(vm, &args[0], "LandscapeDrawWater", &lower, &upper);
+    if (!vertexHeights.values) return makeVoid();
+    if (vertexHeights.lower != 0) {
         runtimeError(vm, "LandscapeDrawWater requires vertex arrays starting at index 0.");
         return makeVoid();
     }
-    int heightsUpper = upper;
+    int heightsUpper = vertexHeights.upper;
 
-    Value* worldXCoords = resolveArrayArg(vm, &args[1], "LandscapeDrawWater", &lower, &upper);
-    if (!worldXCoords) return makeVoid();
-    if (lower != 0) {
+    ArrayArg worldXCoords = resolveArrayArg(vm, &args[1], "LandscapeDrawWater", &lower, &upper);
+    if (!worldXCoords.values) return makeVoid();
+    if (worldXCoords.lower != 0) {
         runtimeError(vm, "LandscapeDrawWater requires coordinate arrays starting at index 0.");
         return makeVoid();
     }
-    int coordUpper = upper;
+    int coordUpper = worldXCoords.upper;
 
-    Value* worldZCoords = resolveArrayArg(vm, &args[2], "LandscapeDrawWater", NULL, &upper);
-    if (!worldZCoords) return makeVoid();
-    if (upper < coordUpper) coordUpper = upper;
+    ArrayArg worldZCoords = resolveArrayArg(vm, &args[2], "LandscapeDrawWater", NULL, &upper);
+    if (!worldZCoords.values) return makeVoid();
+    if (worldZCoords.upper < coordUpper) coordUpper = worldZCoords.upper;
 
-    Value* waterPhaseOffset = resolveArrayArg(vm, &args[3], "LandscapeDrawWater", NULL, &upper);
-    if (!waterPhaseOffset) return makeVoid();
-    int phaseUpper = upper;
+    ArrayArg waterPhaseOffset = resolveArrayArg(vm, &args[3], "LandscapeDrawWater", NULL, &upper);
+    if (!waterPhaseOffset.values) return makeVoid();
+    int phaseUpper = waterPhaseOffset.upper;
 
-    Value* waterSecondaryOffset = resolveArrayArg(vm, &args[4], "LandscapeDrawWater", NULL, &upper);
-    if (!waterSecondaryOffset) return makeVoid();
-    if (upper < phaseUpper) phaseUpper = upper;
+    ArrayArg waterSecondaryOffset = resolveArrayArg(vm, &args[4], "LandscapeDrawWater", NULL, &upper);
+    if (!waterSecondaryOffset.values) return makeVoid();
+    if (waterSecondaryOffset.upper < phaseUpper) phaseUpper = waterSecondaryOffset.upper;
 
-    Value* waterSparkleOffset = resolveArrayArg(vm, &args[5], "LandscapeDrawWater", NULL, &upper);
-    if (!waterSparkleOffset) return makeVoid();
-    if (upper < phaseUpper) phaseUpper = upper;
+    ArrayArg waterSparkleOffset = resolveArrayArg(vm, &args[5], "LandscapeDrawWater", NULL, &upper);
+    if (!waterSparkleOffset.values) return makeVoid();
+    if (waterSparkleOffset.upper < phaseUpper) phaseUpper = waterSparkleOffset.upper;
 
     if (!isRealType(args[6].type) && !IS_INTLIKE(args[6])) {
         runtimeError(vm, "LandscapeDrawWater expects numeric water height.");
@@ -975,54 +1078,54 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
     for (int z = 0; z < terrainSize; ++z) {
         int rowIndex = z * vertexStride;
         int nextRowIndex = (z + 1) * vertexStride;
-        float worldZ0 = (float)asLd(worldZCoords[z]);
-        float worldZ1 = (float)asLd(worldZCoords[z + 1]);
+        float worldZ0 = (float)asLd(worldZCoords.values[z]);
+        float worldZ1 = (float)asLd(worldZCoords.values[z + 1]);
         for (int x = 0; x < terrainSize; ++x) {
             int idx00 = rowIndex + x;
             int idx10 = rowIndex + x + 1;
             int idx01 = nextRowIndex + x;
             int idx11 = nextRowIndex + x + 1;
-            float h00 = (float)asLd(vertexHeights[idx00]);
-            float h10 = (float)asLd(vertexHeights[idx10]);
-            float h01 = (float)asLd(vertexHeights[idx01]);
-            float h11 = (float)asLd(vertexHeights[idx11]);
+            float h00 = (float)asLd(vertexHeights.values[idx00]);
+            float h10 = (float)asLd(vertexHeights.values[idx10]);
+            float h01 = (float)asLd(vertexHeights.values[idx01]);
+            float h11 = (float)asLd(vertexHeights.values[idx11]);
             if (h00 <= maxWaterHeight && h10 <= maxWaterHeight && h01 <= maxWaterHeight) {
-                float worldX0 = (float)asLd(worldXCoords[x]);
-                float worldX1 = (float)asLd(worldXCoords[x + 1]);
+                float worldX0 = (float)asLd(worldXCoords.values[x]);
+                float worldX1 = (float)asLd(worldXCoords.values[x + 1]);
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX0, worldZ0, h00,
-                                (float)asLd(waterPhaseOffset[idx00]),
-                                (float)asLd(waterSecondaryOffset[idx00]),
-                                (float)asLd(waterSparkleOffset[idx00]));
+                                (float)asLd(waterPhaseOffset.values[idx00]),
+                                (float)asLd(waterSecondaryOffset.values[idx00]),
+                                (float)asLd(waterSparkleOffset.values[idx00]));
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX1, worldZ0, h10,
-                                (float)asLd(waterPhaseOffset[idx10]),
-                                (float)asLd(waterSecondaryOffset[idx10]),
-                                (float)asLd(waterSparkleOffset[idx10]));
+                                (float)asLd(waterPhaseOffset.values[idx10]),
+                                (float)asLd(waterSecondaryOffset.values[idx10]),
+                                (float)asLd(waterSparkleOffset.values[idx10]));
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX0, worldZ1, h01,
-                                (float)asLd(waterPhaseOffset[idx01]),
-                                (float)asLd(waterSecondaryOffset[idx01]),
-                                (float)asLd(waterSparkleOffset[idx01]));
+                                (float)asLd(waterPhaseOffset.values[idx01]),
+                                (float)asLd(waterSecondaryOffset.values[idx01]),
+                                (float)asLd(waterSparkleOffset.values[idx01]));
             }
             if (h10 <= maxWaterHeight && h11 <= maxWaterHeight && h01 <= maxWaterHeight) {
-                float worldX1 = (float)asLd(worldXCoords[x + 1]);
-                float worldX0 = (float)asLd(worldXCoords[x]);
+                float worldX1 = (float)asLd(worldXCoords.values[x + 1]);
+                float worldX0 = (float)asLd(worldXCoords.values[x]);
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX1, worldZ0, h10,
-                                (float)asLd(waterPhaseOffset[idx10]),
-                                (float)asLd(waterSecondaryOffset[idx10]),
-                                (float)asLd(waterSparkleOffset[idx10]));
+                                (float)asLd(waterPhaseOffset.values[idx10]),
+                                (float)asLd(waterSecondaryOffset.values[idx10]),
+                                (float)asLd(waterSparkleOffset.values[idx10]));
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX1, worldZ1, h11,
-                                (float)asLd(waterPhaseOffset[idx11]),
-                                (float)asLd(waterSecondaryOffset[idx11]),
-                                (float)asLd(waterSparkleOffset[idx11]));
+                                (float)asLd(waterPhaseOffset.values[idx11]),
+                                (float)asLd(waterSecondaryOffset.values[idx11]),
+                                (float)asLd(waterSparkleOffset.values[idx11]));
                 emitWaterVertex(waterHeight, basePhase, baseSecondary, baseSparkle,
                                 worldX0, worldZ1, h01,
-                                (float)asLd(waterPhaseOffset[idx01]),
-                                (float)asLd(waterSecondaryOffset[idx01]),
-                                (float)asLd(waterSparkleOffset[idx01]));
+                                (float)asLd(waterPhaseOffset.values[idx01]),
+                                (float)asLd(waterSecondaryOffset.values[idx01]),
+                                (float)asLd(waterSparkleOffset.values[idx01]));
             }
         }
     }
