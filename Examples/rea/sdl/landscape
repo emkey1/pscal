@@ -26,8 +26,8 @@ const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
-const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
-const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+const int ScanCodeUp = 81;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 82;  // SDL_SCANCODE_DOWN
 const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 
