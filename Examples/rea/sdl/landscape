@@ -26,6 +26,24 @@ const float SunHaloRadius = 34.0;
 const str KeyForward = "w";
 const str KeyBackward = "s";
 
+float absf(float value) {
+  if (value < 0.0) return -value;
+  return value;
+}
+
+bool floatIsFinite(float value) {
+  if (!(value == value)) return false;
+  float magnitude = absf(value);
+  if (magnitude > 1e12) return false;
+  return true;
+}
+
+bool floatWithinTolerance(float a, float b, float tolerance) {
+  float diff = a - b;
+  diff = absf(diff);
+  return diff <= tolerance;
+}
+
 bool hasDigit(str s) {
   int i = 1;
   while (i <= length(s)) {
@@ -166,8 +184,44 @@ class TerrainField {
     my.minHeight = minHeight;
     my.maxHeight = maxHeight;
     my.normalizationScale = normalizationScale;
-    float sanity = my.heights[0];
-    if (!(sanity == sanity)) return false;
+    if (!floatIsFinite(my.minHeight) || !floatIsFinite(my.maxHeight) ||
+        !floatIsFinite(my.normalizationScale)) {
+      return false;
+    }
+    if (my.minHeight > my.maxHeight) {
+      return false;
+    }
+    int total = VertexCount;
+    if (total <= 0) {
+      return false;
+    }
+    float computedMin = my.heights[0];
+    float computedMax = my.heights[0];
+    int idx = 0;
+    while (idx < total) {
+      float sample = my.heights[idx];
+      if (!floatIsFinite(sample)) {
+        return false;
+      }
+      if (sample < computedMin) computedMin = sample;
+      if (sample > computedMax) computedMax = sample;
+      idx = idx + 1;
+    }
+    if (!floatWithinTolerance(computedMin, my.minHeight, 0.01) ||
+        !floatWithinTolerance(computedMax, my.maxHeight, 0.01)) {
+      return false;
+    }
+    float span = computedMax - computedMin;
+    if (span <= 0.0001) {
+      if (absf(my.normalizationScale) > 0.0001) {
+        return false;
+      }
+    } else {
+      float expectedScale = 1.0 / span;
+      if (!floatWithinTolerance(expectedScale, my.normalizationScale, 0.01)) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -282,10 +336,11 @@ class LandscapeDemo {
   float waterHeight;
   float waterNormalizedLevel;
   float elapsedSeconds;
-  bool useFastTerrain;
-  bool useFastWater;
   bool useFastWorldCoords;
   bool useFastWaterOffsets;
+  bool useFastVertexBake;
+  bool hasTerrainDrawBuiltin;
+  bool hasWaterDrawBuiltin;
   float cloudAzimuth[CloudCount];
   float cloudElevation[CloudCount];
   float cloudDistance[CloudCount];
@@ -304,8 +359,9 @@ class LandscapeDemo {
     if (!my.useFastWaterOffsets) {
       my.precomputeWaterOffsets();
     }
-    my.useFastTerrain = hasextbuiltin("user", "LandscapeDrawTerrain");
-    my.useFastWater = hasextbuiltin("user", "LandscapeDrawWater");
+    my.useFastVertexBake = false;
+    my.hasTerrainDrawBuiltin = hasextbuiltin("user", "LandscapeDrawTerrain");
+    my.hasWaterDrawBuiltin = hasextbuiltin("user", "LandscapeDrawWater");
     my.elapsedSeconds = 0.0;
     my.waterNormalizedLevel = 0.36;
     float sunX = 0.45;
@@ -346,15 +402,34 @@ class LandscapeDemo {
     float expectedMax = (TerrainSize - half) * TileScale;
     float minSample = my.worldXCoords[0];
     float maxSample = my.worldXCoords[TerrainSize];
-    if (!(minSample == minSample) || !(maxSample == maxSample)) {
+    float minZSample = my.worldZCoords[0];
+    float maxZSample = my.worldZCoords[TerrainSize];
+    if (!floatIsFinite(minSample) || !floatIsFinite(maxSample) ||
+        !floatIsFinite(minZSample) || !floatIsFinite(maxZSample)) {
       return false;
     }
-    float diffMin = minSample - expectedMin;
-    if (diffMin < 0.0) diffMin = -diffMin;
-    float diffMax = maxSample - expectedMax;
-    if (diffMax < 0.0) diffMax = -diffMax;
-    if (diffMin > 0.0005 || diffMax > 0.0005) {
+    if (!floatWithinTolerance(minSample, expectedMin, 0.0005) ||
+        !floatWithinTolerance(maxSample, expectedMax, 0.0005) ||
+        !floatWithinTolerance(minZSample, expectedMin, 0.0005) ||
+        !floatWithinTolerance(maxZSample, expectedMax, 0.0005)) {
       return false;
+    }
+    int i = 0;
+    while (i <= TerrainSize) {
+      float xVal = my.worldXCoords[i];
+      float zVal = my.worldZCoords[i];
+      if (!floatIsFinite(xVal) || !floatIsFinite(zVal)) {
+        return false;
+      }
+      if (i > 0) {
+        float deltaX = xVal - my.worldXCoords[i - 1];
+        float deltaZ = zVal - my.worldZCoords[i - 1];
+        if (!floatWithinTolerance(deltaX, TileScale, 0.001) ||
+            !floatWithinTolerance(deltaZ, TileScale, 0.001)) {
+          return false;
+        }
+      }
+      i = i + 1;
     }
     return true;
   }
@@ -379,22 +454,15 @@ class LandscapeDemo {
                                     my.waterSparkleOffset,
                                     TerrainSize,
                                     VertexStride);
-    if (TerrainSize >= 1) {
-      int checkIdx = 1;
-      float expectedPhase = 0.18;
-      float phase = my.waterPhaseOffset[checkIdx];
-      float secondary = my.waterSecondaryOffset[checkIdx];
-      if (!(phase == phase) || !(secondary == secondary)) {
+    int total = VertexCount;
+    int idx = 0;
+    while (idx < total) {
+      if (!floatIsFinite(my.waterPhaseOffset[idx]) ||
+          !floatIsFinite(my.waterSecondaryOffset[idx]) ||
+          !floatIsFinite(my.waterSparkleOffset[idx])) {
         return false;
       }
-      float phaseDiff = phase - expectedPhase;
-      if (phaseDiff < 0.0) phaseDiff = -phaseDiff;
-      float expectedSecondary = 0.05;
-      float secondaryDiff = secondary - expectedSecondary;
-      if (secondaryDiff < 0.0) secondaryDiff = -secondaryDiff;
-      if (phaseDiff > 0.0005 || secondaryDiff > 0.0005) {
-        return false;
-      }
+      idx = idx + 1;
     }
     return true;
   }
@@ -499,13 +567,56 @@ class LandscapeDemo {
                             my.vertexColorB,
                             my.waterHeight,
                             my.field.minHeight,
-                            my.field.maxHeight,
-                            my.field.normalizationScale,
-                            waterLevel,
+                              my.field.maxHeight,
+                              my.field.normalizationScale,
+                              waterLevel,
                             TileScale,
                             TerrainSize,
                             VertexStride);
-    if (!(my.waterHeight == my.waterHeight)) {
+    if (!floatIsFinite(my.waterHeight)) {
+      return false;
+    }
+    int total = VertexCount;
+    int idx = 0;
+    while (idx < total) {
+      float height = my.vertexHeights[idx];
+      float normalX = my.vertexNormalX[idx];
+      float normalY = my.vertexNormalY[idx];
+      float normalZ = my.vertexNormalZ[idx];
+      float colorR = my.vertexColorR[idx];
+      float colorG = my.vertexColorG[idx];
+      float colorB = my.vertexColorB[idx];
+      if (!floatIsFinite(height) ||
+          !floatIsFinite(normalX) ||
+          !floatIsFinite(normalY) ||
+          !floatIsFinite(normalZ) ||
+          !floatIsFinite(colorR) ||
+          !floatIsFinite(colorG) ||
+          !floatIsFinite(colorB)) {
+        return false;
+      }
+      float expectedHeight = my.field.heightByFlatIndex(idx);
+      if (!floatIsFinite(expectedHeight) ||
+          !floatWithinTolerance(height, expectedHeight, 0.05)) {
+        return false;
+      }
+      float normalLenSq = normalX * normalX + normalY * normalY + normalZ * normalZ;
+      if (!floatIsFinite(normalLenSq) || normalLenSq <= 0.0001) {
+        return false;
+      }
+      float normalLen = sqrt(normalLenSq);
+      if (!floatIsFinite(normalLen) || normalLen <= 0.01 || normalLen > 10.0) {
+        return false;
+      }
+      if (colorR < -0.01 || colorR > 1.01 ||
+          colorG < -0.01 || colorG > 1.01 ||
+          colorB < -0.01 || colorB > 1.01) {
+        return false;
+      }
+      idx = idx + 1;
+    }
+    if (my.waterHeight < my.field.minHeight - 50.0 ||
+        my.waterHeight > my.field.maxHeight + 50.0) {
       return false;
     }
     return true;
@@ -513,8 +624,10 @@ class LandscapeDemo {
 
   void updateVertexData() {
     if (my.tryBakeVertexData(my.waterNormalizedLevel)) {
+      my.useFastVertexBake = true;
       return;
     }
+    my.useFastVertexBake = false;
     my.computeVertexNormals();
     float span = my.field.maxHeight - my.field.minHeight;
     if (span <= 0.0001) span = 1.0;
@@ -821,11 +934,13 @@ class LandscapeDemo {
     GLSetSwapInterval(1);
     my.setupLighting();
     writeln("Controls: W/S to move, use the mouse to look around. N/P change seed, R randomizes, Q or Esc exits.");
-    if (my.useFastTerrain ||
-        my.useFastWater ||
-        my.useFastWorldCoords ||
-        my.useFastWaterOffsets) {
-      writeln("Using extended landscape builtins for improved performance.");
+    if (my.useFastWorldCoords ||
+        my.useFastWaterOffsets ||
+        my.useFastVertexBake) {
+      writeln("Using extended landscape builtins for data preparation; rendering occurs in Rea.");
+    }
+    if (my.hasTerrainDrawBuiltin || my.hasWaterDrawBuiltin) {
+      writeln("Extended draw builtins detected but disabled to avoid native rendering.");
     }
     int mouseX = 0;
     int mouseY = 0;
@@ -884,20 +999,6 @@ class LandscapeDemo {
   }
 
   void drawTerrain() {
-    if (my.useFastTerrain) {
-      landscapedrawterrain(my.vertexHeights,
-                           my.vertexColorR,
-                           my.vertexColorG,
-                           my.vertexColorB,
-                           my.vertexNormalX,
-                           my.vertexNormalY,
-                           my.vertexNormalZ,
-                           my.worldXCoords,
-                           my.worldZCoords,
-                           TerrainSize,
-                           VertexStride);
-      return;
-    }
     int z = 0;
     while (z < TerrainSize) {
       GLBegin("triangle_strip");
@@ -927,7 +1028,7 @@ class LandscapeDemo {
     }
   }
 
-    void emitWaterVertex(int idx,
+  void emitWaterVertex(int idx,
                        int gridX,
                        int gridZ,
                        float groundHeight,
@@ -965,20 +1066,6 @@ class LandscapeDemo {
   void drawWater(float timeSeconds) {
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
-    if (my.useFastWater) {
-      landscapedrawwater(my.vertexHeights,
-                         my.worldXCoords,
-                         my.worldZCoords,
-                         my.waterPhaseOffset,
-                         my.waterSecondaryOffset,
-                         my.waterSparkleOffset,
-                         my.waterHeight,
-                         timeSeconds,
-                         TerrainSize,
-                         VertexStride);
-      GLDisable("blend");
-      return;
-    }
     float allowance = 0.18;
     float maxWaterHeight = my.waterHeight + allowance;
     float basePhase = timeSeconds * 0.7;
