@@ -23,8 +23,8 @@ const int CloudCount = 14;
 const float SunDistance = 220.0;
 const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
-const int ScanCodeW = 26; // SDL_SCANCODE_W
-const int ScanCodeS = 22; // SDL_SCANCODE_S
+const str KeyForward = "w";
+const str KeyBackward = "s";
 
 bool hasDigit(str s) {
   int i = 1;
@@ -799,6 +799,7 @@ class LandscapeDemo {
     GLEnable("normalize");
     GLShadeModel("smooth");
     GLColorMaterial("front", "ambient_and_diffuse");
+    GLDisable("cull_face");
 
     GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
     GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
@@ -851,8 +852,8 @@ class LandscapeDemo {
   void handleDiscreteInput() {
     // Prime the SDL key watcher before draining the queue so it sees any new
     // keydown events we are about to consume with pollkey().
-    IsKeyDown(ScanCodeW);
-    IsKeyDown(ScanCodeS);
+    IsKeyDown(KeyForward);
+    IsKeyDown(KeyBackward);
 
     int key = pollkey();
     while (key != 0) {
@@ -874,8 +875,8 @@ class LandscapeDemo {
     // Sample the movement keys after pumping events so their latched state
     // reflects the latest SDL keyboard state even while the mouse is inside
     // the window.
-    my.forwardKeyDown = IsKeyDown(ScanCodeW);
-    my.backwardKeyDown = IsKeyDown(ScanCodeS);
+    my.forwardKeyDown = IsKeyDown(KeyForward);
+    my.backwardKeyDown = IsKeyDown(KeyBackward);
   }
 
   void drawTerrain() {
