@@ -425,7 +425,7 @@ set(CLIKE_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
     src/vm/vm.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/builtin.c src/backend_ast/shell.c src/backend_ast/builtin_network_api.c
     src/symbol/symbol.c
     src/clike/stubs.c
 )
@@ -543,7 +543,7 @@ set(REA_SOURCES
     src/compiler/bytecode.c
     src/compiler/compiler.c
     src/vm/vm.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/builtin.c src/backend_ast/shell.c src/backend_ast/builtin_network_api.c
     src/symbol/symbol.c
 )
 
@@ -639,7 +639,7 @@ set(JSON2BC_SOURCES
     src/ast/ast.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/builtin.c src/backend_ast/shell.c src/backend_ast/builtin_network_api.c
     src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c
