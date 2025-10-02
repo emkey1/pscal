@@ -163,6 +163,33 @@ exercise_rea_cli_smoke() {
   rm -f "$tmp_out" "$tmp_err"
   echo
 
+  echo "---- ReaCLINoRun ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$REA_BIN" --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "rea --no-run exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_out" ]; then
+    echo "rea --no-run produced unexpected stdout" >&2
+    cat "$tmp_out"
+    EXIT_CODE=1
+  elif ! grep -q "Compilation successful" "$tmp_err"; then
+    echo "rea --no-run missing compilation banner" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif grep -q -- "--- executing Program" "$tmp_err"; then
+    echo "rea --no-run should not announce VM execution" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
   echo "---- ReaCLITrace ----"
   tmp_out=$(mktemp)
   tmp_err=$(mktemp)
