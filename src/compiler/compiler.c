@@ -1471,15 +1471,13 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                  arg_vt == TYPE_ENUM    || arg_vt == TYPE_CHAR)) {
                 return true;
             }
-            // Permit wider integer arguments (e.g. LONGINT/INT64, CARDINAL/UINT32)
-            // to match INTEGER parameters.  Traditional Pascal routinely allows
-            // these values to be passed to routines expecting INTEGER so long as
-            // the caller explicitly requests it.  Our VM stores the value's
-            // actual type in the Value struct, so the callee will still receive
-            // the full precision.
+            // Permit ordinal arguments to satisfy INTEGER parameters.  This
+            // keeps BYTE/WORD and the extended integer family compatible with
+            // routines that declare INTEGER parameters, mirroring traditional
+            // Pascal's treatment of these types as interchangeable integer
+            // values.
             if (param_actual->var_type == TYPE_INTEGER &&
-                (arg_vt == TYPE_INT64 || arg_vt == TYPE_UINT64 ||
-                 arg_vt == TYPE_UINT32)) {
+                isIntegerFamilyType(arg_vt)) {
                 return true;
             }
             if (isRealType(param_actual->var_type) && isIntlikeType(arg_vt)) {
@@ -2129,7 +2127,10 @@ Value evaluateCompileTimeValue(AST* node) {
 
                 Value result = makeVoid();
 
-                if (isRealType(left_val.type) && isRealType(right_val.type)) {
+                bool left_is_real = isRealType(left_val.type);
+                bool right_is_real = isRealType(right_val.type);
+
+                if (left_is_real && right_is_real) {
                     double a = (double)AS_REAL(left_val);
                     double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
@@ -2149,7 +2150,14 @@ Value evaluateCompileTimeValue(AST* node) {
                                 result = makeReal(a / b);
                             }
                             break;
-        case TOKEN_MOD:
+                        case TOKEN_INT_DIV:
+                            if (b == 0.0) {
+                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                            } else {
+                                result = makeReal(a / b);
+                            }
+                            break;
+                        case TOKEN_MOD:
                             if (b == 0.0) {
                                 fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
                             } else {
@@ -2159,7 +2167,15 @@ Value evaluateCompileTimeValue(AST* node) {
                         default:
                             break;
                     }
-                } else if (isRealType(left_val.type) || isRealType(right_val.type)) {
+                } else if (node->token->type == TOKEN_INT_DIV && (left_is_real || right_is_real)) {
+                    double a = left_is_real ? (double)AS_REAL(left_val) : (double)AS_INTEGER(left_val);
+                    double b = right_is_real ? (double)AS_REAL(right_val) : (double)AS_INTEGER(right_val);
+                    if (b == 0.0) {
+                        fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
+                    } else {
+                        result = makeReal(a / b);
+                    }
+                } else if (left_is_real || right_is_real) {
                     fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
                 } else { // Both operands are integers
                     long long a = left_val.i_val;
@@ -2283,6 +2299,50 @@ static bool globalVariableExists(const char* name) {
         }
     }
     return false;
+}
+
+static bool resolveUnitQualifiedGlobal(AST* node, char* outName, size_t outSize, Symbol** outSymbol) {
+    if (!node || node->type != AST_FIELD_ACCESS || !outName || outSize == 0) {
+        return false;
+    }
+
+    AST* base = node->left;
+    if (!base || base->type != AST_VARIABLE || !base->token || !base->token->value) {
+        return false;
+    }
+
+    if (!node->token || !node->token->value) {
+        return false;
+    }
+
+    char qualified_buf[MAX_SYMBOL_LENGTH * 2 + 2];
+    int written = snprintf(qualified_buf, sizeof(qualified_buf), "%s.%s", base->token->value, node->token->value);
+    if (written < 0 || written >= (int)sizeof(qualified_buf)) {
+        return false;
+    }
+    toLowerString(qualified_buf);
+
+    Symbol* sym = lookupGlobalSymbol(qualified_buf);
+    if (!sym) {
+        return false;
+    }
+
+    sym = resolveSymbolAlias(sym);
+    if (!sym) {
+        return false;
+    }
+
+    strncpy(outName, qualified_buf, outSize - 1);
+    outName[outSize - 1] = '\0';
+
+    node->var_type = sym->type;
+    node->type_def = sym->type_def;
+
+    if (outSymbol) {
+        *outSymbol = sym;
+    }
+
+    return true;
 }
 
 typedef struct {
@@ -2699,6 +2759,21 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            Symbol* resolved_symbol = NULL;
+            if (resolveUnitQualifiedGlobal(node, qualified_name, sizeof(qualified_name), &resolved_symbol)) {
+                if (resolved_symbol && resolved_symbol->is_const) {
+                    fprintf(stderr, "L%d: Compiler error: Cannot assign to constant '%s'.\n", line, qualified_name);
+                    compiler_had_error = true;
+                    break;
+                }
+
+                int nameIndex = addStringConstant(chunk, qualified_name);
+                emitGlobalNameIdx(chunk, GET_GLOBAL_ADDRESS, GET_GLOBAL_ADDRESS16,
+                                   nameIndex, line);
+                break;
+            }
+
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
                 if (const_ptr) {
@@ -3581,6 +3656,12 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         continue;
                     }
 
+                    AST* resolved_local_type = resolveTypeAlias(actual_type_def_node);
+                    if (resolved_local_type && resolved_local_type->type == AST_TYPE_DECL && resolved_local_type->left) {
+                        resolved_local_type = resolveTypeAlias(resolved_local_type->left);
+                    }
+                    bool is_record_type = resolved_local_type && resolved_local_type->type == AST_RECORD_TYPE;
+
                     if (node->var_type == TYPE_ARRAY) {
                         int dimension_count = actual_type_def_node->child_count;
                         if (dimension_count > 255) {
@@ -3628,6 +3709,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
                         writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                    } else if (is_record_type) {
+                        Value record_init = makeValueForType(TYPE_RECORD, resolved_local_type, NULL);
+                        int const_idx = addConstantToChunk(chunk, &record_init);
+                        freeValue(&record_init);
+                        emitConstant(chunk, const_idx, getLine(varNameNode));
+                        noteLocalSlotUse(current_function_compiler, slot);
+                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     } else if (node->var_type == TYPE_STRING) {
                         int len = 0;
                         if (actual_type_def_node->right) {
@@ -5705,6 +5794,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_FIELD_ACCESS: {
+            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+            Symbol* resolved_symbol = NULL;
+            if (resolveUnitQualifiedGlobal(node, qualified_name, sizeof(qualified_name), &resolved_symbol)) {
+                if (resolved_symbol && resolved_symbol->is_const && resolved_symbol->value) {
+                    emitConstant(chunk, addConstantToChunk(chunk, resolved_symbol->value), line);
+                } else {
+                    int nameIndex = addStringConstant(chunk, qualified_name);
+                    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
+                                       nameIndex, line);
+                }
+                break;
+            }
+
             // If this field is a compile-time constant, embed its value directly.
             if (node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
@@ -5952,7 +6054,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_MINUS:         writeBytecodeChunk(chunk, SUBTRACT, line); break;
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
                         case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
-                        case TOKEN_INT_DIV:       writeBytecodeChunk(chunk, INT_DIV, line); break;
+                        case TOKEN_INT_DIV: {
+                            bool left_is_real = node->left && isRealType(node->left->var_type);
+                            bool right_is_real = node->right && isRealType(node->right->var_type);
+                            bool expr_is_real = isRealType(node->var_type);
+                            
+                            bool emit_real_div = left_is_real || right_is_real || expr_is_real;
+
+
+                            writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
+                            break;
+                        }
                         case TOKEN_MOD:           writeBytecodeChunk(chunk, MOD, line); break;
                         // AND and OR are now handled above
                         case TOKEN_SHL:           writeBytecodeChunk(chunk, SHL, line); break;
@@ -5985,6 +6097,30 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         break;
                 }
             }
+            break;
+        }
+        case AST_TERNARY: {
+            if (!node->left || !node->right || !node->extra) {
+                fprintf(stderr, "L%d: Compiler error: Incomplete ternary expression.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+            compileRValue(node->left, chunk, getLine(node->left));
+            int jumpToElse = chunk->count;
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            compileRValue(node->right, chunk, getLine(node->right));
+            int jumpToEnd = chunk->count;
+            writeBytecodeChunk(chunk, JUMP, line);
+            emitShort(chunk, 0xFFFF, line);
+
+            uint16_t elseOffset = (uint16_t)(chunk->count - (jumpToElse + 3));
+            patchShort(chunk, jumpToElse + 1, elseOffset);
+
+            compileRValue(node->extra, chunk, getLine(node->extra));
+            uint16_t endOffset = (uint16_t)(chunk->count - (jumpToEnd + 3));
+            patchShort(chunk, jumpToEnd + 1, endOffset);
             break;
         }
         case AST_BOOLEAN: {

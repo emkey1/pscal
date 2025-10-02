@@ -1,0 +1,99 @@
+#!/usr/bin/env pascal
+program GLCube;
+
+const
+  Width  = 800;
+  Height = 600;
+
+var
+  frame  : Integer;
+  angle  : Real;
+  VSyncOn: Boolean;
+
+procedure DrawCube;
+begin
+  GLBegin('quads');
+
+  GLColor3f(1.0, 0.0, 0.0);
+  GLVertex3f(-0.5, -0.5,  0.5);
+  GLVertex3f( 0.5, -0.5,  0.5);
+  GLVertex3f( 0.5,  0.5,  0.5);
+  GLVertex3f(-0.5,  0.5,  0.5);
+
+  GLColor3f(0.0, 1.0, 0.0);
+  GLVertex3f(-0.5, -0.5, -0.5);
+  GLVertex3f(-0.5,  0.5, -0.5);
+  GLVertex3f( 0.5,  0.5, -0.5);
+  GLVertex3f( 0.5, -0.5, -0.5);
+
+  GLColor3f(0.0, 0.0, 1.0);
+  GLVertex3f(-0.5, -0.5, -0.5);
+  GLVertex3f(-0.5, -0.5,  0.5);
+  GLVertex3f(-0.5,  0.5,  0.5);
+  GLVertex3f(-0.5,  0.5, -0.5);
+
+  GLColor3f(1.0, 1.0, 0.0);
+  GLVertex3f(0.5, -0.5, -0.5);
+  GLVertex3f(0.5,  0.5, -0.5);
+  GLVertex3f(0.5,  0.5,  0.5);
+  GLVertex3f(0.5, -0.5,  0.5);
+
+  GLColor3f(0.0, 1.0, 1.0);
+  GLVertex3f(-0.5,  0.5, -0.5);
+  GLVertex3f(-0.5,  0.5,  0.5);
+  GLVertex3f( 0.5,  0.5,  0.5);
+  GLVertex3f( 0.5,  0.5, -0.5);
+
+  GLColor3f(1.0, 0.0, 1.0);
+  GLVertex3f(-0.5, -0.5, -0.5);
+  GLVertex3f( 0.5, -0.5, -0.5);
+  GLVertex3f( 0.5, -0.5,  0.5);
+  GLVertex3f(-0.5, -0.5,  0.5);
+
+  GLEnd();
+end;
+
+begin
+  InitGraph3D(Width, Height, 'SDL GL Cube', 24, 8);
+  GLViewport(0, 0, Width, Height);
+  GLClearDepth(1.0);
+  GLDepthTest(true);
+  VSyncOn := true;
+  GLSetSwapInterval(1);
+
+  for frame := 0 to 599 do
+  begin
+    angle := frame * 0.6;
+
+    if (frame > 0) and (frame mod 180 = 0) then
+    begin
+      VSyncOn := not VSyncOn;
+      if VSyncOn then
+        GLSetSwapInterval(1)
+      else
+        GLSetSwapInterval(0);
+    end;
+
+    GLClearColor(0.1, 0.1, 0.15, 1.0);
+    GLClear();
+
+    GLMatrixMode('projection');
+    GLLoadIdentity();
+    GLScalef(1.3, 1.3, 1.3);
+
+    GLMatrixMode('modelview');
+    GLLoadIdentity();
+    GLTranslatef(0.0, 0.0, -0.2);
+    GLRotatef(angle, 1.0, 1.0, 0.0);
+
+    GLPushMatrix();
+    GLRotatef(angle * 0.25, 0.0, 0.0, 1.0);
+    DrawCube;
+    GLPopMatrix();
+
+    GLSwapWindow();
+    GraphLoop(1);
+  end;
+
+  CloseGraph3D;
+end.

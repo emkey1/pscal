@@ -76,7 +76,7 @@ typedef struct ReaModuleBindingList {
     int capacity;
 } ReaModuleBindingList;
 
-static ReaModuleInfo *gLoadedModules = NULL;
+static ReaModuleInfo **gLoadedModules = NULL;
 static int gLoadedModuleCount = 0;
 static int gLoadedModuleCapacity = 0;
 
@@ -675,8 +675,10 @@ static char *resolveModulePath(const char *path, bool *out_exists) {
 static ReaModuleInfo *findModuleByPath(const char *path) {
     if (!path) return NULL;
     for (int i = 0; i < gLoadedModuleCount; i++) {
-        if (strcasecmp(gLoadedModules[i].path, path) == 0) {
-            return &gLoadedModules[i];
+        ReaModuleInfo *info = gLoadedModules[i];
+        if (!info || !info->path) continue;
+        if (strcasecmp(info->path, path) == 0) {
+            return info;
         }
     }
     return NULL;
@@ -685,20 +687,23 @@ static ReaModuleInfo *findModuleByPath(const char *path) {
 static ReaModuleInfo *appendModuleInfo(void) {
     if (gLoadedModuleCount >= gLoadedModuleCapacity) {
         int newCap = gLoadedModuleCapacity ? gLoadedModuleCapacity * 2 : 4;
-        ReaModuleInfo *resized = (ReaModuleInfo *)realloc(gLoadedModules, (size_t)newCap * sizeof(ReaModuleInfo));
+        ReaModuleInfo **resized = (ReaModuleInfo **)realloc(gLoadedModules, (size_t)newCap * sizeof(ReaModuleInfo *));
         if (!resized) {
             fprintf(stderr, "Memory allocation failure expanding module registry.\n");
             EXIT_FAILURE_HANDLER();
         }
-        // Zero initialise newly added slots
         for (int i = gLoadedModuleCapacity; i < newCap; i++) {
-            memset(&resized[i], 0, sizeof(ReaModuleInfo));
+            resized[i] = NULL;
         }
         gLoadedModules = resized;
         gLoadedModuleCapacity = newCap;
     }
-    ReaModuleInfo *info = &gLoadedModules[gLoadedModuleCount++];
-    memset(info, 0, sizeof(ReaModuleInfo));
+    ReaModuleInfo *info = (ReaModuleInfo *)calloc(1, sizeof(ReaModuleInfo));
+    if (!info) {
+        fprintf(stderr, "Memory allocation failure creating module record.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    gLoadedModules[gLoadedModuleCount++] = info;
     return info;
 }
 
@@ -859,6 +864,98 @@ static void collectModuleExports(ReaModuleInfo *module) {
     }
 }
 
+static int countFunctionParams(AST *decl) {
+    if (!decl) return 0;
+    int total = 0;
+    for (int i = 0; i < decl->child_count; i++) {
+        AST *paramGroup = decl->children[i];
+        if (!paramGroup || paramGroup->type != AST_VAR_DECL) continue;
+        int groupCount = paramGroup->child_count > 0 ? paramGroup->child_count : 1;
+        total += groupCount;
+    }
+    if (total > 255) {
+        total = 255;
+    }
+    if (total < 0) {
+        total = 0;
+    }
+    return total;
+}
+
+static Symbol *ensureModuleProcedureSymbol(ReaModuleInfo *module, AST *decl) {
+    if (!module || !module->name || !decl || !decl->token || !decl->token->value) {
+        return NULL;
+    }
+
+    char *qualified = makeQualifiedName(module->name, decl->token->value);
+    if (!qualified) {
+        return NULL;
+    }
+
+    char lowerName[MAX_SYMBOL_LENGTH];
+    strncpy(lowerName, qualified, sizeof(lowerName) - 1);
+    lowerName[sizeof(lowerName) - 1] = '\0';
+    toLowerString(lowerName);
+
+    Symbol *sym = lookupProcedure(lowerName);
+    if (!sym) {
+        sym = (Symbol*)calloc(1, sizeof(Symbol));
+        if (!sym) {
+            fprintf(stderr, "Memory allocation failure registering module procedure '%s'.\n", qualified);
+            EXIT_FAILURE_HANDLER();
+        }
+        sym->name = strdup(lowerName);
+        if (!sym->name) {
+            fprintf(stderr, "Memory allocation failure duplicating procedure name '%s'.\n", lowerName);
+            free(sym);
+            EXIT_FAILURE_HANDLER();
+        }
+        sym->is_alias = false;
+        sym->is_const = false;
+        sym->is_local_var = false;
+        sym->is_inline = false;
+        sym->next = NULL;
+        sym->real_symbol = NULL;
+        sym->enclosing = NULL;
+        sym->value = NULL;
+        sym->type_def = NULL;
+        sym->is_defined = false;
+        sym->bytecode_address = 0;
+        sym->arity = 0;
+        sym->locals_count = 0;
+        sym->upvalue_count = 0;
+        if (procedure_table) {
+            hashTableInsert(procedure_table, sym);
+        }
+    }
+
+    if (sym) {
+        if (sym->type_def) {
+            freeAST(sym->type_def);
+        }
+        sym->type_def = copyAST(decl);
+        sym->type = decl ? decl->var_type : TYPE_UNKNOWN;
+        sym->is_defined = false;
+        sym->arity = (uint8_t)countFunctionParams(decl);
+    }
+
+    free(qualified);
+    return sym;
+}
+
+static void registerModuleInternalProcedures(ReaModuleInfo *module) {
+    if (!module || !module->module_node) return;
+    AST *decls = getDeclsCompound(module->module_node);
+    if (!decls) return;
+    for (int i = 0; i < decls->child_count; i++) {
+        AST *decl = decls->children[i];
+        if (!decl) continue;
+        if (decl->type == AST_FUNCTION_DECL || decl->type == AST_PROCEDURE_DECL) {
+            ensureModuleProcedureSymbol(module, decl);
+        }
+    }
+}
+
 static ReaModuleExport *findModuleExport(const ReaModuleInfo *module, const char *name) {
     if (!module || !name) return NULL;
     for (int i = 0; i < module->export_count; i++) {
@@ -998,6 +1095,8 @@ static ReaModuleInfo *loadModuleRecursive(const char *path) {
 
     collectModuleExports(info);
 
+    registerModuleInternalProcedures(info);
+
     analyzeProgramWithBindings(ast, &moduleBindings);
     if (pushed_dir) {
         popModuleDir();
@@ -1018,60 +1117,15 @@ static void registerModuleExports(ReaModuleInfo *module) {
     for (int i = 0; i < module->export_count; i++) {
         ReaModuleExport *exp = &module->exports[i];
         if (!exp->name) continue;
-        char *qualified = makeQualifiedName(module->name, exp->name);
-        if (!qualified) continue;
-
         switch (exp->kind) {
             case REA_MODULE_EXPORT_FUNCTION:
             case REA_MODULE_EXPORT_PROCEDURE: {
-                char lowerName[MAX_SYMBOL_LENGTH];
-                strncpy(lowerName, qualified, sizeof(lowerName) - 1);
-                lowerName[sizeof(lowerName) - 1] = '\0';
-                toLowerString(lowerName);
-
-                Symbol *sym = lookupProcedure(lowerName);
-                if (!sym) {
-                    sym = (Symbol*)calloc(1, sizeof(Symbol));
-                    if (!sym) {
-                        fprintf(stderr, "Memory allocation failure registering module procedure '%s'.\n", qualified);
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    sym->name = strdup(lowerName);
-                    if (!sym->name) {
-                        fprintf(stderr, "Memory allocation failure duplicating procedure name '%s'.\n", lowerName);
-                        free(sym);
-                        EXIT_FAILURE_HANDLER();
-                    }
-                    sym->is_alias = false;
-                    sym->is_const = false;
-                    sym->is_local_var = false;
-                    sym->is_inline = false;
-                    sym->next = NULL;
-                    sym->real_symbol = NULL;
-                    sym->enclosing = NULL;
-                    sym->value = NULL;
-                    sym->type_def = NULL;
-                    sym->is_defined = false;
-                    sym->bytecode_address = 0;
-                    sym->arity = 0;
-                    sym->locals_count = 0;
-                    sym->upvalue_count = 0;
-                    if (procedure_table) {
-                        hashTableInsert(procedure_table, sym);
-                    }
-                }
-                if (sym) {
-                    if (sym->type_def) {
-                        freeAST(sym->type_def);
-                    }
-                    sym->type_def = copyAST(exp->decl);
-                    sym->type = exp->decl ? exp->decl->var_type : TYPE_UNKNOWN;
-                    sym->is_defined = false;
-                    sym->arity = (uint8_t)((exp->decl && exp->decl->child_count < 255) ? exp->decl->child_count : 255);
-                }
+                ensureModuleProcedureSymbol(module, exp->decl);
                 break;
             }
             case REA_MODULE_EXPORT_CONST: {
+                char *qualified = makeQualifiedName(module->name, exp->name);
+                if (!qualified) break;
                 AST *decl = exp->decl;
                 if (decl && decl->left) {
                     Value v = evaluateCompileTimeValue(decl->left);
@@ -1081,9 +1135,12 @@ static void registerModuleExports(ReaModuleInfo *module) {
                     }
                     freeValue(&v);
                 }
+                free(qualified);
                 break;
             }
             case REA_MODULE_EXPORT_VAR: {
+                char *qualified = makeQualifiedName(module->name, exp->name);
+                if (!qualified) break;
                 AST *decl = exp->decl;
                 if (decl) {
                     AST *typeNode = decl->right;
@@ -1093,13 +1150,13 @@ static void registerModuleExports(ReaModuleInfo *module) {
                     }
                     insertGlobalSymbol(qualified, vt, typeNode);
                 }
+                free(qualified);
                 break;
             }
             case REA_MODULE_EXPORT_TYPE:
             default:
                 break;
         }
-        free(qualified);
     }
 }
 
@@ -2184,17 +2241,6 @@ static ClassInfo *lookupClass(const char *name) {
     Symbol *sym = hashTableLookup(class_table, lower);
     if (!sym || !sym->value) return NULL;
     return (ClassInfo *)sym->value->ptr_val;
-}
-
-static int countFunctionParams(AST *func) {
-    if (!func) return 0;
-    int count = 0;
-    for (int i = 0; i < func->child_count; i++) {
-        AST *param = func->children[i];
-        if (!param || param->type != AST_VAR_DECL) continue;
-        count += param->child_count > 0 ? param->child_count : 1;
-    }
-    return count;
 }
 
 static AST *getFunctionParam(AST *func, int index) {
@@ -3565,10 +3611,19 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         return;
     }
 
-    if (node->left) validateNodeInternal(node->left, clsContext);
-    if (node->right) validateNodeInternal(node->right, clsContext);
-    if (node->extra) validateNodeInternal(node->extra, clsContext);
-    for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], clsContext);
+    ClassInfo *recurseContext = clsContext;
+    if (node->type == AST_TYPE_DECL && node->left && node->left->type == AST_RECORD_TYPE &&
+        node->token && node->token->value) {
+        ClassInfo *declClass = lookupClass(node->token->value);
+        if (declClass) {
+            recurseContext = declClass;
+        }
+    }
+
+    if (node->left) validateNodeInternal(node->left, recurseContext);
+    if (node->right) validateNodeInternal(node->right, recurseContext);
+    if (node->extra) validateNodeInternal(node->extra, recurseContext);
+    for (int i = 0; i < node->child_count; i++) validateNodeInternal(node->children[i], recurseContext);
 
     if (pushedGenericFrame) popGenericFrame();
 }
@@ -3635,15 +3690,18 @@ int reaGetLoadedModuleCount(void) {
 
 AST *reaGetModuleAST(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].ast;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->ast : NULL;
 }
 
 const char *reaGetModulePath(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].path;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->path : NULL;
 }
 
 const char *reaGetModuleName(int index) {
     if (index < 0 || index >= gLoadedModuleCount) return NULL;
-    return gLoadedModules[index].name;
+    ReaModuleInfo *info = gLoadedModules[index];
+    return info ? info->name : NULL;
 }

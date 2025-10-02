@@ -1326,18 +1326,19 @@ Value vmBuiltinHttpRequest(VM* vm, int arg_count, Value* args) {
         s->last_error_code = code;
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
+        s->last_status = -code;
         if (tmp_out_file) fclose(tmp_out_file);
-        runtimeError(vm, "httpRequest: curl failed: %s", curl_easy_strerror(res));
-        return makeInt(-1);
+        return makeInt(-code);
     }
 
     s->last_status = http_code;
     s->last_error_code = 1;
     if (s->last_error_msg) free(s->last_error_msg);
-    s->last_error_msg = strdup("HTTP error");
+    char errbuf[64];
+    snprintf(errbuf, sizeof(errbuf), "HTTP status %ld", http_code);
+    s->last_error_msg = strdup(errbuf);
     if (tmp_out_file) fclose(tmp_out_file);
-    runtimeError(vm, "httpRequest: HTTP status %ld", http_code);
-    return makeInt(-1);
+    return makeInt((int)http_code);
 }
 
 // httpRequestToFile(session, method, url, bodyStrOrMStreamOrNil, outFilename): Integer (status)
@@ -1658,17 +1659,18 @@ Value vmBuiltinHttpRequestToFile(VM* vm, int arg_count, Value* args) {
         s->last_error_code = code;
         if (s->last_error_msg) free(s->last_error_msg);
         s->last_error_msg = strdup(curl_easy_strerror(res));
+        s->last_status = -code;
         if (out) fclose(out);
-        runtimeError(vm, "httpRequestToFile: curl failed: %s", curl_easy_strerror(res));
-        return makeInt(-1);
+        return makeInt(-code);
     }
     s->last_status = http_code;
     s->last_error_code = 1;
     if (s->last_error_msg) free(s->last_error_msg);
-    s->last_error_msg = strdup("HTTP error");
+    char errbuf[64];
+    snprintf(errbuf, sizeof(errbuf), "HTTP status %ld", http_code);
+    s->last_error_msg = strdup(errbuf);
     if (out) fclose(out);
-    runtimeError(vm, "httpRequestToFile: HTTP status %ld", http_code);
-    return makeInt(-1);
+    return makeInt((int)http_code);
 }
 
 // -------------------- Existing simple helpers --------------------
@@ -1890,9 +1892,27 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
+    if (family == AF_INET) {
+        hints.ai_family = AF_INET;
+    }
+#ifdef AF_INET6
+    else if (family == AF_INET6) {
+#ifdef AI_V4MAPPED
+        hints.ai_family = AF_INET6;
+        hints.ai_flags |= AI_V4MAPPED;
+#ifdef AI_ALL
+        hints.ai_flags |= AI_ALL;
+#endif
+#else
+        hints.ai_family = AF_UNSPEC;
+#endif
+    }
+#endif
     hints.ai_socktype = socktype;
 #ifdef AI_ADDRCONFIG
-    hints.ai_flags |= AI_ADDRCONFIG;
+    if (hints.ai_family == AF_UNSPEC) {
+        hints.ai_flags |= AI_ADDRCONFIG;
+    }
 #endif
     int gai_err = getaddrinfo(host, portstr, &hints, &res);
     if (gai_err != 0) {
@@ -2471,13 +2491,61 @@ static void* httpAsyncThread(void* arg) {
             return NULL;
         }
         size_t total = 0; unsigned char buf[8192]; size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-            if (job->cancel_requested) { fclose(in); job->status = -1; job->last_error_msg = strdup("canceled"); job->done = 1; return NULL; }
+        while (1) {
+            if (job->cancel_requested) {
+                fclose(in);
+                if (job->out_file && job->out_file[0]) remove(job->out_file);
+                job->status = -1;
+                if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                job->last_error_msg = strdup("canceled");
+                job->done = 1;
+                return NULL;
+            }
+            n = fread(buf, 1, sizeof(buf), in);
+            if (n == 0) break;
             writeCallback(buf, 1, n, job->result);
             total += n;
             job->dl_now = (long long)total;
+            if (job->cancel_requested) {
+                fclose(in);
+                if (job->out_file && job->out_file[0]) remove(job->out_file);
+                job->status = -1;
+                if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                job->last_error_msg = strdup("canceled");
+                job->done = 1;
+                return NULL;
+            }
+            if (job->max_recv_speed > 0) {
+                unsigned long long delay_ms = 0;
+                unsigned long long speed = (unsigned long long)job->max_recv_speed;
+                delay_ms = ((unsigned long long)n * 1000ULL) / speed;
+                if (delay_ms == 0) delay_ms = 1; // yield so cancel/polling can progress
+                while (delay_ms > 0) {
+                    unsigned long long slice = delay_ms;
+                    if (slice > 50ULL) slice = 50ULL;
+                    sleep_ms((long)slice);
+                    delay_ms -= slice;
+                    if (job->cancel_requested) {
+                        fclose(in);
+                        if (job->out_file && job->out_file[0]) remove(job->out_file);
+                        job->status = -1;
+                        if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+                        job->last_error_msg = strdup("canceled");
+                        job->done = 1;
+                        return NULL;
+                    }
+                }
+            }
         }
         fclose(in);
+        if (job->cancel_requested) {
+            if (job->out_file && job->out_file[0]) remove(job->out_file);
+            job->status = -1;
+            if (job->last_error_msg) { free(job->last_error_msg); job->last_error_msg = NULL; }
+            job->last_error_msg = strdup("canceled");
+            job->done = 1;
+            return NULL;
+        }
         if (job->out_file && job->out_file[0] && job->result && job->result->buffer) {
             FILE* of = fopen(job->out_file, "wb");
             if (of) { fwrite(job->result->buffer, 1, (size_t)job->result->size, of); fclose(of); }

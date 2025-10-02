@@ -23,9 +23,9 @@ This release delivers substantial improvements to the CLike front-end, adds comp
 cmake -S . -B build [-DSDL=ON]
 cmake --build build
 # Pascal
-build/bin/pascal --dump-bytecode-only Examples/Pascal/hello
+build/bin/pascal --dump-bytecode-only Examples/pascal/base/hello
 # CLike
-build/bin/clike --dump-bytecode-only Examples/clike/hello
+build/bin/clike --dump-bytecode-only Examples/clike/base/hello
 ```
 
 ## SDL

@@ -20,6 +20,8 @@
 #include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
 #include <ctype.h>
+#include <limits.h>
+#include <math.h>
 #include <string.h>
 #include <strings.h>
 
@@ -1465,12 +1467,25 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
     }
-    if (!IS_INTLIKE(args[0]) && args[0].type != TYPE_WORD && args[0].type != TYPE_BYTE) {
+    long long ms;
+    if (IS_INTLIKE(args[0]) || args[0].type == TYPE_WORD || args[0].type == TYPE_BYTE) {
+        ms = AS_INTEGER(args[0]);
+    } else if (isRealType(args[0].type)) {
+        double delay = AS_REAL(args[0]);
+        if (!isfinite(delay)) {
+            runtimeError(vm, "GraphLoop delay must be finite.");
+            return makeVoid();
+        }
+        if (delay > (double)LLONG_MAX || delay < (double)LLONG_MIN) {
+            runtimeError(vm, "GraphLoop delay is out of range.");
+            return makeVoid();
+        }
+        ms = (long long)delay;
+    } else {
         runtimeError(vm, "GraphLoop argument must be an integer-like type.");
         return makeVoid();
     }
 
-    long long ms = AS_INTEGER(args[0]);
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
@@ -1555,5 +1570,94 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
     SDL_RenderDrawPoint(gSdlRenderer, x, y);
     
     return makeVoid();
+}
+
+bool sdlIsGraphicsActive(void) {
+    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+}
+
+static void pumpKeyEvents(void) {
+    if (!sdlIsGraphicsActive()) {
+        return;
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
+        if (event.type == SDL_QUIT) {
+            atomic_store(&break_requested, 1);
+            continue;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                atomic_store(&break_requested, 1);
+            }
+            enqueuePendingKeycode(event.key.keysym.sym);
+        }
+    }
+}
+
+bool sdlHasPendingKeycode(void) {
+    if (!sdlIsGraphicsActive()) {
+        return false;
+    }
+
+    if (hasPendingKeycode()) {
+        return true;
+    }
+
+    pumpKeyEvents();
+    return hasPendingKeycode();
+}
+
+SDL_Keycode sdlWaitNextKeycode(void) {
+    if (!sdlIsGraphicsActive()) {
+        return SDLK_UNKNOWN;
+    }
+
+    SDL_Keycode code;
+    if (dequeuePendingKeycode(&code)) {
+        return code;
+    }
+
+    SDL_Event event;
+    while (SDL_WaitEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
+        if (event.type == SDL_QUIT) {
+            atomic_store(&break_requested, 1);
+            return SDLK_UNKNOWN;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+            if (event.key.keysym.sym == SDLK_q) {
+                atomic_store(&break_requested, 1);
+            }
+
+            enqueuePendingKeycode(event.key.keysym.sym);
+
+            if (dequeuePendingKeycode(&code)) {
+                return code;
+            }
+        }
+    }
+
+    return SDLK_UNKNOWN;
 }
 #endif

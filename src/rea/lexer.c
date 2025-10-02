@@ -35,6 +35,110 @@ static int match(ReaLexer *lexer, char expected) {
     return 1;
 }
 
+static void consumeDigits(ReaLexer *lexer) {
+    while (isDigit(peek(lexer))) advance(lexer);
+}
+
+static void consumeExponent(ReaLexer *lexer) {
+    size_t exponent_start = lexer->pos;
+    advance(lexer); // consume 'e' or 'E'
+    if (peek(lexer) == '+' || peek(lexer) == '-') advance(lexer);
+    if (isDigit(peek(lexer))) {
+        consumeDigits(lexer);
+    } else {
+        lexer->pos = exponent_start;
+    }
+}
+
+static int exponentAfterDotHasDigits(ReaLexer *lexer) {
+    size_t pos = lexer->pos + 1; // position of potential exponent marker
+    char c = lexer->source[pos];
+    if (c != 'e' && c != 'E') return 0;
+    pos++;
+    c = lexer->source[pos];
+    if (c == '+' || c == '-') {
+        pos++;
+        c = lexer->source[pos];
+    }
+    if (c == '\0') return 0;
+    return isDigit(c);
+}
+
+static int isExpressionTailChar(char c) {
+    return isAlphaNumeric(c) || c == '_' || c == ')' || c == ']';
+}
+
+static int hasExpressionSuffix(ReaLexer *lexer, size_t pos) {
+    for (size_t i = pos; ; i++) {
+        char c = lexer->source[i];
+        if (c == '\0' || c == '\n') return 0;
+        if (c == ' ' || c == '\t' || c == '\r') continue;
+        switch (c) {
+            case ';':
+            case ',':
+            case ')':
+            case ']':
+            case '}':
+            case '+':
+            case '-':
+            case '*':
+            case '%':
+            case '<':
+            case '>':
+            case '=':
+            case '&':
+            case '|':
+            case '^':
+            case '?':
+            case ':':
+            case '{':
+            case '.':
+                return 1;
+            default:
+                break;
+        }
+    }
+}
+
+static int slashStartsComment(ReaLexer *lexer) {
+    if (lexer->pos == 0) return 1;
+
+    size_t lookahead = lexer->pos + 2;
+    while (1) {
+        char next = lexer->source[lookahead];
+        if (next == ' ' || next == '\t' || next == '\r') {
+            lookahead++;
+            continue;
+        }
+        if (next == '\n' || next == '\0') {
+            lookahead = 0;
+        }
+        break;
+    }
+
+    int rightLooksLikeExpression = 0;
+    if (lookahead != 0) {
+        rightLooksLikeExpression = hasExpressionSuffix(lexer, lookahead);
+    }
+
+    size_t idx = lexer->pos;
+    while (idx > 0) {
+        char prev = lexer->source[idx - 1];
+        if (prev == ' ' || prev == '\t' || prev == '\r') {
+            idx--;
+            continue;
+        }
+        if (prev == '\n') {
+            return 1;
+        }
+        if (isExpressionTailChar(prev) && rightLooksLikeExpression) {
+            return 0;
+        }
+        return 1;
+    }
+    return 1;
+}
+
 static void skipWhitespace(ReaLexer *lexer) {
     for (;;) {
         char c = peek(lexer);
@@ -58,6 +162,9 @@ static void skipWhitespace(ReaLexer *lexer) {
                 break;
             case '/':
                 if (peekNext(lexer) == '/') {
+                    if (!slashStartsComment(lexer)) {
+                        return;
+                    }
                     lexer->pos += 2;
                     while (peek(lexer) != '\n' && peek(lexer) != '\0') {
                         lexer->pos++;
@@ -190,11 +297,20 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case ',':
             return makeToken(lexer, REA_TOKEN_COMMA, start);
         case '.':
+            if (isDigit(peek(lexer))) {
+                consumeDigits(lexer);
+                if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+                    consumeExponent(lexer);
+                }
+                return makeToken(lexer, REA_TOKEN_NUMBER, start);
+            }
             return makeToken(lexer, REA_TOKEN_DOT, start);
         case ';':
             return makeToken(lexer, REA_TOKEN_SEMICOLON, start);
         case ':':
             return makeToken(lexer, REA_TOKEN_COLON, start);
+        case '?':
+            return makeToken(lexer, REA_TOKEN_QUESTION, start);
         case '+':
             if (match(lexer, '+')) return makeToken(lexer, REA_TOKEN_PLUS_PLUS, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PLUS_EQUAL : REA_TOKEN_PLUS, start);
@@ -205,6 +321,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '*':
             return makeToken(lexer, REA_TOKEN_STAR, start);
         case '/':
+            if (match(lexer, '/')) {
+                return makeToken(lexer, REA_TOKEN_INT_DIV, start);
+            }
             return makeToken(lexer, REA_TOKEN_SLASH, start);
         case '%':
             return makeToken(lexer, REA_TOKEN_PERCENT, start);
@@ -221,8 +340,14 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '=':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_EQUAL_EQUAL : REA_TOKEN_EQUAL, start);
         case '<':
+            if (match(lexer, '<')) {
+                return makeToken(lexer, REA_TOKEN_SHIFT_LEFT, start);
+            }
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_LESS_EQUAL : REA_TOKEN_LESS, start);
         case '>':
+            if (match(lexer, '>')) {
+                return makeToken(lexer, REA_TOKEN_SHIFT_RIGHT, start);
+            }
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_GREATER_EQUAL : REA_TOKEN_GREATER, start);
         case '#':
             while (isAlpha(peek(lexer))) advance(lexer);
@@ -230,7 +355,10 @@ ReaToken reaNextToken(ReaLexer *lexer) {
         case '"':
             while (peek(lexer) != '\0') {
                 char ch = peek(lexer);
-                if (ch == '\n') lexer->line++;
+                if (ch == '\n') {
+                    // Implicitly terminate the string at newline if no closing quote
+                    break;
+                }
                 if (ch == '\\') {
                     advance(lexer);
                     if (peek(lexer) != '\0') advance(lexer);
@@ -240,12 +368,16 @@ ReaToken reaNextToken(ReaLexer *lexer) {
                     advance(lexer);
                 }
             }
-            if (peek(lexer) == '"') advance(lexer);
+            if (peek(lexer) == '"') {
+                advance(lexer);
+            }
             return makeToken(lexer, REA_TOKEN_STRING, start);
         case '\'':
             while (peek(lexer) != '\0') {
                 char ch = peek(lexer);
-                if (ch == '\n') lexer->line++;
+                if (ch == '\n') {
+                    break;
+                }
                 if (ch == '\\') {
                     advance(lexer);
                     if (peek(lexer) != '\0') advance(lexer);
@@ -255,7 +387,9 @@ ReaToken reaNextToken(ReaLexer *lexer) {
                     advance(lexer);
                 }
             }
-            if (peek(lexer) == '\'') advance(lexer);
+            if (peek(lexer) == '\'') {
+                advance(lexer);
+            }
             return makeToken(lexer, REA_TOKEN_STRING, start);
         default:
             break;
@@ -268,21 +402,19 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             return makeToken(lexer, REA_TOKEN_NUMBER, start);
         }
         while (isDigit(peek(lexer))) advance(lexer);
-        if (peek(lexer) == '.' && isDigit(peekNext(lexer))) {
-            advance(lexer);
-            while (isDigit(peek(lexer))) advance(lexer);
-        }
-        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
-            size_t exponent_start = lexer->pos;
-            advance(lexer);
-            if (peek(lexer) == '+' || peek(lexer) == '-') {
+        if (peek(lexer) == '.') {
+            char next = peekNext(lexer);
+            if (isDigit(next)) {
+                advance(lexer);
+                consumeDigits(lexer);
+            } else if (exponentAfterDotHasDigits(lexer)) {
+                advance(lexer);
+            } else if (!isAlpha(next) && next != '_') {
                 advance(lexer);
             }
-            if (isDigit(peek(lexer))) {
-                while (isDigit(peek(lexer))) advance(lexer);
-            } else {
-                lexer->pos = exponent_start;
-            }
+        }
+        if (peek(lexer) == 'e' || peek(lexer) == 'E') {
+            consumeExponent(lexer);
         }
         return makeToken(lexer, REA_TOKEN_NUMBER, start);
     }
@@ -334,6 +466,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_DOT: return "DOT";
         case REA_TOKEN_SEMICOLON: return "SEMICOLON";
         case REA_TOKEN_COLON: return "COLON";
+        case REA_TOKEN_QUESTION: return "QUESTION";
         case REA_TOKEN_ARROW: return "ARROW";
         case REA_TOKEN_PLUS: return "PLUS";
         case REA_TOKEN_PLUS_PLUS: return "PLUS_PLUS";
@@ -343,6 +476,7 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
         case REA_TOKEN_STAR: return "STAR";
         case REA_TOKEN_SLASH: return "SLASH";
+        case REA_TOKEN_INT_DIV: return "INT_DIV";
         case REA_TOKEN_PERCENT: return "PERCENT";
         case REA_TOKEN_EQUAL: return "EQUAL";
         case REA_TOKEN_EQUAL_EQUAL: return "EQUAL_EQUAL";
@@ -353,6 +487,8 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_OR: return "OR";
         case REA_TOKEN_OR_OR: return "OR_OR";
         case REA_TOKEN_XOR: return "XOR";
+        case REA_TOKEN_SHIFT_LEFT: return "SHIFT_LEFT";
+        case REA_TOKEN_SHIFT_RIGHT: return "SHIFT_RIGHT";
         case REA_TOKEN_GREATER: return "GREATER";
         case REA_TOKEN_GREATER_EQUAL: return "GREATER_EQUAL";
         case REA_TOKEN_LESS: return "LESS";

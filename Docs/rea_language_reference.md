@@ -13,8 +13,9 @@ bytecode.
 
 #### **Comments**
 
-* `//` introduces a single‑line comment.
-* `/* ... */` encloses a multi‑line comment.
+* `//` introduces a single-line comment. When `//` appears between two expressions it acts as the integer-division operator instead.
+  Place it at the start of a statement (or after punctuation such as `;` or `{`) to keep the comment form.
+* `/* ... */` encloses a multi-line comment.
 
 #### **Identifiers**
 
@@ -69,7 +70,7 @@ const int LIMIT = 10;
 
 ### **Expressions and Operators**
 
-Rea supports the common arithmetic and comparison operators `+ - * / % == != <
+Rea supports the common arithmetic and comparison operators `+ - * / // % == != <
 <= > >=` plus logical `&&` and `||`.  Assignment forms such as `+=` and `-=` are
 also available.  Operator precedence mirrors that of C.
 
@@ -111,7 +112,7 @@ Rea code can call any PSCAL VM built‑in, including I/O (`writeln`, `printf`),
 string helpers, math functions, and threading primitives such as `spawn`,
 `join`, `mutex`, `lock`, and `unlock`.
 
-When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLPerspective`, `GLFrustum`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
+When PSCAL is compiled with SDL support, the same graphics and audio helpers used by Pascal are available to Rea programs. The 3D layer includes `InitGraph3D`, `GLSwapWindow`, `GLSetSwapInterval`, and a collection of fixed-function helpers (`GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLPerspective`, `GLFrustum`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, ...). A short render loop looks like:
 
 ```rea
 int main() {
@@ -152,9 +153,9 @@ int main() {
 }
 ```
 
-The repository includes `Examples/rea/sdl_demo`, which expands this into a
+The repository includes `Examples/rea/sdl/3demo`, which expands this into a
 complete rotating cube rendered with per-face colors, depth testing, and periodic
-swap-interval toggling. `Examples/rea/sdl_landscape` builds on the same helpers
+swap-interval toggling. `Examples/rea/sdl/landscape` builds on the same helpers
 to generate a seeded terrain height field and lets you roam it with `IsKeyDown`
 and `GLPerspective` for a first-person view.
 

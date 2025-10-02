@@ -13,7 +13,7 @@ Rea targets the existing PSCAL virtual machine. Dynamic dispatch will rely on pe
 
 ## The Language
 
-Rea is a strongly typed, class‑based language with C‑like tokens. Comments may be written using `//` or `/* ... */`, identifiers are case‑sensitive, and keywords cover data types (`int`, `float`, `str`, `bool`, etc.), class constructs (`class`, `new`, `extends`, `my`, `myself`, `super`), and control flow (`if`, `while`, `for`, `switch`, `break`, `continue`, `return`). Common arithmetic and comparison operators are supported, and string and character literals follow C conventions with escape sequences【F:src/rea/LANGUAGE_SPEC.md†L14-L37】.
+Rea is a strongly typed, class‑based language with C‑like tokens. Comments use `//` (or `/* ... */` for multi-line blocks), identifiers are case‑sensitive, and keywords cover data types (`int`, `float`, `str`, `bool`, etc.), class constructs (`class`, `new`, `extends`, `my`, `myself`, `super`), and control flow (`if`, `while`, `for`, `switch`, `break`, `continue`, `return`). Common arithmetic and comparison operators—including integer division via `//`—are supported, and string and character literals follow C conventions with escape sequences【F:src/rea/LANGUAGE_SPEC.md†L14-L37】.
 
 Primitive types map directly onto VM representations, standardizing on 64‑bit integers and doubles by default. Object‑oriented features include classes with fields and methods, constructors invoked via `new`, dot‑based field and method access, `my`/`myself` and `super` references, single inheritance through `extends`, and dynamic dispatch through V‑tables. Method overloading is deliberately omitted; each method and function must have a unique name. The language has access to the VM's built‑in routines for I/O, math, strings, and threading【F:src/rea/LANGUAGE_SPEC.md†L41-L90】.
 
@@ -31,9 +31,9 @@ writeln("c=", c.n);
 c.inc();
 writeln("c=", c.n);
 ```
-Example program demonstrating field assignment and method calls【F:Examples/rea/method_demo†L3-L19】.
+Example program demonstrating field assignment and method calls【F:Examples/rea/base/method_demo†L3-L19】.
 
-For additional examples and the full specification, see `rea_language_reference.md` and the sample programs under `Examples/rea`.
+For additional examples and the full specification, see `rea_language_reference.md` and the sample programs under `Examples/rea/base` and `Examples/rea/sdl`.
 
 ### The Name
 

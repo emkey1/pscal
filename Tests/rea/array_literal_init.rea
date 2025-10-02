@@ -1,0 +1,9 @@
+int main() {
+  int numbers[3] = [1, 2, 3];
+  str labels[2] = ["alpha", "beta"];
+  writeln(numbers[1]);
+  writeln(labels[0]);
+  return 0;
+}
+
+main();

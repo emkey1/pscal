@@ -16,6 +16,7 @@ Value vmBuiltinGlclearcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlcleardepth(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlcolor3f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlcolor4f(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlcullface(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGldepthtest(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlenable(struct VM_s* vm, int arg_count, Value* args);

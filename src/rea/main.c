@@ -65,6 +65,7 @@ static const char *REA_USAGE =
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
+    "     --no-run               Compile but skip VM execution.\n"
     "     --dump-ext-builtins    List extended builtin inventory and exit.\n"
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
@@ -249,6 +250,7 @@ int main(int argc, char **argv) {
     int dump_ast_json = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
+    int no_run_flag = 0;
     int dump_ext_builtins = 0;
     int vm_trace_head = 0;
     int no_cache = 0;
@@ -266,6 +268,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
             dump_bytecode_flag = 1;
             dump_bytecode_only_flag = 1;
+        } else if (strcmp(argv[argi], "--no-run") == 0) {
+            no_run_flag = 1;
         } else if (strcmp(argv[argi], "--dump-ext-builtins") == 0) {
             dump_ext_builtins = 1;
         } else if (strcmp(argv[argi], "--no-cache") == 0) {
@@ -330,9 +334,6 @@ int main(int argc, char **argv) {
     gSuppressWriteSpacing = 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
-#ifdef SDL
-    registerSdlGlBuiltins();
-#endif
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
@@ -442,7 +443,7 @@ int main(int argc, char **argv) {
                 disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
                 if (dump_bytecode_only_flag) {
                     _exit(EXIT_SUCCESS);
-                } else {
+                } else if (!no_run_flag) {
                     fprintf(stderr, "\n--- executing Program with VM ---\n");
                 }
             }
@@ -456,7 +457,7 @@ int main(int argc, char **argv) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
             if (dump_bytecode_only_flag) {
                 _exit(EXIT_SUCCESS);
-            } else {
+            } else if (!no_run_flag) {
                 fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
             }
         }
@@ -468,7 +469,7 @@ int main(int argc, char **argv) {
             gParamValues = &argv[argi];
         }
 
-        if (dump_bytecode_only_flag) {
+        if (dump_bytecode_only_flag || no_run_flag) {
             result = INTERPRET_OK;
         } else {
             VM vm;

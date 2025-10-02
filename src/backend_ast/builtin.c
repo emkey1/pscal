@@ -2,11 +2,6 @@
 #include "core/utils.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
-#ifdef SDL
-#include "backend_ast/sdl.h"
-#include "backend_ast/audio.h"
-#include "backend_ast/gl.h"
-#endif
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
@@ -34,8 +29,198 @@
 // Maximum number of arguments allowed for write/writeln
 #define MAX_WRITE_ARGS_VM 32
 
+/* SDL-backed builtins are registered dynamically when available. */
+#ifdef SDL
+#include "backend_ast/sdl.h"
+#define SDL_READKEY_BUFFER_CAPACITY 8
+static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
+static int gSdlReadKeyBufferStart = 0;
+static int gSdlReadKeyBufferCount = 0;
+
+static bool sdlReadKeyBufferHasData(void) {
+    return gSdlReadKeyBufferCount > 0;
+}
+
+static int sdlReadKeyBufferPop(void) {
+    if (!sdlReadKeyBufferHasData()) {
+        return 0;
+    }
+
+    int value = gSdlReadKeyBuffer[gSdlReadKeyBufferStart];
+    gSdlReadKeyBufferStart = (gSdlReadKeyBufferStart + 1) % SDL_READKEY_BUFFER_CAPACITY;
+    gSdlReadKeyBufferCount--;
+    return value & 0xFF;
+}
+
+static void sdlReadKeyBufferPushBytes(const int* bytes, int length) {
+    if (!bytes || length <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < length; ++i) {
+        if (gSdlReadKeyBufferCount >= SDL_READKEY_BUFFER_CAPACITY) {
+            break;
+        }
+        int tail = (gSdlReadKeyBufferStart + gSdlReadKeyBufferCount) % SDL_READKEY_BUFFER_CAPACITY;
+        gSdlReadKeyBuffer[tail] = bytes[i] & 0xFF;
+        gSdlReadKeyBufferCount++;
+    }
+}
+
+static int sdlTranslateKeycode(SDL_Keycode code, int* extraBytes, int* extraCount) {
+    if (extraBytes) {
+        extraBytes[0] = 0;
+        extraBytes[1] = 0;
+        extraBytes[2] = 0;
+        extraBytes[3] = 0;
+    }
+    if (extraCount) {
+        *extraCount = 0;
+    }
+
+    switch (code) {
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            return '\r';
+        case SDLK_BACKSPACE:
+            return '\b';
+        case SDLK_TAB:
+            return '\t';
+        case SDLK_ESCAPE:
+            return 27;
+        case SDLK_DELETE:
+            return 127;
+        case SDLK_LEFT:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'D';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_RIGHT:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'C';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_UP:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'A';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_DOWN:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'B';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_HOME:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'H';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_END:
+            if (extraBytes && extraCount) {
+                extraBytes[0] = '[';
+                extraBytes[1] = 'F';
+                *extraCount = 2;
+            }
+            return 27;
+        case SDLK_KP_0:
+            return '0';
+        case SDLK_KP_1:
+            return '1';
+        case SDLK_KP_2:
+            return '2';
+        case SDLK_KP_3:
+            return '3';
+        case SDLK_KP_4:
+            return '4';
+        case SDLK_KP_5:
+            return '5';
+        case SDLK_KP_6:
+            return '6';
+        case SDLK_KP_7:
+            return '7';
+        case SDLK_KP_8:
+            return '8';
+        case SDLK_KP_9:
+            return '9';
+        case SDLK_KP_PERIOD:
+            return '.';
+        case SDLK_KP_DIVIDE:
+            return '/';
+        case SDLK_KP_MULTIPLY:
+            return '*';
+        case SDLK_KP_MINUS:
+            return '-';
+        case SDLK_KP_PLUS:
+            return '+';
+        case SDLK_KP_EQUALS:
+            return '=';
+        default:
+            break;
+    }
+
+    if (code >= 32 && code <= 126) {
+        return (int)code;
+    }
+
+    if (code >= 0 && code <= 255) {
+        return (int)(code & 0xFF);
+    }
+
+    return 0;
+}
+
+static int sdlFetchReadKeyChar(void) {
+    if (!sdlIsGraphicsActive()) {
+        return -1;
+    }
+
+    if (sdlReadKeyBufferHasData()) {
+        return sdlReadKeyBufferPop();
+    }
+
+    int extraBytes[4];
+    SDL_Keycode keycode;
+
+    for (;;) {
+        keycode = sdlWaitNextKeycode();
+        if (keycode == SDLK_UNKNOWN) {
+            return 0;
+        }
+
+        int extraCount = 0;
+        int translated = sdlTranslateKeycode(keycode, extraBytes, &extraCount);
+        if (extraCount > 0) {
+            sdlReadKeyBufferPushBytes(extraBytes, extraCount);
+        }
+
+        if (translated != 0) {
+            return translated & 0xFF;
+        }
+
+        if (sdlReadKeyBufferHasData()) {
+            return sdlReadKeyBufferPop();
+        }
+    }
+}
+#endif
+
 #ifndef SDL
-static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
+#if defined(__GNUC__) || defined(__clang__)
+#define SDL_UNUSED_FUNC __attribute__((unused))
+#else
+#define SDL_UNUSED_FUNC
+#endif
+static Value SDL_UNUSED_FUNC vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     (void)arg_count;
     (void)args;
     const char* name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "This built-in";
@@ -46,6 +231,7 @@ static Value vmBuiltinSDLUnavailable(VM* vm, int arg_count, Value* args) {
     return makeNil();
 }
 #define SDL_HANDLER(fn) vmBuiltinSDLUnavailable
+#undef SDL_UNUSED_FUNC
 #else
 #define SDL_HANDLER(fn) fn
 #endif
@@ -189,7 +375,9 @@ static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
 
 // The new dispatch table for the VM - MUST be defined before the function that uses it
 // This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
-static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
+// SDL/graphics builtins use NULL placeholders; registerGraphicsBuiltins() overrides them
+// when SDL support is enabled so legacy builtin IDs remain stable.
+static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"apiReceive", vmBuiltinApiReceive},
     {"apiSend", vmBuiltinApiSend},
@@ -235,24 +423,24 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"ceil", vmBuiltinCeil},
     {"char", vmBuiltinToChar},
     {"chr", vmBuiltinChr},
-    {"cleardevice", SDL_HANDLER(vmBuiltinCleardevice)},
+    {"cleardevice", NULL},
     {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
-    {"closegraph", SDL_HANDLER(vmBuiltinClosegraph)},
-    {"closegraph3d", SDL_HANDLER(vmBuiltinClosegraph3d)},
+    {"closegraph", NULL},
+    {"closegraph3d", NULL},
     {"copy", vmBuiltinCopy},
     {"cos", vmBuiltinCos},
     {"cosh", vmBuiltinCosh},
     {"cotan", vmBuiltinCotan},
     {"cursoroff", vmBuiltinCursoroff},
     {"cursoron", vmBuiltinCursoron},
-    {"createtargettexture", SDL_HANDLER(vmBuiltinCreatetargettexture)}, // Moved
-    {"createtexture", SDL_HANDLER(vmBuiltinCreatetexture)}, // Moved
+    {"createtargettexture", NULL}, // Moved
+    {"createtexture", NULL}, // Moved
     {"dec", vmBuiltinDec},
     {"delay", vmBuiltinDelay},
     {"deline", vmBuiltinDeline},
-    {"destroytexture", SDL_HANDLER(vmBuiltinDestroytexture)},
+    {"destroytexture", NULL},
     {"dispose", vmBuiltinDispose},
     {"dnslookup", vmBuiltinDnsLookup},
     {"dosExec", vmBuiltinDosExec},
@@ -265,77 +453,77 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"dosMkdir", vmBuiltinDosMkdir},
     {"dosRmdir", vmBuiltinDosRmdir},
     {"double", vmBuiltinToDouble},
-    {"drawcircle", SDL_HANDLER(vmBuiltinDrawcircle)}, // Moved
-    {"drawline", SDL_HANDLER(vmBuiltinDrawline)}, // Moved
-    {"drawpolygon", SDL_HANDLER(vmBuiltinDrawpolygon)}, // Moved
-    {"drawrect", SDL_HANDLER(vmBuiltinDrawrect)}, // Moved
+    {"drawcircle", NULL}, // Moved
+    {"drawline", NULL}, // Moved
+    {"drawpolygon", NULL}, // Moved
+    {"drawrect", NULL}, // Moved
     {"eof", vmBuiltinEof},
     {"erase", vmBuiltinErase},
     {"exec", vmBuiltinDosExec},
     {"exit", vmBuiltinExit},
     {"exp", vmBuiltinExp},
-    {"fillcircle", SDL_HANDLER(vmBuiltinFillcircle)},
-    {"fillrect", SDL_HANDLER(vmBuiltinFillrect)},
+    {"fillcircle", NULL},
+    {"fillrect", NULL},
     {"findfirst", vmBuiltinDosFindfirst},
     {"findnext", vmBuiltinDosFindnext},
     {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
     {"formatfloat", vmBuiltinFormatfloat},
-    {"freesound", SDL_HANDLER(vmBuiltinFreesound)},
+    {"freesound", NULL},
     {"getdate", vmBuiltinDosGetdate},
     {"getenv", vmBuiltinGetenv},
     {"getenvint", vmBuiltinGetenvint},
     {"getfattr", vmBuiltinDosGetfattr},
-    {"getmaxx", SDL_HANDLER(vmBuiltinGetmaxx)},
-    {"getmaxy", SDL_HANDLER(vmBuiltinGetmaxy)},
-    {"getmousestate", SDL_HANDLER(vmBuiltinGetmousestate)},
-    {"getpixelcolor", SDL_HANDLER(vmBuiltinGetpixelcolor)}, // Moved
-    {"gettextsize", SDL_HANDLER(vmBuiltinGettextsize)},
-    {"getticks", SDL_HANDLER(vmBuiltinGetticks)},
-    {"glbegin", SDL_HANDLER(vmBuiltinGlbegin)},
-    {"glclear", SDL_HANDLER(vmBuiltinGlclear)},
-    {"glclearcolor", SDL_HANDLER(vmBuiltinGlclearcolor)},
-    {"glcleardepth", SDL_HANDLER(vmBuiltinGlcleardepth)},
-    {"glcolor3f", SDL_HANDLER(vmBuiltinGlcolor3f)},
-    {"gldepthtest", SDL_HANDLER(vmBuiltinGldepthtest)},
-    {"glend", SDL_HANDLER(vmBuiltinGlend)},
-    {"glfrustum", SDL_HANDLER(vmBuiltinGlfrustum)},
-    {"glloadidentity", SDL_HANDLER(vmBuiltinGlloadidentity)},
-    {"glmatrixmode", SDL_HANDLER(vmBuiltinGlmatrixmode)},
-    {"glpopmatrix", SDL_HANDLER(vmBuiltinGlpopmatrix)},
-    {"glpushmatrix", SDL_HANDLER(vmBuiltinGlpushmatrix)},
-    {"glrotatef", SDL_HANDLER(vmBuiltinGlrotatef)},
-    {"glscalef", SDL_HANDLER(vmBuiltinGlscalef)},
-    {"glperspective", SDL_HANDLER(vmBuiltinGlperspective)},
-    {"glsetswapinterval", SDL_HANDLER(vmBuiltinGlsetswapinterval)},
-    {"glswapwindow", SDL_HANDLER(vmBuiltinGlswapwindow)},
-    {"gltranslatef", SDL_HANDLER(vmBuiltinGltranslatef)},
-    {"glvertex3f", SDL_HANDLER(vmBuiltinGlvertex3f)},
-    {"glviewport", SDL_HANDLER(vmBuiltinGlviewport)},
+    {"getmaxx", NULL},
+    {"getmaxy", NULL},
+    {"getmousestate", NULL},
+    {"getpixelcolor", NULL}, // Moved
+    {"gettextsize", NULL},
+    {"getticks", NULL},
+    {"glbegin", NULL},
+    {"glclear", NULL},
+    {"glclearcolor", NULL},
+    {"glcleardepth", NULL},
+    {"glcolor3f", NULL},
+    {"gldepthtest", NULL},
+    {"glend", NULL},
+    {"glfrustum", NULL},
+    {"glloadidentity", NULL},
+    {"glmatrixmode", NULL},
+    {"glpopmatrix", NULL},
+    {"glpushmatrix", NULL},
+    {"glrotatef", NULL},
+    {"glscalef", NULL},
+    {"glperspective", NULL},
+    {"glsetswapinterval", NULL},
+    {"glswapwindow", NULL},
+    {"gltranslatef", NULL},
+    {"glvertex3f", NULL},
+    {"glviewport", NULL},
     {"gettime", vmBuiltinDosGettime},
-    {"graphloop", SDL_HANDLER(vmBuiltinGraphloop)},
+    {"graphloop", NULL},
     {"gotoxy", vmBuiltinGotoxy},
     {"halt", vmBuiltinHalt},
     {"hidecursor", vmBuiltinHidecursor},
     {"high", vmBuiltinHigh},
     {"highvideo", vmBuiltinHighvideo},
     {"inc", vmBuiltinInc},
-    {"initgraph", SDL_HANDLER(vmBuiltinInitgraph)},
-    {"initgraph3d", SDL_HANDLER(vmBuiltinInitgraph3d)},
-    {"initsoundsystem", SDL_HANDLER(vmBuiltinInitsoundsystem)},
-    {"inittextsystem", SDL_HANDLER(vmBuiltinInittextsystem)},
+    {"initgraph", NULL},
+    {"initgraph3d", NULL},
+    {"initsoundsystem", NULL},
+    {"inittextsystem", NULL},
     {"insline", vmBuiltinInsline},
     {"int", vmBuiltinToInt},
     {"inttostr", vmBuiltinInttostr},
     {"invertcolors", vmBuiltinInvertcolors},
     {"ioresult", vmBuiltinIoresult},
-    {"issoundplaying", SDL_HANDLER(vmBuiltinIssoundplaying)}, // Moved
+    {"issoundplaying", NULL}, // Moved
     {"keypressed", vmBuiltinKeypressed},
     {"length", vmBuiltinLength},
     {"ln", vmBuiltinLn},
     {"log10", vmBuiltinLog10},
-    {"loadimagetotexture", SDL_HANDLER(vmBuiltinLoadimagetotexture)}, // Moved
-    {"loadsound", SDL_HANDLER(vmBuiltinLoadsound)},
+    {"loadimagetotexture", NULL}, // Moved
+    {"loadsound", NULL},
     {"low", vmBuiltinLow},
     {"lowvideo", vmBuiltinLowvideo},
     {"max", vmBuiltinMax},
@@ -351,13 +539,13 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"normalcolors", vmBuiltinNormalcolors},
     {"normvideo", vmBuiltinNormvideo},
     {"ord", vmBuiltinOrd},
-    {"outtextxy", SDL_HANDLER(vmBuiltinOuttextxy)}, // Moved
+    {"outtextxy", NULL}, // Moved
     {"paramcount", vmBuiltinParamcount},
     {"paramstr", vmBuiltinParamstr},
-    {"playsound", SDL_HANDLER(vmBuiltinPlaysound)},
-    {"stopallsounds", SDL_HANDLER(vmBuiltinStopallsounds)},
-    {"pollkey", SDL_HANDLER(vmBuiltinPollkey)},
-    {"iskeydown", SDL_HANDLER(vmBuiltinIskeydown)},
+    {"playsound", NULL},
+    {"stopallsounds", NULL},
+    {"pollkey", NULL},
+    {"iskeydown", NULL},
     {"popscreen", vmBuiltinPopscreen},
     {"pos", vmBuiltinPos},
     {"power", vmBuiltinPower},
@@ -365,11 +553,11 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"fopen", vmBuiltinFopen},
     {"fclose", vmBuiltinFclose},
     {"pushscreen", vmBuiltinPushscreen},
-    {"putpixel", SDL_HANDLER(vmBuiltinPutpixel)},
+    {"putpixel", NULL},
     {"write", vmBuiltinWrite}, // Preserve legacy builtin id for write
     {"fprintf", vmBuiltinFprintf}, // Registered after write to avoid shifting legacy id 176
-    {"quitsoundsystem", SDL_HANDLER(vmBuiltinQuitsoundsystem)},
-    {"quittextsystem", SDL_HANDLER(vmBuiltinQuittextsystem)},
+    {"quitsoundsystem", NULL},
+    {"quittextsystem", NULL},
     {"random", vmBuiltinRandom},
     {"randomize", vmBuiltinRandomize},
     {"read", vmBuiltinRead},
@@ -378,10 +566,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"real", vmBuiltinReal},
     {"realtostr", vmBuiltinRealtostr},
     {"rename", vmBuiltinRename},
-    {"rendercopy", SDL_HANDLER(vmBuiltinRendercopy)}, // Moved
-    {"rendercopyex", SDL_HANDLER(vmBuiltinRendercopyex)}, // Moved
-    {"rendercopyrect", SDL_HANDLER(vmBuiltinRendercopyrect)},
-    {"rendertexttotexture", SDL_HANDLER(vmBuiltinRendertexttotexture)},
+    {"rendercopy", NULL}, // Moved
+    {"rendercopyex", NULL}, // Moved
+    {"rendercopyrect", NULL},
+    {"rendertexttotexture", NULL},
     {"reset", vmBuiltinReset},
     {"restorecursor", vmBuiltinRestorecursor},
     {"rewrite", vmBuiltinRewrite},
@@ -391,10 +579,10 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"screencols", vmBuiltinScreencols},
     {"screenrows", vmBuiltinScreenrows},
     {"setlength", vmBuiltinSetlength},
-    {"setalphablend", SDL_HANDLER(vmBuiltinSetalphablend)},
-    {"setcolor", SDL_HANDLER(vmBuiltinSetcolor)}, // Moved
-    {"setrendertarget", SDL_HANDLER(vmBuiltinSetrendertarget)}, // Moved
-    {"setrgbcolor", SDL_HANDLER(vmBuiltinSetrgbcolor)},
+    {"setalphablend", NULL},
+    {"setcolor", NULL}, // Moved
+    {"setrendertarget", NULL}, // Moved
+    {"setrgbcolor", NULL},
     {"showcursor", vmBuiltinShowcursor},
     {"sin", vmBuiltinSin},
     {"sinh", vmBuiltinSinh},
@@ -424,20 +612,19 @@ static const VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
     {"toupper", vmBuiltinUpcase},
-    {"updatescreen", SDL_HANDLER(vmBuiltinUpdatescreen)},
-    {"updatetexture", SDL_HANDLER(vmBuiltinUpdatetexture)},
+    {"updatescreen", NULL},
+    {"updatetexture", NULL},
     {"val", vmBuiltinVal},
     {"valreal", vmBuiltinValreal},
     {"vmversion", vmBuiltinVMVersion},
-    {"waitkeyevent", SDL_HANDLER(vmBuiltinWaitkeyevent)}, // Moved
+    {"waitkeyevent", NULL}, // Moved
     {"wherex", vmBuiltinWherex},
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
     {"quitrequested", vmBuiltinQuitrequested},
+    {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
-
-#undef SDL_HANDLER
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
 
@@ -469,6 +656,14 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler,
     }
 
     pthread_mutex_lock(&builtin_registry_mutex);
+    for (size_t i = 0; i < num_vm_builtins; ++i) {
+        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
+            vmBuiltinDispatchTable[i].handler = handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return;
+        }
+    }
+
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
     if (!new_table) {
@@ -707,12 +902,24 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                 continue;
             }
             size_t j = i + 1;
+            char flags[8];
+            size_t flag_len = 0;
+            const char* flag_chars = "-+ #0'";
+            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                if (flag_len + 1 < sizeof(flags)) {
+                    flags[flag_len++] = fmt[j];
+                }
+                j++;
+            }
+            flags[flag_len] = '\0';
+            bool width_specified = false;
             int width = 0;
-            int precision = -1;
             while (isdigit((unsigned char)fmt[j])) {
+                width_specified = true;
                 width = width * 10 + (fmt[j] - '0');
                 j++;
             }
+            int precision = -1;
             if (fmt[j] == '.') {
                 j++;
                 precision = 0;
@@ -723,24 +930,35 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
             }
             // Parse length modifiers and record small-width flags; we normalize by truncating manually
             bool mod_h = false, mod_hh = false;
+            char length_mod[3] = {0};
+            size_t length_len = 0;
             if (fmt[j] == 'h') {
                 mod_h = true;
+                length_mod[length_len++] = 'h';
                 j++;
                 if (fmt[j] == 'h') {
                     mod_hh = true;
                     mod_h = false;
+                    length_mod[length_len++] = 'h';
                     j++;
                 }
             } else if (fmt[j] == 'l') {
-                // We currently ignore 'l' and 'll' modifiers but need to consume them
+                length_mod[length_len++] = 'l';
                 j++;
                 if (fmt[j] == 'l') {
+                    length_mod[length_len++] = 'l';
                     j++;
                 }
             } else {
                 const char* length_mods = "Ljzt";
-                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                    if (length_len + 1 < sizeof(length_mod)) {
+                        length_mod[length_len++] = fmt[j];
+                    }
+                    j++;
+                }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (spec == '\0') {
                 runtimeError(vm, "printf: incomplete format specifier.");
@@ -748,14 +966,47 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
             }
             char fmtbuf[32];
             char buf[256];
-            if (width > 0 && precision >= 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
-            } else if (width > 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
-            } else if (precision >= 0) {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
-            } else {
-                snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            size_t pos = 0;
+            fmtbuf[pos++] = '%';
+            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], flags, flag_len);
+                pos += flag_len;
+            }
+            if (width_specified) {
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = '.';
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], length_mod, length_len);
+                pos += length_len;
+            }
+            if (pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = spec;
+            }
+            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
             }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
@@ -789,13 +1040,37 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                         break;
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, stdout);
                         break;
                     }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, stdout);
                         break;
                     }
@@ -863,39 +1138,99 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                 continue;
             }
             size_t j = i + 1;
+            char flags[8];
+            size_t flag_len = 0;
+            const char* flag_chars = "-+ #0'";
+            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                if (flag_len + 1 < sizeof(flags)) {
+                    flags[flag_len++] = fmt[j];
+                }
+                j++;
+            }
+            flags[flag_len] = '\0';
+            bool width_specified = false;
             int width = 0;
+            while (isdigit((unsigned char)fmt[j])) { width_specified = true; width = width * 10 + (fmt[j]-'0'); j++; }
             int precision = -1;
-            while (isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
             if (fmt[j] == '.') {
                 j++; precision = 0;
                 while (isdigit((unsigned char)fmt[j])) { precision = precision * 10 + (fmt[j]-'0'); j++; }
             }
             bool mod_h = false, mod_hh = false;
+            char length_mod[3] = {0};
+            size_t length_len = 0;
             if (fmt[j] == 'h') {
                 mod_h = true;
+                length_mod[length_len++] = 'h';
                 j++;
                 if (fmt[j] == 'h') {
                     mod_hh = true;
                     mod_h = false;
+                    length_mod[length_len++] = 'h';
                     j++;
                 }
             } else if (fmt[j] == 'l') {
-                // Ignore 'l' and 'll' modifiers but consume them
+                length_mod[length_len++] = 'l';
                 j++;
                 if (fmt[j] == 'l') {
+                    length_mod[length_len++] = 'l';
                     j++;
                 }
             } else {
                 const char* length_mods = "Ljzt";
-                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) j++;
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                    if (length_len + 1 < sizeof(length_mod)) {
+                        length_mod[length_len++] = fmt[j];
+                    }
+                    j++;
+                }
             }
+            length_mod[length_len < sizeof(length_mod) ? length_len : (sizeof(length_mod) - 1)] = '\0';
             char spec = fmt[j];
             if (!spec) { runtimeError(vm, "fprintf: incomplete format specifier."); return makeInt(0); }
             char fmtbuf[32]; char buf[256];
-            if (width > 0 && precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%c", width, precision, spec);
-            else if (width > 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%%d%c", width, spec);
-            else if (precision >= 0) snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%c", precision, spec);
-            else snprintf(fmtbuf, sizeof(fmtbuf), "%%%c", spec);
+            size_t pos = 0;
+            fmtbuf[pos++] = '%';
+            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], flags, flag_len);
+                pos += flag_len;
+            }
+            if (width_specified) {
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = '.';
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], length_mod, length_len);
+                pos += length_len;
+            }
+            if (pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = spec;
+            }
+            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
+            }
             if (arg_index < arg_count) {
                 Value v = args[arg_index++];
                 switch (spec) {
@@ -917,12 +1252,36 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                         break; }
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)asI64(v);
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, ch);
                         fputs(buf, output_stream);
                         break; }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (has_wide_char_length) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, length_mod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(length_mod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, output_stream);
                         break; }
                     case 'p': {
@@ -1598,13 +1957,25 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
-    vmEnableRawMode();
 
-    unsigned char ch_byte;
-    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-        ch_byte = '\0';
+    int c = 0;
+#ifdef SDL
+    if (sdlIsGraphicsActive()) {
+        c = sdlFetchReadKeyChar();
+        if (c < 0) {
+            c = 0;
+        }
+    } else
+#endif
+    {
+        vmEnableRawMode();
+
+        unsigned char ch_byte;
+        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+            ch_byte = '\0';
+        }
+        c = ch_byte;
     }
-    int c = ch_byte;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
@@ -2273,7 +2644,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE: {
             long long next = target->i_val + delta;
             if (next < 0 || next > 255) {
-                runtimeError(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing BYTE to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFF);
             break;
@@ -2282,7 +2653,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_WORD: {
             long long next = target->i_val + delta;
             if (next < 0 || next > 65535) {
-                runtimeError(vm, "Warning: Range check error incrementing WORD to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing WORD to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFFFF);
             break;
@@ -2291,7 +2662,7 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
         case TYPE_CHAR: {
             long long next = target->c_val + delta;
             if (next < 0 || next > PASCAL_CHAR_MAX) {
-                runtimeError(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error incrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
             SET_INT_VALUE(target, target->c_val);
@@ -2339,7 +2710,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_BYTE: {
             long long next = target->i_val - delta;
             if (next < 0 || next > 255) {
-                runtimeError(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing BYTE to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFF);
             break;
@@ -2348,7 +2719,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_WORD: {
             long long next = target->i_val - delta;
             if (next < 0 || next > 65535) {
-                runtimeError(vm, "Warning: Range check error decrementing WORD to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing WORD to %lld.", next);
             }
             SET_INT_VALUE(target, next & 0xFFFF);
             break;
@@ -2357,7 +2728,7 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
         case TYPE_CHAR: {
             long long next = target->c_val - delta;
             if (next < 0 || next > PASCAL_CHAR_MAX) {
-                runtimeError(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
+                runtimeWarning(vm, "Warning: Range check error decrementing CHAR to %lld.", next);
             }
             target->c_val = (int)next;
             SET_INT_VALUE(target, target->c_val);
@@ -3711,7 +4082,7 @@ Value vmBuiltinInttostr(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[1].type != TYPE_POINTER) {
-        runtimeError(vm, "Str expects (numeric, var string).");
+        runtimeError(vm, "Str expects (value, var string).");
         return makeVoid();
     }
     Value val = args[0];
@@ -3720,23 +4091,33 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Str received a nil pointer.");
         return makeVoid();
     }
-    char buffer[64];
-    switch (val.type) {
-        case TYPE_CHAR:
-            snprintf(buffer, sizeof(buffer), "%c", val.c_val);
-            break;
-        default:
-            if (IS_INTLIKE(val)) {
-                snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
-            } else if (isRealType(val.type)) {
-                snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
-            } else {
-                runtimeError(vm, "Str expects a numeric or char argument.");
-                return makeVoid();
-            }
-            break;
+
+    char* new_buf = NULL;
+    if (val.type == TYPE_STRING) {
+        const char* src = val.s_val ? val.s_val : "";
+        new_buf = strdup(src);
+    } else {
+        char buffer[64];
+        switch (val.type) {
+            case TYPE_CHAR:
+                snprintf(buffer, sizeof(buffer), "%c", val.c_val);
+                break;
+            case TYPE_BOOLEAN:
+                snprintf(buffer, sizeof(buffer), "%s", val.i_val ? "TRUE" : "FALSE");
+                break;
+            default:
+                if (IS_INTLIKE(val)) {
+                    snprintf(buffer, sizeof(buffer), "%lld", AS_INTEGER(val));
+                } else if (isRealType(val.type)) {
+                    snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(val));
+                } else {
+                    runtimeError(vm, "Str expects a numeric, char, or formatted string argument.");
+                    return makeVoid();
+                }
+                break;
+        }
+        new_buf = strdup(buffer);
     }
-    char* new_buf = strdup(buffer);
     if (!new_buf) {
         runtimeError(vm, "Str: memory allocation failed.");
         return makeVoid();
@@ -3756,6 +4137,10 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 
     if (args[0].type == TYPE_STRING) {
         return makeInt(args[0].s_val ? (long long)strlen(args[0].s_val) : 0);
+    }
+
+    if (args[0].type == TYPE_CHAR) {
+        return makeInt(1);
     }
 
     if (args[0].type == TYPE_ARRAY) {
@@ -3818,14 +4203,12 @@ int getBuiltinIDForCompiler(const char *name) {
     pthread_mutex_lock(&builtin_registry_mutex);
     for (size_t i = 0; i < num_vm_builtins; ++i) {
         if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-#ifndef SDL
-            if (vmBuiltinDispatchTable[i].handler == vmBuiltinSDLUnavailable) {
+            if (vmBuiltinDispatchTable[i].handler) {
                 pthread_mutex_unlock(&builtin_registry_mutex);
-                return -1;
+                return (int)i;
             }
-#endif
             pthread_mutex_unlock(&builtin_registry_mutex);
-            return (int)i;
+            return -1;
         }
     }
     for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
@@ -3895,62 +4278,6 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
-#ifdef SDL
-static const char *const sdl_gl_static_builtin_names[] = {
-    "GLBegin",
-    "GLClear",
-    "GLClearColor",
-    "GLClearDepth",
-    "GLColor3f",
-    "GLDepthTest",
-    "GLEnd",
-    "GLFrustum",
-    "GLLoadIdentity",
-    "GLMatrixMode",
-    "GLPopMatrix",
-    "GLPushMatrix",
-    "GLRotatef",
-    "GLScalef",
-    "GLPerspective",
-    "GLSetSwapInterval",
-    "GLSwapWindow",
-    "GLTranslatef",
-    "GLVertex3f",
-    "GLViewport",
-};
-
-typedef struct {
-    const char *display_name;
-    const char *vm_name;
-    VmBuiltinFn handler;
-    BuiltinRoutineType type;
-} SdlGlDynamicBuiltin;
-
-static const SdlGlDynamicBuiltin sdl_gl_dynamic_builtins[] = {
-    {"GLColor4f", "glcolor4f", vmBuiltinGlcolor4f, BUILTIN_TYPE_PROCEDURE},
-    {"GLNormal3f", "glnormal3f", vmBuiltinGlnormal3f, BUILTIN_TYPE_PROCEDURE},
-    {"GLEnable", "glenable", vmBuiltinGlenable, BUILTIN_TYPE_PROCEDURE},
-    {"GLDisable", "gldisable", vmBuiltinGldisable, BUILTIN_TYPE_PROCEDURE},
-    {"GLShadeModel", "glshademodel", vmBuiltinGlshademodel, BUILTIN_TYPE_PROCEDURE},
-    {"GLLightfv", "gllightfv", vmBuiltinGllightfv, BUILTIN_TYPE_PROCEDURE},
-    {"GLMaterialfv", "glmaterialfv", vmBuiltinGlmaterialfv, BUILTIN_TYPE_PROCEDURE},
-    {"GLMaterialf", "glmaterialf", vmBuiltinGlmaterialf, BUILTIN_TYPE_PROCEDURE},
-    {"GLColorMaterial", "glcolormaterial", vmBuiltinGlcolormaterial, BUILTIN_TYPE_PROCEDURE},
-    {"GLBlendFunc", "glblendfunc", vmBuiltinGlblendfunc, BUILTIN_TYPE_PROCEDURE},
-    {"GLIsHardwareAccelerated", "glishardwareaccelerated", vmBuiltinGlishardwareaccelerated, BUILTIN_TYPE_FUNCTION},
-};
-
-void registerSdlGlBuiltins(void) {
-    for (size_t i = 0; i < sizeof(sdl_gl_static_builtin_names) / sizeof(sdl_gl_static_builtin_names[0]); ++i) {
-        registerBuiltinFunction(sdl_gl_static_builtin_names[i], AST_PROCEDURE_DECL, NULL);
-    }
-    for (size_t i = 0; i < sizeof(sdl_gl_dynamic_builtins) / sizeof(sdl_gl_dynamic_builtins[0]); ++i) {
-        const SdlGlDynamicBuiltin *entry = &sdl_gl_dynamic_builtins[i];
-        registerVmBuiltin(entry->vm_name, entry->handler, entry->type, entry->display_name);
-    }
-}
-#endif
-
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
@@ -3976,59 +4303,6 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("tochar",   AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobool",   AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobyte",   AST_FUNCTION_DECL, NULL);
-
-    /* Graphics stubs (usable even without SDL) */
-    registerBuiltinFunction("ClearDevice", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CloseGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMaxX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GetMaxY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GraphLoop", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitGraph", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRGBColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateScreen", AST_PROCEDURE_DECL, NULL);
-
-#ifdef SDL
-    /* Additional SDL graphics and sound built-ins */
-    registerBuiltinFunction("CloseGraph3D", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CreateTargetTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("CreateTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("DestroyTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawCircle", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawPolygon", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DrawRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FillRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("FreeSound", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetMouseState", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetPixelColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTextSize", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("GetTicks", AST_FUNCTION_DECL, NULL);
-    registerSdlGlBuiltins();
-    registerBuiltinFunction("InitGraph3D", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IsSoundPlaying", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadImageToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("LoadSound", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("OutTextXY", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PlaySound", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("StopAllSounds", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("PollKey", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("IsKeyDown", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("PutPixel", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitSoundSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitTextSystem", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopy", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyEx", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderCopyRect", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RenderTextToTexture", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SetAlphaBlend", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SetRenderTarget", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UpdateTexture", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("WaitKeyEvent", AST_PROCEDURE_DECL, NULL);
-#endif
 
     /* General built-in functions and procedures */
     // Rea/CLike: object allocation helper

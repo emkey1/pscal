@@ -44,7 +44,7 @@ add_compile_definitions(
 )
 
 # Optionally build additional binaries
-option(BUILD_DASCAL "Build the dascal debugging binary" ON)
+option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
@@ -62,6 +62,8 @@ option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
 option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
+option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ON)
+option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -77,6 +79,12 @@ if(ENABLE_EXT_BUILTIN_YYJSON)
 endif()
 if(ENABLE_EXT_BUILTIN_USER)
     add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
+endif()
+if(ENABLE_EXT_BUILTIN_3D)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_3D)
+endif()
+if(ENABLE_EXT_BUILTIN_GRAPHICS)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_GRAPHICS)
 endif()
 
 set(PSCAL_SQLITE_LIBS "")

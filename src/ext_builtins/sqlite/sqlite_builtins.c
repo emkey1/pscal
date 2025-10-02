@@ -654,35 +654,42 @@ static Value vmSqliteChanges(struct VM_s *vm, int arg_count, Value *args) {
     return makeInt(changes);
 }
 
-static void registerSqliteFunction(const char *display_name,
+static void registerSqliteFunction(const char *group,
+                                   const char *display_name,
                                    const char *vm_name,
                                    VmBuiltinFn fn) {
-    extBuiltinRegisterFunction("sqlite", display_name);
+    extBuiltinRegisterFunction("sqlite", group, display_name);
     registerVmBuiltin(vm_name, fn, BUILTIN_TYPE_FUNCTION, display_name);
 }
 
 void registerSqliteBuiltins(void) {
-    extBuiltinRegisterCategory("sqlite");
+    const char *category = "sqlite";
+    extBuiltinRegisterCategory(category);
+    extBuiltinRegisterGroup(category, "connection");
+    extBuiltinRegisterGroup(category, "statement");
+    extBuiltinRegisterGroup(category, "metadata");
+    extBuiltinRegisterGroup(category, "results");
+    extBuiltinRegisterGroup(category, "binding");
 
-    registerSqliteFunction("SqliteOpen", "sqliteopen", vmSqliteOpen);
-    registerSqliteFunction("SqliteClose", "sqliteclose", vmSqliteClose);
-    registerSqliteFunction("SqliteExec", "sqliteexec", vmSqliteExec);
-    registerSqliteFunction("SqlitePrepare", "sqliteprepare", vmSqlitePrepare);
-    registerSqliteFunction("SqliteFinalize", "sqlitefinalize", vmSqliteFinalize);
-    registerSqliteFunction("SqliteStep", "sqlitestep", vmSqliteStep);
-    registerSqliteFunction("SqliteReset", "sqlitereset", vmSqliteReset);
-    registerSqliteFunction("SqliteColumnCount", "sqlitecolumncount", vmSqliteColumnCount);
-    registerSqliteFunction("SqliteColumnType", "sqlitecolumntype", vmSqliteColumnType);
-    registerSqliteFunction("SqliteColumnName", "sqlitecolumnname", vmSqliteColumnName);
-    registerSqliteFunction("SqliteColumnInt", "sqlitecolumnint", vmSqliteColumnInt);
-    registerSqliteFunction("SqliteColumnDouble", "sqlitecolumndouble", vmSqliteColumnDouble);
-    registerSqliteFunction("SqliteColumnText", "sqlitecolumntext", vmSqliteColumnText);
-    registerSqliteFunction("SqliteBindText", "sqlitebindtext", vmSqliteBindText);
-    registerSqliteFunction("SqliteBindInt", "sqlitebindint", vmSqliteBindInt);
-    registerSqliteFunction("SqliteBindDouble", "sqlitebinddouble", vmSqliteBindDouble);
-    registerSqliteFunction("SqliteBindNull", "sqlitebindnull", vmSqliteBindNull);
-    registerSqliteFunction("SqliteClearBindings", "sqliteclearbindings", vmSqliteClearBindings);
-    registerSqliteFunction("SqliteErrMsg", "sqliteerrmsg", vmSqliteErrMsg);
-    registerSqliteFunction("SqliteLastInsertRowId", "sqlitelastinsertrowid", vmSqliteLastInsertRowId);
-    registerSqliteFunction("SqliteChanges", "sqlitechanges", vmSqliteChanges);
+    registerSqliteFunction("connection", "SqliteOpen", "sqliteopen", vmSqliteOpen);
+    registerSqliteFunction("connection", "SqliteClose", "sqliteclose", vmSqliteClose);
+    registerSqliteFunction("connection", "SqliteExec", "sqliteexec", vmSqliteExec);
+    registerSqliteFunction("statement", "SqlitePrepare", "sqliteprepare", vmSqlitePrepare);
+    registerSqliteFunction("statement", "SqliteFinalize", "sqlitefinalize", vmSqliteFinalize);
+    registerSqliteFunction("statement", "SqliteStep", "sqlitestep", vmSqliteStep);
+    registerSqliteFunction("statement", "SqliteReset", "sqlitereset", vmSqliteReset);
+    registerSqliteFunction("metadata", "SqliteColumnCount", "sqlitecolumncount", vmSqliteColumnCount);
+    registerSqliteFunction("metadata", "SqliteColumnType", "sqlitecolumntype", vmSqliteColumnType);
+    registerSqliteFunction("metadata", "SqliteColumnName", "sqlitecolumnname", vmSqliteColumnName);
+    registerSqliteFunction("results", "SqliteColumnInt", "sqlitecolumnint", vmSqliteColumnInt);
+    registerSqliteFunction("results", "SqliteColumnDouble", "sqlitecolumndouble", vmSqliteColumnDouble);
+    registerSqliteFunction("results", "SqliteColumnText", "sqlitecolumntext", vmSqliteColumnText);
+    registerSqliteFunction("binding", "SqliteBindText", "sqlitebindtext", vmSqliteBindText);
+    registerSqliteFunction("binding", "SqliteBindInt", "sqlitebindint", vmSqliteBindInt);
+    registerSqliteFunction("binding", "SqliteBindDouble", "sqlitebinddouble", vmSqliteBindDouble);
+    registerSqliteFunction("binding", "SqliteBindNull", "sqlitebindnull", vmSqliteBindNull);
+    registerSqliteFunction("statement", "SqliteClearBindings", "sqliteclearbindings", vmSqliteClearBindings);
+    registerSqliteFunction("connection", "SqliteErrMsg", "sqliteerrmsg", vmSqliteErrMsg);
+    registerSqliteFunction("connection", "SqliteLastInsertRowId", "sqlitelastinsertrowid", vmSqliteLastInsertRowId);
+    registerSqliteFunction("connection", "SqliteChanges", "sqlitechanges", vmSqliteChanges);
 }

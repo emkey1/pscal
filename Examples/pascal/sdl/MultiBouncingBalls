@@ -1,0 +1,210 @@
+#!/usr/bin/env pascal
+PROGRAM MultiBouncingBalls;
+
+USES CRT;
+
+CONST
+  WindowWidth   = 1280;
+  WindowHeight  = 1024;
+  WindowTitle   = 'Multi Bouncing Balls Demo';
+  TargetFPS     = 60;
+  FrameDelay    = 1000 DIV TargetFPS;
+
+  NumBalls        = 90; // <<<< Number of balls
+  MaxInitialSpeed = 250.0;
+  MinInitialSpeed = 80.0;
+
+TYPE
+  BallType = RECORD
+    x, y    : Real;
+    dx, dy  : Real;
+    radius  : Integer;
+    r, g, b : Byte;
+    mass    : Real; // Let's use mass for collision (can all be 1.0 for simplicity)
+    active  : Boolean; // To easily add/remove balls if needed later
+  END;
+
+VAR
+  Balls       : ARRAY[1..NumBalls] OF BallType;
+  i, j        : Integer; // Loop counters
+  QuitProgram : Boolean;
+  MaxX, MaxY  : Integer;
+
+PROCEDURE InitializeBalls;
+VAR
+  k: Integer;
+  Speed_pps, Angle : Real;
+BEGIN
+  FOR k := 1 TO NumBalls DO
+  BEGIN
+    Balls[k].radius := 8 + Random(13); // Radius 8 to 20
+    Balls[k].x := Balls[k].radius + Random(WindowWidth - 2 * Balls[k].radius) * 1.0;
+    Balls[k].y := Balls[k].radius + Random(WindowHeight - 2 * Balls[k].radius) * 1.0;
+
+    Speed_pps := MinInitialSpeed + Random(Trunc(MaxInitialSpeed - MinInitialSpeed + 1.0)) * 1.0;
+    Angle := Random(360) * (3.14159265 / 180.0); // Random angle in radians
+
+    Balls[k].dx := Cos(Angle) * Speed_pps / TargetFPS;
+    Balls[k].dy := Sin(Angle) * Speed_pps / TargetFPS;
+    
+    // Ensure non-zero velocity
+    IF (Abs(Balls[k].dx) < 0.1) AND (Abs(Balls[k].dy) < 0.1) THEN BEGIN
+        Balls[k].dx := (MinInitialSpeed / TargetFPS) * 0.707;
+        Balls[k].dy := (MinInitialSpeed / TargetFPS) * 0.707;
+    END;
+
+
+    Balls[k].r := Byte(Random(206) + 50);
+    Balls[k].g := Byte(Random(206) + 50);
+    Balls[k].b := Byte(Random(206) + 50);
+    Balls[k].mass := Balls[k].radius * Balls[k].radius * 1.0; // Mass proportional to area (roughly)
+    Balls[k].active := True;
+  END;
+END;
+
+PROCEDURE UpdateAndCollideBalls;
+VAR
+  k, l          : Integer;
+  distSq, sumRadiiSq : Real;
+  nx, ny, dist, overlap : Real; // For collision normal and overlap
+  // For collision response
+  v1x, v1y, v2x, v2y : Real;
+  v1n, v1t, v2n, v2t : Real;
+  new_v1n, new_v2n   : Real;
+  tx, ty             : Real;
+  m1, m2             : Real;
+BEGIN
+  FOR k := 1 TO NumBalls DO
+  BEGIN
+    IF Balls[k].active THEN
+    BEGIN
+      // Update position
+      Balls[k].x := Balls[k].x + Balls[k].dx;
+      Balls[k].y := Balls[k].y + Balls[k].dy;
+
+      // Ball-Wall Collisions
+      IF (Balls[k].x - Balls[k].radius) < 0 THEN
+      BEGIN Balls[k].x := Balls[k].radius; Balls[k].dx := -Balls[k].dx; END
+      ELSE IF (Balls[k].x + Balls[k].radius) > MaxX THEN
+      BEGIN Balls[k].x := MaxX - Balls[k].radius; Balls[k].dx := -Balls[k].dx; END;
+
+      IF (Balls[k].y - Balls[k].radius) < 0 THEN
+      BEGIN Balls[k].y := Balls[k].radius; Balls[k].dy := -Balls[k].dy; END
+      ELSE IF (Balls[k].y + Balls[k].radius) > MaxY THEN
+      BEGIN Balls[k].y := MaxY - Balls[k].radius; Balls[k].dy := -Balls[k].dy; END;
+
+      // Ball-Ball Collisions
+      FOR l := k + 1 TO NumBalls DO // Check against subsequent balls
+      BEGIN
+        IF Balls[l].active THEN
+        BEGIN
+          distSq := (Balls[k].x - Balls[l].x) * (Balls[k].x - Balls[l].x) +
+                    (Balls[k].y - Balls[l].y) * (Balls[k].y - Balls[l].y);
+          sumRadiiSq := (Balls[k].radius + Balls[l].radius) * (Balls[k].radius + Balls[l].radius);
+
+          IF distSq <= sumRadiiSq THEN // Collision detected
+          BEGIN
+            dist := Sqrt(distSq);
+            IF dist = 0.0 THEN // Prevent division by zero if balls perfectly overlap
+            BEGIN // Nudge them apart slightly
+                Balls[k].x := Balls[k].x + (Random(11)-5) * 0.1; // Small random nudge
+                Balls[l].y := Balls[l].y + (Random(11)-5) * 0.1;
+                dist := Sqrt(Sqr(Balls[k].x - Balls[l].x) + Sqr(Balls[k].y - Balls[l].y));
+                IF dist = 0.0 THEN dist := 0.001; // Final fallback
+            END;
+
+            // Normal vector (from ball k to ball l)
+            nx := (Balls[l].x - Balls[k].x) / dist;
+            ny := (Balls[l].y - Balls[k].y) / dist;
+
+            // Tangent vector
+            tx := -ny;
+            ty := nx;
+
+            // Velocities
+            v1x := Balls[k].dx; v1y := Balls[k].dy;
+            v2x := Balls[l].dx; v2y := Balls[l].dy;
+
+            // Project velocities onto normal and tangent
+            v1n := v1x * nx + v1y * ny;
+            v1t := v1x * tx + v1y * ty;
+            v2n := v2x * nx + v2y * ny;
+            v2t := v2x * tx + v2y * ty;
+
+            // Masses
+            m1 := Balls[k].mass;
+            m2 := Balls[l].mass;
+
+            // 1D collision for normal velocities
+            IF (m1 + m2) = 0 THEN BEGIN new_v1n := 0; new_v2n := 0; END // Avoid division by zero if both masses are 0
+            ELSE BEGIN
+              new_v1n := (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
+              new_v2n := (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
+            END;
+            
+            // Tangential velocities remain unchanged: v1t, v2t
+
+            // Convert back to Cartesian velocities
+            Balls[k].dx := new_v1n * nx + v1t * tx;
+            Balls[k].dy := new_v1n * ny + v1t * ty;
+            Balls[l].dx := new_v2n * nx + v2t * tx;
+            Balls[l].dy := new_v2n * ny + v2t * ty;
+
+            // Overlap resolution (Static resolution - move balls apart)
+            overlap := (Balls[k].radius + Balls[l].radius) - dist;
+            IF overlap > 0.0 THEN // Only if they are actually overlapping
+            BEGIN
+              // Move them apart along the normal, weighted by inverse mass (simpler: equal move)
+              Balls[k].x := Balls[k].x - (overlap / 2.0) * nx;
+              Balls[k].y := Balls[k].y - (overlap / 2.0) * ny;
+              Balls[l].x := Balls[l].x + (overlap / 2.0) * nx;
+              Balls[l].y := Balls[l].y + (overlap / 2.0) * ny;
+            END;
+          END; // IF collision
+        END; // IF Balls[l].active
+      END; // FOR l
+    END; // IF Balls[k].active
+  END; // FOR k
+END;
+
+PROCEDURE DrawBalls; // Stays plural
+VAR k:Integer;
+BEGIN
+  FOR k := 1 TO NumBalls DO
+  BEGIN
+    IF Balls[k].active THEN
+    BEGIN
+      SetRGBColor(Balls[k].r, Balls[k].g, Balls[k].b);
+      // Change DrawCircle to FillCircle
+      FillCircle(Trunc(Balls[k].x), Trunc(Balls[k].y), Balls[k].radius); // <<<< CORRECT CHANGE HERE
+    END;
+  END;
+END;
+
+BEGIN // Main Program
+  InitGraph(WindowWidth, WindowHeight, WindowTitle);
+  Randomize;
+  MaxX := GetMaxX; MaxY := GetMaxY;
+
+  InitializeBalls;
+
+  QuitProgram := False;
+  WriteLn('Multi Bouncing Balls... Press Q in the console to quit.');
+
+  WHILE NOT QuitProgram DO
+  BEGIN
+    IF KeyPressed THEN
+    BEGIN IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True; END;
+
+    UpdateAndCollideBalls; // Updates positions and handles all collisions
+
+    ClearDevice;
+    DrawBalls;
+    UpdateScreen;
+
+    GraphLoop(FrameDelay);
+  END;
+
+  CloseGraph;
+  WriteLn('Demo finished.');
+END.

@@ -2,9 +2,9 @@
 
 The Rea compiler is an experimental front end for PSCAL. This tutorial walks through
 building the compiler, running the SDL multi bouncing balls sample located at
-`Examples/rea/sdl_multibouncingballs`, and understanding every part of the
+`Examples/rea/sdl/multibouncingballs`, and understanding every part of the
 program. Once you are comfortable with the 2D version, check out the
-`Examples/rea/sdl_multibouncingballs_3d` variant that renders a 3D boxed arena
+`Examples/rea/sdl/multibouncingballs_3d` variant that renders a 3D boxed arena
 and now leans on the `BouncingBalls3DStepUltraAdvanced` extended builtin for fast
 physics, projection, and lighting hints.
 
@@ -41,7 +41,7 @@ export RUN_SDL=1
 ```
 Invoke the compiler with the sample source:
 ```sh
-build/bin/rea Examples/rea/sdl_multibouncingballs
+build/bin/rea Examples/rea/sdl/multibouncingballs
 ```
 
 ## Sample walkthrough
@@ -313,7 +313,7 @@ bytecode disassembly.
 - Enable a short instruction trace (first N instructions):
 
   ```sh
-  build/bin/rea --vm-trace-head=64 Examples/rea/sdl_multibouncingballs
+  build/bin/rea --vm-trace-head=64 Examples/rea/sdl/multibouncingballs
   ```
 
   The VM prints lines like:
@@ -334,7 +334,7 @@ bytecode disassembly.
 - Disassemble the compiled bytecode to human‑readable mnemonics:
 
   ```sh
-  build/bin/rea --no-cache --dump-bytecode Examples/rea/sdl_multibouncingballs
+  build/bin/rea --no-cache --dump-bytecode Examples/rea/sdl/multibouncingballs
   ```
 
   This prints the bytecode and any procedures discovered. It is useful to
@@ -343,7 +343,7 @@ bytecode disassembly.
 - Bypass cached bytecode to ensure you execute the latest compile:
 
   ```sh
-  build/bin/rea --no-cache Examples/rea/sdl_multibouncingballs
+  build/bin/rea --no-cache Examples/rea/sdl/multibouncingballs
   ```
 
   The Rea front end caches compiled chunks under `~/.pscal/bc_cache`. Use `--no-cache`

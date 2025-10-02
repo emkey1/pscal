@@ -117,6 +117,8 @@ import sys
 
 path = sys.argv[1]
 seen = set()
+groups = {}
+DEFAULT_GROUP = 'default'
 with open(path, 'r', encoding='utf-8') as fh:
     for idx, raw_line in enumerate(fh, 1):
         line = raw_line.rstrip('\n')
@@ -131,12 +133,25 @@ with open(path, 'r', encoding='utf-8') as fh:
                 print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             seen.add(parts[1])
-        elif tag == 'function':
+            groups.setdefault(parts[1], set())
+        elif tag == 'group':
             if len(parts) != 3:
-                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                print(f"Invalid group line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             if parts[1] not in seen:
+                print(f"Group references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            groups.setdefault(parts[1], set()).add(parts[2])
+        elif tag == 'function':
+            if len(parts) != 4:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            category, group = parts[1], parts[2]
+            if category not in seen:
                 print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if group != DEFAULT_GROUP and group not in groups.get(category, set()):
+                print(f"Function references unknown group on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
         else:
             print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
@@ -235,7 +250,6 @@ has_ext_builtin_category() {
   local status=$?
   set -e
   return $status
-=
 }
 
 # Detect SDL enabled and set dummy drivers by default unless RUN_SDL=1
@@ -270,6 +284,12 @@ else
   CLIKE_SQLITE_AVAILABLE=0
 fi
 
+if has_ext_builtin_category "$CLIKE_BIN" graphics; then
+  CLIKE_GRAPHICS_AVAILABLE=1
+else
+  CLIKE_GRAPHICS_AVAILABLE=0
+fi
+
 for src in "$SCRIPT_DIR"/clike/*.cl; do
   test_name=$(basename "$src" .cl)
   in_file="$SCRIPT_DIR/clike/$test_name.in"
@@ -281,10 +301,18 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   disasm_stdout=""
   disasm_stderr=""
   # Skip SDL-dependent clike tests unless RUN_SDL=1 forces them
-  if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ] && [ "$test_name" = "graphics" ]; then
-    echo "Skipping $test_name (SDL dummy driver)"
-    echo
-    continue
+  if [ "$test_name" = "graphics" ]; then
+    if [ "$CLIKE_GRAPHICS_AVAILABLE" -ne 1 ]; then
+      echo "Skipping $test_name (graphics builtins unavailable)"
+      echo
+      continue
+    fi
+
+    if [ "${RUN_SDL:-0}" != "1" ] && [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; then
+      echo "Skipping $test_name (SDL dummy driver)"
+      echo
+      continue
+    fi
   fi
 
   if [ -f "$SCRIPT_DIR/clike/$test_name.sqlite" ] && [ "$CLIKE_SQLITE_AVAILABLE" -ne 1 ]; then
@@ -328,6 +356,13 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   echo "---- $test_name ----"
 
   server_pid=""
+  if [ "${CLIKE_HTTP_TEST_PORT+x}" = x ]; then
+    prev_http_port="$CLIKE_HTTP_TEST_PORT"
+    had_prev_http_port=1
+  else
+    prev_http_port=""
+    had_prev_http_port=0
+  fi
   server_script="$SCRIPT_DIR/clike/$test_name.net"
   server_ready_file=""
   if [ -f "$server_script" ] && [ "${RUN_NET_TESTS:-0}" = "1" ] && [ -s "$server_script" ]; then
@@ -345,6 +380,13 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
         stop_server "$server_pid"
         server_pid=""
       fi
+    elif [ -f "$server_ready_file" ]; then
+      while IFS='=' read -r key value; do
+        if [ "$key" = "PORT" ] && [ -n "$value" ]; then
+          CLIKE_HTTP_TEST_PORT="$value"
+          export CLIKE_HTTP_TEST_PORT
+        fi
+      done < "$server_ready_file"
     fi
   fi
 
@@ -404,6 +446,12 @@ for src in "$SCRIPT_DIR"/clike/*.cl; do
   if [ -n "$server_pid" ]; then
     stop_server "$server_pid"
     server_pid=""
+  fi
+  if [ "$had_prev_http_port" = 1 ]; then
+    CLIKE_HTTP_TEST_PORT="$prev_http_port"
+    export CLIKE_HTTP_TEST_PORT
+  else
+    unset CLIKE_HTTP_TEST_PORT
   fi
   if [ -n "${server_ready_file:-}" ]; then
     rm -f "$server_ready_file"

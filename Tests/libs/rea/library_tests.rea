@@ -1,0 +1,518 @@
+#import "crt";
+#import "datetime";
+#import "filesystem";
+#import "http";
+#import "json";
+#import "strings";
+
+int executedTests = 0;
+int failedTests = 0;
+int skippedTests = 0;
+
+str boolToText(bool value) {
+    if (value) {
+        return "true";
+    }
+    return "false";
+}
+
+void markPass(str name) {
+    executedTests = executedTests + 1;
+    writeln("PASS ", name);
+}
+
+void markFail(str name, str detail) {
+    executedTests = executedTests + 1;
+    failedTests = failedTests + 1;
+    writeln("FAIL ", name, ": ", detail);
+}
+
+void markSkip(str name, str reason) {
+    skippedTests = skippedTests + 1;
+    writeln("SKIP ", name, ": ", reason);
+}
+
+void assertTrue(str name, bool condition, str detail) {
+    if (condition) {
+        markPass(name);
+    } else {
+        markFail(name, detail);
+    }
+}
+
+void assertFalse(str name, bool condition, str detail) {
+    if (!condition) {
+        markPass(name);
+    } else {
+        markFail(name, detail);
+    }
+}
+
+void assertEqualStr(str name, str expected, str actual) {
+    if (expected == actual) {
+        markPass(name);
+    } else {
+        markFail(name, "expected \"" + expected + "\" but got \"" + actual + "\"");
+    }
+}
+
+void assertEqualInt(str name, int expected, int actual) {
+    if (expected == actual) {
+        markPass(name);
+    } else {
+        markFail(name, "expected " + inttostr(expected) + " but got " + inttostr(actual));
+    }
+}
+
+void assertEqualBool(str name, bool expected, bool actual) {
+    if (expected == actual) {
+        markPass(name);
+    } else {
+        markFail(name, "expected " + boolToText(expected) + " but got " + boolToText(actual));
+    }
+}
+
+void assertFloatNear(str name, float expected, float actual, float tolerance) {
+    float lower = expected - tolerance;
+    float upper = expected + tolerance;
+    if (actual >= lower && actual <= upper) {
+        markPass(name);
+    } else {
+        markFail(name, "float values differ");
+        writeln("  expected: ", expected:0:6, " +/- ", tolerance:0:6);
+        writeln("  actual:   ", actual:0:6);
+    }
+}
+
+str charToString(char value) {
+    str result;
+    setlength(result, 1);
+    result[1] = value;
+    return result;
+}
+
+int safeDivInt(int numerator, int denominator) {
+    if (denominator == 0) {
+        return 0;
+    }
+    float numeratorFloat = numerator * 1.0;
+    float denominatorFloat = denominator * 1.0;
+    float quotient = numeratorFloat / denominatorFloat;
+    int truncated = int(quotient);
+    if (quotient < 0 && quotient != truncated) {
+        return truncated - 1;
+    }
+    return truncated;
+}
+
+int mapPscalColorToAnsiBase(int color) {
+    int normalized = color % 8;
+    if (normalized < 0) {
+        normalized = normalized + 8;
+    }
+    if (normalized == 0) { return 0; }
+    if (normalized == 1) { return 4; }
+    if (normalized == 2) { return 2; }
+    if (normalized == 3) { return 6; }
+    if (normalized == 4) { return 1; }
+    if (normalized == 5) { return 5; }
+    if (normalized == 6) { return 3; }
+    return 7;
+}
+
+str buildAnsiSequenceForAttr(int attr) {
+    int fg = attr % 16;
+    if (fg < 0) {
+        fg = fg + 16;
+    }
+    bool isBright = fg >= 8;
+    int fgBase = fg % 8;
+    int bg = safeDivInt(attr, 16) % 8;
+    if (bg < 0) {
+        bg = bg + 8;
+    }
+    bool isBlink = safeDivInt(attr, 128) % 2 == 1;
+
+    int fgCode = (isBright ? 90 : 30) + mapPscalColorToAnsiBase(fgBase);
+    int bgCode = 40 + mapPscalColorToAnsiBase(bg);
+
+    str sequence = charToString(chr(27)) + "[0";
+    if (isBright) {
+        sequence = sequence + ";1";
+    }
+    if (isBlink) {
+        sequence = sequence + ";5";
+    }
+    sequence = sequence + ";" + inttostr(fgCode);
+    sequence = sequence + ";" + inttostr(bgCode);
+    sequence = sequence + "m";
+    return sequence;
+}
+
+void applyTextAttrToTerminal(int attr) {
+    str sequence = buildAnsiSequenceForAttr(attr);
+    if (sequence != "") {
+        write(sequence);
+    }
+}
+
+void testCRT() {
+    writeln();
+    writeln("-- CRT --");
+    int originalAttr = CRT.TextAttr;
+    assertEqualInt("CRT.Black", 0, CRT.Black);
+    assertEqualInt("CRT.Blue", 1, CRT.Blue);
+    assertEqualInt("CRT.Green", 2, CRT.Green);
+    assertEqualInt("CRT.Cyan", 3, CRT.Cyan);
+    assertEqualInt("CRT.Red", 4, CRT.Red);
+    assertEqualInt("CRT.Magenta", 5, CRT.Magenta);
+    assertEqualInt("CRT.Brown", 6, CRT.Brown);
+    assertEqualInt("CRT.LightGray", 7, CRT.LightGray);
+    assertEqualInt("CRT.DarkGray", 8, CRT.DarkGray);
+    assertEqualInt("CRT.LightBlue", 9, CRT.LightBlue);
+    assertEqualInt("CRT.LightGreen", 10, CRT.LightGreen);
+    assertEqualInt("CRT.LightCyan", 11, CRT.LightCyan);
+    assertEqualInt("CRT.LightRed", 12, CRT.LightRed);
+    assertEqualInt("CRT.LightMagenta", 13, CRT.LightMagenta);
+    assertEqualInt("CRT.Yellow", 14, CRT.Yellow);
+    assertEqualInt("CRT.White", 15, CRT.White);
+    assertEqualInt("CRT.Blink", 128, CRT.Blink);
+    assertEqualInt("CRT.TextAttr default", CRT.LightGray, CRT.TextAttr);
+    CRT.TextAttr = CRT.Green;
+    assertEqualInt("CRT.TextAttr assignment", CRT.Green, CRT.TextAttr);
+    CRT.TextAttr = 0;
+    bool zeroAssignmentStored = CRT.TextAttr == 0;
+    CRT.TextAttr = originalAttr;
+    applyTextAttrToTerminal(originalAttr);
+    if (zeroAssignmentStored) {
+        markPass("CRT.TextAttr zero assignment");
+    } else {
+        markFail("CRT.TextAttr zero assignment", "expected zero to be stored");
+    }
+}
+
+void testStrings() {
+    writeln();
+    writeln("-- Strings --");
+    assertTrue("Strings.contains finds substring", Strings.contains("hello world", "world"), "expected substring to be found");
+    assertFalse("Strings.contains missing substring", Strings.contains("hello", "xyz"), "unexpected match");
+    assertTrue("Strings.contains empty needle", Strings.contains("abc", ""), "empty needle should always match");
+    assertFalse("Strings.contains empty haystack", Strings.contains("", "abc"), "empty haystack should not match");
+
+    assertTrue("Strings.startsWith matches prefix", Strings.startsWith("prefix-value", "prefix"), "expected prefix match");
+    assertFalse("Strings.startsWith mismatch", Strings.startsWith("prefix-value", "value"), "unexpected prefix match");
+    assertFalse("Strings.startsWith longer prefix", Strings.startsWith("short", "longer"), "unexpected prefix match");
+
+    assertTrue("Strings.endsWith matches suffix", Strings.endsWith("value-suffix", "suffix"), "expected suffix match");
+    assertFalse("Strings.endsWith mismatch", Strings.endsWith("value", "suffix"), "unexpected suffix match");
+    assertFalse("Strings.endsWith longer suffix", Strings.endsWith("abc", "abcd"), "unexpected suffix match");
+
+    assertEqualStr("Strings.trimLeft", "abc", Strings.trimLeft("  \t\nabc"));
+    assertEqualStr("Strings.trimLeft all whitespace", "", Strings.trimLeft("  \t\n"));
+    assertEqualStr("Strings.trimRight", "abc", Strings.trimRight("abc  \t"));
+    assertEqualStr("Strings.trimRight all whitespace", "", Strings.trimRight("  \n"));
+    assertEqualStr("Strings.trim", "middle", Strings.trim("  middle  \n"));
+
+    assertEqualStr("Strings.padLeft default padding", "  abc", Strings.padLeft("abc", 5, ""));
+    assertEqualStr("Strings.padLeft custom padding", "00abc", Strings.padLeft("abc", 5, "0"));
+    assertEqualStr("Strings.padLeft width shorter", "abc", Strings.padLeft("abc", 2, ""));
+    assertEqualStr("Strings.padRight default padding", "abc  ", Strings.padRight("abc", 5, ""));
+    assertEqualStr("Strings.padRight custom padding", "abc--", Strings.padRight("abc", 5, "-"));
+    assertEqualStr("Strings.padRight width shorter", "abc", Strings.padRight("abc", 2, ""));
+
+    assertEqualStr("Strings.toUpper", "ABC", Strings.toUpper("Abc"));
+    assertEqualStr("Strings.toLower", "abc", Strings.toLower("AbC"));
+
+    assertEqualStr("Strings.sortCharacters", "abcd", Strings.sortCharacters("dcba"));
+    assertEqualStr("Strings.sortCharacters single", "a", Strings.sortCharacters("a"));
+
+    assertEqualStr("Strings.repeat", "ababab", Strings.repeat("ab", 3));
+    assertEqualStr("Strings.repeat zero", "", Strings.repeat("ab", 0));
+}
+
+void testDateTime() {
+    writeln();
+    writeln("-- DateTime --");
+    assertEqualStr("DateTime.formatUtcOffset zero", "+00:00", DateTime.formatUtcOffset(0));
+    assertEqualStr("DateTime.formatUtcOffset positive", "+02:30", DateTime.formatUtcOffset(9000));
+    assertEqualStr("DateTime.formatUtcOffset negative", "-01:30", DateTime.formatUtcOffset(-5400));
+
+    assertEqualStr("DateTime.formatUnix epoch", "1970-01-01 00:00:00", DateTime.formatUnix(0, 0));
+    assertEqualStr("DateTime.formatUnix offset", "1970-01-01 01:01:00", DateTime.formatUnix(60, 3600));
+    assertEqualStr("DateTime.iso8601", "2020-12-31T19:00:00-05:00", DateTime.iso8601(1609459200, -18000));
+
+    assertEqualInt("DateTime.startOfDay utc", 1609459200, DateTime.startOfDay(1609502400, 0));
+    assertEqualInt("DateTime.startOfDay with offset", 1609477200, DateTime.startOfDay(1609502400, -18000));
+    assertEqualInt("DateTime.startOfDay negative epoch", -86400, DateTime.startOfDay(-1, 0));
+    assertEqualInt("DateTime.endOfDay", 1609545599, DateTime.endOfDay(1609502400, 0));
+
+    assertEqualInt("DateTime.addDays", 1609545600, DateTime.addDays(1609459200, 1));
+    assertEqualInt("DateTime.addHours", 1609462800, DateTime.addHours(1609459200, 1));
+    assertEqualInt("DateTime.addMinutes", 1609459260, DateTime.addMinutes(1609459200, 1));
+
+    assertEqualInt("DateTime.daysBetween forward", 2, DateTime.daysBetween(0, 172800));
+    assertEqualInt("DateTime.daysBetween backward", -2, DateTime.daysBetween(172800, 0));
+
+    assertEqualStr("DateTime.describeDifference positive", "1d 1h 1m 1s", DateTime.describeDifference(0, 90061));
+    assertEqualStr("DateTime.describeDifference negative", "-1d 1h 1m 1s", DateTime.describeDifference(90061, 0));
+    assertEqualStr("DateTime.describeDifference zero", "0s", DateTime.describeDifference(100, 100));
+}
+
+void testFilesystem() {
+    writeln();
+    writeln("-- Filesystem --");
+    str tmpDir = getenv("REA_TEST_TMPDIR");
+    if (tmpDir == "") {
+        markSkip("Filesystem suite", "REA_TEST_TMPDIR not set");
+        return;
+    }
+
+    str missingPath = Filesystem.joinPath(tmpDir, "missing.txt");
+    str missing = Filesystem.readAllText(missingPath);
+    assertEqualStr("Filesystem.readAllText missing", "", missing);
+    assertFalse("Filesystem.lastReadSucceeded missing", Filesystem.lastReadSucceeded(), "expected read failure flag");
+    int missingError = Filesystem.lastReadErrorCode();
+    if (missingError != 0) {
+        markPass("Filesystem.lastReadErrorCode missing");
+    } else {
+        markFail("Filesystem.lastReadErrorCode missing", "expected non-zero error code");
+    }
+
+    str filePath = Filesystem.joinPath(tmpDir, "fs_roundtrip.txt");
+    bool writeOk = Filesystem.writeAllText(filePath, "line1\nline2");
+    assertTrue("Filesystem.writeAllText success", writeOk, "expected write to succeed");
+    int writeErr = Filesystem.lastWriteErrorCode();
+    if (writeErr == 0) {
+        markPass("Filesystem.lastWriteErrorCode success");
+    } else {
+        markFail("Filesystem.lastWriteErrorCode success", "expected zero error code");
+    }
+
+    str readBack = Filesystem.readAllText(filePath);
+    assertEqualStr("Filesystem.readAllText contents", "line1\nline2", readBack);
+    assertTrue("Filesystem.lastReadSucceeded success", Filesystem.lastReadSucceeded(), "expected read success flag");
+    if (Filesystem.lastReadErrorCode() == 0) {
+        markPass("Filesystem.lastReadErrorCode success");
+    } else {
+        markFail("Filesystem.lastReadErrorCode success", "expected zero error code");
+    }
+
+    str firstLine = Filesystem.readFirstLine(filePath);
+    assertEqualStr("Filesystem.readFirstLine", "line1", firstLine);
+    assertTrue("Filesystem.lastReadSucceeded readFirstLine", Filesystem.lastReadSucceeded(), "expected read success flag");
+    if (Filesystem.lastReadErrorCode() == 0) {
+        markPass("Filesystem.lastReadErrorCode readFirstLine");
+    } else {
+        markFail("Filesystem.lastReadErrorCode readFirstLine", "expected zero error code");
+    }
+
+    str nestedDir = Filesystem.joinPath(tmpDir, "missing_dir");
+    str nestedPath = Filesystem.joinPath(nestedDir, "file.txt");
+    bool writeFail = Filesystem.writeAllText(nestedPath, "data");
+    assertFalse("Filesystem.writeAllText missing directory", writeFail, "expected write to fail");
+    if (Filesystem.lastWriteErrorCode() != 0) {
+        markPass("Filesystem.lastWriteErrorCode failure");
+    } else {
+        markFail("Filesystem.lastWriteErrorCode failure", "expected non-zero error code");
+    }
+
+    assertEqualStr("Filesystem.joinPath basic", "foo/bar", Filesystem.joinPath("foo", "bar"));
+    assertEqualStr("Filesystem.joinPath left slash", "foo/bar", Filesystem.joinPath("foo/", "bar"));
+    assertEqualStr("Filesystem.joinPath right slash", "foo/bar", Filesystem.joinPath("foo", "/bar"));
+    assertEqualStr("Filesystem.joinPath both slash", "foo/bar", Filesystem.joinPath("foo/", "/bar"));
+    assertEqualStr("Filesystem.joinPath empty left", "bar", Filesystem.joinPath("", "bar"));
+    assertEqualStr("Filesystem.joinPath empty right", "foo", Filesystem.joinPath("foo", ""));
+
+    str home = getenv("HOME");
+    if (home == "") {
+        markSkip("Filesystem.expandUser", "HOME not set");
+    } else {
+        assertEqualStr("Filesystem.expandUser tilde", home, Filesystem.expandUser("~"));
+        assertEqualStr("Filesystem.expandUser passthrough", "plain/path", Filesystem.expandUser("plain/path"));
+        str expectedChild = Filesystem.joinPath(home, "child");
+        assertEqualStr("Filesystem.expandUser child", expectedChild, Filesystem.expandUser("~/child"));
+        assertEqualStr("Filesystem.expandUser named user", "~user/path", Filesystem.expandUser("~user/path"));
+        assertEqualStr("Filesystem.expandUser empty", "", Filesystem.expandUser(""));
+    }
+}
+
+void testJson() {
+    writeln();
+    writeln("-- Json --");
+    str hasYyjson = getenv("REA_TEST_HAS_YYJSON");
+    if (hasYyjson != "" && hasYyjson != "1") {
+        markSkip("Json suite", "yyjson extended built-ins disabled");
+        return;
+    }
+    if (!Json.isAvailable()) {
+        markSkip("Json suite", "yyjson built-ins not available");
+        return;
+    }
+
+    str objectJson = "{\"name\":\"Rea\",\"count\":3,\"enabled\":true,\"pi\":3.14159,\"tags\":[\"alpha\",\"beta\"],\"missing\":null,\"nested\":{\"value\":42}}";
+    int doc = Json.parse(objectJson);
+    assertTrue("Json.parse", doc >= 0, "expected parse success");
+    int root = Json.root(doc);
+    assertTrue("Json.root", root >= 0, "expected root handle");
+
+    assertTrue("Json.hasKey existing", Json.hasKey(root, "name"), "expected key to exist");
+    assertFalse("Json.hasKey missing", Json.hasKey(root, "absent"), "unexpected key");
+
+    assertEqualStr("Json.getString", "Rea", Json.getString(root, "name", "fallback"));
+    assertEqualStr("Json.getString fallback", "fallback", Json.getString(root, "absent", "fallback"));
+    assertEqualInt("Json.getInt", 3, Json.getInt(root, "count", -1));
+    assertEqualInt("Json.getInt fallback", -1, Json.getInt(root, "absent", -1));
+    assertFloatNear("Json.getNumber", 3.14159, Json.getNumber(root, "pi", 0.0), 0.0005);
+    assertFloatNear("Json.getNumber fallback", 1.23, Json.getNumber(root, "absent", 1.23), 0.0001);
+    assertEqualBool("Json.getBool", true, Json.getBool(root, "enabled", false));
+    assertEqualBool("Json.getBool fallback", false, Json.getBool(root, "absent", false));
+    assertEqualBool("Json.isNull true", true, Json.isNull(root, "missing"));
+    assertEqualBool("Json.isNull missing key", true, Json.isNull(root, "absent"));
+    assertEqualBool("Json.isNull false", false, Json.isNull(root, "name"));
+
+    int nestedHandle = Json.arrayIndex(-1, 0);
+    assertEqualInt("Json.arrayIndex invalid handle", -1, nestedHandle);
+    assertEqualInt("Json.arrayLength invalid handle", 0, Json.arrayLength(-1));
+
+    str jsonTmp = getenv("REA_TEST_TMPDIR");
+    if (jsonTmp == "") {
+        markSkip("Json.parseFile", "REA_TEST_TMPDIR not set");
+    } else {
+        str jsonPath = Filesystem.joinPath(jsonTmp, "sample.json");
+        Filesystem.writeAllText(jsonPath, objectJson);
+        int fileDoc = Json.parseFile(jsonPath);
+        assertTrue("Json.parseFile", fileDoc >= 0, "expected parseFile success");
+        Json.closeDocument(fileDoc);
+    }
+
+    str arrayJson = "[\"alpha\",5,2.5,true]";
+    int arrayDoc = Json.parse(arrayJson);
+    assertTrue("Json.parse array", arrayDoc >= 0, "expected parse success");
+    int arrayRoot = Json.root(arrayDoc);
+    assertTrue("Json.root array", arrayRoot >= 0, "expected array root");
+
+    assertEqualInt("Json.arrayLength", 4, Json.arrayLength(arrayRoot));
+    int manualHandle = Json.arrayIndex(arrayRoot, 1);
+    assertTrue("Json.arrayIndex valid", manualHandle >= 0, "expected value handle");
+    Json.free(manualHandle);
+    assertEqualInt("Json.arrayIndex out of range", -1, Json.arrayIndex(arrayRoot, 99));
+
+    assertEqualStr("Json.getStringAt", "alpha", Json.getStringAt(arrayRoot, 0, "fallback"));
+    assertEqualStr("Json.getStringAt fallback", "fallback", Json.getStringAt(arrayRoot, 99, "fallback"));
+    assertEqualInt("Json.getIntAt", 5, Json.getIntAt(arrayRoot, 1, -1));
+    assertEqualInt("Json.getIntAt fallback", -1, Json.getIntAt(arrayRoot, 99, -1));
+    assertFloatNear("Json.getNumberAt", 2.5, Json.getNumberAt(arrayRoot, 2, 0.0), 0.0005);
+    assertFloatNear("Json.getNumberAt fallback", 7.5, Json.getNumberAt(arrayRoot, 99, 7.5), 0.0005);
+    assertEqualBool("Json.getBoolAt", true, Json.getBoolAt(arrayRoot, 3, false));
+    assertEqualBool("Json.getBoolAt fallback", false, Json.getBoolAt(arrayRoot, 99, false));
+
+    Json.closeDocument(arrayDoc);
+    Json.closeDocument(doc);
+}
+
+void testHttp() {
+    writeln();
+    writeln("-- Http --");
+    str baseUrl = getenv("REA_TEST_HTTP_BASE_URL");
+    str tmpDir = getenv("REA_TEST_TMPDIR");
+    if (baseUrl == "") {
+        markSkip("Http suite", "REA_TEST_HTTP_BASE_URL not set");
+        return;
+    }
+
+    str textUrl = baseUrl + "/text";
+    str textBody = Http.get(textUrl);
+    assertEqualStr("Http.get body", "hello world", textBody);
+    assertEqualInt("Http.get status", 200, Http.lastResponseStatus());
+    assertEqualBool("Http.get success", true, Http.wasSuccessful());
+
+    str jsonUrl = baseUrl + "/json";
+    str jsonBody = Http.getJson(jsonUrl);
+    assertTrue("Http.getJson body", Strings.contains(jsonBody, "accept: application/json"), "expected Accept header to be echoed");
+    assertEqualInt("Http.getJson status", 200, Http.lastResponseStatus());
+
+    str postUrl = baseUrl + "/post";
+    str postBody = Http.post(postUrl, "payload", "text/plain");
+    assertTrue("Http.post method", Strings.contains(postBody, "method: POST"), "expected POST method");
+    assertTrue("Http.post content-type", Strings.contains(postBody, "content-type: text/plain"), "expected content type");
+    assertTrue("Http.post body echo", Strings.contains(postBody, "body: payload"), "expected body echo");
+    assertEqualInt("Http.post status", 200, Http.lastResponseStatus());
+
+    str postJsonUrl = baseUrl + "/post-json";
+    str postJsonBody = Http.postJson(postJsonUrl, "{\"value\":42}");
+    assertTrue("Http.postJson method", Strings.contains(postJsonBody, "method: POST"), "expected POST method");
+    assertTrue("Http.postJson content-type", Strings.contains(postJsonBody, "content-type: application/json"), "expected JSON content type");
+    assertTrue("Http.postJson accept", Strings.contains(postJsonBody, "accept: application/json"), "expected JSON accept header");
+    assertTrue("Http.postJson body", Strings.contains(postJsonBody, "body: {\"value\":42}"), "expected body echo");
+    assertEqualInt("Http.postJson status", 200, Http.lastResponseStatus());
+
+    str putUrl = baseUrl + "/put";
+    str putBody = Http.put(putUrl, "data", "text/plain");
+    assertTrue("Http.put method", Strings.contains(putBody, "method: PUT"), "expected PUT method");
+    assertTrue("Http.put content-type", Strings.contains(putBody, "content-type: text/plain"), "expected content type");
+    assertEqualInt("Http.put status", 200, Http.lastResponseStatus());
+
+    str statusUrl = baseUrl + "/status/404";
+    str missingBody = Http.get(statusUrl);
+    assertEqualInt("Http.get 404 status", 404, Http.lastResponseStatus());
+    assertEqualBool("Http.get 404 success", false, Http.wasSuccessful());
+    assertEqualStr("Http.get 404 body", "not found", missingBody);
+
+    if (tmpDir == "") {
+        markSkip("Http.downloadToFile", "REA_TEST_TMPDIR not set");
+    } else {
+        str downloadPath = Filesystem.joinPath(tmpDir, "download.txt");
+        bool downloadOk = Http.downloadToFile(baseUrl + "/download", downloadPath);
+        assertTrue("Http.downloadToFile", downloadOk, "expected download success");
+        str downloadContents = Filesystem.readAllText(downloadPath);
+        assertEqualStr("Http.downloadToFile contents", "download body", downloadContents);
+    }
+
+    str unreachable = "http://127.0.0.1:9/";
+    str unreachableBody = Http.get(unreachable);
+    assertEqualStr("Http.get unreachable body", "", unreachableBody);
+    assertFalse("Http.get unreachable success", Http.wasSuccessful(), "expected failure");
+    int unreachableStatus = Http.lastResponseStatus();
+    if (unreachableStatus < 0) {
+        markPass("Http.get unreachable status");
+    } else {
+        markFail("Http.get unreachable status", "expected negative status");
+    }
+}
+
+int main() {
+    int startingAttr = CRT.TextAttr;
+    bool changedStartingAttr = startingAttr != CRT.LightGray;
+    if (changedStartingAttr) {
+        CRT.TextAttr = CRT.LightGray;
+        applyTextAttrToTerminal(CRT.LightGray);
+    } else {
+        applyTextAttrToTerminal(startingAttr);
+    }
+
+    writeln("Rea standard library test suite");
+    testCRT();
+    testStrings();
+    testDateTime();
+    testFilesystem();
+    testJson();
+    testHttp();
+    writeln();
+    writeln("TOTAL ", executedTests);
+    writeln("FAILED ", failedTests);
+    writeln("SKIPPED ", skippedTests);
+    int exitCode = 0;
+    if (failedTests == 0) {
+        writeln("OVERALL PASS");
+    } else {
+        writeln("OVERALL FAIL");
+        exitCode = 1;
+    }
+
+    if (changedStartingAttr) {
+        CRT.TextAttr = startingAttr;
+        applyTextAttrToTerminal(startingAttr);
+    }
+
+    return exitCode;
+}

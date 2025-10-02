@@ -848,36 +848,116 @@ resolved_field: ;
                 break;
             }
             case AST_BINARY_OP: {
-                 VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
-                 VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
-                 TokenType op = node->token ? node->token->type : TOKEN_UNKNOWN;
-                 if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
-                     op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL ||
-                     op == TOKEN_IN) {
-                     node->var_type = TYPE_BOOLEAN;
-                 }
-                 else if (op == TOKEN_AND || op == TOKEN_OR ) {
-                     if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
-                         node->var_type = TYPE_INTEGER;
-                     } else {
-                         node->var_type = TYPE_BOOLEAN; // Default to boolean for mixed or boolean types
-                     }
-                 }
-                 else if (op == TOKEN_SLASH) {
-                     node->var_type = TYPE_REAL;
-                 }
-                 else if (leftType == TYPE_REAL || rightType == TYPE_REAL) {
-                      node->var_type = TYPE_REAL;
-                 }
-                 else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
-                      node->var_type = TYPE_STRING;
-                 }
-                 else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
-                     node->var_type = TYPE_INTEGER;
-                 }
-                 else {
-                     node->var_type = TYPE_VOID;
-                 }
+                VarType leftType = node->left ? node->left->var_type : TYPE_VOID;
+                VarType rightType = node->right ? node->right->var_type : TYPE_VOID;
+                TokenType op = node->token ? node->token->type : TOKEN_UNKNOWN;
+
+                if (op == TOKEN_EQUAL || op == TOKEN_NOT_EQUAL || op == TOKEN_LESS ||
+                    op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER || op == TOKEN_GREATER_EQUAL ||
+                    op == TOKEN_IN) {
+                    node->var_type = TYPE_BOOLEAN;
+                }
+                else if (op == TOKEN_AND || op == TOKEN_OR ) {
+                    if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                        node->var_type = TYPE_INTEGER;
+                    } else {
+                        node->var_type = TYPE_BOOLEAN; // Default to boolean for mixed or boolean types
+                    }
+                }
+                else if (op == TOKEN_SLASH) {
+                    if (leftType == TYPE_LONG_DOUBLE || rightType == TYPE_LONG_DOUBLE) {
+                        node->var_type = TYPE_LONG_DOUBLE;
+                    } else if (leftType == TYPE_DOUBLE || rightType == TYPE_DOUBLE) {
+                        node->var_type = TYPE_DOUBLE;
+                    } else if (leftType == TYPE_FLOAT || rightType == TYPE_FLOAT) {
+                        node->var_type = TYPE_FLOAT;
+                    } else {
+                        node->var_type = TYPE_DOUBLE; // Default for integer / integer
+                    }
+                }
+                else if (isRealType(leftType) || isRealType(rightType)) {
+                    if (leftType == TYPE_LONG_DOUBLE || rightType == TYPE_LONG_DOUBLE) {
+                        node->var_type = TYPE_LONG_DOUBLE;
+                    } else if (leftType == TYPE_DOUBLE || rightType == TYPE_DOUBLE) {
+                        node->var_type = TYPE_DOUBLE;
+                    } else {
+                        node->var_type = TYPE_FLOAT;
+                    }
+                }
+                else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
+                    node->var_type = TYPE_STRING;
+                }
+                else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
+                    node->var_type = TYPE_INTEGER;
+                }
+                else {
+                    node->var_type = TYPE_VOID;
+                }
+                break;
+            }
+            case AST_TERNARY: {
+                VarType thenType = node->right ? node->right->var_type : TYPE_UNKNOWN;
+                VarType elseType = node->extra ? node->extra->var_type : TYPE_UNKNOWN;
+
+                if (thenType == TYPE_POINTER || elseType == TYPE_POINTER) {
+                    node->var_type = TYPE_POINTER;
+                } else if (isRealType(thenType) && isIntlikeType(elseType)) {
+                    node->var_type = thenType;
+                } else if (isRealType(elseType) && isIntlikeType(thenType)) {
+                    node->var_type = elseType;
+                } else if (isRealType(thenType) && isRealType(elseType)) {
+                    if (thenType == TYPE_LONG_DOUBLE || elseType == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
+                    else if (thenType == TYPE_DOUBLE || elseType == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
+                    else node->var_type = TYPE_FLOAT;
+                } else if (thenType == TYPE_STRING || elseType == TYPE_STRING) {
+                    node->var_type = TYPE_STRING;
+                } else if (thenType == TYPE_BOOLEAN && elseType == TYPE_BOOLEAN) {
+                    node->var_type = TYPE_BOOLEAN;
+                } else if (thenType != TYPE_UNKNOWN && thenType != TYPE_VOID) {
+                    node->var_type = thenType;
+                } else {
+                    node->var_type = elseType;
+                }
+
+                AST *preferredTypeDef = NULL;
+                if (node->var_type == TYPE_POINTER) {
+                    AST *thenDef = (node->right && node->right->var_type == TYPE_POINTER) ? node->right->type_def : NULL;
+                    AST *elseDef = (node->extra && node->extra->var_type == TYPE_POINTER) ? node->extra->type_def : NULL;
+                    if (thenDef && elseDef) {
+                        AST *resolvedThen = resolveTypeAlias(thenDef);
+                        AST *resolvedElse = resolveTypeAlias(elseDef);
+                        if (resolvedThen && resolvedElse && resolvedThen->type == resolvedElse->type) {
+                            if (resolvedThen->type == AST_POINTER_TYPE) {
+                                AST *thenTarget = resolveTypeAlias(resolvedThen->right);
+                                AST *elseTarget = resolveTypeAlias(resolvedElse->right);
+                                if (thenTarget == elseTarget || !elseTarget) {
+                                    preferredTypeDef = thenDef;
+                                } else if (!thenTarget) {
+                                    preferredTypeDef = elseDef;
+                                } else {
+                                    preferredTypeDef = thenDef;
+                                }
+                            } else {
+                                preferredTypeDef = thenDef;
+                            }
+                        } else {
+                            preferredTypeDef = thenDef;
+                        }
+                    } else {
+                        preferredTypeDef = thenDef ? thenDef : elseDef;
+                    }
+                } else {
+                    if (node->right && node->right->type_def && node->right->var_type == node->var_type) {
+                        preferredTypeDef = node->right->type_def;
+                    }
+                    if ((!preferredTypeDef || preferredTypeDef == NULL) && node->extra && node->extra->type_def && node->extra->var_type == node->var_type) {
+                        preferredTypeDef = node->extra->type_def;
+                    }
+                }
+
+                if (preferredTypeDef) {
+                    node->type_def = preferredTypeDef;
+                }
                 break;
             }
             case AST_UNARY_OP:

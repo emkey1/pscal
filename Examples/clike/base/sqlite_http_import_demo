@@ -1,0 +1,260 @@
+#!/usr/bin/env clike
+
+#ifdef extended sqlite
+
+str trimLine(str line) {
+    int len = length(line);
+    while (len > 0) {
+        str tail = copy(line, len, 1);
+        if (tail == "\r" || tail == "\n") {
+            len = len - 1;
+        } else {
+            break;
+        }
+    }
+    if (len < length(line)) {
+        if (len <= 0) {
+            return "";
+        }
+        return copy(line, 1, len);
+    }
+    return line;
+}
+
+int importStocksCsv(int db, str csv) {
+    int insertStmt;
+    int idx;
+    int len;
+    int lineNo;
+    int inserted;
+
+    insertStmt = SqlitePrepare(db, "INSERT INTO quotes(symbol, trade_date, close_price) VALUES (?1, ?2, CAST(?3 AS REAL));");
+    if (insertStmt < 0) {
+        printf("prepare_insert_failed=%s\n", SqliteErrMsg(db));
+        return 0;
+    }
+
+    len = length(csv);
+    idx = 1;
+    lineNo = 0;
+    inserted = 0;
+    while (idx <= len) {
+        int lineEnd = idx;
+        while (lineEnd <= len && copy(csv, lineEnd, 1) != "\n") {
+            lineEnd = lineEnd + 1;
+        }
+        int nextIdx = lineEnd + 1;
+        if (lineEnd > len) {
+            nextIdx = len + 2;
+        }
+        str line;
+        if (lineEnd > idx) {
+            line = copy(csv, idx, lineEnd - idx);
+        } else {
+            line = "";
+        }
+        line = trimLine(line);
+        lineNo = lineNo + 1;
+        if (lineNo == 1 || length(line) == 0) {
+            idx = nextIdx;
+            continue;
+        }
+
+        str symbol = "";
+        str tradeDate = "";
+        str priceText = "";
+        str current = "";
+        int field = 0;
+        int i = 1;
+        int lineLen = length(line);
+        while (i <= lineLen) {
+            str ch = copy(line, i, 1);
+            if (ch == ",") {
+                if (field == 0) {
+                    symbol = current;
+                } else if (field == 1) {
+                    tradeDate = current;
+                } else if (field == 2) {
+                    priceText = current;
+                }
+                field = field + 1;
+                current = "";
+            } else {
+                current = current + ch;
+            }
+            i = i + 1;
+        }
+        if (field == 0) {
+            symbol = current;
+        } else if (field == 1) {
+            tradeDate = current;
+        } else if (field == 2) {
+            priceText = current;
+        }
+
+        if (length(symbol) == 0 || length(tradeDate) == 0 || length(priceText) == 0) {
+            idx = nextIdx;
+            continue;
+        }
+
+        SqliteBindText(insertStmt, 1, symbol);
+        SqliteBindText(insertStmt, 2, tradeDate);
+        SqliteBindText(insertStmt, 3, priceText);
+        int stepRc = SqliteStep(insertStmt);
+        if (stepRc == 101) {
+            inserted = inserted + 1;
+        } else {
+            printf("insert_failed_line=%d rc=%d msg=%s\n", lineNo, stepRc, SqliteErrMsg(db));
+        }
+        SqliteReset(insertStmt);
+        SqliteClearBindings(insertStmt);
+
+        idx = nextIdx;
+    }
+
+    SqliteFinalize(insertStmt);
+    return inserted;
+}
+
+void printRowCount(int db) {
+    int stmt = SqlitePrepare(db, "SELECT COUNT(*) FROM quotes;");
+    if (stmt < 0) {
+        printf("count_prepare_failed=%s\n", SqliteErrMsg(db));
+        return;
+    }
+    int rc = SqliteStep(stmt);
+    if (rc == 100) {
+        printf("rows_in_quotes=%lld\n", SqliteColumnInt(stmt, 0));
+        rc = SqliteStep(stmt);
+    }
+    printf("count_query_done=%d\n", rc);
+    SqliteFinalize(stmt);
+}
+
+void printSymbolSummary(int db) {
+    int stmt = SqlitePrepare(db, "SELECT symbol, COUNT(*) AS days, MIN(trade_date), MAX(trade_date), AVG(close_price) FROM quotes GROUP BY symbol ORDER BY symbol;");
+    if (stmt < 0) {
+        printf("summary_prepare_failed=%s\n", SqliteErrMsg(db));
+        return;
+    }
+    printf("symbol_summary_begin\n");
+    int rc = SqliteStep(stmt);
+    while (rc == 100) {
+        str symbol = SqliteColumnText(stmt, 0);
+        long long days = SqliteColumnInt(stmt, 1);
+        str firstDate = SqliteColumnText(stmt, 2);
+        str lastDate = SqliteColumnText(stmt, 3);
+        double avgPrice = SqliteColumnDouble(stmt, 4);
+        printf("symbol=%s days=%lld range=%s..%s avg_price=%.2f\n", symbol, days, firstDate, lastDate, avgPrice);
+        rc = SqliteStep(stmt);
+    }
+    printf("symbol_summary_end rc=%d\n", rc);
+    SqliteFinalize(stmt);
+}
+
+void printTopDays(int db, str ticker, int limit) {
+    int stmt = SqlitePrepare(db, "SELECT trade_date, close_price FROM quotes WHERE symbol = ?1 ORDER BY close_price DESC LIMIT ?2;");
+    if (stmt < 0) {
+        printf("top_prepare_failed=%s\n", SqliteErrMsg(db));
+        return;
+    }
+    SqliteBindText(stmt, 1, ticker);
+    SqliteBindInt(stmt, 2, limit);
+    printf("top_days_for_%s\n", ticker);
+    int rc = SqliteStep(stmt);
+    int row = 0;
+    while (rc == 100) {
+        row = row + 1;
+        str tradeDate = SqliteColumnText(stmt, 0);
+        double price = SqliteColumnDouble(stmt, 1);
+        printf("  %d: %s close=%.2f\n", row, tradeDate, price);
+        rc = SqliteStep(stmt);
+    }
+    printf("top_days_end rc=%d\n", rc);
+    SqliteFinalize(stmt);
+}
+
+void printAverageSince(int db, str ticker, str minDate) {
+    int stmt = SqlitePrepare(db, "SELECT AVG(close_price) FROM quotes WHERE symbol = ?1 AND trade_date >= ?2;");
+    if (stmt < 0) {
+        printf("avg_prepare_failed=%s\n", SqliteErrMsg(db));
+        return;
+    }
+    SqliteBindText(stmt, 1, ticker);
+    SqliteBindText(stmt, 2, minDate);
+    int rc = SqliteStep(stmt);
+    if (rc == 100) {
+        double avgPrice = SqliteColumnDouble(stmt, 0);
+        str type = SqliteColumnType(stmt, 0);
+        printf("avg_close_since ticker=%s since=%s avg=%.2f type=%s\n", ticker, minDate, avgPrice, type);
+        rc = SqliteStep(stmt);
+    }
+    printf("avg_query_done=%d\n", rc);
+    SqliteFinalize(stmt);
+}
+
+int main() {
+    str url = "https://raw.githubusercontent.com/vega/vega-datasets/master/data/stocks.csv";
+    str dbPath = "stocks_demo.sqlite";
+    printf("sqlite_http_import_demo_start\n");
+    printf("source_url=%s\n", url);
+
+    int session = httpsession();
+    if (session < 0) {
+        printf("http_session_error\n");
+        return 1;
+    }
+    httpsetoption(session, "timeout_ms", 8000);
+    mstream body = mstreamcreate();
+    int status = httprequest(session, "GET", url, NULL, body);
+    if (status != 200) {
+        printf("http_request_failed status=%d err=%d msg=%s\n", status, httperrorcode(session), httplasterror(session));
+        mstreamfree(&body);
+        httpclose(session);
+        return 1;
+    }
+    str csv = mstreambuffer(body);
+    printf("http_download_bytes=%d\n", length(csv));
+    mstreamfree(&body);
+    httpclose(session);
+
+    int db = SqliteOpen(dbPath);
+    if (db < 0) {
+        printf("sqlite_open_failed\n");
+        return 1;
+    }
+    printf("sqlite_db_path=%s\n", dbPath);
+
+    int rc = SqliteExec(db, "DROP TABLE IF EXISTS quotes;");
+    if (rc != 0) {
+        printf("drop_failed rc=%d msg=%s\n", rc, SqliteErrMsg(db));
+    }
+    rc = SqliteExec(db, "CREATE TABLE quotes(symbol TEXT NOT NULL, trade_date TEXT NOT NULL, close_price REAL NOT NULL);");
+    if (rc != 0) {
+        printf("create_table_failed rc=%d msg=%s\n", rc, SqliteErrMsg(db));
+        SqliteClose(db);
+        return 1;
+    }
+
+    int inserted = importStocksCsv(db, csv);
+    printf("rows_imported=%d\n", inserted);
+
+    printRowCount(db);
+    printSymbolSummary(db);
+    printTopDays(db, "AAPL", 3);
+    printAverageSince(db, "MSFT", "2008-01-01");
+
+    rc = SqliteClose(db);
+    printf("sqlite_close_rc=%d\n", rc);
+    printf("sqlite_http_import_demo_done\n");
+    return 0;
+}
+
+#else
+
+int main() {
+    printf("sqlite extended builtins are required for this demo.\n");
+    return 0;
+}
+
+#endif

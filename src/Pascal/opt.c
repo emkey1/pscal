@@ -198,6 +198,19 @@ static AST* optimizeNode(AST* node) {
             }
             break;
         }
+        case AST_TERNARY: {
+            double cond; int cf;
+            if (isConst(node->left, &cond, &cf)) {
+                AST* taken = (cond != 0) ? node->right : node->extra;
+                AST* discard = (cond != 0) ? node->extra : node->right;
+                freeAST(node->left);
+                if (discard) freeAST(discard);
+                if (node->token) freeToken(node->token);
+                free(node);
+                return taken;
+            }
+            break;
+        }
         case AST_THREAD_SPAWN:
         case AST_THREAD_JOIN:
             break;

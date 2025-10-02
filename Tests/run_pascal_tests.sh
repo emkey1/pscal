@@ -56,6 +56,8 @@ import sys
 
 path = sys.argv[1]
 seen = set()
+groups = {}
+DEFAULT_GROUP = 'default'
 with open(path, 'r', encoding='utf-8') as fh:
     for idx, raw_line in enumerate(fh, 1):
         line = raw_line.rstrip('\n')
@@ -70,12 +72,25 @@ with open(path, 'r', encoding='utf-8') as fh:
                 print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             seen.add(parts[1])
-        elif tag == 'function':
+            groups.setdefault(parts[1], set())
+        elif tag == 'group':
             if len(parts) != 3:
-                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                print(f"Invalid group line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             if parts[1] not in seen:
+                print(f"Group references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            groups.setdefault(parts[1], set()).add(parts[2])
+        elif tag == 'function':
+            if len(parts) != 4:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            category, group = parts[1], parts[2]
+            if category not in seen:
                 print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if group != DEFAULT_GROUP and group not in groups.get(category, set()):
+                print(f"Function references unknown group on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
         else:
             print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
@@ -222,6 +237,12 @@ else
   PASCAL_SQLITE_AVAILABLE=0
 fi
 
+if has_ext_builtin_category "$PASCAL_BIN" graphics; then
+  PASCAL_GRAPHICS_AVAILABLE=1
+else
+  PASCAL_GRAPHICS_AVAILABLE=0
+fi
+
 # Iterate over Pascal test sources (files without extensions)
 for src in "$SCRIPT_DIR"/Pascal/*; do
   test_name=$(basename "$src")
@@ -229,10 +250,18 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
     continue
   fi
   # Skip SDL-dependent test unless RUN_SDL=1 forces it
-  if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; } && [ "$test_name" = "SDLFeaturesTest" ]; then
-    echo "Skipping $test_name (SDL disabled)"
-    echo
-    continue
+  if [ "$test_name" = "SDLFeaturesTest" ]; then
+    if [ "$PASCAL_GRAPHICS_AVAILABLE" -ne 1 ]; then
+      echo "Skipping $test_name (graphics builtins unavailable)"
+      echo
+      continue
+    fi
+
+    if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; }; then
+      echo "Skipping $test_name (SDL disabled)"
+      echo
+      continue
+    fi
   fi
 
   if [ -f "$SCRIPT_DIR/Pascal/$test_name.sqlite" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then

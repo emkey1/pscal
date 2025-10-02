@@ -7,6 +7,8 @@ option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable user-provided builtins" ON)
 option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
+option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ON)
+option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
 
 # Base sources that are always built
 set(PSCAL_EXT_BUILTIN_SOURCES
@@ -45,6 +47,16 @@ endif()
 if(ENABLE_EXT_BUILTIN_USER)
     add_subdirectory(user)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_USER_SOURCES})
+endif()
+
+if(ENABLE_EXT_BUILTIN_3D)
+    add_subdirectory(threed)
+    list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_THREED_SOURCES})
+endif()
+
+if(ENABLE_EXT_BUILTIN_GRAPHICS)
+    add_subdirectory(graphics)
+    list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_GRAPHICS_SOURCES})
 endif()
 
 # Expose sources to parent scope

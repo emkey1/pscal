@@ -19,7 +19,7 @@ Date: 2025-09-21
   - Pascal's lexer accepts ASCII identifiers on all libc implementations and comment directives such as `// override builtin fibonacci` to silence intentional builtin replacements.
 - CLI & Docs
   - Pascal, CLike, and Rea CLIs gained `--no-cache` to force recompilation, and documentation for standalone front ends now covers the new builtin procedure call flow.
-  - Added `Examples/Pascal/PerformanceBenchmark`, a comprehensive workload that overrides builtin math routines, along with updated language reference notes.
+  - Added `Examples/pascal/base/PerformanceBenchmark`, a comprehensive workload that overrides builtin math routines, along with updated language reference notes.
 
 ## Improvements
 - Compiler & VM
@@ -27,7 +27,7 @@ Date: 2025-09-21
   - Constant index array reads emit `LOAD_ELEMENT_VALUE_CONST`, `GET_ELEMENT_ADDRESS_CONST`, and other targeted bytecode, while `INC_LOCAL`/`DEC_LOCAL` update real and enum locals safely.
   - Builtin registry ordering stays stable whether SDL is enabled or not, and console attribute tracking leaves terminals in their default color scheme.
 - Tooling & Tests
-  - Regression scripts run all front ends with `--no-cache`, normalize stderr without `memmem`, respect case-sensitive paths on macOS, and disassemble `Examples/rea/hangman5` to ensure vtables precede global constructors.
+  - Regression scripts run all front ends with `--no-cache`, normalize stderr without `memmem`, respect case-sensitive paths on macOS, and disassemble `Examples/rea/base/hangman5` to ensure vtables precede global constructors.
 - Build & Packaging
   - The build probes for AddressSanitizer support before enabling it for `dascal`, falling back gracefully when the toolchain lacks `-fsanitize=address`.
 

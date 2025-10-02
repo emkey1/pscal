@@ -651,8 +651,8 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
         }
     }
     if (range_error) {
-        runtimeError(vm, "Warning: Range check error assigning REAL %Lf to %s.",
-                    real_val, varTypeToString(dest->type));
+        runtimeWarning(vm, "Warning: Range check error assigning REAL %Lf to %s.",
+                       real_val, varTypeToString(dest->type));
     }
 }
 
@@ -758,32 +758,89 @@ void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue) {
     }
 }
 
-// runtimeError - Assuming your existing one is fine.
-void runtimeError(VM* vm, const char* format, ...) {
+static void computeRuntimeLocation(VM* vm, size_t* offset_out, int* line_out) {
+    size_t instruction_offset = 0;
+    int source_line = 0;
+
+    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
+        if (vm->lastInstruction >= vm->chunk->code) {
+            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
+            if (instruction_offset < (size_t)vm->chunk->count) {
+                source_line = vm->chunk->lines[instruction_offset];
+            }
+        }
+    } else if (vm && vm->chunk && vm->chunk->count > 0 && vm->chunk->lines) {
+        instruction_offset = 0;
+        source_line = vm->chunk->lines[0];
+    }
+
+    if (offset_out) {
+        *offset_out = instruction_offset;
+    }
+    if (line_out) {
+        *line_out = source_line;
+    }
+}
+
+static void emitRuntimeLocation(VM* vm, const char* label) {
+    size_t instruction_offset = 0;
+    int source_line = 0;
+    computeRuntimeLocation(vm, &instruction_offset, &source_line);
+
+    if (!label) {
+        label = "[Runtime Location]";
+    }
+
+    fprintf(stderr, "%s Offset: %zu, Line: %d\n", label, instruction_offset, source_line);
+}
+
+void runtimeWarning(VM* vm, const char* format, ...) {
+    if (isatty(STDOUT_FILENO)) {
+        fflush(stdout);
+        resetTextAttributes(stdout);
+        fflush(stdout);
+    }
+    if (isatty(STDERR_FILENO)) {
+        resetTextAttributes(stderr);
+    }
+
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
     fputc('\n', stderr);
+    fflush(stderr);
 
-    // Get precise instruction offset and line for the error.
-    // vm->lastInstruction points at the start of the instruction that ran last
-    // (the one that triggered the runtime error).
+    emitRuntimeLocation(vm, "[Warning Location]");
+}
+
+// runtimeError - Assuming your existing one is fine.
+void runtimeError(VM* vm, const char* format, ...) {
+    if (vm) {
+        vm->abort_requested = true;
+    }
+
+    if (isatty(STDOUT_FILENO)) {
+        fflush(stdout);
+        resetTextAttributes(stdout);
+        fflush(stdout);
+    }
+    if (isatty(STDERR_FILENO)) {
+        resetTextAttributes(stderr);
+    }
+
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    fflush(stderr);
+
     size_t instruction_offset = 0;
     int error_line = 0;
-    if (vm && vm->chunk && vm->lastInstruction && vm->chunk->code && vm->chunk->lines) {
-        if (vm->lastInstruction >= vm->chunk->code) {
-            instruction_offset = (size_t)(vm->lastInstruction - vm->chunk->code);
-            if (instruction_offset < (size_t)vm->chunk->count) {
-                error_line = vm->chunk->lines[instruction_offset];
-            }
-        }
-    } else if (vm && vm->chunk && vm->chunk->count > 0) {
-        // Special case: error on the very first instruction
-        instruction_offset = 0;
-        error_line = vm->chunk->lines[0];
-    }
-    fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+    computeRuntimeLocation(vm, &instruction_offset, &error_line);
+    (void)error_line;
+    emitRuntimeLocation(vm, "[Error Location]");
 
     // --- NEW: Dump crash context (instructions and full stack) ---
     fprintf(stderr, "\n--- VM Crash Context ---\n");
@@ -1015,16 +1072,24 @@ static Value vmHostPrintf(VM* vm) {
                 i++;
             } else if (arg_index < arg_count) {
                 size_t j = i + 1;
-                // Parse minimal flags: support '0' for zero-padding
-                bool zero_pad = false;
-                while (j < flen) {
-                    if (fmt[j] == '0') { zero_pad = true; j++; continue; }
-                    // Ignore other flags for now ('-', '+', ' ', '#')
-                    break;
+                char flags[8];
+                size_t flag_len = 0;
+                const char* flag_chars = "-+ #0'";
+                while (j < flen && strchr(flag_chars, fmt[j]) != NULL) {
+                    if (flag_len + 1 < sizeof(flags)) {
+                        flags[flag_len++] = fmt[j];
+                    }
+                    j++;
                 }
+                flags[flag_len] = '\0';
+                bool width_specified = false;
                 int width = 0;
+                while (j < flen && isdigit((unsigned char)fmt[j])) {
+                    width_specified = true;
+                    width = width * 10 + (fmt[j]-'0');
+                    j++;
+                }
                 int precision = -1;
-                while (j < flen && isdigit((unsigned char)fmt[j])) { width = width * 10 + (fmt[j]-'0'); j++; }
                 if (j < flen && fmt[j] == '.') {
                     j++;
                     precision = 0;
@@ -1042,9 +1107,47 @@ static Value vmHostPrintf(VM* vm) {
                 }
                 char spec = (j < flen) ? fmt[j] : '\0';
 
-                char fmtbuf[32];
+                char fmtbuf[64];
                 char buf[DEFAULT_STRING_CAPACITY];
                 Value v = args[arg_index++];
+                size_t copy_len = (spec && spec != '\0') ? (j - i + 1) : 0;
+                if (copy_len >= sizeof(fmtbuf)) copy_len = sizeof(fmtbuf) - 1;
+                if (copy_len > 0) {
+                    memcpy(fmtbuf, fmt + i, copy_len);
+                    fmtbuf[copy_len] = '\0';
+                } else {
+                    fmtbuf[0] = '%';
+                    size_t pos = 1;
+                    if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                        memcpy(&fmtbuf[pos], flags, flag_len);
+                        pos += flag_len;
+                    }
+                    if (width_specified) {
+                        int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                        if (written > 0) {
+                            if ((size_t)written >= sizeof(fmtbuf) - pos) pos = sizeof(fmtbuf) - 1;
+                            else pos += (size_t)written;
+                        }
+                    }
+                    if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                        fmtbuf[pos++] = '.';
+                        int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                        if (written > 0) {
+                            if ((size_t)written >= sizeof(fmtbuf) - pos) pos = sizeof(fmtbuf) - 1;
+                            else pos += (size_t)written;
+                        }
+                    }
+                    size_t lenmod_len = strlen(lenmod);
+                    if (lenmod_len > 0 && pos + lenmod_len < sizeof(fmtbuf)) {
+                        memcpy(&fmtbuf[pos], lenmod, lenmod_len);
+                        pos += lenmod_len;
+                    }
+                    if (pos < sizeof(fmtbuf)) {
+                        fmtbuf[pos++] = spec ? spec : ' ';
+                    }
+                    fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+                }
+                bool expects_wide_char = (lenmod[0] != '\0' && strpbrk(lenmod, "lL") != NULL);
                 switch (spec) {
                     case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': {
                         unsigned long long u = 0ULL; long long s = 0LL;
@@ -1053,15 +1156,6 @@ static Value vmHostPrintf(VM* vm) {
                             u = (unsigned long long)AS_INTEGER(v);
                         }
                         bool is_unsigned = (spec=='u'||spec=='o'||spec=='x'||spec=='X');
-                if (precision >= 0 && width > 0)
-                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
-                else if (precision >= 0)
-                    snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
-                else if (width > 0)
-                    snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
-                else
-                    snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
-
                         // Cast to the correct type expected by the format length modifier
                         if (is_unsigned) {
                             if (strcmp(lenmod, "ll") == 0) {
@@ -1103,15 +1197,6 @@ static Value vmHostPrintf(VM* vm) {
                     }
                     case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
                         long double rv = isRealType(v.type) ? AS_REAL(v) : (long double)AS_INTEGER(v);
-                        if (precision >= 0 && width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%d%s%c", width, precision, lenmod, spec);
-                        else if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%.%d%s%c", precision, lenmod, spec);
-                        else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), zero_pad ? "%%0%d%s%c" : "%%%d%s%c", width, lenmod, spec);
-                        else
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%s%c", lenmod, spec);
-
                         // If 'L' modifier is present, pass a long double; otherwise pass double
                         if (strcmp(lenmod, "L") == 0) {
                             // Print directly with long double argument
@@ -1128,23 +1213,37 @@ static Value vmHostPrintf(VM* vm) {
                     }
                     case 'c': {
                         char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)AS_INTEGER(v);
-                        if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%dc", width);
-                        else
-                            strcpy(fmtbuf, "%c");
-                        snprintf(buf, sizeof(buf), fmtbuf, ch);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (expects_wide_char) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, lenmod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(lenmod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, (unsigned int)ch);
                         fputs(buf, stdout);
                         break;
                     }
                     case 's': {
                         const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
-                        if (precision >= 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%d.%ds", width, precision);
-                        else if (width > 0)
-                            snprintf(fmtbuf, sizeof(fmtbuf), "%%%ds", width);
-                        else
-                            strcpy(fmtbuf, "%s");
-                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                        char safe_fmt[sizeof(fmtbuf)];
+                        const char* format = fmtbuf;
+                        if (expects_wide_char) {
+                            strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                            safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                            char* mod_pos = strstr(safe_fmt, lenmod);
+                            if (mod_pos) {
+                                size_t remove_len = strlen(lenmod);
+                                memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                                format = safe_fmt;
+                            }
+                        }
+                        snprintf(buf, sizeof(buf), format, sv);
                         fputs(buf, stdout);
                         break;
                     }
@@ -1362,6 +1461,9 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
 
     // Call makeValueForType with the (now potentially non-NULL) type_def_for_value_init
     *(sym->value) = makeValueForType(type, type_def_for_value_init, sym);
+    if (sym->name && strcmp(sym->name, "textattr") == 0) {
+        SET_INT_VALUE(sym->value, 7);
+    }
     // (debug logging removed)
 
     sym->is_alias = false;
@@ -1462,7 +1564,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             sym->upvalue_count = 0;
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
-            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            runtimeWarning(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
             freeValue(sym->value);
             *(sym->value) = array_val;
         }
@@ -1544,7 +1646,7 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             }
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
-            runtimeError(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+            runtimeWarning(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
         }
     }
 
@@ -2130,7 +2232,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     }
                     push(vm, makeInt(ia / ib));
                 } else {
-                    runtimeError(vm, "Runtime Error: Operands for 'div' must be integers. Got %s and %s.",
+                    runtimeError(vm, "Runtime Error: Operands for 'int_div' must be integers. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -3248,13 +3350,13 @@ comparison_error_label:
                     }
                     else if (target_lvalue_ptr->type == TYPE_BYTE && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 255) {
-                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
+                            runtimeWarning(vm, "Warning: Range check error assigning INTEGER %lld to BYTE.", value_to_set.i_val);
                         }
                         SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFF);
                     }
                     else if (target_lvalue_ptr->type == TYPE_WORD && value_to_set.type == TYPE_INTEGER) {
                         if (value_to_set.i_val < 0 || value_to_set.i_val > 65535) {
-                            runtimeError(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
+                            runtimeWarning(vm, "Warning: Range check error assigning INTEGER %lld to WORD.", value_to_set.i_val);
                         }
                         SET_INT_VALUE(target_lvalue_ptr, value_to_set.i_val & 0xFFFF);
                     }
@@ -3454,6 +3556,15 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                if (!gTextAttrInitialized && name_val->s_val &&
+                    (strcasecmp(name_val->s_val, "CRT.TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "crt.textattr") == 0 ||
+                     strcasecmp(name_val->s_val, "textattr") == 0)) {
+                    gTextAttrInitialized = true;
+                    SET_INT_VALUE(sym->value, 7);
+                }
+
                 push(vm, copyValueForStack(sym->value));
                 break;
             }
@@ -3485,6 +3596,15 @@ comparison_error_label:
                 if (!sym || !sym->value) {
                     runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
                     return INTERPRET_RUNTIME_ERROR;
+                }
+
+                if (!gTextAttrInitialized && name_val->s_val &&
+                    (strcasecmp(name_val->s_val, "CRT.TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "TextAttr") == 0 ||
+                     strcasecmp(name_val->s_val, "crt.textattr") == 0 ||
+                     strcasecmp(name_val->s_val, "textattr") == 0)) {
+                    gTextAttrInitialized = true;
+                    SET_INT_VALUE(sym->value, 7);
                 }
 
                 push(vm, copyValueForStack(sym->value));

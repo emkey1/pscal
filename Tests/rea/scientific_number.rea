@@ -1,2 +1,5 @@
 float big = 1e9;
 float small = 2.5e-3;
+float trailingPoint = 3.;
+float leadingPoint = .75;
+float trailingExponent = 6.e1;

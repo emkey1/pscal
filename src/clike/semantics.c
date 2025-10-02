@@ -290,6 +290,11 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltinfunctioncount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltinfunctionname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupcount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupfunctioncount"), TYPE_INT32, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_STRING, 0, 0, 0);
+
 }
 
 static VarType getFunctionType(const char *name) {
@@ -322,6 +327,37 @@ static void analyzeScopedStmt(ASTNodeClike *node, ScopeStack *scopes, VarType re
 
 static int isCharPointerDecl(const ASTNodeClike *decl) {
     return decl && decl->var_type == TYPE_POINTER && decl->element_type == TYPE_CHAR;
+}
+
+static int canAssignToType(VarType target, VarType value, int allowStringToCharPointer) {
+    if (target == TYPE_UNKNOWN || value == TYPE_UNKNOWN) {
+        return 1;
+    }
+    if (target == value) {
+        return 1;
+    }
+    if (isRealType(target) && isRealType(value)) {
+        return 1;
+    }
+    if (isRealType(target) && isIntlikeType(value)) {
+        return 1;
+    }
+    if (target == TYPE_STRING && value == TYPE_CHAR) {
+        return 1;
+    }
+    if (target == TYPE_STRING && isIntlikeType(value)) {
+        return 1;
+    }
+    if (isIntlikeType(target) && isIntlikeType(value)) {
+        return 1;
+    }
+    if (isIntlikeType(target) && value == TYPE_POINTER) {
+        return 1;
+    }
+    if (target == TYPE_POINTER && value == TYPE_STRING && allowStringToCharPointer) {
+        return 1;
+    }
+    return 0;
 }
 
 static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
@@ -375,7 +411,21 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             analyzeExpr(node->left, scopes);
             VarType rt = analyzeExpr(node->right, scopes);
             VarType ft = analyzeExpr(node->third, scopes);
-            if (isRealType(rt) && isIntlikeType(ft)) {
+            if (rt == TYPE_POINTER || ft == TYPE_POINTER) {
+                node->var_type = TYPE_POINTER;
+                node->element_type = TYPE_UNKNOWN;
+                if (rt == TYPE_POINTER && node->right) {
+                    node->element_type = node->right->element_type;
+                }
+                if (ft == TYPE_POINTER && node->third) {
+                    if (node->element_type == TYPE_UNKNOWN) {
+                        node->element_type = node->third->element_type;
+                    } else if (node->third->element_type != TYPE_UNKNOWN &&
+                               node->element_type != node->third->element_type) {
+                        node->element_type = TYPE_UNKNOWN;
+                    }
+                }
+            } else if (isRealType(rt) && isIntlikeType(ft)) {
                 node->var_type = rt;
             } else if (isRealType(ft) && isIntlikeType(rt)) {
                 node->var_type = ft;
@@ -385,6 +435,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 else node->var_type = TYPE_FLOAT;
             } else if (rt == TYPE_STRING || ft == TYPE_STRING) {
                 node->var_type = TYPE_STRING;
+            } else if (rt == TYPE_BOOLEAN && ft == TYPE_BOOLEAN) {
+                node->var_type = TYPE_BOOLEAN;
             } else {
                 node->var_type = rt != TYPE_UNKNOWN ? rt : ft;
             }
@@ -477,13 +529,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 }
             }
             if (lt != TYPE_UNKNOWN && rt != TYPE_UNKNOWN) {
-            if (lt != rt &&
-                !(isRealType(lt) && isRealType(rt)) &&
-                !(isRealType(lt) && isIntlikeType(rt)) &&
-                !(lt == TYPE_STRING && rt == TYPE_CHAR) &&
-                !(isIntlikeType(lt) && isIntlikeType(rt)) &&
-                !(isIntlikeType(lt) && rt == TYPE_POINTER) &&
-                !allowStringToCharPointer) {
+            if (!canAssignToType(lt, rt, allowStringToCharPointer)) {
                 fprintf(stderr,
                         "Type error: cannot assign %s to %s at line %d, column %d\n",
                         varTypeToString(rt), varTypeToString(lt),
@@ -929,19 +975,14 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                     node->left->type == TCAST_STRING) {
                     initType = declType;
                 }
-                if (declType != TYPE_UNKNOWN && initType != TYPE_UNKNOWN) {
-                    if (declType != initType &&
-                        !(isRealType(declType) && isRealType(initType)) &&
-                        !(declType == TYPE_STRING && initType == TYPE_CHAR) &&
-                        !(isIntlikeType(declType) && isIntlikeType(initType)) &&
-                        !(isIntlikeType(declType) && initType == TYPE_POINTER) &&
-                        !(isCharPointerDecl(node) && initType == TYPE_STRING)) {
-                        fprintf(stderr,
-                                "Type error: cannot assign %s to %s at line %d, column %d\n",
-                                varTypeToString(initType), varTypeToString(declType),
-                                node->left->token.line, node->left->token.column);
-                        clike_error_count++;
-                    }
+                if (!canAssignToType(declType,
+                                     initType,
+                                     isCharPointerDecl(node))) {
+                    fprintf(stderr,
+                            "Type error: cannot assign %s to %s at line %d, column %d\n",
+                            varTypeToString(initType), varTypeToString(declType),
+                            node->left->token.line, node->left->token.column);
+                    clike_error_count++;
                 }
             }
             break;
@@ -1012,9 +1053,7 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
                             node->token.line, node->token.column);
                     clike_error_count++;
                 }
-            } else if (t != TYPE_UNKNOWN && t != retType &&
-                       !(isRealType(t) && isRealType(retType)) &&
-                       !(isIntlikeType(t) && isIntlikeType(retType))) {
+            } else if (!canAssignToType(retType, t, 0)) {
                 fprintf(stderr,
                         "Type error: return type %s does not match %s at line %d, column %d\n",
                         varTypeToString(t), varTypeToString(retType),
@@ -1188,6 +1227,20 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
     globalVars.count = 0;
     ScopeStack globalsScope = {0};
     ssPush(&globalsScope);
+    for (int i = 0; i < clike_import_count; ++i) {
+        if (!modules[i].prog) continue;
+        for (int j = 0; j < modules[i].prog->child_count; ++j) {
+            ASTNodeClike *decl = modules[i].prog->children[j];
+            if (decl->type == TCAST_VAR_DECL) {
+                char *name = tokenToCString(decl->token);
+                if (ssAdd(&globalsScope, name, decl->var_type, decl, decl->is_const)) {
+                    vtAdd(&globalVars, name, decl->var_type, decl, decl->is_const);
+                }
+                if (decl->left) analyzeExpr(decl->left, &globalsScope);
+                free(name);
+            }
+        }
+    }
     for (int i = 0; i < program->child_count; ++i) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {

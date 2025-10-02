@@ -19,6 +19,7 @@ Start here to explore the available guides and references in this directory.
 ## Rea front end
 - [rea_overview.md](rea_overview.md): architecture and roadmap of the experimental Rea compiler.
 - [rea_language_reference.md](rea_language_reference.md): full specification of the Rea language.
+- [rea_programmers_guide.md](rea_programmers_guide.md): practical workflows for building, testing, and extending Rea.
 - [rea_tutorial.md](rea_tutorial.md): build and run the Rea compiler with an SDL sample.
 
 ## Tiny compiler

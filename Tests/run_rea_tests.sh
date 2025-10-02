@@ -62,6 +62,8 @@ import sys
 
 path = sys.argv[1]
 seen = set()
+groups = {}
+DEFAULT_GROUP = 'default'
 with open(path, 'r', encoding='utf-8') as fh:
     for idx, raw_line in enumerate(fh, 1):
         line = raw_line.rstrip('\n')
@@ -76,12 +78,25 @@ with open(path, 'r', encoding='utf-8') as fh:
                 print(f"Invalid category line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             seen.add(parts[1])
-        elif tag == 'function':
+            groups.setdefault(parts[1], set())
+        elif tag == 'group':
             if len(parts) != 3:
-                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                print(f"Invalid group line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
             if parts[1] not in seen:
+                print(f"Group references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            groups.setdefault(parts[1], set()).add(parts[2])
+        elif tag == 'function':
+            if len(parts) != 4:
+                print(f"Invalid function line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            category, group = parts[1], parts[2]
+            if category not in seen:
                 print(f"Function references unknown category on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
+                sys.exit(1)
+            if group != DEFAULT_GROUP and group not in groups.get(category, set()):
+                print(f"Function references unknown group on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
                 sys.exit(1)
         else:
             print(f"Unknown directive on line {idx}: {raw_line.rstrip()}", file=sys.stderr)
@@ -142,6 +157,33 @@ exercise_rea_cli_smoke() {
     EXIT_CODE=1
   elif ! grep -q "Compiling Main Program AST to Bytecode" "$tmp_err"; then
     echo "rea --strict --dump-bytecode-only missing disassembly banner" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+
+  echo "---- ReaCLINoRun ----"
+  tmp_out=$(mktemp)
+  tmp_err=$(mktemp)
+  set +e
+  "$REA_BIN" --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
+  status=$?
+  set -e
+  if [ $status -ne 0 ]; then
+    echo "rea --no-run exited with $status" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif [ -s "$tmp_out" ]; then
+    echo "rea --no-run produced unexpected stdout" >&2
+    cat "$tmp_out"
+    EXIT_CODE=1
+  elif ! grep -q "Compilation successful" "$tmp_err"; then
+    echo "rea --no-run missing compilation banner" >&2
+    cat "$tmp_err" >&2
+    EXIT_CODE=1
+  elif grep -q -- "--- executing Program" "$tmp_err"; then
+    echo "rea --no-run should not announce VM execution" >&2
     cat "$tmp_err" >&2
     EXIT_CODE=1
   fi
@@ -332,7 +374,7 @@ done
 echo "---- HangmanExample ----"
 hangman_disasm=$(mktemp)
 set +e
-python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/hangman5 \
+python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/base/hangman5 \
   > /dev/null 2> "$hangman_disasm"
 status=$?
 set -e

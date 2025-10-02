@@ -5,10 +5,11 @@
 
 /*
  * Write a machine-readable listing of the registered extended builtin
- * categories and their functions.  The output format is a series of lines in
- * the form:
+ * categories, their groups, and their functions.  The output format is a
+ * series of lines in the form:
  *   category <name>
- *   function <category> <name>
+ *   group <category> <group>
+ *   function <category> <group> <name>
  * The listing is stable across front ends so regression harnesses can parse
  * it regardless of which interpreter produced the data.
  */

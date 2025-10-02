@@ -2,21 +2,25 @@
 #include "ext_builtins/registry.h"
 
 void registerLandscapeBuiltins(void);
-void registerBalls3DBuiltins(void);
 
 void registerUserBuiltins(void) {
-    extBuiltinRegisterCategory("user");
-    extBuiltinRegisterFunction("user", "LandscapeDrawTerrain");
-    extBuiltinRegisterFunction("user", "LandscapeDrawWater");
-    extBuiltinRegisterFunction("user", "LandscapePrecomputeWorldCoords");
-    extBuiltinRegisterFunction("user", "LandscapePrecomputeWaterOffsets");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DStep");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DStepUltra");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DStepAdvanced");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DStepUltraAdvanced");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DAccelerate");
-    extBuiltinRegisterFunction("user", "BouncingBalls3DDrawUnitSphereFast");
+    const char *category = "user";
+    extBuiltinRegisterCategory(category);
+    extBuiltinRegisterGroup(category, "landscape");
+    extBuiltinRegisterGroup(category, "landscape/rendering");
+    extBuiltinRegisterGroup(category, "landscape/precompute");
+    extBuiltinRegisterFunction(category, "landscape/rendering",
+                               "LandscapeDrawTerrain");
+    extBuiltinRegisterFunction(category, "landscape/rendering",
+                               "LandscapeDrawWater");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapePrecomputeWorldCoords");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapePrecomputeWaterOffsets");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapeBuildHeightField");
+    extBuiltinRegisterFunction(category, "landscape/precompute",
+                               "LandscapeBakeVertexData");
 
     registerLandscapeBuiltins();
-    registerBalls3DBuiltins();
 }

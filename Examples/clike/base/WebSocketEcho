@@ -1,0 +1,84 @@
+#!/usr/bin/env clike
+
+int openSocket(const char *host, int port, int family) {
+    int sock;
+    if (family == 6) {
+        sock = socketcreate(0, 6);
+    } else {
+        sock = socketcreate(0);
+    }
+    if (sock < 0) {
+        printf("socketcreate (%s) failed: %d\n", family == 6 ? "IPv6" : "IPv4", socketlasterror());
+        return -1;
+    }
+    if (socketconnect(sock, host, port) != 0) {
+        printf("socketconnect (%s) failed: %d\n", family == 6 ? "IPv6" : "IPv4", socketlasterror());
+        socketclose(sock);
+        return -1;
+    }
+    return sock;
+}
+
+int main() {
+    const char *host = "ws.ifelse.io";
+    int port = 80;
+
+    int s = openSocket(host, port, 6);
+    if (s < 0) {
+        printf("Retrying with IPv4...\n");
+        s = openSocket(host, port, 4);
+        if (s < 0) {
+            return 1;
+        }
+    }
+
+    if (socketsend(s,
+            "GET /raw HTTP/1.1\r\n"
+            "Host: ws.postman-echo.com\r\n"
+            "Origin: http://ws.postman-echo.com\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "\r\n") < 0) {
+        printf("failed to send handshake: %d\n", socketlasterror());
+        socketclose(s);
+        return 1;
+    }
+
+    mstream resp = socketreceive(s, 1024);
+    if (resp == NULL) {
+        printf("handshake receive failed: %d\n", socketlasterror());
+        socketclose(s);
+        return 1;
+    }
+
+    str handshake = mstreambuffer(resp);
+    printf("handshake:\n%s\n", handshake);
+    mstreamfree(&resp);
+
+    // send masked text frame "hi"
+    if (socketsend(s, "\x81\x82\x12\x34\x56\x78\x7a\x5d") < 0) {
+        printf("failed to send WebSocket frame: %d\n", socketlasterror());
+        socketclose(s);
+        return 1;
+    }
+
+    mstream msg = socketreceive(s, 1024);
+    if (msg == NULL) {
+        printf("echo receive failed: %d\n", socketlasterror());
+        socketclose(s);
+        return 1;
+    }
+
+    str buf = mstreambuffer(msg);
+    int msglen = strlen(buf);
+    if (msglen >= 4) {
+        printf("echo: %c%c\n", buf[3], buf[4]);
+    } else {
+        printf("unexpected echo payload (length=%d)\n", msglen);
+    }
+    mstreamfree(&msg);
+    socketclose(s);
+    return 0;
+}
