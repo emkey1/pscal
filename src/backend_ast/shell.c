@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <regex.h>
 #include <stdbool.h>
 #include <signal.h>
 #include <spawn.h>
@@ -149,6 +150,22 @@ static void shellBufferAppendString(char **buffer, size_t *length, size_t *capac
     }
     memcpy(*buffer + *length, str, add);
     *length += add;
+    (*buffer)[*length] = '\0';
+}
+
+static void shellBufferAppendSlice(char **buffer,
+                                   size_t *length,
+                                   size_t *capacity,
+                                   const char *data,
+                                   size_t slice_len) {
+    if (!data || slice_len == 0) {
+        return;
+    }
+    if (!shellBufferEnsure(buffer, length, capacity, slice_len)) {
+        return;
+    }
+    memcpy(*buffer + *length, data, slice_len);
+    *length += slice_len;
     (*buffer)[*length] = '\0';
 }
 
@@ -301,6 +318,238 @@ static char *shellJoinHistoryWords(char **items, size_t start, size_t end) {
     return result;
 }
 
+static bool shellHistoryCollectUntil(const char **cursor, char delim, char **out_value) {
+    if (!cursor || !*cursor || !out_value) {
+        return false;
+    }
+    const char *p = *cursor;
+    char *value = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    bool escape = false;
+    while (*p) {
+        char c = *p;
+        if (!escape && c == '\\') {
+            escape = true;
+            p++;
+            continue;
+        }
+        if (!escape && c == delim) {
+            *cursor = p + 1;
+            if (!value) {
+                value = strdup("");
+            }
+            if (!value) {
+                return false;
+            }
+            *out_value = value;
+            return true;
+        }
+        if (escape) {
+            if (c != delim && c != '\\') {
+                shellBufferAppendChar(&value, &len, &cap, '\\');
+            }
+            shellBufferAppendChar(&value, &len, &cap, c);
+            escape = false;
+        } else {
+            shellBufferAppendChar(&value, &len, &cap, c);
+        }
+        p++;
+    }
+    free(value);
+    return false;
+}
+
+static bool shellHistoryParseSubstitutionSpec(const char *spec,
+                                              bool *out_is_substitution,
+                                              bool *out_global,
+                                              char **out_pattern,
+                                              char **out_replacement) {
+    if (out_is_substitution) {
+        *out_is_substitution = false;
+    }
+    if (out_global) {
+        *out_global = false;
+    }
+    if (out_pattern) {
+        *out_pattern = NULL;
+    }
+    if (out_replacement) {
+        *out_replacement = NULL;
+    }
+    if (!spec) {
+        return true;
+    }
+    const char *cursor = spec;
+    bool prefix_global = false;
+    if (cursor[0] == 'g' && cursor[1] == 's') {
+        prefix_global = true;
+        cursor++;
+    }
+    if (*cursor != 's') {
+        return true;
+    }
+    cursor++;
+    if (*cursor == '\0') {
+        if (out_is_substitution) {
+            *out_is_substitution = true;
+        }
+        return false;
+    }
+    char delim = *cursor++;
+    char *pattern = NULL;
+    if (!shellHistoryCollectUntil(&cursor, delim, &pattern)) {
+        if (out_is_substitution) {
+            *out_is_substitution = true;
+        }
+        free(pattern);
+        return false;
+    }
+    char *replacement = NULL;
+    if (!shellHistoryCollectUntil(&cursor, delim, &replacement)) {
+        if (out_is_substitution) {
+            *out_is_substitution = true;
+        }
+        free(pattern);
+        free(replacement);
+        return false;
+    }
+    bool trailing_global = false;
+    if (*cursor == 'g') {
+        trailing_global = true;
+        cursor++;
+    }
+    if (*cursor != '\0') {
+        if (out_is_substitution) {
+            *out_is_substitution = true;
+        }
+        free(pattern);
+        free(replacement);
+        return false;
+    }
+    if (out_is_substitution) {
+        *out_is_substitution = true;
+    }
+    if (out_global) {
+        *out_global = prefix_global || trailing_global;
+    }
+    if (out_pattern) {
+        *out_pattern = pattern;
+    } else {
+        free(pattern);
+    }
+    if (out_replacement) {
+        *out_replacement = replacement;
+    } else {
+        free(replacement);
+    }
+    return true;
+}
+
+static void shellHistoryAppendReplacement(char **buffer,
+                                          size_t *length,
+                                          size_t *capacity,
+                                          const char *replacement,
+                                          const char *match_start,
+                                          size_t match_len) {
+    if (!replacement) {
+        return;
+    }
+    for (size_t i = 0; replacement[i]; ++i) {
+        char c = replacement[i];
+        if (c == '&') {
+            if (match_start && match_len > 0) {
+                shellBufferAppendSlice(buffer, length, capacity, match_start, match_len);
+            }
+            continue;
+        }
+        if (c == '\\') {
+            char next = replacement[i + 1];
+            if (next == '\0') {
+                shellBufferAppendChar(buffer, length, capacity, '\\');
+                continue;
+            }
+            i++;
+            switch (next) {
+                case 't':
+                    shellBufferAppendChar(buffer, length, capacity, '\t');
+                    break;
+                case 'n':
+                    shellBufferAppendChar(buffer, length, capacity, '\n');
+                    break;
+                case '\\':
+                    shellBufferAppendChar(buffer, length, capacity, '\\');
+                    break;
+                case '&':
+                    shellBufferAppendChar(buffer, length, capacity, '&');
+                    break;
+                default:
+                    shellBufferAppendChar(buffer, length, capacity, next);
+                    break;
+            }
+            continue;
+        }
+        shellBufferAppendChar(buffer, length, capacity, c);
+    }
+}
+
+static char *shellHistoryApplyRegexSubstitution(const char *entry,
+                                                const char *pattern,
+                                                const char *replacement,
+                                                bool global) {
+    if (!entry || !pattern || !replacement) {
+        return NULL;
+    }
+    regex_t regex;
+    int rc = regcomp(&regex, pattern, REG_EXTENDED);
+    if (rc != 0) {
+        return NULL;
+    }
+
+    char *result = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    const char *cursor = entry;
+    bool replaced = false;
+
+    while (cursor && *cursor) {
+        regmatch_t match;
+        int flags = (cursor != entry) ? REG_NOTBOL : 0;
+        rc = regexec(&regex, cursor, 1, &match, flags);
+        if (rc != 0) {
+            shellBufferAppendString(&result, &length, &capacity, cursor);
+            break;
+        }
+        replaced = true;
+        size_t match_len = (size_t)(match.rm_eo - match.rm_so);
+        shellBufferAppendSlice(&result, &length, &capacity, cursor, (size_t)match.rm_so);
+        const char *match_start = cursor + match.rm_so;
+        shellHistoryAppendReplacement(&result, &length, &capacity, replacement, match_start, match_len);
+        cursor += match.rm_eo;
+        if (!global) {
+            shellBufferAppendString(&result, &length, &capacity, cursor);
+            break;
+        }
+        if (match_len == 0) {
+            if (*cursor == '\0') {
+                break;
+            }
+            shellBufferAppendChar(&result, &length, &capacity, *cursor);
+            cursor++;
+        }
+    }
+
+    if (!replaced) {
+        if (result) {
+            free(result);
+        }
+        result = strdup(entry);
+    }
+
+    regfree(&regex);
+    return result;
+}
+
 static bool shellApplyHistoryDesignator(const char *entry, const char *designator, size_t len, char **out_line) {
     if (out_line) {
         *out_line = NULL;
@@ -327,7 +576,21 @@ static bool shellApplyHistoryDesignator(const char *entry, const char *designato
     bool success = true;
     char *result = NULL;
 
-    if (strcmp(spec, "*") == 0) {
+    bool is_substitution = false;
+    bool substitution_global = false;
+    char *sub_pattern = NULL;
+    char *sub_replacement = NULL;
+    if (!shellHistoryParseSubstitutionSpec(spec, &is_substitution, &substitution_global, &sub_pattern, &sub_replacement)) {
+        success = false;
+    } else if (is_substitution) {
+        result = shellHistoryApplyRegexSubstitution(entry,
+                                                    sub_pattern ? sub_pattern : "",
+                                                    sub_replacement ? sub_replacement : "",
+                                                    substitution_global);
+        if (!result) {
+            success = false;
+        }
+    } else if (strcmp(spec, "*") == 0) {
         if (words.count <= 1) {
             result = strdup("");
         } else {
@@ -360,6 +623,8 @@ static bool shellApplyHistoryDesignator(const char *entry, const char *designato
     }
 
     free(spec);
+    free(sub_pattern);
+    free(sub_replacement);
 
     if (!success || !result) {
         free(result);
@@ -429,6 +694,41 @@ static const char *shellHistoryFindBySubstring(const char *needle, size_t len) {
     }
     free(pattern);
     return NULL;
+}
+
+static const char *shellHistoryFindByRegex(const char *pattern, size_t len, bool *out_invalid) {
+    if (out_invalid) {
+        *out_invalid = false;
+    }
+    if (!pattern || len == 0) {
+        return NULL;
+    }
+    char *expr = strndup(pattern, len);
+    if (!expr) {
+        if (out_invalid) {
+            *out_invalid = true;
+        }
+        return NULL;
+    }
+    regex_t regex;
+    int rc = regcomp(&regex, expr, REG_EXTENDED | REG_NOSUB);
+    free(expr);
+    if (rc != 0) {
+        if (out_invalid) {
+            *out_invalid = true;
+        }
+        return NULL;
+    }
+    const char *result = NULL;
+    for (size_t i = gShellHistory.count; i > 0; --i) {
+        const char *entry = gShellHistory.entries[i - 1];
+        if (entry && regexec(&regex, entry, 0, NULL, 0) == 0) {
+            result = entry;
+            break;
+        }
+    }
+    regfree(&regex);
+    return result;
 }
 
 static char *shellJoinPositionalParameters(void) {
@@ -871,6 +1171,7 @@ static ShellHistoryExpandResult shellExpandHistoryDesignatorAt(const char *input
     const char *search_token_start = NULL;
     size_t search_token_len = 0;
     bool search_substring = false;
+    bool search_regex = false;
 
     if (*cursor == '!') {
         numeric_index = -1;
@@ -912,6 +1213,17 @@ static ShellHistoryExpandResult shellExpandHistoryDesignatorAt(const char *input
         }
         search_token_start = start;
         search_token_len = (size_t)(closing - start);
+        if (search_token_len >= 2 && start[0] == '/' && start[search_token_len - 1] == '/') {
+            search_regex = true;
+            search_token_start = start + 1;
+            search_token_len -= 2;
+            if (search_token_len == 0) {
+                if (out_consumed) {
+                    *out_consumed = (size_t)(cursor - input);
+                }
+                return SHELL_HISTORY_EXPAND_INVALID;
+            }
+        }
         cursor = closing + 1;
         search_substring = true;
     } else {
@@ -952,7 +1264,18 @@ static ShellHistoryExpandResult shellExpandHistoryDesignatorAt(const char *input
     if (has_index) {
         entry = shellHistoryEntryByIndex(numeric_index);
     } else if (search_substring) {
-        entry = shellHistoryFindBySubstring(search_token_start, search_token_len);
+        if (search_regex) {
+            bool invalid = false;
+            entry = shellHistoryFindByRegex(search_token_start, search_token_len, &invalid);
+            if (!entry && invalid) {
+                if (out_consumed) {
+                    *out_consumed = (size_t)(cursor - input);
+                }
+                return SHELL_HISTORY_EXPAND_INVALID;
+            }
+        } else {
+            entry = shellHistoryFindBySubstring(search_token_start, search_token_len);
+        }
     } else {
         entry = shellHistoryFindByPrefix(search_token_start, search_token_len);
     }
