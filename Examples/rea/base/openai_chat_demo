@@ -1,37 +1,41 @@
 #!/usr/bin/env rea
-// OpenAI chat completion demo using the Rea front end.
+// Generic chat completion demo using the Rea front end.
 //
-// This sample targets the new OpenAI API server exposed at
-// http://192.168.110.209:1234 and shows how to call it from Rea code.
+// This sample targets any OpenAI-compatible chat completion server. It can point
+// at the public OpenAI API, a local proxy such as LM Studio, or other services
+// that expose the same HTTP interface.
 //
 // Usage examples:
-//   OPENAI_API_KEY=sk-... ./openai_chat_demo "Say hello in one sentence."
-//   ./openai_chat_demo --api-key sk-... --model gpt-4.1-mini --temperature 0.2 \
+//   LLM_API_KEY=sk-... ./openai_chat_demo "Say hello in one sentence."
+//   ./openai_chat_demo --base-url http://192.168.110.209:1234/v1 \
+//       --model llama-3.1-8b --options '{"temperature":0.2}' \
 //       "Summarise the PSCAL toolchain in 40 words."
 //
 // Command line options:
-//   --model <id>        Override the model name (defaults to OPENAI_MODEL or gpt-4.1-mini)
-//   --system <prompt>   Provide a custom system prompt (defaults to a concise helper prompt)
-//   --base-url <url>    Set the API base URL (defaults to OPENAI_BASE_URL or http://192.168.110.209:1234/v1)
-//   --api-key <key>     Supply an API key (otherwise falls back to OPENAI_API_KEY)
-//   --temperature <n>   Adjust the temperature (numeric literal, overrides the default 0.7)
-//   --options <json>    Send a raw JSON object with additional parameters (overrides --temperature)
+//   --model <id>        Override the model name (default gpt-4.1-mini)
+//   --system <prompt>   Provide a custom system prompt
+//   --base-url <url>    Set the API base URL (default http://127.0.0.1:1234/v1)
+//   --endpoint <path>   Override the chat completion endpoint (default /chat/completions)
+//   --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY or OPENAI_API_KEY)
+//   --temperature <n>   Adjust the temperature (numeric literal)
+//   --options <json>    Send a raw JSON object with additional top-level parameters
 //   --help, -h          Display this message
-//
-//#import "openai";
-#import "openai";
 
 const str DEFAULT_MODEL = "gpt-4.1-mini";
-const str DEFAULT_BASE_URL = "http://192.168.110.209:1234/v1";
+const str DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
+const str DEFAULT_ENDPOINT = "/chat/completions";
 const str DEFAULT_SYSTEM_PROMPT = "You are a concise assistant for PSCAL demo programs.";
 const str DEFAULT_OPTIONS = "{\"temperature\":0.7}";
+const int DEFAULT_TIMEOUT_MS = 30000;
+const str DEFAULT_USER_AGENT = "PSCALChatDemo/1.0";
 
 void printUsage(str programName) {
   writeln("Usage: ", programName, " [options] <prompt>");
   writeln("  --model <id>        Override the model name (default gpt-4.1-mini)");
   writeln("  --system <prompt>   Provide a custom system prompt");
-  writeln("  --base-url <url>    Set the API base URL (default http://192.168.110.209:1234/v1)");
-  writeln("  --api-key <key>     Supply an API key (default OPENAI_API_KEY environment variable)");
+  writeln("  --base-url <url>    Set the API base URL (default http://127.0.0.1:1234/v1)");
+  writeln("  --endpoint <path>   Override the chat completion endpoint (default /chat/completions)");
+  writeln("  --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY/OPENAI_API_KEY)");
   writeln("  --temperature <n>   Adjust the temperature (numeric literal)");
   writeln("  --options <json>    Send a raw JSON object with additional parameters");
   writeln("  --help, -h          Display this message");
@@ -73,30 +77,375 @@ bool isValidNumber(str value) {
   return seenDigit;
 }
 
-str resolveEnvOrDefault(str name, str fallback) {
-  str value = getenv(name);
-  if (value != "") {
-    return value;
+str resolveEnvOrDefault(str primary, str secondary, str fallback) {
+  if (primary != "") {
+    str value = getenv(primary);
+    if (value != "") {
+      return value;
+    }
+  }
+  if (secondary != "") {
+    str alt = getenv(secondary);
+    if (alt != "") {
+      return alt;
+    }
   }
   return fallback;
 }
 
-int main() {
-  if (!hasextbuiltin("openai", "OpenAIChatCompletions")) {
-    writeln("Error: openai extended built-ins are unavailable. Rebuild PSCAL with -DENABLE_EXT_BUILTIN_OPENAI=ON.");
-    return 1;
-  }
+str hexDigits() {
+  return "0123456789ABCDEF";
+}
 
+str charToString(char ch) {
+  str result;
+  setlength(result, 1);
+  result[1] = ch;
+  return result;
+}
+
+int hexDigitValue(char ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ord(ch) - ord('0');
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ord(ch) - ord('A') + 10;
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ord(ch) - ord('a') + 10;
+  }
+  return -1;
+}
+
+int parseHexAt(str text, int index) {
+  int len = length(text);
+  if (index + 3 > len) {
+    return -1;
+  }
+  int value = 0;
+  int i = 0;
+  while (i < 4) {
+    char ch = text[index + i];
+    int digit = hexDigitValue(ch);
+    if (digit < 0) {
+      return -1;
+    }
+    value = (value << 4) + digit;
+    i = i + 1;
+  }
+  return value;
+}
+
+str jsonEscape(str text) {
+  int len = length(text);
+  int i = 1;
+  str result = "";
+  while (i <= len) {
+    char ch = text[i];
+    int code = ord(ch);
+    if (ch == '"') {
+      result = result + "\\\"";
+    } else if (ch == '\\') {
+      result = result + "\\\\";
+    } else if (code == 8) {
+      result = result + "\\b";
+    } else if (code == 9) {
+      result = result + "\\t";
+    } else if (code == 10) {
+      result = result + "\\n";
+    } else if (code == 12) {
+      result = result + "\\f";
+    } else if (code == 13) {
+      result = result + "\\r";
+    } else if (code < 32) {
+      int high = ((code >> 4) & 15) + 1;
+      int low = (code & 15) + 1;
+      str digits = hexDigits();
+      result = result + "\\u00" + charToString(digits[high]) +
+          charToString(digits[low]);
+    } else {
+      result = result + charToString(ch);
+    }
+    i = i + 1;
+  }
+  return result;
+}
+
+bool isWhitespace(char ch) {
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
+int skipWhitespace(str text, int index) {
+  int len = length(text);
+  while (index <= len) {
+    if (!isWhitespace(text[index])) {
+      break;
+    }
+    index = index + 1;
+  }
+  return index;
+}
+
+str substringRange(str text, int startIndex, int endIndex) {
+  if (startIndex > endIndex) {
+    return "";
+  }
+  int len = length(text);
+  if (startIndex < 1) {
+    startIndex = 1;
+  }
+  if (endIndex > len) {
+    endIndex = len;
+  }
+  if (startIndex > endIndex) {
+    return "";
+  }
+  str result = "";
+  int i = startIndex;
+  while (i <= endIndex) {
+    result = result + charToString(text[i]);
+    i = i + 1;
+  }
+  return result;
+}
+
+str trim(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  int startIndex = 1;
+  while (startIndex <= len && isWhitespace(text[startIndex])) {
+    startIndex = startIndex + 1;
+  }
+  int endIndex = len;
+  while (endIndex >= startIndex && isWhitespace(text[endIndex])) {
+    endIndex = endIndex - 1;
+  }
+  if (startIndex > endIndex) {
+    return "";
+  }
+  return substringRange(text, startIndex, endIndex);
+}
+
+bool startsWith(str text, str prefix) {
+  int textLen = length(text);
+  int prefixLen = length(prefix);
+  if (prefixLen == 0) {
+    return true;
+  }
+  if (prefixLen > textLen) {
+    return false;
+  }
+  int i = 1;
+  while (i <= prefixLen) {
+    if (text[i] != prefix[i]) {
+      return false;
+    }
+    i = i + 1;
+  }
+  return true;
+}
+
+str trimTrailingSlash(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return text;
+  }
+  int endIndex = len;
+  while (endIndex > 0 && text[endIndex] == '/') {
+    endIndex = endIndex - 1;
+  }
+  if (endIndex == len) {
+    return text;
+  }
+  return substringRange(text, 1, endIndex);
+}
+
+str ensureLeadingSlash(str text) {
+  if (text == "") {
+    return text;
+  }
+  if (text[1] == '/') {
+    return text;
+  }
+  return "/" + text;
+}
+
+int findSubstring(str haystack, str needle, int startIndex) {
+  int hayLen = length(haystack);
+  int needleLen = length(needle);
+  if (needleLen == 0) {
+    return startIndex;
+  }
+  int limit = hayLen - needleLen + 1;
+  int i = startIndex;
+  while (i <= limit) {
+    bool match = true;
+    int j = 1;
+    while (j <= needleLen) {
+      if (haystack[i + j - 1] != needle[j]) {
+        match = false;
+        break;
+      }
+      j = j + 1;
+    }
+    if (match) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+str extractFirstContent(str response) {
+  int len = length(response);
+  int searchStart = 1;
+  while (searchStart <= len) {
+    int idx = findSubstring(response, "\"content\"", searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + 9;
+    cursor = skipWhitespace(response, cursor);
+    if (cursor <= len && response[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(response, cursor);
+      if (cursor <= len && response[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = response[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = response[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(response, index + 1);
+              if (code < 0) {
+                break;
+              }
+              decoded = decoded + tochar(code & 255);
+              index = index + 4;
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok) {
+          return decoded;
+        }
+      }
+    }
+    searchStart = idx + 8;
+  }
+  return response;
+}
+
+str composeMessages(str systemPrompt, str userPrompt) {
+  str result = "[";
+  if (length(systemPrompt) > 0) {
+    result = result + "{\"role\":\"system\",\"content\":\"" +
+        jsonEscape(systemPrompt) + "\"}";
+    if (length(userPrompt) > 0) {
+      result = result + ",";
+    }
+  }
+  result = result + "{\"role\":\"user\",\"content\":\"" +
+      jsonEscape(userPrompt) + "\"}]";
+  return result;
+}
+
+str normaliseOptions(str optionsJson) {
+  str trimmed = trim(optionsJson);
+  if (trimmed == "") {
+    return "";
+  }
+  int len = length(trimmed);
+  int startIndex = 1;
+  int endIndex = len;
+  if (trimmed[startIndex] == '{' && trimmed[endIndex] == '}' && endIndex - startIndex >= 1) {
+    startIndex = startIndex + 1;
+    endIndex = endIndex - 1;
+    while (startIndex <= endIndex && isWhitespace(trimmed[startIndex])) {
+      startIndex = startIndex + 1;
+    }
+    while (endIndex >= startIndex && isWhitespace(trimmed[endIndex])) {
+      endIndex = endIndex - 1;
+    }
+    if (startIndex > endIndex) {
+      return "";
+    }
+    return substringRange(trimmed, startIndex, endIndex);
+  }
+  return trimmed;
+}
+
+str buildRequestBody(str model, str systemPrompt, str userPrompt, str optionsJson) {
+  str messages = composeMessages(systemPrompt, userPrompt);
+  str body = "{\"model\":\"" + jsonEscape(model) + "\",\"messages\":" + messages;
+  str optionsPayload = normaliseOptions(optionsJson);
+  if (optionsPayload != "") {
+    body = body + "," + optionsPayload;
+  }
+  body = body + "}";
+  return body;
+}
+
+str buildUrl(str baseUrl, str endpoint) {
+  str trimmedEndpoint = trim(endpoint);
+  if (trimmedEndpoint == "") {
+    trimmedEndpoint = DEFAULT_ENDPOINT;
+  }
+  if (startsWith(trimmedEndpoint, "http://") || startsWith(trimmedEndpoint, "https://")) {
+    return trimmedEndpoint;
+  }
+  str base = trim(baseUrl);
+  if (base == "") {
+    base = DEFAULT_BASE_URL;
+  }
+  str prefix = trimTrailingSlash(base);
+  str suffix = ensureLeadingSlash(trimmedEndpoint);
+  return prefix + suffix;
+}
+
+int main() {
   str programName = paramstr(0);
-  str model = resolveEnvOrDefault("OPENAI_MODEL", DEFAULT_MODEL);
-  str baseUrl = resolveEnvOrDefault("OPENAI_BASE_URL", DEFAULT_BASE_URL);
-  str apiKey = getenv("OPENAI_API_KEY");
-  str systemPrompt = resolveEnvOrDefault("OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+  str model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
+  str baseUrl = resolveEnvOrDefault("LLM_API_BASE_URL", "OPENAI_BASE_URL", DEFAULT_BASE_URL);
+  str endpoint = resolveEnvOrDefault("LLM_API_ENDPOINT", "OPENAI_API_ENDPOINT", DEFAULT_ENDPOINT);
+  str apiKey = resolveEnvOrDefault("LLM_API_KEY", "OPENAI_API_KEY", "");
+  str systemPrompt = resolveEnvOrDefault("LLM_SYSTEM_PROMPT", "OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+  str userAgent = resolveEnvOrDefault("LLM_USER_AGENT", "OPENAI_USER_AGENT", DEFAULT_USER_AGENT);
   str optionsOverride = "";
   bool hasOptionsOverride = false;
   bool temperatureProvided = false;
   str temperatureValue = "";
   str userPrompt = "";
+  str endpointOverride = "";
 
   int argc = paramcount();
   int i = 1;
@@ -127,6 +476,14 @@ int main() {
         return 1;
       }
       baseUrl = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else if (arg == "--endpoint") {
+      if (i + 1 > argc) {
+        writeln("Error: --endpoint requires a value.");
+        return 1;
+      }
+      endpointOverride = paramstr(i + 1);
       i = i + 2;
       continue;
     } else if (arg == "--api-key") {
@@ -174,11 +531,6 @@ int main() {
     return 1;
   }
 
-  if (apiKey == "") {
-    writeln("Error: provide an API key via --api-key or set OPENAI_API_KEY.");
-    return 1;
-  }
-
   str optionsJson = DEFAULT_OPTIONS;
   if (temperatureProvided) {
     optionsJson = "{\"temperature\":" + temperatureValue + "}";
@@ -187,19 +539,84 @@ int main() {
     optionsJson = optionsOverride;
   }
 
+  if (endpointOverride != "") {
+    endpoint = endpointOverride;
+  }
+
+  str url = buildUrl(baseUrl, endpoint);
+  str body = buildRequestBody(model, systemPrompt, userPrompt, optionsJson);
+
   writeln("Model: ", model);
   writeln("Base URL: ", baseUrl);
+  writeln("Endpoint: ", endpoint);
   writeln("System prompt: ", systemPrompt);
   writeln("Request options: ", optionsJson);
   writeln("Prompt: ", userPrompt);
   writeln("---");
 
-  str reply = OpenAI.chatWithOptions(model, systemPrompt, userPrompt, optionsJson, apiKey, baseUrl);
-  if (reply == "") {
-    writeln("Error: Empty response body returned by the OpenAI API.");
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Error: Unable to allocate an HTTP session.");
     return 1;
   }
 
-  writeln(reply);
+  httpsetoption(session, "timeout_ms", DEFAULT_TIMEOUT_MS);
+  httpsetheader(session, "Accept", "application/json");
+  httpsetheader(session, "Content-Type", "application/json");
+  if (userAgent != "") {
+    httpsetheader(session, "User-Agent", userAgent);
+  }
+  if (apiKey != "") {
+    httpsetheader(session, "Authorization", "Bearer " + apiKey);
+  }
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "POST", url, body, out);
+  str responseBody = mstreambuffer(out);
+
+  if (status < 0) {
+    writeln("Error: HTTP request failed (status ", status, ")");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return 1;
+  }
+
+  if (status >= 400) {
+    writeln("Error: Server returned HTTP status ", status, ".");
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return 1;
+  }
+
+  str reply = responseBody;
+  if (reply != "") {
+    str extracted = extractFirstContent(reply);
+    if (extracted != "") {
+      reply = extracted;
+    }
+  }
+
+  if (reply == "") {
+    writeln("Warning: Empty response body returned by the server.");
+  } else {
+    writeln(reply);
+  }
+
+  mstreamfree(out);
+  httpclose(session);
   return 0;
 }
