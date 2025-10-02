@@ -50,7 +50,7 @@ jobs:
       - name: Compile Shell examples (dump-only)
         run: |
           set -e
-          for f in Examples/shell/*.psh; do
+          for f in Examples/psh/*.psh; do
             if [ -f "$f" ]; then
               bn=$(basename "$f")
               echo "Shell example: $bn"

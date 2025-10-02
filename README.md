@@ -241,8 +241,8 @@ bindings) is available via direct function calls.
 Example usage:
 
 ```sh
-build/bin/psh Examples/shell/pipeline.psh
-build/bin/psh --dump-bytecode Examples/shell/functions.psh
+build/bin/psh Examples/psh/pipeline.psh
+build/bin/psh --dump-bytecode Examples/psh/functions.psh
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a

@@ -3,7 +3,7 @@
 The shell front end ships with a few minimal scripts that are used by the
 regression suite and serve as reference material for new programs. Each script
 lives alongside this README so you can run it directly with the `psh`
-executable (for example, `build/bin/psh Examples/shell/pipeline.psh`).
+executable (for example, `build/bin/psh Examples/psh/pipeline.psh`).
 
 ## `pipeline.psh`
 
@@ -59,6 +59,38 @@ result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
 complex workflows.
 
+## `logical.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "logical:start"
+false && echo "and-skipped"
+true && echo "and-ran"
+true || echo "or-skipped"
+false || echo "or-ran"
+echo "logical:end"
+```
+
+`psh` wires logical connectors (`&&`, `||`) to dedicated helpers so commands can
+short-circuit based on the status of the previous stage. This sample shows which
+branches execute when paired with the standard `true`/`false` utilities.
+
+## `redirection.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "redirection:start"
+echo "alpha" > tmp_psh_redirection.txt
+echo "beta" >> tmp_psh_redirection.txt
+cat < tmp_psh_redirection.txt
+rm -f tmp_psh_redirection.txt
+echo "redirection:end"
+```
+
+Redirections map to the VM's file descriptor helpers. The script writes to a
+temporary file, appends an extra line, reads it back via input redirection, and
+removes the temporary resource.
+
 ## Running the examples
 
 Configure and build the project first:
@@ -71,7 +103,7 @@ cmake --build build
 You can then run any script directly:
 
 ```sh
-build/bin/psh Examples/shell/pipeline.psh
+build/bin/psh Examples/psh/pipeline.psh
 ```
 
 Pass additional arguments after the script path to expose them to `$0`, `$1`,
