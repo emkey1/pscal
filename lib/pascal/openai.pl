@@ -76,11 +76,13 @@ begin
       #12: OpenAIJsonEscape := OpenAIJsonEscape + '\f';
       #13: OpenAIJsonEscape := OpenAIJsonEscape + '\r';
     else
+    begin
       Code := Ord(Ch);
       if Code < 32 then
         OpenAIJsonEscape := OpenAIJsonEscape + '\u00' + OpenAIHexByte(Code)
       else
         OpenAIJsonEscape := OpenAIJsonEscape + Ch;
+    end;
     end;
   end;
 end;
