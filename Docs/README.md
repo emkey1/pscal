@@ -16,6 +16,9 @@ Start here to explore the available guides and references in this directory.
 - [clike_tutorial.md](clike_tutorial.md): build and run the C-like compiler.
 - [clike_repl_tutorial.md](clike_repl_tutorial.md): interact with the language through the REPL.
 
+## Shell front end
+- [shell_overview.md](shell_overview.md): running shell scripts on the PSCAL VM, caching and builtin integration.
+
 ## Rea front end
 - [rea_overview.md](rea_overview.md): architecture and roadmap of the experimental Rea compiler.
 - [rea_language_reference.md](rea_language_reference.md): full specification of the Rea language.

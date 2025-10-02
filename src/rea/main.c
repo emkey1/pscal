@@ -71,6 +71,8 @@ static const char *REA_USAGE =
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
 
+static const char *const kReaCompilerId = "rea";
+
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
 #if defined(__APPLE__)
@@ -385,7 +387,7 @@ int main(int argc, char **argv) {
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     bool used_cache = 0;
-    if (!no_cache) used_cache = loadBytecodeFromCache(path, argv[0], dep_array, dep_count, &chunk);
+    if (!no_cache) used_cache = loadBytecodeFromCache(path, kReaCompilerId, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);
     if (used_cache) {
 #if defined(__APPLE__)
@@ -393,7 +395,7 @@ int main(int argc, char **argv) {
 #else
 #define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
 #endif
-        char* cache_path = buildCachePath(path);
+        char* cache_path = buildCachePath(path, kReaCompilerId);
         struct stat cache_stat;
         if (!cache_path || stat(cache_path, &cache_stat) != 0 ||
             !importsAreFresh(program, PSCAL_STAT_SEC(cache_stat))) {
@@ -435,7 +437,7 @@ int main(int argc, char **argv) {
         }
         if (compilation_ok) {
             finalizeBytecode(&chunk);
-            saveBytecodeToCache(path, &chunk);
+            saveBytecodeToCache(path, kReaCompilerId, &chunk);
             fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
                     chunk.count, chunk.constants_count);
             if (dump_bytecode_flag) {

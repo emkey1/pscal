@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "tests": [
+    {
+      "id": "pipeline_basic",
+      "name": "Pipeline echoes through cat",
+      "category": "pipeline",
+      "description": "Single pipeline stage forwards data between commands.",
+      "script": "Examples/shell/pipeline.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+    },
+    {
+      "id": "conditionals_loop",
+      "name": "Conditionals syntax placeholder",
+      "category": "control",
+      "description": "if/then/else syntax is parsed (branches execute sequentially until flow control lands).",
+      "script": "Examples/shell/conditionals.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "conditionals:start\nthen-branch\nelse-branch\nconditionals:end"
+    },
+    {
+      "id": "builtin_functions",
+      "name": "Builtins update environment and status",
+      "category": "builtins",
+      "description": "export/unset update environment and shell status variables.",
+      "script": "Examples/shell/functions.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
+    },
+    {
+      "id": "pipeline_cache_hit",
+      "name": "Pipeline cache reuse emits notice",
+      "category": "cache",
+      "description": "Second run loads cached bytecode for the same script.",
+      "script": "Examples/shell/pipeline.psh",
+      "expect": "runtime_ok",
+      "prime_cache": true,
+      "expected_stdout": "pipeline:start\nalpha\npipeline:end",
+      "expected_stderr_substring": "Loaded cached bytecode"
+    }
+  ]
+}

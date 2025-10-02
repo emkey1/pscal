@@ -106,6 +106,8 @@ const char *PASCAL_USAGE =
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
+static const char *const kPascalCompilerId = "pascal";
+
 void initSymbolSystem(void) {
 #ifdef DEBUG
     inserted_global_names = createList();
@@ -210,7 +212,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
             }
 
             if (!no_cache_flag) {
-                used_cache = loadBytecodeFromCache(programName, frontend_path, dep_array, dep_count, &chunk);
+                used_cache = loadBytecodeFromCache(programName, kPascalCompilerId, frontend_path, dep_array, dep_count, &chunk);
             }
             if (dep_array) {
                 free(dep_array);
@@ -228,7 +230,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
-                    saveBytecodeToCache(programName, &chunk);
+                    saveBytecodeToCache(programName, kPascalCompilerId, &chunk);
                     // Silence successful compilation message for cleaner test stderr.
                     // fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {

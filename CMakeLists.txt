@@ -410,6 +410,89 @@ if(BUILD_PSCALD)
     set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 endif()
 
+# Shell front-end executable
+set(SHELL_SOURCES
+    src/shell/main.c
+    src/shell/lexer.c
+    src/shell/parser.c
+    src/shell/ast.c
+    src/shell/semantics.c
+    src/shell/codegen.c
+    src/shell/builtins.c
+    src/shell/opt.c
+    src/shell/stubs.c
+    src/backend_ast/builtin.c
+    src/backend_ast/shell.c
+    src/backend_ast/builtin_network_api.c
+    src/Pascal/globals.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
+    src/compiler/bytecode.c
+    src/vm/vm.c
+    src/symbol/symbol.c
+)
+
+list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND SHELL_SOURCES src/third_party/yyjson/yyjson.c)
+
+if(SDL)
+    list(APPEND SHELL_SOURCES
+        src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
+        src/backend_ast/audio.c
+    )
+endif()
+
+add_executable(psh ${SHELL_SOURCES})
+target_compile_definitions(psh PRIVATE FRONTEND_SHELL)
+if(TARGET CURL::libcurl)
+    target_link_libraries(psh PRIVATE CURL::libcurl m Threads::Threads)
+else()
+    target_link_libraries(psh PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(psh PRIVATE ${PSCAL_SQLITE_LIBS})
+endif()
+
+if(SDL)
+    target_include_directories(psh PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+
+    target_link_directories(psh PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+
+    set(PSH_SDL_LIBS "")
+    if(TARGET SDL2::SDL2)
+        list(APPEND PSH_SDL_LIBS SDL2::SDL2)
+    else()
+        list(APPEND PSH_SDL_LIBS ${SDL2_LIBRARIES})
+    endif()
+    list(APPEND PSH_SDL_LIBS
+        ${PC_SDL2_IMAGE_LIBRARIES}
+        ${PC_SDL2_MIXER_LIBRARIES}
+        ${PC_SDL2_TTF_LIBRARIES}
+        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+    )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND PSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND PSH_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
+    list(APPEND PSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+    list(REMOVE_DUPLICATES PSH_SDL_LIBS)
+    target_link_libraries(psh PRIVATE ${PSH_SDL_LIBS})
+    target_compile_definitions(psh PRIVATE SDL)
+endif()
+
 # Tiny C front-end executable
 set(CLIKE_SOURCES
     src/clike/main.c

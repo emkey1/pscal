@@ -1,0 +1,7 @@
+echo "conditionals:start"
+if true; then
+  echo "then-branch"
+else
+  echo "else-branch"
+fi
+echo "conditionals:end"
