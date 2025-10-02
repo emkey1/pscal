@@ -57,6 +57,8 @@ static ShellRuntimeState gShellRuntime = {
     .pipeline = {0}
 };
 
+static bool gShellExitRequested = false;
+
 typedef struct {
     pid_t pid;
     char *command;
@@ -810,6 +812,7 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
         code = (int)AS_INTEGER(args[0]);
     }
     shellUpdateStatus(code);
+    gShellExitRequested = true;
     vm->exit_requested = true;
     vm->current_builtin_name = "exit";
     return makeVoid();
@@ -957,4 +960,14 @@ Value vmHostShellLastStatus(VM *vm) {
 Value vmHostShellPollJobs(VM *vm) {
     (void)vm;
     return makeInt(shellCollectJobs());
+}
+
+bool shellRuntimeConsumeExitRequested(void) {
+    bool requested = gShellExitRequested;
+    gShellExitRequested = false;
+    return requested;
+}
+
+int shellRuntimeLastStatus(void) {
+    return gShellRuntime.last_status;
 }
