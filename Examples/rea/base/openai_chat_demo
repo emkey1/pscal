@@ -128,6 +128,29 @@ str repeatChar(char ch, int count) {
   return result;
 }
 
+str substringRange(str text, int startIndex, int endIndex) {
+  if (startIndex > endIndex) {
+    return "";
+  }
+  int len = length(text);
+  if (startIndex < 1) {
+    startIndex = 1;
+  }
+  if (endIndex > len) {
+    endIndex = len;
+  }
+  if (startIndex > endIndex) {
+    return "";
+  }
+  str result = "";
+  int i = startIndex;
+  while (i <= endIndex) {
+    result = result + charToString(text[i]);
+    i = i + 1;
+  }
+  return result;
+}
+
 str maskSecret(str value) {
   if (value == "") {
     return "(not set)";
@@ -304,29 +327,6 @@ int skipWhitespace(str text, int index) {
     index = index + 1;
   }
   return index;
-}
-
-str substringRange(str text, int startIndex, int endIndex) {
-  if (startIndex > endIndex) {
-    return "";
-  }
-  int len = length(text);
-  if (startIndex < 1) {
-    startIndex = 1;
-  }
-  if (endIndex > len) {
-    endIndex = len;
-  }
-  if (startIndex > endIndex) {
-    return "";
-  }
-  str result = "";
-  int i = startIndex;
-  while (i <= endIndex) {
-    result = result + charToString(text[i]);
-    i = i + 1;
-  }
-  return result;
 }
 
 str trim(str text) {
