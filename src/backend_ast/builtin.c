@@ -1969,12 +1969,12 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     {
         vmEnableRawMode();
 
-
-    unsigned char ch_byte;
-    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-        ch_byte = '\0';
+        unsigned char ch_byte;
+        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+            ch_byte = '\0';
+        }
+        c = ch_byte;
     }
-    int c = ch_byte;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
