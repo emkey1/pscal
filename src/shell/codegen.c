@@ -1,5 +1,6 @@
 #include "shell/codegen.h"
 #include "shell/builtins.h"
+#include "shell/word_encoding.h"
 #include "core/utils.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,42 @@ static void emitConstantOperand(BytecodeChunk *chunk, int constant_index, int li
 static void emitPushString(BytecodeChunk *chunk, const char *value, int line) {
     int idx = addStringConstant(chunk, value);
     emitConstantOperand(chunk, idx, line);
+}
+
+static char *encodeWord(const ShellWord *word) {
+    if (!word) {
+        return strdup("");
+    }
+    uint8_t flags = 0;
+    if (word->single_quoted) {
+        flags |= SHELL_WORD_FLAG_SINGLE_QUOTED;
+    }
+    if (word->double_quoted) {
+        flags |= SHELL_WORD_FLAG_DOUBLE_QUOTED;
+    }
+    if (word->has_parameter_expansion) {
+        flags |= SHELL_WORD_FLAG_HAS_PARAM;
+    }
+    const char *text = word->text ? word->text : "";
+    size_t len = strlen(text);
+    char *encoded = (char *)malloc(len + 3);
+    if (!encoded) {
+        return NULL;
+    }
+    encoded[0] = SHELL_WORD_ENCODE_PREFIX;
+    encoded[1] = (char)(flags + 1);
+    memcpy(encoded + 2, text, len + 1);
+    return encoded;
+}
+
+static void emitPushWord(BytecodeChunk *chunk, const ShellWord *word, int line) {
+    char *encoded = encodeWord(word);
+    if (!encoded) {
+        emitPushString(chunk, "", line);
+        return;
+    }
+    emitPushString(chunk, encoded, line);
+    free(encoded);
 }
 
 static void emitBuiltinProc(BytecodeChunk *chunk, const char *name, uint8_t arg_count, int line) {
@@ -84,18 +121,22 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command) {
         const ShellWordArray *words = &command->data.simple.words;
         for (size_t i = 0; i < words->count; ++i) {
             const ShellWord *word = words->items[i];
-            emitPushString(chunk, word && word->text ? word->text : "", line);
+            emitPushWord(chunk, word, line);
             arg_count++;
         }
         const ShellRedirectionArray *redirs = &command->data.simple.redirections;
         for (size_t i = 0; i < redirs->count; ++i) {
             const ShellRedirection *redir = redirs->items[i];
             char buffer[256];
+            const ShellWord *target = redir ? redir->target : NULL;
+            char *encoded_target = encodeWord(target);
+            const char *target_text = encoded_target ? encoded_target : "";
             snprintf(buffer, sizeof(buffer), "redir:%s:%s:%s",
                      redir && redir->io_number ? redir->io_number : "",
                      redirTypeName(redir ? redir->type : SHELL_REDIRECT_OUTPUT),
-                     (redir && redir->target && redir->target->text) ? redir->target->text : "");
+                     target_text);
             emitPushString(chunk, buffer, line);
+            free(encoded_target);
             arg_count++;
         }
     }

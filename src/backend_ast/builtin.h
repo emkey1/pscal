@@ -123,6 +123,8 @@ Value vmHostShellPollJobs(struct VM_s* vm);
 bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
+void shellRuntimeSetArg0(const char *name);
+bool shellRuntimeExpandHistoryReference(const char *input, char **out_line);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);

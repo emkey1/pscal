@@ -1,5 +1,6 @@
 #include "shell/semantics.h"
 #include "shell/builtins.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,23 @@ static bool shellVariableDefined(ShellSemanticContext *ctx, const char *name) {
         return false;
     }
     return hashTableLookup(ctx->variable_table, name) != NULL;
+}
+
+static bool shellIsSpecialParameterName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (strcmp(name, "?") == 0 || strcmp(name, "#") == 0 ||
+        strcmp(name, "*") == 0 || strcmp(name, "@") == 0 ||
+        strcmp(name, "0") == 0) {
+        return true;
+    }
+    for (const char *p = name; *p; ++p) {
+        if (!isdigit((unsigned char)*p)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void shellAnnotatePipeline(ShellPipeline *pipeline) {
@@ -159,15 +177,6 @@ static bool shellCommandExistsOnPath(const char *name) {
     return false;
 }
 
-static void shellReportUndefinedVariable(ShellSemanticContext *ctx, const ShellWord *word, const char *name) {
-    if (!ctx || !word || !name) {
-        return;
-    }
-    ctx->error_count++;
-    fprintf(stderr, "shell semantic error (%d:%d): undefined variable '%s'\n",
-            word->line, word->column, name);
-}
-
 static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *command) {
     if (!ctx || !command) {
         return;
@@ -212,8 +221,12 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
         }
         for (size_t j = 0; j < word->expansions.count; ++j) {
             const char *name = word->expansions.items[j];
-            if (name && !shellVariableDefined(ctx, name)) {
-                shellReportUndefinedVariable(ctx, word, name);
+            if (name) {
+                if (shellVariableDefined(ctx, name) || shellIsSpecialParameterName(name)) {
+                    continue;
+                }
+                // Environment variables and dynamically provided shell parameters
+                // are resolved at runtime, so we do not treat them as errors here.
             }
         }
     }

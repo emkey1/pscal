@@ -27,13 +27,6 @@ static int peekChar(const ShellLexer *lexer) {
     return (unsigned char)lexer->src[lexer->pos];
 }
 
-static int peekNextChar(const ShellLexer *lexer) {
-    if (!lexer || lexer->pos + 1 >= lexer->length) {
-        return EOF;
-    }
-    return (unsigned char)lexer->src[lexer->pos + 1];
-}
-
 static int advanceChar(ShellLexer *lexer) {
     if (!lexer || lexer->pos >= lexer->length) {
         return EOF;
@@ -184,7 +177,6 @@ static bool isOperatorDelimiter(int c) {
 }
 
 static ShellToken scanWord(ShellLexer *lexer) {
-    size_t start = lexer->pos;
     bool singleQuoted = false;
     bool doubleQuoted = false;
     bool hasParam = false;
@@ -214,33 +206,59 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 advanceChar(lexer);
                 c = next;
             }
-        } else if (c == '\'"' && !doubleQuoted) {
+        } else if (c == '\'' && !doubleQuoted) {
             singleQuoted = !singleQuoted;
             continue;
         } else if (c == '"') {
             doubleQuoted = !doubleQuoted;
             continue;
-        } else if (c == '$') {
+        } else if (c == '$' && !singleQuoted) {
             hasParam = true;
+            if (bufLen + 2 >= bufCap) {
+                bufCap = bufCap ? bufCap * 2 : 32;
+                char *tmp = (char *)realloc(buffer, bufCap);
+                if (!tmp) {
+                    free(buffer);
+                    return makeErrorToken(lexer, "Out of memory while scanning word");
+                }
+                buffer = tmp;
+            }
+            buffer[bufLen++] = (char)c;
             int next = peekChar(lexer);
             if (next == '{' || next == '(') {
-                // consume balanced structure but keep placeholder
-                advanceChar(lexer);
+                buffer[bufLen++] = (char)advanceChar(lexer);
                 int depth = 1;
                 while (depth > 0) {
                     int inner = peekChar(lexer);
                     if (inner == EOF) {
                         break;
                     }
-                    advanceChar(lexer);
+                    buffer[bufLen++] = (char)advanceChar(lexer);
                     if (inner == '{' || inner == '(') depth++;
                     else if (inner == '}' || inner == ')') depth--;
+                    if (bufLen + 1 >= bufCap) {
+                        bufCap = bufCap ? bufCap * 2 : 32;
+                        char *tmp2 = (char *)realloc(buffer, bufCap);
+                        if (!tmp2) {
+                            free(buffer);
+                            return makeErrorToken(lexer, "Out of memory while scanning word");
+                        }
+                        buffer = tmp2;
+                    }
                 }
-                // append placeholder
                 continue;
             } else {
                 while (isalnum(next) || next == '_' || next == '#') {
-                    advanceChar(lexer);
+                    buffer[bufLen++] = (char)advanceChar(lexer);
+                    if (bufLen + 1 >= bufCap) {
+                        bufCap = bufCap ? bufCap * 2 : 32;
+                        char *tmp3 = (char *)realloc(buffer, bufCap);
+                        if (!tmp3) {
+                            free(buffer);
+                            return makeErrorToken(lexer, "Out of memory while scanning word");
+                        }
+                        buffer = tmp3;
+                    }
                     next = peekChar(lexer);
                 }
                 continue;
