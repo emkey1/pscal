@@ -10,6 +10,9 @@
 //   ./openai_chat_demo --base-url http://192.168.110.209:1234/v1 \
 //       --model llama-3.1-8b --options '{"temperature":0.2}' \
 //       "Summarise the PSCAL toolchain in 40 words."
+//   # LM Studio (local server enabled on port 1234)
+//   ./openai_chat_demo --lmstudio --model llama-3.1-8b-instruct \
+//       "List three fun weekend projects."
 //
 // Command line options:
 //   --model <id>        Override the model name (default gpt-4.1-mini)
@@ -19,6 +22,8 @@
 //   --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY or OPENAI_API_KEY)
 //   --temperature <n>   Adjust the temperature (numeric literal)
 //   --options <json>    Send a raw JSON object with additional top-level parameters
+//   --lmstudio          Shortcut for LM Studio defaults (base=http://127.0.0.1:1234,
+//                      endpoint=/v1/chat/completions)
 //   --help, -h          Display this message
 
 const str DEFAULT_MODEL = "gpt-4.1-mini";
@@ -38,6 +43,7 @@ void printUsage(str programName) {
   writeln("  --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY/OPENAI_API_KEY)");
   writeln("  --temperature <n>   Adjust the temperature (numeric literal)");
   writeln("  --options <json>    Send a raw JSON object with additional parameters");
+  writeln("  --lmstudio          Shortcut for LM Studio defaults (base=http://127.0.0.1:1234, endpoint=/v1/chat/completions)");
   writeln("  --help, -h          Display this message");
 }
 
@@ -529,6 +535,9 @@ int main() {
   str temperatureValue = "";
   str userPrompt = "";
   str endpointOverride = "";
+  bool useLmStudioPreset = false;
+  bool baseUrlExplicit = false;
+  bool endpointExplicit = false;
 
   int argc = paramcount();
   int i = 1;
@@ -559,6 +568,7 @@ int main() {
         return 1;
       }
       baseUrl = paramstr(i + 1);
+      baseUrlExplicit = true;
       i = i + 2;
       continue;
     } else if (arg == "--endpoint") {
@@ -567,6 +577,7 @@ int main() {
         return 1;
       }
       endpointOverride = paramstr(i + 1);
+      endpointExplicit = true;
       i = i + 2;
       continue;
     } else if (arg == "--api-key") {
@@ -600,6 +611,10 @@ int main() {
       optionsOverride = paramstr(i + 1);
       i = i + 2;
       continue;
+    } else if (arg == "--lmstudio") {
+      useLmStudioPreset = true;
+      i = i + 1;
+      continue;
     } else {
       if (userPrompt != "") {
         userPrompt = userPrompt + " ";
@@ -622,6 +637,15 @@ int main() {
     optionsJson = optionsOverride;
   }
 
+  if (useLmStudioPreset) {
+    if (!baseUrlExplicit) {
+      baseUrl = "http://127.0.0.1:1234";
+    }
+    if (!endpointExplicit) {
+      endpointOverride = "/v1/chat/completions";
+    }
+  }
+
   if (endpointOverride != "") {
     endpoint = endpointOverride;
   }
@@ -635,6 +659,9 @@ int main() {
   writeln("System prompt: ", systemPrompt);
   writeln("Request options: ", optionsJson);
   writeln("Prompt: ", userPrompt);
+  if (useLmStudioPreset) {
+    writeln("LM Studio preset active. Ensure the local server is running and copy the exact model ID from the LM Studio API panel.");
+  }
   writeln("---");
 
   int session = httpsession();
@@ -679,6 +706,9 @@ int main() {
     writeln("Error: Server returned HTTP status ", status, ".");
     if (responseBody != "") {
       writeln("Response: ", responseBody);
+    }
+    if (status == 400) {
+      writeln("Hint: Double-check the endpoint and model identifier. LM Studio returns HTTP 400 when the local server is disabled or the model slug does not match the value in its API panel.");
     }
     mstreamfree(out);
     httpclose(session);
