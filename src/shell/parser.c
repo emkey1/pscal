@@ -1,0 +1,636 @@
+#include "shell/parser.h"
+#include "core/utils.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void advance(ShellParser *parser);
+static bool check(const ShellParser *parser, ShellTokenType type);
+static bool match(ShellParser *parser, ShellTokenType type);
+static void consume(ShellParser *parser, ShellTokenType type, const char *message);
+static void synchronizeStatementBoundary(ShellParser *parser);
+static ShellCommand *parseCommand(ShellParser *parser);
+static ShellCommand *parseAndOr(ShellParser *parser);
+static ShellPipeline *parsePipeline(ShellParser *parser);
+static ShellCommand *parsePrimary(ShellParser *parser);
+static ShellCommand *parseSimpleCommand(ShellParser *parser);
+static ShellCommand *parseIfCommand(ShellParser *parser);
+static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until);
+static ShellCommand *parseForCommand(ShellParser *parser);
+static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
+                                     ShellTokenType terminator2, ShellTokenType terminator3);
+static void populateWordExpansions(ShellWord *word);
+static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
+
+ShellProgram *shellParseString(const char *source, ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+    memset(parser, 0, sizeof(*parser));
+    shellInitLexer(&parser->lexer, source);
+    parser->current.lexeme = NULL;
+    parser->previous.lexeme = NULL;
+    advance(parser);
+
+    ShellProgram *program = shellCreateProgram();
+    if (!program) {
+        return NULL;
+    }
+
+    while (!parser->had_error && parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+            continue;
+        }
+        ShellCommand *command = parseCommand(parser);
+        if (command) {
+            shellProgramAddCommand(program, command);
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+                advance(parser);
+            }
+        } else if (parser->current.type != SHELL_TOKEN_EOF) {
+            // Allow implicit separators before EOF or reserved words like fi/done
+            if (parser->current.type == SHELL_TOKEN_FI || parser->current.type == SHELL_TOKEN_DONE ||
+                parser->current.type == SHELL_TOKEN_ESAC || parser->current.type == SHELL_TOKEN_ELSE ||
+                parser->current.type == SHELL_TOKEN_ELIF) {
+                continue;
+            }
+            parserErrorAt(parser, &parser->current, "Expected command separator");
+            synchronizeStatementBoundary(parser);
+        }
+    }
+
+    return program;
+}
+
+void shellParserFree(ShellParser *parser) {
+    if (!parser) {
+        return;
+    }
+    shellFreeToken(&parser->current);
+    shellFreeToken(&parser->previous);
+}
+
+static void advance(ShellParser *parser) {
+    shellFreeToken(&parser->previous);
+    parser->previous = parser->current;
+    parser->current = shellNextToken(&parser->lexer);
+}
+
+static bool check(const ShellParser *parser, ShellTokenType type) {
+    return parser->current.type == type;
+}
+
+static bool match(ShellParser *parser, ShellTokenType type) {
+    if (!check(parser, type)) {
+        return false;
+    }
+    advance(parser);
+    return true;
+}
+
+static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message) {
+    if (!parser || parser->had_error) {
+        return;
+    }
+    int line = token ? token->line : parser->lexer.line;
+    int column = token ? token->column : parser->lexer.column;
+    fprintf(stderr, "shell parse error at %d:%d: %s\n", line, column, message ? message : "error");
+    parser->had_error = true;
+    parser->panic_mode = true;
+}
+
+static void consume(ShellParser *parser, ShellTokenType type, const char *message) {
+    if (parser->current.type == type) {
+        advance(parser);
+        return;
+    }
+    parserErrorAt(parser, &parser->current, message);
+}
+
+static void synchronizeStatementBoundary(ShellParser *parser) {
+    while (parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->previous.type == SHELL_TOKEN_SEMICOLON || parser->previous.type == SHELL_TOKEN_NEWLINE) {
+            parser->panic_mode = false;
+            return;
+        }
+        switch (parser->current.type) {
+            case SHELL_TOKEN_IF:
+            case SHELL_TOKEN_THEN:
+            case SHELL_TOKEN_ELIF:
+            case SHELL_TOKEN_ELSE:
+            case SHELL_TOKEN_FI:
+            case SHELL_TOKEN_FOR:
+            case SHELL_TOKEN_WHILE:
+            case SHELL_TOKEN_UNTIL:
+            case SHELL_TOKEN_DO:
+            case SHELL_TOKEN_DONE:
+                parser->panic_mode = false;
+                return;
+            default:
+                break;
+        }
+        advance(parser);
+    }
+}
+
+static ShellCommand *parseCommand(ShellParser *parser) {
+    ShellCommand *command = parseAndOr(parser);
+    if (!command) {
+        return NULL;
+    }
+    if (match(parser, SHELL_TOKEN_AMPERSAND)) {
+        command->exec.runs_in_background = true;
+        command->exec.is_async_parent = true;
+    }
+    return command;
+}
+
+static ShellCommand *parseAndOr(ShellParser *parser) {
+    ShellPipeline *first = parsePipeline(parser);
+    if (!first) {
+        return NULL;
+    }
+
+    ShellLogicalList *logical = NULL;
+    while (true) {
+        ShellLogicalConnector connector;
+        if (match(parser, SHELL_TOKEN_AND_AND)) {
+            connector = SHELL_LOGICAL_AND;
+        } else if (match(parser, SHELL_TOKEN_OR_OR)) {
+            connector = SHELL_LOGICAL_OR;
+        } else {
+            break;
+        }
+        ShellPipeline *next = parsePipeline(parser);
+        if (!next) {
+            break;
+        }
+        if (!logical) {
+            logical = shellCreateLogicalList();
+            shellLogicalListAdd(logical, first, SHELL_LOGICAL_AND);
+        }
+        shellLogicalListAdd(logical, next, connector);
+    }
+
+    if (logical) {
+        ShellCommand *cmd = shellCreateLogicalCommand(logical);
+        if (cmd) {
+            cmd->line = first && first->command_count > 0 && first->commands[0]
+                            ? first->commands[0]->line
+                            : parser->current.line;
+            cmd->column = first && first->command_count > 0 && first->commands[0]
+                              ? first->commands[0]->column
+                              : parser->current.column;
+        }
+        return cmd;
+    }
+
+    ShellCommand *cmd = shellCreatePipelineCommand(first);
+    if (cmd) {
+        if (first && first->command_count > 0 && first->commands[0]) {
+            cmd->line = first->commands[0]->line;
+            cmd->column = first->commands[0]->column;
+        } else {
+            cmd->line = parser->current.line;
+            cmd->column = parser->current.column;
+        }
+        if (first && first->command_count > 0) {
+            for (size_t i = 0; i < first->command_count; ++i) {
+                first->commands[i]->exec.pipeline_index = (int)i;
+                first->commands[i]->exec.is_pipeline_head = (i == 0);
+                first->commands[i]->exec.is_pipeline_tail = (i + 1 == first->command_count);
+            }
+        }
+    }
+    return cmd;
+}
+
+static ShellPipeline *parsePipeline(ShellParser *parser) {
+    ShellPipeline *pipeline = shellCreatePipeline();
+    if (!pipeline) {
+        return NULL;
+    }
+
+    ShellCommand *command = parsePrimary(parser);
+    if (!command) {
+        return pipeline;
+    }
+    shellPipelineAddCommand(pipeline, command);
+
+    while (true) {
+        if (match(parser, SHELL_TOKEN_PIPE)) {
+            ShellCommand *next = parsePrimary(parser);
+            if (!next) {
+                break;
+            }
+            shellPipelineAddCommand(pipeline, next);
+            continue;
+        }
+        if (match(parser, SHELL_TOKEN_PIPE_AMP)) {
+            pipeline->negated = true;
+            ShellCommand *next = parsePrimary(parser);
+            if (next) {
+                shellPipelineAddCommand(pipeline, next);
+            }
+            break;
+        }
+        break;
+    }
+
+    for (size_t i = 0; i < pipeline->command_count; ++i) {
+        pipeline->commands[i]->exec.pipeline_index = (int)i;
+        pipeline->commands[i]->exec.is_pipeline_head = (i == 0);
+        pipeline->commands[i]->exec.is_pipeline_tail = (i + 1 == pipeline->command_count);
+    }
+    return pipeline;
+}
+
+static ShellProgram *parseSubshellBody(ShellParser *parser) {
+    ShellProgram *body = shellCreateProgram();
+    while (!parser->had_error && parser->current.type != SHELL_TOKEN_RPAREN && parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+            continue;
+        }
+        ShellCommand *command = parseCommand(parser);
+        if (command) {
+            shellProgramAddCommand(body, command);
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+        }
+    }
+    consume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
+    return body;
+}
+
+static ShellCommand *parsePrimary(ShellParser *parser) {
+    switch (parser->current.type) {
+        case SHELL_TOKEN_LPAREN: {
+            int line = parser->current.line;
+            int column = parser->current.column;
+            advance(parser);
+            ShellProgram *body = parseSubshellBody(parser);
+            ShellCommand *cmd = shellCreateSubshellCommand(body);
+            if (cmd) {
+                cmd->line = line;
+                cmd->column = column;
+            }
+            return cmd;
+        }
+        case SHELL_TOKEN_IF:
+            return parseIfCommand(parser);
+        case SHELL_TOKEN_WHILE:
+            return parseLoopCommand(parser, false);
+        case SHELL_TOKEN_UNTIL:
+            return parseLoopCommand(parser, true);
+        case SHELL_TOKEN_FOR:
+            return parseForCommand(parser);
+        default:
+            return parseSimpleCommand(parser);
+    }
+}
+
+static ShellCommand *parseSimpleCommand(ShellParser *parser) {
+    ShellCommand *command = shellCreateSimpleCommand();
+    if (!command) {
+        return NULL;
+    }
+    command->line = parser->current.line;
+    command->column = parser->current.column;
+
+    bool saw_word = false;
+    while (!parser->had_error) {
+        switch (parser->current.type) {
+            case SHELL_TOKEN_WORD:
+            case SHELL_TOKEN_ASSIGNMENT:
+            case SHELL_TOKEN_PARAMETER: {
+                ShellTokenType type = parser->current.type;
+                const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+                bool single_quoted = parser->current.single_quoted;
+                bool double_quoted = parser->current.double_quoted;
+                bool has_param = parser->current.contains_parameter_expansion;
+                int line = parser->current.line;
+                int column = parser->current.column;
+                advance(parser);
+                ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
+                if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
+                    shellWordAddExpansion(word, lexeme + 1);
+                }
+                populateWordExpansions(word);
+                shellCommandAddWord(command, word);
+                saw_word = true;
+                continue;
+            }
+            case SHELL_TOKEN_IO_NUMBER: {
+                int line = parser->current.line;
+                int column = parser->current.column;
+                char *io_number = parser->current.lexeme ? strdup(parser->current.lexeme) : NULL;
+                advance(parser);
+                ShellTokenType redir_type = parser->current.type;
+                advance(parser);
+                ShellRedirectionType type;
+                switch (redir_type) {
+                    case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
+                    case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
+                    case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
+                    case SHELL_TOKEN_LT_LT: type = SHELL_REDIRECT_HEREDOC; break;
+                    case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
+                    case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
+                    case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
+                    default:
+                        parserErrorAt(parser, &parser->current, "Expected redirection operator");
+                        free(io_number);
+                        return command;
+                }
+                ShellWord *target = NULL;
+                if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
+                    parser->current.type == SHELL_TOKEN_PARAMETER) {
+                    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+                    bool single_quoted = parser->current.single_quoted;
+                    bool double_quoted = parser->current.double_quoted;
+                    bool has_param = parser->current.contains_parameter_expansion;
+                    int target_line = parser->current.line;
+                    int target_column = parser->current.column;
+                    advance(parser);
+                    target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
+                    populateWordExpansions(target);
+                } else {
+                    parserErrorAt(parser, &parser->current, "Expected redirection target");
+                }
+                ShellRedirection *redir = shellCreateRedirection(type, io_number, target, line, column);
+                shellCommandAddRedirection(command, redir);
+                free(io_number);
+                continue;
+            }
+            case SHELL_TOKEN_LT:
+            case SHELL_TOKEN_GT:
+            case SHELL_TOKEN_GT_GT:
+            case SHELL_TOKEN_LT_LT:
+            case SHELL_TOKEN_LT_AND:
+            case SHELL_TOKEN_GT_AND:
+            case SHELL_TOKEN_CLOBBER: {
+                ShellTokenType redirTokType = parser->current.type;
+                int redir_line = parser->current.line;
+                int redir_column = parser->current.column;
+                advance(parser);
+                ShellRedirectionType type;
+                switch (redirTokType) {
+                    case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
+                    case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
+                    case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
+                    case SHELL_TOKEN_LT_LT: type = SHELL_REDIRECT_HEREDOC; break;
+                    case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
+                    case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
+                    case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
+                    default: type = SHELL_REDIRECT_OUTPUT; break;
+                }
+                ShellWord *target = NULL;
+                if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
+                    parser->current.type == SHELL_TOKEN_PARAMETER) {
+                    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+                    bool single_quoted = parser->current.single_quoted;
+                    bool double_quoted = parser->current.double_quoted;
+                    bool has_param = parser->current.contains_parameter_expansion;
+                    int target_line = parser->current.line;
+                    int target_column = parser->current.column;
+                    advance(parser);
+                    target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
+                    populateWordExpansions(target);
+                } else {
+                    parserErrorAt(parser, &parser->current, "Expected redirection target");
+                }
+                ShellRedirection *redir = shellCreateRedirection(type, NULL, target, redir_line, redir_column);
+                shellCommandAddRedirection(command, redir);
+                continue;
+            }
+            default:
+                break;
+        }
+        break;
+    }
+
+    if (!saw_word && command->data.simple.words.count == 0 && command->data.simple.redirections.count == 0) {
+        parserErrorAt(parser, &parser->current, "Expected command word");
+    }
+    return command;
+}
+
+static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
+                                     ShellTokenType terminator2, ShellTokenType terminator3) {
+    ShellProgram *block = shellCreateProgram();
+    while (!parser->had_error && parser->current.type != terminator1 &&
+           parser->current.type != terminator2 && parser->current.type != terminator3 &&
+           parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+            continue;
+        }
+        ShellCommand *command = parseCommand(parser);
+        if (command) {
+            shellProgramAddCommand(block, command);
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+            advance(parser);
+        }
+    }
+    return block;
+}
+
+static ShellCommand *parseIfTail(ShellParser *parser);
+
+static ShellCommand *parseIfCommand(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    advance(parser); // consume 'if'
+    ShellPipeline *condition = parsePipeline(parser);
+    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+        advance(parser);
+    }
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        advance(parser);
+    }
+    consume(parser, SHELL_TOKEN_THEN, "Expected 'then' after if condition");
+    ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
+    ShellProgram *else_block = NULL;
+
+    if (match(parser, SHELL_TOKEN_ELIF)) {
+        ShellCommand *elif_cmd = parseIfTail(parser);
+        else_block = shellCreateProgram();
+        shellProgramAddCommand(else_block, elif_cmd);
+    } else if (match(parser, SHELL_TOKEN_ELSE)) {
+        else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+        goto done;
+    } else {
+        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+    }
+
+done:
+    ShellConditional *conditional = shellCreateConditional(condition, then_block, else_block);
+    ShellCommand *cmd = shellCreateConditionalCommand(conditional);
+    if (cmd) {
+        cmd->line = line;
+        cmd->column = column;
+    }
+    return cmd;
+}
+
+static ShellCommand *parseIfTail(ShellParser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    // parser currently after 'elif'
+    ShellPipeline *condition = parsePipeline(parser);
+    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+        advance(parser);
+    }
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        advance(parser);
+    }
+    consume(parser, SHELL_TOKEN_THEN, "Expected 'then' after elif condition");
+    ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
+    ShellProgram *else_block = NULL;
+    if (match(parser, SHELL_TOKEN_ELIF)) {
+        ShellCommand *elif_cmd = parseIfTail(parser);
+        else_block = shellCreateProgram();
+        shellProgramAddCommand(else_block, elif_cmd);
+    } else if (match(parser, SHELL_TOKEN_ELSE)) {
+        else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+    } else {
+        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+    }
+    ShellConditional *conditional = shellCreateConditional(condition, then_block, else_block);
+    ShellCommand *cmd = shellCreateConditionalCommand(conditional);
+    if (cmd) {
+        cmd->line = line;
+        cmd->column = column;
+    }
+    return cmd;
+}
+
+static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    advance(parser); // consume keyword
+    ShellPipeline *condition = parsePipeline(parser);
+    consume(parser, SHELL_TOKEN_DO, "Expected 'do' after loop condition");
+    ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    consume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close loop");
+    ShellLoop *loop = shellCreateLoop(is_until, condition, body);
+    ShellCommand *cmd = shellCreateLoopCommand(loop);
+    if (cmd) {
+        cmd->line = line;
+        cmd->column = column;
+    }
+    return cmd;
+}
+
+static ShellCommand *parseForCommand(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    advance(parser); // consume 'for'
+    if (parser->current.type != SHELL_TOKEN_WORD && parser->current.type != SHELL_TOKEN_ASSIGNMENT) {
+        parserErrorAt(parser, &parser->current, "Expected identifier after for");
+    }
+    const char *var_lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+    int var_line = parser->current.line;
+    int var_column = parser->current.column;
+    advance(parser);
+    ShellCommand *command = shellCreateSimpleCommand();
+    ShellWord *var_word = shellCreateWord(var_lexeme, false, false, false, var_line, var_column);
+    shellCommandAddWord(command, var_word);
+
+    ShellProgram *body = NULL;
+    if (match(parser, SHELL_TOKEN_IN)) {
+        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
+               parser->current.type == SHELL_TOKEN_PARAMETER) {
+            const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+            bool single_quoted = parser->current.single_quoted;
+            bool double_quoted = parser->current.double_quoted;
+            bool has_param = parser->current.contains_parameter_expansion;
+            int word_line = parser->current.line;
+            int word_column = parser->current.column;
+            advance(parser);
+            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param,
+                                              word_line, word_column);
+            populateWordExpansions(word);
+            shellCommandAddWord(command, word);
+            if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+                break;
+            }
+        }
+    }
+
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+        advance(parser);
+    }
+    consume(parser, SHELL_TOKEN_DO, "Expected 'do' after for list");
+    body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    consume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for loop");
+
+    ShellPipeline *condition = shellCreatePipeline();
+    if (condition) {
+        shellPipelineAddCommand(condition, command);
+    }
+    ShellLoop *loop = shellCreateLoop(false, condition, body);
+    ShellCommand *cmd = shellCreateLoopCommand(loop);
+    if (cmd) {
+        cmd->line = line;
+        cmd->column = column;
+    }
+    return cmd;
+}
+
+static void populateWordExpansions(ShellWord *word) {
+    if (!word || !word->text) {
+        return;
+    }
+    const char *p = word->text;
+    while (*p) {
+        if (*p == '$') {
+            p++;
+            if (*p == '{') {
+                p++;
+                const char *start = p;
+                while (*p && *p != '}' && (isalnum((unsigned char)*p) || *p == '_' || *p == '#')) {
+                    p++;
+                }
+                size_t len = (size_t)(p - start);
+                if (len > 0) {
+                    char *name = (char *)malloc(len + 1);
+                    memcpy(name, start, len);
+                    name[len] = '\0';
+                    shellWordAddExpansion(word, name);
+                    free(name);
+                }
+                while (*p && *p != '}') {
+                    p++;
+                }
+                if (*p == '}') {
+                    p++;
+                }
+            } else {
+                const char *start = p;
+                while (*p && (isalnum((unsigned char)*p) || *p == '_' || *p == '#')) {
+                    p++;
+                }
+                size_t len = (size_t)(p - start);
+                if (len > 0) {
+                    char *name = (char *)malloc(len + 1);
+                    memcpy(name, start, len);
+                    name[len] = '\0';
+                    shellWordAddExpansion(word, name);
+                    free(name);
+                }
+            }
+        } else {
+            p++;
+        }
+    }
+}
