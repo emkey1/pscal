@@ -51,6 +51,14 @@ bool isDigit(char ch) {
   return ch >= '0' && ch <= '9';
 }
 
+bool hasEnvValue(str name) {
+  if (name == "") {
+    return false;
+  }
+  str value = getenv(name);
+  return value != "";
+}
+
 bool isValidNumber(str value) {
   int len = length(value);
   if (len == 0) {
@@ -845,6 +853,7 @@ int main() {
   str model;
   setlength(model, 0);
   model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
+  bool modelExplicit = hasEnvValue("LLM_MODEL") || hasEnvValue("OPENAI_MODEL");
   str baseUrl;
   setlength(baseUrl, 0);
   baseUrl = resolveEnvOrDefault("LLM_API_BASE_URL", "OPENAI_BASE_URL", DEFAULT_BASE_URL);
@@ -884,6 +893,7 @@ int main() {
       }
       str modelArg = paramstr(i + 1);
       model = duplicateString(modelArg);
+      modelExplicit = true;
       i = i + 2;
       continue;
     } else if (arg == "--system") {
@@ -983,7 +993,7 @@ int main() {
     if (!endpointExplicit) {
       endpointOverride = "/v1/chat/completions";
     }
-    if (model == "") {
+    if (!modelExplicit) {
       model = autoDetectLmStudioModel(baseUrl, apiKey, userAgent);
       model = trim(model);
       if (model == "") {
