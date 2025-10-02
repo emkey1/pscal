@@ -292,10 +292,35 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             continue;
         }
 
+        char *trimmed = line;
+        while (*trimmed == ' ' || *trimmed == '\t') {
+            trimmed++;
+        }
+        char *history_line = NULL;
+        bool used_history = false;
+        if (*trimmed == '!') {
+            if (!shellRuntimeExpandHistoryReference(trimmed, &history_line) || !history_line) {
+                fprintf(stderr, "psh: %s: event not found\n", trimmed);
+                free(line);
+                continue;
+            }
+            if (tty) {
+                printf("%s\n", history_line);
+                fflush(stdout);
+            }
+            free(line);
+            line = history_line;
+            used_history = true;
+        }
+
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
         last_status = runShellSource(line, "<stdin>", &exec_opts, &exit_requested);
-        free(line);
+        if (used_history) {
+            free(history_line);
+        } else {
+            free(line);
+        }
         if (exit_requested) {
             break;
         }
@@ -307,6 +332,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 int main(int argc, char **argv) {
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "psh";
+    shellRuntimeSetArg0(options.frontend_path);
 
     int dump_ext_builtins_flag = 0;
     const char *path = NULL;
@@ -356,10 +382,12 @@ int main(int argc, char **argv) {
             gParamCount = argc - arg_start_index;
             gParamValues = &argv[arg_start_index];
         }
+        shellRuntimeSetArg0(path);
         bool exit_requested = false;
         int status = runShellSource(src, path, &options, &exit_requested);
         (void)exit_requested;
         free(src);
+        shellRuntimeSetArg0(options.frontend_path);
         return vmExitWithCleanup(status);
     }
 

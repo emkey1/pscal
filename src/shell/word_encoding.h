@@ -1,0 +1,14 @@
+#ifndef SHELL_WORD_ENCODING_H
+#define SHELL_WORD_ENCODING_H
+
+#include <stdint.h>
+
+#define SHELL_WORD_ENCODE_PREFIX ((char)0x1F)
+
+enum {
+    SHELL_WORD_FLAG_SINGLE_QUOTED = 1 << 0,
+    SHELL_WORD_FLAG_DOUBLE_QUOTED = 1 << 1,
+    SHELL_WORD_FLAG_HAS_PARAM = 1 << 2
+};
+
+#endif /* SHELL_WORD_ENCODING_H */

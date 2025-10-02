@@ -1,7 +1,10 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
+#include "shell/word_encoding.h"
 #include "vm/vm.h"
+#include "Pascal/globals.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -74,6 +77,333 @@ typedef struct {
 } ShellHistory;
 
 static ShellHistory gShellHistory = {NULL, 0, 0};
+static char *gShellArg0 = NULL;
+
+static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags) {
+    if (out_text) {
+        *out_text = encoded ? encoded : "";
+    }
+    if (out_flags) {
+        *out_flags = 0;
+    }
+    if (!encoded) {
+        return false;
+    }
+    size_t len = strlen(encoded);
+    if (len < 2 || encoded[0] != SHELL_WORD_ENCODE_PREFIX) {
+        return false;
+    }
+    if (out_flags) {
+        uint8_t stored = (uint8_t)encoded[1];
+        *out_flags = stored > 0 ? (stored - 1) : 0;
+    }
+    if (out_text) {
+        *out_text = encoded + 2;
+    }
+    return true;
+}
+
+static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra) {
+    if (!buffer || !length || !capacity) {
+        return false;
+    }
+    size_t needed = *length + extra + 1; // +1 for null terminator
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_capacity = *capacity ? *capacity : 32;
+    while (needed > new_capacity) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char *new_buffer = (char *)realloc(*buffer, new_capacity);
+    if (!new_buffer) {
+        return false;
+    }
+    *buffer = new_buffer;
+    *capacity = new_capacity;
+    return true;
+}
+
+static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c) {
+    if (!shellBufferEnsure(buffer, length, capacity, 1)) {
+        return;
+    }
+    (*buffer)[(*length)++] = c;
+    (*buffer)[*length] = '\0';
+}
+
+static void shellBufferAppendString(char **buffer, size_t *length, size_t *capacity, const char *str) {
+    if (!str) {
+        return;
+    }
+    size_t add = strlen(str);
+    if (add == 0) {
+        return;
+    }
+    if (!shellBufferEnsure(buffer, length, capacity, add)) {
+        return;
+    }
+    memcpy(*buffer + *length, str, add);
+    *length += add;
+    (*buffer)[*length] = '\0';
+}
+
+static char *shellJoinPositionalParameters(void) {
+    if (gParamCount <= 0 || !gParamValues) {
+        return strdup("");
+    }
+    size_t total = 0;
+    for (int i = 0; i < gParamCount; ++i) {
+        if (gParamValues[i]) {
+            total += strlen(gParamValues[i]);
+        }
+        if (i + 1 < gParamCount) {
+            total += 1; // space separator
+        }
+    }
+    char *result = (char *)malloc(total + 1);
+    if (!result) {
+        return NULL;
+    }
+    size_t pos = 0;
+    for (int i = 0; i < gParamCount; ++i) {
+        const char *value = gParamValues[i] ? gParamValues[i] : "";
+        size_t len = strlen(value);
+        memcpy(result + pos, value, len);
+        pos += len;
+        if (i + 1 < gParamCount) {
+            result[pos++] = ' ';
+        }
+    }
+    result[pos] = '\0';
+    return result;
+}
+
+static char *shellLookupParameterValue(const char *name, size_t len) {
+    if (!name || len == 0) {
+        return strdup("");
+    }
+    if (len == 1) {
+        switch (name[0]) {
+            case '?': {
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%d", gShellRuntime.last_status);
+                return strdup(buffer);
+            }
+            case '$': {
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%d", (int)getpid());
+                return strdup(buffer);
+            }
+            case '#': {
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%d", gParamCount);
+                return strdup(buffer);
+            }
+            case '*':
+            case '@':
+                return shellJoinPositionalParameters();
+            case '0': {
+                if (gShellArg0) {
+                    return strdup(gShellArg0);
+                }
+                return strdup("psh");
+            }
+            default:
+                break;
+        }
+    }
+
+    bool numeric = true;
+    for (size_t i = 0; i < len; ++i) {
+        if (!isdigit((unsigned char)name[i])) {
+            numeric = false;
+            break;
+        }
+    }
+    if (numeric) {
+        long index = strtol(name, NULL, 10);
+        if (index >= 1 && index <= gParamCount && gParamValues) {
+            const char *value = gParamValues[index - 1] ? gParamValues[index - 1] : "";
+            return strdup(value);
+        }
+        return strdup("");
+    }
+
+    char *key = (char *)malloc(len + 1);
+    if (!key) {
+        return NULL;
+    }
+    memcpy(key, name, len);
+    key[len] = '\0';
+    const char *env = getenv(key);
+    free(key);
+    if (!env) {
+        return strdup("");
+    }
+    return strdup(env);
+}
+
+static char *shellExpandParameter(const char *input, size_t *out_consumed) {
+    if (out_consumed) {
+        *out_consumed = 0;
+    }
+    if (!input || !*input) {
+        return NULL;
+    }
+    if (*input == '{') {
+        const char *cursor = input + 1;
+        bool length_only = false;
+        if (*cursor == '#') {
+            length_only = true;
+            cursor++;
+        }
+        const char *name_start = cursor;
+        while (*cursor && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+            cursor++;
+        }
+        if (*cursor != '}' || cursor == name_start) {
+            return NULL;
+        }
+        size_t name_len = (size_t)(cursor - name_start);
+        if (out_consumed) {
+            *out_consumed = (size_t)(cursor - input) + 1;
+        }
+        char *value = shellLookupParameterValue(name_start, name_len);
+        if (!value) {
+            return NULL;
+        }
+        if (length_only) {
+            size_t val_len = strlen(value);
+            free(value);
+            char buffer[32];
+            snprintf(buffer, sizeof(buffer), "%zu", val_len);
+            return strdup(buffer);
+        }
+        return value;
+    }
+
+    if (*input == '$') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", (int)getpid());
+        return strdup(buffer);
+    }
+
+    if (*input == '?') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", gShellRuntime.last_status);
+        return strdup(buffer);
+    }
+
+    if (*input == '#') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", gParamCount);
+        return strdup(buffer);
+    }
+
+    if (*input == '*' || *input == '@') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        return shellJoinPositionalParameters();
+    }
+
+    if (*input == '0') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        if (gShellArg0) {
+            return strdup(gShellArg0);
+        }
+        return strdup("psh");
+    }
+
+    if (isdigit((unsigned char)*input)) {
+        const char *cursor = input;
+        while (isdigit((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (out_consumed) {
+            *out_consumed = (size_t)(cursor - input);
+        }
+        return shellLookupParameterValue(input, (size_t)(cursor - input));
+    }
+
+    if (isalpha((unsigned char)*input) || *input == '_') {
+        const char *cursor = input + 1;
+        while (isalnum((unsigned char)*cursor) || *cursor == '_') {
+            cursor++;
+        }
+        if (out_consumed) {
+            *out_consumed = (size_t)(cursor - input);
+        }
+        return shellLookupParameterValue(input, (size_t)(cursor - input));
+    }
+
+    return NULL;
+}
+
+static char *shellExpandWord(const char *text, uint8_t flags) {
+    if (!text) {
+        return strdup("");
+    }
+    if (flags & SHELL_WORD_FLAG_SINGLE_QUOTED) {
+        return strdup(text);
+    }
+    size_t length = 0;
+    size_t capacity = strlen(text) + 1;
+    if (capacity < 32) {
+        capacity = 32;
+    }
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return NULL;
+    }
+    buffer[0] = '\0';
+    bool double_quoted = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
+    for (size_t i = 0; text[i];) {
+        char c = text[i];
+        if (c == '\\') {
+            if (text[i + 1]) {
+                char next = text[i + 1];
+                if (!double_quoted || next == '$' || next == '"' || next == '\\' || next == '`' || next == '\n') {
+                    shellBufferAppendChar(&buffer, &length, &capacity, next);
+                    i += 2;
+                    continue;
+                }
+            }
+            shellBufferAppendChar(&buffer, &length, &capacity, c);
+            i++;
+            continue;
+        }
+        if (c == '$') {
+            size_t consumed = 0;
+            char *expanded = shellExpandParameter(text + i + 1, &consumed);
+            if (expanded) {
+                shellBufferAppendString(&buffer, &length, &capacity, expanded);
+                free(expanded);
+                i += consumed + 1;
+                continue;
+            }
+        }
+        shellBufferAppendChar(&buffer, &length, &capacity, c);
+        i++;
+    }
+    return buffer;
+}
 
 static void shellFreeRedirections(ShellCommand *cmd) {
     if (!cmd) {
@@ -173,6 +503,68 @@ void shellRuntimeRecordHistory(const char *line) {
     memcpy(copy, line, len);
     copy[len] = '\0';
     gShellHistory.entries[gShellHistory.count++] = copy;
+}
+
+void shellRuntimeSetArg0(const char *name) {
+    char *copy = NULL;
+    if (name && *name) {
+        copy = strdup(name);
+        if (!copy) {
+            return;
+        }
+    }
+    free(gShellArg0);
+    gShellArg0 = copy;
+}
+
+bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (!input || !out_line) {
+        return false;
+    }
+    const char *cursor = input;
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor != '!') {
+        return false;
+    }
+    cursor++;
+    const char *end = cursor;
+    if (*cursor == '!') {
+        end = cursor + 1;
+        while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
+            end++;
+        }
+        if (*end != '\0') {
+            return false;
+        }
+        if (gShellHistory.count == 0) {
+            return false;
+        }
+        const char *entry = gShellHistory.entries[gShellHistory.count - 1];
+        *out_line = entry ? strdup(entry) : strdup("");
+        return *out_line != NULL;
+    }
+
+    if (!isdigit((unsigned char)*cursor)) {
+        return false;
+    }
+    long index = strtol(cursor, (char **)&end, 10);
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
+        end++;
+    }
+    if (*end != '\0') {
+        return false;
+    }
+    if (index <= 0 || (size_t)index > gShellHistory.count) {
+        return false;
+    }
+    const char *entry = gShellHistory.entries[index - 1];
+    *out_line = entry ? strdup(entry) : strdup("");
+    return *out_line != NULL;
 }
 
 static bool shellIsRuntimeBuiltin(const char *name) {
@@ -344,10 +736,14 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
         return false;
     }
     cmd->argv = new_argv;
-    cmd->argv[cmd->argc] = strdup(arg);
-    if (!cmd->argv[cmd->argc]) {
+    const char *text = NULL;
+    uint8_t flags = 0;
+    shellDecodeWordSpec(arg, &text, &flags);
+    char *expanded = shellExpandWord(text, flags);
+    if (!expanded) {
         return false;
     }
+    cmd->argv[cmd->argc] = expanded;
     cmd->argc++;
     cmd->argv[cmd->argc] = NULL;
     return true;
@@ -382,7 +778,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     }
     const char *fd_str = parts[0];
     const char *type = parts[1];
-    const char *target = parts[2];
+    const char *target_spec = parts[2];
     int fd = -1;
     if (fd_str && *fd_str) {
         fd = atoi(fd_str);
@@ -415,7 +811,10 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     redir->fd = fd;
     redir->flags = flags;
     redir->mode = mode;
-    redir->path = strdup(target ? target : "");
+    const char *target_text = NULL;
+    uint8_t target_flags = 0;
+    shellDecodeWordSpec(target_spec, &target_text, &target_flags);
+    redir->path = shellExpandWord(target_text, target_flags);
     free(copy);
     if (!redir->path) {
         cmd->redir_count--;
