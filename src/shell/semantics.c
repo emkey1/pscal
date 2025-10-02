@@ -1,24 +1,20 @@
 #include "shell/semantics.h"
 #include "shell/builtins.h"
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static char *shellDuplicateLower(const char *name) {
+static char *shellDuplicateName(const char *name) {
     if (!name) {
         return NULL;
     }
     size_t len = strlen(name);
-    char *lower = (char *)malloc(len + 1);
-    if (!lower) {
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) {
         return NULL;
     }
-    for (size_t i = 0; i < len; ++i) {
-        lower[i] = (char)tolower((unsigned char)name[i]);
-    }
-    lower[len] = '\0';
-    return lower;
+    memcpy(copy, name, len + 1);
+    return copy;
 }
 
 static void shellDefineVariable(ShellSemanticContext *ctx, const char *name) {
@@ -32,7 +28,7 @@ static void shellDefineVariable(ShellSemanticContext *ctx, const char *name) {
     if (!symbol) {
         return;
     }
-    symbol->name = shellDuplicateLower(name);
+    symbol->name = shellDuplicateName(name);
     symbol->type = TYPE_STRING;
     symbol->is_const = false;
     symbol->is_alias = false;
