@@ -1,8 +1,10 @@
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
@@ -257,6 +259,296 @@ cleanup:
     return exit_code;
 }
 
+static void redrawInteractiveLine(const char *prompt,
+                                  const char *buffer,
+                                  size_t length,
+                                  size_t *displayed_length) {
+    size_t previous = displayed_length ? *displayed_length : 0;
+    fputs("\r", stdout);
+    if (prompt) {
+        fputs(prompt, stdout);
+    }
+    if (buffer && length > 0) {
+        fwrite(buffer, 1, length, stdout);
+    }
+    if (previous > length) {
+        size_t diff = previous - length;
+        for (size_t i = 0; i < diff; ++i) {
+            fputc(' ', stdout);
+        }
+        for (size_t i = 0; i < diff; ++i) {
+            fputc('\b', stdout);
+        }
+    }
+    fflush(stdout);
+    if (displayed_length) {
+        *displayed_length = length;
+    }
+}
+
+static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length) {
+    if (!scratch) {
+        return false;
+    }
+    char *new_scratch = (char *)realloc(*scratch, length + 1);
+    if (!new_scratch) {
+        return false;
+    }
+    if (buffer && length > 0) {
+        memcpy(new_scratch, buffer, length);
+    }
+    new_scratch[length] = '\0';
+    *scratch = new_scratch;
+    return true;
+}
+
+static char *readInteractiveLine(const char *prompt,
+                                 bool *out_eof,
+                                 bool *out_editor_failed) {
+    if (out_eof) {
+        *out_eof = false;
+    }
+    if (out_editor_failed) {
+        *out_editor_failed = false;
+    }
+    if (!prompt) {
+        prompt = "";
+    }
+
+    struct termios original_termios;
+    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+
+    struct termios raw_termios = original_termios;
+    raw_termios.c_lflag &= ~(ICANON | ECHO);
+    raw_termios.c_cc[VMIN] = 1;
+    raw_termios.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+    buffer[0] = '\0';
+    size_t length = 0;
+    size_t displayed_length = 0;
+    size_t history_index = 0;
+    char *scratch = NULL;
+    interactiveUpdateScratch(&scratch, buffer, length);
+
+    fputs(prompt, stdout);
+    fflush(stdout);
+
+    bool done = false;
+    bool eof_requested = false;
+
+    while (!done) {
+        unsigned char ch = 0;
+        ssize_t read_count = read(STDIN_FILENO, &ch, 1);
+        if (read_count <= 0) {
+            eof_requested = true;
+            break;
+        }
+
+        if (ch == '\r' || ch == '\n') {
+            fputc('\n', stdout);
+            fflush(stdout);
+            done = true;
+            break;
+        }
+
+        if (ch == 4) { /* Ctrl-D */
+            if (length == 0) {
+                eof_requested = true;
+                break;
+            }
+            continue;
+        }
+
+        if (ch == 3) { /* Ctrl-C */
+            fputs("^C\n", stdout);
+            fflush(stdout);
+            length = 0;
+            buffer[0] = '\0';
+            displayed_length = 0;
+            history_index = 0;
+            interactiveUpdateScratch(&scratch, buffer, length);
+            fputs(prompt, stdout);
+            fflush(stdout);
+            continue;
+        }
+
+        if (ch == 127 || ch == 8) { /* Backspace */
+            if (length > 0) {
+                length--;
+                buffer[length] = '\0';
+                fputs("\b \b", stdout);
+                fflush(stdout);
+                displayed_length = length;
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            }
+            continue;
+        }
+
+        if (ch == 27) { /* Escape sequence */
+            unsigned char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) <= 0) {
+                continue;
+            }
+            if (read(STDIN_FILENO, &seq[1], 1) <= 0) {
+                continue;
+            }
+            if (seq[0] == '[') {
+                if (seq[1] == 'A') { /* Up arrow */
+                    size_t history_count = shellRuntimeHistoryCount();
+                    if (history_index < history_count) {
+                        if (history_index == 0) {
+                            interactiveUpdateScratch(&scratch, buffer, length);
+                        }
+                        history_index++;
+                        char *entry = NULL;
+                        if (shellRuntimeHistoryGetEntry(history_index - 1, &entry)) {
+                            size_t entry_len = strlen(entry);
+                            if (entry_len + 1 > capacity) {
+                                size_t new_capacity = entry_len + 1;
+                                char *new_buffer = (char *)realloc(buffer, new_capacity);
+                                if (!new_buffer) {
+                                    free(entry);
+                                    history_index--;
+                                    fputc('\a', stdout);
+                                    fflush(stdout);
+                                    continue;
+                                }
+                                buffer = new_buffer;
+                                capacity = new_capacity;
+                            }
+                            memcpy(buffer, entry, entry_len);
+                            buffer[entry_len] = '\0';
+                            length = entry_len;
+                            redrawInteractiveLine(prompt, buffer, length, &displayed_length);
+                        } else {
+                            history_index--;
+                            fputc('\a', stdout);
+                            fflush(stdout);
+                        }
+                        free(entry);
+                    } else {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                    }
+                    continue;
+                } else if (seq[1] == 'B') { /* Down arrow */
+                    if (history_index > 0) {
+                        history_index--;
+                        const char *replacement = "";
+                        char *entry = NULL;
+                        if (history_index > 0) {
+                            if (shellRuntimeHistoryGetEntry(history_index - 1, &entry)) {
+                                replacement = entry;
+                            }
+                        } else if (scratch) {
+                            replacement = scratch;
+                        }
+                        size_t entry_len = strlen(replacement);
+                        if (entry_len + 1 > capacity) {
+                            size_t new_capacity = entry_len + 1;
+                            char *new_buffer = (char *)realloc(buffer, new_capacity);
+                            if (!new_buffer) {
+                                free(entry);
+                                fputc('\a', stdout);
+                                fflush(stdout);
+                                continue;
+                            }
+                            buffer = new_buffer;
+                            capacity = new_capacity;
+                        }
+                        memcpy(buffer, replacement, entry_len);
+                        buffer[entry_len] = '\0';
+                        length = entry_len;
+                        redrawInteractiveLine(prompt, buffer, length, &displayed_length);
+                        if (history_index == 0) {
+                            interactiveUpdateScratch(&scratch, buffer, length);
+                        }
+                        free(entry);
+                    }
+                    continue;
+                }
+            }
+            continue;
+        }
+
+        if (!isprint(ch)) {
+            fputc('\a', stdout);
+            fflush(stdout);
+            continue;
+        }
+
+        if (length + 1 >= capacity) {
+            size_t new_capacity = capacity * 2;
+            if (new_capacity <= length + 1) {
+                new_capacity = length + 2;
+            }
+            char *new_buffer = (char *)realloc(buffer, new_capacity);
+            if (!new_buffer) {
+                fputc('\a', stdout);
+                fflush(stdout);
+                continue;
+            }
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+
+        buffer[length++] = (char)ch;
+        buffer[length] = '\0';
+        fputc((char)ch, stdout);
+        fflush(stdout);
+        displayed_length = length;
+        history_index = 0;
+        interactiveUpdateScratch(&scratch, buffer, length);
+    }
+
+    (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+    free(scratch);
+
+    if (eof_requested && length == 0) {
+        free(buffer);
+        if (out_eof) {
+            *out_eof = true;
+        }
+        return NULL;
+    }
+
+    if (!done) {
+        free(buffer);
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+
+    char *result = (char *)realloc(buffer, length + 1);
+    if (!result) {
+        result = buffer;
+    }
+    result[length] = '\0';
+    return result;
+}
+
 static int runInteractiveSession(const ShellRunOptions *options) {
     ShellRunOptions exec_opts = *options;
     exec_opts.no_cache = 1;
@@ -266,19 +558,36 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     bool tty = isatty(STDIN_FILENO);
 
     while (true) {
-        if (tty) {
-            fputs("psh$ ", stdout);
-            fflush(stdout);
-        }
         char *line = NULL;
-        size_t line_capacity = 0;
-        ssize_t read = getline(&line, &line_capacity, stdin);
-        if (read < 0) {
-            free(line);
-            if (tty) {
-                fputc('\n', stdout);
+        bool interactive_eof = false;
+        bool editor_failed = false;
+        if (tty) {
+            line = readInteractiveLine("psh$ ", &interactive_eof, &editor_failed);
+            if (!line && editor_failed) {
+                tty = false;
             }
-            break;
+            if (!line && interactive_eof) {
+                fputc('\n', stdout);
+                break;
+            }
+        }
+        size_t line_capacity = 0;
+        ssize_t read = 0;
+        if (!line) {
+            if (isatty(STDIN_FILENO)) {
+                fputs("psh$ ", stdout);
+                fflush(stdout);
+            }
+            read = getline(&line, &line_capacity, stdin);
+            if (read < 0) {
+                free(line);
+                if (isatty(STDIN_FILENO)) {
+                    fputc('\n', stdout);
+                }
+                break;
+            }
+        } else {
+            read = (ssize_t)strlen(line);
         }
         bool only_whitespace = true;
         for (ssize_t i = 0; i < read; ++i) {
@@ -305,7 +614,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             free(line);
             continue;
         }
-        if (used_history && tty) {
+        if (used_history && isatty(STDIN_FILENO)) {
             printf("%s\n", expanded_line);
             fflush(stdout);
         }
