@@ -240,7 +240,7 @@ str jsonEscape(str text) {
 }
 
 bool isWhitespace(char ch) {
-  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
 }
 
 int skipWhitespace(str text, int index) {
@@ -301,25 +301,57 @@ bool isControlCharacter(char ch) {
   return (code >= 0 && code < 32) || code == 127;
 }
 
+str trimWhitespace(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  int start = 1;
+  while (start <= len && isWhitespace(text[start])) {
+    start = start + 1;
+  }
+  int finish = len;
+  while (finish >= start && isWhitespace(text[finish])) {
+    finish = finish - 1;
+  }
+  if (start > finish) {
+    return "";
+  }
+  str result;
+  setlength(result, finish - start + 1);
+  int outIndex = 1;
+  int i = start;
+  while (i <= finish) {
+    result[outIndex] = text[i];
+    outIndex = outIndex + 1;
+    i = i + 1;
+  }
+  return result;
+}
+
 str stripControlCharacters(str text) {
   int len = length(text);
   if (len == 0) {
     return "";
   }
-  str result = "";
+  str result;
+  setlength(result, len);
+  int outIndex = 1;
   int index = 1;
   while (index <= len) {
     char ch = text[index];
     if (!isControlCharacter(ch)) {
-      result = result + charToString(ch);
+      result[outIndex] = ch;
+      outIndex = outIndex + 1;
     }
     index = index + 1;
   }
+  setlength(result, outIndex - 1);
   return result;
 }
 
 str normaliseModelIdentifier(str value) {
-  str trimmed = trim(value);
+  str trimmed = trimWhitespace(value);
   if (trimmed == "") {
     return "";
   }
@@ -327,7 +359,7 @@ str normaliseModelIdentifier(str value) {
   if (cleaned == "") {
     return "";
   }
-  return trim(cleaned);
+  return trimWhitespace(cleaned);
 }
 
 bool startsWith(str text, str prefix) {
@@ -917,7 +949,10 @@ int main() {
   int argc = paramcount();
   int i = 1;
   while (i <= argc) {
-    str arg = paramstr(i);
+    // Copy each argument immediately; paramstr reuses an internal buffer so
+    // later calls would otherwise overwrite earlier results (e.g. option
+    // values with slashes such as "qwen/qwen3-4b-thinking-2507").
+    str arg = duplicateString(paramstr(i));
     if (arg == "--help" || arg == "-h") {
       printUsage(programName);
       return 0;
@@ -926,7 +961,7 @@ int main() {
         writeln("Error: --model requires a value.");
         return 1;
       }
-      str modelArg = paramstr(i + 1);
+      str modelArg = duplicateString(paramstr(i + 1));
       str cleanedModel = normaliseModelIdentifier(modelArg);
       if (cleanedModel == "") {
         writeln("Error: --model requires a non-empty identifier.");
@@ -941,8 +976,8 @@ int main() {
         writeln("Error: --system requires a value.");
         return 1;
       }
-      str systemArg = paramstr(i + 1);
-      systemPrompt = duplicateString(systemArg);
+      str systemArg = duplicateString(paramstr(i + 1));
+      systemPrompt = systemArg;
       i = i + 2;
       continue;
     } else if (arg == "--base-url") {
@@ -950,8 +985,8 @@ int main() {
         writeln("Error: --base-url requires a value.");
         return 1;
       }
-      str baseArg = paramstr(i + 1);
-      baseUrl = duplicateString(baseArg);
+      str baseArg = duplicateString(paramstr(i + 1));
+      baseUrl = baseArg;
       baseUrlExplicit = true;
       i = i + 2;
       continue;
@@ -960,8 +995,8 @@ int main() {
         writeln("Error: --endpoint requires a value.");
         return 1;
       }
-      str endpointArg = paramstr(i + 1);
-      endpointOverride = duplicateString(endpointArg);
+      str endpointArg = duplicateString(paramstr(i + 1));
+      endpointOverride = endpointArg;
       endpointExplicit = true;
       i = i + 2;
       continue;
@@ -970,8 +1005,8 @@ int main() {
         writeln("Error: --api-key requires a value.");
         return 1;
       }
-      str keyArg = paramstr(i + 1);
-      apiKey = duplicateString(keyArg);
+      str keyArg = duplicateString(paramstr(i + 1));
+      apiKey = keyArg;
       i = i + 2;
       continue;
     } else if (arg == "--temperature") {
@@ -979,7 +1014,7 @@ int main() {
         writeln("Error: --temperature requires a value.");
         return 1;
       }
-      str value = paramstr(i + 1);
+      str value = duplicateString(paramstr(i + 1));
       if (!isValidNumber(value)) {
         writeln("Error: --temperature expects a numeric literal (e.g. 0.7).");
         return 1;
@@ -994,8 +1029,8 @@ int main() {
         return 1;
       }
       hasOptionsOverride = true;
-      str optionsArg = paramstr(i + 1);
-      optionsOverride = duplicateString(optionsArg);
+      str optionsArg = duplicateString(paramstr(i + 1));
+      optionsOverride = optionsArg;
       i = i + 2;
       continue;
     } else if (arg == "--lmstudio") {
