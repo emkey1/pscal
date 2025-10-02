@@ -3,6 +3,8 @@ int main() {
   bool ok = true;
   bool foundSystem = false;
   bool foundGetPid = false;
+  bool foundOpenAI = false;
+  bool foundOpenAIChat = false;
   int i = 0;
   while (i < categoryCount) {
     str name = extbuiltincategoryname(i);
@@ -26,6 +28,10 @@ int main() {
         if (name == "system" && groupName == "process" && fnName == "GetPid") {
           foundGetPid = true;
         }
+        if (name == "openai" && groupName == "chat" && fnName == "OpenAIChatCompletions") {
+          foundOpenAI = true;
+          foundOpenAIChat = true;
+        }
         k = k + 1;
       }
       j = j + 1;
@@ -36,10 +42,18 @@ int main() {
     if (name == "system") {
       foundSystem = true;
     }
+    if (name == "openai") {
+      foundOpenAI = true;
+    }
     i = i + 1;
   }
   if (hasextbuiltin("system", "GetPid")) {
     if (!(foundSystem && foundGetPid)) {
+      ok = false;
+    }
+  }
+  if (hasextbuiltin("openai", "OpenAIChatCompletions")) {
+    if (!(foundOpenAI && foundOpenAIChat)) {
       ok = false;
     }
   }

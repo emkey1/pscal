@@ -7,6 +7,7 @@ void registerSystemBuiltins(void);
 void registerUserBuiltins(void);
 void registerThreeDBuiltins(void);
 void registerGraphicsBuiltins(void);
+void registerOpenAIBuiltins(void);
 
 void registerSqliteBuiltins(void);
 
@@ -42,6 +43,9 @@ static void registerExtendedBuiltinsOnce(void) {
 #endif
 #ifdef ENABLE_EXT_BUILTIN_GRAPHICS
   registerGraphicsBuiltins();
+#endif
+#ifdef ENABLE_EXT_BUILTIN_OPENAI
+  registerOpenAIBuiltins();
 #endif
 }
 
