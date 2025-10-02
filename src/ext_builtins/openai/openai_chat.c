@@ -141,9 +141,14 @@ static char *openaiBuildRequestBody(const char *model,
     }
 
     size_t messages_len = messages_json ? strlen(messages_json) : 0;
-    size_t base_len = strlen("{\"model\":\"") + strlen(escaped_model) +
-                      strlen("\",\"messages\":") + messages_len + 2;
-    size_t total_len = base_len + (options_len ? options_len + 1 : 0) + 1;
+    size_t prefix_len = strlen("{\"model\":\"") + strlen(escaped_model) +
+                        strlen("\",\"messages\":");
+    size_t messages_section_len =
+        (messages_json && messages_len > 0) ? messages_len : 2; /* [] */
+    size_t options_section_len =
+        (options_len > 0 && options_start) ? 1 + options_len : 0; /* ,options */
+    size_t total_len = prefix_len + messages_section_len + options_section_len +
+                       1 /* } */ + 1; /* \0 */
     char *body = malloc(total_len);
     if (!body) {
         free(escaped_model);
