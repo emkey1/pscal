@@ -3984,18 +3984,27 @@ static AST *parseStatement(ReaParser *p) {
     if (tokenIsIdentifierLike(p->current.type)) {
         // Peek the identifier text and check type table
         char namebuf[256];
-        size_t n = p->current.length < sizeof(namebuf)-1 ? p->current.length : sizeof(namebuf)-1;
+        size_t n = p->current.length < sizeof(namebuf) - 1 ? p->current.length : sizeof(namebuf) - 1;
         memcpy(namebuf, p->current.start, n);
         namebuf[n] = '\0';
+
+        ReaToken peek = reaPeekToken(p);
+        bool nextCanDeclareWithType = tokenIsIdentifierLike(peek.type) ||
+                                      peek.type == REA_TOKEN_LESS ||
+                                      peek.type == REA_TOKEN_LEFT_PAREN ||
+                                      peek.type == REA_TOKEN_STAR;
+        bool nextCanDeclareWithoutType = tokenIsIdentifierLike(peek.type) ||
+                                         peek.type == REA_TOKEN_LESS;
+
         AST *tdef = lookupType(namebuf);
         if (tdef) {
             if (!tdef->token) {
                 freeAST(tdef);
             }
-            return parseVarDecl(p);
-        }
-        ReaToken peek = reaPeekToken(p);
-        if (tokenIsIdentifierLike(peek.type) || peek.type == REA_TOKEN_LESS) {
+            if (nextCanDeclareWithType) {
+                return parseVarDecl(p);
+            }
+        } else if (nextCanDeclareWithoutType) {
             return parseVarDecl(p);
         }
     }
