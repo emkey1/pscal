@@ -77,22 +77,6 @@ bool isValidNumber(str value) {
   return seenDigit;
 }
 
-str resolveEnvOrDefault(str primary, str secondary, str fallback) {
-  if (primary != "") {
-    str value = getenv(primary);
-    if (value != "") {
-      return value;
-    }
-  }
-  if (secondary != "") {
-    str alt = getenv(secondary);
-    if (alt != "") {
-      return alt;
-    }
-  }
-  return fallback;
-}
-
 str hexDigits() {
   return "0123456789ABCDEF";
 }
@@ -102,6 +86,34 @@ str charToString(char ch) {
   setlength(result, 1);
   result[1] = ch;
   return result;
+}
+
+str duplicateString(str value) {
+  int len = length(value);
+  str result;
+  setlength(result, len);
+  int index = 1;
+  while (index <= len) {
+    result[index] = value[index];
+    index = index + 1;
+  }
+  return result;
+}
+
+str resolveEnvOrDefault(str primary, str secondary, str fallback) {
+  if (primary != "") {
+    str value = getenv(primary);
+    if (value != "") {
+      return duplicateString(value);
+    }
+  }
+  if (secondary != "") {
+    str alt = getenv(secondary);
+    if (alt != "") {
+      return duplicateString(alt);
+    }
+  }
+  return duplicateString(fallback);
 }
 
 bool isHighSurrogate(int codePoint) {
@@ -493,12 +505,24 @@ str buildUrl(str baseUrl, str endpoint) {
 
 int main() {
   str programName = paramstr(0);
-  str model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
-  str baseUrl = resolveEnvOrDefault("LLM_API_BASE_URL", "OPENAI_BASE_URL", DEFAULT_BASE_URL);
-  str endpoint = resolveEnvOrDefault("LLM_API_ENDPOINT", "OPENAI_API_ENDPOINT", DEFAULT_ENDPOINT);
-  str apiKey = resolveEnvOrDefault("LLM_API_KEY", "OPENAI_API_KEY", "");
-  str systemPrompt = resolveEnvOrDefault("LLM_SYSTEM_PROMPT", "OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
-  str userAgent = resolveEnvOrDefault("LLM_USER_AGENT", "OPENAI_USER_AGENT", DEFAULT_USER_AGENT);
+  str model;
+  setlength(model, 0);
+  model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
+  str baseUrl;
+  setlength(baseUrl, 0);
+  baseUrl = resolveEnvOrDefault("LLM_API_BASE_URL", "OPENAI_BASE_URL", DEFAULT_BASE_URL);
+  str endpoint;
+  setlength(endpoint, 0);
+  endpoint = resolveEnvOrDefault("LLM_API_ENDPOINT", "OPENAI_API_ENDPOINT", DEFAULT_ENDPOINT);
+  str apiKey;
+  setlength(apiKey, 0);
+  apiKey = resolveEnvOrDefault("LLM_API_KEY", "OPENAI_API_KEY", "");
+  str systemPrompt;
+  setlength(systemPrompt, 0);
+  systemPrompt = resolveEnvOrDefault("LLM_SYSTEM_PROMPT", "OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+  str userAgent;
+  setlength(userAgent, 0);
+  userAgent = resolveEnvOrDefault("LLM_USER_AGENT", "OPENAI_USER_AGENT", DEFAULT_USER_AGENT);
   str optionsOverride = "";
   bool hasOptionsOverride = false;
   bool temperatureProvided = false;
