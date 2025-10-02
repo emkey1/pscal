@@ -91,6 +91,26 @@ Redirections map to the VM's file descriptor helpers. The script writes to a
 temporary file, appends an extra line, reads it back via input redirection, and
 removes the temporary resource.
 
+## `env.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "env:start"
+setenv TEST_ENV alpha
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+setenv TEST_ENV beta
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+setenv TEST_ENV
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+unsetenv TEST_ENV
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+echo "env:end"
+```
+
+Environment management now mirrors standard shells: `setenv` updates or
+prints variables, while `unsetenv` removes them. The helper Python invocations
+read back the current value so the behaviour is visible in automated tests.
+
 ## Running the examples
 
 Configure and build the project first:

@@ -41,20 +41,27 @@ end can coexist with Pascal, CLike and Rea bytecode without collisions. Use
 
 The shell front end honours the standard process environment:
 
-- Builtins such as `export` and `unset` mutate the host environment for the
-  current process. External utilities like `printenv` observe those changes
+- Builtins such as `export`, `setenv`, and `unset` mutate the host environment
+  for the current process. External utilities like `printenv` observe those changes
   immediately because `psh` runs everything in-process.
 - `PSCALSHELL_LAST_STATUS` mirrors the most recent exit status observed by the
   runtime and is updated after every builtin or pipeline execution.
 - Caching relies on `$HOME` to locate the cache directory and `$PATH` to resolve
   executables when necessary.
 
-Direct parameter interpolation (`$NAME`, `${NAME}`) is parsed but not yet
-expanded by the runtime. Use standard tools (`printenv`, `env`) when scripts
-need to inspect the current environment. The VM argument vector (`$0`, `$1` …)
-maps directly to the parameters passed after the script path (`gParamValues`
-inside the VM), so invoking `build/bin/psh script.psh 1 2 3` exposes `1`, `2`,
-and `3` to the program.
+Direct parameter interpolation now behaves like a POSIX shell: `$NAME`,
+`${NAME}`, `$?`, `$#`, `$@`, `$*`, and positional parameters expand to the
+current environment and argument vector. `setenv` accepts `NAME [VALUE]` to set
+variables (printing the environment when invoked without arguments), and the
+new `unsetenv` builtin mirrors `unset` for scripts that prefer csh-style
+naming. The VM argument vector (`$0`, `$1` …) maps directly to the parameters
+passed after the script path (`gParamValues` inside the VM), so invoking
+`build/bin/psh script.psh 1 2 3` exposes `1`, `2`, and `3` to the program.
+
+Interactive sessions also support history expansion beyond `!!`. Numeric
+designators like `!-2` and `!42`, prefix/substring searches (`!foo`, `!?bar?`),
+and word designators (`!$`, `!*`, `!^`, `!:2`) work against the recorded
+history before execution, providing the usual convenience shorthands.
 
 ## Builtins and interaction with the VM
 
@@ -62,7 +69,8 @@ and `3` to the program.
 extends it with orchestration helpers implemented in
 `backend_ast/shell.c`. The following categories are available out of the box:
 
-- Shell control builtins (`cd`, `pwd`, `exit`, `alias`, `export`, `unset`).
+- Shell control builtins (`cd`, `pwd`, `exit`, `alias`, `export`, `setenv`,
+  `unset`, `unsetenv`).
 - Pipeline helpers (`__shell_exec`, `__shell_pipeline`, `__shell_and`,
   `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`).
 - The complete PSCAL builtin catalog (HTTP, sockets, JSON, extended math/string

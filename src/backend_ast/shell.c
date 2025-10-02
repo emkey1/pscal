@@ -152,6 +152,285 @@ static void shellBufferAppendString(char **buffer, size_t *length, size_t *capac
     (*buffer)[*length] = '\0';
 }
 
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellHistoryWordArray;
+
+static void shellHistoryWordArrayFree(ShellHistoryWordArray *array) {
+    if (!array || !array->items) {
+        return;
+    }
+    for (size_t i = 0; i < array->count; ++i) {
+        free(array->items[i]);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static bool shellHistoryWordArrayAppend(ShellHistoryWordArray *array, char *word) {
+    if (!array || !word) {
+        return false;
+    }
+    if (array->count == array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 8;
+        char **items = realloc(array->items, new_capacity * sizeof(char *));
+        if (!items) {
+            return false;
+        }
+        array->items = items;
+        array->capacity = new_capacity;
+    }
+    array->items[array->count++] = word;
+    return true;
+}
+
+static bool shellTokenizeHistoryEntry(const char *entry, ShellHistoryWordArray *out_words) {
+    if (!entry || !out_words) {
+        return false;
+    }
+    out_words->items = NULL;
+    out_words->count = 0;
+    out_words->capacity = 0;
+
+    char *current = NULL;
+    size_t current_len = 0;
+    size_t current_cap = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool escape = false;
+    bool word_active = false;
+
+    for (size_t i = 0;; ++i) {
+        char c = entry[i];
+        bool at_end = (c == '\0');
+
+        if (!at_end && escape) {
+            shellBufferAppendChar(&current, &current_len, &current_cap, c);
+            escape = false;
+            word_active = true;
+            continue;
+        }
+
+        if (!at_end && c == '\\' && !escape) {
+            escape = true;
+            word_active = true;
+            continue;
+        }
+
+        if (!at_end && c == '\'' && !in_double) {
+            in_single = !in_single;
+            word_active = true;
+            continue;
+        }
+
+        if (!at_end && c == '"' && !in_single) {
+            in_double = !in_double;
+            word_active = true;
+            continue;
+        }
+
+        if (at_end && escape) {
+            shellBufferAppendChar(&current, &current_len, &current_cap, '\\');
+            escape = false;
+        }
+
+        bool is_space = (!in_single && !in_double && (c == ' ' || c == '\t'));
+        if (at_end || is_space) {
+            if (word_active) {
+                const char *src = current ? current : "";
+                char *word = strdup(src);
+                if (!word) {
+                    free(current);
+                    shellHistoryWordArrayFree(out_words);
+                    return false;
+                }
+                if (!shellHistoryWordArrayAppend(out_words, word)) {
+                    free(word);
+                    free(current);
+                    shellHistoryWordArrayFree(out_words);
+                    return false;
+                }
+            }
+            free(current);
+            current = NULL;
+            current_len = 0;
+            current_cap = 0;
+            word_active = false;
+            if (at_end) {
+                break;
+            }
+            continue;
+        }
+
+        shellBufferAppendChar(&current, &current_len, &current_cap, c);
+        word_active = true;
+    }
+
+    return true;
+}
+
+static char *shellJoinHistoryWords(char **items, size_t start, size_t end) {
+    if (!items || start >= end) {
+        return strdup("");
+    }
+    size_t total = 0;
+    for (size_t i = start; i < end; ++i) {
+        total += strlen(items[i]);
+        if (i + 1 < end) {
+            total += 1;
+        }
+    }
+    char *result = (char *)malloc(total + 1);
+    if (!result) {
+        return NULL;
+    }
+    size_t pos = 0;
+    for (size_t i = start; i < end; ++i) {
+        size_t len = strlen(items[i]);
+        memcpy(result + pos, items[i], len);
+        pos += len;
+        if (i + 1 < end) {
+            result[pos++] = ' ';
+        }
+    }
+    result[pos] = '\0';
+    return result;
+}
+
+static bool shellApplyHistoryDesignator(const char *entry, const char *designator, size_t len, char **out_line) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (!entry || !out_line) {
+        return false;
+    }
+    if (!designator || len == 0) {
+        *out_line = strdup(entry);
+        return *out_line != NULL;
+    }
+
+    char *spec = strndup(designator, len);
+    if (!spec) {
+        return false;
+    }
+
+    ShellHistoryWordArray words = {0};
+    if (!shellTokenizeHistoryEntry(entry, &words)) {
+        free(spec);
+        return false;
+    }
+
+    bool success = true;
+    char *result = NULL;
+
+    if (strcmp(spec, "*") == 0) {
+        if (words.count <= 1) {
+            result = strdup("");
+        } else {
+            result = shellJoinHistoryWords(words.items, 1, words.count);
+        }
+    } else if (strcmp(spec, "^") == 0) {
+        if (words.count <= 1) {
+            success = false;
+        } else {
+            result = strdup(words.items[1]);
+        }
+    } else if (strcmp(spec, "$") == 0) {
+        if (words.count == 0) {
+            success = false;
+        } else {
+            result = strdup(words.items[words.count - 1]);
+        }
+    } else {
+        char *endptr = NULL;
+        long index = strtol(spec, &endptr, 10);
+        if (endptr && *endptr == '\0') {
+            if (index < 0 || (size_t)index >= words.count) {
+                success = false;
+            } else {
+                result = strdup(words.items[index]);
+            }
+        } else {
+            success = false;
+        }
+    }
+
+    free(spec);
+
+    if (!success || !result) {
+        free(result);
+        shellHistoryWordArrayFree(&words);
+        return false;
+    }
+
+    *out_line = result;
+    shellHistoryWordArrayFree(&words);
+    return true;
+}
+
+static const char *shellHistoryEntryByIndex(long index) {
+    if (gShellHistory.count == 0 || index == 0) {
+        return NULL;
+    }
+    if (index > 0) {
+        if ((size_t)index > gShellHistory.count) {
+            return NULL;
+        }
+        return gShellHistory.entries[index - 1];
+    }
+    size_t offset = (size_t)(-index);
+    if (offset == 0 || offset > gShellHistory.count) {
+        return NULL;
+    }
+    return gShellHistory.entries[gShellHistory.count - offset];
+}
+
+static const char *shellHistoryFindByPrefix(const char *prefix, size_t len) {
+    if (!prefix || len == 0) {
+        return NULL;
+    }
+    for (size_t i = gShellHistory.count; i > 0; --i) {
+        const char *entry = gShellHistory.entries[i - 1];
+        if (!entry) {
+            continue;
+        }
+        const char *trimmed = entry;
+        while (*trimmed == ' ' || *trimmed == '\t') {
+            trimmed++;
+        }
+        if (strncmp(trimmed, prefix, len) == 0) {
+            char next = trimmed[len];
+            if (next == '\0' || next == ' ' || next == '\t') {
+                return entry;
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char *shellHistoryFindBySubstring(const char *needle, size_t len) {
+    if (!needle || len == 0) {
+        return NULL;
+    }
+    char *pattern = strndup(needle, len);
+    if (!pattern) {
+        return NULL;
+    }
+    for (size_t i = gShellHistory.count; i > 0; --i) {
+        const char *entry = gShellHistory.entries[i - 1];
+        if (entry && strstr(entry, pattern)) {
+            free(pattern);
+            return entry;
+        }
+    }
+    free(pattern);
+    return NULL;
+}
+
 static char *shellJoinPositionalParameters(void) {
     if (gParamCount <= 0 || !gParamValues) {
         return strdup("");
@@ -532,38 +811,122 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         return false;
     }
     cursor++;
-    const char *end = cursor;
-    if (*cursor == '!') {
-        end = cursor + 1;
-        while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
-            end++;
-        }
-        if (*end != '\0') {
-            return false;
-        }
-        if (gShellHistory.count == 0) {
-            return false;
-        }
-        const char *entry = gShellHistory.entries[gShellHistory.count - 1];
-        *out_line = entry ? strdup(entry) : strdup("");
-        return *out_line != NULL;
+    if (*cursor == '\0') {
+        return false;
     }
 
-    if (!isdigit((unsigned char)*cursor)) {
+    const char *designator_start = NULL;
+    size_t designator_len = 0;
+    const char *entry = NULL;
+
+    if (*cursor == '$' || *cursor == '*' || *cursor == '^') {
+        designator_start = cursor;
+        designator_len = 1;
+        cursor++;
+        while (*cursor == ' ' || *cursor == '\t') {
+            cursor++;
+        }
+        if (*cursor != '\0') {
+            return false;
+        }
+        entry = shellHistoryEntryByIndex(-1);
+        if (!entry) {
+            return false;
+        }
+        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line);
+    }
+
+    long numeric_index = 0;
+    bool has_index = false;
+    const char *search_token_start = NULL;
+    size_t search_token_len = 0;
+    bool search_substring = false;
+
+    if (*cursor == '!') {
+        numeric_index = -1;
+        has_index = true;
+        cursor++;
+    } else if (*cursor == '-') {
+        char *endptr = NULL;
+        long value = strtol(cursor + 1, &endptr, 10);
+        if (endptr == cursor + 1) {
+            return false;
+        }
+        numeric_index = -value;
+        cursor = endptr;
+        has_index = true;
+    } else if (isdigit((unsigned char)*cursor)) {
+        char *endptr = NULL;
+        long value = strtol(cursor, &endptr, 10);
+        if (endptr == cursor) {
+            return false;
+        }
+        numeric_index = value;
+        cursor = endptr;
+        has_index = true;
+    } else if (*cursor == '?') {
+        cursor++;
+        const char *start = cursor;
+        const char *closing = strchr(cursor, '?');
+        if (!closing) {
+            return false;
+        }
+        search_token_start = start;
+        search_token_len = (size_t)(closing - start);
+        cursor = closing + 1;
+        search_substring = true;
+    } else {
+        const char *start = cursor;
+        while (*cursor && *cursor != ' ' && *cursor != '\t' && *cursor != ':' && *cursor != '$' && *cursor != '^' && *cursor != '*') {
+            cursor++;
+        }
+        if (cursor == start) {
+            return false;
+        }
+        search_token_start = start;
+        search_token_len = (size_t)(cursor - start);
+    }
+
+    if ((*cursor == '$' || *cursor == '^' || *cursor == '*') && designator_len == 0) {
+        designator_start = cursor;
+        designator_len = 1;
+        cursor++;
+    } else if (*cursor == ':') {
+        cursor++;
+        designator_start = cursor;
+        while (*cursor && *cursor != ' ' && *cursor != '\t') {
+            cursor++;
+        }
+        designator_len = (size_t)(cursor - designator_start);
+        if (designator_len == 0) {
+            return false;
+        }
+    }
+
+    while (*cursor == ' ' || *cursor == '\t') {
+        cursor++;
+    }
+    if (*cursor != '\0') {
         return false;
     }
-    long index = strtol(cursor, (char **)&end, 10);
-    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
-        end++;
+
+    if (has_index) {
+        entry = shellHistoryEntryByIndex(numeric_index);
+    } else if (search_substring) {
+        entry = shellHistoryFindBySubstring(search_token_start, search_token_len);
+    } else {
+        entry = shellHistoryFindByPrefix(search_token_start, search_token_len);
     }
-    if (*end != '\0') {
+
+    if (!entry) {
         return false;
     }
-    if (index <= 0 || (size_t)index > gShellHistory.count) {
-        return false;
+
+    if (designator_start && designator_len > 0) {
+        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line);
     }
-    const char *entry = gShellHistory.entries[index - 1];
-    *out_line = entry ? strdup(entry) : strdup("");
+
+    *out_line = strdup(entry);
     return *out_line != NULL;
 }
 
@@ -571,7 +934,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "alias", "history"};
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history"};
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
         if (strcasecmp(name, kBuiltins[i]) == 0) {
@@ -1278,6 +1641,49 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
+    if (arg_count == 0) {
+        if (environ) {
+            for (char **env = environ; *env; ++env) {
+                puts(*env);
+            }
+        }
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "setenv: expected NAME [VALUE]");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "setenv: variable name must be a non-empty string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (strchr(args[0].s_val, '=')) {
+        runtimeError(vm, "setenv: variable name must not contain '='");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *value = "";
+    if (arg_count > 1) {
+        if (args[1].type != TYPE_STRING || !args[1].s_val) {
+            runtimeError(vm, "setenv: value must be a string");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        value = args[1].s_val;
+    }
+    if (setenv(args[0].s_val, value, 1) != 0) {
+        runtimeError(vm, "setenv: unable to set '%s': %s", args[0].s_val, strerror(errno));
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
     for (int i = 0; i < arg_count; ++i) {
         if (args[i].type != TYPE_STRING || !args[i].s_val) {
@@ -1318,6 +1724,10 @@ Value vmBuiltinShellUnset(VM *vm, int arg_count, Value *args) {
     }
     shellUpdateStatus(0);
     return makeVoid();
+}
+
+Value vmBuiltinShellUnsetenv(VM *vm, int arg_count, Value *args) {
+    return vmBuiltinShellUnset(vm, arg_count, args);
 }
 
 typedef struct {
