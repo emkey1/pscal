@@ -179,6 +179,9 @@ static bool isOperatorDelimiter(int c) {
 static ShellToken scanWord(ShellLexer *lexer) {
     bool singleQuoted = false;
     bool doubleQuoted = false;
+    bool sawSingleQuotedSegment = false;
+    bool sawDoubleQuotedSegment = false;
+    bool sawUnquotedSegment = false;
     bool hasParam = false;
 
     char *buffer = NULL;
@@ -207,10 +210,18 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 c = next;
             }
         } else if (c == '\'' && !doubleQuoted) {
+            bool enteringSingle = !singleQuoted;
             singleQuoted = !singleQuoted;
+            if (enteringSingle) {
+                sawSingleQuotedSegment = true;
+            }
             continue;
-        } else if (c == '"') {
+        } else if (c == '"' && !singleQuoted) {
+            bool enteringDouble = !doubleQuoted;
             doubleQuoted = !doubleQuoted;
+            if (enteringDouble) {
+                sawDoubleQuotedSegment = true;
+            }
             continue;
         } else if (c == '$' && !singleQuoted) {
             hasParam = true;
@@ -275,6 +286,13 @@ static ShellToken scanWord(ShellLexer *lexer) {
             buffer = tmp;
         }
         buffer[bufLen++] = (char)c;
+        if (singleQuoted) {
+            sawSingleQuotedSegment = true;
+        } else if (doubleQuoted) {
+            sawDoubleQuotedSegment = true;
+        } else {
+            sawUnquotedSegment = true;
+        }
     }
 
     if (buffer && bufLen < bufCap) {
@@ -295,8 +313,8 @@ static ShellToken scanWord(ShellLexer *lexer) {
     tok.lexeme = buffer ? buffer : strdup("");
     tok.line = lexer->line;
     tok.column = lexer->column;
-    tok.single_quoted = singleQuoted;
-    tok.double_quoted = doubleQuoted;
+    tok.single_quoted = sawSingleQuotedSegment && !sawDoubleQuotedSegment && !sawUnquotedSegment;
+    tok.double_quoted = sawDoubleQuotedSegment && !sawSingleQuotedSegment && !sawUnquotedSegment;
     tok.contains_parameter_expansion = hasParam;
     return tok;
 }
