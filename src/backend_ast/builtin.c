@@ -212,6 +212,7 @@ static int sdlFetchReadKeyChar(void) {
     }
 }
 #endif
+
 #ifndef SDL
 #if defined(__GNUC__) || defined(__clang__)
 #define SDL_UNUSED_FUNC __attribute__((unused))
@@ -1943,14 +1944,6 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
         return makeBoolean(false);
     }
-#ifdef SDL
-    if (sdlIsGraphicsActive()) {
-        if (sdlReadKeyBufferHasData()) {
-            return makeBoolean(true);
-        }
-        return makeBoolean(sdlHasPendingKeycode());
-    }
-#endif
     vmEnableRawMode();
 
     int bytes_available = 0;
@@ -1963,6 +1956,7 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ReadKey expects 0 or 1 argument.");
         return makeChar('\0');
     }
+
     int c = 0;
 #ifdef SDL
     if (sdlIsGraphicsActive()) {
@@ -1975,25 +1969,24 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     {
         vmEnableRawMode();
 
-        unsigned char ch_byte;
-        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-            ch_byte = '\0';
-        }
-        c = ch_byte;
+
+    unsigned char ch_byte;
+    if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+        ch_byte = '\0';
     }
-    c &= 0xFF;
+    int c = ch_byte;
 
     if (arg_count == 1) {
         if (args[0].type != TYPE_POINTER || args[0].ptr_val == NULL) {
             runtimeError(vm, "ReadKey argument must be a VAR char.");
         } else {
             Value* dst = (Value*)args[0].ptr_val;
-            if (dst->type == TYPE_CHAR) {
-                dst->c_val = c;
-                SET_INT_VALUE(dst, dst->c_val);
-            } else {
-                runtimeError(vm, "ReadKey argument must be of type CHAR.");
-            }
+                if (dst->type == TYPE_CHAR) {
+                    dst->c_val = c;
+                    SET_INT_VALUE(dst, dst->c_val);
+                } else {
+                    runtimeError(vm, "ReadKey argument must be of type CHAR.");
+                }
         }
     }
 
