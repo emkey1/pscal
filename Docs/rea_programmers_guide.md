@@ -338,7 +338,7 @@ Use the CLI switches described in Section 1.4 during compiler development. Addit
 
 ### 7.2 Bytecode Inspection and VM Tracing
 
-`--dump-bytecode` prints disassembled output annotated with offsets. For deeper analysis, run the resulting `.obj` through `build/bin/disassembler` or `Tests/run_rea_tests.sh --dump`. The VM trace (`--vm-trace-head=N`) is invaluable when hunting control-flow regressions or verifying module initialisation order.
+`--dump-bytecode` prints disassembled output annotated with offsets. For deeper analysis, run the resulting `.obj` through `build/bin/pscald` (built by enabling `BUILD_PSCALD` during configuration). To capture canonical disassembly, execute `Tests/run_rea_tests.sh` against fixtures that provide `.disasm` expectations or invoke `build/bin/rea --dump-bytecode-only` directly on the sources under investigation. The VM trace (`--vm-trace-head=N`) is invaluable when hunting control-flow regressions or verifying module initialisation order.
 
 ### 7.3 Logging and Error Reporting
 
