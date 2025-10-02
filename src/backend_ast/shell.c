@@ -796,23 +796,51 @@ void shellRuntimeSetArg0(const char *name) {
     gShellArg0 = copy;
 }
 
-bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
+typedef enum {
+    SHELL_HISTORY_EXPAND_OK,
+    SHELL_HISTORY_EXPAND_NOT_FOUND,
+    SHELL_HISTORY_EXPAND_INVALID
+} ShellHistoryExpandResult;
+
+static bool shellIsHistoryTerminator(char c) {
+    switch (c) {
+        case '\0':
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\r':
+        case ';':
+        case '&':
+        case '|':
+        case '(':
+        case ')':
+        case '<':
+        case '>':
+            return true;
+        default:
+            return false;
+    }
+}
+
+static ShellHistoryExpandResult shellExpandHistoryDesignatorAt(const char *input,
+                                                               size_t *out_consumed,
+                                                               char **out_line) {
     if (out_line) {
         *out_line = NULL;
     }
-    if (!input || !out_line) {
-        return false;
+    if (out_consumed) {
+        *out_consumed = 0;
     }
-    const char *cursor = input;
-    while (*cursor == ' ' || *cursor == '\t') {
-        cursor++;
+    if (!input || input[0] != '!') {
+        return SHELL_HISTORY_EXPAND_INVALID;
     }
-    if (*cursor != '!') {
-        return false;
-    }
-    cursor++;
+
+    const char *cursor = input + 1;
     if (*cursor == '\0') {
-        return false;
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        return SHELL_HISTORY_EXPAND_INVALID;
     }
 
     const char *designator_start = NULL;
@@ -823,17 +851,19 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         designator_start = cursor;
         designator_len = 1;
         cursor++;
-        while (*cursor == ' ' || *cursor == '\t') {
-            cursor++;
-        }
-        if (*cursor != '\0') {
-            return false;
-        }
         entry = shellHistoryEntryByIndex(-1);
         if (!entry) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = (size_t)(cursor - input);
+            }
+            return SHELL_HISTORY_EXPAND_NOT_FOUND;
         }
-        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line);
+        if (out_consumed) {
+            *out_consumed = (size_t)(cursor - input);
+        }
+        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line)
+                   ? SHELL_HISTORY_EXPAND_OK
+                   : SHELL_HISTORY_EXPAND_INVALID;
     }
 
     long numeric_index = 0;
@@ -850,7 +880,10 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         char *endptr = NULL;
         long value = strtol(cursor + 1, &endptr, 10);
         if (endptr == cursor + 1) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = (size_t)(cursor + 1 - input);
+            }
+            return SHELL_HISTORY_EXPAND_INVALID;
         }
         numeric_index = -value;
         cursor = endptr;
@@ -859,7 +892,10 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         char *endptr = NULL;
         long value = strtol(cursor, &endptr, 10);
         if (endptr == cursor) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = (size_t)(cursor - input);
+            }
+            return SHELL_HISTORY_EXPAND_INVALID;
         }
         numeric_index = value;
         cursor = endptr;
@@ -869,7 +905,10 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         const char *start = cursor;
         const char *closing = strchr(cursor, '?');
         if (!closing) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = strlen(input);
+            }
+            return SHELL_HISTORY_EXPAND_INVALID;
         }
         search_token_start = start;
         search_token_len = (size_t)(closing - start);
@@ -877,37 +916,37 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
         search_substring = true;
     } else {
         const char *start = cursor;
-        while (*cursor && *cursor != ' ' && *cursor != '\t' && *cursor != ':' && *cursor != '$' && *cursor != '^' && *cursor != '*') {
+        while (*cursor && !shellIsHistoryTerminator(*cursor) &&
+               *cursor != ':' && *cursor != '$' && *cursor != '^' && *cursor != '*') {
             cursor++;
         }
         if (cursor == start) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = (size_t)(cursor - input);
+            }
+            return SHELL_HISTORY_EXPAND_INVALID;
         }
         search_token_start = start;
         search_token_len = (size_t)(cursor - start);
     }
 
-    if ((*cursor == '$' || *cursor == '^' || *cursor == '*') && designator_len == 0) {
+    if (*cursor == '$' || *cursor == '^' || *cursor == '*') {
         designator_start = cursor;
         designator_len = 1;
         cursor++;
     } else if (*cursor == ':') {
         cursor++;
         designator_start = cursor;
-        while (*cursor && *cursor != ' ' && *cursor != '\t') {
+        while (*cursor && !shellIsHistoryTerminator(*cursor)) {
             cursor++;
         }
         designator_len = (size_t)(cursor - designator_start);
         if (designator_len == 0) {
-            return false;
+            if (out_consumed) {
+                *out_consumed = (size_t)(cursor - input);
+            }
+            return SHELL_HISTORY_EXPAND_INVALID;
         }
-    }
-
-    while (*cursor == ' ' || *cursor == '\t') {
-        cursor++;
-    }
-    if (*cursor != '\0') {
-        return false;
     }
 
     if (has_index) {
@@ -919,15 +958,119 @@ bool shellRuntimeExpandHistoryReference(const char *input, char **out_line) {
     }
 
     if (!entry) {
-        return false;
+        if (out_consumed) {
+            *out_consumed = (size_t)(cursor - input);
+        }
+        return SHELL_HISTORY_EXPAND_NOT_FOUND;
+    }
+
+    if (out_consumed) {
+        *out_consumed = (size_t)(cursor - input);
     }
 
     if (designator_start && designator_len > 0) {
-        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line);
+        return shellApplyHistoryDesignator(entry, designator_start, designator_len, out_line)
+                   ? SHELL_HISTORY_EXPAND_OK
+                   : SHELL_HISTORY_EXPAND_INVALID;
     }
 
     *out_line = strdup(entry);
-    return *out_line != NULL;
+    if (!*out_line) {
+        return SHELL_HISTORY_EXPAND_INVALID;
+    }
+    return SHELL_HISTORY_EXPAND_OK;
+}
+
+bool shellRuntimeExpandHistoryReference(const char *input,
+                                        char **out_line,
+                                        bool *out_did_expand,
+                                        char **out_error_token) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (out_did_expand) {
+        *out_did_expand = false;
+    }
+    if (out_error_token) {
+        *out_error_token = NULL;
+    }
+    if (!input || !out_line) {
+        return false;
+    }
+
+    size_t capacity = strlen(input) + 1;
+    if (capacity < 32) {
+        capacity = 32;
+    }
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return false;
+    }
+    buffer[0] = '\0';
+    size_t length = 0;
+
+    bool in_single = false;
+    bool in_double = false;
+
+    for (size_t i = 0; input[i];) {
+        char c = input[i];
+        if (c == '\\' && !in_single) {
+            if (input[i + 1] == '!') {
+                shellBufferAppendChar(&buffer, &length, &capacity, '!');
+                i += 2;
+                continue;
+            }
+            shellBufferAppendChar(&buffer, &length, &capacity, c);
+            i++;
+            continue;
+        }
+        if (c == '\'') {
+            if (!in_double) {
+                in_single = !in_single;
+            }
+            shellBufferAppendChar(&buffer, &length, &capacity, c);
+            i++;
+            continue;
+        }
+        if (c == '"') {
+            if (!in_single) {
+                in_double = !in_double;
+            }
+            shellBufferAppendChar(&buffer, &length, &capacity, c);
+            i++;
+            continue;
+        }
+        if (c == '!' && !in_single) {
+            size_t consumed = 0;
+            char *replacement = NULL;
+            ShellHistoryExpandResult result =
+                shellExpandHistoryDesignatorAt(input + i, &consumed, &replacement);
+            if (result != SHELL_HISTORY_EXPAND_OK) {
+                if (out_error_token) {
+                    size_t error_len = consumed > 0 ? consumed : 1;
+                    char *token = strndup(input + i, error_len);
+                    *out_error_token = token;
+                }
+                free(replacement);
+                free(buffer);
+                return false;
+            }
+            if (replacement) {
+                shellBufferAppendString(&buffer, &length, &capacity, replacement);
+                free(replacement);
+            }
+            if (out_did_expand) {
+                *out_did_expand = true;
+            }
+            i += consumed;
+            continue;
+        }
+        shellBufferAppendChar(&buffer, &length, &capacity, c);
+        i++;
+    }
+
+    *out_line = buffer;
+    return true;
 }
 
 static bool shellIsRuntimeBuiltin(const char *name) {

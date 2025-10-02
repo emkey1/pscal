@@ -292,35 +292,33 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             continue;
         }
 
-        char *trimmed = line;
-        while (*trimmed == ' ' || *trimmed == '\t') {
-            trimmed++;
-        }
-        char *history_line = NULL;
+        char *expanded_line = NULL;
         bool used_history = false;
-        if (*trimmed == '!') {
-            if (!shellRuntimeExpandHistoryReference(trimmed, &history_line) || !history_line) {
-                fprintf(stderr, "psh: %s: event not found\n", trimmed);
-                free(line);
-                continue;
-            }
-            if (tty) {
-                printf("%s\n", history_line);
-                fflush(stdout);
+        char *history_error = NULL;
+        if (!shellRuntimeExpandHistoryReference(line, &expanded_line, &used_history, &history_error)) {
+            if (history_error) {
+                fprintf(stderr, "psh: %s: event not found\n", history_error);
+                free(history_error);
+            } else {
+                fprintf(stderr, "psh: history expansion failed\n");
             }
             free(line);
-            line = history_line;
-            used_history = true;
+            continue;
         }
+        if (used_history && tty) {
+            printf("%s\n", expanded_line);
+            fflush(stdout);
+        }
+        if (history_error) {
+            free(history_error);
+        }
+        free(line);
+        line = expanded_line;
 
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
         last_status = runShellSource(line, "<stdin>", &exec_opts, &exit_requested);
-        if (used_history) {
-            free(history_line);
-        } else {
-            free(line);
-        }
+        free(line);
         if (exit_requested) {
             break;
         }
