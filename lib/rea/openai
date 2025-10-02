@@ -11,6 +11,48 @@ module OpenAI {
         return result;
     }
 
+    bool isHighSurrogate(int codePoint) {
+        return codePoint >= 0xD800 && codePoint <= 0xDBFF;
+    }
+
+    bool isLowSurrogate(int codePoint) {
+        return codePoint >= 0xDC00 && codePoint <= 0xDFFF;
+    }
+
+    int decodeSurrogatePair(int high, int low) {
+        return 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+    }
+
+    str encodeUtf8CodePoint(int codePoint) {
+        int value = codePoint;
+        if (value < 0 || value > 0x10FFFF) {
+            value = 0xFFFD;
+        }
+        if (value <= 0x7F) {
+            return charToString(tochar(value));
+        }
+        str result;
+        if (value <= 0x7FF) {
+            setlength(result, 2);
+            result[1] = tochar(0xC0 | (value >> 6));
+            result[2] = tochar(0x80 | (value & 0x3F));
+            return result;
+        }
+        if (value <= 0xFFFF) {
+            setlength(result, 3);
+            result[1] = tochar(0xE0 | (value >> 12));
+            result[2] = tochar(0x80 | ((value >> 6) & 0x3F));
+            result[3] = tochar(0x80 | (value & 0x3F));
+            return result;
+        }
+        setlength(result, 4);
+        result[1] = tochar(0xF0 | (value >> 18));
+        result[2] = tochar(0x80 | ((value >> 12) & 0x3F));
+        result[3] = tochar(0x80 | ((value >> 6) & 0x3F));
+        result[4] = tochar(0x80 | (value & 0x3F));
+        return result;
+    }
+
     int hexDigitValue(char ch) {
         if (ch >= '0' && ch <= '9') {
             return ord(ch) - ord('0');
@@ -166,8 +208,25 @@ module OpenAI {
                                 if (code < 0) {
                                     break;
                                 }
-                                decoded = decoded + tochar(code & 255);
                                 index = index + 4;
+                                if (isHighSurrogate(code)) {
+                                    int pairStart = index + 1;
+                                    if (pairStart + 5 <= len && response[pairStart] == '\\' &&
+                                        response[pairStart + 1] == 'u') {
+                                        int low = parseHexAt(response, pairStart + 2);
+                                        if (isLowSurrogate(low)) {
+                                            code = decodeSurrogatePair(code, low);
+                                            index = pairStart + 5;
+                                        } else {
+                                            code = 0xFFFD;
+                                        }
+                                    } else {
+                                        code = 0xFFFD;
+                                    }
+                                } else if (isLowSurrogate(code)) {
+                                    code = 0xFFFD;
+                                }
+                                decoded = decoded + encodeUtf8CodePoint(code);
                             } else {
                                 decoded = decoded + charToString(esc);
                             }
