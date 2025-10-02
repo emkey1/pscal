@@ -443,6 +443,47 @@ static void shellResetPipeline(void) {
     ctx->last_status = 0;
 }
 
+static void shellAbortPipeline(void) {
+    ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    if (!ctx->active) {
+        return;
+    }
+
+    if (ctx->pipes) {
+        size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+        for (size_t i = 0; i < pipe_count; ++i) {
+            if (ctx->pipes[i][0] >= 0) {
+                close(ctx->pipes[i][0]);
+                ctx->pipes[i][0] = -1;
+            }
+            if (ctx->pipes[i][1] >= 0) {
+                close(ctx->pipes[i][1]);
+                ctx->pipes[i][1] = -1;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < ctx->launched; ++i) {
+        pid_t pid = ctx->pids[i];
+        if (pid <= 0) {
+            continue;
+        }
+        int status = 0;
+        pid_t res = -1;
+        do {
+            res = waitpid(pid, &status, WNOHANG);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            kill(pid, SIGTERM);
+            do {
+                res = waitpid(pid, &status, 0);
+            } while (res < 0 && errno == EINTR);
+        }
+    }
+
+    shellResetPipeline();
+}
+
 static bool shellEnsurePipeline(size_t stages, bool negated) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     shellResetPipeline();
@@ -529,7 +570,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (spawn_err != 0) {
         runtimeError(vm, "shell exec: failed to spawn '%s': %s", cmd->argv[0], strerror(spawn_err));
         if (ctx->active) {
-            shellResetPipeline();
+            shellAbortPipeline();
         }
         shellFreeCommand(cmd);
         shellUpdateStatus(127);
