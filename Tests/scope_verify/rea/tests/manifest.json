@@ -1036,6 +1036,63 @@
           "code": "module Helpers {\n    export int baseValue() {\n        return 5;\n    }\n    export const int SHIFT = 3;\n}"
         }
       ]
+    },
+    {
+      "id": "class_constructor_sets_and_reads",
+      "name": "Constructors assign fields and methods observe them",
+      "category": "class_scope",
+      "description": "Instantiating a class should run its constructor, and instance methods should read updated fields via implicit self.",
+      "expect": "runtime_ok",
+      "code": "class Counter {\n    int value;\n\n    void Counter(int start) {\n        my.value = start;\n    }\n\n    void increment() {\n        my.value = my.value + 1;\n    }\n\n    int current() {\n        return my.value;\n    }\n}\n\nint main() {\n    Counter counter = new Counter(5);\n    counter.increment();\n    writeln(\"current=\", counter.current());\n    return 0;\n}",
+      "expected_stdout": "current=6"
+    },
+    {
+      "id": "class_method_my_alias_updates_fields",
+      "name": "`my` and `myself` aliases mutate object state",
+      "category": "class_scope",
+      "description": "Both `my` and `myself` should reference the implicit receiver inside methods, enabling field swaps across aliases.",
+      "expect": "runtime_ok",
+      "code": "class Pair {\n    int left;\n    int right;\n\n    void Pair(int l, int r) {\n        my.left = l;\n        myself.right = r;\n    }\n\n    void swap() {\n        int temp = my.left;\n        my.left = myself.right;\n        myself.right = temp;\n    }\n}\n\nint main() {\n    Pair pair = new Pair(1, 2);\n    pair.swap();\n    writeln(\"left=\", pair.left);\n    writeln(\"right=\", pair.right);\n    return 0;\n}",
+      "expected_stdout": "left=2\nright=1"
+    },
+    {
+      "id": "class_inheritance_super_constructor_and_method",
+      "name": "Subclass can call super constructor and methods",
+      "category": "class_scope",
+      "description": "A subclass constructor should invoke its parent constructor via `super`, and overridden methods may delegate back to the parent.",
+      "expect": "runtime_ok",
+      "code": "class BaseCounter {\n    int total;\n\n    void BaseCounter(int start) {\n        my.total = start;\n    }\n\n    void add(int amount) {\n        my.total = my.total + amount;\n    }\n\n    int current() {\n        return my.total;\n    }\n}\n\nclass BonusCounter extends BaseCounter {\n    void BonusCounter(int start) {\n        super(start);\n    }\n\n    void add(int amount) {\n        super.add(amount + 1);\n    }\n\n    int current() {\n        return super.current();\n    }\n}\n\nint main() {\n    BonusCounter counter = new BonusCounter(2);\n    counter.add(3);\n    writeln(\"total=\", counter.current());\n    return 0;\n}",
+      "expected_stdout": "total=6"
+    },
+    {
+      "id": "class_unknown_parent_error",
+      "name": "Extending an unknown parent is rejected",
+      "category": "class_scope",
+      "description": "Referencing a non-existent superclass should emit a semantic error identifying the missing parent.",
+      "expect": "compile_error",
+      "code": "class Orphan extends MissingParent {\n    int value;\n}\n\nint main() {\n    return 0;\n}",
+      "expected_stderr_substring": "Unknown parent class",
+      "failure_reason": "Inheritance chains must reference classes that have been declared."
+    },
+    {
+      "id": "class_duplicate_field_error",
+      "name": "Duplicate class fields are rejected",
+      "category": "class_scope",
+      "description": "A class may not declare two fields with the same identifier.",
+      "expect": "compile_error",
+      "code": "class Point {\n    int x;\n    int x;\n}\n\nint main() {\n    Point point = new Point();\n    return 0;\n}",
+      "expected_stderr_substring": "Duplicate field",
+      "failure_reason": "Field identifiers must be unique within a class body."
+    },
+    {
+      "id": "class_unknown_field_access_error",
+      "name": "Accessing missing fields surfaces an error",
+      "category": "class_scope",
+      "description": "Referencing a field that is not declared on the receiver class should produce a helpful diagnostic.",
+      "expect": "compile_error",
+      "code": "class Bucket {\n    int capacity;\n\n    int remaining() {\n        return my.level;\n    }\n}\n\nint main() {\n    Bucket bucket = new Bucket();\n    return bucket.remaining();\n}",
+      "expected_stderr_substring": "Unknown field",
+      "failure_reason": "Only declared fields may be accessed through `my`/`myself`."
     }
   ]
 }
