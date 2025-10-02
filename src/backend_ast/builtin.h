@@ -126,7 +126,10 @@ bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);
-bool shellRuntimeExpandHistoryReference(const char *input, char **out_line);
+bool shellRuntimeExpandHistoryReference(const char *input,
+                                        char **out_line,
+                                        bool *out_did_expand,
+                                        char **out_error_token);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
