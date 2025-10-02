@@ -758,7 +758,9 @@ bool verifyLmStudioModel(str baseUrl, str apiKey, str userAgent, str modelId) {
 }
 
 int main() {
-  str programName = paramstr(0);
+  // Duplicate command-line arguments immediately; paramstr reuses an internal
+  // buffer so later calls would otherwise clobber previously read values.
+  str programName = duplicateString(paramstr(0));
   str model;
   setlength(model, 0);
   model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
@@ -799,7 +801,8 @@ int main() {
         writeln("Error: --model requires a value.");
         return 1;
       }
-      model = paramstr(i + 1);
+      str modelArg = paramstr(i + 1);
+      model = duplicateString(modelArg);
       i = i + 2;
       continue;
     } else if (arg == "--system") {
@@ -807,7 +810,8 @@ int main() {
         writeln("Error: --system requires a value.");
         return 1;
       }
-      systemPrompt = paramstr(i + 1);
+      str systemArg = paramstr(i + 1);
+      systemPrompt = duplicateString(systemArg);
       i = i + 2;
       continue;
     } else if (arg == "--base-url") {
@@ -815,7 +819,8 @@ int main() {
         writeln("Error: --base-url requires a value.");
         return 1;
       }
-      baseUrl = paramstr(i + 1);
+      str baseArg = paramstr(i + 1);
+      baseUrl = duplicateString(baseArg);
       baseUrlExplicit = true;
       i = i + 2;
       continue;
@@ -824,7 +829,8 @@ int main() {
         writeln("Error: --endpoint requires a value.");
         return 1;
       }
-      endpointOverride = paramstr(i + 1);
+      str endpointArg = paramstr(i + 1);
+      endpointOverride = duplicateString(endpointArg);
       endpointExplicit = true;
       i = i + 2;
       continue;
@@ -833,7 +839,8 @@ int main() {
         writeln("Error: --api-key requires a value.");
         return 1;
       }
-      apiKey = paramstr(i + 1);
+      str keyArg = paramstr(i + 1);
+      apiKey = duplicateString(keyArg);
       i = i + 2;
       continue;
     } else if (arg == "--temperature") {
@@ -847,7 +854,7 @@ int main() {
         return 1;
       }
       temperatureProvided = true;
-      temperatureValue = value;
+      temperatureValue = duplicateString(value);
       i = i + 2;
       continue;
     } else if (arg == "--options") {
@@ -856,7 +863,8 @@ int main() {
         return 1;
       }
       hasOptionsOverride = true;
-      optionsOverride = paramstr(i + 1);
+      str optionsArg = paramstr(i + 1);
+      optionsOverride = duplicateString(optionsArg);
       i = i + 2;
       continue;
     } else if (arg == "--lmstudio") {
