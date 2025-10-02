@@ -52,6 +52,7 @@ Files in `Examples/rea` are executable scripts with a `#!/usr/bin/env rea` sheba
 - `--dump-ast-json` – emit the parsed AST as JSON and exit.
 - `--dump-bytecode` – print the compiled bytecode before running it.
 - `--dump-bytecode-only` – compile, dump bytecode, and exit without executing.
+- `--no-run` – compile without running to perform static analysis or bytecode inspection.
 - `--vm-trace-head=N` – trace the first `N` VM instructions.
 - `--no-cache` – ignore cached `.rea.obj` artifacts in `rea-obj/`.
 
@@ -332,7 +333,7 @@ When composing async workflows, document ownership of shared resources and ensur
 
 Use the CLI switches described in Section 1.4 during compiler development. Additional helper tips:
 
-- `--no-run` (when available through the build configuration) compiles without executing, useful for bytecode inspection.
+- `--no-run` compiles without executing, useful for bytecode inspection or compile-only CI checks.
 - Embed `trace on` comments to trigger tracing near complicated sections without editing CLI arguments.
 - Combine `--dump-ast-json` with `jq` to visualise parse trees.
 
@@ -424,6 +425,7 @@ Before cutting a release candidate:
 - `--dump-bytecode-only` – print bytecode and exit.
 - `--vm-trace-head=N` – trace the first `N` VM instructions.
 - `--no-cache` – ignore `rea-obj/` caches.
+- `--no-run` – compile the program without launching the VM.
 
 ### B. Environment Variables
 
