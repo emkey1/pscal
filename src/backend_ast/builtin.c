@@ -4481,6 +4481,21 @@ void registerAllBuiltins(void) {
     registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
 
+    /* Shell front-end builtins */
+    registerBuiltinFunction("__shell_exec", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_pipeline", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_and", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_or", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_subshell", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_loop", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("__shell_if", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("cd", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("pwd", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("exit", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("export", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("unset", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunction("alias", AST_PROCEDURE_DECL, NULL);
+
     // Additional registrations to ensure CLike builtins are classified correctly
     registerBuiltinFunction("Fopen", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("Fclose", AST_PROCEDURE_DECL, NULL);
@@ -4501,5 +4516,18 @@ void registerAllBuiltins(void) {
     registerVmBuiltin("tochar",   vmBuiltinToChar,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("__shell_exec", vmBuiltinShellExec, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_pipeline", vmBuiltinShellPipeline, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_and", vmBuiltinShellAnd, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_or", vmBuiltinShellOr, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_subshell", vmBuiltinShellSubshell, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_loop", vmBuiltinShellLoop, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("__shell_if", vmBuiltinShellIf, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("cd", vmBuiltinShellCd, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("pwd", vmBuiltinShellPwd, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("exit", vmBuiltinShellExit, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("export", vmBuiltinShellExport, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("unset", vmBuiltinShellUnset, BUILTIN_TYPE_PROCEDURE, NULL);
+    registerVmBuiltin("alias", vmBuiltinShellAlias, BUILTIN_TYPE_PROCEDURE, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }

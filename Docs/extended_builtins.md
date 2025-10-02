@@ -19,7 +19,7 @@ The project currently ships several optional built‑in groups:
 | Category | Location | Groups |
 | -------- | -------- | ------ |
 | **Math** | `src/ext_builtins/math` | `series` (`Factorial`, `Fibonacci`), `fractal` (`MandelbrotRow`), `constants` (`Chudnovsky`) |
-| **System** | `src/ext_builtins/system` | `filesystem` (`FileExists`), `process` (`GetPid`), `timing` (`RealTimeClock`), `utility` (`Swap`) |
+| **System** | `src/ext_builtins/system` | `filesystem` (`FileExists`), `process` (`GetPid`), `timing` (`RealTimeClock`), `utility` (`Swap`), `shell` (`__shell_exec`, `__shell_pipeline`, `__shell_and`, `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`, `cd`, `pwd`, `exit`, `export`, `unset`, `alias`) |
 | **Strings** | `src/ext_builtins/strings` | `conversion` (`Atoi`) |
 | **Yyjson** | `src/ext_builtins/yyjson` | `document` (`YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`), `query` (`YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`), `primitives` (`YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull`) |
 | **Sqlite** | `src/ext_builtins/sqlite` | `connection` (`SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges`), `statement` (`SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteClearBindings`), `metadata` (`SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`), `results` (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`), `binding` (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) |
@@ -63,6 +63,29 @@ argument is empty the runtime falls back to the `OPENAI_API_KEY` environment
 variable. All three front ends ship helper libraries that build message arrays,
 invoke the builtin, and extract the assistant's response text for quick
 integration.
+
+### Shell orchestration built-ins
+
+The system category now enumerates a `shell` group that mirrors the runtime
+helpers used by the standalone shell front end. These routines are implemented
+inside the VM, so scripts can orchestrate processes without spawning additional
+interpreters.
+
+- `__shell_exec(meta, ...)` launches a single command, honouring simple
+  redirections encoded in its argument vector and optionally running in the
+  background.
+- `__shell_pipeline(meta)` initialises pipeline state so the subsequent
+  `__shell_exec` calls connect their standard streams via POSIX pipes. Background
+  pipelines are registered with the VM's job table for later polling.
+- Logical helpers (`__shell_and`, `__shell_or`, `__shell_subshell`,
+  `__shell_loop`, `__shell_if`) allow the compiler to model complex control
+  structures without embedding host-specific branching.
+- Classic shell utilities (`cd`, `pwd`, `exit`, `export`, `unset`, `alias`) run
+  entirely inside the interpreter so callers avoid forking when they need to
+  mutate the current environment.
+
+Although primarily targeted by the shell front end, these routines are exposed
+to every VM client via the builtin registry and host function table.
 
 ## Discovering available categories at runtime
 

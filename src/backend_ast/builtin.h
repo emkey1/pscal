@@ -102,6 +102,23 @@ Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
 
+/* Shell builtins */
+Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPipeline(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellAnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellOr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSubshell(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLoop(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPwd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
+Value vmHostShellLastStatus(struct VM_s* vm);
+Value vmHostShellPollJobs(struct VM_s* vm);
+
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReset(struct VM_s* vm, int arg_count, Value* args);
