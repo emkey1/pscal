@@ -442,6 +442,188 @@ str extractFirstContent(str response) {
   return response;
 }
 
+bool containsModelId(str json, str modelId) {
+  str fieldName = "\"id\"";
+  int len = length(json);
+  int searchStart = 1;
+  int fieldLen = length(fieldName);
+  str target = trim(modelId);
+  if (target == "") {
+    return false;
+  }
+  while (searchStart <= len) {
+    int idx = findSubstring(json, fieldName, searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + fieldLen;
+    cursor = skipWhitespace(json, cursor);
+    if (cursor <= len && json[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(json, cursor);
+      if (cursor <= len && json[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = json[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = json[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(json, index + 1);
+              if (code < 0) {
+                break;
+              }
+              index = index + 4;
+              if (isHighSurrogate(code)) {
+                int pairStart = index + 1;
+                if (pairStart + 5 <= len && json[pairStart] == '\\' &&
+                    json[pairStart + 1] == 'u') {
+                  int low = parseHexAt(json, pairStart + 2);
+                  if (isLowSurrogate(low)) {
+                    code = decodeSurrogatePair(code, low);
+                    index = pairStart + 5;
+                  } else {
+                    code = 0xFFFD;
+                  }
+                } else {
+                  code = 0xFFFD;
+                }
+              } else if (isLowSurrogate(code)) {
+                code = 0xFFFD;
+              }
+              decoded = decoded + encodeUtf8CodePoint(code);
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok && decoded == target) {
+          return true;
+        }
+      }
+    }
+    searchStart = idx + fieldLen;
+  }
+  return false;
+}
+
+str collectModelIds(str json) {
+  str fieldName = "\"id\"";
+  int len = length(json);
+  int searchStart = 1;
+  int fieldLen = length(fieldName);
+  str result = "";
+  bool first = true;
+  while (searchStart <= len) {
+    int idx = findSubstring(json, fieldName, searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + fieldLen;
+    cursor = skipWhitespace(json, cursor);
+    if (cursor <= len && json[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(json, cursor);
+      if (cursor <= len && json[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = json[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = json[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(json, index + 1);
+              if (code < 0) {
+                break;
+              }
+              index = index + 4;
+              if (isHighSurrogate(code)) {
+                int pairStart = index + 1;
+                if (pairStart + 5 <= len && json[pairStart] == '\\' &&
+                    json[pairStart + 1] == 'u') {
+                  int low = parseHexAt(json, pairStart + 2);
+                  if (isLowSurrogate(low)) {
+                    code = decodeSurrogatePair(code, low);
+                    index = pairStart + 5;
+                  } else {
+                    code = 0xFFFD;
+                  }
+                } else {
+                  code = 0xFFFD;
+                }
+              } else if (isLowSurrogate(code)) {
+                code = 0xFFFD;
+              }
+              decoded = decoded + encodeUtf8CodePoint(code);
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok) {
+          if (!first) {
+            result = result + ", ";
+          }
+          result = result + decoded;
+          first = false;
+        }
+      }
+    }
+    searchStart = idx + fieldLen;
+  }
+  return result;
+}
+
 str composeMessages(str systemPrompt, str userPrompt) {
   str result = "[";
   if (length(systemPrompt) > 0) {
@@ -507,6 +689,72 @@ str buildUrl(str baseUrl, str endpoint) {
   str prefix = trimTrailingSlash(base);
   str suffix = ensureLeadingSlash(trimmedEndpoint);
   return prefix + suffix;
+}
+
+bool verifyLmStudioModel(str baseUrl, str apiKey, str userAgent, str modelId) {
+  str trimmedModel = trim(modelId);
+  if (trimmedModel == "") {
+    return true;
+  }
+
+  str modelsUrl = buildUrl(baseUrl, "/v1/models");
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Warning: Unable to allocate an HTTP session for LM Studio model validation.");
+    return true;
+  }
+
+  httpsetoption(session, "timeout_ms", DEFAULT_TIMEOUT_MS);
+  httpsetheader(session, "Accept", "application/json");
+  if (userAgent != "") {
+    httpsetheader(session, "User-Agent", userAgent);
+  }
+  if (apiKey != "") {
+    httpsetheader(session, "Authorization", "Bearer " + apiKey);
+  }
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "GET", modelsUrl, nil, out);
+  str responseBody = mstreambuffer(out);
+
+  if (status < 0) {
+    writeln("Warning: Unable to query LM Studio model list (status ", status, ").");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return true;
+  }
+
+  bool ok = true;
+  if (status >= 200 && status < 300) {
+    if (!containsModelId(responseBody, trimmedModel)) {
+      writeln("Error: Model '", trimmedModel, "' is not available on the LM Studio server.");
+      str available = collectModelIds(responseBody);
+      if (available != "") {
+        writeln("Available models: ", available);
+      } else {
+        writeln("The server did not report any loaded models. Load a model in LM Studio's API panel and retry.");
+      }
+      writeln("Tip: Open LM Studio's API panel and copy the model identifier exactly as it appears in the HTTP API section.");
+      ok = false;
+    }
+  } else {
+    writeln("Warning: LM Studio returned HTTP status ", status, " when listing models.");
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+  }
+
+  mstreamfree(out);
+  httpclose(session);
+  return ok;
 }
 
 int main() {
@@ -629,6 +877,8 @@ int main() {
     return 1;
   }
 
+  model = trim(model);
+
   str optionsJson = DEFAULT_OPTIONS;
   if (temperatureProvided) {
     optionsJson = "{\"temperature\":" + temperatureValue + "}";
@@ -643,6 +893,9 @@ int main() {
     }
     if (!endpointExplicit) {
       endpointOverride = "/v1/chat/completions";
+    }
+    if (!verifyLmStudioModel(baseUrl, apiKey, userAgent, model)) {
+      return 1;
     }
   }
 
