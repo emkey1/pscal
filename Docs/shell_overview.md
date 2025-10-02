@@ -61,7 +61,10 @@ passed after the script path (`gParamValues` inside the VM), so invoking
 Interactive sessions also support history expansion beyond `!!`. Numeric
 designators like `!-2` and `!42`, prefix/substring searches (`!foo`, `!?bar?`),
 and word designators (`!$`, `!*`, `!^`, `!:2`) work against the recorded
-history before execution, providing the usual convenience shorthands.
+history before execution, providing the usual convenience shorthands. Regular
+expression lookups (`!?/expr/?`) and substitution designators (`!:s/old/new/` or
+`!:gs/old/new/`) are honoured as well, with replacement strings supporting tab
+escapes via `\t`.
 
 ## Builtins and interaction with the VM
 
