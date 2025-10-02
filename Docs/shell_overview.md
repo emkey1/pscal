@@ -27,7 +27,7 @@ ends:
 - `--vm-trace-head=<N>` traces the first `N` VM instructions (the same toggle as
   the Pascal and CLike front ends).
 
-Example scripts live under `Examples/shell/` and cover pipelines, conditionals,
+Example scripts live under `Examples/psh/` and cover pipelines, conditionals,
 and environment-aware builtins.
 
 ## Bytecode caching
@@ -82,7 +82,7 @@ exposed through the same dispatch table as other front ends.
 ## Working with examples and tests
 
 Sample scripts demonstrating pipelines, conditionals, and environment-focused
-builtins live in `Examples/shell/`. The regression suite under `Tests/shell/`
+builtins live in `Examples/psh/`. The regression suite under `Tests/shell/`
 runs these scripts through `build/bin/psh`, checks stdout/stderr, and verifies
 exit codes. The CI workflow executes the new suite alongside the Pascal, CLike,
 and Rea test runs.
