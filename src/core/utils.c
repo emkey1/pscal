@@ -1377,7 +1377,9 @@ char *findUnitFile(const char *unit_name) {
     const char *relative_fallbacks[] = {
         "./lib/pascal",
         "../lib/pascal",
-        "../../lib/pascal"
+        "../../lib/pascal",
+        "../../../lib/pascal",
+        "../../../../lib/pascal"
     };
     const size_t relative_count = sizeof(relative_fallbacks) / sizeof(relative_fallbacks[0]);
 
