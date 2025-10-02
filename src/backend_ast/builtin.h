@@ -4,6 +4,7 @@
 #include "core/types.h"
 #include "ast/ast.h"
 #include "Pascal/globals.h"
+#include <stdbool.h>
 
 struct VM_s;
 
@@ -118,6 +119,8 @@ Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellPollJobs(struct VM_s* vm);
+bool shellRuntimeConsumeExitRequested(void);
+int shellRuntimeLastStatus(void);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);

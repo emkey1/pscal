@@ -1,7 +1,9 @@
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -63,20 +65,251 @@ static char *readFile(const char *path) {
     return buffer;
 }
 
-int main(int argc, char **argv) {
-    int dump_ast_json_flag = 0;
-    int dump_bytecode_flag = 0;
-    int dump_bytecode_only_flag = 0;
-    int dump_ext_builtins_flag = 0;
-    int no_cache_flag = 0;
-    int vm_trace_head = 0;
-    const char *path = NULL;
-    int arg_start_index = 0;
+typedef struct {
+    int dump_ast_json;
+    int dump_bytecode;
+    int dump_bytecode_only;
+    int no_cache;
+    int vm_trace_head;
+    bool quiet;
+    const char *frontend_path;
+} ShellRunOptions;
 
-    if (argc == 1) {
-        fprintf(stderr, "%s\n", SHELL_USAGE);
+static char *readStream(FILE *stream) {
+    if (!stream) {
+        return NULL;
+    }
+    size_t capacity = 4096;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return NULL;
+    }
+    size_t length = 0;
+    while (true) {
+        if (capacity - length <= 1) {
+            size_t new_capacity = capacity * 2;
+            char *new_buffer = (char *)realloc(buffer, new_capacity);
+            if (!new_buffer) {
+                free(buffer);
+                return NULL;
+            }
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+        size_t chunk_size = capacity - length - 1;
+        size_t read_count = fread(buffer + length, 1, chunk_size, stream);
+        length += read_count;
+        if (read_count < chunk_size) {
+            if (ferror(stream)) {
+                free(buffer);
+                return NULL;
+            }
+            break;
+        }
+    }
+    buffer[length] = '\0';
+    return buffer;
+}
+
+static int runShellSource(const char *source,
+                          const char *path,
+                          const ShellRunOptions *options,
+                          bool *out_exit_requested) {
+    if (out_exit_requested) {
+        *out_exit_requested = false;
+    }
+    if (!source || !options) {
         return EXIT_FAILURE;
     }
+
+    const char *defines[1];
+    int define_count = 0;
+    char *pre_src = preprocessConditionals(source, defines, define_count);
+
+    globalSymbols = createHashTable();
+    constGlobalSymbols = createHashTable();
+    procedure_table = createHashTable();
+    if (!globalSymbols || !constGlobalSymbols || !procedure_table) {
+        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
+        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
+        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
+        if (pre_src) free(pre_src);
+        return EXIT_FAILURE;
+    }
+    current_procedure_table = procedure_table;
+    registerAllBuiltins();
+
+    int exit_code = EXIT_FAILURE;
+    ShellProgram *program = NULL;
+    ShellSemanticContext sem_ctx;
+    bool sem_ctx_initialized = false;
+    BytecodeChunk chunk;
+    bool chunk_initialized = false;
+    VM vm;
+    bool vm_initialized = false;
+    bool exit_flag = false;
+
+    ShellParser parser;
+    program = shellParseString(pre_src ? pre_src : source, &parser);
+    shellParserFree(&parser);
+    if (parser.had_error || !program) {
+        fprintf(stderr, "Parsing failed.\n");
+        goto cleanup;
+    }
+
+    if (options->dump_ast_json) {
+        shellDumpAstJson(stdout, program);
+        exit_code = EXIT_SUCCESS;
+        goto cleanup;
+    }
+
+    shellInitSemanticContext(&sem_ctx);
+    sem_ctx_initialized = true;
+    ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
+    if (sem_result.warning_count > 0) {
+        fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
+    }
+    if (sem_result.error_count > 0) {
+        fprintf(stderr, "Semantic analysis failed with %d error(s).\n", sem_result.error_count);
+        goto cleanup;
+    }
+
+    initBytecodeChunk(&chunk);
+    chunk_initialized = true;
+    bool used_cache = false;
+    if (!options->no_cache && path && path[0]) {
+        used_cache = loadBytecodeFromCache(path, kShellCompilerId, options->frontend_path, NULL, 0, &chunk);
+    }
+
+    if (!used_cache) {
+        ShellOptConfig opt_config = { false };
+        shellRunOptimizations(program, &opt_config);
+        shellCompile(program, &chunk);
+        if (path && path[0] && !options->no_cache) {
+            saveBytecodeToCache(path, kShellCompilerId, &chunk);
+        }
+        if (!options->quiet) {
+            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+        }
+        if (options->dump_bytecode) {
+            fprintf(stderr, "--- Compiling Shell Script to Bytecode ---\n");
+            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
+            if (!options->dump_bytecode_only) {
+                fprintf(stderr, "\n--- executing Script with VM ---\n");
+            }
+        }
+    } else {
+        if (!options->quiet) {
+            fprintf(stderr, "Loaded cached bytecode. Byte code size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+        }
+        if (options->dump_bytecode) {
+            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
+            if (!options->dump_bytecode_only) {
+                fprintf(stderr, "\n--- executing Script with VM (cached) ---\n");
+            }
+        }
+    }
+
+    if (options->dump_bytecode_only) {
+        exit_code = EXIT_SUCCESS;
+        goto cleanup;
+    }
+
+    initVM(&vm);
+    vm_initialized = true;
+    if (options->vm_trace_head > 0) {
+        vm.trace_head_instructions = options->vm_trace_head;
+    }
+
+    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    int last_status = shellRuntimeLastStatus();
+    exit_flag = shellRuntimeConsumeExitRequested();
+    exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
+
+cleanup:
+    if (out_exit_requested) {
+        *out_exit_requested = exit_flag;
+    } else {
+        (void)exit_flag;
+    }
+    if (vm_initialized) {
+        freeVM(&vm);
+    }
+    if (chunk_initialized) {
+        freeBytecodeChunk(&chunk);
+    }
+    if (sem_ctx_initialized) {
+        shellFreeSemanticContext(&sem_ctx);
+    }
+    if (program) {
+        shellFreeProgram(program);
+    }
+    if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
+    if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
+    if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
+    current_procedure_table = NULL;
+    if (pre_src) {
+        free(pre_src);
+    }
+    return exit_code;
+}
+
+static int runInteractiveSession(const ShellRunOptions *options) {
+    ShellRunOptions exec_opts = *options;
+    exec_opts.no_cache = 1;
+    exec_opts.quiet = true;
+
+    int last_status = shellRuntimeLastStatus();
+    bool tty = isatty(STDIN_FILENO);
+
+    while (true) {
+        if (tty) {
+            fputs("psh$ ", stdout);
+            fflush(stdout);
+        }
+        char *line = NULL;
+        size_t line_capacity = 0;
+        ssize_t read = getline(&line, &line_capacity, stdin);
+        if (read < 0) {
+            free(line);
+            if (tty) {
+                fputc('\n', stdout);
+            }
+            break;
+        }
+        bool only_whitespace = true;
+        for (ssize_t i = 0; i < read; ++i) {
+            if (line[i] != ' ' && line[i] != '\t' && line[i] != '\n' && line[i] != '\r') {
+                only_whitespace = false;
+                break;
+            }
+        }
+        if (only_whitespace) {
+            free(line);
+            continue;
+        }
+
+        bool exit_requested = false;
+        last_status = runShellSource(line, "<stdin>", &exec_opts, &exit_requested);
+        free(line);
+        if (exit_requested) {
+            break;
+        }
+    }
+
+    return last_status;
+}
+
+int main(int argc, char **argv) {
+    ShellRunOptions options = {0};
+    options.frontend_path = (argc > 0) ? argv[0] : "psh";
+
+    int dump_ext_builtins_flag = 0;
+    const char *path = NULL;
+    int arg_start_index = 0;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) {
@@ -84,18 +317,18 @@ int main(int argc, char **argv) {
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
-            dump_ast_json_flag = 1;
+            options.dump_ast_json = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
-            dump_bytecode_flag = 1;
+            options.dump_bytecode = 1;
         } else if (strcmp(argv[i], "--dump-bytecode-only") == 0) {
-            dump_bytecode_flag = 1;
-            dump_bytecode_only_flag = 1;
+            options.dump_bytecode = 1;
+            options.dump_bytecode_only = 1;
         } else if (strcmp(argv[i], "--dump-ext-builtins") == 0) {
             dump_ext_builtins_flag = 1;
         } else if (strcmp(argv[i], "--no-cache") == 0) {
-            no_cache_flag = 1;
+            options.no_cache = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
-            vm_trace_head = atoi(argv[i] + 16);
+            options.vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
             return EXIT_FAILURE;
@@ -111,152 +344,43 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
-    if (!path) {
-        fprintf(stderr, "Error: no input script provided.\n%s\n", SHELL_USAGE);
-        return EXIT_FAILURE;
-    }
+    setenv("PSCALSHELL_LAST_STATUS", "0", 1);
 
-    char *src = readFile(path);
-    if (!src) {
-        return EXIT_FAILURE;
-    }
-
-    const char *defines[1];
-    int define_count = 0;
-    char *pre_src = preprocessConditionals(src, defines, define_count);
-
-    globalSymbols = createHashTable();
-    constGlobalSymbols = createHashTable();
-    procedure_table = createHashTable();
-    if (!globalSymbols || !constGlobalSymbols || !procedure_table) {
-        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        if (pre_src) free(pre_src);
-        free(src);
-        return EXIT_FAILURE;
-    }
-    current_procedure_table = procedure_table;
-    registerAllBuiltins();
-
-    ShellParser parser;
-    ShellProgram *program = shellParseString(pre_src ? pre_src : src, &parser);
-    shellParserFree(&parser);
-    if (parser.had_error || !program) {
-        fprintf(stderr, "Parsing failed.\n");
-        if (program) {
-            shellFreeProgram(program);
+    if (path) {
+        char *src = readFile(path);
+        if (!src) {
+            return EXIT_FAILURE;
         }
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        current_procedure_table = NULL;
+        if (arg_start_index < argc) {
+            gParamCount = argc - arg_start_index;
+            gParamValues = &argv[arg_start_index];
+        }
+        bool exit_requested = false;
+        int status = runShellSource(src, path, &options, &exit_requested);
+        (void)exit_requested;
         free(src);
-        if (pre_src) free(pre_src);
+        return vmExitWithCleanup(status);
+    }
+
+    gParamCount = 0;
+    gParamValues = NULL;
+
+    if (isatty(STDIN_FILENO)) {
+        int status = runInteractiveSession(&options);
+        return vmExitWithCleanup(status);
+    }
+
+    char *stdin_src = readStream(stdin);
+    if (!stdin_src) {
         return EXIT_FAILURE;
     }
 
-    if (dump_ast_json_flag) {
-        shellDumpAstJson(stdout, program);
-        shellFreeProgram(program);
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        current_procedure_table = NULL;
-        free(src);
-        if (pre_src) free(pre_src);
-        return EXIT_SUCCESS;
-    }
-
-    if (arg_start_index < argc) {
-        gParamCount = argc - arg_start_index;
-        gParamValues = &argv[arg_start_index];
-    }
-
-    ShellSemanticContext sem_ctx;
-    shellInitSemanticContext(&sem_ctx);
-    ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
-    if (sem_result.warning_count > 0) {
-        fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
-    }
-    if (sem_result.error_count > 0) {
-        fprintf(stderr, "Semantic analysis failed with %d error(s).\n", sem_result.error_count);
-        shellFreeSemanticContext(&sem_ctx);
-        shellFreeProgram(program);
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        current_procedure_table = NULL;
-        free(src);
-        if (pre_src) free(pre_src);
-        return EXIT_FAILURE;
-    }
-
-    BytecodeChunk chunk;
-    initBytecodeChunk(&chunk);
-    bool used_cache = false;
-    if (!no_cache_flag) {
-        used_cache = loadBytecodeFromCache(path, kShellCompilerId, argv[0], NULL, 0, &chunk);
-    }
-
-    if (!used_cache) {
-        ShellOptConfig opt_config = { false };
-        shellRunOptimizations(program, &opt_config);
-        shellCompile(program, &chunk);
-        saveBytecodeToCache(path, kShellCompilerId, &chunk);
-        fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
-                chunk.count, chunk.constants_count);
-        if (dump_bytecode_flag) {
-            fprintf(stderr, "--- Compiling Shell Script to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
-            if (!dump_bytecode_only_flag) {
-                fprintf(stderr, "\n--- executing Script with VM ---\n");
-            }
-        }
-    } else {
-        fprintf(stderr, "Loaded cached bytecode. Byte code size: %d bytes, Constants: %d\n",
-                chunk.count, chunk.constants_count);
-        if (dump_bytecode_flag) {
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
-            if (!dump_bytecode_only_flag) {
-                fprintf(stderr, "\n--- executing Script with VM (cached) ---\n");
-            }
-        }
-    }
-
-    if (dump_bytecode_only_flag) {
-        freeBytecodeChunk(&chunk);
-        shellFreeSemanticContext(&sem_ctx);
-        shellFreeProgram(program);
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        current_procedure_table = NULL;
-        free(src);
-        if (pre_src) free(pre_src);
-        return vmExitWithCleanup(EXIT_SUCCESS);
-    }
-
-    VM vm;
-    initVM(&vm);
-    if (vm_trace_head > 0) {
-        vm.trace_head_instructions = vm_trace_head;
-    }
-
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
-
-    if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-    if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-    if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-    current_procedure_table = NULL;
-
-    freeVM(&vm);
-    freeBytecodeChunk(&chunk);
-    shellFreeSemanticContext(&sem_ctx);
-    shellFreeProgram(program);
-    free(src);
-    if (pre_src) free(pre_src);
-
-    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
+    ShellRunOptions stdin_opts = options;
+    stdin_opts.no_cache = 1;
+    stdin_opts.quiet = true;
+    bool exit_requested = false;
+    int status = runShellSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
+    (void)exit_requested;
+    free(stdin_src);
+    return vmExitWithCleanup(status);
 }
