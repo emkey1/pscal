@@ -26,6 +26,7 @@ The project currently ships several optional built‑in groups:
 | **3D** | `src/ext_builtins/threed` | `physics` (`BouncingBalls3DStep`, `BouncingBalls3DStepUltra`, `BouncingBalls3DStepAdvanced`, `BouncingBalls3DStepUltraAdvanced`, `BouncingBalls3DAccelerate`), `rendering` (`BouncingBalls3DDrawUnitSphereFast`) |
 | **Graphics** | `src/ext_builtins/graphics` | `window` (`InitGraph`, `CloseGraph`, `ClearDevice`, `UpdateScreen`, `GraphLoop`), `drawing` (`SetColor`, `DrawLine`, `FillRect`, `DrawCircle`, `GetPixelColor`), `textures` (`CreateTexture`, `LoadImageToTexture`, `RenderCopyEx`, `UpdateTexture`), `text` (`InitTextSystem`, `OutTextXY`, `RenderTextToTexture`), `input` (`PollKey`, `IsKeyDown`, `GetMouseState`, `WaitKeyEvent`), `audio` (`InitSoundSystem`, `LoadSound`, `PlaySound`, `StopAllSounds`, `IsSoundPlaying`), `opengl` (`GLBegin`, `GLRotatef`, `GLColor4f`, `GLIsHardwareAccelerated`) |
 | **User** | `src/ext_builtins/user` | `landscape` → `landscape/rendering` (`LandscapeDrawTerrain`, `LandscapeDrawWater`), `landscape/precompute` (`LandscapePrecomputeWorldCoords`, `LandscapePrecomputeWaterOffsets`) |
+| **OpenAI** | `src/ext_builtins/openai` | `chat` (`OpenAIChatCompletions`) |
 
 Individual categories can be enabled or disabled at configure time with
 the following CMake options (all default to `ON`):
@@ -39,6 +40,7 @@ the following CMake options (all default to `ON`):
 -DENABLE_EXT_BUILTIN_SQLITE=ON/OFF
 -DENABLE_EXT_BUILTIN_3D=ON/OFF
 -DENABLE_EXT_BUILTIN_GRAPHICS=ON/OFF
+-DENABLE_EXT_BUILTIN_OPENAI=ON/OFF
 ```
 
 ### Yyjson built-ins
@@ -48,6 +50,19 @@ The `yyjson` category wraps the bundled [yyjson](https://github.com/ibireme/yyjs
 ### Sqlite built-ins
 
 The `sqlite` category embeds the platform SQLite3 library and presents handle-based wrappers that work consistently across the Pascal, C-like, and Rea front ends. `SqliteOpen` returns a database handle for the supplied path (use `:memory:` for an in-memory database); invoke `SqliteClose` when finished to dispose of the connection. Use `SqliteExec` for simple statements or the `SqlitePrepare`/`SqliteStep`/`SqliteFinalize` trio for parameterised queries. Column accessors (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`, etc.) operate on statement handles after `SqliteStep` yields a row. Binding helpers (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) populate positional parameters; call `SqliteReset` and `SqliteClearBindings` to reuse prepared statements. Diagnostic helpers such as `SqliteErrMsg`, `SqliteChanges`, and `SqliteLastInsertRowId` mirror their SQLite counterparts.
+
+### OpenAI built-ins
+
+The `openai` category exposes a small HTTP-based interface for calling the
+`/chat/completions` endpoint. `OpenAIChatCompletions(model, messagesJson,
+[optionsJson, apiKey, baseUrl])` sends a JSON payload to the service and
+returns the raw response body. Provide a JSON array of message objects for the
+conversation history; optional parameters let callers append additional request
+fields, override the API key, or target a different endpoint. When the API key
+argument is empty the runtime falls back to the `OPENAI_API_KEY` environment
+variable. All three front ends ship helper libraries that build message arrays,
+invoke the builtin, and extract the assistant's response text for quick
+integration.
 
 ## Discovering available categories at runtime
 

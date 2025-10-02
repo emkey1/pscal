@@ -9,6 +9,7 @@ option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
 option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ON)
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
+option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
 
 # Base sources that are always built
 set(PSCAL_EXT_BUILTIN_SOURCES
@@ -57,6 +58,11 @@ endif()
 if(ENABLE_EXT_BUILTIN_GRAPHICS)
     add_subdirectory(graphics)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_GRAPHICS_SOURCES})
+endif()
+
+if(ENABLE_EXT_BUILTIN_OPENAI)
+    add_subdirectory(openai)
+    list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_OPENAI_SOURCES})
 endif()
 
 # Expose sources to parent scope
