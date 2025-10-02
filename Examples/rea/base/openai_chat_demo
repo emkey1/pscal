@@ -136,6 +136,9 @@ str maskSecret(str value) {
   if (len <= 4) {
     return repeatChar('*', len);
   }
+  if (len <= 8) {
+    return repeatChar('*', len);
+  }
   int visible = 4;
   str prefix = substringRange(value, 1, visible);
   str suffix;
