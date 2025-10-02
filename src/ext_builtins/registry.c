@@ -121,6 +121,16 @@ static char *buildFullName(const ExtBuiltinGroup *parent,
     return full;
 }
 
+static char *dupComponent(const char *component, size_t component_len) {
+    char *copy = malloc(component_len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, component, component_len);
+    copy[component_len] = '\0';
+    return copy;
+}
+
 static ExtBuiltinGroup *ensureChild(ExtBuiltinGroup **groups, size_t *count,
                                     ExtBuiltinGroup *parent,
                                     const char *component,
@@ -147,7 +157,7 @@ static ExtBuiltinGroup *ensureChild(ExtBuiltinGroup **groups, size_t *count,
     child->children = NULL;
     child->child_count = 0;
 
-    child->name = strndup(component, component_len);
+    child->name = dupComponent(component, component_len);
     if (!child->name) {
         ExtBuiltinGroup *shrunk = realloc(*groups, sizeof(ExtBuiltinGroup) * (*count));
         if (shrunk || *count == 0) {
