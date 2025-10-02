@@ -1,0 +1,205 @@
+#!/usr/bin/env rea
+// OpenAI chat completion demo using the Rea front end.
+//
+// This sample targets the new OpenAI API server exposed at
+// http://192.168.110.209:1234 and shows how to call it from Rea code.
+//
+// Usage examples:
+//   OPENAI_API_KEY=sk-... ./openai_chat_demo "Say hello in one sentence."
+//   ./openai_chat_demo --api-key sk-... --model gpt-4.1-mini --temperature 0.2 \
+//       "Summarise the PSCAL toolchain in 40 words."
+//
+// Command line options:
+//   --model <id>        Override the model name (defaults to OPENAI_MODEL or gpt-4.1-mini)
+//   --system <prompt>   Provide a custom system prompt (defaults to a concise helper prompt)
+//   --base-url <url>    Set the API base URL (defaults to OPENAI_BASE_URL or http://192.168.110.209:1234/v1)
+//   --api-key <key>     Supply an API key (otherwise falls back to OPENAI_API_KEY)
+//   --temperature <n>   Adjust the temperature (numeric literal, overrides the default 0.7)
+//   --options <json>    Send a raw JSON object with additional parameters (overrides --temperature)
+//   --help, -h          Display this message
+//
+//#import "openai";
+#import "openai";
+
+const str DEFAULT_MODEL = "gpt-4.1-mini";
+const str DEFAULT_BASE_URL = "http://192.168.110.209:1234/v1";
+const str DEFAULT_SYSTEM_PROMPT = "You are a concise assistant for PSCAL demo programs.";
+const str DEFAULT_OPTIONS = "{\"temperature\":0.7}";
+
+void printUsage(str programName) {
+  writeln("Usage: ", programName, " [options] <prompt>");
+  writeln("  --model <id>        Override the model name (default gpt-4.1-mini)");
+  writeln("  --system <prompt>   Provide a custom system prompt");
+  writeln("  --base-url <url>    Set the API base URL (default http://192.168.110.209:1234/v1)");
+  writeln("  --api-key <key>     Supply an API key (default OPENAI_API_KEY environment variable)");
+  writeln("  --temperature <n>   Adjust the temperature (numeric literal)");
+  writeln("  --options <json>    Send a raw JSON object with additional parameters");
+  writeln("  --help, -h          Display this message");
+}
+
+bool isDigit(char ch) {
+  return ch >= '0' && ch <= '9';
+}
+
+bool isValidNumber(str value) {
+  int len = length(value);
+  if (len == 0) {
+    return false;
+  }
+  int index = 1;
+  char first = value[1];
+  if (first == '+' || first == '-') {
+    if (len == 1) {
+      return false;
+    }
+    index = 2;
+  }
+  bool seenDigit = false;
+  int dotCount = 0;
+  while (index <= len) {
+    char ch = value[index];
+    if (isDigit(ch)) {
+      seenDigit = true;
+    } else if (ch == '.') {
+      dotCount = dotCount + 1;
+      if (dotCount > 1) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+    index = index + 1;
+  }
+  return seenDigit;
+}
+
+str resolveEnvOrDefault(str name, str fallback) {
+  str value = getenv(name);
+  if (value != "") {
+    return value;
+  }
+  return fallback;
+}
+
+int main() {
+  if (!hasextbuiltin("openai", "OpenAIChatCompletions")) {
+    writeln("Error: openai extended built-ins are unavailable. Rebuild PSCAL with -DENABLE_EXT_BUILTIN_OPENAI=ON.");
+    return 1;
+  }
+
+  str programName = paramstr(0);
+  str model = resolveEnvOrDefault("OPENAI_MODEL", DEFAULT_MODEL);
+  str baseUrl = resolveEnvOrDefault("OPENAI_BASE_URL", DEFAULT_BASE_URL);
+  str apiKey = getenv("OPENAI_API_KEY");
+  str systemPrompt = resolveEnvOrDefault("OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+  str optionsOverride = "";
+  bool hasOptionsOverride = false;
+  bool temperatureProvided = false;
+  str temperatureValue = "";
+  str userPrompt = "";
+
+  int argc = paramcount();
+  int i = 1;
+  while (i <= argc) {
+    str arg = paramstr(i);
+    if (arg == "--help" || arg == "-h") {
+      printUsage(programName);
+      return 0;
+    } else if (arg == "--model") {
+      if (i + 1 > argc) {
+        writeln("Error: --model requires a value.");
+        return 1;
+      }
+      model = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else if (arg == "--system") {
+      if (i + 1 > argc) {
+        writeln("Error: --system requires a value.");
+        return 1;
+      }
+      systemPrompt = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else if (arg == "--base-url") {
+      if (i + 1 > argc) {
+        writeln("Error: --base-url requires a value.");
+        return 1;
+      }
+      baseUrl = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else if (arg == "--api-key") {
+      if (i + 1 > argc) {
+        writeln("Error: --api-key requires a value.");
+        return 1;
+      }
+      apiKey = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else if (arg == "--temperature") {
+      if (i + 1 > argc) {
+        writeln("Error: --temperature requires a value.");
+        return 1;
+      }
+      str value = paramstr(i + 1);
+      if (!isValidNumber(value)) {
+        writeln("Error: --temperature expects a numeric literal (e.g. 0.7).");
+        return 1;
+      }
+      temperatureProvided = true;
+      temperatureValue = value;
+      i = i + 2;
+      continue;
+    } else if (arg == "--options") {
+      if (i + 1 > argc) {
+        writeln("Error: --options requires a JSON object value.");
+        return 1;
+      }
+      hasOptionsOverride = true;
+      optionsOverride = paramstr(i + 1);
+      i = i + 2;
+      continue;
+    } else {
+      if (userPrompt != "") {
+        userPrompt = userPrompt + " ";
+      }
+      userPrompt = userPrompt + arg;
+      i = i + 1;
+    }
+  }
+
+  if (userPrompt == "") {
+    printUsage(programName);
+    return 1;
+  }
+
+  if (apiKey == "") {
+    writeln("Error: provide an API key via --api-key or set OPENAI_API_KEY.");
+    return 1;
+  }
+
+  str optionsJson = DEFAULT_OPTIONS;
+  if (temperatureProvided) {
+    optionsJson = "{\"temperature\":" + temperatureValue + "}";
+  }
+  if (hasOptionsOverride) {
+    optionsJson = optionsOverride;
+  }
+
+  writeln("Model: ", model);
+  writeln("Base URL: ", baseUrl);
+  writeln("System prompt: ", systemPrompt);
+  writeln("Request options: ", optionsJson);
+  writeln("Prompt: ", userPrompt);
+  writeln("---");
+
+  str reply = OpenAI.chatWithOptions(model, systemPrompt, userPrompt, optionsJson, apiKey, baseUrl);
+  if (reply == "") {
+    writeln("Error: Empty response body returned by the OpenAI API.");
+    return 1;
+  }
+
+  writeln(reply);
+  return 0;
+}
