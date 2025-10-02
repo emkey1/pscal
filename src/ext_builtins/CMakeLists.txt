@@ -65,5 +65,12 @@ if(ENABLE_EXT_BUILTIN_OPENAI)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_OPENAI_SOURCES})
 endif()
 
+# Shell front-end builtins are exposed separately so only the `psh`
+# executable pulls them in by default.
+set(PSH_EXT_BUILTIN_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shell_frontend.c
+)
+
 # Expose sources to parent scope
 set(PSCAL_EXT_BUILTIN_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES} PARENT_SCOPE)
+set(PSH_EXT_BUILTIN_SOURCES ${PSH_EXT_BUILTIN_SOURCES} PARENT_SCOPE)
