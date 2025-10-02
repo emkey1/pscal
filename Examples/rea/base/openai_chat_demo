@@ -114,6 +114,55 @@ str duplicateString(str value) {
   return result;
 }
 
+str repeatChar(char ch, int count) {
+  if (count <= 0) {
+    return "";
+  }
+  str result;
+  setlength(result, count);
+  int index = 1;
+  while (index <= count) {
+    result[index] = ch;
+    index = index + 1;
+  }
+  return result;
+}
+
+str maskSecret(str value) {
+  if (value == "") {
+    return "(not set)";
+  }
+  int len = length(value);
+  if (len <= 4) {
+    return repeatChar('*', len);
+  }
+  int visible = 4;
+  str prefix = substringRange(value, 1, visible);
+  str suffix;
+  if (len > visible) {
+    int start = len - visible + 1;
+    if (start < visible + 1) {
+      start = visible + 1;
+    }
+    suffix = substringRange(value, start, len);
+  } else {
+    suffix = "";
+  }
+  int maskedCount = len - length(prefix) - length(suffix);
+  if (maskedCount < 0) {
+    maskedCount = 0;
+  }
+  str mask = repeatChar('*', maskedCount);
+  return prefix + mask + suffix;
+}
+
+str describeAuthorization(str apiKey) {
+  if (apiKey == "") {
+    return "(not set)";
+  }
+  return "Bearer " + maskSecret(apiKey);
+}
+
 str resolveEnvOrDefault(str primary, str secondary, str fallback) {
   if (primary != "") {
     str value = getenv(primary);
@@ -1100,8 +1149,17 @@ int main() {
   writeln("Model: ", model);
   writeln("Base URL: ", baseUrl);
   writeln("Endpoint: ", endpoint);
+  writeln("Resolved request URL: ", url);
   writeln("System prompt: ", systemPrompt);
   writeln("Request options: ", optionsJson);
+  writeln("Request payload: ", body);
+  writeln("Authorization header: ", describeAuthorization(apiKey));
+  if (userAgent != "") {
+    writeln("User-Agent header: ", userAgent);
+  } else {
+    writeln("User-Agent header: (not set)");
+  }
+  writeln("HTTP timeout (ms): ", DEFAULT_TIMEOUT_MS);
   writeln("Prompt: ", userPrompt);
   if (useLmStudioPreset) {
     writeln("LM Studio preset active. Ensure the local server is running and copy the exact model ID from the LM Studio API panel.");
@@ -1151,6 +1209,9 @@ int main() {
     if (responseBody != "") {
       writeln("Response: ", responseBody);
     }
+    writeln("Request payload (repeated for debugging): ", body);
+    writeln("Authorization header state: ", describeAuthorization(apiKey));
+    writeln("Resolved request URL (repeated): ", url);
     if (status == 400) {
       writeln("Hint: Double-check the endpoint and model identifier. LM Studio returns HTTP 400 when the local server is disabled or the model slug does not match the value in its API panel.");
     }
