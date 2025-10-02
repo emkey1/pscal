@@ -117,10 +117,12 @@ Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellHistory(struct VM_s* vm, int arg_count, Value* args);
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellPollJobs(struct VM_s* vm);
 bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
+void shellRuntimeRecordHistory(const char *line);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);

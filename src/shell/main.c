@@ -292,6 +292,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             continue;
         }
 
+        shellRuntimeRecordHistory(line);
         bool exit_requested = false;
         last_status = runShellSource(line, "<stdin>", &exec_opts, &exit_requested);
         free(line);

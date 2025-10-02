@@ -16,6 +16,10 @@ void registerHasExtBuiltin(void);
 
 void registerExtBuiltinQueryBuiltins(void);
 
+#ifdef FRONTEND_SHELL
+void registerShellFrontendBuiltins(void);
+#endif
+
 static pthread_once_t s_ext_builtin_once = PTHREAD_ONCE_INIT;
 
 static void registerExtendedBuiltinsOnce(void) {
@@ -46,6 +50,9 @@ static void registerExtendedBuiltinsOnce(void) {
 #endif
 #ifdef ENABLE_EXT_BUILTIN_OPENAI
   registerOpenAIBuiltins();
+#endif
+#ifdef FRONTEND_SHELL
+  registerShellFrontendBuiltins();
 #endif
 }
 

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static char *shellDuplicateName(const char *name) {
     if (!name) {
@@ -95,6 +96,69 @@ static void shellReportUndefinedBuiltin(ShellSemanticContext *ctx, const ShellWo
             word->line, word->column, word->text);
 }
 
+static bool shellCommandExistsOnPath(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (strchr(name, '/')) {
+        return access(name, X_OK) == 0;
+    }
+
+    const char *path_env = getenv("PATH");
+    if (!path_env || !*path_env) {
+        path_env = "/bin:/usr/bin";
+    }
+
+    size_t name_len = strlen(name);
+    const char *cursor = path_env;
+    while (*cursor) {
+        const char *sep = strchr(cursor, ':');
+        size_t dir_len = sep ? (size_t)(sep - cursor) : strlen(cursor);
+        size_t prefix_len = dir_len;
+        bool use_current_dir = (dir_len == 0);
+        if (use_current_dir) {
+            prefix_len = 1; // "" -> "."
+        }
+
+        size_t total_len = prefix_len + 1 + name_len + 1;
+        char *candidate = (char *)malloc(total_len);
+        if (!candidate) {
+            if (!sep) {
+                break;
+            }
+            cursor = sep + 1;
+            continue;
+        }
+
+        size_t pos = 0;
+        if (use_current_dir) {
+            candidate[pos++] = '.';
+        } else if (dir_len > 0) {
+            memcpy(candidate + pos, cursor, dir_len);
+            pos += dir_len;
+        }
+        if (pos == 0 || candidate[pos - 1] != '/') {
+            candidate[pos++] = '/';
+        }
+        memcpy(candidate + pos, name, name_len);
+        pos += name_len;
+        candidate[pos] = '\0';
+
+        bool found = access(candidate, X_OK) == 0;
+        free(candidate);
+        if (found) {
+            return true;
+        }
+
+        if (!sep) {
+            break;
+        }
+        cursor = sep + 1;
+    }
+
+    return false;
+}
+
 static void shellReportUndefinedVariable(ShellSemanticContext *ctx, const ShellWord *word, const char *name) {
     if (!ctx || !word || !name) {
         return;
@@ -122,7 +186,7 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
             if (!sym && procedure_table) {
                 sym = hashTableLookup(procedure_table, first->text);
             }
-            if (!sym) {
+            if (!sym && !shellCommandExistsOnPath(first->text)) {
                 shellReportUndefinedBuiltin(ctx, first);
             }
         }

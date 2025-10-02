@@ -67,6 +67,14 @@ typedef struct {
 static ShellJob *gShellJobs = NULL;
 static size_t gShellJobCount = 0;
 
+typedef struct {
+    char **entries;
+    size_t count;
+    size_t capacity;
+} ShellHistory;
+
+static ShellHistory gShellHistory = {NULL, 0, 0};
+
 static void shellFreeRedirections(ShellCommand *cmd) {
     if (!cmd) {
         return;
@@ -114,11 +122,64 @@ static void shellUpdateStatus(int status) {
     setenv("PSCALSHELL_LAST_STATUS", buffer, 1);
 }
 
+static bool shellHistoryEnsureCapacity(size_t needed) {
+    if (gShellHistory.capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellHistory.capacity ? gShellHistory.capacity * 2 : 16;
+    if (new_capacity < needed) {
+        new_capacity = needed;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(char *)) {
+        return false;
+    }
+    char **entries = realloc(gShellHistory.entries, new_capacity * sizeof(char *));
+    if (!entries) {
+        return false;
+    }
+    gShellHistory.entries = entries;
+    gShellHistory.capacity = new_capacity;
+    return true;
+}
+
+void shellRuntimeRecordHistory(const char *line) {
+    if (!line) {
+        return;
+    }
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+        --len;
+    }
+    if (len == 0) {
+        return;
+    }
+    bool has_content = false;
+    for (size_t i = 0; i < len; ++i) {
+        if (line[i] != ' ' && line[i] != '\t') {
+            has_content = true;
+            break;
+        }
+    }
+    if (!has_content) {
+        return;
+    }
+    if (!shellHistoryEnsureCapacity(gShellHistory.count + 1)) {
+        return;
+    }
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return;
+    }
+    memcpy(copy, line, len);
+    copy[len] = '\0';
+    gShellHistory.entries[gShellHistory.count++] = copy;
+}
+
 static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "alias"};
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "alias", "history"};
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
         if (strcasecmp(name, kBuiltins[i]) == 0) {
@@ -947,6 +1008,17 @@ Value vmBuiltinShellAlias(VM *vm, int arg_count, Value *args) {
             return makeVoid();
         }
         free(name);
+    }
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellHistory(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    for (size_t i = 0; i < gShellHistory.count; ++i) {
+        printf("%zu  %s\n", i + 1, gShellHistory.entries[i]);
     }
     shellUpdateStatus(0);
     return makeVoid();
