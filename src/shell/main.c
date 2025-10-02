@@ -148,6 +148,7 @@ static int runShellSource(const char *source,
     bool chunk_initialized = false;
     VM vm;
     bool vm_initialized = false;
+    bool exit_flag = false;
 
     ShellParser parser;
     program = shellParseString(pre_src ? pre_src : source, &parser);
@@ -225,7 +226,7 @@ static int runShellSource(const char *source,
 
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     int last_status = shellRuntimeLastStatus();
-    bool exit_flag = shellRuntimeConsumeExitRequested();
+    exit_flag = shellRuntimeConsumeExitRequested();
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
 
 cleanup:
