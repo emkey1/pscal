@@ -20,6 +20,8 @@ jobs:
         run: cd build && ctest --output-on-failure
       - name: Run CLike tests
         run: Tests/run_clike_tests.sh
+      - name: Run Shell tests
+        run: Tests/run_shell_tests.sh
       - name: Run Pascal tests
         run: Tests/run_pascal_tests.sh
       - name: Run Rea tests
@@ -43,6 +45,16 @@ jobs:
             if [ -f "$f" ]; then
               echo "CLike example: $bn"
               build/bin/clike --dump-bytecode-only "$f" >/dev/null
+            fi
+          done
+      - name: Compile Shell examples (dump-only)
+        run: |
+          set -e
+          for f in Examples/shell/*.psh; do
+            if [ -f "$f" ]; then
+              bn=$(basename "$f")
+              echo "Shell example: $bn"
+              build/bin/psh --dump-bytecode-only "$f" >/dev/null
             fi
           done
       - name: Compile Pascal examples (dump-only)

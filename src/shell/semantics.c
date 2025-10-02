@@ -115,7 +115,13 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
     ShellWord *first = words->items[0];
     if (first && first->text && !shellIsBuiltinName(first->text)) {
         if (!hashTableLookup(ctx->builtin_table, first->text)) {
-            Symbol *sym = lookupSymbol(first->text);
+            Symbol *sym = lookupGlobalSymbol(first->text);
+            if (!sym && constGlobalSymbols) {
+                sym = hashTableLookup(constGlobalSymbols, first->text);
+            }
+            if (!sym && procedure_table) {
+                sym = hashTableLookup(procedure_table, first->text);
+            }
             if (!sym) {
                 shellReportUndefinedBuiltin(ctx, first);
             }

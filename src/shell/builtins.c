@@ -23,6 +23,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"read", "read", 10},
     {"test", "test", 11},
     {"shift", "shift", 12},
+    {"alias", "alias", 13},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},

@@ -31,7 +31,35 @@ static unsigned long hashPath(const char* path) {
     return (unsigned long)hash;
 }
 
-char* buildCachePath(const char* source_path) {
+static void sanitizeCompilerId(const char* compiler_id, char* buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    size_t out_idx = 0;
+    if (compiler_id && compiler_id[0]) {
+        for (const char* p = compiler_id; *p && out_idx + 1 < buffer_size; ++p) {
+            unsigned char ch = (unsigned char)(*p);
+            if ((ch >= 'A' && ch <= 'Z')) {
+                buffer[out_idx++] = (char)(ch - 'A' + 'a');
+            } else if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+                buffer[out_idx++] = (char)ch;
+            } else if (*p == '-' || *p == '_') {
+                buffer[out_idx++] = '-';
+            }
+        }
+    }
+    if (out_idx == 0) {
+        strncpy(buffer, "pscal", buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+        out_idx = strlen(buffer);
+    }
+    if (out_idx >= buffer_size) {
+        out_idx = buffer_size - 1;
+    }
+    buffer[out_idx] = '\0';
+}
+
+char* buildCachePath(const char* source_path, const char* compiler_id) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
     size_t root_len = strlen(home) + 1 + strlen(CACHE_ROOT) + 1;
@@ -62,11 +90,13 @@ char* buildCachePath(const char* source_path) {
     }
     free(root);
 
+    char safe_id[32];
+    sanitizeCompilerId(compiler_id, safe_id, sizeof(safe_id));
     unsigned long h = hashPath(source_path);
-    size_t path_len = dir_len + 32;
+    size_t path_len = dir_len + strlen(safe_id) + 32;
     char* full = (char*)malloc(path_len);
     if (!full) { free(dir); return NULL; }
-    snprintf(full, path_len, "%s/%lu.bc", dir, h);
+    snprintf(full, path_len, "%s/%s-%lu.bc", dir, safe_id, h);
     free(dir);
     return full;
 }
@@ -802,11 +832,12 @@ static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_ver
 }
 
 bool loadBytecodeFromCache(const char* source_path,
+                           const char* compiler_id,
                            const char* frontend_path,
                            const char** dependencies,
                            int dep_count,
                            BytecodeChunk* chunk) {
-    char* cache_path = buildCachePath(source_path);
+    char* cache_path = buildCachePath(source_path, compiler_id);
     if (!cache_path) return false;
     if (chunk && chunk->count > 0) {
         free(cache_path);
@@ -1153,8 +1184,8 @@ static bool serializeBytecodeChunk(FILE* f, const char* source_path, const Bytec
     return true;
 }
 
-void saveBytecodeToCache(const char* source_path, const BytecodeChunk* chunk) {
-    char* cache_path = buildCachePath(source_path);
+void saveBytecodeToCache(const char* source_path, const char* compiler_id, const BytecodeChunk* chunk) {
+    char* cache_path = buildCachePath(source_path, compiler_id);
     if (!cache_path) return;
     FILE* f = fopen(cache_path, "wb");
     if (!f) { free(cache_path); return; }

@@ -5,11 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void advance(ShellParser *parser);
-static bool check(const ShellParser *parser, ShellTokenType type);
-static bool match(ShellParser *parser, ShellTokenType type);
-static void consume(ShellParser *parser, ShellTokenType type, const char *message);
-static void synchronizeStatementBoundary(ShellParser *parser);
+static void shellParserAdvance(ShellParser *parser);
+static bool shellParserCheck(const ShellParser *parser, ShellTokenType type);
+static bool shellParserMatch(ShellParser *parser, ShellTokenType type);
+static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
+static void shellParserSynchronize(ShellParser *parser);
 static ShellCommand *parseCommand(ShellParser *parser);
 static ShellCommand *parseAndOr(ShellParser *parser);
 static ShellPipeline *parsePipeline(ShellParser *parser);
@@ -31,7 +31,7 @@ ShellProgram *shellParseString(const char *source, ShellParser *parser) {
     shellInitLexer(&parser->lexer, source);
     parser->current.lexeme = NULL;
     parser->previous.lexeme = NULL;
-    advance(parser);
+    shellParserAdvance(parser);
 
     ShellProgram *program = shellCreateProgram();
     if (!program) {
@@ -40,7 +40,7 @@ ShellProgram *shellParseString(const char *source, ShellParser *parser) {
 
     while (!parser->had_error && parser->current.type != SHELL_TOKEN_EOF) {
         if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
             continue;
         }
         ShellCommand *command = parseCommand(parser);
@@ -48,9 +48,9 @@ ShellProgram *shellParseString(const char *source, ShellParser *parser) {
             shellProgramAddCommand(program, command);
         }
         if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
             while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-                advance(parser);
+                shellParserAdvance(parser);
             }
         } else if (parser->current.type != SHELL_TOKEN_EOF) {
             // Allow implicit separators before EOF or reserved words like fi/done
@@ -60,7 +60,7 @@ ShellProgram *shellParseString(const char *source, ShellParser *parser) {
                 continue;
             }
             parserErrorAt(parser, &parser->current, "Expected command separator");
-            synchronizeStatementBoundary(parser);
+            shellParserSynchronize(parser);
         }
     }
 
@@ -75,21 +75,21 @@ void shellParserFree(ShellParser *parser) {
     shellFreeToken(&parser->previous);
 }
 
-static void advance(ShellParser *parser) {
+static void shellParserAdvance(ShellParser *parser) {
     shellFreeToken(&parser->previous);
     parser->previous = parser->current;
     parser->current = shellNextToken(&parser->lexer);
 }
 
-static bool check(const ShellParser *parser, ShellTokenType type) {
+static bool shellParserCheck(const ShellParser *parser, ShellTokenType type) {
     return parser->current.type == type;
 }
 
-static bool match(ShellParser *parser, ShellTokenType type) {
-    if (!check(parser, type)) {
+static bool shellParserMatch(ShellParser *parser, ShellTokenType type) {
+    if (!shellParserCheck(parser, type)) {
         return false;
     }
-    advance(parser);
+    shellParserAdvance(parser);
     return true;
 }
 
@@ -104,15 +104,15 @@ static void parserErrorAt(ShellParser *parser, const ShellToken *token, const ch
     parser->panic_mode = true;
 }
 
-static void consume(ShellParser *parser, ShellTokenType type, const char *message) {
+static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message) {
     if (parser->current.type == type) {
-        advance(parser);
+        shellParserAdvance(parser);
         return;
     }
     parserErrorAt(parser, &parser->current, message);
 }
 
-static void synchronizeStatementBoundary(ShellParser *parser) {
+static void shellParserSynchronize(ShellParser *parser) {
     while (parser->current.type != SHELL_TOKEN_EOF) {
         if (parser->previous.type == SHELL_TOKEN_SEMICOLON || parser->previous.type == SHELL_TOKEN_NEWLINE) {
             parser->panic_mode = false;
@@ -134,7 +134,7 @@ static void synchronizeStatementBoundary(ShellParser *parser) {
             default:
                 break;
         }
-        advance(parser);
+        shellParserAdvance(parser);
     }
 }
 
@@ -143,7 +143,7 @@ static ShellCommand *parseCommand(ShellParser *parser) {
     if (!command) {
         return NULL;
     }
-    if (match(parser, SHELL_TOKEN_AMPERSAND)) {
+    if (shellParserMatch(parser, SHELL_TOKEN_AMPERSAND)) {
         command->exec.runs_in_background = true;
         command->exec.is_async_parent = true;
     }
@@ -159,9 +159,9 @@ static ShellCommand *parseAndOr(ShellParser *parser) {
     ShellLogicalList *logical = NULL;
     while (true) {
         ShellLogicalConnector connector;
-        if (match(parser, SHELL_TOKEN_AND_AND)) {
+        if (shellParserMatch(parser, SHELL_TOKEN_AND_AND)) {
             connector = SHELL_LOGICAL_AND;
-        } else if (match(parser, SHELL_TOKEN_OR_OR)) {
+        } else if (shellParserMatch(parser, SHELL_TOKEN_OR_OR)) {
             connector = SHELL_LOGICAL_OR;
         } else {
             break;
@@ -223,7 +223,7 @@ static ShellPipeline *parsePipeline(ShellParser *parser) {
     shellPipelineAddCommand(pipeline, command);
 
     while (true) {
-        if (match(parser, SHELL_TOKEN_PIPE)) {
+        if (shellParserMatch(parser, SHELL_TOKEN_PIPE)) {
             ShellCommand *next = parsePrimary(parser);
             if (!next) {
                 break;
@@ -231,7 +231,7 @@ static ShellPipeline *parsePipeline(ShellParser *parser) {
             shellPipelineAddCommand(pipeline, next);
             continue;
         }
-        if (match(parser, SHELL_TOKEN_PIPE_AMP)) {
+        if (shellParserMatch(parser, SHELL_TOKEN_PIPE_AMP)) {
             pipeline->negated = true;
             ShellCommand *next = parsePrimary(parser);
             if (next) {
@@ -254,7 +254,7 @@ static ShellProgram *parseSubshellBody(ShellParser *parser) {
     ShellProgram *body = shellCreateProgram();
     while (!parser->had_error && parser->current.type != SHELL_TOKEN_RPAREN && parser->current.type != SHELL_TOKEN_EOF) {
         if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
             continue;
         }
         ShellCommand *command = parseCommand(parser);
@@ -262,10 +262,10 @@ static ShellProgram *parseSubshellBody(ShellParser *parser) {
             shellProgramAddCommand(body, command);
         }
         if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
         }
     }
-    consume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
+    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
     return body;
 }
 
@@ -274,7 +274,7 @@ static ShellCommand *parsePrimary(ShellParser *parser) {
         case SHELL_TOKEN_LPAREN: {
             int line = parser->current.line;
             int column = parser->current.column;
-            advance(parser);
+            shellParserAdvance(parser);
             ShellProgram *body = parseSubshellBody(parser);
             ShellCommand *cmd = shellCreateSubshellCommand(body);
             if (cmd) {
@@ -317,7 +317,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 bool has_param = parser->current.contains_parameter_expansion;
                 int line = parser->current.line;
                 int column = parser->current.column;
-                advance(parser);
+                shellParserAdvance(parser);
                 ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
                 if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
                     shellWordAddExpansion(word, lexeme + 1);
@@ -331,9 +331,9 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 int line = parser->current.line;
                 int column = parser->current.column;
                 char *io_number = parser->current.lexeme ? strdup(parser->current.lexeme) : NULL;
-                advance(parser);
+                shellParserAdvance(parser);
                 ShellTokenType redir_type = parser->current.type;
-                advance(parser);
+                shellParserAdvance(parser);
                 ShellRedirectionType type;
                 switch (redir_type) {
                     case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
@@ -357,7 +357,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     bool has_param = parser->current.contains_parameter_expansion;
                     int target_line = parser->current.line;
                     int target_column = parser->current.column;
-                    advance(parser);
+                    shellParserAdvance(parser);
                     target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
                     populateWordExpansions(target);
                 } else {
@@ -378,7 +378,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 ShellTokenType redirTokType = parser->current.type;
                 int redir_line = parser->current.line;
                 int redir_column = parser->current.column;
-                advance(parser);
+                shellParserAdvance(parser);
                 ShellRedirectionType type;
                 switch (redirTokType) {
                     case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
@@ -399,7 +399,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     bool has_param = parser->current.contains_parameter_expansion;
                     int target_line = parser->current.line;
                     int target_column = parser->current.column;
-                    advance(parser);
+                    shellParserAdvance(parser);
                     target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
                     populateWordExpansions(target);
                 } else {
@@ -428,7 +428,7 @@ static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType termina
            parser->current.type != terminator2 && parser->current.type != terminator3 &&
            parser->current.type != SHELL_TOKEN_EOF) {
         if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
             continue;
         }
         ShellCommand *command = parseCommand(parser);
@@ -436,7 +436,7 @@ static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType termina
             shellProgramAddCommand(block, command);
         }
         if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            advance(parser);
+            shellParserAdvance(parser);
         }
     }
     return block;
@@ -447,28 +447,28 @@ static ShellCommand *parseIfTail(ShellParser *parser);
 static ShellCommand *parseIfCommand(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
-    advance(parser); // consume 'if'
+    shellParserAdvance(parser); // consume 'if'
     ShellPipeline *condition = parsePipeline(parser);
     while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-        advance(parser);
+        shellParserAdvance(parser);
     }
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
-        advance(parser);
+        shellParserAdvance(parser);
     }
-    consume(parser, SHELL_TOKEN_THEN, "Expected 'then' after if condition");
+    shellParserConsume(parser, SHELL_TOKEN_THEN, "Expected 'then' after if condition");
     ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
     ShellProgram *else_block = NULL;
 
-    if (match(parser, SHELL_TOKEN_ELIF)) {
+    if (shellParserMatch(parser, SHELL_TOKEN_ELIF)) {
         ShellCommand *elif_cmd = parseIfTail(parser);
         else_block = shellCreateProgram();
         shellProgramAddCommand(else_block, elif_cmd);
-    } else if (match(parser, SHELL_TOKEN_ELSE)) {
+    } else if (shellParserMatch(parser, SHELL_TOKEN_ELSE)) {
         else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
-        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
         goto done;
     } else {
-        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     }
 
 done:
@@ -487,23 +487,23 @@ static ShellCommand *parseIfTail(ShellParser *parser) {
     // parser currently after 'elif'
     ShellPipeline *condition = parsePipeline(parser);
     while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-        advance(parser);
+        shellParserAdvance(parser);
     }
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
-        advance(parser);
+        shellParserAdvance(parser);
     }
-    consume(parser, SHELL_TOKEN_THEN, "Expected 'then' after elif condition");
+    shellParserConsume(parser, SHELL_TOKEN_THEN, "Expected 'then' after elif condition");
     ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
     ShellProgram *else_block = NULL;
-    if (match(parser, SHELL_TOKEN_ELIF)) {
+    if (shellParserMatch(parser, SHELL_TOKEN_ELIF)) {
         ShellCommand *elif_cmd = parseIfTail(parser);
         else_block = shellCreateProgram();
         shellProgramAddCommand(else_block, elif_cmd);
-    } else if (match(parser, SHELL_TOKEN_ELSE)) {
+    } else if (shellParserMatch(parser, SHELL_TOKEN_ELSE)) {
         else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
-        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     } else {
-        consume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
+        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     }
     ShellConditional *conditional = shellCreateConditional(condition, then_block, else_block);
     ShellCommand *cmd = shellCreateConditionalCommand(conditional);
@@ -517,11 +517,11 @@ static ShellCommand *parseIfTail(ShellParser *parser) {
 static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
     int line = parser->current.line;
     int column = parser->current.column;
-    advance(parser); // consume keyword
+    shellParserAdvance(parser); // consume keyword
     ShellPipeline *condition = parsePipeline(parser);
-    consume(parser, SHELL_TOKEN_DO, "Expected 'do' after loop condition");
+    shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' after loop condition");
     ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
-    consume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close loop");
+    shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close loop");
     ShellLoop *loop = shellCreateLoop(is_until, condition, body);
     ShellCommand *cmd = shellCreateLoopCommand(loop);
     if (cmd) {
@@ -534,20 +534,20 @@ static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
 static ShellCommand *parseForCommand(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
-    advance(parser); // consume 'for'
+    shellParserAdvance(parser); // consume 'for'
     if (parser->current.type != SHELL_TOKEN_WORD && parser->current.type != SHELL_TOKEN_ASSIGNMENT) {
         parserErrorAt(parser, &parser->current, "Expected identifier after for");
     }
     const char *var_lexeme = parser->current.lexeme ? parser->current.lexeme : "";
     int var_line = parser->current.line;
     int var_column = parser->current.column;
-    advance(parser);
+    shellParserAdvance(parser);
     ShellCommand *command = shellCreateSimpleCommand();
     ShellWord *var_word = shellCreateWord(var_lexeme, false, false, false, var_line, var_column);
     shellCommandAddWord(command, var_word);
 
     ShellProgram *body = NULL;
-    if (match(parser, SHELL_TOKEN_IN)) {
+    if (shellParserMatch(parser, SHELL_TOKEN_IN)) {
         while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
                parser->current.type == SHELL_TOKEN_PARAMETER) {
             const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
@@ -556,7 +556,7 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
             bool has_param = parser->current.contains_parameter_expansion;
             int word_line = parser->current.line;
             int word_column = parser->current.column;
-            advance(parser);
+            shellParserAdvance(parser);
             ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param,
                                               word_line, word_column);
             populateWordExpansions(word);
@@ -568,11 +568,11 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
     }
 
     if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-        advance(parser);
+        shellParserAdvance(parser);
     }
-    consume(parser, SHELL_TOKEN_DO, "Expected 'do' after for list");
+    shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' after for list");
     body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
-    consume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for loop");
+    shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for loop");
 
     ShellPipeline *condition = shellCreatePipeline();
     if (condition) {

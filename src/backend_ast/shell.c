@@ -112,6 +112,55 @@ static void shellUpdateStatus(int status) {
     setenv("PSCALSHELL_LAST_STATUS", buffer, 1);
 }
 
+static bool shellIsRuntimeBuiltin(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "alias"};
+    size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
+    for (size_t i = 0; i < count; ++i) {
+        if (strcasecmp(name, kBuiltins[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
+    if (!cmd || cmd->argc == 0) {
+        return false;
+    }
+    const char *name = cmd->argv[0];
+    if (!name || !shellIsRuntimeBuiltin(name)) {
+        return false;
+    }
+    VmBuiltinFn handler = getVmBuiltinHandler(name);
+    if (!handler) {
+        return false;
+    }
+    int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
+    Value *args = NULL;
+    if (arg_count > 0) {
+        args = calloc((size_t)arg_count, sizeof(Value));
+        if (!args) {
+            runtimeError(vm, "shell builtin '%s': out of memory", name);
+            shellUpdateStatus(1);
+            return true;
+        }
+        for (int i = 0; i < arg_count; ++i) {
+            args[i] = makeString(cmd->argv[i + 1]);
+        }
+    }
+    handler(vm, arg_count, args);
+    if (args) {
+        for (int i = 0; i < arg_count; ++i) {
+            freeValue(&args[i]);
+        }
+        free(args);
+    }
+    return true;
+}
+
 static void shellFreeJob(ShellJob *job) {
     if (!job) {
         return;
@@ -548,6 +597,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     int stdin_fd = -1;
     int stdout_fd = -1;
     if (ctx->active) {
+        if (ctx->stage_count == 1 && shellInvokeBuiltin(vm, cmd)) {
+            ctx->last_status = gShellRuntime.last_status;
+            shellResetPipeline();
+            shellFreeCommand(cmd);
+            return makeVoid();
+        }
         size_t idx = (size_t)cmd->pipeline_index;
         if (idx >= ctx->stage_count) {
             runtimeError(vm, "shell exec: pipeline index out of range");
@@ -562,6 +617,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (!cmd->is_pipeline_tail) {
                 stdout_fd = ctx->pipes[idx][1];
             }
+        }
+    } else {
+        if (shellInvokeBuiltin(vm, cmd)) {
+            shellFreeCommand(cmd);
+            return makeVoid();
         }
     }
 

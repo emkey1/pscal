@@ -1,0 +1,10 @@
+echo "functions:start"
+export GREETING=hello
+printenv GREETING
+false
+printenv PSCALSHELL_LAST_STATUS
+true
+printenv PSCALSHELL_LAST_STATUS
+unset GREETING
+printenv GREETING
+echo "functions:end"

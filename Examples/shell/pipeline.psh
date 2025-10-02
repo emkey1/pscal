@@ -1,0 +1,3 @@
+echo "pipeline:start"
+echo "alpha" | cat
+echo "pipeline:end"
