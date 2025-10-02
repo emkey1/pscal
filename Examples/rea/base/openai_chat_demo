@@ -296,6 +296,40 @@ str trim(str text) {
   return substringRange(text, startIndex, endIndex);
 }
 
+bool isControlCharacter(char ch) {
+  int code = ord(ch);
+  return (code >= 0 && code < 32) || code == 127;
+}
+
+str stripControlCharacters(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  str result = "";
+  int index = 1;
+  while (index <= len) {
+    char ch = text[index];
+    if (!isControlCharacter(ch)) {
+      result = result + charToString(ch);
+    }
+    index = index + 1;
+  }
+  return result;
+}
+
+str normaliseModelIdentifier(str value) {
+  str trimmed = trim(value);
+  if (trimmed == "") {
+    return "";
+  }
+  str cleaned = stripControlCharacters(trimmed);
+  if (cleaned == "") {
+    return "";
+  }
+  return trim(cleaned);
+}
+
 bool startsWith(str text, str prefix) {
   int textLen = length(text);
   int prefixLen = length(prefix);
@@ -853,6 +887,7 @@ int main() {
   str model;
   setlength(model, 0);
   model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
+  model = normaliseModelIdentifier(model);
   bool modelExplicit = hasEnvValue("LLM_MODEL") || hasEnvValue("OPENAI_MODEL");
   str baseUrl;
   setlength(baseUrl, 0);
@@ -892,7 +927,12 @@ int main() {
         return 1;
       }
       str modelArg = paramstr(i + 1);
-      model = duplicateString(modelArg);
+      str cleanedModel = normaliseModelIdentifier(modelArg);
+      if (cleanedModel == "") {
+        writeln("Error: --model requires a non-empty identifier.");
+        return 1;
+      }
+      model = cleanedModel;
       modelExplicit = true;
       i = i + 2;
       continue;
@@ -976,7 +1016,7 @@ int main() {
     return 1;
   }
 
-  model = trim(model);
+  model = normaliseModelIdentifier(model);
 
   str optionsJson = DEFAULT_OPTIONS;
   if (temperatureProvided) {
@@ -993,9 +1033,9 @@ int main() {
     if (!endpointExplicit) {
       endpointOverride = "/v1/chat/completions";
     }
-    if (!modelExplicit) {
+    if (!modelExplicit || model == "") {
       model = autoDetectLmStudioModel(baseUrl, apiKey, userAgent);
-      model = trim(model);
+      model = normaliseModelIdentifier(model);
       if (model == "") {
         return 1;
       }
@@ -1004,6 +1044,15 @@ int main() {
         return 1;
       }
     }
+  }
+
+  model = normaliseModelIdentifier(model);
+  if (model == "") {
+    if (modelExplicit) {
+      writeln("Error: Model identifier cannot be blank. Provide a non-empty value with --model or the LLM_MODEL/OPENAI_MODEL environment variables.");
+      return 1;
+    }
+    model = DEFAULT_MODEL;
   }
 
   if (endpointOverride != "") {
