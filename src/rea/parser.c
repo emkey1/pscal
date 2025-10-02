@@ -785,6 +785,32 @@ static bool tokenIsIdentifierLike(ReaTokenType t) {
     return t == REA_TOKEN_IDENTIFIER || t == REA_TOKEN_MATCH;
 }
 
+static bool tokenIsNameToken(ReaTokenType t) {
+    if (tokenIsIdentifierLike(t)) {
+        return true;
+    }
+    switch (t) {
+        case REA_TOKEN_INT:
+        case REA_TOKEN_INT64:
+        case REA_TOKEN_INT32:
+        case REA_TOKEN_INT16:
+        case REA_TOKEN_INT8:
+        case REA_TOKEN_FLOAT:
+        case REA_TOKEN_FLOAT32:
+        case REA_TOKEN_LONG_DOUBLE:
+        case REA_TOKEN_CHAR:
+        case REA_TOKEN_BYTE:
+        case REA_TOKEN_STR:
+        case REA_TOKEN_TEXT:
+        case REA_TOKEN_MSTREAM:
+        case REA_TOKEN_BOOL:
+        case REA_TOKEN_VOID:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static VarType tokenTypeToVarType(ReaTokenType t) {
     switch (t) {
         case REA_TOKEN_INT:
@@ -901,7 +927,7 @@ static AST *parseFactor(ReaParser *p) {
         // Case: super.method(args)
         if (p->current.type == REA_TOKEN_DOT) {
             reaAdvance(p);
-            if (!tokenIsIdentifierLike(p->current.type)) return NULL;
+            if (!tokenIsNameToken(p->current.type)) return NULL;
             char *mlex = (char*)malloc(p->current.length + 1);
             if (!mlex) return NULL;
             memcpy(mlex, p->current.start, p->current.length);
@@ -951,7 +977,7 @@ static AST *parseFactor(ReaParser *p) {
     if (p->current.type == REA_TOKEN_NEW) {
         // new ClassName(args) -> AST_NEW(token=ClassName, children=args)
         reaAdvance(p); // consume 'new'
-        if (!tokenIsIdentifierLike(p->current.type)) return NULL;
+        if (!tokenIsNameToken(p->current.type)) return NULL;
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
         memcpy(lex, p->current.start, p->current.length);
@@ -989,7 +1015,7 @@ static AST *parseFactor(ReaParser *p) {
             }
             // DOT
             reaAdvance(p);
-            if (!tokenIsIdentifierLike(p->current.type)) break;
+            if (!tokenIsNameToken(p->current.type)) break;
             char *f = (char*)malloc(p->current.length + 1);
             if (!f) break;
             memcpy(f, p->current.start, p->current.length);
@@ -1120,7 +1146,7 @@ static AST *parseFactor(ReaParser *p) {
         freeToken(tok);
         reaAdvance(p);
         return node;
-    } else if (tokenIsIdentifierLike(p->current.type) || p->current.type == REA_TOKEN_MYSELF) {
+    } else if (tokenIsNameToken(p->current.type) || p->current.type == REA_TOKEN_MYSELF) {
         size_t alloc_len = p->current.length;
         if (p->current.type == REA_TOKEN_MYSELF && alloc_len < 7) {
             alloc_len = 7; // ensure space for canonical "myself" lexeme
@@ -1224,7 +1250,7 @@ static AST *parseFactor(ReaParser *p) {
                     continue;
                 }
                 reaAdvance(p);
-                if (!tokenIsIdentifierLike(p->current.type)) break;
+                if (!tokenIsNameToken(p->current.type)) break;
                 // Capture method/field name
                 char *f = (char*)malloc(p->current.length + 1);
                 if (!f) break;
@@ -1299,7 +1325,7 @@ static AST *parseFactor(ReaParser *p) {
                     continue;
                 }
                 reaAdvance(p);
-                if (!tokenIsIdentifierLike(p->current.type)) break;
+                if (!tokenIsNameToken(p->current.type)) break;
                 char *f = (char*)malloc(p->current.length + 1);
                 if (!f) break;
                 memcpy(f, p->current.start, p->current.length);
@@ -2286,7 +2312,7 @@ static AST *parseVarDecl(ReaParser *p) {
     if (typeTok == REA_TOKEN_VOID) {
         // Procedures: void name(...)
         reaAdvance(p); // consume 'void'
-        if (!tokenIsIdentifierLike(p->current.type)) return NULL;
+        if (!tokenIsNameToken(p->current.type)) return NULL;
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) return NULL;
         memcpy(lex, p->current.start, p->current.length);
@@ -2367,7 +2393,7 @@ static AST *parseVarDecl(ReaParser *p) {
         }
     }
 
-    if (!tokenIsIdentifierLike(p->current.type) && p->current.type != REA_TOKEN_LEFT_PAREN) return NULL;
+    if (!tokenIsNameToken(p->current.type) && p->current.type != REA_TOKEN_LEFT_PAREN) return NULL;
 
     AST *baseType = copyAST(typeNode); // copy uses original token pointers; keep until end
     AST *compound = newASTNode(AST_COMPOUND, NULL);
@@ -2386,7 +2412,7 @@ static AST *parseVarDecl(ReaParser *p) {
             reaAdvance(p); // consume '('
             if (p->current.type == REA_TOKEN_STAR) {
                 reaAdvance(p); // consume '*'
-                if (tokenIsIdentifierLike(p->current.type)) {
+                if (tokenIsNameToken(p->current.type)) {
                     char *nameLex = (char *)malloc(p->current.length + 1);
                     if (!nameLex) { freeAST(compound); return NULL; }
                     memcpy(nameLex, p->current.start, p->current.length);
@@ -2434,7 +2460,7 @@ static AST *parseVarDecl(ReaParser *p) {
             }
         }
 
-        if (!tokenIsIdentifierLike(p->current.type)) break;
+        if (!tokenIsNameToken(p->current.type)) break;
 
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) { freeAST(compound); return NULL; }
@@ -2592,7 +2618,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
             reaAdvance(p); // consume param type
         }
 
-        if (!tokenIsIdentifierLike(p->current.type)) break;
+        if (!tokenIsNameToken(p->current.type)) break;
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) break;
         memcpy(lex, p->current.start, p->current.length);
@@ -3134,7 +3160,7 @@ static AST *parseTuplePattern(ReaParser *p) {
     int nameCount = 0;
     int nameCap = 0;
     while (p->current.type != REA_TOKEN_RIGHT_PAREN && p->current.type != REA_TOKEN_EOF) {
-        if (tokenIsIdentifierLike(p->current.type)) {
+        if (tokenIsNameToken(p->current.type)) {
             char *lex = (char *)malloc(p->current.length + 1);
             if (!lex) {
                 fprintf(stderr, "Memory allocation failure parsing tuple pattern.\n");
@@ -3193,7 +3219,7 @@ static AST *parseMatchPattern(ReaParser *p) {
     if (p->current.type == REA_TOKEN_LEFT_PAREN) {
         return parseTuplePattern(p);
     }
-    if (tokenIsIdentifierLike(p->current.type)) {
+    if (tokenIsNameToken(p->current.type)) {
         char *lex = (char *)malloc(p->current.length + 1);
         if (!lex) {
             fprintf(stderr, "Memory allocation failure parsing pattern binding.\n");
@@ -3342,7 +3368,7 @@ static AST *parseTry(ReaParser *p) {
         typeNode = newASTNode(AST_TYPE_IDENTIFIER, tok);
         setTypeAST(typeNode, TYPE_INT64);
     }
-    if (!tokenIsIdentifierLike(p->current.type)) {
+    if (!tokenIsNameToken(p->current.type)) {
         fprintf(stderr, "L%d: expected identifier for catch variable.\n", p->current.line);
         p->hadError = true;
         return tryBlock;
@@ -3398,7 +3424,7 @@ static AST *parseConstDecl(ReaParser *p) {
         setTypeAST(typeNode, vtype);
         reaAdvance(p); // consume type keyword
     }
-    if (!tokenIsIdentifierLike(p->current.type)) return NULL;
+    if (!tokenIsNameToken(p->current.type)) return NULL;
     char *lex = (char *)malloc(p->current.length + 1);
     if (!lex) return NULL;
     memcpy(lex, p->current.start, p->current.length);
@@ -3989,11 +4015,11 @@ static AST *parseStatement(ReaParser *p) {
         namebuf[n] = '\0';
 
         ReaToken peek = reaPeekToken(p);
-        bool nextCanDeclareWithType = tokenIsIdentifierLike(peek.type) ||
+        bool nextCanDeclareWithType = tokenIsNameToken(peek.type) ||
                                       peek.type == REA_TOKEN_LESS ||
                                       peek.type == REA_TOKEN_LEFT_PAREN ||
                                       peek.type == REA_TOKEN_STAR;
-        bool nextCanDeclareWithoutType = tokenIsIdentifierLike(peek.type) ||
+        bool nextCanDeclareWithoutType = tokenIsNameToken(peek.type) ||
                                          peek.type == REA_TOKEN_LESS;
 
         AST *tdef = lookupType(namebuf);
