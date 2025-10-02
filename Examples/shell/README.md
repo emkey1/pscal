@@ -1,0 +1,78 @@
+# `psh` Example Scripts
+
+The shell front end ships with a few minimal scripts that are used by the
+regression suite and serve as reference material for new programs. Each script
+lives alongside this README so you can run it directly with the `psh`
+executable (for example, `build/bin/psh Examples/shell/pipeline.psh`).
+
+## `pipeline.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "pipeline:start"
+echo "alpha" | cat
+echo "pipeline:end"
+```
+
+This script demonstrates how pipelines are lowered into the VM. `psh` wires the
+standard POSIX `|` operator through the builtin pipeline helpers so you can
+combine multiple commands. Additional stages can be appended with more `|`
+operators; each stage runs sequentially within the VM process.
+
+## `conditionals.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "conditionals:start"
+if true; then
+    echo "then-branch"
+else
+    echo "else-branch"
+fi
+echo "conditionals:end"
+```
+
+High-level control flow such as `if`/`else` is parsed and executed inside the
+VM. Because the current implementation executes helpers sequentially, this
+example uses constant `true`/`false` commands to keep behaviour deterministic.
+Replace them with your own conditions to drive different branches.
+
+## `functions.psh`
+
+```sh
+#!/usr/bin/env psh
+echo "functions:start"
+export GREETING=hello
+printenv GREETING
+false
+printenv PSCALSHELL_LAST_STATUS
+true
+printenv PSCALSHELL_LAST_STATUS
+unset GREETING
+printenv GREETING
+echo "functions:end"
+```
+
+`psh` scripts have access to the shared builtin catalog. The `export`/`unset`
+pair mutates the host environment, and `PSCALSHELL_LAST_STATUS` reflects the
+result of the most recently executed command or pipeline. You can call any other
+PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
+complex workflows.
+
+## Running the examples
+
+Configure and build the project first:
+
+```sh
+cmake -S . -B build
+cmake --build build
+```
+
+You can then run any script directly:
+
+```sh
+build/bin/psh Examples/shell/pipeline.psh
+```
+
+Pass additional arguments after the script path to expose them to `$0`, `$1`,
+and so on inside the VM.
