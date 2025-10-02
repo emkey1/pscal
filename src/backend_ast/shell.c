@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <limits.h>
 #include <regex.h>
 #include <stdbool.h>
@@ -127,6 +128,38 @@ static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, s
     *buffer = new_buffer;
     *capacity = new_capacity;
     return true;
+}
+
+static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value) {
+    if (!cmd || !value) {
+        free(value);
+        return false;
+    }
+    char **new_argv = realloc(cmd->argv, sizeof(char*) * (cmd->argc + 2));
+    if (!new_argv) {
+        free(value);
+        return false;
+    }
+    cmd->argv = new_argv;
+    cmd->argv[cmd->argc] = value;
+    cmd->argc++;
+    cmd->argv[cmd->argc] = NULL;
+    return true;
+}
+
+static bool shellWordShouldGlob(uint8_t flags, const char *text) {
+    if (!text || !*text) {
+        return false;
+    }
+    if (flags & (SHELL_WORD_FLAG_SINGLE_QUOTED | SHELL_WORD_FLAG_DOUBLE_QUOTED)) {
+        return false;
+    }
+    for (const char *cursor = text; *cursor; ++cursor) {
+        if (*cursor == '*' || *cursor == '?' || *cursor == '[') {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c) {
@@ -1560,11 +1593,6 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
     if (!cmd || !arg) {
         return false;
     }
-    char **new_argv = realloc(cmd->argv, sizeof(char*) * (cmd->argc + 2));
-    if (!new_argv) {
-        return false;
-    }
-    cmd->argv = new_argv;
     const char *text = NULL;
     uint8_t flags = 0;
     shellDecodeWordSpec(arg, &text, &flags);
@@ -1572,9 +1600,46 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
     if (!expanded) {
         return false;
     }
-    cmd->argv[cmd->argc] = expanded;
-    cmd->argc++;
-    cmd->argv[cmd->argc] = NULL;
+    if (shellWordShouldGlob(flags, expanded)) {
+        glob_t glob_result;
+        int glob_status = glob(expanded, 0, NULL, &glob_result);
+        if (glob_status == 0) {
+            size_t original_argc = cmd->argc;
+            bool ok = true;
+            for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
+                char *dup = strdup(glob_result.gl_pathv[i]);
+                if (!dup) {
+                    ok = false;
+                    break;
+                }
+                if (!shellCommandAppendArgOwned(cmd, dup)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) {
+                while (cmd->argc > original_argc) {
+                    free(cmd->argv[cmd->argc - 1]);
+                    cmd->argc--;
+                }
+                if (cmd->argv) {
+                    cmd->argv[cmd->argc] = NULL;
+                }
+                globfree(&glob_result);
+                free(expanded);
+                return false;
+            }
+            globfree(&glob_result);
+            free(expanded);
+            return true;
+        }
+        if (glob_status != GLOB_NOMATCH) {
+            fprintf(stderr, "psh: glob failed for '%s'\n", expanded);
+        }
+    }
+    if (!shellCommandAppendArgOwned(cmd, expanded)) {
+        return false;
+    }
     return true;
 }
 
