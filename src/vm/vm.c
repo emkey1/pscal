@@ -1270,6 +1270,14 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
+static Value vmHostShellLastStatusHost(VM* vm) {
+    return vmHostShellLastStatus(vm);
+}
+
+static Value vmHostShellPollJobsHost(VM* vm) {
+    return vmHostShellPollJobs(vm);
+}
+
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
@@ -1321,6 +1329,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
+    registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
+    registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
 
     // Default: tracing disabled
     vm->trace_head_instructions = 0;

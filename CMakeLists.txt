@@ -235,6 +235,7 @@ set(PSCAL_SOURCES
     src/Pascal/lexer.c src/Pascal/parser.c src/ast/ast.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
+    src/backend_ast/shell.c
     src/backend_ast/builtin_network_api.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
