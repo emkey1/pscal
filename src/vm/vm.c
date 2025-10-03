@@ -25,6 +25,11 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
+static bool s_vmVerboseErrors = false;
+
+void vmSetVerboseErrors(bool enabled) {
+    s_vmVerboseErrors = enabled;
+}
 
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
@@ -811,7 +816,9 @@ void runtimeWarning(VM* vm, const char* format, ...) {
     fputc('\n', stderr);
     fflush(stderr);
 
-    emitRuntimeLocation(vm, "[Warning Location]");
+    if (s_vmVerboseErrors) {
+        emitRuntimeLocation(vm, "[Warning Location]");
+    }
 }
 
 // runtimeError - Assuming your existing one is fine.
@@ -836,49 +843,43 @@ void runtimeError(VM* vm, const char* format, ...) {
     fputc('\n', stderr);
     fflush(stderr);
 
-    size_t instruction_offset = 0;
-    int error_line = 0;
-    computeRuntimeLocation(vm, &instruction_offset, &error_line);
-    (void)error_line;
-    emitRuntimeLocation(vm, "[Error Location]");
+    if (s_vmVerboseErrors) {
+        size_t instruction_offset = 0;
+        int error_line = 0;
+        computeRuntimeLocation(vm, &instruction_offset, &error_line);
+        (void)error_line;
+        emitRuntimeLocation(vm, "[Error Location]");
 
-    // --- NEW: Dump crash context (instructions and full stack) ---
-    fprintf(stderr, "\n--- VM Crash Context ---\n");
-    if (vm) {
-        fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
-        fprintf(stderr, "Code Base: %p\n", vm && vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
-    }
+        fprintf(stderr, "\n--- VM Crash Context ---\n");
+        if (vm) {
+            fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
+            fprintf(stderr, "Code Base: %p\n", vm && vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
+        }
 
-    // Dump current instruction (at vm->ip)
-    fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
-    if (vm && vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
-        // disassembleInstruction will advance vm->ip temporarily.
-        // We want to disassemble at vm->ip's current position.
-        // Temporarily store vm->ip and restore it if disassembleInstruction modifies it.
-        // However, disassembleInstruction itself returns the new offset, so safer to pass the current IP's offset.
-        disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
-    } else {
-        fprintf(stderr, "  (IP is out of bytecode bounds: %p)\n", (void*)vm->ip);
-    }
+        fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
+        if (vm && vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
+            disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
+        } else {
+            fprintf(stderr, "  (IP is out of bytecode bounds: %p)\n", (void*)vm->ip);
+        }
 
-    // Dump preceding instructions for context
-    int start_dump_offset = (int)instruction_offset - 10; // Dump last 10 instructions
-    if (start_dump_offset < 0) start_dump_offset = 0;
+        int start_dump_offset = (int)instruction_offset - 10;
+        if (start_dump_offset < 0) start_dump_offset = 0;
 
-    fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
-    if (vm && vm->chunk) {
-        for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
-            offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+        fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
+        if (vm && vm->chunk) {
+            for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
+                offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+            }
+        }
+        if (start_dump_offset == (int)instruction_offset) {
+            fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
+        }
+
+        if (vm) {
+            vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
         }
     }
-    if (start_dump_offset == (int)instruction_offset) {
-        fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
-    }
-
-    // Dump full stack contents
-    if (vm) vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
-
-    // --- END NEW DUMP ---
 
     // resetStack(vm); // Keep this commented out for post-mortem analysis purposes if you want to inspect stack in debugger
     // ... (rest of runtimeError function, calls EXIT_FAILURE_HANDLER()) ...

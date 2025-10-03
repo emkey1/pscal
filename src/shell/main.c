@@ -60,7 +60,8 @@ static const char *SHELL_USAGE =
     "     --dump-bytecode-only        Disassemble bytecode and exit.\n"
     "     --dump-ext-builtins         List builtin commands.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
-    "     --vm-trace-head=N           Trace first N VM instructions.\n";
+    "     --vm-trace-head=N           Trace first N VM instructions.\n"
+    "     -d                          Enable verbose VM error diagnostics.\n";
 
 static const char *const kShellCompilerId = "shell";
 
@@ -102,6 +103,7 @@ typedef struct {
     int no_cache;
     int vm_trace_head;
     bool quiet;
+    bool verbose_errors;
     const char *frontend_path;
 } ShellRunOptions;
 
@@ -151,6 +153,8 @@ static int runShellSource(const char *source,
     if (!source || !options) {
         return EXIT_FAILURE;
     }
+
+    vmSetVerboseErrors(options->verbose_errors);
 
     const char *defines[1];
     int define_count = 0;
@@ -897,6 +901,8 @@ int main(int argc, char **argv) {
             options.no_cache = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             options.vm_trace_head = atoi(argv[i] + 16);
+        } else if (strcmp(argv[i], "-d") == 0) {
+            options.verbose_errors = true;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
             return EXIT_FAILURE;

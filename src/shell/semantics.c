@@ -143,7 +143,10 @@ static bool shellCommandExistsOnPath(const char *name) {
         return false;
     }
     if (strchr(name, '/')) {
-        return access(name, X_OK) == 0;
+        if (access(name, X_OK) == 0) {
+            return true;
+        }
+        return access(name, F_OK) == 0;
     }
 
     const char *path_env = getenv("PATH");
@@ -187,6 +190,9 @@ static bool shellCommandExistsOnPath(const char *name) {
         candidate[pos] = '\0';
 
         bool found = access(candidate, X_OK) == 0;
+        if (!found) {
+            found = access(candidate, F_OK) == 0;
+        }
         free(candidate);
         if (found) {
             return true;
