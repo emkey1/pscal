@@ -1,5 +1,7 @@
 echo "case:start"
-case foo in
+
+setenv CASE_SUBJECT foo
+case "$CASE_SUBJECT" in
   foo)
     echo "match foo"
     ;;
@@ -8,11 +10,13 @@ case foo in
     ;;
 esac
 
-case baz in
+setenv CASE_SUBJECT baz
+setenv CASE_PATTERN baz
+case "$CASE_SUBJECT" in
   foo)
     echo "no foo"
     ;;
-  bar|baz)
+  "$CASE_PATTERN"|bar)
     echo "match group"
     ;;
   *)
@@ -20,12 +24,15 @@ case baz in
     ;;
 esac
 
-case qux in
+setenv CASE_SUBJECT qux
+setenv CASE_DEFAULT qux
+case "$CASE_SUBJECT" in
   foo|bar)
     echo "unexpected branch"
     ;;
   *)
-    echo "match default qux"
+    echo "match default $CASE_DEFAULT"
     ;;
 esac
+
 echo "case:end"
