@@ -236,13 +236,16 @@ Configure per-session knobs via `HttpSetOption/httpsetoption`:
 Pipelines, background jobs, and conditionals map to dedicated VM
 builtins implemented in `backend_ast/shell.c`, while the full PSCAL builtin
 catalog (HTTP, sockets, extended math/string helpers, optional SDL/SQLite
-bindings) is available via direct function calls.
+bindings) is available via the `builtin` command. Prefix arguments with
+`int:`, `float:`/`double:`/`real:`, `bool:`, `str:` or `nil` to coerce shell
+tokens to the appropriate VM types before dispatch.
 
 Example usage:
 
 ```sh
 build/bin/psh Examples/psh/pipeline.psh
 build/bin/psh --dump-bytecode Examples/psh/functions.psh
+build/bin/psh Examples/psh/builtins.psh
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a

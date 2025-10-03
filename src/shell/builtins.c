@@ -31,6 +31,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"fg", "fg", 18},
     {"bg", "bg", 19},
     {"wait", "wait", 20},
+    {"builtin", "builtin", 21},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},

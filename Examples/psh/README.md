@@ -59,6 +59,34 @@ result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
 complex workflows.
 
+## `builtins.psh`
+
+```sh
+#!/usr/bin/env psh
+builtin IntToStr int:42
+builtin Length str:psh-demo
+builtin getEnv str:HOME
+builtin ParamCount
+builtin atoi str:1337
+builtin getpid
+```
+
+The `builtin` command exposes the VM's core and extended builtin catalog from
+the shell. Arguments are parsed as strings by default; add an explicit prefix to
+force other types:
+
+- `str:<value>` – keep the payload as a string.
+- `int:<value>` – parse the payload with `strtoll` (base `0`, so `0x`, `0` and
+  decimal forms are accepted).
+- `float:<value>` / `double:<value>` / `real:<value>` – parse the payload with
+  `strtod`.
+- `bool:<value>` / `boolean:<value>` – coerce common truthy/falsy literals.
+- `nil` or `nil:` – pass the VM's `nil` value.
+
+When a builtin returns a result the command prints it to `stdout`. Procedures
+that return `void` simply update `PSCALSHELL_LAST_STATUS` to `0` on success so
+you can chain them in conditionals.
+
 ## `logical.psh`
 
 ```sh

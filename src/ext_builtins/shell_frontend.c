@@ -41,4 +41,5 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "fg", vmBuiltinShellFg);
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);
+    registerShellBuiltin(category, command_group, "builtin", vmBuiltinShellBuiltin);
 }
