@@ -34,6 +34,48 @@ static void shellStringArrayAppend(ShellStringArray *array, const char *value) {
     array->items[array->count++] = strdup(value);
 }
 
+static void shellCommandSubstitutionArrayInit(ShellCommandSubstitutionArray *array) {
+    if (!array) return;
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static void shellCommandSubstitutionArrayFree(ShellCommandSubstitutionArray *array) {
+    if (!array) return;
+    for (size_t i = 0; i < array->count; ++i) {
+        free(array->items[i].command);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static void shellCommandSubstitutionArrayAppend(ShellCommandSubstitutionArray *array,
+                                               ShellCommandSubstitutionStyle style,
+                                               const char *command,
+                                               size_t span_length) {
+    if (!array || !command) return;
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        ShellCommandSubstitution *new_items = (ShellCommandSubstitution *)realloc(
+            array->items, new_capacity * sizeof(ShellCommandSubstitution));
+        if (!new_items) {
+            return;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    ShellCommandSubstitution *entry = &array->items[array->count++];
+    entry->style = style;
+    entry->span_length = span_length;
+    entry->command = strdup(command);
+    if (!entry->command) {
+        array->count--;
+    }
+}
+
 static void shellWordArrayInit(ShellWordArray *array) {
     if (!array) return;
     array->items = NULL;
@@ -174,7 +216,9 @@ ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quo
     word->has_parameter_expansion = has_param_expansion;
     word->line = line;
     word->column = column;
+    word->has_command_substitution = false;
     shellStringArrayInit(&word->expansions);
+    shellCommandSubstitutionArrayInit(&word->command_substitutions);
     return word;
 }
 
@@ -183,10 +227,22 @@ void shellWordAddExpansion(ShellWord *word, const char *name) {
     shellStringArrayAppend(&word->expansions, name);
 }
 
+void shellWordAddCommandSubstitution(ShellWord *word, ShellCommandSubstitutionStyle style,
+                                     const char *command, size_t span_length) {
+    if (!word || !command) {
+        return;
+    }
+    shellCommandSubstitutionArrayAppend(&word->command_substitutions, style, command, span_length);
+    if (word->command_substitutions.count > 0) {
+        word->has_command_substitution = true;
+    }
+}
+
 void shellFreeWord(ShellWord *word) {
     if (!word) return;
     free(word->text);
     shellStringArrayFree(&word->expansions);
+    shellCommandSubstitutionArrayFree(&word->command_substitutions);
     free(word);
 }
 
@@ -552,7 +608,13 @@ static void shellDumpWordJson(FILE *out, const ShellWord *word, int indent) {
     shellPrintIndent(out, indent + 2);
     fprintf(out, "\"doubleQuoted\": %s,\n", word && word->double_quoted ? "true" : "false");
     shellPrintIndent(out, indent + 2);
-    fprintf(out, "\"hasParameterExpansion\": %s", word && word->has_parameter_expansion ? "true" : "false");
+    fprintf(out, "\"hasParameterExpansion\": %s,\n",
+            word && word->has_parameter_expansion ? "true" : "false");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"hasCommandSubstitution\": %s",
+            word && word->has_command_substitution ? "true" : "false");
+
+    bool printed_section = false;
     if (word && word->expansions.count > 0) {
         fprintf(out, ",\n");
         shellPrintIndent(out, indent + 2);
@@ -560,14 +622,28 @@ static void shellDumpWordJson(FILE *out, const ShellWord *word, int indent) {
         for (size_t i = 0; i < word->expansions.count; ++i) {
             fprintf(out, "\"%s\"%s", word->expansions.items[i], (i + 1 < word->expansions.count) ? ", " : "");
         }
-        fprintf(out, "]\n");
-        shellPrintIndent(out, indent);
-        fprintf(out, "}");
-    } else {
-        fprintf(out, "\n");
-        shellPrintIndent(out, indent);
-        fprintf(out, "}");
+        fprintf(out, "]");
+        printed_section = true;
     }
+    if (word && word->command_substitutions.count > 0) {
+        fprintf(out, printed_section ? ",\n" : ",\n");
+        shellPrintIndent(out, indent + 2);
+        fprintf(out, "\"commandSubstitutions\": [");
+        for (size_t i = 0; i < word->command_substitutions.count; ++i) {
+            const ShellCommandSubstitution *sub = &word->command_substitutions.items[i];
+            const char *style = (sub->style == SHELL_COMMAND_SUBSTITUTION_BACKTICK) ? "backtick" : "dollar";
+            fprintf(out, "{\"style\": \"%s\", \"span\": %zu, \"command\": \"%s\"}%s",
+                    style,
+                    sub->span_length,
+                    sub->command ? sub->command : "",
+                    (i + 1 < word->command_substitutions.count) ? ", " : "");
+        }
+        fprintf(out, "]");
+        printed_section = true;
+    }
+    fprintf(out, "\n");
+    shellPrintIndent(out, indent);
+    fprintf(out, "}");
 }
 
 static void shellDumpRedirectionJson(FILE *out, const ShellRedirection *redir, int indent) {

@@ -25,6 +25,10 @@ static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType termina
 static ShellProgram *parseBraceBody(ShellParser *parser);
 static ShellWord *parseWordToken(ShellParser *parser, const char *context);
 static void populateWordExpansions(ShellWord *word);
+static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command);
+static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command);
+static char *normalizeDollarCommand(const char *command, size_t len);
+static char *normalizeBacktickCommand(const char *command, size_t len);
 static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
 
 ShellProgram *shellParseString(const char *source, ShellParser *parser) {
@@ -776,61 +780,267 @@ static ShellWord *parseWordToken(ShellParser *parser, const char *context) {
     bool single_quoted = parser->current.single_quoted;
     bool double_quoted = parser->current.double_quoted;
     bool has_param = parser->current.contains_parameter_expansion;
+    bool has_command = parser->current.contains_command_substitution;
     int line = parser->current.line;
     int column = parser->current.column;
     shellParserAdvance(parser);
     ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
+    if (word && has_command) {
+        word->has_command_substitution = true;
+    }
     if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
-        shellWordAddExpansion(word, lexeme + 1);
+        if (lexeme[1] != '(') {
+            shellWordAddExpansion(word, lexeme + 1);
+        }
     }
     populateWordExpansions(word);
     return word;
+}
+
+static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command) {
+    if (out_span) *out_span = 0;
+    if (out_command) *out_command = NULL;
+    if (!text || text[start] != '$' || text[start + 1] != '(') {
+        return false;
+    }
+    size_t i = start + 2;
+    int depth = 1;
+    bool in_single = false;
+    bool in_double = false;
+    while (text[i]) {
+        char c = text[i];
+        if (c == '\\') {
+            if (text[i + 1]) {
+                i += 2;
+                continue;
+            }
+            break;
+        }
+        if (!in_double && c == 39) {
+            in_single = !in_single;
+            i++;
+            continue;
+        }
+        if (!in_single && c == '"') {
+            in_double = !in_double;
+            i++;
+            continue;
+        }
+        if (!in_single && !in_double) {
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    size_t end = i;
+                    size_t span = end - start + 1;
+                    size_t command_start = start + 2;
+                    size_t command_len = end - command_start;
+                    char *raw = (char *)malloc(command_len + 1);
+                    if (!raw) {
+                        return false;
+                    }
+                    memcpy(raw, text + command_start, command_len);
+                    raw[command_len] = '\0';
+                    char *normalized = normalizeDollarCommand(raw, command_len);
+                    free(raw);
+                    if (!normalized) {
+                        return false;
+                    }
+                    if (out_span) *out_span = span;
+                    if (out_command) {
+                        *out_command = normalized;
+                    } else {
+                        free(normalized);
+                    }
+                    return true;
+                }
+            }
+        }
+        i++;
+    }
+    return false;
+}
+
+static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command) {
+    if (out_span) *out_span = 0;
+    if (out_command) *out_command = NULL;
+    if (!text || text[start] != '`') {
+        return false;
+    }
+    size_t i = start + 1;
+    while (text[i]) {
+        char c = text[i];
+        if (c == '\\') {
+            if (text[i + 1]) {
+                i += 2;
+                continue;
+            }
+            break;
+        }
+        if (c == '`') {
+            size_t span = (i - start) + 1;
+            size_t command_start = start + 1;
+            size_t command_len = i - command_start;
+            char *raw = (char *)malloc(command_len + 1);
+            if (!raw) {
+                return false;
+            }
+            memcpy(raw, text + command_start, command_len);
+            raw[command_len] = '\0';
+            char *normalized = normalizeBacktickCommand(raw, command_len);
+            free(raw);
+            if (!normalized) {
+                return false;
+            }
+            if (out_span) *out_span = span;
+            if (out_command) {
+                *out_command = normalized;
+            } else {
+                free(normalized);
+            }
+            return true;
+        }
+        i++;
+    }
+    return false;
+}
+
+static char *normalizeDollarCommand(const char *command, size_t len) {
+    if (!command) {
+        return NULL;
+    }
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    size_t j = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = command[i];
+        if (c == '\\' && i + 1 < len) {
+            char next = command[i + 1];
+            if (next == '\n') {
+                i++;
+                continue;
+            }
+        }
+        out[j++] = c;
+    }
+    out[j] = '\0';
+    char *shrunk = (char *)realloc(out, j + 1);
+    return shrunk ? shrunk : out;
+}
+
+static char *normalizeBacktickCommand(const char *command, size_t len) {
+    if (!command) {
+        return NULL;
+    }
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    size_t j = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = command[i];
+        if (c == '\\' && i + 1 < len) {
+            char next = command[i + 1];
+            if (next == '\n') {
+                i++;
+                continue;
+            }
+            if (next == '\\' || next == '`' || next == '$') {
+                out[j++] = next;
+                i++;
+                continue;
+            }
+        }
+        out[j++] = c;
+    }
+    out[j] = '\0';
+    char *shrunk = (char *)realloc(out, j + 1);
+    return shrunk ? shrunk : out;
 }
 
 static void populateWordExpansions(ShellWord *word) {
     if (!word || !word->text) {
         return;
     }
-    const char *p = word->text;
-    while (*p) {
-        if (*p == '$') {
-            p++;
-            if (*p == '{') {
-                p++;
-                const char *start = p;
-                while (*p && *p != '}' && (isalnum((unsigned char)*p) || *p == '_' || *p == '#')) {
-                    p++;
-                }
-                size_t len = (size_t)(p - start);
-                if (len > 0) {
-                    char *name = (char *)malloc(len + 1);
-                    memcpy(name, start, len);
-                    name[len] = '\0';
-                    shellWordAddExpansion(word, name);
-                    free(name);
-                }
-                while (*p && *p != '}') {
-                    p++;
-                }
-                if (*p == '}') {
-                    p++;
-                }
-            } else {
-                const char *start = p;
-                while (*p && (isalnum((unsigned char)*p) || *p == '_' || *p == '#')) {
-                    p++;
-                }
-                size_t len = (size_t)(p - start);
-                if (len > 0) {
-                    char *name = (char *)malloc(len + 1);
-                    memcpy(name, start, len);
-                    name[len] = '\0';
-                    shellWordAddExpansion(word, name);
-                    free(name);
+    const char *text = word->text;
+    size_t len = strlen(text);
+    size_t i = 0;
+    while (i < len) {
+        char c = text[i];
+        if (c == '$') {
+            size_t span = 0;
+            char *command = NULL;
+            if (i + 1 < len && text[i + 1] == '(') {
+                if (i + 2 < len && text[i + 2] == '(') {
+                    /* Treat $(( as arithmetic expansion; do not parse as command substitution. */
+                } else if (parseDollarCommandSubstitution(text, i, &span, &command)) {
+                    if (command) {
+                        shellWordAddCommandSubstitution(word, SHELL_COMMAND_SUBSTITUTION_DOLLAR, command, span);
+                        free(command);
+                    }
+                    i += span;
+                    continue;
                 }
             }
-        } else {
-            p++;
+            size_t j = i + 1;
+            if (j < len && text[j] == '{') {
+                j++;
+                const char *start = text + j;
+                while (j < len && text[j] && text[j] != '}' &&
+                       (isalnum((unsigned char)text[j]) || text[j] == '_' || text[j] == '#')) {
+                    j++;
+                }
+                size_t name_len = (size_t)((text + j) - start);
+                if (name_len > 0) {
+                    char *name = (char *)malloc(name_len + 1);
+                    if (name) {
+                        memcpy(name, start, name_len);
+                        name[name_len] = '\0';
+                        shellWordAddExpansion(word, name);
+                        free(name);
+                    }
+                }
+                while (j < len && text[j] && text[j] != '}') {
+                    j++;
+                }
+                if (j < len && text[j] == '}') {
+                    j++;
+                }
+                i = j;
+                continue;
+            } else {
+                const char *start = text + j;
+                while (j < len && (isalnum((unsigned char)text[j]) || text[j] == '_' || text[j] == '#')) {
+                    j++;
+                }
+                size_t name_len = (size_t)((text + j) - start);
+                if (name_len > 0) {
+                    char *name = (char *)malloc(name_len + 1);
+                    if (name) {
+                        memcpy(name, start, name_len);
+                        name[name_len] = '\0';
+                        shellWordAddExpansion(word, name);
+                        free(name);
+                    }
+                }
+                i = j;
+                continue;
+            }
+        } else if (c == '`') {
+            size_t span = 0;
+            char *command = NULL;
+            if (parseBacktickCommandSubstitution(text, i, &span, &command)) {
+                if (command) {
+                    shellWordAddCommandSubstitution(word, SHELL_COMMAND_SUBSTITUTION_BACKTICK, command, span);
+                    free(command);
+                }
+                i += span;
+                continue;
+            }
         }
+        i++;
     }
 }
