@@ -630,6 +630,15 @@ static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
     int column = parser->current.column;
     shellParserAdvance(parser); // consume keyword
     ShellPipeline *condition = parsePipeline(parser);
+    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+        shellParserAdvance(parser);
+    }
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        shellParserAdvance(parser);
+        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+        }
+    }
     shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' after loop condition");
     ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
     shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close loop");
