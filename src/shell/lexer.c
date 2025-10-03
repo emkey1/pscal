@@ -1,5 +1,6 @@
 #include "shell/lexer.h"
 #include "core/utils.h"
+#include "shell/quote_markers.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -238,13 +239,45 @@ static ShellToken scanWord(ShellLexer *lexer) {
         advanceChar(lexer);
         if (c == '\\') {
             int next = peekChar(lexer);
-            if (next != EOF) {
+            if (singleQuoted || next == EOF) {
+                // Inside single quotes (or at end of input) the backslash is literal.
+                c = '\\';
+            } else if (!doubleQuoted) {
+                // Unquoted backslashes escape the following character, unless they
+                // introduce a line continuation.
+                if (next == '\n') {
+                    advanceChar(lexer);
+                    continue;
+                }
                 advanceChar(lexer);
                 c = next;
+            } else {
+                // Within double quotes only a limited set of characters are
+                // escapable. The rest keep the backslash literally.
+                if (next == '\n') {
+                    advanceChar(lexer);
+                    continue;
+                }
+                if (next == '\\' || next == '"' || next == '$' || next == '`') {
+                    advanceChar(lexer);
+                    c = next;
+                } else {
+                    c = '\\';
+                }
             }
         } else if (c == '\'' && !doubleQuoted) {
             bool enteringSingle = !singleQuoted;
             singleQuoted = !singleQuoted;
+            if (bufLen + 1 >= bufCap) {
+                bufCap = bufCap ? bufCap * 2 : 32;
+                char *tmp = (char *)realloc(buffer, bufCap);
+                if (!tmp) {
+                    free(buffer);
+                    return makeErrorToken(lexer, "Out of memory while scanning word");
+                }
+                buffer = tmp;
+            }
+            buffer[bufLen++] = SHELL_QUOTE_MARK_SINGLE;
             if (enteringSingle) {
                 sawSingleQuotedSegment = true;
             }
@@ -252,6 +285,16 @@ static ShellToken scanWord(ShellLexer *lexer) {
         } else if (c == '"' && !singleQuoted) {
             bool enteringDouble = !doubleQuoted;
             doubleQuoted = !doubleQuoted;
+            if (bufLen + 1 >= bufCap) {
+                bufCap = bufCap ? bufCap * 2 : 32;
+                char *tmp = (char *)realloc(buffer, bufCap);
+                if (!tmp) {
+                    free(buffer);
+                    return makeErrorToken(lexer, "Out of memory while scanning word");
+                }
+                buffer = tmp;
+            }
+            buffer[bufLen++] = SHELL_QUOTE_MARK_DOUBLE;
             if (enteringDouble) {
                 sawDoubleQuotedSegment = true;
             }
