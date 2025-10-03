@@ -3432,6 +3432,21 @@ static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_f
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
 
+#if defined(POSIX_SPAWN_SETSIGDEF)
+    sigset_t default_signals;
+    sigemptyset(&default_signals);
+    sigaddset(&default_signals, SIGTTIN);
+    sigaddset(&default_signals, SIGTTOU);
+    if (posix_spawnattr_setsigdefault(&attr, &default_signals) == 0) {
+        short attr_flags = 0;
+        if (posix_spawnattr_getflags(&attr, &attr_flags) != 0) {
+            attr_flags = 0;
+        }
+        attr_flags |= POSIX_SPAWN_SETSIGDEF;
+        posix_spawnattr_setflags(&attr, attr_flags);
+    }
+#endif
+
     int result = posix_spawnp(child_pid, cmd->argv[0], &actions, &attr, cmd->argv, environ);
 
     posix_spawnattr_destroy(&attr);
