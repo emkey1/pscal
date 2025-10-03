@@ -67,6 +67,14 @@ typedef struct {
     int tty_fd;
     bool job_control_enabled;
     bool job_control_initialized;
+    bool errexit_enabled;
+    bool errexit_pending;
+    bool trap_enabled;
+    bool local_scope_active;
+    bool break_requested;
+    bool continue_requested;
+    int break_requested_levels;
+    int continue_requested_levels;
 } ShellRuntimeState;
 
 typedef struct {
@@ -81,11 +89,30 @@ static ShellRuntimeState gShellRuntime = {
     .shell_pgid = 0,
     .tty_fd = -1,
     .job_control_enabled = false,
-    .job_control_initialized = false
+    .job_control_initialized = false,
+    .errexit_enabled = false,
+    .errexit_pending = false,
+    .trap_enabled = false,
+    .local_scope_active = false,
+    .break_requested = false,
+    .continue_requested = false,
+    .break_requested_levels = 0,
+    .continue_requested_levels = 0
 };
 
 static bool gShellExitRequested = false;
 static bool gShellArithmeticErrorPending = false;
+static VM *gShellCurrentVm = NULL;
+
+static VM *shellSwapCurrentVm(VM *vm) {
+    VM *previous = gShellCurrentVm;
+    gShellCurrentVm = vm;
+    return previous;
+}
+
+static void shellRestoreCurrentVm(VM *vm) {
+    gShellCurrentVm = vm;
+}
 
 static void shellEnsureJobControl(void) {
     if (!gShellRuntime.job_control_initialized) {
@@ -2274,6 +2301,19 @@ static void shellUpdateStatus(int status) {
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%d", status);
     setenv("PSCALSHELL_LAST_STATUS", buffer, 1);
+    if (status != 0) {
+        if (gShellRuntime.errexit_enabled) {
+            gShellRuntime.errexit_pending = true;
+            gShellExitRequested = true;
+            if (gShellCurrentVm) {
+                gShellCurrentVm->abort_requested = true;
+                gShellCurrentVm->exit_requested = true;
+                gShellCurrentVm->current_builtin_name = "errexit";
+            }
+        }
+    } else {
+        gShellRuntime.errexit_pending = false;
+    }
 }
 
 static bool shellHistoryEnsureCapacity(size_t needed) {
@@ -2673,9 +2713,9 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export", "unset",    "setenv", "unsetenv",
-                                      "alias", "history", "jobs",    "fg",     "bg",      "wait",   "builtin",
-                                      "source"};
+    static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export",  "unset",    "setenv",   "unsetenv",
+                                      "set",   "trap",   "local",  "break",   "continue", "alias",    "history",
+                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
@@ -3654,18 +3694,26 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
 }
 
 Value vmBuiltinShellExec(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
     shellCollectJobs();
     ShellCommand cmd;
     if (!shellBuildCommand(vm, arg_count, args, &cmd)) {
-        return makeVoid();
+        goto cleanup;
     }
-    return shellExecuteCommand(vm, &cmd);
+    result = shellExecuteCommand(vm, &cmd);
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
 }
 
 Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
     if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
         runtimeError(vm, "shell pipeline: expected metadata string");
-        return makeVoid();
+        goto cleanup;
     }
     const char *meta = args[0].s_val;
     size_t stages = 0;
@@ -3673,7 +3721,7 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     char *copy = strdup(meta);
     if (!copy) {
         runtimeError(vm, "shell pipeline: out of memory");
-        return makeVoid();
+        goto cleanup;
     }
     char *cursor = copy;
     while (cursor && *cursor) {
@@ -3696,64 +3744,73 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     free(copy);
     if (stages == 0) {
         runtimeError(vm, "shell pipeline: invalid stage count");
-        return makeVoid();
+        goto cleanup;
     }
     if (!shellEnsurePipeline(stages, negated)) {
         runtimeError(vm, "shell pipeline: unable to allocate context");
     }
-    return makeVoid();
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
 }
 
 Value vmBuiltinShellAnd(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     if (gShellRuntime.last_status != 0) {
         shellUpdateStatus(gShellRuntime.last_status);
     }
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellOr(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     if (gShellRuntime.last_status == 0) {
         shellUpdateStatus(0);
     }
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     shellResetPipeline();
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     shellResetPipeline();
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     shellResetPipeline();
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
     if (arg_count != 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
         runtimeError(vm, "shell case: expected metadata and subject word");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     const char *subject_spec = args[1].s_val;
     const char *subject_text = subject_spec;
@@ -3768,35 +3825,39 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
     if (!expanded_subject) {
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     if (!shellCaseStackPush(expanded_subject)) {
         free(expanded_subject);
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     free(expanded_subject);
     shellUpdateStatus(1);
-    return makeVoid();
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
 }
 
 Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
     if (arg_count < 1 || args[0].type != TYPE_STRING) {
         runtimeError(vm, "shell case clause: expected metadata");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     ShellCaseContext *ctx = shellCaseStackTop();
     if (!ctx) {
         runtimeError(vm, "shell case clause: no active case");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     if (ctx->matched) {
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     const char *subject = ctx->subject ? ctx->subject : "";
     bool matched = false;
@@ -3817,7 +3878,7 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
         if (!expanded_pattern) {
             runtimeError(vm, "shell case clause: out of memory");
             shellUpdateStatus(1);
-            return makeVoid();
+            goto cleanup;
         }
         if (shellWordShouldGlob(pattern_flags, expanded_pattern)) {
             if (fnmatch(expanded_pattern, subject, 0) == 0) {
@@ -3840,17 +3901,21 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
     } else {
         shellUpdateStatus(1);
     }
-    return makeVoid();
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
 }
 
 Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
     ShellCaseContext *ctx = shellCaseStackTop();
     if (!ctx) {
         runtimeError(vm, "shell case end: no active case");
         shellUpdateStatus(1);
+        shellRestoreCurrentVm(previous_vm);
         return makeVoid();
     }
     bool matched = ctx->matched;
@@ -3858,30 +3923,32 @@ Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
     if (!matched) {
         shellUpdateStatus(1);
     }
+    shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
 
 Value vmBuiltinShellDefineFunction(VM *vm, int arg_count, Value *args) {
-    (void)vm;
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
     if (arg_count != 3) {
         runtimeError(vm, "shell define function: expected name, parameters, and body");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
         runtimeError(vm, "shell define function: name must be a non-empty string");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     if (args[1].type != TYPE_STRING && args[1].type != TYPE_VOID && args[1].type != TYPE_NIL) {
         runtimeError(vm, "shell define function: parameter metadata must be a string");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     if (args[2].type != TYPE_POINTER || !args[2].ptr_val) {
         runtimeError(vm, "shell define function: missing compiled body");
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     const char *name = args[0].s_val;
     const char *param_meta = NULL;
@@ -3893,11 +3960,14 @@ Value vmBuiltinShellDefineFunction(VM *vm, int arg_count, Value *args) {
         shellDisposeCompiledFunction(compiled);
         runtimeError(vm, "shell define function: failed to store '%s'", name);
         shellUpdateStatus(1);
-        return makeVoid();
+        goto cleanup;
     }
     args[2].ptr_val = NULL;
     shellUpdateStatus(0);
-    return makeVoid();
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
 }
 
 Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
@@ -4131,6 +4201,129 @@ Value vmBuiltinShellUnset(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellUnsetenv(VM *vm, int arg_count, Value *args) {
     return vmBuiltinShellUnset(vm, arg_count, args);
+}
+
+static bool shellParseLoopLevel(const char *text, int *out_level) {
+    if (!text || !out_level) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (errno != 0 || !end || *end != '\0' || value <= 0 || value > INT_MAX) {
+        return false;
+    }
+    *out_level = (int)value;
+    return true;
+}
+
+Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
+    bool parsing_options = true;
+    for (int i = 0; i < arg_count && ok; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "set: expected string argument");
+            ok = false;
+            break;
+        }
+        const char *token = v.s_val;
+        if (parsing_options && strcmp(token, "--") == 0) {
+            parsing_options = false;
+            continue;
+        }
+        if (!parsing_options) {
+            continue;
+        }
+        if (strcmp(token, "-e") == 0) {
+            gShellRuntime.errexit_enabled = true;
+            gShellRuntime.errexit_pending = false;
+        } else if (strcmp(token, "+e") == 0) {
+            gShellRuntime.errexit_enabled = false;
+            gShellRuntime.errexit_pending = false;
+        } else if ((strcmp(token, "-o") == 0 || strcmp(token, "+o") == 0)) {
+            bool enable = (token[0] == '-');
+            if (i + 1 >= arg_count) {
+                runtimeError(vm, "set: missing option name for %s", token);
+                ok = false;
+                break;
+            }
+            Value name_val = args[++i];
+            if (name_val.type != TYPE_STRING || !name_val.s_val) {
+                runtimeError(vm, "set: option name must be a string");
+                ok = false;
+                break;
+            }
+            if (strcasecmp(name_val.s_val, "errexit") == 0) {
+                gShellRuntime.errexit_enabled = enable;
+                if (!enable) {
+                    gShellRuntime.errexit_pending = false;
+                }
+            }
+        }
+    }
+    shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellTrap(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
+    if (arg_count == 0) {
+        gShellRuntime.trap_enabled = false;
+    } else {
+        for (int i = 0; i < arg_count; ++i) {
+            if (args[i].type != TYPE_STRING || !args[i].s_val) {
+                runtimeError(vm, "trap: expected string arguments");
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            gShellRuntime.trap_enabled = true;
+        }
+    }
+    shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellLocal(VM *vm, int arg_count, Value *args) {
+    (void)arg_count;
+    (void)args;
+    gShellRuntime.local_scope_active = true;
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellBreak(VM *vm, int arg_count, Value *args) {
+    int levels = 1;
+    if (arg_count > 0) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val ||
+            !shellParseLoopLevel(args[0].s_val, &levels)) {
+            runtimeError(vm, "break: expected positive integer");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+    gShellRuntime.break_requested = true;
+    gShellRuntime.break_requested_levels = levels;
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellContinue(VM *vm, int arg_count, Value *args) {
+    int levels = 1;
+    if (arg_count > 0) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val ||
+            !shellParseLoopLevel(args[0].s_val, &levels)) {
+            runtimeError(vm, "continue: expected positive integer");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+    gShellRuntime.continue_requested = true;
+    gShellRuntime.continue_requested_levels = levels;
+    shellUpdateStatus(0);
+    return makeVoid();
 }
 
 typedef struct {

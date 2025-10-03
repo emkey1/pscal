@@ -32,10 +32,15 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "pwd", vmBuiltinShellPwd);
     registerShellBuiltin(category, command_group, "source", vmBuiltinShellSource);
     registerShellBuiltin(category, command_group, "exit", vmBuiltinShellExit);
+    registerShellBuiltin(category, command_group, "set", vmBuiltinShellSet);
     registerShellBuiltin(category, command_group, "setenv", vmBuiltinShellSetenv);
     registerShellBuiltin(category, command_group, "export", vmBuiltinShellExport);
     registerShellBuiltin(category, command_group, "unset", vmBuiltinShellUnset);
     registerShellBuiltin(category, command_group, "unsetenv", vmBuiltinShellUnsetenv);
+    registerShellBuiltin(category, command_group, "trap", vmBuiltinShellTrap);
+    registerShellBuiltin(category, command_group, "local", vmBuiltinShellLocal);
+    registerShellBuiltin(category, command_group, "break", vmBuiltinShellBreak);
+    registerShellBuiltin(category, command_group, "continue", vmBuiltinShellContinue);
     registerShellBuiltin(category, command_group, "alias", vmBuiltinShellAlias);
     registerShellBuiltin(category, command_group, "history", vmBuiltinShellHistory);
     registerShellBuiltin(category, command_group, "jobs", vmBuiltinShellJobs);
