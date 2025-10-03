@@ -216,6 +216,7 @@ ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quo
     word->double_quoted = double_quoted;
     word->has_parameter_expansion = has_param_expansion;
     word->has_arithmetic_expansion = has_arith_expansion;
+    word->is_assignment = false;
     word->line = line;
     word->column = column;
     word->has_command_substitution = false;
@@ -613,8 +614,11 @@ static void shellDumpWordJson(FILE *out, const ShellWord *word, int indent) {
     fprintf(out, "\"hasParameterExpansion\": %s,\n",
             word && word->has_parameter_expansion ? "true" : "false");
     shellPrintIndent(out, indent + 2);
-    fprintf(out, "\"hasCommandSubstitution\": %s",
+    fprintf(out, "\"hasCommandSubstitution\": %s,\n",
             word && word->has_command_substitution ? "true" : "false");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"isAssignment\": %s",
+            word && word->is_assignment ? "true" : "false");
 
     bool printed_section = false;
     if (word && word->expansions.count > 0) {

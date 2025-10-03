@@ -120,6 +120,9 @@ static char *encodeWord(const ShellWord *word) {
     if (word->has_arithmetic_expansion) {
         flags |= SHELL_WORD_FLAG_HAS_ARITHMETIC;
     }
+    if (word->is_assignment) {
+        flags |= SHELL_WORD_FLAG_ASSIGNMENT;
+    }
     const char *text = word->text ? word->text : "";
     size_t len = strlen(text);
     char *meta = NULL;

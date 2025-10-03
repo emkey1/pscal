@@ -36,6 +36,8 @@ typedef struct {
 typedef struct {
     char **argv;
     size_t argc;
+    char **assignments;
+    size_t assignment_count;
     ShellRedirection *redirs;
     size_t redir_count;
     bool background;
@@ -60,6 +62,12 @@ typedef struct {
     int last_status;
     ShellPipelineContext pipeline;
 } ShellRuntimeState;
+
+typedef struct {
+    char *name;
+    char *previous_value;
+    bool had_previous;
+} ShellAssignmentBackup;
 
 static ShellRuntimeState gShellRuntime = {
     .last_status = 0,
@@ -172,6 +180,18 @@ typedef struct {
 
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
+static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value);
+static bool shellLooksLikeAssignment(const char *text);
+static bool shellParseAssignment(const char *assignment, char **out_name, const char **out_value);
+static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
+                                             const char **out_failed_assignment,
+                                             bool *out_invalid_assignment);
+static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
+                                           ShellAssignmentBackup **out_backups,
+                                           size_t *out_count,
+                                           const char **out_failed_assignment,
+                                           bool *out_invalid_assignment);
+static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count);
 static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid);
 static int shellWaitPid(pid_t pid, int *status_out);
 static void shellFreeCommand(ShellCommand *cmd);
@@ -490,6 +510,212 @@ static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value) {
     cmd->argv[cmd->argc] = value;
     cmd->argc++;
     cmd->argv[cmd->argc] = NULL;
+    return true;
+}
+
+static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value) {
+    if (!cmd || !value) {
+        free(value);
+        return false;
+    }
+    char **new_assignments = realloc(cmd->assignments, sizeof(char *) * (cmd->assignment_count + 1));
+    if (!new_assignments) {
+        free(value);
+        return false;
+    }
+    cmd->assignments = new_assignments;
+    cmd->assignments[cmd->assignment_count++] = value;
+    return true;
+}
+
+static bool shellLooksLikeAssignment(const char *text) {
+    if (!text) {
+        return false;
+    }
+    const char *eq = strchr(text, '=');
+    if (!eq || eq == text) {
+        return false;
+    }
+    for (const char *cursor = text; cursor < eq; ++cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (cursor == text) {
+            if (!isalpha(ch) && ch != '_') {
+                return false;
+            }
+        } else if (!isalnum(ch) && ch != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool shellParseAssignment(const char *assignment, char **out_name, const char **out_value) {
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (out_value) {
+        *out_value = NULL;
+    }
+    if (!assignment) {
+        return false;
+    }
+    const char *eq = strchr(assignment, '=');
+    if (!eq || eq == assignment) {
+        return false;
+    }
+    size_t name_len = (size_t)(eq - assignment);
+    for (size_t i = 0; i < name_len; ++i) {
+        unsigned char ch = (unsigned char)assignment[i];
+        if (i == 0) {
+            if (!isalpha(ch) && ch != '_') {
+                return false;
+            }
+        } else if (!isalnum(ch) && ch != '_') {
+            return false;
+        }
+    }
+    char *name = (char *)malloc(name_len + 1);
+    if (!name) {
+        return false;
+    }
+    memcpy(name, assignment, name_len);
+    name[name_len] = '\0';
+    if (out_name) {
+        *out_name = name;
+    } else {
+        free(name);
+    }
+    if (out_value) {
+        *out_value = eq + 1;
+    }
+    return true;
+}
+
+static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
+                                             const char **out_failed_assignment,
+                                             bool *out_invalid_assignment) {
+    if (out_failed_assignment) {
+        *out_failed_assignment = NULL;
+    }
+    if (out_invalid_assignment) {
+        *out_invalid_assignment = false;
+    }
+    if (!cmd) {
+        return true;
+    }
+    for (size_t i = 0; i < cmd->assignment_count; ++i) {
+        const char *assignment = cmd->assignments[i];
+        char *name = NULL;
+        const char *value = NULL;
+        if (!shellParseAssignment(assignment, &name, &value)) {
+            if (out_failed_assignment) {
+                *out_failed_assignment = assignment;
+            }
+            if (out_invalid_assignment) {
+                *out_invalid_assignment = true;
+            }
+            free(name);
+            return false;
+        }
+        if (setenv(name, value ? value : "", 1) != 0) {
+            if (out_failed_assignment) {
+                *out_failed_assignment = assignment;
+            }
+            free(name);
+            return false;
+        }
+        free(name);
+    }
+    return true;
+}
+
+static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count) {
+    if (!backups) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        ShellAssignmentBackup *backup = &backups[i];
+        if (!backup->name) {
+            continue;
+        }
+        if (backup->had_previous) {
+            setenv(backup->name, backup->previous_value ? backup->previous_value : "", 1);
+        } else {
+            unsetenv(backup->name);
+        }
+        free(backup->name);
+        free(backup->previous_value);
+    }
+    free(backups);
+}
+
+static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
+                                           ShellAssignmentBackup **out_backups,
+                                           size_t *out_count,
+                                           const char **out_failed_assignment,
+                                           bool *out_invalid_assignment) {
+    if (out_backups) {
+        *out_backups = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (out_failed_assignment) {
+        *out_failed_assignment = NULL;
+    }
+    if (out_invalid_assignment) {
+        *out_invalid_assignment = false;
+    }
+    if (!cmd || cmd->assignment_count == 0) {
+        return true;
+    }
+    ShellAssignmentBackup *backups = calloc(cmd->assignment_count, sizeof(ShellAssignmentBackup));
+    if (!backups) {
+        return false;
+    }
+    for (size_t i = 0; i < cmd->assignment_count; ++i) {
+        const char *assignment = cmd->assignments[i];
+        char *name = NULL;
+        const char *value = NULL;
+        if (!shellParseAssignment(assignment, &name, &value)) {
+            if (out_failed_assignment) {
+                *out_failed_assignment = assignment;
+            }
+            if (out_invalid_assignment) {
+                *out_invalid_assignment = true;
+            }
+            shellRestoreAssignments(backups, i);
+            return false;
+        }
+        backups[i].name = name;
+        const char *previous = getenv(name);
+        if (previous) {
+            backups[i].previous_value = strdup(previous);
+            if (!backups[i].previous_value) {
+                shellRestoreAssignments(backups, i + 1);
+                return false;
+            }
+            backups[i].had_previous = true;
+        } else {
+            backups[i].previous_value = NULL;
+            backups[i].had_previous = false;
+        }
+        if (setenv(name, value ? value : "", 1) != 0) {
+            if (out_failed_assignment) {
+                *out_failed_assignment = assignment;
+            }
+            shellRestoreAssignments(backups, i + 1);
+            return false;
+        }
+    }
+    if (out_backups) {
+        *out_backups = backups;
+    } else {
+        shellRestoreAssignments(backups, cmd->assignment_count);
+    }
+    if (out_count) {
+        *out_count = cmd->assignment_count;
+    }
     return true;
 }
 
@@ -1752,6 +1978,12 @@ static void shellFreeCommand(ShellCommand *cmd) {
     if (!cmd) {
         return;
     }
+    for (size_t i = 0; i < cmd->assignment_count; ++i) {
+        free(cmd->assignments[i]);
+    }
+    free(cmd->assignments);
+    cmd->assignments = NULL;
+    cmd->assignment_count = 0;
     for (size_t i = 0; i < cmd->argc; ++i) {
         free(cmd->argv[i]);
     }
@@ -2677,7 +2909,7 @@ static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
     free(copy);
 }
 
-static bool shellAddArg(ShellCommand *cmd, const char *arg) {
+static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_word) {
     if (!cmd || !arg) {
         return false;
     }
@@ -2685,10 +2917,20 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
     const char *meta = NULL;
     size_t meta_len = 0;
     uint8_t flags = 0;
-    shellDecodeWordSpec(arg, &text, &flags, &meta, &meta_len);
+    if (!shellDecodeWordSpec(arg, &text, &flags, &meta, &meta_len)) {
+        return false;
+    }
     char *expanded = shellExpandWord(text, flags, meta, meta_len);
     if (!expanded) {
         return false;
+    }
+    if (saw_command_word && !*saw_command_word) {
+        if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
+            if (!shellCommandAppendAssignmentOwned(cmd, expanded)) {
+                return false;
+            }
+            return true;
+        }
     }
     if (shellWordShouldGlob(flags, expanded)) {
         glob_t glob_result;
@@ -2721,6 +2963,9 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
             }
             globfree(&glob_result);
             free(expanded);
+            if (saw_command_word) {
+                *saw_command_word = true;
+            }
             return true;
         }
         if (glob_status != GLOB_NOMATCH) {
@@ -2729,6 +2974,9 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
     }
     if (!shellCommandAppendArgOwned(cmd, expanded)) {
         return false;
+    }
+    if (saw_command_word) {
+        *saw_command_word = true;
     }
     return true;
 }
@@ -2824,6 +3072,7 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
         return false;
     }
     shellParseMetadata(meta.s_val, out_cmd);
+    bool saw_command_word = false;
     for (int i = 1; i < arg_count; ++i) {
         Value v = args[i];
         if (v.type != TYPE_STRING || !v.s_val) {
@@ -2838,7 +3087,7 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
                 return false;
             }
         } else {
-            if (!shellAddArg(out_cmd, v.s_val)) {
+            if (!shellAddArg(out_cmd, v.s_val, &saw_command_word)) {
                 runtimeError(vm, "shell exec: unable to add argument");
                 shellFreeCommand(out_cmd);
                 return false;
@@ -3044,11 +3293,79 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 }
 
 static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
+    if (!cmd) {
+        return makeVoid();
+    }
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    ShellAssignmentBackup *assignment_backups = NULL;
+    size_t assignment_backup_count = 0;
+    bool assignments_applied = false;
+
+    if (cmd->argc == 0) {
+        const char *failed_assignment = NULL;
+        bool invalid_assignment = false;
+        if (cmd->assignment_count > 0) {
+            if (!shellApplyAssignmentsPermanently(cmd, &failed_assignment, &invalid_assignment)) {
+                if (invalid_assignment) {
+                    runtimeError(vm, "shell exec: invalid assignment '%s'",
+                                 failed_assignment ? failed_assignment : "<assignment>");
+                    shellUpdateStatus(1);
+                } else {
+                    runtimeError(vm, "shell exec: failed to apply assignment '%s': %s",
+                                 failed_assignment ? failed_assignment : "<assignment>",
+                                 strerror(errno));
+                    shellUpdateStatus(errno ? errno : 1);
+                }
+            } else {
+                shellUpdateStatus(0);
+            }
+        } else {
+            shellUpdateStatus(0);
+        }
+        if (ctx->active) {
+            ctx->last_status = gShellRuntime.last_status;
+            if (ctx->stage_count <= 1) {
+                shellResetPipeline();
+            }
+        }
+        shellFreeCommand(cmd);
+        return makeVoid();
+    }
+
+    const char *failed_assignment = NULL;
+    bool invalid_assignment = false;
+    if (cmd->assignment_count > 0) {
+        if (!shellApplyAssignmentsTemporary(cmd, &assignment_backups, &assignment_backup_count,
+                                            &failed_assignment, &invalid_assignment)) {
+            if (invalid_assignment) {
+                runtimeError(vm, "shell exec: invalid assignment '%s'",
+                             failed_assignment ? failed_assignment : "<assignment>");
+                shellUpdateStatus(1);
+            } else {
+                runtimeError(vm, "shell exec: failed to apply assignment '%s': %s",
+                             failed_assignment ? failed_assignment : "<assignment>",
+                             strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+            }
+            if (ctx->active) {
+                shellAbortPipeline();
+            }
+            shellFreeCommand(cmd);
+            return makeVoid();
+        }
+        assignments_applied = true;
+    }
+
     int stdin_fd = -1;
     int stdout_fd = -1;
     if (ctx->active) {
         if (ctx->stage_count == 1 && shellInvokeBuiltin(vm, cmd)) {
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
             ctx->last_status = gShellRuntime.last_status;
             shellResetPipeline();
             shellFreeCommand(cmd);
@@ -3056,6 +3373,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         }
         size_t idx = (size_t)cmd->pipeline_index;
         if (idx >= ctx->stage_count) {
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+            }
+            assignment_backups = NULL;
+            assignment_backup_count = 0;
             runtimeError(vm, "shell exec: pipeline index out of range");
             shellFreeCommand(cmd);
             shellResetPipeline();
@@ -3071,6 +3393,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         }
     } else {
         if (shellInvokeBuiltin(vm, cmd)) {
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
             shellFreeCommand(cmd);
             return makeVoid();
         }
@@ -3078,6 +3406,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
 
     pid_t child = -1;
     int spawn_err = shellSpawnProcess(cmd, stdin_fd, stdout_fd, &child);
+    if (assignments_applied) {
+        shellRestoreAssignments(assignment_backups, assignment_backup_count);
+        assignments_applied = false;
+        assignment_backups = NULL;
+        assignment_backup_count = 0;
+    }
     if (spawn_err != 0) {
         runtimeError(vm, "shell exec: failed to spawn '%s': %s", cmd->argv[0], strerror(spawn_err));
         if (ctx->active) {
