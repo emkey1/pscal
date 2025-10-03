@@ -78,6 +78,16 @@ typedef struct {
 } ShellRuntimeState;
 
 typedef struct {
+    bool skip_body;
+    bool break_pending;
+    bool continue_pending;
+} ShellLoopFrame;
+
+static ShellLoopFrame *gShellLoopStack = NULL;
+static size_t gShellLoopStackSize = 0;
+static size_t gShellLoopStackCapacity = 0;
+
+typedef struct {
     char *name;
     char *previous_value;
     bool had_previous;
@@ -103,6 +113,104 @@ static ShellRuntimeState gShellRuntime = {
 static bool gShellExitRequested = false;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
+
+static bool shellLoopEnsureCapacity(size_t needed) {
+    if (gShellLoopStackCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellLoopStackCapacity ? gShellLoopStackCapacity * 2 : 4;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    ShellLoopFrame *resized = (ShellLoopFrame *)realloc(gShellLoopStack, new_capacity * sizeof(ShellLoopFrame));
+    if (!resized) {
+        return false;
+    }
+    gShellLoopStack = resized;
+    gShellLoopStackCapacity = new_capacity;
+    return true;
+}
+
+static ShellLoopFrame *shellLoopPushFrame(void) {
+    if (!shellLoopEnsureCapacity(gShellLoopStackSize + 1)) {
+        return NULL;
+    }
+    ShellLoopFrame frame = {false, false, false};
+    gShellLoopStack[gShellLoopStackSize++] = frame;
+    return &gShellLoopStack[gShellLoopStackSize - 1];
+}
+
+static ShellLoopFrame *shellLoopTop(void) {
+    if (gShellLoopStackSize == 0) {
+        return NULL;
+    }
+    return &gShellLoopStack[gShellLoopStackSize - 1];
+}
+
+static void shellLoopPopFrame(void) {
+    if (gShellLoopStackSize == 0) {
+        return;
+    }
+    gShellLoopStackSize--;
+    if (gShellLoopStackSize == 0) {
+        gShellRuntime.break_requested = false;
+        gShellRuntime.continue_requested = false;
+        gShellRuntime.break_requested_levels = 0;
+        gShellRuntime.continue_requested_levels = 0;
+    }
+}
+
+static bool shellLoopSkipActive(void) {
+    for (size_t i = gShellLoopStackSize; i > 0; --i) {
+        if (gShellLoopStack[i - 1].skip_body) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void shellLoopRequestBreakLevels(int levels) {
+    if (levels <= 0) {
+        levels = 1;
+    }
+    size_t idx = gShellLoopStackSize;
+    while (idx > 0 && levels > 0) {
+        ShellLoopFrame *frame = &gShellLoopStack[idx - 1];
+        frame->skip_body = true;
+        frame->break_pending = true;
+        frame->continue_pending = false;
+        idx--;
+        levels--;
+    }
+    if (levels > 0) {
+        gShellExitRequested = true;
+    }
+}
+
+static void shellLoopRequestContinueLevels(int levels) {
+    if (levels <= 0) {
+        levels = 1;
+    }
+    if (gShellLoopStackSize == 0) {
+        return;
+    }
+    size_t idx = gShellLoopStackSize;
+    int remaining = levels;
+    while (idx > 0 && remaining > 1) {
+        ShellLoopFrame *frame = &gShellLoopStack[idx - 1];
+        frame->skip_body = true;
+        frame->break_pending = true;
+        frame->continue_pending = false;
+        idx--;
+        remaining--;
+    }
+    if (idx > 0) {
+        ShellLoopFrame *target = &gShellLoopStack[idx - 1];
+        target->skip_body = true;
+        target->continue_pending = true;
+        target->break_pending = false;
+    }
+}
 
 static VM *shellSwapCurrentVm(VM *vm) {
     VM *previous = gShellCurrentVm;
@@ -3489,6 +3597,10 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (!cmd) {
         return makeVoid();
     }
+    if (shellLoopSkipActive()) {
+        shellFreeCommand(cmd);
+        return makeVoid();
+    }
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     ShellAssignmentBackup *assignment_backups = NULL;
     size_t assignment_backup_count = 0;
@@ -3715,6 +3827,9 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
         runtimeError(vm, "shell pipeline: expected metadata string");
         goto cleanup;
     }
+    if (shellLoopSkipActive()) {
+        goto cleanup;
+    }
     const char *meta = args[0].s_val;
     size_t stages = 0;
     bool negated = false;
@@ -3790,7 +3905,42 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
+    bool parent_skip = shellLoopSkipActive();
+    ShellLoopFrame *frame = shellLoopPushFrame();
+    if (!frame) {
+        runtimeError(vm, "shell loop: out of memory");
+        shellRestoreCurrentVm(previous_vm);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (parent_skip) {
+        frame->skip_body = true;
+    }
     shellResetPipeline();
+    shellRestoreCurrentVm(previous_vm);
+    return makeVoid();
+}
+
+Value vmBuiltinShellLoopEnd(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    (void)arg_count;
+    (void)args;
+    ShellLoopFrame *frame = shellLoopTop();
+    if (frame) {
+        bool propagate_continue = frame->continue_pending;
+        bool propagate_break = frame->break_pending;
+        shellLoopPopFrame();
+        if (gShellLoopStackSize == 0) {
+            if (propagate_break) {
+                gShellRuntime.break_requested = false;
+                gShellRuntime.break_requested_levels = 0;
+            }
+            if (propagate_continue) {
+                gShellRuntime.continue_requested = false;
+                gShellRuntime.continue_requested_levels = 0;
+            }
+        }
+    }
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
@@ -4306,6 +4456,7 @@ Value vmBuiltinShellBreak(VM *vm, int arg_count, Value *args) {
     }
     gShellRuntime.break_requested = true;
     gShellRuntime.break_requested_levels = levels;
+    shellLoopRequestBreakLevels(levels);
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -4322,6 +4473,7 @@ Value vmBuiltinShellContinue(VM *vm, int arg_count, Value *args) {
     }
     gShellRuntime.continue_requested = true;
     gShellRuntime.continue_requested_levels = levels;
+    shellLoopRequestContinueLevels(levels);
     shellUpdateStatus(0);
     return makeVoid();
 }

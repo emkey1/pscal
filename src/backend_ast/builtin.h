@@ -111,6 +111,7 @@ Value vmBuiltinShellAnd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellOr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSubshell(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLoop(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLoopEnd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCaseClause(struct VM_s* vm, int arg_count, Value* args);
