@@ -486,13 +486,32 @@ static char *shellResolveInteractivePrompt(void) {
     return strdup(env_prompt);
 }
 
+static size_t shellPromptLineBreakCount(const char *prompt) {
+    if (!prompt) {
+        return 0;
+    }
+    size_t count = 0;
+    for (const char *cursor = prompt; *cursor; ++cursor) {
+        if (*cursor == '\n') {
+            ++count;
+        }
+    }
+    return count;
+}
+
 static void redrawInteractiveLine(const char *prompt,
                                   const char *buffer,
                                   size_t length,
                                   size_t cursor,
-                                  size_t *displayed_length) {
+                                  size_t *displayed_length,
+                                  size_t *displayed_prompt_lines) {
     size_t previous = displayed_length ? *displayed_length : 0;
+    size_t previous_prompt_lines =
+        displayed_prompt_lines ? *displayed_prompt_lines : 0;
     fputs("\r", stdout);
+    for (size_t i = 0; i < previous_prompt_lines; ++i) {
+        fputs("\033[A", stdout);
+    }
     if (prompt) {
         fputs(prompt, stdout);
     }
@@ -518,6 +537,9 @@ static void redrawInteractiveLine(const char *prompt,
     fflush(stdout);
     if (displayed_length) {
         *displayed_length = length;
+    }
+    if (displayed_prompt_lines) {
+        *displayed_prompt_lines = shellPromptLineBreakCount(prompt);
     }
 }
 
@@ -627,6 +649,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                                            size_t *cursor,
                                            size_t *capacity,
                                            size_t *displayed_length,
+                                           size_t *displayed_prompt_lines,
                                            char **scratch) {
     if (!buffer || !*buffer || !length || !capacity || !cursor) {
         return false;
@@ -708,7 +731,12 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     globfree(&results);
 
     *cursor = *length;
-    redrawInteractiveLine(prompt, *buffer, *length, *cursor, displayed_length);
+    redrawInteractiveLine(prompt,
+                          *buffer,
+                          *length,
+                          *cursor,
+                          displayed_length,
+                          displayed_prompt_lines);
     if (scratch) {
         interactiveUpdateScratch(scratch, *buffer, *length);
     }
@@ -855,6 +883,7 @@ static char *readInteractiveLine(const char *prompt,
     buffer[0] = '\0';
     size_t length = 0;
     size_t displayed_length = 0;
+    size_t displayed_prompt_lines = shellPromptLineBreakCount(prompt);
     size_t history_index = 0;
     size_t cursor = 0;
     char *scratch = NULL;
@@ -896,6 +925,7 @@ static char *readInteractiveLine(const char *prompt,
             cursor = 0;
             buffer[0] = '\0';
             displayed_length = 0;
+            displayed_prompt_lines = shellPromptLineBreakCount(prompt);
             history_index = 0;
             interactiveUpdateScratch(&scratch, buffer, length);
             fputs(prompt, stdout);
@@ -908,7 +938,12 @@ static char *readInteractiveLine(const char *prompt,
                 memmove(buffer + cursor - 1, buffer + cursor, length - cursor + 1);
                 cursor--;
                 length--;
-                redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
@@ -954,7 +989,12 @@ static char *readInteractiveLine(const char *prompt,
                             buffer[entry_len] = '\0';
                             length = entry_len;
                             cursor = length;
-                            redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+                            redrawInteractiveLine(prompt,
+                                                  buffer,
+                                                  length,
+                                                  cursor,
+                                                  &displayed_length,
+                                                  &displayed_prompt_lines);
                         } else {
                             history_index--;
                             fputc('\a', stdout);
@@ -995,7 +1035,12 @@ static char *readInteractiveLine(const char *prompt,
                         buffer[entry_len] = '\0';
                         length = entry_len;
                         cursor = length;
-                        redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+                        redrawInteractiveLine(prompt,
+                                              buffer,
+                                              length,
+                                              cursor,
+                                              &displayed_length,
+                                              &displayed_prompt_lines);
                         if (history_index == 0) {
                             interactiveUpdateScratch(&scratch, buffer, length);
                         }
@@ -1030,7 +1075,12 @@ static char *readInteractiveLine(const char *prompt,
                         if (cursor < length) {
                             memmove(buffer + cursor, buffer + cursor + 1, length - cursor);
                             length--;
-                            redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+                            redrawInteractiveLine(prompt,
+                                                  buffer,
+                                                  length,
+                                                  cursor,
+                                                  &displayed_length,
+                                                  &displayed_prompt_lines);
                             history_index = 0;
                             interactiveUpdateScratch(&scratch, buffer, length);
                         } else {
@@ -1045,7 +1095,14 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == '\t') { /* Tab completion */
-            if (!interactiveHandleTabCompletion(prompt, &buffer, &length, &cursor, &capacity, &displayed_length, &scratch)) {
+            if (!interactiveHandleTabCompletion(prompt,
+                                                &buffer,
+                                                &length,
+                                                &cursor,
+                                                &capacity,
+                                                &displayed_length,
+                                                &displayed_prompt_lines,
+                                                &scratch)) {
                 fputc('\a', stdout);
                 fflush(stdout);
             } else {
@@ -1082,7 +1139,12 @@ static char *readInteractiveLine(const char *prompt,
         cursor++;
         length++;
         buffer[length] = '\0';
-        redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+        redrawInteractiveLine(prompt,
+                              buffer,
+                              length,
+                              cursor,
+                              &displayed_length,
+                              &displayed_prompt_lines);
         history_index = 0;
         interactiveUpdateScratch(&scratch, buffer, length);
     }
