@@ -8,6 +8,68 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void encodeHexDigits(size_t value, size_t width, char *out) {
+    static const char digits[] = "0123456789ABCDEF";
+    if (!out) {
+        return;
+    }
+    for (size_t i = 0; i < width; ++i) {
+        size_t shift = (width - 1 - i) * 4;
+        size_t nibble;
+        if (shift >= sizeof(size_t) * 8) {
+            nibble = 0;
+        } else {
+            nibble = (value >> shift) & 0xF;
+        }
+        out[i] = digits[nibble & 0xF];
+    }
+}
+
+static size_t buildCommandSubstitutionMetadata(const ShellWord *word, char **out_meta) {
+    if (out_meta) {
+        *out_meta = NULL;
+    }
+    if (!word) {
+        return 0;
+    }
+    size_t count = word->command_substitutions.count;
+    size_t meta_len = 4; // always store count
+    for (size_t i = 0; i < count; ++i) {
+        const ShellCommandSubstitution *sub = &word->command_substitutions.items[i];
+        size_t cmd_len = sub->command ? strlen(sub->command) : 0;
+        meta_len += 1 + 6 + 6 + cmd_len;
+    }
+    if (meta_len == 0) {
+        return 0;
+    }
+    char *meta = (char *)malloc(meta_len);
+    if (!meta) {
+        return 0;
+    }
+    size_t offset = 0;
+    encodeHexDigits(count, 4, meta + offset);
+    offset += 4;
+    for (size_t i = 0; i < count; ++i) {
+        const ShellCommandSubstitution *sub = &word->command_substitutions.items[i];
+        meta[offset++] = (sub->style == SHELL_COMMAND_SUBSTITUTION_BACKTICK) ? 'B' : 'D';
+        encodeHexDigits(sub->span_length, 6, meta + offset);
+        offset += 6;
+        size_t cmd_len = sub->command ? strlen(sub->command) : 0;
+        encodeHexDigits(cmd_len, 6, meta + offset);
+        offset += 6;
+        if (cmd_len > 0 && sub->command) {
+            memcpy(meta + offset, sub->command, cmd_len);
+        }
+        offset += cmd_len;
+    }
+    if (out_meta) {
+        *out_meta = meta;
+    } else {
+        free(meta);
+    }
+    return meta_len;
+}
+
 static int addStringConstant(BytecodeChunk *chunk, const char *str) {
     Value val = makeString(str ? str : "");
     int index = addConstantToChunk(chunk, &val);
@@ -52,15 +114,29 @@ static char *encodeWord(const ShellWord *word) {
     if (word->has_parameter_expansion) {
         flags |= SHELL_WORD_FLAG_HAS_PARAM;
     }
+    if (word->has_command_substitution || word->command_substitutions.count > 0) {
+        flags |= SHELL_WORD_FLAG_HAS_COMMAND;
+    }
     const char *text = word->text ? word->text : "";
     size_t len = strlen(text);
-    char *encoded = (char *)malloc(len + 3);
+    char *meta = NULL;
+    size_t meta_len = buildCommandSubstitutionMetadata(word, &meta);
+    char len_hex[6];
+    encodeHexDigits(meta_len, 6, len_hex);
+    size_t total_len = 2 + 6 + meta_len + len + 1;
+    char *encoded = (char *)malloc(total_len);
     if (!encoded) {
+        free(meta);
         return NULL;
     }
     encoded[0] = SHELL_WORD_ENCODE_PREFIX;
     encoded[1] = (char)(flags + 1);
-    memcpy(encoded + 2, text, len + 1);
+    memcpy(encoded + 2, len_hex, 6);
+    if (meta_len > 0 && meta) {
+        memcpy(encoded + 8, meta, meta_len);
+    }
+    memcpy(encoded + 8 + meta_len, text, len + 1);
+    free(meta);
     return encoded;
 }
 

@@ -61,6 +61,7 @@ typedef struct {
     bool single_quoted;
     bool double_quoted;
     bool contains_parameter_expansion;
+    bool contains_command_substitution;
 } ShellToken;
 
 typedef struct {

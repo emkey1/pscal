@@ -151,28 +151,232 @@ typedef struct {
 static ShellFunctionEntry *gShellFunctions = NULL;
 static size_t gShellFunctionCount = 0;
 
-static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags) {
+typedef enum {
+    SHELL_META_SUBSTITUTION_DOLLAR,
+    SHELL_META_SUBSTITUTION_BACKTICK
+} ShellMetaSubstitutionStyle;
+
+typedef struct {
+    ShellMetaSubstitutionStyle style;
+    size_t span_length;
+    char *command;
+} ShellMetaSubstitution;
+
+static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
+static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
+static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid);
+static int shellWaitPid(pid_t pid, int *status_out);
+static void shellFreeCommand(ShellCommand *cmd);
+
+static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags,
+                                const char **out_meta, size_t *out_meta_len) {
     if (out_text) {
         *out_text = encoded ? encoded : "";
     }
     if (out_flags) {
         *out_flags = 0;
     }
+    if (out_meta) {
+        *out_meta = NULL;
+    }
+    if (out_meta_len) {
+        *out_meta_len = 0;
+    }
     if (!encoded) {
         return false;
     }
     size_t len = strlen(encoded);
-    if (len < 2 || encoded[0] != SHELL_WORD_ENCODE_PREFIX) {
+    if (len < 8 || encoded[0] != SHELL_WORD_ENCODE_PREFIX) {
         return false;
     }
     if (out_flags) {
         uint8_t stored = (uint8_t)encoded[1];
         *out_flags = stored > 0 ? (stored - 1) : 0;
     }
+    char meta_len_buf[7];
+    memcpy(meta_len_buf, encoded + 2, 6);
+    meta_len_buf[6] = '\0';
+    size_t meta_len = strtoul(meta_len_buf, NULL, 16);
+    if (8 + meta_len > len) {
+        return false;
+    }
+    if (out_meta) {
+        *out_meta = encoded + 8;
+    }
+    if (out_meta_len) {
+        *out_meta_len = meta_len;
+    }
     if (out_text) {
-        *out_text = encoded + 2;
+        *out_text = encoded + 8 + meta_len;
     }
     return true;
+}
+
+static void shellFreeMetaSubstitutions(ShellMetaSubstitution *subs, size_t count) {
+    if (!subs) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(subs[i].command);
+    }
+    free(subs);
+}
+
+static bool shellParseCommandMetadata(const char *meta, size_t meta_len,
+                                      ShellMetaSubstitution **out_subs, size_t *out_count) {
+    if (out_subs) {
+        *out_subs = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!meta || meta_len == 0) {
+        return true;
+    }
+    if (meta_len < 4) {
+        return false;
+    }
+    char count_buf[5];
+    memcpy(count_buf, meta, 4);
+    count_buf[4] = '\0';
+    size_t count = strtoul(count_buf, NULL, 16);
+    if (count == 0) {
+        return true;
+    }
+    ShellMetaSubstitution *subs = (ShellMetaSubstitution *)calloc(count, sizeof(ShellMetaSubstitution));
+    if (!subs) {
+        return false;
+    }
+    size_t offset = 4;
+    for (size_t i = 0; i < count; ++i) {
+        if (offset + 1 + 6 + 6 > meta_len) {
+            shellFreeMetaSubstitutions(subs, count);
+            return false;
+        }
+        char style_char = meta[offset++];
+        ShellMetaSubstitutionStyle style = (style_char == 'B') ?
+            SHELL_META_SUBSTITUTION_BACKTICK : SHELL_META_SUBSTITUTION_DOLLAR;
+
+        char span_buf[7];
+        memcpy(span_buf, meta + offset, 6);
+        span_buf[6] = '\0';
+        size_t span = strtoul(span_buf, NULL, 16);
+        offset += 6;
+
+        char len_buf[7];
+        memcpy(len_buf, meta + offset, 6);
+        len_buf[6] = '\0';
+        size_t cmd_len = strtoul(len_buf, NULL, 16);
+        offset += 6;
+        if (offset + cmd_len > meta_len) {
+            shellFreeMetaSubstitutions(subs, count);
+            return false;
+        }
+        char *command = (char *)malloc(cmd_len + 1);
+        if (!command && cmd_len > 0) {
+            shellFreeMetaSubstitutions(subs, count);
+            return false;
+        }
+        if (cmd_len > 0) {
+            memcpy(command, meta + offset, cmd_len);
+        }
+        if (command) {
+            command[cmd_len] = '\0';
+        } else {
+            command = strdup("");
+            if (!command) {
+                shellFreeMetaSubstitutions(subs, count);
+                return false;
+            }
+        }
+        offset += cmd_len;
+        subs[i].style = style;
+        subs[i].span_length = span;
+        subs[i].command = command;
+    }
+    if (out_subs) {
+        *out_subs = subs;
+    } else {
+        shellFreeMetaSubstitutions(subs, count);
+    }
+    if (out_count) {
+        *out_count = count;
+    }
+    return true;
+}
+
+static char *shellRunCommandSubstitution(const char *command) {
+    int pipes[2] = {-1, -1};
+    ShellCommand cmd;
+    memset(&cmd, 0, sizeof(cmd));
+
+    if (pipe(pipes) != 0) {
+        return strdup("");
+    }
+    const char *shell_path = "/bin/sh";
+    if (!shellCommandAppendArgOwned(&cmd, strdup(shell_path)) ||
+        !shellCommandAppendArgOwned(&cmd, strdup("-c")) ||
+        !shellCommandAppendArgOwned(&cmd, strdup(command ? command : ""))) {
+        goto cleanup;
+    }
+
+    pid_t child = -1;
+    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], &child);
+    close(pipes[1]);
+    pipes[1] = -1;
+    if (spawn_err != 0) {
+        goto cleanup;
+    }
+
+    char *output = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    char buffer[256];
+    while (true) {
+        ssize_t n = read(pipes[0], buffer, sizeof(buffer));
+        if (n > 0) {
+            if (!shellBufferEnsure(&output, &length, &capacity, (size_t)n)) {
+                free(output);
+                output = NULL;
+                break;
+            }
+            memcpy(output + length, buffer, (size_t)n);
+            length += (size_t)n;
+            output[length] = '\0';
+        } else if (n == 0) {
+            break;
+        } else if (errno == EINTR) {
+            continue;
+        } else {
+            free(output);
+            output = NULL;
+            break;
+        }
+    }
+    close(pipes[0]);
+    pipes[0] = -1;
+
+    int status = 0;
+    shellWaitPid(child, &status);
+    shellFreeCommand(&cmd);
+
+    if (!output) {
+        return strdup("");
+    }
+    while (length > 0 && (output[length - 1] == '\n' || output[length - 1] == '\r')) {
+        output[--length] = '\0';
+    }
+    return output;
+
+cleanup:
+    if (pipes[0] >= 0) {
+        close(pipes[0]);
+    }
+    if (pipes[1] >= 0) {
+        close(pipes[1]);
+    }
+    shellFreeCommand(&cmd);
+    return strdup("");
 }
 
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra) {
@@ -1101,28 +1305,72 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
     return NULL;
 }
 
-static char *shellExpandWord(const char *text, uint8_t flags) {
+static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len) {
     if (!text) {
         return strdup("");
     }
     if (flags & SHELL_WORD_FLAG_SINGLE_QUOTED) {
         return strdup(text);
     }
+    ShellMetaSubstitution *subs = NULL;
+    size_t sub_count = 0;
+    if (!shellParseCommandMetadata(meta, meta_len, &subs, &sub_count)) {
+        subs = NULL;
+        sub_count = 0;
+    }
+    size_t text_len = strlen(text);
     size_t length = 0;
-    size_t capacity = strlen(text) + 1;
+    size_t capacity = text_len + 1;
     if (capacity < 32) {
         capacity = 32;
     }
     char *buffer = (char *)malloc(capacity);
     if (!buffer) {
+        shellFreeMetaSubstitutions(subs, sub_count);
         return NULL;
     }
     buffer[0] = '\0';
     bool double_quoted = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
-    for (size_t i = 0; text[i];) {
+    size_t sub_index = 0;
+    for (size_t i = 0; i < text_len;) {
         char c = text[i];
+        bool handled = false;
+        if (sub_index < sub_count) {
+            ShellMetaSubstitution *sub = &subs[sub_index];
+            size_t span = sub->span_length;
+            if (sub->style == SHELL_META_SUBSTITUTION_DOLLAR && c == '$' && i + 1 < text_len && text[i + 1] == '(') {
+                if (span > 0 && i + span <= text_len) {
+                    char *output = shellRunCommandSubstitution(sub->command);
+                    if (output) {
+                        shellBufferAppendString(&buffer, &length, &capacity, output);
+                        free(output);
+                    }
+                    i += span;
+                    sub_index++;
+                    handled = true;
+                } else {
+                    sub_index++;
+                }
+            } else if (sub->style == SHELL_META_SUBSTITUTION_BACKTICK && c == '`') {
+                if (span > 0 && i + span <= text_len) {
+                    char *output = shellRunCommandSubstitution(sub->command);
+                    if (output) {
+                        shellBufferAppendString(&buffer, &length, &capacity, output);
+                        free(output);
+                    }
+                    i += span;
+                    sub_index++;
+                    handled = true;
+                } else {
+                    sub_index++;
+                }
+            }
+        }
+        if (handled) {
+            continue;
+        }
         if (c == '\\') {
-            if (text[i + 1]) {
+            if (i + 1 < text_len) {
                 char next = text[i + 1];
                 if (!double_quoted || next == '$' || next == '"' || next == '\\' || next == '`' || next == '\n') {
                     shellBufferAppendChar(&buffer, &length, &capacity, next);
@@ -1147,6 +1395,7 @@ static char *shellExpandWord(const char *text, uint8_t flags) {
         shellBufferAppendChar(&buffer, &length, &capacity, c);
         i++;
     }
+    shellFreeMetaSubstitutions(subs, sub_count);
     return buffer;
 }
 
@@ -1776,9 +2025,11 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg) {
         return false;
     }
     const char *text = NULL;
+    const char *meta = NULL;
+    size_t meta_len = 0;
     uint8_t flags = 0;
-    shellDecodeWordSpec(arg, &text, &flags);
-    char *expanded = shellExpandWord(text, flags);
+    shellDecodeWordSpec(arg, &text, &flags, &meta, &meta_len);
+    char *expanded = shellExpandWord(text, flags, meta, meta_len);
     if (!expanded) {
         return false;
     }
@@ -1888,9 +2139,11 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     redir->flags = flags;
     redir->mode = mode;
     const char *target_text = NULL;
+    const char *target_meta = NULL;
+    size_t target_meta_len = 0;
     uint8_t target_flags = 0;
-    shellDecodeWordSpec(target_spec, &target_text, &target_flags);
-    redir->path = shellExpandWord(target_text, target_flags);
+    shellDecodeWordSpec(target_spec, &target_text, &target_flags, &target_meta, &target_meta_len);
+    redir->path = shellExpandWord(target_text, target_flags, target_meta, target_meta_len);
     free(copy);
     if (!redir->path) {
         cmd->redir_count--;
@@ -2309,12 +2562,14 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
     }
     const char *subject_spec = args[1].s_val;
     const char *subject_text = subject_spec;
+    const char *subject_meta = NULL;
+    size_t subject_meta_len = 0;
     uint8_t subject_flags = 0;
-    if (!shellDecodeWordSpec(subject_spec, &subject_text, &subject_flags)) {
+    if (!shellDecodeWordSpec(subject_spec, &subject_text, &subject_flags, &subject_meta, &subject_meta_len)) {
         subject_text = subject_spec ? subject_spec : "";
         subject_flags = 0;
     }
-    char *expanded_subject = shellExpandWord(subject_text, subject_flags);
+    char *expanded_subject = shellExpandWord(subject_text, subject_flags, subject_meta, subject_meta_len);
     if (!expanded_subject) {
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
@@ -2356,12 +2611,14 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
         }
         const char *pattern_spec = args[i].s_val;
         const char *pattern_text = pattern_spec;
+        const char *pattern_meta = NULL;
+        size_t pattern_meta_len = 0;
         uint8_t pattern_flags = 0;
-        if (!shellDecodeWordSpec(pattern_spec, &pattern_text, &pattern_flags)) {
+        if (!shellDecodeWordSpec(pattern_spec, &pattern_text, &pattern_flags, &pattern_meta, &pattern_meta_len)) {
             pattern_text = pattern_spec ? pattern_spec : "";
             pattern_flags = 0;
         }
-        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags);
+        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags, pattern_meta, pattern_meta_len);
         if (!expanded_pattern) {
             runtimeError(vm, "shell case clause: out of memory");
             shellUpdateStatus(1);

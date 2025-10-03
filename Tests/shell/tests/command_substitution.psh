@@ -1,0 +1,5 @@
+echo "command-substitution:start"
+echo "value:$(printf foo; echo)"
+echo "inline:x$(printf 'A'; printf 'B')y"
+echo "quoted:$(printf line1; echo; printf line2; echo)"
+echo "command-substitution:end"

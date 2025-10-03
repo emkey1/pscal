@@ -18,12 +18,31 @@ typedef struct {
     size_t capacity;
 } ShellStringArray;
 
+typedef enum {
+    SHELL_COMMAND_SUBSTITUTION_DOLLAR,
+    SHELL_COMMAND_SUBSTITUTION_BACKTICK
+} ShellCommandSubstitutionStyle;
+
+typedef struct {
+    ShellCommandSubstitutionStyle style;
+    char *command;
+    size_t span_length;
+} ShellCommandSubstitution;
+
+typedef struct ShellCommandSubstitutionArray {
+    ShellCommandSubstitution *items;
+    size_t count;
+    size_t capacity;
+} ShellCommandSubstitutionArray;
+
 typedef struct {
     char *text;
     bool single_quoted;
     bool double_quoted;
     bool has_parameter_expansion;
+    bool has_command_substitution;
     ShellStringArray expansions;
+    ShellCommandSubstitutionArray command_substitutions;
     int line;
     int column;
 } ShellWord;
@@ -165,6 +184,8 @@ typedef struct ShellProgram {
 ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quoted,
                            bool has_param_expansion, int line, int column);
 void shellWordAddExpansion(ShellWord *word, const char *name);
+void shellWordAddCommandSubstitution(ShellWord *word, ShellCommandSubstitutionStyle style,
+                                     const char *command, size_t span_length);
 void shellFreeWord(ShellWord *word);
 
 ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *io_number,

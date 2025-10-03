@@ -65,6 +65,24 @@
       "script": "Examples/psh/case.psh",
       "expect": "runtime_ok",
       "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
+    },
+    {
+      "id": "command_substitution",
+      "name": "Command substitution captures stdout",
+      "category": "expansion",
+      "description": "$(...) trims trailing newlines and supports line continuations.",
+      "script": "Tests/shell/tests/command_substitution.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
+    },
+    {
+      "id": "backtick_substitution",
+      "name": "Legacy backtick substitution is supported",
+      "category": "expansion",
+      "description": "Backtick command substitution trims trailing newlines and honors escapes.",
+      "script": "Tests/shell/tests/backtick_substitution.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
     }
   ]
 }

@@ -68,6 +68,7 @@ static ShellToken makeSimpleToken(ShellLexer *lexer, ShellTokenType type, const 
     tok.single_quoted = false;
     tok.double_quoted = false;
     tok.contains_parameter_expansion = false;
+    tok.contains_command_substitution = false;
     tok.line = lexer ? lexer->line : 1;
     tok.column = lexer ? lexer->column : 1;
     tok.lexeme = NULL;
@@ -87,6 +88,7 @@ static ShellToken makeTokenFromRange(ShellLexer *lexer, ShellTokenType type, siz
     tok.single_quoted = singleQuoted;
     tok.double_quoted = doubleQuoted;
     tok.contains_parameter_expansion = hasParam;
+    tok.contains_command_substitution = false;
     tok.line = lexer ? lexer->line : 1;
     tok.column = lexer ? lexer->column : 1;
     tok.lexeme = (lexer && lexer->src) ? shellCopyRange(lexer->src, start, end) : NULL;
@@ -103,6 +105,7 @@ static ShellToken makeEOFToken(ShellLexer *lexer) {
     tok.single_quoted = false;
     tok.double_quoted = false;
     tok.contains_parameter_expansion = false;
+    tok.contains_command_substitution = false;
     return tok;
 }
 
@@ -116,6 +119,7 @@ static ShellToken makeErrorToken(ShellLexer *lexer, const char *message) {
     tok.single_quoted = false;
     tok.double_quoted = false;
     tok.contains_parameter_expansion = false;
+    tok.contains_command_substitution = false;
     return tok;
 }
 
@@ -124,6 +128,7 @@ static ShellToken scanParameter(ShellLexer *lexer) {
     int first = advanceChar(lexer); // consume '$'
     (void)first;
     int c = peekChar(lexer);
+    bool command_sub = false;
     if (c == '{') {
         advanceChar(lexer); // consume '{'
         while (true) {
@@ -138,6 +143,7 @@ static ShellToken scanParameter(ShellLexer *lexer) {
             advanceChar(lexer);
         }
     } else if (c == '(') {
+        command_sub = true;
         // command substitution: consume balanced parentheses crudely
         advanceChar(lexer);
         int depth = 1;
@@ -158,6 +164,7 @@ static ShellToken scanParameter(ShellLexer *lexer) {
     }
     size_t end = lexer->pos;
     ShellToken tok = makeTokenFromRange(lexer, SHELL_TOKEN_PARAMETER, start, end, false, false, true);
+    tok.contains_command_substitution = command_sub;
     return tok;
 }
 
@@ -183,6 +190,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
     bool sawDoubleQuotedSegment = false;
     bool sawUnquotedSegment = false;
     bool hasParam = false;
+    bool hasCommand = false;
 
     char *buffer = NULL;
     size_t bufLen = 0;
@@ -237,6 +245,9 @@ static ShellToken scanWord(ShellLexer *lexer) {
             buffer[bufLen++] = (char)c;
             int next = peekChar(lexer);
             if (next == '{' || next == '(') {
+                if (next == '(') {
+                    hasCommand = true;
+                }
                 buffer[bufLen++] = (char)advanceChar(lexer);
                 int depth = 1;
                 while (depth > 0) {
@@ -274,6 +285,9 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 }
                 continue;
             }
+        }
+        if (c == '`' && !singleQuoted) {
+            hasCommand = true;
         }
 
         if (bufLen + 1 >= bufCap) {
@@ -316,6 +330,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
     tok.single_quoted = sawSingleQuotedSegment && !sawDoubleQuotedSegment && !sawUnquotedSegment;
     tok.double_quoted = sawDoubleQuotedSegment && !sawSingleQuotedSegment && !sawUnquotedSegment;
     tok.contains_parameter_expansion = hasParam;
+    tok.contains_command_substitution = hasCommand;
     return tok;
 }
 
