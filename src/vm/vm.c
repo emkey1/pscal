@@ -2958,6 +2958,26 @@ comparison_error_label:
                 uint32_t flat_offset = READ_UINT32(vm);
                 Value operand = pop(vm);
 
+                if (operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        const char* str = base_val->s_val ? base_val->s_val : "";
+                        size_t len = strlen(str);
+
+                        if ((size_t)flat_offset >= len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%u) out of bounds for string of length %zu.",
+                                         flat_offset + 1, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        push(vm, makePointer(&base_val->s_val[flat_offset], STRING_CHAR_PTR_SENTINEL));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
+
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
                 temp_wrapper.lower_bounds = NULL;
@@ -3176,6 +3196,26 @@ comparison_error_label:
                 uint32_t flat_offset = READ_UINT32(vm);
 
                 Value operand = pop(vm);
+
+                if (operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        const char* str = base_val->s_val ? base_val->s_val : "";
+                        size_t len = strlen(str);
+
+                        if ((size_t)flat_offset >= len) {
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%u) out of bounds for string of length %zu.",
+                                         flat_offset + 1, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        push(vm, makeChar(str[flat_offset]));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
 
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
