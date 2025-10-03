@@ -3789,6 +3789,7 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
         }
     }
 
+    int previous_status = shellRuntimeLastStatus();
     Value result = handler(vm, call_argc, call_args);
 
     if (call_args) {
@@ -3798,11 +3799,11 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
         free(call_args);
     }
 
-    int status = 0;
-    if (vm && (vm->abort_requested || vm->exit_requested)) {
-        status = 1;
+    if (vm && vm->abort_requested && shellRuntimeLastStatus() == previous_status) {
+        shellUpdateStatus(1);
     }
-    shellUpdateStatus(status);
+
+    int status = shellRuntimeLastStatus();
 
     if (status == 0 && result.type != TYPE_VOID) {
         printValueToStream(result, stdout);
