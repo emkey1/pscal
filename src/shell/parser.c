@@ -328,6 +328,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
             int word_column = parser->current.column;
             shellParserAdvance(parser);
             if (parser->current.type == SHELL_TOKEN_LPAREN) {
+                char *name_copy = parser->previous.lexeme ? strdup(parser->previous.lexeme) : NULL;
                 shellParserAdvance(parser);
                 shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
                 while (parser->current.type == SHELL_TOKEN_NEWLINE) {
@@ -336,12 +337,14 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
                 ShellProgram *body = parseBraceBody(parser);
                 shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
-                ShellFunction *function = shellCreateFunction(lexeme, "", body);
+                const char *function_name = name_copy ? name_copy : "";
+                ShellFunction *function = shellCreateFunction(function_name, "", body);
                 ShellCommand *func_cmd = shellCreateFunctionCommand(function);
                 if (func_cmd) {
                     func_cmd->line = word_line;
                     func_cmd->column = word_column;
                 }
+                free(name_copy);
                 return func_cmd;
             }
             ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
@@ -523,7 +526,7 @@ static ShellCommand *parseFunctionCommand(ShellParser *parser) {
         parserErrorAt(parser, &parser->current, "Expected function name after 'function'");
         return NULL;
     }
-    const char *name = parser->current.lexeme ? parser->current.lexeme : "";
+    char *name_copy = parser->current.lexeme ? strdup(parser->current.lexeme) : NULL;
     int name_line = parser->current.line;
     int name_column = parser->current.column;
     shellParserAdvance(parser);
@@ -542,12 +545,14 @@ static ShellCommand *parseFunctionCommand(ShellParser *parser) {
     shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
     ShellProgram *body = parseBraceBody(parser);
     shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
-    ShellFunction *function = shellCreateFunction(name, param_meta, body);
+    const char *function_name = name_copy ? name_copy : "";
+    ShellFunction *function = shellCreateFunction(function_name, param_meta, body);
     ShellCommand *cmd = shellCreateFunctionCommand(function);
     if (cmd) {
         cmd->line = line;
         cmd->column = column;
     }
+    free(name_copy);
     (void)name_line;
     (void)name_column;
     return cmd;
