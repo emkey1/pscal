@@ -205,7 +205,8 @@ static void shellCaseClauseArrayFree(ShellCaseClauseArray *array) {
 }
 
 ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quoted,
-                           bool has_param_expansion, int line, int column) {
+                           bool has_param_expansion, bool has_arith_expansion,
+                           int line, int column) {
     ShellWord *word = (ShellWord *)calloc(1, sizeof(ShellWord));
     if (!word) {
         return NULL;
@@ -214,6 +215,7 @@ ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quo
     word->single_quoted = single_quoted;
     word->double_quoted = double_quoted;
     word->has_parameter_expansion = has_param_expansion;
+    word->has_arithmetic_expansion = has_arith_expansion;
     word->line = line;
     word->column = column;
     word->has_command_substitution = false;

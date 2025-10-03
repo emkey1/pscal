@@ -62,6 +62,7 @@ typedef struct {
     bool double_quoted;
     bool contains_parameter_expansion;
     bool contains_command_substitution;
+    bool contains_arithmetic_expansion;
 } ShellToken;
 
 typedef struct {

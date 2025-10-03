@@ -41,6 +41,7 @@ typedef struct {
     bool double_quoted;
     bool has_parameter_expansion;
     bool has_command_substitution;
+    bool has_arithmetic_expansion;
     ShellStringArray expansions;
     ShellCommandSubstitutionArray command_substitutions;
     int line;
@@ -182,7 +183,8 @@ typedef struct ShellProgram {
 } ShellProgram;
 
 ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quoted,
-                           bool has_param_expansion, int line, int column);
+                           bool has_param_expansion, bool has_arith_expansion,
+                           int line, int column);
 void shellWordAddExpansion(ShellWord *word, const char *name);
 void shellWordAddCommandSubstitution(ShellWord *word, ShellCommandSubstitutionStyle style,
                                      const char *command, size_t span_length);

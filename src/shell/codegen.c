@@ -117,6 +117,9 @@ static char *encodeWord(const ShellWord *word) {
     if (word->has_command_substitution || word->command_substitutions.count > 0) {
         flags |= SHELL_WORD_FLAG_HAS_COMMAND;
     }
+    if (word->has_arithmetic_expansion) {
+        flags |= SHELL_WORD_FLAG_HAS_ARITHMETIC;
+    }
     const char *text = word->text ? word->text : "";
     size_t len = strlen(text);
     char *meta = NULL;

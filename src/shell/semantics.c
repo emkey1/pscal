@@ -145,7 +145,7 @@ static bool shellWordIsDynamicCommand(const ShellWord *word) {
         return false;
     }
     if (word->single_quoted || word->double_quoted || word->has_parameter_expansion ||
-        word->has_command_substitution) {
+        word->has_command_substitution || word->has_arithmetic_expansion) {
         return true;
     }
     bool escaped = false;
