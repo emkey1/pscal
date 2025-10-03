@@ -2347,8 +2347,9 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history",
-                                      "jobs", "fg", "bg", "wait", "builtin"};
+    static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export", "unset",    "setenv", "unsetenv",
+                                      "alias", "history", "jobs",    "fg",     "bg",      "wait",   "builtin",
+                                      "source"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {

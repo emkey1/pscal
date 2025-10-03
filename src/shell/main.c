@@ -8,6 +8,7 @@
 #include <string.h>
 #include <signal.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
@@ -100,16 +101,389 @@ static char *readStream(FILE *stream) {
     return buffer;
 }
 
+static bool promptBufferEnsureCapacity(char **buffer, size_t *capacity, size_t needed) {
+    if (!buffer || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_capacity = *capacity ? *capacity : 64;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char *new_buffer = (char *)realloc(*buffer, new_capacity);
+    if (!new_buffer) {
+        return false;
+    }
+    *buffer = new_buffer;
+    *capacity = new_capacity;
+    return true;
+}
+
+static bool promptBufferAppendChar(char **buffer,
+                                   size_t *length,
+                                   size_t *capacity,
+                                   char c) {
+    if (!buffer || !length || !capacity) {
+        return false;
+    }
+    size_t needed = (*length) + 2;
+    if (!promptBufferEnsureCapacity(buffer, capacity, needed)) {
+        return false;
+    }
+    (*buffer)[*length] = c;
+    (*length)++;
+    (*buffer)[*length] = '\0';
+    return true;
+}
+
+static bool promptBufferAppendString(char **buffer,
+                                     size_t *length,
+                                     size_t *capacity,
+                                     const char *text) {
+    if (!text) {
+        return true;
+    }
+    size_t text_len = strlen(text);
+    if (text_len == 0) {
+        return true;
+    }
+    size_t needed = (*length) + text_len + 1;
+    if (!promptBufferEnsureCapacity(buffer, capacity, needed)) {
+        return false;
+    }
+    memcpy((*buffer) + *length, text, text_len);
+    *length += text_len;
+    (*buffer)[*length] = '\0';
+    return true;
+}
+
+static bool promptBufferAppendTime(char **buffer,
+                                   size_t *length,
+                                   size_t *capacity,
+                                   const char *format) {
+    time_t now = time(NULL);
+    struct tm tm_info;
+    struct tm *tm_ptr = localtime(&now);
+    if (!tm_ptr) {
+        return true;
+    }
+    tm_info = *tm_ptr;
+    char formatted[64];
+    size_t written = strftime(formatted, sizeof(formatted), format, &tm_info);
+    if (written == 0) {
+        return true;
+    }
+    formatted[written] = '\0';
+    return promptBufferAppendString(buffer, length, capacity, formatted);
+}
+
+static bool promptBufferAppendWorkingDir(char **buffer,
+                                         size_t *length,
+                                         size_t *capacity,
+                                         bool basename_only) {
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        return true;
+    }
+    char display[PATH_MAX + 2];
+    strncpy(display, cwd, sizeof(display));
+    display[sizeof(display) - 1] = '\0';
+
+    const char *home = getenv("HOME");
+    if (home && *home) {
+        size_t home_len = strlen(home);
+        if (home_len > 0 && strncmp(display, home, home_len) == 0 &&
+            (display[home_len] == '/' || display[home_len] == '\0')) {
+            char replaced[PATH_MAX + 2];
+            replaced[0] = '~';
+            size_t rest_len = strlen(display + home_len);
+            if (rest_len > sizeof(replaced) - 2) {
+                rest_len = sizeof(replaced) - 2;
+            }
+            memcpy(replaced + 1, display + home_len, rest_len + 1);
+            strncpy(display, replaced, sizeof(display));
+            display[sizeof(display) - 1] = '\0';
+        }
+    }
+
+    size_t disp_len = strlen(display);
+    while (disp_len > 1 && display[disp_len - 1] == '/') {
+        display[disp_len - 1] = '\0';
+        disp_len--;
+    }
+
+    const char *segment = display;
+    if (basename_only) {
+        if (strcmp(display, "~") == 0) {
+            segment = "~";
+        } else {
+            char *slash = strrchr(display, '/');
+            if (slash) {
+                if (slash == display) {
+                    if (slash[1] == '\0') {
+                        segment = "/";
+                    } else {
+                        segment = slash + 1;
+                    }
+                } else if (slash[1] != '\0') {
+                    segment = slash + 1;
+                } else {
+                    *slash = '\0';
+                    slash = strrchr(display, '/');
+                    if (!slash) {
+                        segment = display;
+                    } else if (slash[1] != '\0') {
+                        segment = slash + 1;
+                    } else if (slash == display) {
+                        segment = "/";
+                    }
+                }
+            }
+        }
+    }
+
+    return promptBufferAppendString(buffer, length, capacity, segment);
+}
+
+static char *shellFormatPrompt(const char *input) {
+    if (!input) {
+        return NULL;
+    }
+    char *buffer = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+
+    for (size_t i = 0; input[i]; ++i) {
+        char c = input[i];
+        if (c != '\\') {
+            if (!promptBufferAppendChar(&buffer, &length, &capacity, c)) {
+                free(buffer);
+                return NULL;
+            }
+            continue;
+        }
+
+        ++i;
+        char next = input[i];
+        if (next == '\0') {
+            if (!promptBufferAppendChar(&buffer, &length, &capacity, '\\')) {
+                free(buffer);
+                return NULL;
+            }
+            break;
+        }
+
+        switch (next) {
+            case '[':
+            case ']':
+                break;
+            case '\\':
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, '\\')) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'a':
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, '\a')) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'e':
+            case 'E':
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, '\033')) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'n':
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, '\n')) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'r':
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, '\r')) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 't':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%H:%M:%S")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'T':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%I:%M:%S")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case '@':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%I:%M%p")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'A':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%H:%M")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'd':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%a %b %d")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'D':
+                if (!promptBufferAppendTime(&buffer, &length, &capacity, "%m/%d/%y")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'w':
+                if (!promptBufferAppendWorkingDir(&buffer, &length, &capacity, false)) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'W':
+                if (!promptBufferAppendWorkingDir(&buffer, &length, &capacity, true)) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case 'u': {
+                const char *user = getenv("USER");
+                if (!user || !*user) {
+                    user = getenv("USERNAME");
+                }
+                if (user && *user) {
+                    if (!promptBufferAppendString(&buffer, &length, &capacity, user)) {
+                        free(buffer);
+                        return NULL;
+                    }
+                }
+                break;
+            }
+            case 'h':
+            case 'H': {
+                char hostname[256];
+                if (gethostname(hostname, sizeof(hostname)) == 0) {
+                    hostname[sizeof(hostname) - 1] = '\0';
+                    if (next == 'h') {
+                        char *dot = strchr(hostname, '.');
+                        if (dot) {
+                            *dot = '\0';
+                        }
+                    }
+                    if (!promptBufferAppendString(&buffer, &length, &capacity, hostname)) {
+                        free(buffer);
+                        return NULL;
+                    }
+                }
+                break;
+            }
+            case 's':
+                if (!promptBufferAppendString(&buffer, &length, &capacity, "psh")) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            case '$': {
+                char symbol = (geteuid() == 0) ? '#' : '$';
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, symbol)) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            }
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7': {
+                int value = next - '0';
+                size_t consumed = 0;
+                while (consumed < 2 && input[i + 1] >= '0' && input[i + 1] <= '7') {
+                    value = (value * 8) + (input[i + 1] - '0');
+                    ++i;
+                    ++consumed;
+                }
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, (char)value)) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+            }
+            case 'x':
+            case 'X': {
+                int value = 0;
+                size_t consumed = 0;
+                while (consumed < 2) {
+                    char hex = input[i + 1];
+                    if (!isxdigit((unsigned char)hex)) {
+                        break;
+                    }
+                    value *= 16;
+                    if (hex >= '0' && hex <= '9') {
+                        value += hex - '0';
+                    } else {
+                        value += 10 + (tolower((unsigned char)hex) - 'a');
+                    }
+                    ++i;
+                    ++consumed;
+                }
+                if (consumed == 0) {
+                    if (!promptBufferAppendChar(&buffer, &length, &capacity, next)) {
+                        free(buffer);
+                        return NULL;
+                    }
+                } else {
+                    if (!promptBufferAppendChar(&buffer, &length, &capacity, (char)value)) {
+                        free(buffer);
+                        return NULL;
+                    }
+                }
+                break;
+            }
+            default:
+                if (!promptBufferAppendChar(&buffer, &length, &capacity, next)) {
+                    free(buffer);
+                    return NULL;
+                }
+                break;
+        }
+    }
+
+    if (!buffer) {
+        buffer = strdup("");
+    }
+    return buffer;
+}
+
 static char *shellResolveInteractivePrompt(void) {
     const char *env_prompt = getenv("PS1");
     if (!env_prompt || !*env_prompt) {
         env_prompt = "psh$ ";
     }
-    char *copy = strdup(env_prompt);
-    if (!copy) {
-        return NULL;
+    char *formatted = shellFormatPrompt(env_prompt);
+    if (formatted) {
+        return formatted;
     }
-    return copy;
+    return strdup(env_prompt);
 }
 
 static void redrawInteractiveLine(const char *prompt,
