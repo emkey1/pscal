@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <termios.h>
 #include <unistd.h>
 #include "shell/parser.h"
@@ -22,6 +23,31 @@
 
 int gParamCount = 0;
 char **gParamValues = NULL;
+
+static struct termios gInteractiveOriginalTermios;
+static volatile sig_atomic_t gInteractiveTermiosValid = 0;
+static struct sigaction gInteractiveOldSigintAction;
+static volatile sig_atomic_t gInteractiveHasOldSigint = 0;
+
+static void interactiveRestoreTerminal(void) {
+    if (gInteractiveTermiosValid) {
+        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
+        gInteractiveTermiosValid = 0;
+    }
+}
+
+static void interactiveRestoreSigintHandler(void) {
+    if (gInteractiveHasOldSigint) {
+        (void)sigaction(SIGINT, &gInteractiveOldSigintAction, NULL);
+        gInteractiveHasOldSigint = 0;
+    }
+}
+
+static void interactiveSigintHandler(int signo) {
+    interactiveRestoreSigintHandler();
+    interactiveRestoreTerminal();
+    raise(signo);
+}
 
 static const char *SHELL_USAGE =
     "Usage: psh <options> <script.sh> [args...]\n"
@@ -305,6 +331,7 @@ static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t 
 static char *readInteractiveLine(const char *prompt,
                                  bool *out_eof,
                                  bool *out_editor_failed) {
+    bool installed_sigint_handler = false;
     if (out_eof) {
         *out_eof = false;
     }
@@ -327,17 +354,36 @@ static char *readInteractiveLine(const char *prompt,
     raw_termios.c_lflag &= ~(ICANON | ECHO);
     raw_termios.c_cc[VMIN] = 1;
     raw_termios.c_cc[VTIME] = 0;
+    gInteractiveOriginalTermios = original_termios;
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
         if (out_editor_failed) {
             *out_editor_failed = true;
         }
         return NULL;
     }
+    gInteractiveTermiosValid = 1;
+
+    struct sigaction sigint_action;
+    memset(&sigint_action, 0, sizeof(sigint_action));
+    sigemptyset(&sigint_action.sa_mask);
+    sigint_action.sa_handler = interactiveSigintHandler;
+    if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
+        interactiveRestoreTerminal();
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+    gInteractiveHasOldSigint = 1;
+    installed_sigint_handler = true;
 
     size_t capacity = 128;
     char *buffer = (char *)malloc(capacity);
     if (!buffer) {
-        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+        if (installed_sigint_handler) {
+            interactiveRestoreSigintHandler();
+        }
+        interactiveRestoreTerminal();
         if (out_editor_failed) {
             *out_editor_failed = true;
         }
@@ -522,7 +568,10 @@ static char *readInteractiveLine(const char *prompt,
         interactiveUpdateScratch(&scratch, buffer, length);
     }
 
-    (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+    if (installed_sigint_handler) {
+        interactiveRestoreSigintHandler();
+    }
+    interactiveRestoreTerminal();
     free(scratch);
 
     if (eof_requested && length == 0) {
