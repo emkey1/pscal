@@ -115,6 +115,7 @@ static char *shellResolveInteractivePrompt(void) {
 static void redrawInteractiveLine(const char *prompt,
                                   const char *buffer,
                                   size_t length,
+                                  size_t cursor,
                                   size_t *displayed_length) {
     size_t previous = displayed_length ? *displayed_length : 0;
     fputs("\r", stdout);
@@ -130,6 +131,13 @@ static void redrawInteractiveLine(const char *prompt,
             fputc(' ', stdout);
         }
         for (size_t i = 0; i < diff; ++i) {
+            fputc('\b', stdout);
+        }
+    }
+    size_t desired_cursor = cursor;
+    if (desired_cursor < length) {
+        size_t moves = length - desired_cursor;
+        for (size_t i = 0; i < moves; ++i) {
             fputc('\b', stdout);
         }
     }
@@ -242,10 +250,14 @@ static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
 static bool interactiveHandleTabCompletion(const char *prompt,
                                            char **buffer,
                                            size_t *length,
+                                           size_t *cursor,
                                            size_t *capacity,
                                            size_t *displayed_length,
                                            char **scratch) {
-    if (!buffer || !*buffer || !length || !capacity) {
+    if (!buffer || !*buffer || !length || !capacity || !cursor) {
+        return false;
+    }
+    if (*cursor != *length) {
         return false;
     }
     size_t word_start = interactiveFindWordStart(*buffer, *length);
@@ -321,11 +333,88 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     (*buffer)[*length] = '\0';
     globfree(&results);
 
-    redrawInteractiveLine(prompt, *buffer, *length, displayed_length);
+    redrawInteractiveLine(prompt, *buffer, *length, *cursor, displayed_length);
     if (scratch) {
         interactiveUpdateScratch(scratch, *buffer, *length);
     }
+    *cursor = *length;
     return true;
+}
+
+static char *interactiveExpandTilde(const char *line) {
+    if (!line) {
+        return NULL;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !*home) {
+        return strdup(line);
+    }
+    size_t home_len = strlen(home);
+    size_t capacity = strlen(line) + home_len + 1;
+    char *result = (char *)malloc(capacity);
+    if (!result) {
+        return NULL;
+    }
+    size_t out_len = 0;
+    bool in_single_quote = false;
+    bool in_double_quote = false;
+    bool escaped = false;
+    for (size_t i = 0; line[i] != '\0'; ++i) {
+        unsigned char c = (unsigned char)line[i];
+        if (escaped) {
+            if (!interactiveEnsureCapacity(&result, &capacity, out_len + 2)) {
+                free(result);
+                return NULL;
+            }
+            result[out_len++] = (char)c;
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            if (!interactiveEnsureCapacity(&result, &capacity, out_len + 2)) {
+                free(result);
+                return NULL;
+            }
+            result[out_len++] = (char)c;
+            escaped = true;
+            continue;
+        }
+        if (c == '\'' && !in_double_quote) {
+            in_single_quote = !in_single_quote;
+        } else if (c == '"' && !in_single_quote) {
+            in_double_quote = !in_double_quote;
+        }
+        bool expand = false;
+        if (!in_single_quote && c == '~') {
+            char prev = (i > 0) ? line[i - 1] : '\0';
+            if (i == 0 || prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' || prev == '=') {
+                char next = line[i + 1];
+                if (next == '/' || next == '\0') {
+                    expand = true;
+                }
+            }
+        }
+        if (expand) {
+            if (!interactiveEnsureCapacity(&result, &capacity, out_len + home_len + 1)) {
+                free(result);
+                return NULL;
+            }
+            memcpy(result + out_len, home, home_len);
+            out_len += home_len;
+            continue;
+        }
+        if (!interactiveEnsureCapacity(&result, &capacity, out_len + 2)) {
+            free(result);
+            return NULL;
+        }
+        result[out_len++] = (char)c;
+    }
+    char *new_result = (char *)realloc(result, out_len + 1);
+    if (new_result) {
+        result = new_result;
+    }
+    result[out_len] = '\0';
+    return result;
 }
 
 static char *readInteractiveLine(const char *prompt,
@@ -393,6 +482,7 @@ static char *readInteractiveLine(const char *prompt,
     size_t length = 0;
     size_t displayed_length = 0;
     size_t history_index = 0;
+    size_t cursor = 0;
     char *scratch = NULL;
     interactiveUpdateScratch(&scratch, buffer, length);
 
@@ -429,6 +519,7 @@ static char *readInteractiveLine(const char *prompt,
             fputs("^C\n", stdout);
             fflush(stdout);
             length = 0;
+            cursor = 0;
             buffer[0] = '\0';
             displayed_length = 0;
             history_index = 0;
@@ -439,27 +530,29 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 127 || ch == 8) { /* Backspace */
-            if (length > 0) {
+            if (cursor > 0) {
+                memmove(buffer + cursor - 1, buffer + cursor, length - cursor + 1);
+                cursor--;
                 length--;
-                buffer[length] = '\0';
-                fputs("\b \b", stdout);
-                fflush(stdout);
-                displayed_length = length;
+                redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
             }
             continue;
         }
 
         if (ch == 27) { /* Escape sequence */
-            unsigned char seq[2];
+            unsigned char seq[3];
             if (read(STDIN_FILENO, &seq[0], 1) <= 0) {
                 continue;
             }
-            if (read(STDIN_FILENO, &seq[1], 1) <= 0) {
-                continue;
-            }
             if (seq[0] == '[') {
+                if (read(STDIN_FILENO, &seq[1], 1) <= 0) {
+                    continue;
+                }
                 if (seq[1] == 'A') { /* Up arrow */
                     size_t history_count = shellRuntimeHistoryCount();
                     if (history_index < history_count) {
@@ -486,7 +579,8 @@ static char *readInteractiveLine(const char *prompt,
                             memcpy(buffer, entry, entry_len);
                             buffer[entry_len] = '\0';
                             length = entry_len;
-                            redrawInteractiveLine(prompt, buffer, length, &displayed_length);
+                            cursor = length;
+                            redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
                         } else {
                             history_index--;
                             fputc('\a', stdout);
@@ -526,20 +620,58 @@ static char *readInteractiveLine(const char *prompt,
                         memcpy(buffer, replacement, entry_len);
                         buffer[entry_len] = '\0';
                         length = entry_len;
-                        redrawInteractiveLine(prompt, buffer, length, &displayed_length);
+                        cursor = length;
+                        redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
                         if (history_index == 0) {
                             interactiveUpdateScratch(&scratch, buffer, length);
                         }
                         free(entry);
                     }
                     continue;
+                } else if (seq[1] == 'C') { /* Right arrow */
+                    if (cursor < length) {
+                        cursor++;
+                        fputs("\033[C", stdout);
+                        fflush(stdout);
+                    } else {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                    }
+                    continue;
+                } else if (seq[1] == 'D') { /* Left arrow */
+                    if (cursor > 0) {
+                        cursor--;
+                        fputs("\033[D", stdout);
+                        fflush(stdout);
+                    } else {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                    }
+                    continue;
+                } else if (seq[1] >= '0' && seq[1] <= '9') {
+                    if (read(STDIN_FILENO, &seq[2], 1) <= 0) {
+                        continue;
+                    }
+                    if (seq[1] == '3' && seq[2] == '~') { /* Delete */
+                        if (cursor < length) {
+                            memmove(buffer + cursor, buffer + cursor + 1, length - cursor);
+                            length--;
+                            redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
+                            history_index = 0;
+                            interactiveUpdateScratch(&scratch, buffer, length);
+                        } else {
+                            fputc('\a', stdout);
+                            fflush(stdout);
+                        }
+                        continue;
+                    }
                 }
             }
             continue;
         }
 
         if (ch == '\t') { /* Tab completion */
-            if (!interactiveHandleTabCompletion(prompt, &buffer, &length, &capacity, &displayed_length, &scratch)) {
+            if (!interactiveHandleTabCompletion(prompt, &buffer, &length, &cursor, &capacity, &displayed_length, &scratch)) {
                 fputc('\a', stdout);
                 fflush(stdout);
             } else {
@@ -569,11 +701,14 @@ static char *readInteractiveLine(const char *prompt,
             capacity = new_capacity;
         }
 
-        buffer[length++] = (char)ch;
+        if (cursor < length) {
+            memmove(buffer + cursor + 1, buffer + cursor, length - cursor);
+        }
+        buffer[cursor] = (char)ch;
+        cursor++;
+        length++;
         buffer[length] = '\0';
-        fputc((char)ch, stdout);
-        fflush(stdout);
-        displayed_length = length;
+        redrawInteractiveLine(prompt, buffer, length, cursor, &displayed_length);
         history_index = 0;
         interactiveUpdateScratch(&scratch, buffer, length);
     }
@@ -688,9 +823,16 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         free(line);
         line = expanded_line;
 
+        char *expanded_tilde = interactiveExpandTilde(line);
+        if (!expanded_tilde) {
+            fprintf(stderr, "psh: failed to expand home directory\n");
+            free(line);
+            continue;
+        }
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
-        last_status = shellRunSource(line, "<stdin>", &exec_opts, &exit_requested);
+        last_status = shellRunSource(expanded_tilde, "<stdin>", &exec_opts, &exit_requested);
+        free(expanded_tilde);
         free(line);
         if (exit_requested) {
             break;
