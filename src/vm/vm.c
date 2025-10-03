@@ -3402,9 +3402,11 @@ comparison_error_label:
                     freeValue(&value_to_set);
                     freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
+                } else
 #else
-                } else {
+                } else
 #endif
+                {
                     // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
