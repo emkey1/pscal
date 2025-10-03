@@ -1160,8 +1160,29 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     } else {
         replacement_len = interactiveCommonPrefixLength(results.gl_pathv, results.gl_pathc);
         if (replacement_len <= word_len) {
+            putchar('\n');
+            for (size_t i = 0; i < results.gl_pathc; ++i) {
+                const char *match = results.gl_pathv[i];
+                if (!match) {
+                    continue;
+                }
+                fputs(match, stdout);
+                fputc('\n', stdout);
+            }
             globfree(&results);
-            return false;
+            fflush(stdout);
+
+            *cursor = *length;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            if (scratch) {
+                interactiveUpdateScratch(scratch, *buffer, *length);
+            }
+            return true;
         }
     }
 
