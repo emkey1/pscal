@@ -2,6 +2,7 @@
 #include "core/utils.h"
 #include "shell/word_encoding.h"
 #include "shell/function.h"
+#include "shell/runner.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 
@@ -1875,6 +1876,10 @@ void shellRuntimeSetArg0(const char *name) {
     gShellArg0 = copy;
 }
 
+const char *shellRuntimeGetArg0(void) {
+    return gShellArg0;
+}
+
 typedef enum {
     SHELL_HISTORY_EXPAND_OK,
     SHELL_HISTORY_EXPAND_NOT_FOUND,
@@ -2179,7 +2184,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history",
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "source", "unset", "setenv", "unsetenv", "alias", "history",
                                       "jobs", "fg", "bg", "wait"};
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
@@ -3256,6 +3261,95 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
     }
     printf("%s\n", cwd);
     shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
+    if (arg_count < 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "source: expected path to script");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *path = args[0].s_val;
+    char *source = shellLoadFile(path);
+    if (!source) {
+        runtimeError(vm, "source: unable to read '%s'", path);
+        shellUpdateStatus(errno ? errno : 1);
+        return makeVoid();
+    }
+
+    char **saved_params = gParamValues;
+    int saved_count = gParamCount;
+
+    int new_count = (arg_count > 1) ? (arg_count - 1) : 0;
+    char **new_params = NULL;
+    bool replaced_params = false;
+    if (new_count > 0) {
+        new_params = (char **)calloc((size_t)new_count, sizeof(char *));
+        if (!new_params) {
+            free(source);
+            runtimeError(vm, "source: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        for (int i = 0; i < new_count; ++i) {
+            if (args[i + 1].type != TYPE_STRING || !args[i + 1].s_val) {
+                for (int j = 0; j < i; ++j) {
+                    free(new_params[j]);
+                }
+                free(new_params);
+                free(source);
+                runtimeError(vm, "source: arguments must be strings");
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            new_params[i] = strdup(args[i + 1].s_val);
+            if (!new_params[i]) {
+                for (int j = 0; j < i; ++j) {
+                    free(new_params[j]);
+                }
+                free(new_params);
+                free(source);
+                runtimeError(vm, "source: out of memory");
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        gParamValues = new_params;
+        gParamCount = new_count;
+        replaced_params = true;
+    }
+
+    ShellRunOptions opts = {0};
+    opts.no_cache = 1;
+    opts.quiet = true;
+    const char *frontend_path = shellRuntimeGetArg0();
+    opts.frontend_path = frontend_path ? frontend_path : "psh";
+
+    bool exit_requested = false;
+    int status = shellRunSource(source, path, &opts, &exit_requested);
+    free(source);
+
+    if (new_params) {
+        for (int i = 0; i < new_count; ++i) {
+            free(new_params[i]);
+        }
+        free(new_params);
+    }
+
+    if (replaced_params) {
+        gParamValues = saved_params;
+        gParamCount = saved_count;
+    }
+
+    if (exit_requested) {
+        gShellExitRequested = true;
+        if (vm) {
+            vm->exit_requested = true;
+        }
+    }
+
+    shellUpdateStatus(status);
     return makeVoid();
 }
 

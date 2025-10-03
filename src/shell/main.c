@@ -14,6 +14,7 @@
 #include "shell/codegen.h"
 #include "shell/opt.h"
 #include "shell/builtins.h"
+#include "shell/runner.h"
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "core/cache.h"
@@ -63,50 +64,6 @@ static const char *SHELL_USAGE =
     "     --vm-trace-head=N           Trace first N VM instructions.\n"
     "     -d                          Enable verbose VM error diagnostics.\n";
 
-static const char *const kShellCompilerId = "shell";
-
-static char *readFile(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "Unable to open '%s': %s\n", path, strerror(errno));
-        return NULL;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    long len = ftell(f);
-    if (len < 0) {
-        fclose(f);
-        return NULL;
-    }
-    rewind(f);
-    char *buffer = (char *)malloc((size_t)len + 1);
-    if (!buffer) {
-        fclose(f);
-        return NULL;
-    }
-    size_t read = fread(buffer, 1, (size_t)len, f);
-    fclose(f);
-    if (read != (size_t)len) {
-        free(buffer);
-        return NULL;
-    }
-    buffer[len] = '\0';
-    return buffer;
-}
-
-typedef struct {
-    int dump_ast_json;
-    int dump_bytecode;
-    int dump_bytecode_only;
-    int no_cache;
-    int vm_trace_head;
-    bool quiet;
-    bool verbose_errors;
-    const char *frontend_path;
-} ShellRunOptions;
-
 static char *readStream(FILE *stream) {
     if (!stream) {
         return NULL;
@@ -143,152 +100,16 @@ static char *readStream(FILE *stream) {
     return buffer;
 }
 
-static int runShellSource(const char *source,
-                          const char *path,
-                          const ShellRunOptions *options,
-                          bool *out_exit_requested) {
-    if (out_exit_requested) {
-        *out_exit_requested = false;
+static char *shellResolveInteractivePrompt(void) {
+    const char *env_prompt = getenv("PS1");
+    if (!env_prompt || !*env_prompt) {
+        env_prompt = "psh$ ";
     }
-    if (!source || !options) {
-        return EXIT_FAILURE;
+    char *copy = strdup(env_prompt);
+    if (!copy) {
+        return NULL;
     }
-
-    vmSetVerboseErrors(options->verbose_errors);
-
-    const char *defines[1];
-    int define_count = 0;
-    char *pre_src = preprocessConditionals(source, defines, define_count);
-
-    globalSymbols = createHashTable();
-    constGlobalSymbols = createHashTable();
-    procedure_table = createHashTable();
-    if (!globalSymbols || !constGlobalSymbols || !procedure_table) {
-        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        if (pre_src) free(pre_src);
-        return EXIT_FAILURE;
-    }
-    current_procedure_table = procedure_table;
-    registerAllBuiltins();
-
-    int exit_code = EXIT_FAILURE;
-    ShellProgram *program = NULL;
-    ShellSemanticContext sem_ctx;
-    bool sem_ctx_initialized = false;
-    BytecodeChunk chunk;
-    bool chunk_initialized = false;
-    VM vm;
-    bool vm_initialized = false;
-    bool exit_flag = false;
-
-    ShellParser parser;
-    program = shellParseString(pre_src ? pre_src : source, &parser);
-    shellParserFree(&parser);
-    if (parser.had_error || !program) {
-        fprintf(stderr, "Parsing failed.\n");
-        goto cleanup;
-    }
-
-    if (options->dump_ast_json) {
-        shellDumpAstJson(stdout, program);
-        exit_code = EXIT_SUCCESS;
-        goto cleanup;
-    }
-
-    shellInitSemanticContext(&sem_ctx);
-    sem_ctx_initialized = true;
-    ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
-    if (sem_result.warning_count > 0) {
-        fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
-    }
-    if (sem_result.error_count > 0) {
-        fprintf(stderr, "Semantic analysis failed with %d error(s).\n", sem_result.error_count);
-        goto cleanup;
-    }
-
-    initBytecodeChunk(&chunk);
-    chunk_initialized = true;
-    bool used_cache = false;
-    if (!options->no_cache && path && path[0]) {
-        used_cache = loadBytecodeFromCache(path, kShellCompilerId, options->frontend_path, NULL, 0, &chunk);
-    }
-
-    if (!used_cache) {
-        ShellOptConfig opt_config = { false };
-        shellRunOptimizations(program, &opt_config);
-        shellCompile(program, &chunk);
-        if (path && path[0] && !options->no_cache) {
-            saveBytecodeToCache(path, kShellCompilerId, &chunk);
-        }
-        if (!options->quiet) {
-            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
-                    chunk.count, chunk.constants_count);
-        }
-        if (options->dump_bytecode) {
-            fprintf(stderr, "--- Compiling Shell Script to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
-            if (!options->dump_bytecode_only) {
-                fprintf(stderr, "\n--- executing Script with VM ---\n");
-            }
-        }
-    } else {
-        if (!options->quiet) {
-            fprintf(stderr, "Loaded cached bytecode. Byte code size: %d bytes, Constants: %d\n",
-                    chunk.count, chunk.constants_count);
-        }
-        if (options->dump_bytecode) {
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
-            if (!options->dump_bytecode_only) {
-                fprintf(stderr, "\n--- executing Script with VM (cached) ---\n");
-            }
-        }
-    }
-
-    if (options->dump_bytecode_only) {
-        exit_code = EXIT_SUCCESS;
-        goto cleanup;
-    }
-
-    initVM(&vm);
-    vm_initialized = true;
-    if (options->vm_trace_head > 0) {
-        vm.trace_head_instructions = options->vm_trace_head;
-    }
-
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
-    int last_status = shellRuntimeLastStatus();
-    exit_flag = shellRuntimeConsumeExitRequested();
-    exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
-
-cleanup:
-    if (out_exit_requested) {
-        *out_exit_requested = exit_flag;
-    } else {
-        (void)exit_flag;
-    }
-    if (vm_initialized) {
-        freeVM(&vm);
-    }
-    if (chunk_initialized) {
-        freeBytecodeChunk(&chunk);
-    }
-    if (sem_ctx_initialized) {
-        shellFreeSemanticContext(&sem_ctx);
-    }
-    if (program) {
-        shellFreeProgram(program);
-    }
-    if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-    if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-    if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-    current_procedure_table = NULL;
-    if (pre_src) {
-        free(pre_src);
-    }
-    return exit_code;
+    return copy;
 }
 
 static void redrawInteractiveLine(const char *prompt,
@@ -796,16 +617,19 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     bool tty = isatty(STDIN_FILENO);
 
     while (true) {
+        char *prompt_storage = shellResolveInteractivePrompt();
+        const char *prompt = prompt_storage ? prompt_storage : "psh$ ";
         char *line = NULL;
         bool interactive_eof = false;
         bool editor_failed = false;
         if (tty) {
-            line = readInteractiveLine("psh$ ", &interactive_eof, &editor_failed);
+            line = readInteractiveLine(prompt, &interactive_eof, &editor_failed);
             if (!line && editor_failed) {
                 tty = false;
             }
             if (!line && interactive_eof) {
                 fputc('\n', stdout);
+                free(prompt_storage);
                 break;
             }
         }
@@ -813,7 +637,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         ssize_t read = 0;
         if (!line) {
             if (isatty(STDIN_FILENO)) {
-                fputs("psh$ ", stdout);
+                fputs(prompt, stdout);
                 fflush(stdout);
             }
             read = getline(&line, &line_capacity, stdin);
@@ -822,11 +646,13 @@ static int runInteractiveSession(const ShellRunOptions *options) {
                 if (isatty(STDIN_FILENO)) {
                     fputc('\n', stdout);
                 }
+                free(prompt_storage);
                 break;
             }
         } else {
             read = (ssize_t)strlen(line);
         }
+        free(prompt_storage);
         bool only_whitespace = true;
         for (ssize_t i = 0; i < read; ++i) {
             if (line[i] != ' ' && line[i] != '\t' && line[i] != '\n' && line[i] != '\r') {
@@ -864,7 +690,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
-        last_status = runShellSource(line, "<stdin>", &exec_opts, &exit_requested);
+        last_status = shellRunSource(line, "<stdin>", &exec_opts, &exit_requested);
         free(line);
         if (exit_requested) {
             break;
@@ -921,7 +747,7 @@ int main(int argc, char **argv) {
     setenv("PSCALSHELL_LAST_STATUS", "0", 1);
 
     if (path) {
-        char *src = readFile(path);
+        char *src = shellLoadFile(path);
         if (!src) {
             return EXIT_FAILURE;
         }
@@ -931,7 +757,7 @@ int main(int argc, char **argv) {
         }
         shellRuntimeSetArg0(path);
         bool exit_requested = false;
-        int status = runShellSource(src, path, &options, &exit_requested);
+        int status = shellRunSource(src, path, &options, &exit_requested);
         (void)exit_requested;
         free(src);
         shellRuntimeSetArg0(options.frontend_path);
@@ -955,7 +781,7 @@ int main(int argc, char **argv) {
     stdin_opts.no_cache = 1;
     stdin_opts.quiet = true;
     bool exit_requested = false;
-    int status = runShellSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
+    int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
     (void)exit_requested;
     free(stdin_src);
     return vmExitWithCleanup(status);
