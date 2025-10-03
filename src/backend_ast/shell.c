@@ -23,6 +23,7 @@
 #include <strings.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -62,6 +63,10 @@ typedef struct {
 typedef struct {
     int last_status;
     ShellPipelineContext pipeline;
+    pid_t shell_pgid;
+    int tty_fd;
+    bool job_control_enabled;
+    bool job_control_initialized;
 } ShellRuntimeState;
 
 typedef struct {
@@ -72,11 +77,77 @@ typedef struct {
 
 static ShellRuntimeState gShellRuntime = {
     .last_status = 0,
-    .pipeline = {0}
+    .pipeline = {0},
+    .shell_pgid = 0,
+    .tty_fd = -1,
+    .job_control_enabled = false,
+    .job_control_initialized = false
 };
 
 static bool gShellExitRequested = false;
 static bool gShellArithmeticErrorPending = false;
+
+static void shellEnsureJobControl(void) {
+    if (!gShellRuntime.job_control_initialized) {
+        gShellRuntime.job_control_initialized = true;
+        gShellRuntime.tty_fd = STDIN_FILENO;
+    }
+
+    if (gShellRuntime.tty_fd < 0) {
+        gShellRuntime.job_control_enabled = false;
+        return;
+    }
+
+    if (!isatty(gShellRuntime.tty_fd)) {
+        gShellRuntime.job_control_enabled = false;
+        gShellRuntime.tty_fd = -1;
+        return;
+    }
+
+    pid_t pgid = getpgrp();
+    if (pgid <= 0) {
+        gShellRuntime.job_control_enabled = false;
+        return;
+    }
+
+    gShellRuntime.shell_pgid = pgid;
+
+    pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
+    if (foreground < 0 || foreground != pgid) {
+        gShellRuntime.job_control_enabled = false;
+        return;
+    }
+
+    gShellRuntime.job_control_enabled = true;
+}
+
+static void shellJobControlSetForeground(pid_t pgid) {
+    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
+        return;
+    }
+    while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
+
+static void shellJobControlRestoreForeground(void) {
+    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
+        return;
+    }
+    pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
+    if (target <= 0) {
+        return;
+    }
+    while (tcsetpgrp(gShellRuntime.tty_fd, target) != 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
 
 typedef struct {
     char *subject;
@@ -194,7 +265,7 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                                            bool *out_invalid_assignment);
 static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count);
 static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid);
-static int shellWaitPid(pid_t pid, int *status_out);
+static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped);
 static void shellFreeCommand(ShellCommand *cmd);
 static void shellUpdateStatus(int status);
 
@@ -387,7 +458,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     pipes[0] = -1;
 
     int status = 0;
-    shellWaitPid(child, &status);
+    shellWaitPid(child, &status, false, NULL);
     shellFreeCommand(&cmd);
 
     if (!output) {
@@ -2719,14 +2790,14 @@ static void shellRemoveJobAt(size_t index) {
     }
 }
 
-static void shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
+static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
     if (pgid <= 0 || !pids || pid_count == 0 || !cmd) {
-        return;
+        return NULL;
     }
 
     pid_t *pid_copy = malloc(sizeof(pid_t) * pid_count);
     if (!pid_copy) {
-        return;
+        return NULL;
     }
     memcpy(pid_copy, pids, sizeof(pid_t) * pid_count);
 
@@ -2752,7 +2823,7 @@ static void shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, co
     if (!new_jobs) {
         free(summary);
         free(pid_copy);
-        return;
+        return NULL;
     }
 
     gShellJobs = new_jobs;
@@ -2764,6 +2835,7 @@ static void shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, co
     job->stopped = false;
     job->last_status = 0;
     job->command = summary;
+    return job;
 }
 
 static int shellCollectJobs(void) {
@@ -3171,17 +3243,29 @@ static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_f
     return result;
 }
 
-static int shellWaitPid(pid_t pid, int *status_out) {
+static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
+    if (out_stopped) {
+        *out_stopped = false;
+    }
     int status = 0;
-    pid_t waited = waitpid(pid, &status, 0);
+    int options = allow_stop ? WUNTRACED : 0;
+    pid_t waited;
+    do {
+        waited = waitpid(pid, &status, options);
+    } while (waited < 0 && errno == EINTR);
     if (waited < 0) {
         return errno;
+    }
+    if (out_stopped && WIFSTOPPED(status)) {
+        *out_stopped = true;
     }
     if (status_out) {
         if (WIFEXITED(status)) {
             *status_out = WEXITSTATUS(status);
         } else if (WIFSIGNALED(status)) {
             *status_out = 128 + WTERMSIG(status);
+        } else if (WIFSTOPPED(status)) {
+            *status_out = 128 + WSTOPSIG(status);
         } else {
             *status_out = status;
         }
@@ -3292,23 +3376,69 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
     if (!ctx->active) {
         return gShellRuntime.last_status;
     }
+
     int final_status = ctx->last_status;
+    pid_t job_pgid = (ctx->pgid > 0) ? ctx->pgid : ((ctx->launched > 0) ? ctx->pids[0] : -1);
+
     if (!ctx->background) {
+        shellEnsureJobControl();
+        bool job_control = gShellRuntime.job_control_enabled && job_pgid > 0;
+        bool stopped_job = false;
+
+        if (job_control) {
+            shellJobControlSetForeground(job_pgid);
+        }
+
         for (size_t i = 0; i < ctx->launched; ++i) {
+            pid_t pid = ctx->pids[i];
+            if (pid <= 0) {
+                continue;
+            }
+            bool stopped = false;
             int status = 0;
-            shellWaitPid(ctx->pids[i], &status);
-            if (i + 1 == ctx->launched) {
+            int err = shellWaitPid(pid, &status, job_control, &stopped);
+            if (err != 0) {
+                continue;
+            }
+            if (stopped) {
+                stopped_job = true;
                 final_status = status;
+            } else {
+                final_status = status;
+                ctx->pids[i] = -1;
             }
         }
+
+        if (job_control) {
+            shellJobControlRestoreForeground();
+        }
+
+        if (stopped_job && job_control) {
+            ShellJob *job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+            if (job) {
+                job->stopped = true;
+                job->running = false;
+                job->last_status = final_status;
+            }
+            ctx->last_status = final_status;
+            shellResetPipeline();
+            shellUpdateStatus(final_status);
+            return final_status;
+        }
     } else if (ctx->launched > 0) {
-        pid_t pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
-        shellRegisterJob(pgid, ctx->pids, ctx->launched, tail_cmd);
+        ShellJob *job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+        if (job) {
+            job->running = true;
+            job->stopped = false;
+            job->last_status = 0;
+        }
         final_status = 0;
     }
+
     if (ctx->negated) {
         final_status = (final_status == 0) ? 1 : 0;
     }
+
     ctx->last_status = final_status;
     shellResetPipeline();
     shellUpdateStatus(final_status);
@@ -3482,11 +3612,38 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     } else {
         int status = 0;
         if (!cmd->background) {
-            shellWaitPid(child, &status);
+            shellEnsureJobControl();
+            bool job_control = gShellRuntime.job_control_enabled;
+            bool stopped = false;
+            if (job_control) {
+                shellJobControlSetForeground(child);
+            }
+            shellWaitPid(child, &status, job_control, &stopped);
+            if (job_control) {
+                shellJobControlRestoreForeground();
+            }
+            if (stopped && job_control) {
+                pid_t job_pids[1];
+                job_pids[0] = child;
+                ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
+                if (job) {
+                    job->stopped = true;
+                    job->running = false;
+                    job->last_status = status;
+                }
+                shellUpdateStatus(status);
+                shellFreeCommand(cmd);
+                return makeVoid();
+            }
         } else {
             pid_t job_pids[1];
             job_pids[0] = child;
-            shellRegisterJob(child, job_pids, 1, cmd);
+            ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
+            if (job) {
+                job->running = true;
+                job->stopped = false;
+                job->last_status = 0;
+            }
             status = 0;
         }
         shellUpdateStatus(status);
@@ -4103,6 +4260,11 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
+    shellEnsureJobControl();
+    bool job_control = gShellRuntime.job_control_enabled && job->pgid > 0;
+    if (job_control) {
+        shellJobControlSetForeground(job->pgid);
+    }
     if (job->pgid > 0) {
         if (kill(-job->pgid, SIGCONT) != 0 && errno != ESRCH) {
             /* ignore */
@@ -4135,11 +4297,17 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
             job->stopped = true;
             job->running = false;
             job->last_status = shellStatusFromWait(status);
+            if (job_control) {
+                shellJobControlRestoreForeground();
+            }
             shellUpdateStatus(job->last_status);
             return makeVoid();
         }
         final_status = shellStatusFromWait(status);
         job->pids[i] = -1;
+    }
+    if (job_control) {
+        shellJobControlRestoreForeground();
     }
     shellRemoveJobAt(index);
     shellUpdateStatus(final_status);
