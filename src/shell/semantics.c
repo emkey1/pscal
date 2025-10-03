@@ -114,6 +114,30 @@ static void shellReportUndefinedBuiltin(ShellSemanticContext *ctx, const ShellWo
             word->line, word->column, word->text);
 }
 
+static bool shellWordIsDynamicCommand(const ShellWord *word) {
+    if (!word || !word->text) {
+        return false;
+    }
+    if (word->single_quoted || word->double_quoted || word->has_parameter_expansion) {
+        return true;
+    }
+    bool escaped = false;
+    for (const char *cursor = word->text; *cursor; ++cursor) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (*cursor == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (*cursor == '*' || *cursor == '?' || *cursor == '[') {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool shellCommandExistsOnPath(const char *name) {
     if (!name || !*name) {
         return false;
@@ -187,7 +211,7 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
     }
     ShellWord *first = words->items[0];
     if (first && first->text && !shellIsBuiltinName(first->text)) {
-        if (!hashTableLookup(ctx->builtin_table, first->text)) {
+        if (!shellWordIsDynamicCommand(first) && !hashTableLookup(ctx->builtin_table, first->text)) {
             Symbol *sym = lookupGlobalSymbol(first->text);
             if (!sym && constGlobalSymbols) {
                 sym = hashTableLookup(constGlobalSymbols, first->text);
