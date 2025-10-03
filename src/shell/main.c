@@ -577,6 +577,404 @@ static bool interactiveEnsureCapacity(char **buffer, size_t *capacity, size_t ne
     return true;
 }
 
+static bool interactiveSetKillBuffer(char **kill_buffer, const char *text, size_t length) {
+    if (!kill_buffer) {
+        return false;
+    }
+    char *replacement = NULL;
+    if (text && length > 0) {
+        replacement = (char *)malloc(length + 1);
+        if (!replacement) {
+            return false;
+        }
+        memcpy(replacement, text, length);
+        replacement[length] = '\0';
+    }
+    free(*kill_buffer);
+    *kill_buffer = replacement;
+    return true;
+}
+
+static bool interactiveInsertText(char **buffer,
+                                  size_t *length,
+                                  size_t *capacity,
+                                  size_t *cursor,
+                                  const char *text,
+                                  size_t text_len) {
+    if (!buffer || !length || !capacity || !cursor || !text) {
+        return false;
+    }
+    if (!interactiveEnsureCapacity(buffer, capacity, (*length) + text_len + 1)) {
+        return false;
+    }
+    if (*cursor < *length) {
+        memmove((*buffer) + *cursor + text_len,
+                (*buffer) + *cursor,
+                (*length) - *cursor);
+    }
+    memcpy((*buffer) + *cursor, text, text_len);
+    *cursor += text_len;
+    *length += text_len;
+    (*buffer)[*length] = '\0';
+    return true;
+}
+
+static bool interactiveHistoryNavigateUp(const char *prompt,
+                                         char **buffer,
+                                         size_t *length,
+                                         size_t *cursor,
+                                         size_t *capacity,
+                                         size_t *displayed_length,
+                                         size_t *displayed_prompt_lines,
+                                         size_t *history_index,
+                                         char **scratch) {
+    if (!prompt || !buffer || !length || !cursor || !capacity || !displayed_length ||
+        !displayed_prompt_lines || !history_index || !scratch) {
+        return false;
+    }
+    size_t history_count = shellRuntimeHistoryCount();
+    if (*history_index >= history_count) {
+        return false;
+    }
+    if (*history_index == 0) {
+        if (!interactiveUpdateScratch(scratch, *buffer, *length)) {
+            return false;
+        }
+    }
+    (*history_index)++;
+    char *entry = NULL;
+    if (!shellRuntimeHistoryGetEntry((*history_index) - 1, &entry)) {
+        (*history_index)--;
+        return false;
+    }
+    size_t entry_len = strlen(entry);
+    if (!interactiveEnsureCapacity(buffer, capacity, entry_len + 1)) {
+        free(entry);
+        (*history_index)--;
+        return false;
+    }
+    memcpy(*buffer, entry, entry_len);
+    (*buffer)[entry_len] = '\0';
+    *length = entry_len;
+    *cursor = *length;
+    redrawInteractiveLine(prompt,
+                          *buffer,
+                          *length,
+                          *cursor,
+                          displayed_length,
+                          displayed_prompt_lines);
+    free(entry);
+    return true;
+}
+
+static bool interactiveHistoryNavigateDown(const char *prompt,
+                                           char **buffer,
+                                           size_t *length,
+                                           size_t *cursor,
+                                           size_t *capacity,
+                                           size_t *displayed_length,
+                                           size_t *displayed_prompt_lines,
+                                           size_t *history_index,
+                                           char **scratch) {
+    if (!prompt || !buffer || !length || !cursor || !capacity || !displayed_length ||
+        !displayed_prompt_lines || !history_index || !scratch) {
+        return false;
+    }
+    if (*history_index == 0) {
+        return false;
+    }
+    (*history_index)--;
+    const char *replacement = "";
+    char *entry = NULL;
+    if (*history_index > 0) {
+        if (shellRuntimeHistoryGetEntry((*history_index) - 1, &entry)) {
+            replacement = entry;
+        }
+    } else if (*scratch) {
+        replacement = *scratch;
+    }
+    size_t entry_len = strlen(replacement);
+    if (!interactiveEnsureCapacity(buffer, capacity, entry_len + 1)) {
+        free(entry);
+        (*history_index)++;
+        return false;
+    }
+    memcpy(*buffer, replacement, entry_len);
+    (*buffer)[entry_len] = '\0';
+    *length = entry_len;
+    *cursor = *length;
+    redrawInteractiveLine(prompt,
+                          *buffer,
+                          *length,
+                          *cursor,
+                          displayed_length,
+                          displayed_prompt_lines);
+    if (*history_index == 0) {
+        interactiveUpdateScratch(scratch, *buffer, *length);
+    }
+    free(entry);
+    return true;
+}
+
+static bool interactiveExtractLastArgument(size_t skip_commands,
+                                           char **out_argument) {
+    if (!out_argument) {
+        return false;
+    }
+    *out_argument = NULL;
+    size_t history_count = shellRuntimeHistoryCount();
+    size_t index = skip_commands;
+    while (index < history_count) {
+        char *entry = NULL;
+        if (!shellRuntimeHistoryGetEntry(index, &entry)) {
+            index++;
+            continue;
+        }
+        size_t len = strlen(entry);
+        if (len == 0) {
+            free(entry);
+            index++;
+            continue;
+        }
+        ssize_t pos = (ssize_t)len - 1;
+        while (pos >= 0 && isspace((unsigned char)entry[pos])) {
+            pos--;
+        }
+        if (pos < 0) {
+            free(entry);
+            index++;
+            continue;
+        }
+        ssize_t end = pos;
+        while (pos >= 0 && !isspace((unsigned char)entry[pos])) {
+            pos--;
+        }
+        size_t arg_len = (size_t)(end - pos);
+        char *argument = (char *)malloc(arg_len + 1);
+        if (!argument) {
+            free(entry);
+            return false;
+        }
+        memcpy(argument, entry + pos + 1, arg_len);
+        argument[arg_len] = '\0';
+        free(entry);
+        *out_argument = argument;
+        return true;
+    }
+    return true;
+}
+
+static bool interactiveFindHistoryMatch(const char *query,
+                                        size_t start_offset,
+                                        char **out_entry,
+                                        size_t *out_reverse_index) {
+    if (out_entry) {
+        *out_entry = NULL;
+    }
+    size_t history_count = shellRuntimeHistoryCount();
+    size_t query_len = query ? strlen(query) : 0;
+    for (size_t reverse_index = start_offset; reverse_index < history_count; ++reverse_index) {
+        char *candidate = NULL;
+        if (!shellRuntimeHistoryGetEntry(reverse_index, &candidate)) {
+            continue;
+        }
+        bool matches = (query_len == 0) ||
+                       (candidate && strstr(candidate, query) != NULL);
+        if (matches) {
+            if (out_entry) {
+                *out_entry = candidate;
+            } else {
+                free(candidate);
+            }
+            if (out_reverse_index) {
+                *out_reverse_index = reverse_index;
+            }
+            return true;
+        }
+        free(candidate);
+    }
+    return false;
+}
+
+static void interactiveRenderSearchPrompt(const char *query, const char *match) {
+    fputs("\r", stdout);
+    fputs("\033[K", stdout);
+    if (match) {
+        fprintf(stdout, "(reverse-i-search) '%s': %s", query ? query : "", match);
+    } else {
+        fprintf(stdout, "(reverse-i-search) '%s': ", query ? query : "");
+    }
+    fflush(stdout);
+}
+
+static bool interactiveReverseSearch(const char *prompt,
+                                     char **buffer,
+                                     size_t *length,
+                                     size_t *capacity,
+                                     size_t *cursor,
+                                     size_t *displayed_length,
+                                     size_t *displayed_prompt_lines,
+                                     size_t *history_index,
+                                     char **scratch,
+                                     bool *out_submit_line) {
+    if (!prompt || !buffer || !length || !capacity || !cursor || !displayed_length ||
+        !displayed_prompt_lines || !history_index || !scratch || !out_submit_line) {
+        return false;
+    }
+    *out_submit_line = false;
+
+    char *saved_line = (char *)malloc((*length) + 1);
+    if (!saved_line) {
+        return false;
+    }
+    memcpy(saved_line, *buffer, *length);
+    saved_line[*length] = '\0';
+    size_t saved_length = *length;
+    size_t saved_cursor = *cursor;
+
+    size_t query_capacity = 32;
+    char *query = (char *)malloc(query_capacity);
+    if (!query) {
+        free(saved_line);
+        return false;
+    }
+    size_t query_length = 0;
+    query[0] = '\0';
+
+    char *match = NULL;
+    size_t match_index = 0;
+    bool has_match = interactiveFindHistoryMatch(query, 0, &match, &match_index);
+    interactiveRenderSearchPrompt(query, has_match ? match : NULL);
+
+    while (true) {
+        unsigned char input = 0;
+        ssize_t count = read(STDIN_FILENO, &input, 1);
+        if (count <= 0) {
+            break;
+        }
+
+        if (input == 7) { /* Ctrl-G */
+            if (!interactiveEnsureCapacity(buffer, capacity, saved_length + 1)) {
+                break;
+            }
+            memcpy(*buffer, saved_line, saved_length + 1);
+            *length = saved_length;
+            *cursor = saved_cursor;
+            fputs("\r", stdout);
+            fputs("\033[K", stdout);
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            interactiveUpdateScratch(scratch, *buffer, *length);
+            free(match);
+            free(query);
+            free(saved_line);
+            return true;
+        }
+
+        if (input == '\r' || input == '\n') {
+            if (has_match && match) {
+                size_t match_len = strlen(match);
+                if (!interactiveEnsureCapacity(buffer, capacity, match_len + 1)) {
+                    break;
+                }
+                memcpy(*buffer, match, match_len + 1);
+                *length = match_len;
+                *cursor = *length;
+                redrawInteractiveLine(prompt,
+                                      *buffer,
+                                      *length,
+                                      *cursor,
+                                      displayed_length,
+                                      displayed_prompt_lines);
+                interactiveUpdateScratch(scratch, *buffer, *length);
+                *history_index = 0;
+                *out_submit_line = true;
+            }
+            break;
+        }
+
+        if (input == 18) { /* Ctrl-R cycles matches */
+            if (has_match) {
+                size_t next_start = match_index + 1;
+                free(match);
+                match = NULL;
+                has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
+                if (!has_match) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+            }
+            interactiveRenderSearchPrompt(query, has_match ? match : NULL);
+            continue;
+        }
+
+        if (input == 127 || input == 8) { /* Backspace */
+            if (query_length > 0) {
+                query_length--;
+                query[query_length] = '\0';
+                size_t next_start = 0;
+                free(match);
+                match = NULL;
+                has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
+                if (!has_match) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            interactiveRenderSearchPrompt(query, has_match ? match : NULL);
+            continue;
+        }
+
+        if (isprint(input)) {
+            if (query_length + 1 >= query_capacity) {
+                size_t new_capacity = query_capacity * 2;
+                char *new_query = (char *)realloc(query, new_capacity);
+                if (!new_query) {
+                    break;
+                }
+                query = new_query;
+                query_capacity = new_capacity;
+            }
+            query[query_length++] = (char)input;
+            query[query_length] = '\0';
+            size_t next_start = 0;
+            free(match);
+            match = NULL;
+            has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
+            if (!has_match) {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            interactiveRenderSearchPrompt(query, has_match ? match : NULL);
+            continue;
+        }
+
+        fputc('\a', stdout);
+        fflush(stdout);
+    }
+
+    fputs("\r", stdout);
+    fputs("\033[K", stdout);
+    redrawInteractiveLine(prompt,
+                          *buffer,
+                          *length,
+                          *cursor,
+                          displayed_length,
+                          displayed_prompt_lines);
+
+    free(match);
+    free(query);
+    free(saved_line);
+    return true;
+}
+
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length) {
     if (!scratch) {
         return false;
@@ -958,6 +1356,9 @@ static char *readInteractiveLine(const char *prompt,
     size_t cursor = 0;
     char *scratch = NULL;
     interactiveUpdateScratch(&scratch, buffer, length);
+    char *kill_buffer = NULL;
+    size_t alt_dot_offset = 0;
+    bool alt_dot_active = false;
 
     fputs(prompt, stdout);
     fflush(stdout);
@@ -977,18 +1378,39 @@ static char *readInteractiveLine(const char *prompt,
             fputc('\n', stdout);
             fflush(stdout);
             done = true;
+            alt_dot_active = false;
             break;
         }
 
         if (ch == 4) { /* Ctrl-D */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (length == 0) {
                 eof_requested = true;
                 break;
+            }
+            if (cursor < length) {
+                memmove(buffer + cursor, buffer + cursor + 1, length - cursor);
+                length--;
+                buffer[length] = '\0';
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
             }
             continue;
         }
 
         if (ch == 3) { /* Ctrl-C */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             fputs("^C\n", stdout);
             fflush(stdout);
             length = 0;
@@ -1004,12 +1426,282 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 26) { /* Ctrl-Z */
-            fputc('\a', stdout);
-            fflush(stdout);
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            interactiveRestoreSigintHandler();
+            installed_sigint_handler = false;
+            interactiveRestoreSigtstpHandler();
+            interactiveRestoreTerminal();
+            raise(SIGTSTP);
+            if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+                if (out_editor_failed) {
+                    *out_editor_failed = true;
+                }
+                done = true;
+                break;
+            }
+            gInteractiveTermiosValid = 1;
+            if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
+                interactiveRestoreTerminal();
+                if (out_editor_failed) {
+                    *out_editor_failed = true;
+                }
+                done = true;
+                break;
+            }
+            gInteractiveHasOldSigint = 1;
+            installed_sigint_handler = true;
+            if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
+                interactiveRestoreSigintHandler();
+                installed_sigint_handler = false;
+                interactiveRestoreTerminal();
+                if (out_editor_failed) {
+                    *out_editor_failed = true;
+                }
+                done = true;
+                break;
+            }
+            gInteractiveHasOldSigtstp = 1;
+            redrawInteractiveLine(prompt,
+                                  buffer,
+                                  length,
+                                  cursor,
+                                  &displayed_length,
+                                  &displayed_prompt_lines);
+            continue;
+        }
+
+        if (ch == 12) { /* Ctrl-L */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            fputs("\033[H\033[J", stdout);
+            redrawInteractiveLine(prompt,
+                                  buffer,
+                                  length,
+                                  cursor,
+                                  &displayed_length,
+                                  &displayed_prompt_lines);
+            continue;
+        }
+
+        if (ch == 19) { /* Ctrl-S */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            tcflow(STDOUT_FILENO, TCOOFF);
+            continue;
+        }
+
+        if (ch == 17) { /* Ctrl-Q */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            tcflow(STDOUT_FILENO, TCOON);
+            continue;
+        }
+
+        if (ch == 16) { /* Ctrl-P */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            if (!interactiveHistoryNavigateUp(prompt,
+                                              &buffer,
+                                              &length,
+                                              &cursor,
+                                              &capacity,
+                                              &displayed_length,
+                                              &displayed_prompt_lines,
+                                              &history_index,
+                                              &scratch)) {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 14) { /* Ctrl-N */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            if (!interactiveHistoryNavigateDown(prompt,
+                                                &buffer,
+                                                &length,
+                                                &cursor,
+                                                &capacity,
+                                                &displayed_length,
+                                                &displayed_prompt_lines,
+                                                &history_index,
+                                                &scratch)) {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 18) { /* Ctrl-R */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            bool submit_line = false;
+            if (!interactiveReverseSearch(prompt,
+                                          &buffer,
+                                          &length,
+                                          &capacity,
+                                          &cursor,
+                                          &displayed_length,
+                                          &displayed_prompt_lines,
+                                          &history_index,
+                                          &scratch,
+                                          &submit_line)) {
+                fputc('\a', stdout);
+                fflush(stdout);
+            } else if (submit_line) {
+                fputc('\n', stdout);
+                fflush(stdout);
+                done = true;
+                break;
+            }
+            continue;
+        }
+
+        if (ch == 21) { /* Ctrl-U */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            if (cursor > 0) {
+                if (!interactiveSetKillBuffer(&kill_buffer, buffer, cursor)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                memmove(buffer, buffer + cursor, length - cursor + 1);
+                length -= cursor;
+                cursor = 0;
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 11) { /* Ctrl-K */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            if (cursor < length) {
+                if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, length - cursor)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                buffer[cursor] = '\0';
+                length = cursor;
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                interactiveSetKillBuffer(&kill_buffer, NULL, 0);
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 23) { /* Ctrl-W */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            size_t prev = interactivePreviousWord(buffer, length, cursor);
+            if (prev < cursor) {
+                size_t removed_len = cursor - prev;
+                if (!interactiveSetKillBuffer(&kill_buffer, buffer + prev, removed_len)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                memmove(buffer + prev, buffer + cursor, length - cursor + 1);
+                length -= removed_len;
+                cursor = prev;
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 25) { /* Ctrl-Y */
+            alt_dot_offset = 0;
+            if (kill_buffer && *kill_buffer) {
+                size_t kill_len = strlen(kill_buffer);
+                if (!interactiveInsertText(&buffer,
+                                           &length,
+                                           &capacity,
+                                           &cursor,
+                                           kill_buffer,
+                                           kill_len)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            alt_dot_active = false;
+            continue;
+        }
+
+        if (ch == 20) { /* Ctrl-T */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            if (length >= 2 && cursor > 0) {
+                size_t pos1 = (cursor == length) ? length - 2 : cursor - 1;
+                size_t pos2 = (cursor == length) ? length - 1 : cursor;
+                char tmp = buffer[pos1];
+                buffer[pos1] = buffer[pos2];
+                buffer[pos2] = tmp;
+                if (cursor < length) {
+                    cursor++;
+                }
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
             continue;
         }
 
         if (ch == 1) { /* Ctrl-A */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (cursor > 0) {
                 cursor = 0;
                 redrawInteractiveLine(prompt,
@@ -1026,6 +1718,8 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 5) { /* Ctrl-E */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (cursor < length) {
                 cursor = length;
                 redrawInteractiveLine(prompt,
@@ -1042,6 +1736,8 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 2) { /* Ctrl-B */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (cursor > 0) {
                 cursor--;
                 fputs("\033[D", stdout);
@@ -1054,6 +1750,8 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 6) { /* Ctrl-F */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (cursor < length) {
                 cursor++;
                 fputs("\033[C", stdout);
@@ -1066,6 +1764,8 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 127 || ch == 8) { /* Backspace */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (cursor > 0) {
                 memmove(buffer + cursor - 1, buffer + cursor, length - cursor + 1);
                 cursor--;
@@ -1095,91 +1795,40 @@ static char *readInteractiveLine(const char *prompt,
                     continue;
                 }
                 if (seq[1] == 'A') { /* Up arrow */
-                    size_t history_count = shellRuntimeHistoryCount();
-                    if (history_index < history_count) {
-                        if (history_index == 0) {
-                            interactiveUpdateScratch(&scratch, buffer, length);
-                        }
-                        history_index++;
-                        char *entry = NULL;
-                        if (shellRuntimeHistoryGetEntry(history_index - 1, &entry)) {
-                            size_t entry_len = strlen(entry);
-                            if (entry_len + 1 > capacity) {
-                                size_t new_capacity = entry_len + 1;
-                                char *new_buffer = (char *)realloc(buffer, new_capacity);
-                                if (!new_buffer) {
-                                    free(entry);
-                                    history_index--;
-                                    fputc('\a', stdout);
-                                    fflush(stdout);
-                                    continue;
-                                }
-                                buffer = new_buffer;
-                                capacity = new_capacity;
-                            }
-                            memcpy(buffer, entry, entry_len);
-                            buffer[entry_len] = '\0';
-                            length = entry_len;
-                            cursor = length;
-                            redrawInteractiveLine(prompt,
-                                                  buffer,
-                                                  length,
-                                                  cursor,
-                                                  &displayed_length,
-                                                  &displayed_prompt_lines);
-                        } else {
-                            history_index--;
-                            fputc('\a', stdout);
-                            fflush(stdout);
-                        }
-                        free(entry);
-                    } else {
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    if (!interactiveHistoryNavigateUp(prompt,
+                                                      &buffer,
+                                                      &length,
+                                                      &cursor,
+                                                      &capacity,
+                                                      &displayed_length,
+                                                      &displayed_prompt_lines,
+                                                      &history_index,
+                                                      &scratch)) {
                         fputc('\a', stdout);
                         fflush(stdout);
                     }
                     continue;
                 } else if (seq[1] == 'B') { /* Down arrow */
-                    if (history_index > 0) {
-                        history_index--;
-                        const char *replacement = "";
-                        char *entry = NULL;
-                        if (history_index > 0) {
-                            if (shellRuntimeHistoryGetEntry(history_index - 1, &entry)) {
-                                replacement = entry;
-                            }
-                        } else if (scratch) {
-                            replacement = scratch;
-                        }
-                        size_t entry_len = strlen(replacement);
-                        if (entry_len + 1 > capacity) {
-                            size_t new_capacity = entry_len + 1;
-                            char *new_buffer = (char *)realloc(buffer, new_capacity);
-                            if (!new_buffer) {
-                                free(entry);
-                                fputc('\a', stdout);
-                                fflush(stdout);
-                                continue;
-                            }
-                            buffer = new_buffer;
-                            capacity = new_capacity;
-                        }
-                        memcpy(buffer, replacement, entry_len);
-                        buffer[entry_len] = '\0';
-                        length = entry_len;
-                        cursor = length;
-                        redrawInteractiveLine(prompt,
-                                              buffer,
-                                              length,
-                                              cursor,
-                                              &displayed_length,
-                                              &displayed_prompt_lines);
-                        if (history_index == 0) {
-                            interactiveUpdateScratch(&scratch, buffer, length);
-                        }
-                        free(entry);
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    if (!interactiveHistoryNavigateDown(prompt,
+                                                        &buffer,
+                                                        &length,
+                                                        &cursor,
+                                                        &capacity,
+                                                        &displayed_length,
+                                                        &displayed_prompt_lines,
+                                                        &history_index,
+                                                        &scratch)) {
+                        fputc('\a', stdout);
+                        fflush(stdout);
                     }
                     continue;
                 } else if (seq[1] == 'C') { /* Right arrow */
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
                     if (cursor < length) {
                         cursor++;
                         fputs("\033[C", stdout);
@@ -1190,6 +1839,8 @@ static char *readInteractiveLine(const char *prompt,
                     }
                     continue;
                 } else if (seq[1] == 'D') { /* Left arrow */
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
                     if (cursor > 0) {
                         cursor--;
                         fputs("\033[D", stdout);
@@ -1204,9 +1855,12 @@ static char *readInteractiveLine(const char *prompt,
                         continue;
                     }
                     if (seq[1] == '3' && seq[2] == '~') { /* Delete */
+                        alt_dot_active = false;
+                        alt_dot_offset = 0;
                         if (cursor < length) {
                             memmove(buffer + cursor, buffer + cursor + 1, length - cursor);
                             length--;
+                            buffer[length] = '\0';
                             redrawInteractiveLine(prompt,
                                                   buffer,
                                                   length,
@@ -1223,6 +1877,8 @@ static char *readInteractiveLine(const char *prompt,
                     }
                 }
             } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
+                alt_dot_active = false;
+                alt_dot_offset = 0;
                 size_t next = interactiveNextWord(buffer, length, cursor);
                 if (next != cursor) {
                     cursor = next;
@@ -1238,6 +1894,8 @@ static char *readInteractiveLine(const char *prompt,
                 }
                 continue;
             } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
+                alt_dot_active = false;
+                alt_dot_offset = 0;
                 size_t prev = interactivePreviousWord(buffer, length, cursor);
                 if (prev != cursor) {
                     cursor = prev;
@@ -1252,11 +1910,157 @@ static char *readInteractiveLine(const char *prompt,
                     fflush(stdout);
                 }
                 continue;
+            } else if (seq[0] == 'd' || seq[0] == 'D') { /* Alt+D */
+                alt_dot_active = false;
+                alt_dot_offset = 0;
+                size_t next = interactiveNextWord(buffer, length, cursor);
+                if (next > cursor) {
+                    size_t removed_len = next - cursor;
+                    if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, removed_len)) {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                        continue;
+                    }
+                    memmove(buffer + cursor, buffer + next, length - next + 1);
+                    length -= removed_len;
+                    redrawInteractiveLine(prompt,
+                                          buffer,
+                                          length,
+                                          cursor,
+                                          &displayed_length,
+                                          &displayed_prompt_lines);
+                    history_index = 0;
+                    interactiveUpdateScratch(&scratch, buffer, length);
+                } else {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+                continue;
+            } else if (seq[0] == 't' || seq[0] == 'T') { /* Alt+T */
+                alt_dot_active = false;
+                alt_dot_offset = 0;
+                if (length > 0 && cursor > 0) {
+                    size_t current_start = cursor;
+                    if (current_start > 0 && isspace((unsigned char)buffer[current_start])) {
+                        while (current_start < length && isspace((unsigned char)buffer[current_start])) {
+                            current_start++;
+                        }
+                        if (current_start >= length) {
+                            fputc('\a', stdout);
+                            fflush(stdout);
+                            continue;
+                        }
+                    } else {
+                        while (current_start > 0 && !isspace((unsigned char)buffer[current_start - 1])) {
+                            current_start--;
+                        }
+                    }
+                    size_t current_end = current_start;
+                    while (current_end < length && !isspace((unsigned char)buffer[current_end])) {
+                        current_end++;
+                    }
+                    size_t prev_end = current_start;
+                    while (prev_end > 0 && isspace((unsigned char)buffer[prev_end - 1])) {
+                        prev_end--;
+                    }
+                    if (prev_end == 0) {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                        continue;
+                    }
+                    size_t prev_start = prev_end;
+                    while (prev_start > 0 && !isspace((unsigned char)buffer[prev_start - 1])) {
+                        prev_start--;
+                    }
+                    size_t word1_len = prev_end - prev_start;
+                    size_t middle_len = current_start - prev_end;
+                    size_t word2_len = current_end - current_start;
+                    char *temp = (char *)malloc(length + 1);
+                    if (!temp) {
+                        fputc('\a', stdout);
+                        fflush(stdout);
+                        continue;
+                    }
+                    memcpy(temp, buffer, prev_start);
+                    size_t offset = prev_start;
+                    memcpy(temp + offset, buffer + current_start, word2_len);
+                    offset += word2_len;
+                    memcpy(temp + offset, buffer + prev_end, middle_len);
+                    offset += middle_len;
+                    memcpy(temp + offset, buffer + prev_start, word1_len);
+                    offset += word1_len;
+                    memcpy(temp + offset, buffer + current_end, length - current_end + 1);
+                    memcpy(buffer, temp, length + 1);
+                    free(temp);
+                    cursor = prev_start + word2_len + middle_len + word1_len;
+                    redrawInteractiveLine(prompt,
+                                          buffer,
+                                          length,
+                                          cursor,
+                                          &displayed_length,
+                                          &displayed_prompt_lines);
+                    history_index = 0;
+                    interactiveUpdateScratch(&scratch, buffer, length);
+                } else {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+                continue;
+            } else if (seq[0] == '.') { /* Alt+. */
+                if (!alt_dot_active) {
+                    alt_dot_offset = 0;
+                } else {
+                    alt_dot_offset++;
+                }
+                char *argument = NULL;
+                if (!interactiveExtractLastArgument(alt_dot_offset, &argument)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    continue;
+                }
+                if (!argument) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    continue;
+                }
+                size_t arg_len = strlen(argument);
+                if (!interactiveInsertText(&buffer,
+                                           &length,
+                                           &capacity,
+                                           &cursor,
+                                           argument,
+                                           arg_len)) {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                    free(argument);
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    continue;
+                }
+                free(argument);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+                history_index = 0;
+                interactiveUpdateScratch(&scratch, buffer, length);
+                alt_dot_active = true;
+                continue;
             }
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             continue;
         }
 
         if (ch == '\t') { /* Tab completion */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             if (!interactiveHandleTabCompletion(prompt,
                                                 &buffer,
                                                 &length,
@@ -1274,10 +2078,15 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (!isprint(ch)) {
+            alt_dot_active = false;
+            alt_dot_offset = 0;
             fputc('\a', stdout);
             fflush(stdout);
             continue;
         }
+
+        alt_dot_active = false;
+        alt_dot_offset = 0;
 
         if (length + 1 >= capacity) {
             size_t new_capacity = capacity * 2;
@@ -1317,6 +2126,7 @@ static char *readInteractiveLine(const char *prompt,
     interactiveRestoreSigtstpHandler();
     interactiveRestoreTerminal();
     free(scratch);
+    free(kill_buffer);
 
     if (eof_requested && length == 0) {
         free(buffer);
