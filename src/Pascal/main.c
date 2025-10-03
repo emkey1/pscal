@@ -258,6 +258,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 } else {
                 VM vm;
                 initVM(&vm);
+                vmSetVerboseErrors(true);
                 // Inline trace toggle via source comment: {trace on} / {trace off}
                 if (s_vm_trace_head > 0) vm.trace_head_instructions = s_vm_trace_head;
                 else if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
