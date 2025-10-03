@@ -65,6 +65,7 @@ static ShellRuntimeState gShellRuntime = {
 };
 
 static bool gShellExitRequested = false;
+static bool gShellArithmeticErrorPending = false;
 
 typedef struct {
     char *subject;
@@ -1305,6 +1306,282 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
     return NULL;
 }
 
+static void shellMarkArithmeticError(void) {
+    shellUpdateStatus(1);
+    gShellArithmeticErrorPending = true;
+}
+
+typedef struct {
+    const char *input;
+    size_t length;
+    size_t pos;
+} ShellArithmeticParser;
+
+static void shellArithmeticSkipWhitespace(ShellArithmeticParser *parser) {
+    if (!parser) {
+        return;
+    }
+    while (parser->pos < parser->length &&
+           isspace((unsigned char)parser->input[parser->pos])) {
+        parser->pos++;
+    }
+}
+
+static bool shellArithmeticParseValueString(const char *text, long long *out_value) {
+    if (!out_value) {
+        return false;
+    }
+    if (!text || *text == '\0') {
+        *out_value = 0;
+        return true;
+    }
+    errno = 0;
+    char *endptr = NULL;
+    long long value = strtoll(text, &endptr, 0);
+    if (errno != 0) {
+        return false;
+    }
+    if (endptr && *endptr != '\0') {
+        while (endptr && *endptr && isspace((unsigned char)*endptr)) {
+            endptr++;
+        }
+        if (endptr && *endptr != '\0') {
+            return false;
+        }
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellArithmeticParseExpression(ShellArithmeticParser *parser, long long *out_value);
+
+static bool shellArithmeticParsePrimary(ShellArithmeticParser *parser, long long *out_value) {
+    if (!parser || !out_value) {
+        return false;
+    }
+    shellArithmeticSkipWhitespace(parser);
+    if (parser->pos >= parser->length) {
+        return false;
+    }
+    char c = parser->input[parser->pos];
+    if (c == '(') {
+        parser->pos++;
+        if (!shellArithmeticParseExpression(parser, out_value)) {
+            return false;
+        }
+        shellArithmeticSkipWhitespace(parser);
+        if (parser->pos >= parser->length || parser->input[parser->pos] != ')') {
+            return false;
+        }
+        parser->pos++;
+        return true;
+    }
+    if (c == '$') {
+        parser->pos++;
+        size_t consumed = 0;
+        char *value = shellExpandParameter(parser->input + parser->pos, &consumed);
+        if (!value) {
+            return false;
+        }
+        parser->pos += consumed;
+        long long parsed = 0;
+        bool ok = shellArithmeticParseValueString(value, &parsed);
+        free(value);
+        if (!ok) {
+            return false;
+        }
+        *out_value = parsed;
+        return true;
+    }
+    if (isalpha((unsigned char)c) || c == '_') {
+        size_t start = parser->pos;
+        parser->pos++;
+        while (parser->pos < parser->length) {
+            char ch = parser->input[parser->pos];
+            if (!isalnum((unsigned char)ch) && ch != '_') {
+                break;
+            }
+            parser->pos++;
+        }
+        size_t len = parser->pos - start;
+        char *value = shellLookupParameterValue(parser->input + start, len);
+        if (!value) {
+            return false;
+        }
+        long long parsed = 0;
+        bool ok = shellArithmeticParseValueString(value, &parsed);
+        free(value);
+        if (!ok) {
+            return false;
+        }
+        *out_value = parsed;
+        return true;
+    }
+    if (isdigit((unsigned char)c)) {
+        const char *start_ptr = parser->input + parser->pos;
+        errno = 0;
+        char *endptr = NULL;
+        long long value = strtoll(start_ptr, &endptr, 0);
+        if (errno != 0 || endptr == start_ptr) {
+            return false;
+        }
+        size_t consumed = (size_t)(endptr - start_ptr);
+        parser->pos += consumed;
+        if (parser->pos < parser->length) {
+            char next = parser->input[parser->pos];
+            if (isalnum((unsigned char)next) || next == '_') {
+                return false;
+            }
+        }
+        *out_value = value;
+        return true;
+    }
+    return false;
+}
+
+static bool shellArithmeticParseUnary(ShellArithmeticParser *parser, long long *out_value) {
+    if (!parser || !out_value) {
+        return false;
+    }
+    shellArithmeticSkipWhitespace(parser);
+    if (parser->pos >= parser->length) {
+        return false;
+    }
+    char c = parser->input[parser->pos];
+    if (c == '+') {
+        parser->pos++;
+        return shellArithmeticParseUnary(parser, out_value);
+    }
+    if (c == '-') {
+        parser->pos++;
+        long long value = 0;
+        if (!shellArithmeticParseUnary(parser, &value)) {
+            return false;
+        }
+        *out_value = -value;
+        return true;
+    }
+    return shellArithmeticParsePrimary(parser, out_value);
+}
+
+static bool shellArithmeticParseTerm(ShellArithmeticParser *parser, long long *out_value) {
+    if (!parser || !out_value) {
+        return false;
+    }
+    long long value = 0;
+    if (!shellArithmeticParseUnary(parser, &value)) {
+        return false;
+    }
+    while (true) {
+        shellArithmeticSkipWhitespace(parser);
+        if (parser->pos >= parser->length) {
+            break;
+        }
+        char op = parser->input[parser->pos];
+        if (op != '*' && op != '/' && op != '%') {
+            break;
+        }
+        parser->pos++;
+        long long rhs = 0;
+        if (!shellArithmeticParseUnary(parser, &rhs)) {
+            return false;
+        }
+        if (op == '*') {
+            value *= rhs;
+        } else if (op == '/') {
+            if (rhs == 0) {
+                return false;
+            }
+            value /= rhs;
+        } else {
+            if (rhs == 0) {
+                return false;
+            }
+            value %= rhs;
+        }
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellArithmeticParseExpression(ShellArithmeticParser *parser, long long *out_value) {
+    if (!parser || !out_value) {
+        return false;
+    }
+    long long value = 0;
+    if (!shellArithmeticParseTerm(parser, &value)) {
+        return false;
+    }
+    while (true) {
+        shellArithmeticSkipWhitespace(parser);
+        if (parser->pos >= parser->length) {
+            break;
+        }
+        char op = parser->input[parser->pos];
+        if (op != '+' && op != '-') {
+            break;
+        }
+        parser->pos++;
+        long long rhs = 0;
+        if (!shellArithmeticParseTerm(parser, &rhs)) {
+            return false;
+        }
+        if (op == '+') {
+            value += rhs;
+        } else {
+            value -= rhs;
+        }
+    }
+    *out_value = value;
+    return true;
+}
+
+static char *shellEvaluateArithmetic(const char *expr, bool *out_error) {
+    if (out_error) {
+        *out_error = false;
+    }
+    if (!expr) {
+        if (out_error) {
+            *out_error = true;
+        }
+        return NULL;
+    }
+    ShellArithmeticParser parser;
+    parser.input = expr;
+    parser.length = strlen(expr);
+    parser.pos = 0;
+    long long value = 0;
+    if (!shellArithmeticParseExpression(&parser, &value)) {
+        if (out_error) {
+            *out_error = true;
+        }
+        return NULL;
+    }
+    shellArithmeticSkipWhitespace(&parser);
+    if (parser.pos < parser.length) {
+        if (out_error) {
+            *out_error = true;
+        }
+        return NULL;
+    }
+    char buffer[64];
+    int written = snprintf(buffer, sizeof(buffer), "%lld", value);
+    if (written < 0) {
+        if (out_error) {
+            *out_error = true;
+        }
+        return NULL;
+    }
+    char *result = strdup(buffer);
+    if (!result) {
+        if (out_error) {
+            *out_error = true;
+        }
+        return NULL;
+    }
+    return result;
+}
+
 static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len) {
     if (!text) {
         return strdup("");
@@ -1331,6 +1608,7 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
     }
     buffer[0] = '\0';
     bool double_quoted = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
+    bool has_arithmetic = (flags & SHELL_WORD_FLAG_HAS_ARITHMETIC) != 0;
     size_t sub_index = 0;
     for (size_t i = 0; i < text_len;) {
         char c = text[i];
@@ -1368,6 +1646,57 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
         }
         if (handled) {
             continue;
+        }
+        if (c == '$' && has_arithmetic && i + 2 < text_len && text[i + 1] == '(' && text[i + 2] == '(') {
+            size_t expr_start = i + 3;
+            size_t j = expr_start;
+            int depth = 1;
+            while (j < text_len) {
+                char inner = text[j];
+                if (inner == '(') {
+                    depth++;
+                } else if (inner == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        break;
+                    }
+                }
+                j++;
+            }
+            size_t span = 0;
+            if (depth == 0 && j + 1 < text_len && text[j + 1] == ')') {
+                span = (j + 2) - i;
+                size_t expr_len = j - expr_start;
+                char *expr = (char *)malloc(expr_len + 1);
+                if (!expr) {
+                    shellMarkArithmeticError();
+                    shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
+                    i += span;
+                    continue;
+                }
+                if (expr_len > 0) {
+                    memcpy(expr, text + expr_start, expr_len);
+                }
+                expr[expr_len] = '\0';
+                bool eval_error = false;
+                char *result = shellEvaluateArithmetic(expr, &eval_error);
+                free(expr);
+                if (!eval_error && result) {
+                    shellBufferAppendString(&buffer, &length, &capacity, result);
+                    free(result);
+                } else {
+                    shellMarkArithmeticError();
+                    shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
+                }
+                i += span;
+                continue;
+            } else {
+                span = text_len - i;
+                shellMarkArithmeticError();
+                shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
+                i = text_len;
+                continue;
+            }
         }
         if (c == '\\') {
             if (i + 1 < text_len) {
@@ -1440,6 +1769,10 @@ static bool shellParseBool(const char *value, bool *out_flag) {
 }
 
 static void shellUpdateStatus(int status) {
+    if (gShellArithmeticErrorPending) {
+        status = 1;
+        gShellArithmeticErrorPending = false;
+    }
     gShellRuntime.last_status = status;
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%d", status);

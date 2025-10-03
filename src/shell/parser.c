@@ -323,6 +323,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
             bool single_quoted = parser->current.single_quoted;
             bool double_quoted = parser->current.double_quoted;
             bool has_param = parser->current.contains_parameter_expansion;
+            bool has_arith = parser->current.contains_arithmetic_expansion;
             int word_line = parser->current.line;
             int word_column = parser->current.column;
             shellParserAdvance(parser);
@@ -343,7 +344,8 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 }
                 return func_cmd;
             }
-            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, word_line, word_column);
+            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
+                                             has_param, has_arith, word_line, word_column);
             populateWordExpansions(word);
             shellCommandAddWord(command, word);
             saw_word = true;
@@ -358,10 +360,12 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 bool single_quoted = parser->current.single_quoted;
                 bool double_quoted = parser->current.double_quoted;
                 bool has_param = parser->current.contains_parameter_expansion;
+                bool has_arith = parser->current.contains_arithmetic_expansion;
                 int line = parser->current.line;
                 int column = parser->current.column;
                 shellParserAdvance(parser);
-                ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
+                ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
+                                                  has_param, has_arith, line, column);
                 if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
                     shellWordAddExpansion(word, lexeme + 1);
                 }
@@ -398,10 +402,12 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     bool single_quoted = parser->current.single_quoted;
                     bool double_quoted = parser->current.double_quoted;
                     bool has_param = parser->current.contains_parameter_expansion;
+                    bool has_arith = parser->current.contains_arithmetic_expansion;
                     int target_line = parser->current.line;
                     int target_column = parser->current.column;
                     shellParserAdvance(parser);
-                    target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
+                    target = shellCreateWord(lexeme, single_quoted, double_quoted,
+                                             has_param, has_arith, target_line, target_column);
                     populateWordExpansions(target);
                 } else {
                     parserErrorAt(parser, &parser->current, "Expected redirection target");
@@ -440,10 +446,12 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     bool single_quoted = parser->current.single_quoted;
                     bool double_quoted = parser->current.double_quoted;
                     bool has_param = parser->current.contains_parameter_expansion;
+                    bool has_arith = parser->current.contains_arithmetic_expansion;
                     int target_line = parser->current.line;
                     int target_column = parser->current.column;
                     shellParserAdvance(parser);
-                    target = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, target_line, target_column);
+                    target = shellCreateWord(lexeme, single_quoted, double_quoted,
+                                             has_param, has_arith, target_line, target_column);
                     populateWordExpansions(target);
                 } else {
                     parserErrorAt(parser, &parser->current, "Expected redirection target");
@@ -720,7 +728,7 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
     int var_column = parser->current.column;
     shellParserAdvance(parser);
     ShellCommand *command = shellCreateSimpleCommand();
-    ShellWord *var_word = shellCreateWord(var_lexeme, false, false, false, var_line, var_column);
+    ShellWord *var_word = shellCreateWord(var_lexeme, false, false, false, false, var_line, var_column);
     shellCommandAddWord(command, var_word);
 
     ShellProgram *body = NULL;
@@ -731,11 +739,12 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
             bool single_quoted = parser->current.single_quoted;
             bool double_quoted = parser->current.double_quoted;
             bool has_param = parser->current.contains_parameter_expansion;
+            bool has_arith = parser->current.contains_arithmetic_expansion;
             int word_line = parser->current.line;
             int word_column = parser->current.column;
             shellParserAdvance(parser);
-            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param,
-                                              word_line, word_column);
+            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
+                                              has_param, has_arith, word_line, word_column);
             populateWordExpansions(word);
             shellCommandAddWord(command, word);
             if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
@@ -780,11 +789,12 @@ static ShellWord *parseWordToken(ShellParser *parser, const char *context) {
     bool single_quoted = parser->current.single_quoted;
     bool double_quoted = parser->current.double_quoted;
     bool has_param = parser->current.contains_parameter_expansion;
+    bool has_arith = parser->current.contains_arithmetic_expansion;
     bool has_command = parser->current.contains_command_substitution;
     int line = parser->current.line;
     int column = parser->current.column;
     shellParserAdvance(parser);
-    ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
+    ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, has_arith, line, column);
     if (word && has_command) {
         word->has_command_substitution = true;
     }
