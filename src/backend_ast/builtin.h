@@ -115,6 +115,7 @@ Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCaseClause(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCaseEnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellDefineFunction(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPwd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);

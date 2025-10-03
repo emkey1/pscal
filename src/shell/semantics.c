@@ -38,6 +38,26 @@ static void shellDefineVariable(ShellSemanticContext *ctx, const char *name) {
     hashTableInsert(ctx->variable_table, symbol);
 }
 
+static void shellRegisterFunctionSymbol(ShellSemanticContext *ctx, const char *name) {
+    if (!ctx || !ctx->function_table || !name || !*name) {
+        return;
+    }
+    if (hashTableLookup(ctx->function_table, name)) {
+        return;
+    }
+    Symbol *symbol = (Symbol *)calloc(1, sizeof(Symbol));
+    if (!symbol) {
+        return;
+    }
+    symbol->name = shellDuplicateName(name);
+    symbol->type = TYPE_VOID;
+    symbol->is_const = true;
+    symbol->is_alias = false;
+    symbol->is_defined = true;
+    symbol->bytecode_address = -1;
+    hashTableInsert(ctx->function_table, symbol);
+}
+
 static bool shellVariableDefined(ShellSemanticContext *ctx, const char *name) {
     if (!ctx || !ctx->variable_table || !name) {
         return false;
@@ -87,6 +107,7 @@ void shellInitSemanticContext(ShellSemanticContext *ctx) {
     }
     ctx->builtin_table = createHashTable();
     ctx->variable_table = createHashTable();
+    ctx->function_table = createHashTable();
     ctx->error_count = 0;
     ctx->warning_count = 0;
     shellRegisterBuiltins(ctx->builtin_table);
@@ -103,6 +124,10 @@ void shellFreeSemanticContext(ShellSemanticContext *ctx) {
     if (ctx->variable_table) {
         freeHashTable(ctx->variable_table);
         ctx->variable_table = NULL;
+    }
+    if (ctx->function_table) {
+        freeHashTable(ctx->function_table);
+        ctx->function_table = NULL;
     }
 }
 
@@ -218,7 +243,9 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
     }
     ShellWord *first = words->items[0];
     if (first && first->text && !shellIsBuiltinName(first->text)) {
-        if (!shellWordIsDynamicCommand(first) && !hashTableLookup(ctx->builtin_table, first->text)) {
+        bool known_builtin = hashTableLookup(ctx->builtin_table, first->text) != NULL;
+        bool known_function = ctx->function_table && hashTableLookup(ctx->function_table, first->text);
+        if (!shellWordIsDynamicCommand(first) && !known_builtin && !known_function) {
             Symbol *sym = lookupGlobalSymbol(first->text);
             if (!sym && constGlobalSymbols) {
                 sym = hashTableLookup(constGlobalSymbols, first->text);
@@ -317,6 +344,14 @@ static void shellAnalyzeLoop(ShellSemanticContext *ctx, ShellLoop *loop) {
     shellAnalyzeProgramInternal(ctx, loop->body);
 }
 
+static void shellAnalyzeFunctionCommand(ShellSemanticContext *ctx, ShellFunction *function) {
+    if (!function) {
+        return;
+    }
+    shellRegisterFunctionSymbol(ctx, function->name);
+    shellAnalyzeProgramInternal(ctx, function->body);
+}
+
 static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command) {
     if (!ctx || !command) {
         return;
@@ -342,6 +377,9 @@ static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command
             break;
         case SHELL_COMMAND_CASE:
             shellAnalyzeCase(ctx, command->data.case_stmt);
+            break;
+        case SHELL_COMMAND_FUNCTION:
+            shellAnalyzeFunctionCommand(ctx, command->data.function);
             break;
     }
 }

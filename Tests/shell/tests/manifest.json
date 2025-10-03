@@ -29,6 +29,15 @@
       "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
     },
     {
+      "id": "shell_function_definition",
+      "name": "Shell functions execute stored bodies",
+      "category": "functions",
+      "description": "function keyword and name() syntax register and invoke shell functions.",
+      "script": "Examples/psh/user_functions.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
+    },
+    {
       "id": "builtin_setenv",
       "name": "setenv/unsetenv mirror POSIX behaviour",
       "category": "builtins",

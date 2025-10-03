@@ -19,8 +19,10 @@ static ShellCommand *parseIfCommand(ShellParser *parser);
 static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until);
 static ShellCommand *parseForCommand(ShellParser *parser);
 static ShellCommand *parseCaseCommand(ShellParser *parser);
+static ShellCommand *parseFunctionCommand(ShellParser *parser);
 static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
                                      ShellTokenType terminator2, ShellTokenType terminator3);
+static ShellProgram *parseBraceBody(ShellParser *parser);
 static ShellWord *parseWordToken(ShellParser *parser, const char *context);
 static void populateWordExpansions(ShellWord *word);
 static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
@@ -285,6 +287,8 @@ static ShellCommand *parsePrimary(ShellParser *parser) {
             }
             return cmd;
         }
+        case SHELL_TOKEN_FUNCTION:
+            return parseFunctionCommand(parser);
         case SHELL_TOKEN_IF:
             return parseIfCommand(parser);
         case SHELL_TOKEN_WHILE:
@@ -310,6 +314,37 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
 
     bool saw_word = false;
     while (!parser->had_error) {
+        if (!saw_word && parser->current.type == SHELL_TOKEN_WORD) {
+            const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+            bool single_quoted = parser->current.single_quoted;
+            bool double_quoted = parser->current.double_quoted;
+            bool has_param = parser->current.contains_parameter_expansion;
+            int word_line = parser->current.line;
+            int word_column = parser->current.column;
+            shellParserAdvance(parser);
+            if (parser->current.type == SHELL_TOKEN_LPAREN) {
+                shellParserAdvance(parser);
+                shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+                while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+                    shellParserAdvance(parser);
+                }
+                shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
+                ShellProgram *body = parseBraceBody(parser);
+                shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
+                ShellFunction *function = shellCreateFunction(lexeme, "", body);
+                ShellCommand *func_cmd = shellCreateFunctionCommand(function);
+                if (func_cmd) {
+                    func_cmd->line = word_line;
+                    func_cmd->column = word_column;
+                }
+                return func_cmd;
+            }
+            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, word_line, word_column);
+            populateWordExpansions(word);
+            shellCommandAddWord(command, word);
+            saw_word = true;
+            continue;
+        }
         switch (parser->current.type) {
             case SHELL_TOKEN_WORD:
             case SHELL_TOKEN_ASSIGNMENT:
@@ -444,6 +479,63 @@ static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType termina
         }
     }
     return block;
+}
+
+static ShellProgram *parseBraceBody(ShellParser *parser) {
+    ShellProgram *body = shellCreateProgram();
+    while (!parser->had_error && parser->current.type != SHELL_TOKEN_RBRACE &&
+           parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+            continue;
+        }
+        ShellCommand *command = parseCommand(parser);
+        if (command) {
+            shellProgramAddCommand(body, command);
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+        }
+    }
+    return body;
+}
+
+static ShellCommand *parseFunctionCommand(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    shellParserAdvance(parser); // consume 'function'
+    if (parser->current.type != SHELL_TOKEN_WORD) {
+        parserErrorAt(parser, &parser->current, "Expected function name after 'function'");
+        return NULL;
+    }
+    const char *name = parser->current.lexeme ? parser->current.lexeme : "";
+    int name_line = parser->current.line;
+    int name_column = parser->current.column;
+    shellParserAdvance(parser);
+    const char *param_meta = NULL;
+    if (parser->current.type == SHELL_TOKEN_LPAREN) {
+        shellParserAdvance(parser);
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+        param_meta = "";
+        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+        }
+    }
+    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+        shellParserAdvance(parser);
+    }
+    shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
+    ShellProgram *body = parseBraceBody(parser);
+    shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
+    ShellFunction *function = shellCreateFunction(name, param_meta, body);
+    ShellCommand *cmd = shellCreateFunctionCommand(function);
+    if (cmd) {
+        cmd->line = line;
+        cmd->column = column;
+    }
+    (void)name_line;
+    (void)name_column;
+    return cmd;
 }
 
 static ShellCommand *parseIfTail(ShellParser *parser);

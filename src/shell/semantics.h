@@ -12,6 +12,7 @@ extern "C" {
 typedef struct {
     HashTable *builtin_table;
     HashTable *variable_table;
+    HashTable *function_table;
     int error_count;
     int warning_count;
 } ShellSemanticContext;

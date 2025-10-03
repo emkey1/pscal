@@ -442,6 +442,38 @@ ShellCommand *shellCreateCaseCommand(ShellCase *case_stmt) {
     return cmd;
 }
 
+ShellFunction *shellCreateFunction(const char *name, const char *parameter_metadata,
+                                   ShellProgram *body) {
+    ShellFunction *function = (ShellFunction *)calloc(1, sizeof(ShellFunction));
+    if (!function) {
+        return NULL;
+    }
+    function->name = name ? strdup(name) : NULL;
+    function->parameter_metadata = parameter_metadata && *parameter_metadata
+                                        ? strdup(parameter_metadata)
+                                        : NULL;
+    function->body = body;
+    return function;
+}
+
+ShellCommand *shellCreateFunctionCommand(ShellFunction *function) {
+    ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_FUNCTION);
+    if (cmd) {
+        cmd->data.function = function;
+    }
+    return cmd;
+}
+
+void shellFreeFunction(ShellFunction *function) {
+    if (!function) {
+        return;
+    }
+    free(function->name);
+    free(function->parameter_metadata);
+    shellFreeProgram(function->body);
+    free(function);
+}
+
 void shellCommandAddWord(ShellCommand *command, ShellWord *word) {
     if (!command || command->type != SHELL_COMMAND_SIMPLE) return;
     shellWordArrayAppend(&command->data.simple.words, word);
@@ -473,6 +505,12 @@ void shellFreeCommand(ShellCommand *command) {
             break;
         case SHELL_COMMAND_CONDITIONAL:
             shellFreeConditional(command->data.conditional);
+            break;
+        case SHELL_COMMAND_CASE:
+            shellFreeCase(command->data.case_stmt);
+            break;
+        case SHELL_COMMAND_FUNCTION:
+            shellFreeFunction(command->data.function);
             break;
     }
     free(command);
@@ -756,6 +794,23 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             }
             shellPrintIndent(out, indent + 4);
             fprintf(out, "]\n");
+            shellPrintIndent(out, indent + 2);
+            fprintf(out, "}\n");
+            break;
+        case SHELL_COMMAND_FUNCTION:
+            fprintf(out, "{\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"name\": \"%s\",\n",
+                    command->data.function && command->data.function->name ? command->data.function->name : "");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"parameters\": \"%s\",\n",
+                    command->data.function && command->data.function->parameter_metadata
+                        ? command->data.function->parameter_metadata
+                        : "");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"body\": ");
+            shellDumpProgramJson(out, command->data.function ? command->data.function->body : NULL, indent + 4);
+            fprintf(out, "\n");
             shellPrintIndent(out, indent + 2);
             fprintf(out, "}\n");
             break;

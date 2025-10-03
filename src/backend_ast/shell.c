@@ -1,6 +1,7 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "shell/word_encoding.h"
+#include "shell/function.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 
@@ -141,6 +142,15 @@ typedef struct {
 static ShellHistory gShellHistory = {NULL, 0, 0};
 static char *gShellArg0 = NULL;
 
+typedef struct {
+    char *name;
+    char *parameter_metadata;
+    ShellCompiledFunction *compiled;
+} ShellFunctionEntry;
+
+static ShellFunctionEntry *gShellFunctions = NULL;
+static size_t gShellFunctionCount = 0;
+
 static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags) {
     if (out_text) {
         *out_text = encoded ? encoded : "";
@@ -187,6 +197,69 @@ static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, s
     }
     *buffer = new_buffer;
     *capacity = new_capacity;
+    return true;
+}
+
+static void shellDisposeCompiledFunction(ShellCompiledFunction *fn) {
+    if (!fn) {
+        return;
+    }
+    freeBytecodeChunk(&fn->chunk);
+    free(fn);
+}
+
+static ShellFunctionEntry *shellFindFunctionEntry(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellFunctionCount; ++i) {
+        ShellFunctionEntry *entry = &gShellFunctions[i];
+        if (entry->name && strcmp(entry->name, name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static bool shellStoreFunction(const char *name, const char *param_meta, ShellCompiledFunction *compiled) {
+    if (!name || !compiled) {
+        return false;
+    }
+    char *name_copy = strdup(name);
+    char *meta_copy = NULL;
+    if (!name_copy) {
+        return false;
+    }
+    if (param_meta && *param_meta) {
+        meta_copy = strdup(param_meta);
+        if (!meta_copy) {
+            free(name_copy);
+            return false;
+        }
+    }
+    ShellFunctionEntry *existing = shellFindFunctionEntry(name);
+    if (existing) {
+        if (existing->compiled && existing->compiled != compiled) {
+            shellDisposeCompiledFunction(existing->compiled);
+        }
+        free(existing->name);
+        free(existing->parameter_metadata);
+        existing->name = name_copy;
+        existing->parameter_metadata = meta_copy;
+        existing->compiled = compiled;
+        return true;
+    }
+    ShellFunctionEntry *entries = realloc(gShellFunctions, sizeof(ShellFunctionEntry) * (gShellFunctionCount + 1));
+    if (!entries) {
+        free(name_copy);
+        free(meta_copy);
+        return false;
+    }
+    gShellFunctions = entries;
+    ShellFunctionEntry *entry = &gShellFunctions[gShellFunctionCount++];
+    entry->name = name_copy;
+    entry->parameter_metadata = meta_copy;
+    entry->compiled = compiled;
     return true;
 }
 
@@ -1527,9 +1600,34 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     return false;
 }
 
+static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
+    if (!cmd || cmd->argc == 0) {
+        return false;
+    }
+    const char *name = cmd->argv[0];
+    ShellFunctionEntry *entry = shellFindFunctionEntry(name);
+    if (!entry || !entry->compiled) {
+        return false;
+    }
+    VM function_vm;
+    initVM(&function_vm);
+    InterpretResult result = interpretBytecode(&function_vm, &entry->compiled->chunk,
+                                               globalSymbols, constGlobalSymbols, procedure_table, 0);
+    if (result != INTERPRET_OK) {
+        shellUpdateStatus(1);
+    } else {
+        shellUpdateStatus(shellRuntimeLastStatus());
+    }
+    freeVM(&function_vm);
+    return true;
+}
+
 static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0) {
         return false;
+    }
+    if (shellInvokeFunction(vm, cmd)) {
+        return true;
     }
     const char *name = cmd->argv[0];
     if (!name || !shellIsRuntimeBuiltin(name)) {
@@ -2308,6 +2406,45 @@ Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
     if (!matched) {
         shellUpdateStatus(1);
     }
+    return makeVoid();
+}
+
+Value vmBuiltinShellDefineFunction(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    if (arg_count != 3) {
+        runtimeError(vm, "shell define function: expected name, parameters, and body");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "shell define function: name must be a non-empty string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[1].type != TYPE_STRING && args[1].type != TYPE_VOID && args[1].type != TYPE_NIL) {
+        runtimeError(vm, "shell define function: parameter metadata must be a string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[2].type != TYPE_POINTER || !args[2].ptr_val) {
+        runtimeError(vm, "shell define function: missing compiled body");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *name = args[0].s_val;
+    const char *param_meta = NULL;
+    if (args[1].type == TYPE_STRING && args[1].s_val) {
+        param_meta = args[1].s_val;
+    }
+    ShellCompiledFunction *compiled = (ShellCompiledFunction *)args[2].ptr_val;
+    if (!shellStoreFunction(name, param_meta, compiled)) {
+        shellDisposeCompiledFunction(compiled);
+        runtimeError(vm, "shell define function: failed to store '%s'", name);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    args[2].ptr_val = NULL;
+    shellUpdateStatus(0);
     return makeVoid();
 }
 
