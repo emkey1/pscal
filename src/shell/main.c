@@ -593,6 +593,50 @@ static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t 
     return true;
 }
 
+static size_t interactivePreviousWord(const char *buffer, size_t length, size_t cursor) {
+    if (!buffer || length == 0 || cursor == 0) {
+        return 0;
+    }
+    size_t pos = cursor;
+    while (pos > 0) {
+        unsigned char c = (unsigned char)buffer[pos - 1];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            break;
+        }
+        pos--;
+    }
+    while (pos > 0) {
+        unsigned char c = (unsigned char)buffer[pos - 1];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            break;
+        }
+        pos--;
+    }
+    return pos;
+}
+
+static size_t interactiveNextWord(const char *buffer, size_t length, size_t cursor) {
+    if (!buffer || cursor >= length) {
+        return length;
+    }
+    size_t pos = cursor;
+    while (pos < length) {
+        unsigned char c = (unsigned char)buffer[pos];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            break;
+        }
+        pos++;
+    }
+    while (pos < length) {
+        unsigned char c = (unsigned char)buffer[pos];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            break;
+        }
+        pos++;
+    }
+    return pos;
+}
+
 static size_t interactiveFindWordStart(const char *buffer, size_t length) {
     if (!buffer || length == 0) {
         return length;
@@ -965,6 +1009,62 @@ static char *readInteractiveLine(const char *prompt,
             continue;
         }
 
+        if (ch == 1) { /* Ctrl-A */
+            if (cursor > 0) {
+                cursor = 0;
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 5) { /* Ctrl-E */
+            if (cursor < length) {
+                cursor = length;
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 2) { /* Ctrl-B */
+            if (cursor > 0) {
+                cursor--;
+                fputs("\033[D", stdout);
+                fflush(stdout);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
+        if (ch == 6) { /* Ctrl-F */
+            if (cursor < length) {
+                cursor++;
+                fputs("\033[C", stdout);
+                fflush(stdout);
+            } else {
+                fputc('\a', stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+
         if (ch == 127 || ch == 8) { /* Backspace */
             if (cursor > 0) {
                 memmove(buffer + cursor - 1, buffer + cursor, length - cursor + 1);
@@ -1122,6 +1222,36 @@ static char *readInteractiveLine(const char *prompt,
                         continue;
                     }
                 }
+            } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
+                size_t next = interactiveNextWord(buffer, length, cursor);
+                if (next != cursor) {
+                    cursor = next;
+                    redrawInteractiveLine(prompt,
+                                          buffer,
+                                          length,
+                                          cursor,
+                                          &displayed_length,
+                                          &displayed_prompt_lines);
+                } else {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+                continue;
+            } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
+                size_t prev = interactivePreviousWord(buffer, length, cursor);
+                if (prev != cursor) {
+                    cursor = prev;
+                    redrawInteractiveLine(prompt,
+                                          buffer,
+                                          length,
+                                          cursor,
+                                          &displayed_length,
+                                          &displayed_prompt_lines);
+                } else {
+                    fputc('\a', stdout);
+                    fflush(stdout);
+                }
+                continue;
             }
             continue;
         }
