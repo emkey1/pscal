@@ -1,0 +1,7 @@
+#ifndef SHELL_QUOTE_MARKERS_H
+#define SHELL_QUOTE_MARKERS_H
+
+#define SHELL_QUOTE_MARK_SINGLE ((char)0x01)
+#define SHELL_QUOTE_MARK_DOUBLE ((char)0x02)
+
+#endif /* SHELL_QUOTE_MARKERS_H */

@@ -1,6 +1,7 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "shell/word_encoding.h"
+#include "shell/quote_markers.h"
 #include "shell/function.h"
 #include "shell/runner.h"
 #include "vm/vm.h"
@@ -1820,9 +1821,6 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
     if (!text) {
         return strdup("");
     }
-    if (flags & SHELL_WORD_FLAG_SINGLE_QUOTED) {
-        return strdup(text);
-    }
     ShellMetaSubstitution *subs = NULL;
     size_t sub_count = 0;
     if (!shellParseCommandMetadata(meta, meta_len, &subs, &sub_count)) {
@@ -1841,11 +1839,35 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
         return NULL;
     }
     buffer[0] = '\0';
-    bool double_quoted = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
+    bool base_single = (flags & SHELL_WORD_FLAG_SINGLE_QUOTED) != 0;
+    bool base_double = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
+    bool in_single_segment = false;
+    bool in_double_segment = false;
+    bool saw_single_marker = false;
+    bool saw_double_marker = false;
     bool has_arithmetic = (flags & SHELL_WORD_FLAG_HAS_ARITHMETIC) != 0;
     size_t sub_index = 0;
     for (size_t i = 0; i < text_len;) {
         char c = text[i];
+        if (c == SHELL_QUOTE_MARK_SINGLE) {
+            saw_single_marker = true;
+            in_single_segment = !in_single_segment;
+            i++;
+            continue;
+        }
+        if (c == SHELL_QUOTE_MARK_DOUBLE) {
+            saw_double_marker = true;
+            in_double_segment = !in_double_segment;
+            i++;
+            continue;
+        }
+        bool effective_single = in_single_segment || (!saw_single_marker && base_single);
+        bool effective_double = in_double_segment || (!saw_double_marker && base_double);
+        if (effective_single) {
+            shellBufferAppendChar(&buffer, &length, &capacity, c);
+            i++;
+            continue;
+        }
         bool handled = false;
         if (sub_index < sub_count) {
             ShellMetaSubstitution *sub = &subs[sub_index];
@@ -1932,10 +1954,11 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 continue;
             }
         }
+        bool treat_as_double = effective_double;
         if (c == '\\') {
             if (i + 1 < text_len) {
                 char next = text[i + 1];
-                if (!double_quoted || next == '$' || next == '"' || next == '\\' || next == '`' || next == '\n') {
+                if (!treat_as_double || next == '$' || next == '"' || next == '\\' || next == '`' || next == '\n') {
                     shellBufferAppendChar(&buffer, &length, &capacity, next);
                     i += 2;
                     continue;
