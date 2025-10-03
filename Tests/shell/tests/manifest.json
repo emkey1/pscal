@@ -92,6 +92,24 @@
       "script": "Tests/shell/tests/arithmetic_expansion.psh",
       "expect": "runtime_ok",
       "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
+    },
+    {
+      "id": "jobs_foreground",
+      "name": "jobs lists and fg reaps background work",
+      "category": "jobs",
+      "description": "jobs reports running background jobs and fg waits for completion.",
+      "script": "Tests/shell/tests/jobs_foreground.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "jobs-foreground:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\njobs:after-start\njobs:after-end\njobs-foreground:end"
+    },
+    {
+      "id": "jobs_wait",
+      "name": "bg resumes jobs and wait observes completion",
+      "category": "jobs",
+      "description": "bg continues the latest background job and wait blocks until it exits.",
+      "script": "Tests/shell/tests/jobs_wait.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
     }
   ]
 }
