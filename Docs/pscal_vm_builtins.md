@@ -122,6 +122,7 @@ VM. For instructions on adding your own routines, see
 | __shell_or | (meta: String) | void | Update the shell status for `||` lists. Primarily used by the shell compiler. |
 | __shell_subshell | (meta: String) | void | Reset pipeline/bookkeeping before running a subshell block. |
 | __shell_loop | (meta: String) | void | Reset pipeline/bookkeeping before running a loop body. |
+| __shell_loop_end | () | void | Signal the end of the current loop body, allowing loop-control requests to unwind. |
 | __shell_if | (meta: String) | void | Reset pipeline/bookkeeping before running a conditional branch. |
 | cd | (path: String) | void | Change the current working directory and update the `PWD` environment variable. |
 | pwd | () | void | Print the current working directory. |

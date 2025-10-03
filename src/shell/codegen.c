@@ -299,6 +299,7 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     emitBuiltinProc(chunk, "__shell_loop", 1, line);
     compilePipeline(chunk, loop->condition, false);
     compileProgram(chunk, loop->body);
+    emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
 }
 
 static void compileConditional(BytecodeChunk *chunk, const ShellConditional *conditional, int line) {

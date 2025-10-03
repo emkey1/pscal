@@ -33,6 +33,10 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"wait", "wait", 20},
     {"builtin", "builtin", 21},
     {"source", "source", 21},
+    {"trap", "trap", 22},
+    {"local", "local", 23},
+    {"break", "break", 24},
+    {"continue", "continue", 25},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},
@@ -43,7 +47,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"__shell_case", "__shell_case", 1008},
     {"__shell_case_clause", "__shell_case_clause", 1009},
     {"__shell_case_end", "__shell_case_end", 1010},
-    {"__shell_define_function", "__shell_define_function", 1011}
+    {"__shell_define_function", "__shell_define_function", 1011},
+    {"__shell_loop_end", "__shell_loop_end", 1012}
 };
 
 static char *shellLowercase(const char *name) {
