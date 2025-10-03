@@ -2138,6 +2138,7 @@ Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
     (void)vm;
     (void)arg_count;
     (void)args;
+    shellResetPipeline();
     return makeVoid();
 }
 

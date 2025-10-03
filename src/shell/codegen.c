@@ -2,6 +2,7 @@
 #include "shell/builtins.h"
 #include "shell/word_encoding.h"
 #include "core/utils.h"
+#include "vm/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,6 +71,18 @@ static void emitPushWord(BytecodeChunk *chunk, const ShellWord *word, int line) 
     }
     emitPushString(chunk, encoded, line);
     free(encoded);
+}
+
+static void emitPushInt(BytecodeChunk *chunk, int value, int line) {
+    Value constant = makeInt(value);
+    int index = addConstantToChunk(chunk, &constant);
+    freeValue(&constant);
+    emitConstantOperand(chunk, index, line);
+}
+
+static void emitCallHost(BytecodeChunk *chunk, HostFunctionID id, int line) {
+    writeBytecodeChunk(chunk, CALL_HOST, line);
+    writeBytecodeChunk(chunk, (uint8_t)id, line);
 }
 
 static void emitBuiltinProc(BytecodeChunk *chunk, const char *name, uint8_t arg_count, int line) {
@@ -209,8 +222,27 @@ static void compileConditional(BytecodeChunk *chunk, const ShellConditional *con
     emitPushString(chunk, "branch=if", line);
     emitBuiltinProc(chunk, "__shell_if", 1, line);
     compilePipeline(chunk, conditional->condition);
+    emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
+    emitPushInt(chunk, 0, line);
+    writeBytecodeChunk(chunk, EQUAL, line);
+    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+    int elseJump = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
     compileProgram(chunk, conditional->then_branch);
-    compileProgram(chunk, conditional->else_branch);
+    bool hasElse = conditional->else_branch != NULL;
+    if (hasElse) {
+        writeBytecodeChunk(chunk, JUMP, line);
+        int endJump = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+        uint16_t elseOffset = (uint16_t)(chunk->count - (elseJump + 2));
+        patchShort(chunk, elseJump, elseOffset);
+        compileProgram(chunk, conditional->else_branch);
+        uint16_t endOffset = (uint16_t)(chunk->count - (endJump + 2));
+        patchShort(chunk, endJump, endOffset);
+    } else {
+        uint16_t elseOffset = (uint16_t)(chunk->count - (elseJump + 2));
+        patchShort(chunk, elseJump, elseOffset);
+    }
 }
 
 static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
