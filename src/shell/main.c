@@ -1,5 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
+#include <glob.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,6 +314,30 @@ static void redrawInteractiveLine(const char *prompt,
     }
 }
 
+static bool interactiveEnsureCapacity(char **buffer, size_t *capacity, size_t needed) {
+    if (!buffer || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_capacity = *capacity ? *capacity : 128;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char *new_buffer = (char *)realloc(*buffer, new_capacity);
+    if (!new_buffer) {
+        return false;
+    }
+    *buffer = new_buffer;
+    *capacity = new_capacity;
+    return true;
+}
+
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length) {
     if (!scratch) {
         return false;
@@ -325,6 +351,155 @@ static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t 
     }
     new_scratch[length] = '\0';
     *scratch = new_scratch;
+    return true;
+}
+
+static size_t interactiveFindWordStart(const char *buffer, size_t length) {
+    if (!buffer || length == 0) {
+        return length;
+    }
+    size_t index = length;
+    while (index > 0) {
+        unsigned char c = (unsigned char)buffer[index - 1];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            break;
+        }
+        index--;
+    }
+    return index;
+}
+
+static bool interactiveWordLooksDynamic(const char *word) {
+    if (!word || !*word) {
+        return false;
+    }
+    bool escaped = false;
+    for (const char *cursor = word; *cursor; ++cursor) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (*cursor == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (*cursor == '\'' || *cursor == '"' || *cursor == '$' || *cursor == '`') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
+    if (!items || count == 0) {
+        return 0;
+    }
+    const char *first = items[0];
+    if (!first) {
+        return 0;
+    }
+    size_t prefix_len = strlen(first);
+    for (size_t i = 1; i < count && prefix_len > 0; ++i) {
+        const char *item = items[i];
+        if (!item) {
+            prefix_len = 0;
+            break;
+        }
+        size_t j = 0;
+        while (j < prefix_len && first[j] == item[j]) {
+            ++j;
+        }
+        prefix_len = j;
+    }
+    return prefix_len;
+}
+
+static bool interactiveHandleTabCompletion(const char *prompt,
+                                           char **buffer,
+                                           size_t *length,
+                                           size_t *capacity,
+                                           size_t *displayed_length,
+                                           char **scratch) {
+    if (!buffer || !*buffer || !length || !capacity) {
+        return false;
+    }
+    size_t word_start = interactiveFindWordStart(*buffer, *length);
+    if (word_start >= *length) {
+        return false;
+    }
+    char *word = *buffer + word_start;
+    size_t word_len = *length - word_start;
+    if (interactiveWordLooksDynamic(word)) {
+        return false;
+    }
+    for (size_t i = 0; i < word_len; ++i) {
+        if (word[i] == '*' || word[i] == '?' || word[i] == '[') {
+            return false;
+        }
+    }
+
+    size_t pattern_len = word_len + 2;
+    char *pattern = (char *)malloc(pattern_len);
+    if (!pattern) {
+        return false;
+    }
+    memcpy(pattern, word, word_len);
+    pattern[word_len] = '*';
+    pattern[word_len + 1] = '\0';
+
+    glob_t results;
+    memset(&results, 0, sizeof(results));
+    int glob_flags = GLOB_TILDE | GLOB_MARK;
+    int glob_status = glob(pattern, glob_flags, NULL, &results);
+    free(pattern);
+    if (glob_status != 0 || results.gl_pathc == 0) {
+        globfree(&results);
+        return false;
+    }
+
+    size_t replacement_len = 0;
+    bool append_space = false;
+    if (results.gl_pathc == 1) {
+        const char *match = results.gl_pathv[0];
+        if (!match) {
+            globfree(&results);
+            return false;
+        }
+        replacement_len = strlen(match);
+        if (replacement_len > 0 && match[replacement_len - 1] != '/') {
+            append_space = true;
+        }
+    } else {
+        replacement_len = interactiveCommonPrefixLength(results.gl_pathv, results.gl_pathc);
+        if (replacement_len <= word_len) {
+            globfree(&results);
+            return false;
+        }
+    }
+
+    size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+    if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
+        globfree(&results);
+        return false;
+    }
+
+    if (results.gl_pathc == 1) {
+        memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
+    } else {
+        memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
+    }
+    if (append_space) {
+        (*buffer)[word_start + replacement_len] = ' ';
+        replacement_len += 1;
+    }
+    *length = word_start + replacement_len;
+    (*buffer)[*length] = '\0';
+    globfree(&results);
+
+    redrawInteractiveLine(prompt, *buffer, *length, displayed_length);
+    if (scratch) {
+        interactiveUpdateScratch(scratch, *buffer, *length);
+    }
     return true;
 }
 
@@ -534,6 +709,16 @@ static char *readInteractiveLine(const char *prompt,
                     }
                     continue;
                 }
+            }
+            continue;
+        }
+
+        if (ch == '\t') { /* Tab completion */
+            if (!interactiveHandleTabCompletion(prompt, &buffer, &length, &capacity, &displayed_length, &scratch)) {
+                fputc('\a', stdout);
+                fflush(stdout);
+            } else {
+                history_index = 0;
             }
             continue;
         }
