@@ -293,6 +293,8 @@ static ShellCommand *parsePrimary(ShellParser *parser) {
             return parseLoopCommand(parser, true);
         case SHELL_TOKEN_FOR:
             return parseForCommand(parser);
+        case SHELL_TOKEN_CASE:
+            return parseCaseCommand(parser);
         default:
             return parseSimpleCommand(parser);
     }

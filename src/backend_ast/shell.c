@@ -2209,15 +2209,26 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(1);
         return makeVoid();
     }
-    const char *subject_text = args[1].s_val;
-    if (!shellDecodeWordSpec(subject_text, &subject_text, NULL)) {
-        subject_text = args[1].s_val ? args[1].s_val : "";
+    const char *subject_spec = args[1].s_val;
+    const char *subject_text = subject_spec;
+    uint8_t subject_flags = 0;
+    if (!shellDecodeWordSpec(subject_spec, &subject_text, &subject_flags)) {
+        subject_text = subject_spec ? subject_spec : "";
+        subject_flags = 0;
     }
-    if (!shellCaseStackPush(subject_text)) {
+    char *expanded_subject = shellExpandWord(subject_text, subject_flags);
+    if (!expanded_subject) {
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
         return makeVoid();
     }
+    if (!shellCaseStackPush(expanded_subject)) {
+        free(expanded_subject);
+        runtimeError(vm, "shell case: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    free(expanded_subject);
     shellUpdateStatus(1);
     return makeVoid();
 }
@@ -2245,22 +2256,33 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
         if (args[i].type != TYPE_STRING || !args[i].s_val) {
             continue;
         }
-        const char *pattern_text = args[i].s_val;
+        const char *pattern_spec = args[i].s_val;
+        const char *pattern_text = pattern_spec;
         uint8_t pattern_flags = 0;
-        if (pattern_text[0] == SHELL_WORD_ENCODE_PREFIX) {
-            shellDecodeWordSpec(pattern_text, &pattern_text, &pattern_flags);
+        if (!shellDecodeWordSpec(pattern_spec, &pattern_text, &pattern_flags)) {
+            pattern_text = pattern_spec ? pattern_spec : "";
+            pattern_flags = 0;
         }
-        if (shellWordShouldGlob(pattern_flags, pattern_text)) {
-            if (fnmatch(pattern_text, subject, 0) == 0) {
+        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags);
+        if (!expanded_pattern) {
+            runtimeError(vm, "shell case clause: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (shellWordShouldGlob(pattern_flags, expanded_pattern)) {
+            if (fnmatch(expanded_pattern, subject, 0) == 0) {
+                free(expanded_pattern);
                 matched = true;
                 break;
             }
         } else {
-            if (strcmp(pattern_text ? pattern_text : "", subject) == 0) {
+            if (strcmp(expanded_pattern, subject) == 0) {
+                free(expanded_pattern);
                 matched = true;
                 break;
             }
         }
+        free(expanded_pattern);
     }
     if (matched) {
         ctx->matched = true;
