@@ -16,7 +16,6 @@
 #include <regex.h>
 #include <stdbool.h>
 #include <signal.h>
-#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3394,69 +3393,158 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
 }
 
 static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid) {
-    if (!cmd || cmd->argc == 0 || !cmd->argv || !cmd->argv[0]) {
+    if (!cmd || cmd->argc == 0 || !cmd->argv || !cmd->argv[0] || !child_pid) {
         return EINVAL;
     }
-    posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
 
-    if (stdin_fd >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stdin_fd, STDIN_FILENO);
-        posix_spawn_file_actions_addclose(&actions, stdin_fd);
-    }
-    if (stdout_fd >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
-        posix_spawn_file_actions_addclose(&actions, stdout_fd);
-    }
-
-    int opened_fds[16];
+    int local_fds[16];
+    int local_targets[16];
+    int *opened_fds = local_fds;
+    int *opened_targets = local_targets;
+    size_t opened_capacity = sizeof(local_fds) / sizeof(local_fds[0]);
     size_t opened_count = 0;
+
+    if (cmd->redir_count > opened_capacity) {
+        opened_fds = (int *)malloc(sizeof(int) * cmd->redir_count);
+        opened_targets = (int *)malloc(sizeof(int) * cmd->redir_count);
+        if (!opened_fds || !opened_targets) {
+            free(opened_fds);
+            free(opened_targets);
+            return ENOMEM;
+        }
+        opened_capacity = cmd->redir_count;
+    }
+
+    for (size_t i = 0; i < opened_capacity; ++i) {
+        opened_fds[i] = -1;
+        opened_targets[i] = -1;
+    }
 
     for (size_t i = 0; i < cmd->redir_count; ++i) {
         const ShellRedirection *redir = &cmd->redirs[i];
         int fd = open(redir->path, redir->flags, redir->mode);
         if (fd < 0) {
+            int saved = errno;
             for (size_t j = 0; j < opened_count; ++j) {
+                if (opened_fds[j] >= 0) {
+                    close(opened_fds[j]);
+                }
+            }
+            if (opened_fds != local_fds) {
+                free(opened_fds);
+            }
+            if (opened_targets != local_targets) {
+                free(opened_targets);
+            }
+            return saved;
+        }
+        opened_fds[opened_count] = fd;
+        opened_targets[opened_count] = redir->fd;
+        opened_count++;
+    }
+
+    pid_t child = fork();
+    if (child < 0) {
+        int saved = errno;
+        for (size_t j = 0; j < opened_count; ++j) {
+            if (opened_fds[j] >= 0) {
                 close(opened_fds[j]);
             }
-            posix_spawn_file_actions_destroy(&actions);
-            return errno;
         }
-        if (opened_count < sizeof(opened_fds) / sizeof(opened_fds[0])) {
-            opened_fds[opened_count++] = fd;
+        if (opened_fds != local_fds) {
+            free(opened_fds);
         }
-        posix_spawn_file_actions_adddup2(&actions, fd, redir->fd);
-        posix_spawn_file_actions_addclose(&actions, fd);
+        if (opened_targets != local_targets) {
+            free(opened_targets);
+        }
+        return saved;
     }
 
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-
-#if defined(POSIX_SPAWN_SETSIGDEF)
-    sigset_t default_signals;
-    sigemptyset(&default_signals);
-    sigaddset(&default_signals, SIGTTIN);
-    sigaddset(&default_signals, SIGTTOU);
-    if (posix_spawnattr_setsigdefault(&attr, &default_signals) == 0) {
-        short attr_flags = 0;
-        if (posix_spawnattr_getflags(&attr, &attr_flags) != 0) {
-            attr_flags = 0;
+    if (child == 0) {
+        ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+        pid_t desired_pgid = getpid();
+        if (ctx->active && ctx->pgid > 0) {
+            desired_pgid = ctx->pgid;
         }
-        attr_flags |= POSIX_SPAWN_SETSIGDEF;
-        posix_spawnattr_setflags(&attr, attr_flags);
+        if (setpgid(0, desired_pgid) != 0) {
+            /* best-effort; ignore errors */
+        }
+
+        signal(SIGINT, SIG_DFL);
+        signal(SIGQUIT, SIG_DFL);
+        signal(SIGTSTP, SIG_DFL);
+        signal(SIGTTIN, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
+        signal(SIGCHLD, SIG_DFL);
+
+        if (ctx->active && ctx->pipes) {
+            size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+            for (size_t i = 0; i < pipe_count; ++i) {
+                int r = ctx->pipes[i][0];
+                int w = ctx->pipes[i][1];
+                if (r >= 0 && r != stdin_fd && r != stdout_fd) {
+                    close(r);
+                }
+                if (w >= 0 && w != stdin_fd && w != stdout_fd) {
+                    close(w);
+                }
+            }
+        }
+
+        if (stdin_fd >= 0 && dup2(stdin_fd, STDIN_FILENO) < 0) {
+            int err = errno;
+            fprintf(stderr, "exsh: failed to setup stdin: %s\n", strerror(err));
+            _exit(126);
+        }
+        if (stdout_fd >= 0 && dup2(stdout_fd, STDOUT_FILENO) < 0) {
+            int err = errno;
+            fprintf(stderr, "exsh: failed to setup stdout: %s\n", strerror(err));
+            _exit(126);
+        }
+
+        for (size_t i = 0; i < opened_count; ++i) {
+            if (opened_fds[i] < 0) {
+                continue;
+            }
+            if (dup2(opened_fds[i], opened_targets[i]) < 0) {
+                int err = errno;
+                fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+                _exit(126);
+            }
+        }
+
+        if (stdin_fd >= 0 && stdin_fd != STDIN_FILENO) {
+            close(stdin_fd);
+        }
+        if (stdout_fd >= 0 && stdout_fd != STDOUT_FILENO) {
+            close(stdout_fd);
+        }
+        for (size_t i = 0; i < opened_count; ++i) {
+            if (opened_fds[i] >= 0 && opened_fds[i] != opened_targets[i]) {
+                close(opened_fds[i]);
+            }
+        }
+
+        execvp(cmd->argv[0], cmd->argv);
+        int err = errno;
+        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+        _exit((err == ENOENT) ? 127 : 126);
     }
-#endif
-
-    int result = posix_spawnp(child_pid, cmd->argv[0], &actions, &attr, cmd->argv, environ);
-
-    posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&actions);
 
     for (size_t j = 0; j < opened_count; ++j) {
-        close(opened_fds[j]);
+        if (opened_fds[j] >= 0) {
+            close(opened_fds[j]);
+        }
+    }
+    if (opened_fds != local_fds) {
+        free(opened_fds);
+    }
+    if (opened_targets != local_targets) {
+        free(opened_targets);
     }
 
-    return result;
+    *child_pid = child;
+    return 0;
 }
 
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
