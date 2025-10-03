@@ -17,7 +17,7 @@
       "description": "if/then/else syntax is parsed (branches execute sequentially until flow control lands).",
       "script": "Examples/psh/conditionals.psh",
       "expect": "runtime_ok",
-      "expected_stdout": "conditionals:start\nthen-branch\nelse-branch\nconditionals:end"
+      "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
     },
     {
       "id": "builtin_functions",
