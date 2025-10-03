@@ -34,6 +34,7 @@
 #include "compiler/bytecode.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -66,9 +67,16 @@ static void initSymbolSystem(void) {
 #endif
 }
 
+static const char *PSCALD_USAGE = "Usage: pscald <bytecode_file>\n";
+
 int main(int argc, char* argv[]) {
+    if (argc == 2 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
+        printf("%s", PSCALD_USAGE);
+        return EXIT_SUCCESS;
+    }
+
     if (argc != 2) {
-        fprintf(stderr, "Usage: pscald <bytecode_file>\n");
+        fprintf(stderr, "%s", PSCALD_USAGE);
         return EXIT_FAILURE;
     }
 

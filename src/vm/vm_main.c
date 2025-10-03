@@ -40,10 +40,16 @@ static void initSymbolSystem(void) {
 #endif
 }
 
+static const char *PSCALVM_USAGE = "Usage: pscalvm <bytecode_file> [program_parameters...]\n";
+
 int main(int argc, char* argv[]) {
     vmInitTerminalState();
+    if (argc >= 2 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
+        printf("%s", PSCALVM_USAGE);
+        return vmExitWithCleanup(EXIT_SUCCESS);
+    }
     if (argc < 2) {
-        fprintf(stderr, "Usage: pscalvm <bytecode_file> [program_parameters...]\n");
+        fprintf(stderr, "%s", PSCALVM_USAGE);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
 

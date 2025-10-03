@@ -381,7 +381,10 @@ int main(int argc, char *argv[]) {
     // Parse options first
     int i = 1;
     for (; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("%s\n", PASCAL_USAGE);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "-v") == 0) {
             printf("Pascal Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
