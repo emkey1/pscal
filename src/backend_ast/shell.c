@@ -222,11 +222,46 @@ static void shellRestoreCurrentVm(VM *vm) {
     gShellCurrentVm = vm;
 }
 
-static void shellEnsureJobControl(void) {
-    if (!gShellRuntime.job_control_initialized) {
-        gShellRuntime.job_control_initialized = true;
-        gShellRuntime.tty_fd = STDIN_FILENO;
+static void shellInitJobControlState(void) {
+    if (gShellRuntime.job_control_initialized) {
+        return;
     }
+
+    gShellRuntime.job_control_initialized = true;
+    gShellRuntime.tty_fd = STDIN_FILENO;
+
+    if (gShellRuntime.tty_fd < 0) {
+        gShellRuntime.tty_fd = -1;
+        return;
+    }
+
+    if (!isatty(gShellRuntime.tty_fd)) {
+        gShellRuntime.tty_fd = -1;
+        return;
+    }
+
+    struct sigaction ignore_action;
+    memset(&ignore_action, 0, sizeof(ignore_action));
+    sigemptyset(&ignore_action.sa_mask);
+    ignore_action.sa_handler = SIG_IGN;
+    (void)sigaction(SIGTTIN, &ignore_action, NULL);
+    (void)sigaction(SIGTTOU, &ignore_action, NULL);
+
+    pid_t shell_pid = getpid();
+    pid_t current_pgid = getpgrp();
+    if (current_pgid != shell_pid) {
+        if (setpgid(0, 0) == 0) {
+            current_pgid = shell_pid;
+        } else {
+            current_pgid = getpgrp();
+        }
+    }
+
+    gShellRuntime.shell_pgid = current_pgid;
+}
+
+static void shellEnsureJobControl(void) {
+    shellInitJobControlState();
 
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.job_control_enabled = false;
@@ -247,13 +282,27 @@ static void shellEnsureJobControl(void) {
 
     gShellRuntime.shell_pgid = pgid;
 
-    pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
-    if (foreground < 0 || foreground != pgid) {
-        gShellRuntime.job_control_enabled = false;
-        return;
+    while (true) {
+        pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
+        if (foreground < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            gShellRuntime.job_control_enabled = false;
+            return;
+        }
+        if (foreground == pgid) {
+            gShellRuntime.job_control_enabled = true;
+            return;
+        }
+        if (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            gShellRuntime.job_control_enabled = false;
+            return;
+        }
     }
-
-    gShellRuntime.job_control_enabled = true;
 }
 
 static void shellJobControlSetForeground(pid_t pgid) {
@@ -2517,6 +2566,10 @@ const char *shellRuntimeGetArg0(void) {
     return gShellArg0;
 }
 
+void shellRuntimeInitJobControl(void) {
+    shellEnsureJobControl();
+}
+
 typedef enum {
     SHELL_HISTORY_EXPAND_OK,
     SHELL_HISTORY_EXPAND_NOT_FOUND,
@@ -3378,6 +3431,21 @@ static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_f
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
+
+#if defined(POSIX_SPAWN_SETSIGDEF)
+    sigset_t default_signals;
+    sigemptyset(&default_signals);
+    sigaddset(&default_signals, SIGTTIN);
+    sigaddset(&default_signals, SIGTTOU);
+    if (posix_spawnattr_setsigdefault(&attr, &default_signals) == 0) {
+        short attr_flags = 0;
+        if (posix_spawnattr_getflags(&attr, &attr_flags) != 0) {
+            attr_flags = 0;
+        }
+        attr_flags |= POSIX_SPAWN_SETSIGDEF;
+        posix_spawnattr_setflags(&attr, attr_flags);
+    }
+#endif
 
     int result = posix_spawnp(child_pid, cmd->argv[0], &actions, &attr, cmd->argv, environ);
 
