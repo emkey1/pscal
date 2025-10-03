@@ -2345,6 +2345,7 @@ int main(int argc, char **argv) {
     gParamValues = NULL;
 
     if (isatty(STDIN_FILENO)) {
+        shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
         return vmExitWithCleanup(status);
     }
