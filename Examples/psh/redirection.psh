@@ -1,4 +1,4 @@
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "redirection:start"
 echo "alpha" > tmp_psh_redirection.txt
 echo "beta" >> tmp_psh_redirection.txt

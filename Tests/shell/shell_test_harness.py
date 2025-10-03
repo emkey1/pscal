@@ -70,13 +70,13 @@ def load_manifest(path: Path) -> List[TestCase]:
 
 
 def ensure_executable() -> Path:
-    exe = REPO_ROOT / "build" / "bin" / "psh"
+    exe = REPO_ROOT / "build" / "bin" / "exsh"
     if not exe.exists():
-        raise FileNotFoundError(f"psh executable not found at {exe}; build the project first")
+        raise FileNotFoundError(f"exsh executable not found at {exe}; build the project first")
     return exe
 
 
-def run_psh(executable: Path, case: TestCase, extra_args: Optional[List[str]] = None) -> subprocess.CompletedProcess[str]:
+def run_exsh(executable: Path, case: TestCase, extra_args: Optional[List[str]] = None) -> subprocess.CompletedProcess[str]:
     cmd = [str(executable)]
     if extra_args:
         cmd.extend(extra_args)
@@ -125,11 +125,11 @@ def run_case(executable: Path, case: TestCase) -> TestResult:
 
     if case.prime_cache:
         try:
-            run_psh(executable, case, extra_args=["--no-cache"])
+            run_exsh(executable, case, extra_args=["--no-cache"])
         except subprocess.SubprocessError:
             pass  # ignore priming errors; actual run will report details
 
-    proc = run_psh(executable, case)
+    proc = run_exsh(executable, case)
     return evaluate(case, proc)
 
 

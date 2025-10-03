@@ -232,7 +232,7 @@ Configure per-session knobs via `HttpSetOption/httpsetoption`:
 
 ## Shell front end
 
-`build/bin/psh` compiles shell-style orchestration scripts to PSCAL bytecode.
+`build/bin/exsh` compiles shell-style orchestration scripts to PSCAL bytecode.
 Pipelines, background jobs, and conditionals map to dedicated VM
 builtins implemented in `backend_ast/shell.c`, while the full PSCAL builtin
 catalog (HTTP, sockets, extended math/string helpers, optional SDL/SQLite
@@ -243,9 +243,9 @@ tokens to the appropriate VM types before dispatch.
 Example usage:
 
 ```sh
-build/bin/psh Examples/psh/pipeline.psh
-build/bin/psh --dump-bytecode Examples/psh/functions.psh
-build/bin/psh Examples/psh/builtins.psh
+build/bin/exsh Examples/psh/pipeline.psh
+build/bin/exsh --dump-bytecode Examples/psh/functions.psh
+build/bin/exsh Examples/psh/builtins.psh
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a

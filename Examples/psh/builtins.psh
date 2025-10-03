@@ -1,4 +1,4 @@
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 # Demonstrate invoking VM builtins from the shell frontend.
 
 setenv ORIGINAL_STATUS $PSCALSHELL_LAST_STATUS

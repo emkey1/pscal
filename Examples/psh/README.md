@@ -1,20 +1,20 @@
-# `psh` Example Scripts
+# `exsh` Example Scripts
 
 The shell front end ships with a few minimal scripts that are used by the
 regression suite and serve as reference material for new programs. Each script
-lives alongside this README so you can run it directly with the `psh`
-executable (for example, `build/bin/psh Examples/psh/pipeline.psh`).
+lives alongside this README so you can run it directly with the `exsh`
+executable (for example, `build/bin/exsh Examples/psh/pipeline.psh`).
 
 ## `pipeline.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "pipeline:start"
 echo "alpha" | cat
 echo "pipeline:end"
 ```
 
-This script demonstrates how pipelines are lowered into the VM. `psh` wires the
+This script demonstrates how pipelines are lowered into the VM. `exsh` wires the
 standard POSIX `|` operator through the builtin pipeline helpers so you can
 combine multiple commands. Additional stages can be appended with more `|`
 operators; each stage runs sequentially within the VM process.
@@ -22,7 +22,7 @@ operators; each stage runs sequentially within the VM process.
 ## `conditionals.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "conditionals:start"
 if true; then
     echo "then-branch"
@@ -40,7 +40,7 @@ Replace them with your own conditions to drive different branches.
 ## `functions.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "functions:start"
 export GREETING=hello
 printenv GREETING
@@ -53,7 +53,7 @@ printenv GREETING
 echo "functions:end"
 ```
 
-`psh` scripts have access to the shared builtin catalog. The `export`/`unset`
+`exsh` scripts have access to the shared builtin catalog. The `export`/`unset`
 pair mutates the host environment, and `PSCALSHELL_LAST_STATUS` reflects the
 result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
@@ -62,7 +62,7 @@ complex workflows.
 ## `builtins.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 builtin IntToStr int:42
 builtin Length str:psh-demo
 builtin getEnv str:HOME
@@ -90,7 +90,7 @@ you can chain them in conditionals.
 ## `logical.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "logical:start"
 false && echo "and-skipped"
 true && echo "and-ran"
@@ -99,14 +99,14 @@ false || echo "or-ran"
 echo "logical:end"
 ```
 
-`psh` wires logical connectors (`&&`, `||`) to dedicated helpers so commands can
+`exsh` wires logical connectors (`&&`, `||`) to dedicated helpers so commands can
 short-circuit based on the status of the previous stage. This sample shows which
 branches execute when paired with the standard `true`/`false` utilities.
 
 ## `redirection.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "redirection:start"
 echo "alpha" > tmp_psh_redirection.txt
 echo "beta" >> tmp_psh_redirection.txt
@@ -122,7 +122,7 @@ removes the temporary resource.
 ## `env.psh`
 
 ```sh
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "env:start"
 setenv TEST_ENV alpha
 python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
@@ -151,7 +151,7 @@ cmake --build build
 You can then run any script directly:
 
 ```sh
-build/bin/psh Examples/psh/pipeline.psh
+build/bin/exsh Examples/psh/pipeline.psh
 ```
 
 Pass additional arguments after the script path to expose them to `$0`, `$1`,
