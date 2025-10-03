@@ -52,6 +52,7 @@ typedef struct {
     size_t launched;
     bool background;
     int last_status;
+    pid_t pgid;
 } ShellPipelineContext;
 
 typedef struct {
@@ -127,7 +128,12 @@ static void shellCaseStackPop(void) {
 }
 
 typedef struct {
-    pid_t pid;
+    pid_t pgid;
+    pid_t *pids;
+    size_t pid_count;
+    bool running;
+    bool stopped;
+    int last_status;
     char *command;
 } ShellJob;
 
@@ -168,6 +174,7 @@ static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid);
 static int shellWaitPid(pid_t pid, int *status_out);
 static void shellFreeCommand(ShellCommand *cmd);
+static void shellUpdateStatus(int status);
 
 static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags,
                                 const char **out_meta, size_t *out_meta_len) {
@@ -2172,7 +2179,8 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history"};
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history",
+                                      "jobs", "fg", "bg", "wait"};
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
         if (strcasecmp(name, kBuiltins[i]) == 0) {
@@ -2242,42 +2250,94 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     return true;
 }
 
+static int shellStatusFromWait(int status) {
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    if (WIFSTOPPED(status)) {
+        return 128 + WSTOPSIG(status);
+    }
+    return status;
+}
+
 static void shellFreeJob(ShellJob *job) {
     if (!job) {
         return;
     }
     free(job->command);
     job->command = NULL;
-    job->pid = -1;
+    free(job->pids);
+    job->pids = NULL;
+    job->pid_count = 0;
+    job->pgid = -1;
+    job->running = false;
+    job->stopped = false;
+    job->last_status = 0;
 }
 
-static void shellRegisterJob(pid_t pid, const ShellCommand *cmd) {
-    if (pid <= 0 || !cmd) {
+static void shellRemoveJobAt(size_t index) {
+    if (index >= gShellJobCount) {
         return;
     }
-    ShellJob *new_jobs = realloc(gShellJobs, sizeof(ShellJob) * (gShellJobCount + 1));
-    if (!new_jobs) {
+    ShellJob *job = &gShellJobs[index];
+    shellFreeJob(job);
+    if (index + 1 < gShellJobCount) {
+        gShellJobs[index] = gShellJobs[gShellJobCount - 1];
+    }
+    gShellJobCount--;
+    if (gShellJobCount == 0 && gShellJobs) {
+        free(gShellJobs);
+        gShellJobs = NULL;
+    }
+}
+
+static void shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
+    if (pgid <= 0 || !pids || pid_count == 0 || !cmd) {
         return;
     }
-    gShellJobs = new_jobs;
-    ShellJob *job = &gShellJobs[gShellJobCount++];
-    job->pid = pid;
-    size_t len = 0;
-    for (size_t i = 0; i < cmd->argc; ++i) {
-        len += strlen(cmd->argv[i]) + 1;
-    }
-    char *summary = malloc(len + 1);
-    if (!summary) {
-        job->command = NULL;
+
+    pid_t *pid_copy = malloc(sizeof(pid_t) * pid_count);
+    if (!pid_copy) {
         return;
     }
-    summary[0] = '\0';
-    for (size_t i = 0; i < cmd->argc; ++i) {
-        strcat(summary, cmd->argv[i]);
-        if (i + 1 < cmd->argc) {
-            strcat(summary, " ");
+    memcpy(pid_copy, pids, sizeof(pid_t) * pid_count);
+
+    char *summary = NULL;
+    if (cmd->argc > 0 && cmd->argv) {
+        size_t len = 0;
+        for (size_t i = 0; i < cmd->argc; ++i) {
+            len += strlen(cmd->argv[i]) + 1;
+        }
+        summary = malloc(len + 1);
+        if (summary) {
+            summary[0] = '\0';
+            for (size_t i = 0; i < cmd->argc; ++i) {
+                strcat(summary, cmd->argv[i]);
+                if (i + 1 < cmd->argc) {
+                    strcat(summary, " ");
+                }
+            }
         }
     }
+
+    ShellJob *new_jobs = realloc(gShellJobs, sizeof(ShellJob) * (gShellJobCount + 1));
+    if (!new_jobs) {
+        free(summary);
+        free(pid_copy);
+        return;
+    }
+
+    gShellJobs = new_jobs;
+    ShellJob *job = &gShellJobs[gShellJobCount++];
+    job->pgid = pgid;
+    job->pids = pid_copy;
+    job->pid_count = pid_count;
+    job->running = true;
+    job->stopped = false;
+    job->last_status = 0;
     job->command = summary;
 }
 
@@ -2285,35 +2345,129 @@ static int shellCollectJobs(void) {
     int reaped = 0;
     for (size_t i = 0; i < gShellJobCount;) {
         ShellJob *job = &gShellJobs[i];
-        int status = 0;
-        pid_t res = waitpid(job->pid, &status, WNOHANG);
-        if (res == 0) {
-            ++i;
+        bool job_active = false;
+
+        if (!job->pids || job->pid_count == 0) {
+            shellRemoveJobAt(i);
+            reaped++;
             continue;
         }
-        if (res < 0) {
-            ++i;
+
+        for (size_t j = 0; j < job->pid_count; ++j) {
+            pid_t pid = job->pids[j];
+            if (pid <= 0) {
+                continue;
+            }
+            int status = 0;
+            pid_t res = waitpid(pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
+            if (res == 0) {
+                job_active = true;
+                continue;
+            }
+            if (res < 0) {
+                if (errno == EINTR) {
+                    job_active = true;
+                    continue;
+                }
+                if (errno == ECHILD) {
+                    job->pids[j] = -1;
+                }
+                continue;
+            }
+            if (WIFSTOPPED(status)) {
+                job->stopped = true;
+                job->running = false;
+                job_active = true;
+            } else if (WIFCONTINUED(status)) {
+                job->stopped = false;
+                job->running = true;
+                job_active = true;
+            } else {
+                job->last_status = shellStatusFromWait(status);
+                job->pids[j] = -1;
+            }
+        }
+
+        if (!job->stopped) {
+            for (size_t j = 0; j < job->pid_count; ++j) {
+                if (job->pids[j] > 0) {
+                    job_active = true;
+                    job->running = true;
+                    break;
+                }
+            }
+        }
+
+        bool all_done = true;
+        for (size_t j = 0; j < job->pid_count; ++j) {
+            if (job->pids[j] > 0) {
+                all_done = false;
+                break;
+            }
+        }
+
+        if (all_done) {
+            shellUpdateStatus(job->last_status);
+            shellRemoveJobAt(i);
+            reaped++;
             continue;
         }
-        int exit_status = 0;
-        if (WIFEXITED(status)) {
-            exit_status = WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            exit_status = 128 + WTERMSIG(status);
+
+        if (!job_active && !job->stopped) {
+            job->running = true;
         }
-        shellUpdateStatus(exit_status);
-        shellFreeJob(job);
-        if (i + 1 < gShellJobCount) {
-            gShellJobs[i] = gShellJobs[gShellJobCount - 1];
-        }
-        gShellJobCount--;
-        reaped++;
-    }
-    if (gShellJobCount == 0 && gShellJobs) {
-        free(gShellJobs);
-        gShellJobs = NULL;
+
+        ++i;
     }
     return reaped;
+}
+
+static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value *args, size_t *out_index) {
+    if (gShellJobCount == 0) {
+        runtimeError(vm, "%s: no current job", name);
+        return false;
+    }
+    if (arg_count == 0) {
+        *out_index = gShellJobCount - 1;
+        return true;
+    }
+    if (arg_count > 1) {
+        runtimeError(vm, "%s: too many arguments", name);
+        return false;
+    }
+
+    Value spec = args[0];
+    if (spec.type == TYPE_STRING && spec.s_val) {
+        const char *text = spec.s_val;
+        if (text[0] == '%') {
+            text++;
+        }
+        if (*text == '\0') {
+            runtimeError(vm, "%s: invalid job spec", name);
+            return false;
+        }
+        char *end = NULL;
+        long index = strtol(text, &end, 10);
+        if (*end != '\0' || index <= 0 || (size_t)index > gShellJobCount) {
+            runtimeError(vm, "%s: invalid job '%s'", name, spec.s_val);
+            return false;
+        }
+        *out_index = (size_t)index - 1;
+        return true;
+    }
+
+    if (IS_INTLIKE(spec)) {
+        long index = (long)AS_INTEGER(spec);
+        if (index <= 0 || (size_t)index > gShellJobCount) {
+            runtimeError(vm, "%s: invalid job index", name);
+            return false;
+        }
+        *out_index = (size_t)index - 1;
+        return true;
+    }
+
+    runtimeError(vm, "%s: job spec must be a string or integer", name);
+    return false;
 }
 
 static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
@@ -2614,6 +2768,7 @@ static void shellResetPipeline(void) {
     ctx->launched = 0;
     ctx->background = false;
     ctx->last_status = 0;
+    ctx->pgid = -1;
 }
 
 static void shellAbortPipeline(void) {
@@ -2666,6 +2821,7 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     ctx->launched = 0;
     ctx->last_status = 0;
     ctx->background = false;
+    ctx->pgid = -1;
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
         shellResetPipeline();
@@ -2704,7 +2860,8 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             }
         }
     } else if (ctx->launched > 0) {
-        shellRegisterJob(ctx->pids[ctx->launched - 1], tail_cmd);
+        pid_t pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
+        shellRegisterJob(pgid, ctx->pids, ctx->launched, tail_cmd);
         final_status = 0;
     }
     if (ctx->negated) {
@@ -2762,6 +2919,24 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
 
     if (ctx->active) {
+        pid_t target_pgid = (ctx->pgid > 0) ? ctx->pgid : child;
+        if (setpgid(child, target_pgid) != 0) {
+            if (errno != EACCES && errno != ESRCH) {
+                /* best-effort: ignore errors from lack of job control */
+            }
+        }
+        if (ctx->pgid <= 0) {
+            ctx->pgid = target_pgid;
+        }
+    } else {
+        if (setpgid(child, child) != 0) {
+            if (errno != EACCES && errno != ESRCH) {
+                /* ignore */
+            }
+        }
+    }
+
+    if (ctx->active) {
         if (!cmd->is_pipeline_head && stdin_fd >= 0) {
             close(stdin_fd);
             if (cmd->pipeline_index > 0) {
@@ -2782,7 +2957,10 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         if (!cmd->background) {
             shellWaitPid(child, &status);
         } else {
-            shellRegisterJob(child, cmd);
+            pid_t job_pids[1];
+            job_pids[0] = child;
+            shellRegisterJob(child, job_pids, 1, cmd);
+            status = 0;
         }
         shellUpdateStatus(status);
     }
@@ -3282,6 +3460,133 @@ Value vmBuiltinShellHistory(VM *vm, int arg_count, Value *args) {
         printf("%zu  %s\n", i + 1, gShellHistory.entries[i]);
     }
     shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellCollectJobs();
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        const char *state = job->stopped ? "Stopped" : "Running";
+        const char *command = job->command ? job->command : "";
+        printf("[%zu] %s %s\n", i + 1, state, command);
+    }
+    fflush(stdout);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
+    shellCollectJobs();
+    size_t index = 0;
+    if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    ShellJob *job = &gShellJobs[index];
+    if (job->pgid > 0) {
+        if (kill(-job->pgid, SIGCONT) != 0 && errno != ESRCH) {
+            /* ignore */
+        }
+    } else {
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid > 0) {
+                kill(pid, SIGCONT);
+            }
+        }
+    }
+    job->stopped = false;
+    job->running = true;
+    int final_status = job->last_status;
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid <= 0) {
+            continue;
+        }
+        int status = 0;
+        pid_t res;
+        do {
+            res = waitpid(pid, &status, WUNTRACED);
+        } while (res < 0 && errno == EINTR);
+        if (res < 0) {
+            continue;
+        }
+        if (WIFSTOPPED(status)) {
+            job->stopped = true;
+            job->running = false;
+            job->last_status = shellStatusFromWait(status);
+            shellUpdateStatus(job->last_status);
+            return makeVoid();
+        }
+        final_status = shellStatusFromWait(status);
+        job->pids[i] = -1;
+    }
+    shellRemoveJobAt(index);
+    shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
+    shellCollectJobs();
+    size_t index = 0;
+    if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    ShellJob *job = &gShellJobs[index];
+    if (job->pgid > 0) {
+        if (kill(-job->pgid, SIGCONT) != 0 && errno != ESRCH) {
+            /* ignore */
+        }
+    } else {
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid > 0) {
+                kill(pid, SIGCONT);
+            }
+        }
+    }
+    job->stopped = false;
+    job->running = true;
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
+    shellCollectJobs();
+    if (gShellJobCount == 0) {
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+    size_t index = 0;
+    if (!shellResolveJobIndex(vm, "wait", arg_count, args, &index)) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    ShellJob *job = &gShellJobs[index];
+    int final_status = job->last_status;
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid <= 0) {
+            continue;
+        }
+        int status = 0;
+        pid_t res;
+        do {
+            res = waitpid(pid, &status, 0);
+        } while (res < 0 && errno == EINTR);
+        if (res < 0) {
+            continue;
+        }
+        final_status = shellStatusFromWait(status);
+        job->pids[i] = -1;
+    }
+    shellRemoveJobAt(index);
+    shellUpdateStatus(final_status);
     return makeVoid();
 }
 

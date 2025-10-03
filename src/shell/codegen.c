@@ -195,17 +195,17 @@ static const char *redirTypeName(ShellRedirectionType type) {
     return "";
 }
 
-static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command);
+static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background);
 static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program);
-static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline);
+static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline, bool runs_in_background);
 static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int line);
 static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function, int line);
 
-static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command) {
+static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
     int line = command ? command->line : 0;
     char meta[128];
     snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d",
-             command && command->exec.runs_in_background ? 1 : 0,
+             (command && command->exec.runs_in_background) || runs_in_background ? 1 : 0,
              command ? command->exec.pipeline_index : -1,
              command && command->exec.is_pipeline_head ? 1 : 0,
              command && command->exec.is_pipeline_tail ? 1 : 0);
@@ -243,7 +243,7 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command) {
     emitBuiltinProc(chunk, "__shell_exec", (uint8_t)arg_count, line);
 }
 
-static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline) {
+static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline, bool runs_in_background) {
     if (!pipeline) {
         return;
     }
@@ -256,7 +256,8 @@ static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline)
     emitBuiltinProc(chunk, "__shell_pipeline", 1,
                     pipeline->command_count > 0 && pipeline->commands[0] ? pipeline->commands[0]->line : 0);
     for (size_t i = 0; i < pipeline->command_count; ++i) {
-        compileCommand(chunk, pipeline->commands[i]);
+        bool stage_background = runs_in_background && (i + 1 == pipeline->command_count);
+        compileCommand(chunk, pipeline->commands[i], stage_background);
     }
 }
 
@@ -265,7 +266,7 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
         return;
     }
     for (size_t i = 0; i < logical->count; ++i) {
-        compilePipeline(chunk, logical->pipelines[i]);
+        compilePipeline(chunk, logical->pipelines[i], false);
         if (i + 1 < logical->count) {
             ShellLogicalConnector connector = logical->connectors[i + 1];
             const char *name = connector == SHELL_LOGICAL_AND ? "__shell_and" : "__shell_or";
@@ -293,7 +294,7 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     snprintf(meta, sizeof(meta), "until=%d", loop->is_until ? 1 : 0);
     emitPushString(chunk, meta, line);
     emitBuiltinProc(chunk, "__shell_loop", 1, line);
-    compilePipeline(chunk, loop->condition);
+    compilePipeline(chunk, loop->condition, false);
     compileProgram(chunk, loop->body);
 }
 
@@ -303,7 +304,7 @@ static void compileConditional(BytecodeChunk *chunk, const ShellConditional *con
     }
     emitPushString(chunk, "branch=if", line);
     emitBuiltinProc(chunk, "__shell_if", 1, line);
-    compilePipeline(chunk, conditional->condition);
+    compilePipeline(chunk, conditional->condition, false);
     emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
     emitPushInt(chunk, 0, line);
     writeBytecodeChunk(chunk, EQUAL, line);
@@ -418,16 +419,16 @@ static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function,
     emitBuiltinProc(chunk, "__shell_define_function", 3, line);
 }
 
-static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
+static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
     if (!command) {
         return;
     }
     switch (command->type) {
         case SHELL_COMMAND_SIMPLE:
-            compileSimple(chunk, command);
+            compileSimple(chunk, command, runs_in_background);
             break;
         case SHELL_COMMAND_PIPELINE:
-            compilePipeline(chunk, command->data.pipeline);
+            compilePipeline(chunk, command->data.pipeline, command->exec.runs_in_background || runs_in_background);
             break;
         case SHELL_COMMAND_LOGICAL:
             compileLogical(chunk, command->data.logical, command->line);
@@ -455,7 +456,7 @@ static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program) {
         return;
     }
     for (size_t i = 0; i < program->commands.count; ++i) {
-        compileCommand(chunk, program->commands.items[i]);
+        compileCommand(chunk, program->commands.items[i], false);
     }
 }
 

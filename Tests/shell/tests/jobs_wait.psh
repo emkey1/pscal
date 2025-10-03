@@ -1,0 +1,12 @@
+echo "jobs-wait:start"
+sleep 0.4 &
+echo "jobs:before-start"
+jobs
+echo "jobs:before-end"
+bg
+echo "bg:ran"
+wait
+echo "jobs:after-start"
+jobs
+echo "jobs:after-end"
+echo "jobs-wait:end"
