@@ -30,6 +30,7 @@ void registerShellFrontendBuiltins(void) {
 
     registerShellBuiltin(category, command_group, "cd", vmBuiltinShellCd);
     registerShellBuiltin(category, command_group, "pwd", vmBuiltinShellPwd);
+    registerShellBuiltin(category, command_group, "source", vmBuiltinShellSource);
     registerShellBuiltin(category, command_group, "exit", vmBuiltinShellExit);
     registerShellBuiltin(category, command_group, "setenv", vmBuiltinShellSetenv);
     registerShellBuiltin(category, command_group, "export", vmBuiltinShellExport);

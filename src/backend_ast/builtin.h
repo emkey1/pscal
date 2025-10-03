@@ -118,6 +118,7 @@ Value vmBuiltinShellCaseEnd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellDefineFunction(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPwd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSource(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
@@ -135,6 +136,7 @@ bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);
+const char *shellRuntimeGetArg0(void);
 size_t shellRuntimeHistoryCount(void);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,

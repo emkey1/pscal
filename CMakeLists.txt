@@ -419,6 +419,7 @@ set(SHELL_SOURCES
     src/shell/semantics.c
     src/shell/codegen.c
     src/shell/builtins.c
+    src/shell/runner.c
     src/shell/opt.c
     src/shell/stubs.c
     src/backend_ast/builtin.c
