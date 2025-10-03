@@ -1331,6 +1331,7 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
+#ifdef FRONTEND_SHELL
 static Value vmHostShellLastStatusHost(VM* vm) {
     return vmHostShellLastStatus(vm);
 }
@@ -1338,6 +1339,17 @@ static Value vmHostShellLastStatusHost(VM* vm) {
 static Value vmHostShellPollJobsHost(VM* vm) {
     return vmHostShellPollJobs(vm);
 }
+#else
+static Value vmHostShellLastStatusHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellPollJobsHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+#endif
 
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
