@@ -54,7 +54,7 @@ jobs:
             if [ -f "$f" ]; then
               bn=$(basename "$f")
               echo "Shell example: $bn"
-              build/bin/psh --dump-bytecode-only "$f" >/dev/null
+              build/bin/exsh --dump-bytecode-only "$f" >/dev/null
             fi
           done
       - name: Compile Pascal examples (dump-only)

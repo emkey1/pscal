@@ -32,6 +32,8 @@ static struct termios gInteractiveOriginalTermios;
 static volatile sig_atomic_t gInteractiveTermiosValid = 0;
 static struct sigaction gInteractiveOldSigintAction;
 static volatile sig_atomic_t gInteractiveHasOldSigint = 0;
+static struct sigaction gInteractiveOldSigtstpAction;
+static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 
 static void interactiveRestoreTerminal(void) {
     if (gInteractiveTermiosValid) {
@@ -47,14 +49,22 @@ static void interactiveRestoreSigintHandler(void) {
     }
 }
 
+static void interactiveRestoreSigtstpHandler(void) {
+    if (gInteractiveHasOldSigtstp) {
+        (void)sigaction(SIGTSTP, &gInteractiveOldSigtstpAction, NULL);
+        gInteractiveHasOldSigtstp = 0;
+    }
+}
+
 static void interactiveSigintHandler(int signo) {
     interactiveRestoreSigintHandler();
+    interactiveRestoreSigtstpHandler();
     interactiveRestoreTerminal();
     raise(signo);
 }
 
 static const char *SHELL_USAGE =
-    "Usage: psh <options> <script.sh> [args...]\n"
+    "Usage: exsh <options> <script.sh> [args...]\n"
     "   Options:\n"
     "     -v                          Display version information.\n"
     "     --dump-ast-json             Dump parsed AST as JSON.\n"
@@ -394,7 +404,7 @@ static char *shellFormatPrompt(const char *input) {
                 break;
             }
             case 's':
-                if (!promptBufferAppendString(&buffer, &length, &capacity, "psh")) {
+                if (!promptBufferAppendString(&buffer, &length, &capacity, "exsh")) {
                     free(buffer);
                     return NULL;
                 }
@@ -477,7 +487,7 @@ static char *shellFormatPrompt(const char *input) {
 static char *shellResolveInteractivePrompt(void) {
     const char *env_prompt = getenv("PS1");
     if (!env_prompt || !*env_prompt) {
-        env_prompt = "psh$ ";
+        env_prompt = "exsh$ ";
     }
     char *formatted = shellFormatPrompt(env_prompt);
     if (formatted) {
@@ -868,12 +878,28 @@ static char *readInteractiveLine(const char *prompt,
     gInteractiveHasOldSigint = 1;
     installed_sigint_handler = true;
 
+    struct sigaction sigtstp_action;
+    memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+    sigemptyset(&sigtstp_action.sa_mask);
+    sigtstp_action.sa_handler = SIG_IGN;
+    if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
+        interactiveRestoreSigintHandler();
+        installed_sigint_handler = false;
+        interactiveRestoreTerminal();
+        if (out_editor_failed) {
+            *out_editor_failed = true;
+        }
+        return NULL;
+    }
+    gInteractiveHasOldSigtstp = 1;
+
     size_t capacity = 128;
     char *buffer = (char *)malloc(capacity);
     if (!buffer) {
         if (installed_sigint_handler) {
             interactiveRestoreSigintHandler();
         }
+        interactiveRestoreSigtstpHandler();
         interactiveRestoreTerminal();
         if (out_editor_failed) {
             *out_editor_failed = true;
@@ -929,6 +955,12 @@ static char *readInteractiveLine(const char *prompt,
             history_index = 0;
             interactiveUpdateScratch(&scratch, buffer, length);
             fputs(prompt, stdout);
+            fflush(stdout);
+            continue;
+        }
+
+        if (ch == 26) { /* Ctrl-Z */
+            fputc('\a', stdout);
             fflush(stdout);
             continue;
         }
@@ -1152,6 +1184,7 @@ static char *readInteractiveLine(const char *prompt,
     if (installed_sigint_handler) {
         interactiveRestoreSigintHandler();
     }
+    interactiveRestoreSigtstpHandler();
     interactiveRestoreTerminal();
     free(scratch);
 
@@ -1189,7 +1222,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 
     while (true) {
         char *prompt_storage = shellResolveInteractivePrompt();
-        const char *prompt = prompt_storage ? prompt_storage : "psh$ ";
+        const char *prompt = prompt_storage ? prompt_storage : "exsh$ ";
         char *line = NULL;
         bool interactive_eof = false;
         bool editor_failed = false;
@@ -1241,10 +1274,10 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         char *history_error = NULL;
         if (!shellRuntimeExpandHistoryReference(line, &expanded_line, &used_history, &history_error)) {
             if (history_error) {
-                fprintf(stderr, "psh: %s: event not found\n", history_error);
+                fprintf(stderr, "exsh: %s: event not found\n", history_error);
                 free(history_error);
             } else {
-                fprintf(stderr, "psh: history expansion failed\n");
+                fprintf(stderr, "exsh: history expansion failed\n");
             }
             free(line);
             continue;
@@ -1261,7 +1294,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 
         char *expanded_tilde = interactiveExpandTilde(line);
         if (!expanded_tilde) {
-            fprintf(stderr, "psh: failed to expand home directory\n");
+            fprintf(stderr, "exsh: failed to expand home directory\n");
             free(line);
             continue;
         }
@@ -1280,7 +1313,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 
 int main(int argc, char **argv) {
     ShellRunOptions options = {0};
-    options.frontend_path = (argc > 0) ? argv[0] : "psh";
+    options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     shellRuntimeSetArg0(options.frontend_path);
 
     int dump_ext_builtins_flag = 0;

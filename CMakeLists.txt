@@ -432,7 +432,7 @@ set(SHELL_SOURCES
 )
 
 list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND SHELL_SOURCES ${PSH_EXT_BUILTIN_SOURCES})
+list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
 list(APPEND SHELL_SOURCES src/third_party/yyjson/yyjson.c)
 
 if(SDL)
@@ -444,38 +444,38 @@ if(SDL)
     )
 endif()
 
-add_executable(psh ${SHELL_SOURCES})
-target_compile_definitions(psh PRIVATE FRONTEND_SHELL)
+add_executable(exsh ${SHELL_SOURCES})
+target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
 if(TARGET CURL::libcurl)
-    target_link_libraries(psh PRIVATE CURL::libcurl m Threads::Threads)
+    target_link_libraries(exsh PRIVATE CURL::libcurl m Threads::Threads)
 else()
-    target_link_libraries(psh PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+    target_link_libraries(exsh PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
 endif()
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(psh PRIVATE ${PSCAL_SQLITE_LIBS})
+    target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
 endif()
 
 if(SDL)
-    target_include_directories(psh PRIVATE
+    target_include_directories(exsh PRIVATE
         ${SDL2_INCLUDE_DIRS}
         ${PC_SDL2_IMAGE_INCLUDE_DIRS}
         ${PC_SDL2_MIXER_INCLUDE_DIRS}
         ${PC_SDL2_TTF_INCLUDE_DIRS}
     )
 
-    target_link_directories(psh PRIVATE
+    target_link_directories(exsh PRIVATE
         ${PC_SDL2_IMAGE_LIBRARY_DIRS}
         ${PC_SDL2_MIXER_LIBRARY_DIRS}
         ${PC_SDL2_TTF_LIBRARY_DIRS}
     )
 
-    set(PSH_SDL_LIBS "")
+    set(EXSH_SDL_LIBS "")
     if(TARGET SDL2::SDL2)
-        list(APPEND PSH_SDL_LIBS SDL2::SDL2)
+        list(APPEND EXSH_SDL_LIBS SDL2::SDL2)
     else()
-        list(APPEND PSH_SDL_LIBS ${SDL2_LIBRARIES})
+        list(APPEND EXSH_SDL_LIBS ${SDL2_LIBRARIES})
     endif()
-    list(APPEND PSH_SDL_LIBS
+    list(APPEND EXSH_SDL_LIBS
         ${PC_SDL2_IMAGE_LIBRARIES}
         ${PC_SDL2_MIXER_LIBRARIES}
         ${PC_SDL2_TTF_LIBRARIES}
@@ -484,14 +484,14 @@ if(SDL)
         ${PC_SDL2_TTF_LDFLAGS_OTHER}
     )
     if(PSCAL_OPENGL_TARGET)
-        list(APPEND PSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        list(APPEND EXSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
     elseif(OPENGL_LIBRARIES)
-        list(APPEND PSH_SDL_LIBS ${OPENGL_LIBRARIES})
+        list(APPEND EXSH_SDL_LIBS ${OPENGL_LIBRARIES})
     endif()
-    list(APPEND PSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
-    list(REMOVE_DUPLICATES PSH_SDL_LIBS)
-    target_link_libraries(psh PRIVATE ${PSH_SDL_LIBS})
-    target_compile_definitions(psh PRIVATE SDL)
+    list(APPEND EXSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+    list(REMOVE_DUPLICATES EXSH_SDL_LIBS)
+    target_link_libraries(exsh PRIVATE ${EXSH_SDL_LIBS})
+    target_compile_definitions(exsh PRIVATE SDL)
 endif()
 
 # Tiny C front-end executable

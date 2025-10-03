@@ -1,4 +1,4 @@
-#!/usr/bin/env psh
+#!/usr/bin/env exsh
 echo "logical:start"
 false && echo "and-skipped"
 true && echo "and-ran"

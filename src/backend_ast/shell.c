@@ -1396,7 +1396,7 @@ static char *shellLookupParameterValue(const char *name, size_t len) {
                 if (gShellArg0) {
                     return strdup(gShellArg0);
                 }
-                return strdup("psh");
+                return strdup("exsh");
             }
             default:
                 break;
@@ -1513,7 +1513,7 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
         if (gShellArg0) {
             return strdup(gShellArg0);
         }
-        return strdup("psh");
+        return strdup("exsh");
     }
 
     if (isdigit((unsigned char)*input)) {
@@ -2992,7 +2992,7 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
             return true;
         }
         if (glob_status != GLOB_NOMATCH) {
-            fprintf(stderr, "psh: glob failed for '%s'\n", expanded);
+            fprintf(stderr, "exsh: glob failed for '%s'\n", expanded);
         }
     }
     if (!shellCommandAppendArgOwned(cmd, expanded)) {
@@ -3846,7 +3846,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     opts.no_cache = 1;
     opts.quiet = true;
     const char *frontend_path = shellRuntimeGetArg0();
-    opts.frontend_path = frontend_path ? frontend_path : "psh";
+    opts.frontend_path = frontend_path ? frontend_path : "exsh";
 
     bool exit_requested = false;
     int status = shellRunSource(source, path, &opts, &exit_requested);

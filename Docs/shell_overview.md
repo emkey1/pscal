@@ -1,4 +1,4 @@
-# Shell Front End (`psh`)
+# Shell Front End (`exsh`)
 
 The shell front end compiles POSIX-style shell scripts to PSCAL bytecode and
 executes them through the shared virtual machine. It focuses on orchestrating
@@ -7,15 +7,15 @@ implementing a full interactive shell.
 
 ## Command line usage
 
-Build the project with CMake and invoke the new `psh` executable:
+Build the project with CMake and invoke the new `exsh` executable:
 
 ```sh
 cmake -S . -B build
 cmake --build build
-build/bin/psh script.psh [arguments]
+build/bin/exsh script.psh [arguments]
 ```
 
-`psh` accepts the same tracing and bytecode inspection flags as the other front
+`exsh` accepts the same tracing and bytecode inspection flags as the other front
 ends:
 
 - `-v` prints the generated version string and latest git tag.
@@ -43,7 +43,7 @@ The shell front end honours the standard process environment:
 
 - Builtins such as `export`, `setenv`, and `unset` mutate the host environment
   for the current process. External utilities like `printenv` observe those changes
-  immediately because `psh` runs everything in-process.
+  immediately because `exsh` runs everything in-process.
 - `PSCALSHELL_LAST_STATUS` mirrors the most recent exit status observed by the
   runtime and is updated after every builtin or pipeline execution.
 - Caching relies on `$HOME` to locate the cache directory and `$PATH` to resolve
@@ -56,7 +56,7 @@ variables (printing the environment when invoked without arguments), and the
 new `unsetenv` builtin mirrors `unset` for scripts that prefer csh-style
 naming. The VM argument vector (`$0`, `$1` …) maps directly to the parameters
 passed after the script path (`gParamValues` inside the VM), so invoking
-`build/bin/psh script.psh 1 2 3` exposes `1`, `2`, and `3` to the program.
+`build/bin/exsh script.psh 1 2 3` exposes `1`, `2`, and `3` to the program.
 
 Interactive sessions also support history expansion beyond `!!`. Numeric
 designators like `!-2` and `!42`, prefix/substring searches (`!foo`, `!?bar?`),
@@ -92,7 +92,7 @@ placeholder helpers above. Those helpers currently execute sequentially, so
 scripts that rely on branching should gate behaviour using the exported status
 variable or external utilities until proper VM jumps are wired in.
 
-Because `psh` feeds every script through the same VM, shell programs can invoke
+Because `exsh` feeds every script through the same VM, shell programs can invoke
 VM builtins directly—for example calling `HttpRequest` from a pipeline stage or
 mixing shell conditionals with VM networking. Extended builtin groups that are
 enabled at configure time are linked into the shell binary automatically and
@@ -102,6 +102,6 @@ exposed through the same dispatch table as other front ends.
 
 Sample scripts demonstrating pipelines, conditionals, and environment-focused
 builtins live in `Examples/psh/`. The regression suite under `Tests/shell/`
-runs these scripts through `build/bin/psh`, checks stdout/stderr, and verifies
+runs these scripts through `build/bin/exsh`, checks stdout/stderr, and verifies
 exit codes. The CI workflow executes the new suite alongside the Pascal, CLike,
 and Rea test runs.
