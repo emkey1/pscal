@@ -366,6 +366,9 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                 shellParserAdvance(parser);
                 ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
                                                   has_param, has_arith, line, column);
+                if (type == SHELL_TOKEN_ASSIGNMENT && word) {
+                    word->is_assignment = true;
+                }
                 if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
                     shellWordAddExpansion(word, lexeme + 1);
                 }
@@ -742,9 +745,13 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
             bool has_arith = parser->current.contains_arithmetic_expansion;
             int word_line = parser->current.line;
             int word_column = parser->current.column;
+            ShellTokenType token_type = parser->current.type;
             shellParserAdvance(parser);
             ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
                                               has_param, has_arith, word_line, word_column);
+            if (token_type == SHELL_TOKEN_ASSIGNMENT && word) {
+                word->is_assignment = true;
+            }
             populateWordExpansions(word);
             shellCommandAddWord(command, word);
             if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
@@ -797,6 +804,9 @@ static ShellWord *parseWordToken(ShellParser *parser, const char *context) {
     ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, has_arith, line, column);
     if (word && has_command) {
         word->has_command_substitution = true;
+    }
+    if (type == SHELL_TOKEN_ASSIGNMENT && word) {
+        word->is_assignment = true;
     }
     if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
         if (lexeme[1] != '(') {

@@ -42,6 +42,7 @@ typedef struct {
     bool has_parameter_expansion;
     bool has_command_substitution;
     bool has_arithmetic_expansion;
+    bool is_assignment;
     ShellStringArray expansions;
     ShellCommandSubstitutionArray command_substitutions;
     int line;
