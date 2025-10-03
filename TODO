@@ -174,3 +174,20 @@ begin
   WriteLn(Format('%.*d', [5, 123])); // Output: 00123
   WriteLn(Format('%.*d', [2, 123])); // Output: 123 (width ignored if too small)
 end.
+
+------
+Fix the following...
+
+Yes. The VM’s numeric repertoire stops at 64‑bit integers (signed and unsigned) and long double floats, so GCC-only scalars such as __int128/unsigned __int128 and _Float128 have no representation in PSCAL today.
+
+On the front-end side:
+
+The CLike lexer and parser only recognise int, long, long long, float, double, long double, char, and byte; there is no keyword for short or any unsigned form, so types like unsigned int, unsigned long, or unsigned long long can’t be expressed even though the VM defines unsigned variants.
+
+The Pascal type specifier exposes integer, longint, cardinal, shortint, smallint, int64, single, double, extended, etc., but it never maps anything to TYPE_UINT64, leaving GCC’s unsigned long long without a direct analogue.
+
+The Rea front end likewise restricts its type keywords to signed integer widths plus float, float32, and long double; no uint8/16/32/64 or general unsigned keywords are recognised or supplied by its type stubs, so GCC-style unsigned integers are unavailable there as well.
+
+In short, GCC’s extended 128-bit scalars and the family of unsigned C integers are not currently supported by the PSCAL VM or its shipped front ends.
+
+Testing: not run (QA review only).
