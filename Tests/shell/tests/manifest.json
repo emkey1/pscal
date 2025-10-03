@@ -47,6 +47,15 @@
       "prime_cache": true,
       "expected_stdout": "pipeline:start\nalpha\npipeline:end",
       "expected_stderr_substring": "Loaded cached bytecode"
+    },
+    {
+      "id": "case_basic",
+      "name": "Case statements dispatch patterns",
+      "category": "control",
+      "description": "case selects the first matching clause and defaults otherwise.",
+      "script": "Examples/psh/case.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
     }
   ]
 }

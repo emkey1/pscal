@@ -79,6 +79,7 @@ static void shellAnnotatePipeline(ShellPipeline *pipeline) {
 
 static void shellAnalyzeProgramInternal(ShellSemanticContext *ctx, ShellProgram *program);
 static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command);
+static void shellAnalyzeCase(ShellSemanticContext *ctx, ShellCase *case_stmt);
 
 void shellInitSemanticContext(ShellSemanticContext *ctx) {
     if (!ctx) {
@@ -284,6 +285,24 @@ static void shellAnalyzeConditional(ShellSemanticContext *ctx, ShellConditional 
     shellAnalyzeProgramInternal(ctx, conditional->else_branch);
 }
 
+static void shellAnalyzeCase(ShellSemanticContext *ctx, ShellCase *case_stmt) {
+    if (!case_stmt) {
+        return;
+    }
+    for (size_t i = 0; i < case_stmt->clauses.count; ++i) {
+        ShellCaseClause *clause = case_stmt->clauses.items[i];
+        if (!clause) {
+            continue;
+        }
+        if (clause->patterns.count == 0) {
+            ctx->warning_count++;
+            fprintf(stderr, "shell semantic warning (%d:%d): case clause has no patterns\n",
+                    clause->line, clause->column);
+        }
+        shellAnalyzeProgramInternal(ctx, clause->body);
+    }
+}
+
 static void shellAnalyzeLoop(ShellSemanticContext *ctx, ShellLoop *loop) {
     if (!loop) {
         return;
@@ -314,6 +333,9 @@ static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command
             break;
         case SHELL_COMMAND_CONDITIONAL:
             shellAnalyzeConditional(ctx, command->data.conditional);
+            break;
+        case SHELL_COMMAND_CASE:
+            shellAnalyzeCase(ctx, command->data.case_stmt);
             break;
     }
 }

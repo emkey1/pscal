@@ -33,7 +33,10 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"__shell_or", "__shell_or", 1004},
     {"__shell_subshell", "__shell_subshell", 1005},
     {"__shell_loop", "__shell_loop", 1006},
-    {"__shell_if", "__shell_if", 1007}
+    {"__shell_if", "__shell_if", 1007},
+    {"__shell_case", "__shell_case", 1008},
+    {"__shell_case_clause", "__shell_case_clause", 1009},
+    {"__shell_case_end", "__shell_case_end", 1010}
 };
 
 static char *shellLowercase(const char *name) {

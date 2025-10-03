@@ -18,8 +18,10 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser);
 static ShellCommand *parseIfCommand(ShellParser *parser);
 static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until);
 static ShellCommand *parseForCommand(ShellParser *parser);
+static ShellCommand *parseCaseCommand(ShellParser *parser);
 static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
                                      ShellTokenType terminator2, ShellTokenType terminator3);
+static ShellWord *parseWordToken(ShellParser *parser, const char *context);
 static void populateWordExpansions(ShellWord *word);
 static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
 
@@ -531,6 +533,83 @@ static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
     return cmd;
 }
 
+static ShellCommand *parseCaseCommand(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    shellParserAdvance(parser);
+    ShellWord *subject = parseWordToken(parser, "Expected subject after 'case'");
+    if (!subject) {
+        return NULL;
+    }
+    shellParserConsume(parser, SHELL_TOKEN_IN, "Expected 'in' after case subject");
+    while (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        shellParserAdvance(parser);
+    }
+    ShellCase *case_stmt = shellCreateCase(subject);
+    if (!case_stmt) {
+        shellFreeWord(subject);
+        return NULL;
+    }
+    while (!parser->had_error && parser->current.type != SHELL_TOKEN_ESAC && parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
+            shellParserAdvance(parser);
+            continue;
+        }
+        if (shellParserMatch(parser, SHELL_TOKEN_LPAREN)) {
+            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+                shellParserAdvance(parser);
+            }
+        }
+        if (parser->current.type == SHELL_TOKEN_ESAC || parser->current.type == SHELL_TOKEN_EOF) {
+            break;
+        }
+        int clause_line = parser->current.line;
+        int clause_column = parser->current.column;
+        ShellCaseClause *clause = shellCreateCaseClause(clause_line, clause_column);
+        if (!clause) {
+            break;
+        }
+        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
+               parser->current.type == SHELL_TOKEN_PARAMETER) {
+            ShellWord *pattern = parseWordToken(parser, "Expected pattern in case clause");
+            if (pattern) {
+                shellCaseClauseAddPattern(clause, pattern);
+            }
+            if (!shellParserMatch(parser, SHELL_TOKEN_PIPE)) {
+                break;
+            }
+            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+                shellParserAdvance(parser);
+            }
+        }
+        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+        }
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after case pattern");
+        ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DSEMI, SHELL_TOKEN_ESAC, SHELL_TOKEN_EOF);
+        shellCaseClauseSetBody(clause, body);
+        shellCaseAddClause(case_stmt, clause);
+        if (parser->current.type == SHELL_TOKEN_DSEMI) {
+            shellParserAdvance(parser);
+        }
+        while (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
+            shellParserAdvance(parser);
+        }
+        if (parser->current.type == SHELL_TOKEN_ESAC) {
+            break;
+        }
+    }
+    shellParserConsume(parser, SHELL_TOKEN_ESAC, "Expected 'esac' to close case");
+    ShellCommand *cmd = shellCreateCaseCommand(case_stmt);
+    if (!cmd) {
+        shellFreeCase(case_stmt);
+        return NULL;
+    }
+    cmd->line = line;
+    cmd->column = column;
+    return cmd;
+}
+
 static ShellCommand *parseForCommand(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
@@ -585,6 +664,33 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
         cmd->column = column;
     }
     return cmd;
+}
+
+static ShellWord *parseWordToken(ShellParser *parser, const char *context) {
+    if (parser->current.type != SHELL_TOKEN_WORD &&
+        parser->current.type != SHELL_TOKEN_ASSIGNMENT &&
+        parser->current.type != SHELL_TOKEN_PARAMETER) {
+        if (context) {
+            parserErrorAt(parser, &parser->current, context);
+        } else {
+            parserErrorAt(parser, &parser->current, "Expected word");
+        }
+        return NULL;
+    }
+    ShellTokenType type = parser->current.type;
+    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+    bool single_quoted = parser->current.single_quoted;
+    bool double_quoted = parser->current.double_quoted;
+    bool has_param = parser->current.contains_parameter_expansion;
+    int line = parser->current.line;
+    int column = parser->current.column;
+    shellParserAdvance(parser);
+    ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, line, column);
+    if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
+        shellWordAddExpansion(word, lexeme + 1);
+    }
+    populateWordExpansions(word);
+    return word;
 }
 
 static void populateWordExpansions(ShellWord *word) {

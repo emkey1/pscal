@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <glob.h>
 #include <limits.h>
 #include <regex.h>
@@ -63,6 +64,65 @@ static ShellRuntimeState gShellRuntime = {
 };
 
 static bool gShellExitRequested = false;
+
+typedef struct {
+    char *subject;
+    bool matched;
+} ShellCaseContext;
+
+typedef struct {
+    ShellCaseContext *items;
+    size_t count;
+    size_t capacity;
+} ShellCaseContextStack;
+
+static ShellCaseContextStack gShellCaseStack = {NULL, 0, 0};
+
+static bool shellCaseStackPush(const char *subject_text) {
+    if (!subject_text) {
+        subject_text = "";
+    }
+    char *copy = strdup(subject_text);
+    if (!copy) {
+        return false;
+    }
+    if (gShellCaseStack.count + 1 > gShellCaseStack.capacity) {
+        size_t new_capacity = gShellCaseStack.capacity ? gShellCaseStack.capacity * 2 : 4;
+        ShellCaseContext *items = realloc(gShellCaseStack.items, new_capacity * sizeof(ShellCaseContext));
+        if (!items) {
+            free(copy);
+            return false;
+        }
+        gShellCaseStack.items = items;
+        gShellCaseStack.capacity = new_capacity;
+    }
+    ShellCaseContext *ctx = &gShellCaseStack.items[gShellCaseStack.count++];
+    ctx->subject = copy;
+    ctx->matched = false;
+    return true;
+}
+
+static ShellCaseContext *shellCaseStackTop(void) {
+    if (gShellCaseStack.count == 0) {
+        return NULL;
+    }
+    return &gShellCaseStack.items[gShellCaseStack.count - 1];
+}
+
+static void shellCaseStackPop(void) {
+    if (gShellCaseStack.count == 0) {
+        return;
+    }
+    ShellCaseContext *ctx = &gShellCaseStack.items[gShellCaseStack.count - 1];
+    free(ctx->subject);
+    ctx->subject = NULL;
+    gShellCaseStack.count--;
+    if (gShellCaseStack.count == 0 && gShellCaseStack.items) {
+        free(gShellCaseStack.items);
+        gShellCaseStack.items = NULL;
+        gShellCaseStack.capacity = 0;
+    }
+}
 
 typedef struct {
     pid_t pid;
@@ -2139,6 +2199,93 @@ Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
     (void)arg_count;
     (void)args;
     shellResetPipeline();
+    return makeVoid();
+}
+
+Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    if (arg_count != 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
+        runtimeError(vm, "shell case: expected metadata and subject word");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *subject_text = args[1].s_val;
+    if (!shellDecodeWordSpec(subject_text, &subject_text, NULL)) {
+        subject_text = args[1].s_val ? args[1].s_val : "";
+    }
+    if (!shellCaseStackPush(subject_text)) {
+        runtimeError(vm, "shell case: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellUpdateStatus(1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    if (arg_count < 1 || args[0].type != TYPE_STRING) {
+        runtimeError(vm, "shell case clause: expected metadata");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    ShellCaseContext *ctx = shellCaseStackTop();
+    if (!ctx) {
+        runtimeError(vm, "shell case clause: no active case");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (ctx->matched) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *subject = ctx->subject ? ctx->subject : "";
+    bool matched = false;
+    for (int i = 1; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val) {
+            continue;
+        }
+        const char *pattern_text = args[i].s_val;
+        uint8_t pattern_flags = 0;
+        if (pattern_text[0] == SHELL_WORD_ENCODE_PREFIX) {
+            shellDecodeWordSpec(pattern_text, &pattern_text, &pattern_flags);
+        }
+        if (shellWordShouldGlob(pattern_flags, pattern_text)) {
+            if (fnmatch(pattern_text, subject, 0) == 0) {
+                matched = true;
+                break;
+            }
+        } else {
+            if (strcmp(pattern_text ? pattern_text : "", subject) == 0) {
+                matched = true;
+                break;
+            }
+        }
+    }
+    if (matched) {
+        ctx->matched = true;
+        shellUpdateStatus(0);
+    } else {
+        shellUpdateStatus(1);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    ShellCaseContext *ctx = shellCaseStackTop();
+    if (!ctx) {
+        runtimeError(vm, "shell case end: no active case");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    bool matched = ctx->matched;
+    shellCaseStackPop();
+    if (!matched) {
+        shellUpdateStatus(1);
+    }
     return makeVoid();
 }
 

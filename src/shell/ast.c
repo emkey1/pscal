@@ -130,6 +130,38 @@ static void shellCommandArrayFree(ShellCommandArray *array) {
     array->capacity = 0;
 }
 
+static void shellCaseClauseArrayInit(ShellCaseClauseArray *array) {
+    if (!array) return;
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static void shellCaseClauseArrayAppend(ShellCaseClauseArray *array, ShellCaseClause *clause) {
+    if (!array || !clause) return;
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        ShellCaseClause **new_items = (ShellCaseClause **)realloc(array->items, new_capacity * sizeof(ShellCaseClause *));
+        if (!new_items) {
+            return;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    array->items[array->count++] = clause;
+}
+
+static void shellCaseClauseArrayFree(ShellCaseClauseArray *array) {
+    if (!array) return;
+    for (size_t i = 0; i < array->count; ++i) {
+        shellFreeCaseClause(array->items[i]);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
 ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quoted,
                            bool has_param_expansion, int line, int column) {
     ShellWord *word = (ShellWord *)calloc(1, sizeof(ShellWord));
@@ -287,6 +319,57 @@ void shellFreeConditional(ShellConditional *conditional) {
     free(conditional);
 }
 
+ShellCase *shellCreateCase(ShellWord *subject) {
+    ShellCase *case_stmt = (ShellCase *)calloc(1, sizeof(ShellCase));
+    if (!case_stmt) {
+        return NULL;
+    }
+    case_stmt->subject = subject;
+    shellCaseClauseArrayInit(&case_stmt->clauses);
+    return case_stmt;
+}
+
+void shellCaseAddClause(ShellCase *case_stmt, ShellCaseClause *clause) {
+    if (!case_stmt || !clause) return;
+    shellCaseClauseArrayAppend(&case_stmt->clauses, clause);
+}
+
+ShellCaseClause *shellCreateCaseClause(int line, int column) {
+    ShellCaseClause *clause = (ShellCaseClause *)calloc(1, sizeof(ShellCaseClause));
+    if (!clause) {
+        return NULL;
+    }
+    shellWordArrayInit(&clause->patterns);
+    clause->body = NULL;
+    clause->line = line;
+    clause->column = column;
+    return clause;
+}
+
+void shellCaseClauseAddPattern(ShellCaseClause *clause, ShellWord *pattern) {
+    if (!clause || !pattern) return;
+    shellWordArrayAppend(&clause->patterns, pattern);
+}
+
+void shellCaseClauseSetBody(ShellCaseClause *clause, ShellProgram *body) {
+    if (!clause) return;
+    clause->body = body;
+}
+
+void shellFreeCaseClause(ShellCaseClause *clause) {
+    if (!clause) return;
+    shellWordArrayFree(&clause->patterns);
+    shellFreeProgram(clause->body);
+    free(clause);
+}
+
+void shellFreeCase(ShellCase *case_stmt) {
+    if (!case_stmt) return;
+    shellFreeWord(case_stmt->subject);
+    shellCaseClauseArrayFree(&case_stmt->clauses);
+    free(case_stmt);
+}
+
 static ShellCommand *shellCreateCommandInternal(ShellCommandType type) {
     ShellCommand *command = (ShellCommand *)calloc(1, sizeof(ShellCommand));
     if (!command) {
@@ -347,6 +430,14 @@ ShellCommand *shellCreateConditionalCommand(ShellConditional *conditional) {
     ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_CONDITIONAL);
     if (cmd) {
         cmd->data.conditional = conditional;
+    }
+    return cmd;
+}
+
+ShellCommand *shellCreateCaseCommand(ShellCase *case_stmt) {
+    ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_CASE);
+    if (cmd) {
+        cmd->data.case_stmt = case_stmt;
     }
     return cmd;
 }
@@ -620,6 +711,51 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, "\"else\": ");
             shellDumpProgramJson(out, command->data.conditional ? command->data.conditional->else_branch : NULL, indent + 4);
             fprintf(out, "\n");
+            shellPrintIndent(out, indent + 2);
+            fprintf(out, "}\n");
+            break;
+        case SHELL_COMMAND_CASE:
+            fprintf(out, "{\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"subject\": ");
+            shellDumpWordJson(out, command->data.case_stmt ? command->data.case_stmt->subject : NULL, indent + 4);
+            fprintf(out, ",\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"clauses\": [\n");
+            if (command->data.case_stmt) {
+                for (size_t i = 0; i < command->data.case_stmt->clauses.count; ++i) {
+                    ShellCaseClause *clause = command->data.case_stmt->clauses.items[i];
+                    shellPrintIndent(out, indent + 6);
+                    fprintf(out, "{\n");
+                    shellPrintIndent(out, indent + 8);
+                    fprintf(out, "\"patterns\": [\n");
+                    if (clause) {
+                        for (size_t j = 0; j < clause->patterns.count; ++j) {
+                            shellDumpWordJson(out, clause->patterns.items[j], indent + 10);
+                            if (j + 1 < clause->patterns.count) {
+                                fprintf(out, ",\n");
+                            } else {
+                                fprintf(out, "\n");
+                            }
+                        }
+                    }
+                    shellPrintIndent(out, indent + 8);
+                    fprintf(out, "],\n");
+                    shellPrintIndent(out, indent + 8);
+                    fprintf(out, "\"body\": ");
+                    shellDumpProgramJson(out, clause ? clause->body : NULL, indent + 8);
+                    fprintf(out, "\n");
+                    shellPrintIndent(out, indent + 6);
+                    fprintf(out, "}");
+                    if (i + 1 < command->data.case_stmt->clauses.count) {
+                        fprintf(out, ",\n");
+                    } else {
+                        fprintf(out, "\n");
+                    }
+                }
+            }
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "]\n");
             shellPrintIndent(out, indent + 2);
             fprintf(out, "}\n");
             break;

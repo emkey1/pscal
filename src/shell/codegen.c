@@ -118,6 +118,7 @@ static const char *redirTypeName(ShellRedirectionType type) {
 static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command);
 static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program);
 static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline);
+static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int line);
 
 static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command) {
     int line = command ? command->line : 0;
@@ -245,6 +246,78 @@ static void compileConditional(BytecodeChunk *chunk, const ShellConditional *con
     }
 }
 
+static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int line) {
+    if (!case_stmt) {
+        return;
+    }
+    char meta[64];
+    snprintf(meta, sizeof(meta), "clauses=%zu", case_stmt->clauses.count);
+    emitPushString(chunk, meta, line);
+    emitPushWord(chunk, case_stmt->subject, line);
+    emitBuiltinProc(chunk, "__shell_case", 2, line);
+
+    size_t clause_count = case_stmt->clauses.count;
+    int *end_jumps = NULL;
+    size_t end_jump_count = 0;
+    if (clause_count > 0) {
+        end_jumps = (int *)calloc(clause_count, sizeof(int));
+        if (!end_jumps) {
+            fprintf(stderr, "shell codegen warning: unable to allocate case jump table.\n");
+        }
+    }
+
+    for (size_t i = 0; i < clause_count; ++i) {
+        ShellCaseClause *clause = case_stmt->clauses.items[i];
+        size_t pattern_count = clause ? clause->patterns.count : 0;
+        char clause_meta[64];
+        snprintf(clause_meta, sizeof(clause_meta), "index=%zu;patterns=%zu", i, pattern_count);
+        int clause_line = clause ? clause->line : line;
+        emitPushString(chunk, clause_meta, clause_line);
+        size_t max_patterns = pattern_count;
+        if (max_patterns > 254) {
+            fprintf(stderr, "shell codegen warning: case clause %zu patterns truncated.\n", i);
+            max_patterns = 254;
+        }
+        for (size_t j = 0; j < max_patterns; ++j) {
+            const ShellWord *pattern = clause->patterns.items[j];
+            emitPushWord(chunk, pattern, clause_line);
+        }
+        size_t arg_count = max_patterns + 1;
+        emitBuiltinProc(chunk, "__shell_case_clause", (uint8_t)arg_count, clause_line);
+
+        emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, clause_line);
+        emitPushInt(chunk, 0, clause_line);
+        writeBytecodeChunk(chunk, EQUAL, clause_line);
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, clause_line);
+        int skip_body_jump = chunk->count;
+        emitShort(chunk, 0xFFFF, clause_line);
+
+        compileProgram(chunk, clause ? clause->body : NULL);
+
+        writeBytecodeChunk(chunk, JUMP, clause_line);
+        int end_jump_pos = chunk->count;
+        emitShort(chunk, 0xFFFF, clause_line);
+        if (end_jumps && end_jump_count < clause_count) {
+            end_jumps[end_jump_count++] = end_jump_pos;
+        }
+        uint16_t skip_offset = (uint16_t)(chunk->count - (skip_body_jump + 2));
+        patchShort(chunk, skip_body_jump, skip_offset);
+    }
+
+    if (end_jumps) {
+        for (size_t i = 0; i < end_jump_count; ++i) {
+            int pos = end_jumps[i];
+            if (pos >= 0) {
+                uint16_t offset = (uint16_t)(chunk->count - (pos + 2));
+                patchShort(chunk, pos, offset);
+            }
+        }
+        free(end_jumps);
+    }
+
+    emitBuiltinProc(chunk, "__shell_case_end", 0, line);
+}
+
 static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
     if (!command) {
         return;
@@ -267,6 +340,9 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
             break;
         case SHELL_COMMAND_CONDITIONAL:
             compileConditional(chunk, command->data.conditional, command->line);
+            break;
+        case SHELL_COMMAND_CASE:
+            compileCase(chunk, command->data.case_stmt, command->line);
             break;
     }
 }

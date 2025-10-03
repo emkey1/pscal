@@ -1,0 +1,31 @@
+echo "case:start"
+case foo in
+  foo)
+    echo "match foo"
+    ;;
+  *)
+    echo "unexpected"
+    ;;
+esac
+
+case baz in
+  foo)
+    echo "no foo"
+    ;;
+  bar|baz)
+    echo "match group"
+    ;;
+  *)
+    echo "fallback"
+    ;;
+esac
+
+case qux in
+  foo|bar)
+    echo "unexpected branch"
+    ;;
+  *)
+    echo "match default qux"
+    ;;
+esac
+echo "case:end"

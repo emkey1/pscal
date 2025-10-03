@@ -93,13 +93,32 @@ typedef struct ShellConditional {
     struct ShellProgram *else_branch;
 } ShellConditional;
 
+typedef struct ShellCaseClause {
+    ShellWordArray patterns;
+    struct ShellProgram *body;
+    int line;
+    int column;
+} ShellCaseClause;
+
+typedef struct {
+    ShellCaseClause **items;
+    size_t count;
+    size_t capacity;
+} ShellCaseClauseArray;
+
+typedef struct ShellCase {
+    ShellWord *subject;
+    ShellCaseClauseArray clauses;
+} ShellCase;
+
 typedef enum {
     SHELL_COMMAND_SIMPLE,
     SHELL_COMMAND_PIPELINE,
     SHELL_COMMAND_LOGICAL,
     SHELL_COMMAND_SUBSHELL,
     SHELL_COMMAND_LOOP,
-    SHELL_COMMAND_CONDITIONAL
+    SHELL_COMMAND_CONDITIONAL,
+    SHELL_COMMAND_CASE
 } ShellCommandType;
 
 typedef struct {
@@ -127,6 +146,7 @@ typedef struct ShellCommand {
         } subshell;
         ShellLoop *loop;
         ShellConditional *conditional;
+        ShellCase *case_stmt;
     } data;
 } ShellCommand;
 
@@ -158,12 +178,21 @@ ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram 
                                          ShellProgram *else_branch);
 void shellFreeConditional(ShellConditional *conditional);
 
+ShellCase *shellCreateCase(ShellWord *subject);
+void shellCaseAddClause(ShellCase *case_stmt, ShellCaseClause *clause);
+ShellCaseClause *shellCreateCaseClause(int line, int column);
+void shellCaseClauseAddPattern(ShellCaseClause *clause, ShellWord *pattern);
+void shellCaseClauseSetBody(ShellCaseClause *clause, struct ShellProgram *body);
+void shellFreeCaseClause(ShellCaseClause *clause);
+void shellFreeCase(ShellCase *case_stmt);
+
 ShellCommand *shellCreateSimpleCommand(void);
 ShellCommand *shellCreatePipelineCommand(ShellPipeline *pipeline);
 ShellCommand *shellCreateLogicalCommand(ShellLogicalList *logical);
 ShellCommand *shellCreateSubshellCommand(ShellProgram *body);
 ShellCommand *shellCreateLoopCommand(ShellLoop *loop);
 ShellCommand *shellCreateConditionalCommand(ShellConditional *conditional);
+ShellCommand *shellCreateCaseCommand(ShellCase *case_stmt);
 void shellCommandAddWord(ShellCommand *command, ShellWord *word);
 void shellCommandAddRedirection(ShellCommand *command, ShellRedirection *redir);
 void shellFreeCommand(ShellCommand *command);
