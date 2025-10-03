@@ -111,6 +111,12 @@ typedef struct ShellCase {
     ShellCaseClauseArray clauses;
 } ShellCase;
 
+typedef struct ShellFunction {
+    char *name;
+    char *parameter_metadata;
+    struct ShellProgram *body;
+} ShellFunction;
+
 typedef enum {
     SHELL_COMMAND_SIMPLE,
     SHELL_COMMAND_PIPELINE,
@@ -118,7 +124,8 @@ typedef enum {
     SHELL_COMMAND_SUBSHELL,
     SHELL_COMMAND_LOOP,
     SHELL_COMMAND_CONDITIONAL,
-    SHELL_COMMAND_CASE
+    SHELL_COMMAND_CASE,
+    SHELL_COMMAND_FUNCTION
 } ShellCommandType;
 
 typedef struct {
@@ -147,6 +154,7 @@ typedef struct ShellCommand {
         ShellLoop *loop;
         ShellConditional *conditional;
         ShellCase *case_stmt;
+        ShellFunction *function;
     } data;
 } ShellCommand;
 
@@ -193,6 +201,10 @@ ShellCommand *shellCreateSubshellCommand(ShellProgram *body);
 ShellCommand *shellCreateLoopCommand(ShellLoop *loop);
 ShellCommand *shellCreateConditionalCommand(ShellConditional *conditional);
 ShellCommand *shellCreateCaseCommand(ShellCase *case_stmt);
+ShellCommand *shellCreateFunctionCommand(ShellFunction *function);
+ShellFunction *shellCreateFunction(const char *name, const char *parameter_metadata,
+                                   struct ShellProgram *body);
+void shellFreeFunction(ShellFunction *function);
 void shellCommandAddWord(ShellCommand *command, ShellWord *word);
 void shellCommandAddRedirection(ShellCommand *command, ShellRedirection *redir);
 void shellFreeCommand(ShellCommand *command);

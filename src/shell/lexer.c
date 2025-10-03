@@ -345,6 +345,7 @@ static ShellTokenType checkReservedWord(const char *lexeme) {
     if (!lexeme) {
         return SHELL_TOKEN_WORD;
     }
+    if (strcmp(lexeme, "function") == 0) return SHELL_TOKEN_FUNCTION;
     if (strcmp(lexeme, "if") == 0) return SHELL_TOKEN_IF;
     if (strcmp(lexeme, "then") == 0) return SHELL_TOKEN_THEN;
     if (strcmp(lexeme, "elif") == 0) return SHELL_TOKEN_ELIF;
@@ -531,6 +532,7 @@ const char *shellTokenTypeName(ShellTokenType type) {
         case SHELL_TOKEN_RPAREN: return "RPAREN";
         case SHELL_TOKEN_LBRACE: return "LBRACE";
         case SHELL_TOKEN_RBRACE: return "RBRACE";
+        case SHELL_TOKEN_FUNCTION: return "FUNCTION";
         case SHELL_TOKEN_IF: return "IF";
         case SHELL_TOKEN_THEN: return "THEN";
         case SHELL_TOKEN_ELIF: return "ELIF";

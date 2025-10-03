@@ -1,6 +1,7 @@
 #include "shell/codegen.h"
 #include "shell/builtins.h"
 #include "shell/word_encoding.h"
+#include "shell/function.h"
 #include "core/utils.h"
 #include "vm/vm.h"
 #include <stdio.h>
@@ -119,6 +120,7 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command);
 static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program);
 static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline);
 static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int line);
+static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function, int line);
 
 static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command) {
     int line = command ? command->line : 0;
@@ -318,6 +320,25 @@ static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int li
     emitBuiltinProc(chunk, "__shell_case_end", 0, line);
 }
 
+static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function, int line) {
+    if (!function) {
+        return;
+    }
+    ShellCompiledFunction *compiled = (ShellCompiledFunction *)calloc(1, sizeof(ShellCompiledFunction));
+    if (!compiled) {
+        fprintf(stderr, "shell codegen warning: unable to allocate function chunk for '%s'.\n",
+                function->name ? function->name : "<anonymous>");
+        return;
+    }
+    shellCompile(function->body, &compiled->chunk);
+    Value ptr = makePointer(compiled, NULL);
+    int ptr_index = addConstantToChunk(chunk, &ptr);
+    emitPushString(chunk, function->name ? function->name : "", line);
+    emitPushString(chunk, function->parameter_metadata ? function->parameter_metadata : "", line);
+    emitConstantOperand(chunk, ptr_index, line);
+    emitBuiltinProc(chunk, "__shell_define_function", 3, line);
+}
+
 static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
     if (!command) {
         return;
@@ -343,6 +364,9 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command) {
             break;
         case SHELL_COMMAND_CASE:
             compileCase(chunk, command->data.case_stmt, command->line);
+            break;
+        case SHELL_COMMAND_FUNCTION:
+            compileFunction(chunk, command->data.function, command->line);
             break;
     }
 }
