@@ -333,11 +333,11 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     (*buffer)[*length] = '\0';
     globfree(&results);
 
+    *cursor = *length;
     redrawInteractiveLine(prompt, *buffer, *length, *cursor, displayed_length);
     if (scratch) {
         interactiveUpdateScratch(scratch, *buffer, *length);
     }
-    *cursor = *length;
     return true;
 }
 
@@ -385,7 +385,7 @@ static char *interactiveExpandTilde(const char *line) {
             in_double_quote = !in_double_quote;
         }
         bool expand = false;
-        if (!in_single_quote && c == '~') {
+        if (!in_single_quote && !in_double_quote && c == '~') {
             char prev = (i > 0) ? line[i - 1] : '\0';
             if (i == 0 || prev == ' ' || prev == '\t' || prev == '\n' || prev == '\r' || prev == '=') {
                 char next = line[i + 1];
