@@ -973,14 +973,17 @@ static void populateWordExpansions(ShellWord *word) {
         if (c == '$') {
             size_t span = 0;
             char *command = NULL;
-            if (i + 1 < len && text[i + 1] == '(' &&
-                parseDollarCommandSubstitution(text, i, &span, &command)) {
-                if (command) {
-                    shellWordAddCommandSubstitution(word, SHELL_COMMAND_SUBSTITUTION_DOLLAR, command, span);
-                    free(command);
+            if (i + 1 < len && text[i + 1] == '(') {
+                if (i + 2 < len && text[i + 2] == '(') {
+                    /* Treat $(( as arithmetic expansion; do not parse as command substitution. */
+                } else if (parseDollarCommandSubstitution(text, i, &span, &command)) {
+                    if (command) {
+                        shellWordAddCommandSubstitution(word, SHELL_COMMAND_SUBSTITUTION_DOLLAR, command, span);
+                        free(command);
+                    }
+                    i += span;
+                    continue;
                 }
-                i += span;
-                continue;
             }
             size_t j = i + 1;
             if (j < len && text[j] == '{') {
