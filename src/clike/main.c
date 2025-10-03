@@ -113,7 +113,10 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("%s", CLIKE_USAGE);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "-v") == 0) {
             printf("Clike Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
