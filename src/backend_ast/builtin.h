@@ -5,6 +5,7 @@
 #include "ast/ast.h"
 #include "Pascal/globals.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 struct VM_s;
 
@@ -126,6 +127,8 @@ bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);
+size_t shellRuntimeHistoryCount(void);
+bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,
                                         char **out_line,
                                         bool *out_did_expand,

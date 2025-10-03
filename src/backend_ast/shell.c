@@ -1117,6 +1117,30 @@ void shellRuntimeRecordHistory(const char *line) {
     gShellHistory.entries[gShellHistory.count++] = copy;
 }
 
+size_t shellRuntimeHistoryCount(void) {
+    return gShellHistory.count;
+}
+
+bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line) {
+    if (!out_line) {
+        return false;
+    }
+    *out_line = NULL;
+    if (reverse_index >= gShellHistory.count) {
+        return false;
+    }
+    const char *entry = gShellHistory.entries[gShellHistory.count - reverse_index - 1];
+    if (!entry) {
+        return false;
+    }
+    char *copy = strdup(entry);
+    if (!copy) {
+        return false;
+    }
+    *out_line = copy;
+    return true;
+}
+
 void shellRuntimeSetArg0(const char *name) {
     char *copy = NULL;
     if (name && *name) {
