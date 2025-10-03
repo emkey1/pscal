@@ -79,6 +79,14 @@ extends it with orchestration helpers implemented in
 - The complete PSCAL builtin catalog (HTTP, sockets, JSON, extended math/string
   groups, optional SQLite/SDL bindings) via `registerAllBuiltins()`.
 
+The `builtin` shell command bridges these catalogs into scripts. Invoke it with
+the VM builtin name followed by any arguments. Values are treated as strings by
+default; prefix a token with `int:`, `float:`/`double:`/`real:`, `bool:` or
+`str:` to coerce the argument to the corresponding VM type. Supplying `nil` (or
+`nil:`) passes the VM's `nil` value directly. When the target builtin returns a
+value, `builtin` prints it to `stdout`; procedures that return `void` simply set
+`PSCALSHELL_LAST_STATUS` to `0` on success.
+
 High-level control-flow syntax (`if`, loops) is parsed and lowered to the
 placeholder helpers above. Those helpers currently execute sequentially, so
 scripts that rely on branching should gate behaviour using the exported status

@@ -1776,6 +1776,169 @@ static bool shellParseBool(const char *value, bool *out_flag) {
     return false;
 }
 
+static bool shellStringEqualsIgnoreCase(const char *lhs, const char *rhs) {
+    if (!lhs || !rhs) {
+        return false;
+    }
+    return strcasecmp(lhs, rhs) == 0;
+}
+
+static bool shellTryParseIntegerLiteral(const char *text, long long *out_value) {
+    if (!text || !*text) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long long value = strtoll(text, &end, 0);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    if (out_value) {
+        *out_value = value;
+    }
+    return true;
+}
+
+static bool shellLooksLikeFloatLiteral(const char *text) {
+    if (!text) {
+        return false;
+    }
+    for (const char *cursor = text; *cursor; ++cursor) {
+        if (*cursor == '.' || *cursor == 'e' || *cursor == 'E') {
+            return true;
+        }
+    }
+    if (shellStringEqualsIgnoreCase(text, "inf") ||
+        shellStringEqualsIgnoreCase(text, "+inf") ||
+        shellStringEqualsIgnoreCase(text, "-inf") ||
+        shellStringEqualsIgnoreCase(text, "infinity") ||
+        shellStringEqualsIgnoreCase(text, "+infinity") ||
+        shellStringEqualsIgnoreCase(text, "-infinity") ||
+        shellStringEqualsIgnoreCase(text, "nan") ||
+        shellStringEqualsIgnoreCase(text, "+nan") ||
+        shellStringEqualsIgnoreCase(text, "-nan")) {
+        return true;
+    }
+    return false;
+}
+
+static bool shellTryParseFloatLiteral(const char *text, double *out_value) {
+    if (!text || !*text) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    double value = strtod(text, &end);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    if (out_value) {
+        *out_value = value;
+    }
+    return true;
+}
+
+static Value shellConvertBuiltinArgument(const char *text) {
+    if (!text) {
+        return makeString("");
+    }
+
+    enum {
+        SHELL_ARG_MODE_AUTO,
+        SHELL_ARG_MODE_STRING,
+        SHELL_ARG_MODE_BOOL,
+        SHELL_ARG_MODE_INT,
+        SHELL_ARG_MODE_FLOAT,
+        SHELL_ARG_MODE_NIL
+    } mode = SHELL_ARG_MODE_AUTO;
+
+    const char *payload = text;
+
+    if (strncasecmp(payload, "str:", 4) == 0) {
+        mode = SHELL_ARG_MODE_STRING;
+        payload += 4;
+    } else if (strncasecmp(payload, "string:", 7) == 0) {
+        mode = SHELL_ARG_MODE_STRING;
+        payload += 7;
+    } else if (strncasecmp(payload, "raw:", 4) == 0) {
+        mode = SHELL_ARG_MODE_STRING;
+        payload += 4;
+    } else if (strncasecmp(payload, "bool:", 5) == 0) {
+        mode = SHELL_ARG_MODE_BOOL;
+        payload += 5;
+    } else if (strncasecmp(payload, "boolean:", 8) == 0) {
+        mode = SHELL_ARG_MODE_BOOL;
+        payload += 8;
+    } else if (strncasecmp(payload, "int:", 4) == 0) {
+        mode = SHELL_ARG_MODE_INT;
+        payload += 4;
+    } else if (strncasecmp(payload, "integer:", 8) == 0) {
+        mode = SHELL_ARG_MODE_INT;
+        payload += 8;
+    } else if (strncasecmp(payload, "float:", 6) == 0) {
+        mode = SHELL_ARG_MODE_FLOAT;
+        payload += 6;
+    } else if (strncasecmp(payload, "double:", 7) == 0) {
+        mode = SHELL_ARG_MODE_FLOAT;
+        payload += 7;
+    } else if (strncasecmp(payload, "real:", 5) == 0) {
+        mode = SHELL_ARG_MODE_FLOAT;
+        payload += 5;
+    } else if (strncasecmp(payload, "nil:", 4) == 0) {
+        mode = SHELL_ARG_MODE_NIL;
+        payload += 4;
+    }
+
+    if (mode == SHELL_ARG_MODE_STRING) {
+        return makeString(payload ? payload : "");
+    }
+
+    if (mode == SHELL_ARG_MODE_NIL) {
+        return makeNil();
+    }
+
+    if (mode == SHELL_ARG_MODE_BOOL || mode == SHELL_ARG_MODE_AUTO) {
+        bool flag = false;
+        if (shellParseBool(payload, &flag)) {
+            return makeBoolean(flag ? 1 : 0);
+        }
+        if (mode == SHELL_ARG_MODE_BOOL) {
+            return makeString(payload ? payload : "");
+        }
+    }
+
+    if (mode == SHELL_ARG_MODE_INT || mode == SHELL_ARG_MODE_AUTO) {
+        long long int_value = 0;
+        if (shellTryParseIntegerLiteral(payload, &int_value)) {
+            return makeInt(int_value);
+        }
+        if (mode == SHELL_ARG_MODE_INT) {
+            return makeString(payload ? payload : "");
+        }
+    }
+
+    if (mode == SHELL_ARG_MODE_FLOAT || mode == SHELL_ARG_MODE_AUTO) {
+        if (mode == SHELL_ARG_MODE_FLOAT || shellLooksLikeFloatLiteral(payload)) {
+            double dbl_value = 0.0;
+            if (shellTryParseFloatLiteral(payload, &dbl_value)) {
+                return makeDouble(dbl_value);
+            }
+            if (mode == SHELL_ARG_MODE_FLOAT) {
+                return makeString(payload ? payload : "");
+            }
+        }
+    }
+
+    if (mode == SHELL_ARG_MODE_AUTO && payload && *payload) {
+        if (shellStringEqualsIgnoreCase(payload, "nil") ||
+            shellStringEqualsIgnoreCase(payload, "null")) {
+            return makeNil();
+        }
+    }
+
+    return makeString(payload ? payload : "");
+}
+
 static void shellUpdateStatus(int status) {
     if (gShellArithmeticErrorPending) {
         status = 1;
@@ -2184,8 +2347,9 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "source", "unset", "setenv", "unsetenv", "alias", "history",
-                                      "jobs", "fg", "bg", "wait"};
+    static const char *kBuiltins[] = {"cd", "pwd", "exit", "export", "unset", "setenv", "unsetenv", "alias", "history",
+                                      "jobs", "fg", "bg", "wait", "builtin"};
+
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
         if (strcasecmp(name, kBuiltins[i]) == 0) {
@@ -3681,6 +3845,67 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     }
     shellRemoveJobAt(index);
     shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
+    if (arg_count < 1 || args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "builtin: expected VM builtin name");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    const char *name = args[0].s_val;
+    VmBuiltinFn handler = getVmBuiltinHandler(name);
+    if (!handler) {
+        runtimeError(vm, "builtin: unknown VM builtin '%s'", name);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    int call_argc = arg_count - 1;
+    Value *call_args = NULL;
+    if (call_argc > 0) {
+        call_args = (Value *)calloc((size_t)call_argc, sizeof(Value));
+        if (!call_args) {
+            runtimeError(vm, "builtin: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        for (int i = 0; i < call_argc; ++i) {
+            Value src = args[i + 1];
+            if (src.type == TYPE_STRING && src.s_val) {
+                call_args[i] = shellConvertBuiltinArgument(src.s_val);
+            } else if (src.type == TYPE_NIL) {
+                call_args[i] = makeNil();
+            } else {
+                call_args[i] = makeString("");
+            }
+        }
+    }
+
+    int previous_status = shellRuntimeLastStatus();
+    Value result = handler(vm, call_argc, call_args);
+
+    if (call_args) {
+        for (int i = 0; i < call_argc; ++i) {
+            freeValue(&call_args[i]);
+        }
+        free(call_args);
+    }
+
+    if (vm && vm->abort_requested && shellRuntimeLastStatus() == previous_status) {
+        shellUpdateStatus(1);
+    }
+
+    int status = shellRuntimeLastStatus();
+
+    if (status == 0 && result.type != TYPE_VOID) {
+        printValueToStream(result, stdout);
+        fputc('\n', stdout);
+    }
+
+    freeValue(&result);
     return makeVoid();
 }
 
