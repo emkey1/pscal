@@ -35,6 +35,8 @@ static volatile sig_atomic_t gInteractiveHasOldSigint = 0;
 static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 
+static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length);
+
 static void interactiveRestoreTerminal(void) {
     if (gInteractiveTermiosValid) {
         (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
