@@ -1713,6 +1713,240 @@ static char *shellLookupParameterValue(const char *name, size_t len) {
     return strdup(env);
 }
 
+static void shellFreeArrayValues(char **items, size_t count) {
+    if (!items) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(items[i]);
+    }
+    free(items);
+}
+
+static bool shellAppendArrayValue(char ***items, size_t *count, size_t *capacity, char *value) {
+    if (!items || !count || !capacity || !value) {
+        free(value);
+        return false;
+    }
+    if (*count == *capacity) {
+        size_t new_capacity = *capacity ? (*capacity * 2) : 4;
+        char **expanded = realloc(*items, new_capacity * sizeof(char *));
+        if (!expanded) {
+            free(value);
+            return false;
+        }
+        *items = expanded;
+        *capacity = new_capacity;
+    }
+    (*items)[(*count)++] = value;
+    return true;
+}
+
+static char *shellParseNextArrayToken(char **cursor_ptr) {
+    if (!cursor_ptr || !*cursor_ptr) {
+        return NULL;
+    }
+    char *cursor = *cursor_ptr;
+    char *token = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    while (*cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (isspace(ch)) {
+            break;
+        }
+        if (ch == '\\') {
+            if (cursor[1]) {
+                shellBufferAppendChar(&token, &length, &capacity, cursor[1]);
+                cursor += 2;
+            } else {
+                cursor++;
+            }
+            continue;
+        }
+        if (ch == '\'' || ch == '"') {
+            char quote = (char)ch;
+            cursor++;
+            while (*cursor && *cursor != quote) {
+                if (quote == '"' && *cursor == '\\' && cursor[1]) {
+                    shellBufferAppendChar(&token, &length, &capacity, cursor[1]);
+                    cursor += 2;
+                } else {
+                    shellBufferAppendChar(&token, &length, &capacity, *cursor);
+                    cursor++;
+                }
+            }
+            if (*cursor == quote) {
+                cursor++;
+            }
+            continue;
+        }
+        shellBufferAppendChar(&token, &length, &capacity, (char)ch);
+        cursor++;
+    }
+    if (!token) {
+        token = strdup("");
+        if (!token) {
+            return NULL;
+        }
+    }
+    *cursor_ptr = cursor;
+    return token;
+}
+
+static bool shellParseArrayValues(const char *value, char ***out_items, size_t *out_count) {
+    if (out_items) {
+        *out_items = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!value) {
+        return true;
+    }
+    const char *start = value;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    const char *end = value + strlen(value);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (end > start && *start == '(' && end[-1] == ')') {
+        start++;
+        end--;
+        while (start < end && isspace((unsigned char)*start)) {
+            start++;
+        }
+        while (end > start && isspace((unsigned char)end[-1])) {
+            end--;
+        }
+    }
+    size_t span = (size_t)(end - start);
+    if (span == 0) {
+        return true;
+    }
+    char *copy = (char *)malloc(span + 1);
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, start, span);
+    copy[span] = '\0';
+
+    char *cursor = copy;
+    char **items = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    while (*cursor) {
+        while (*cursor && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+        char *token = shellParseNextArrayToken(&cursor);
+        if (!token) {
+            free(copy);
+            shellFreeArrayValues(items, count);
+            return false;
+        }
+        if (!shellAppendArrayValue(&items, &count, &capacity, token)) {
+            free(copy);
+            shellFreeArrayValues(items, count);
+            return false;
+        }
+        while (*cursor && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+    }
+    free(copy);
+    if (out_items) {
+        *out_items = items;
+    } else {
+        shellFreeArrayValues(items, count);
+    }
+    if (out_count) {
+        *out_count = count;
+    }
+    return true;
+}
+
+static char *shellJoinArrayValues(char **items, size_t count) {
+    if (!items || count == 0) {
+        return strdup("");
+    }
+    char *joined = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (i > 0) {
+            shellBufferAppendChar(&joined, &length, &capacity, ' ');
+        }
+        shellBufferAppendString(&joined, &length, &capacity, items[i] ? items[i] : "");
+    }
+    if (!joined) {
+        joined = strdup("");
+    }
+    return joined;
+}
+
+static char *shellExpandArraySubscriptValue(const char *name,
+                                            size_t name_len,
+                                            const char *subscript,
+                                            size_t subscript_len) {
+    if (!name || name_len == 0 || !subscript) {
+        return strdup("");
+    }
+    while (subscript_len > 0 && isspace((unsigned char)subscript[0])) {
+        subscript++;
+        subscript_len--;
+    }
+    while (subscript_len > 0 && isspace((unsigned char)subscript[subscript_len - 1])) {
+        subscript_len--;
+    }
+    char *raw = shellLookupParameterValue(name, name_len);
+    if (!raw) {
+        return NULL;
+    }
+    char **items = NULL;
+    size_t count = 0;
+    if (!shellParseArrayValues(raw, &items, &count)) {
+        free(raw);
+        return NULL;
+    }
+    free(raw);
+
+    char *result = NULL;
+    if (subscript_len == 0) {
+        result = strdup("");
+    } else if (subscript_len == 1 && subscript[0] == '#') {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%zu", count);
+        result = strdup(buffer);
+    } else if (subscript_len == 1 && (subscript[0] == '*' || subscript[0] == '@')) {
+        result = shellJoinArrayValues(items, count);
+    } else {
+        char *index_text = (char *)malloc(subscript_len + 1);
+        if (index_text) {
+            memcpy(index_text, subscript, subscript_len);
+            index_text[subscript_len] = '\0';
+            char *endptr = NULL;
+            long index = strtol(index_text, &endptr, 10);
+            if (endptr && *endptr == '\0' && index >= 0 && (size_t)index < count) {
+                result = strdup(items[index] ? items[index] : "");
+            } else {
+                result = strdup("");
+            }
+            free(index_text);
+        }
+    }
+    shellFreeArrayValues(items, count);
+    if (!result) {
+        result = strdup("");
+    }
+    return result;
+}
+
 static char *shellExpandParameter(const char *input, size_t *out_consumed) {
     if (out_consumed) {
         *out_consumed = 0;
@@ -1844,10 +2078,29 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
                (isalnum((unsigned char)*cursor) || *cursor == '_')) {
             cursor++;
         }
-        if (cursor != closing || cursor == inner) {
+        if (cursor == inner) {
             return NULL;
         }
         size_t name_len = (size_t)(cursor - inner);
+        if (cursor < closing && *cursor == '[') {
+            const char *subscript_start = cursor + 1;
+            const char *subscript_end = memchr(subscript_start, ']', (size_t)(closing - subscript_start));
+            if (!subscript_end || subscript_end > closing) {
+                return NULL;
+            }
+            size_t subscript_len = (size_t)(subscript_end - subscript_start);
+            const char *after_bracket = subscript_end + 1;
+            while (after_bracket < closing && isspace((unsigned char)*after_bracket)) {
+                after_bracket++;
+            }
+            if (after_bracket != closing) {
+                return NULL;
+            }
+            return shellExpandArraySubscriptValue(inner, name_len, subscript_start, subscript_len);
+        }
+        if (cursor != closing) {
+            return NULL;
+        }
         return shellLookupParameterValue(inner, name_len);
     }
 
