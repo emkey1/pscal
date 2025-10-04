@@ -131,7 +131,7 @@ int shellRunSource(const char *source,
         ShellOptConfig opt_config = { false };
         shellRunOptimizations(program, &opt_config);
         shellCompile(program, &chunk);
-        if (path && path[0] && !options->no_cache) {
+        if (path && path[0]) {
             saveBytecodeToCache(path, kShellCompilerId, &chunk);
         }
         if (!options->quiet) {

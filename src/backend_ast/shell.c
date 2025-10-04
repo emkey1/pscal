@@ -62,6 +62,7 @@ typedef struct {
     bool active;
     size_t stage_count;
     bool negated;
+    bool *merge_stderr;
     pid_t *pids;
     int (*pipes)[2];
     size_t launched;
@@ -469,6 +470,7 @@ static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count
 static int shellSpawnProcess(const ShellCommand *cmd,
                              int stdin_fd,
                              int stdout_fd,
+                             int stderr_fd,
                              pid_t *child_pid,
                              bool ignore_job_signals);
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped);
@@ -628,7 +630,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     pid_t child = -1;
-    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], &child, false);
+    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], -1, &child, false);
     close(pipes[1]);
     pipes[1] = -1;
     if (spawn_err != 0) {
@@ -3363,7 +3365,7 @@ static int decodeHexDigit(char c) {
     return -1;
 }
 
-static char *decodeHereDocBody(const char *hex, size_t *out_len) {
+static char *decodeHexString(const char *hex, size_t *out_len) {
     if (out_len) {
         *out_len = 0;
     }
@@ -3405,54 +3407,54 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     if (strncmp(spec, "redir:", 6) != 0) {
         return false;
     }
-    const char *payload = spec + strlen("redir:");
+    const char *payload = spec + 6;
     char *copy = strdup(payload);
     if (!copy) {
         return false;
     }
 
-    char *parts[4] = {NULL, NULL, NULL, NULL};
-    size_t part_index = 0;
+    const char *fd_text = "";
+    const char *type_text = "";
+    const char *word_hex = "";
+    const char *here_hex = "";
+
     char *cursor = copy;
-    while (cursor && part_index < 4) {
-        if (part_index == 3) {
-            parts[part_index++] = cursor;
-            cursor = NULL;
-            break;
-        }
-        char *next = strchr(cursor, ':');
+    while (cursor && *cursor) {
+        char *next = strchr(cursor, ';');
         if (next) {
             *next = '\0';
-            parts[part_index++] = cursor;
-            cursor = next + 1;
-        } else {
-            parts[part_index++] = cursor;
-            cursor = NULL;
         }
-    }
-    if (cursor) {
-        free(copy);
-        return false;
-    }
-    size_t part_count = part_index;
-    if (part_count < 3) {
-        free(copy);
-        return false;
+        char *eq = strchr(cursor, '=');
+        const char *key = cursor;
+        const char *value = "";
+        if (eq) {
+            *eq = '\0';
+            value = eq + 1;
+        }
+        if (strcmp(key, "fd") == 0) {
+            fd_text = value;
+        } else if (strcmp(key, "type") == 0) {
+            type_text = value;
+        } else if (strcmp(key, "word") == 0) {
+            word_hex = value;
+        } else if (strcmp(key, "here") == 0) {
+            here_hex = value;
+        }
+        if (!next) {
+            break;
+        }
+        cursor = next + 1;
     }
 
-    const char *fd_str = parts[0];
-    const char *type = parts[1];
-    const char *target_spec = parts[2];
-    const char *extra_spec = (part_count >= 4) ? parts[3] : NULL;
-    if (!type || !target_spec) {
+    if (!type_text || *type_text == '\0') {
         free(copy);
         return false;
     }
 
     int fd = -1;
-    if (fd_str && *fd_str) {
-        fd = atoi(fd_str);
-    } else if (strcmp(type, "<") == 0 || strcmp(type, "<<") == 0 || strcmp(type, "<&") == 0 || strcmp(type, "<>") == 0) {
+    if (fd_text && *fd_text) {
+        fd = atoi(fd_text);
+    } else if (strcmp(type_text, "<") == 0 || strcmp(type_text, "<<") == 0 || strcmp(type_text, "<&") == 0 || strcmp(type_text, "<>") == 0) {
         fd = STDIN_FILENO;
     } else {
         fd = STDOUT_FILENO;
@@ -3462,54 +3464,65 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     memset(&redir, 0, sizeof(redir));
     redir.fd = fd;
 
+    char *word_encoded = decodeHexString(word_hex, NULL);
+    const char *target_spec = (word_encoded && *word_encoded) ? word_encoded : "";
     const char *target_text = NULL;
     const char *target_meta = NULL;
     size_t target_meta_len = 0;
     uint8_t target_flags = 0;
-    shellDecodeWordSpec(target_spec, &target_text, &target_flags, &target_meta, &target_meta_len);
+    if (target_spec && *target_spec) {
+        shellDecodeWordSpec(target_spec, &target_text, &target_flags, &target_meta, &target_meta_len);
+    }
 
     char *expanded_target = NULL;
-    if (strcmp(type, "<<") != 0) {
+    if (strcmp(type_text, "<<") != 0) {
+        if (!target_spec || *target_spec == '\0') {
+            free(word_encoded);
+            free(copy);
+            return false;
+        }
         expanded_target = shellExpandWord(target_text, target_flags, target_meta, target_meta_len);
         if (!expanded_target) {
+            free(word_encoded);
             free(copy);
             return false;
         }
     }
 
-    if (strcmp(type, "<") == 0) {
+    if (strcmp(type_text, "<") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_RDONLY;
         redir.mode = 0;
         redir.path = expanded_target;
         expanded_target = NULL;
-    } else if (strcmp(type, ">") == 0) {
+    } else if (strcmp(type_text, ">") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_WRONLY | O_CREAT | O_TRUNC;
         redir.mode = 0666;
         redir.path = expanded_target;
         expanded_target = NULL;
-    } else if (strcmp(type, ">>") == 0) {
+    } else if (strcmp(type_text, ">>") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_WRONLY | O_CREAT | O_APPEND;
         redir.mode = 0666;
         redir.path = expanded_target;
         expanded_target = NULL;
-    } else if (strcmp(type, "<>") == 0) {
+    } else if (strcmp(type_text, "<>") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_RDWR | O_CREAT;
         redir.mode = 0666;
         redir.path = expanded_target;
         expanded_target = NULL;
-    } else if (strcmp(type, ">|") == 0) {
+    } else if (strcmp(type_text, ">|") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_WRONLY | O_CREAT | O_TRUNC;
         redir.mode = 0666;
         redir.path = expanded_target;
         expanded_target = NULL;
-    } else if (strcmp(type, "<&") == 0 || strcmp(type, ">&") == 0) {
+    } else if (strcmp(type_text, "<&") == 0 || strcmp(type_text, ">&") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_DUP;
         if (!expanded_target) {
+            free(word_encoded);
             free(copy);
             return false;
         }
@@ -3528,11 +3541,12 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         }
         free(expanded_target);
         expanded_target = NULL;
-    } else if (strcmp(type, "<<") == 0) {
+    } else if (strcmp(type_text, "<<") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_HEREDOC;
         size_t body_len = 0;
-        char *decoded = decodeHereDocBody(extra_spec ? extra_spec : "", &body_len);
+        char *decoded = decodeHexString(here_hex ? here_hex : "", &body_len);
         if (!decoded) {
+            free(word_encoded);
             free(copy);
             return false;
         }
@@ -3540,6 +3554,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         redir.here_doc_length = body_len;
     } else {
         free(expanded_target);
+        free(word_encoded);
         free(copy);
         return false;
     }
@@ -3549,11 +3564,13 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         free(expanded_target);
         free(redir.path);
         free(redir.here_doc);
+        free(word_encoded);
         free(copy);
         return false;
     }
     cmd->redirs = new_redirs;
     cmd->redirs[cmd->redir_count++] = redir;
+    free(word_encoded);
     free(copy);
     return true;
 }
@@ -3617,6 +3634,7 @@ typedef struct {
 static int shellSpawnProcess(const ShellCommand *cmd,
                              int stdin_fd,
                              int stdout_fd,
+                             int stderr_fd,
                              pid_t *child_pid,
                              bool ignore_job_signals) {
     if (!cmd || cmd->argc == 0 || !cmd->argv || !cmd->argv[0] || !child_pid) {
@@ -3699,104 +3717,112 @@ static int shellSpawnProcess(const ShellCommand *cmd,
         }
 
         if (child == 0) {
-        ShellPipelineContext *ctx = &gShellRuntime.pipeline;
-        pid_t desired_pgid = getpid();
-        if (ctx->active && ctx->pgid > 0) {
-            desired_pgid = ctx->pgid;
-        }
-        if (setpgid(0, desired_pgid) != 0) {
-            /* best-effort; ignore errors */
-        }
-
-        if (ignore_job_signals) {
-            signal(SIGINT, SIG_IGN);
-            signal(SIGQUIT, SIG_IGN);
-        } else {
-            signal(SIGINT, SIG_DFL);
-            signal(SIGQUIT, SIG_DFL);
-        }
-        signal(SIGTSTP, SIG_DFL);
-        signal(SIGTTIN, SIG_DFL);
-        signal(SIGTTOU, SIG_DFL);
-        signal(SIGCHLD, SIG_DFL);
-
-        if (ctx->active && ctx->pipes) {
-            size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
-            for (size_t i = 0; i < pipe_count; ++i) {
-                int r = ctx->pipes[i][0];
-                int w = ctx->pipes[i][1];
-                if (r >= 0 && r != stdin_fd && r != stdout_fd) {
-                    close(r);
-                }
-                if (w >= 0 && w != stdin_fd && w != stdout_fd) {
-                    close(w);
-                }
+            ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+            pid_t desired_pgid = getpid();
+            if (ctx->active && ctx->pgid > 0) {
+                desired_pgid = ctx->pgid;
             }
-        }
-
-        if (stdin_fd >= 0 && dup2(stdin_fd, STDIN_FILENO) < 0) {
-            int err = errno;
-            fprintf(stderr, "exsh: failed to setup stdin: %s\n", strerror(err));
-            _exit(126);
-        }
-        if (stdout_fd >= 0 && dup2(stdout_fd, STDOUT_FILENO) < 0) {
-            int err = errno;
-            fprintf(stderr, "exsh: failed to setup stdout: %s\n", strerror(err));
-            _exit(126);
-        }
-
-        for (size_t i = 0; i < op_count; ++i) {
-            ShellRuntimeRedirOp *op = &ops[i];
-            if (op->type == SHELL_REDIR_OP_HEREDOC && op->write_fd >= 0) {
-                close(op->write_fd);
-                op->write_fd = -1;
+            if (setpgid(0, desired_pgid) != 0) {
+                /* best-effort; ignore errors */
             }
-        }
 
-        for (size_t i = 0; i < op_count; ++i) {
-            ShellRuntimeRedirOp *op = &ops[i];
-            switch (op->type) {
-                case SHELL_REDIR_OP_OPEN:
-                case SHELL_REDIR_OP_HEREDOC:
-                    if (dup2(op->source_fd, op->target_fd) < 0) {
-                        int err = errno;
-                        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
-                        _exit(126);
+            if (ignore_job_signals) {
+                signal(SIGINT, SIG_IGN);
+                signal(SIGQUIT, SIG_IGN);
+            } else {
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+            }
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGTTIN, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
+            signal(SIGCHLD, SIG_DFL);
+
+            if (ctx->active && ctx->pipes) {
+                size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+                for (size_t i = 0; i < pipe_count; ++i) {
+                    int r = ctx->pipes[i][0];
+                    int w = ctx->pipes[i][1];
+                    if (r >= 0 && r != stdin_fd && r != stdout_fd && r != stderr_fd) {
+                        close(r);
                     }
-                    break;
-                case SHELL_REDIR_OP_DUP:
-                    if (op->close_target) {
-                        close(op->target_fd);
-                    } else if (dup2(op->source_fd, op->target_fd) < 0) {
-                        int err = errno;
-                        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
-                        _exit(126);
+                    if (w >= 0 && w != stdin_fd && w != stdout_fd && w != stderr_fd) {
+                        close(w);
                     }
-                    break;
+                }
             }
-        }
 
-        if (stdin_fd >= 0 && stdin_fd != STDIN_FILENO) {
-            close(stdin_fd);
-        }
-        if (stdout_fd >= 0 && stdout_fd != STDOUT_FILENO) {
-            close(stdout_fd);
-        }
-
-        for (size_t i = 0; i < op_count; ++i) {
-            ShellRuntimeRedirOp *op = &ops[i];
-            if ((op->type == SHELL_REDIR_OP_OPEN || op->type == SHELL_REDIR_OP_HEREDOC) &&
-                op->source_fd >= 0 && op->source_fd != op->target_fd) {
-                close(op->source_fd);
-                op->source_fd = -1;
+            if (stdin_fd >= 0 && dup2(stdin_fd, STDIN_FILENO) < 0) {
+                int err = errno;
+                fprintf(stderr, "exsh: failed to setup stdin: %s\n", strerror(err));
+                _exit(126);
             }
-        }
+            if (stdout_fd >= 0 && dup2(stdout_fd, STDOUT_FILENO) < 0) {
+                int err = errno;
+                fprintf(stderr, "exsh: failed to setup stdout: %s\n", strerror(err));
+                _exit(126);
+            }
+            if (stderr_fd >= 0 && dup2(stderr_fd, STDERR_FILENO) < 0) {
+                int err = errno;
+                fprintf(stderr, "exsh: failed to setup stderr: %s\n", strerror(err));
+                _exit(126);
+            }
 
-        execvp(cmd->argv[0], cmd->argv);
-        int err = errno;
-        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
-        _exit((err == ENOENT) ? 127 : 126);
-    }
+            for (size_t i = 0; i < op_count; ++i) {
+                ShellRuntimeRedirOp *op = &ops[i];
+                if (op->type == SHELL_REDIR_OP_HEREDOC && op->write_fd >= 0) {
+                    close(op->write_fd);
+                    op->write_fd = -1;
+                }
+            }
+
+            for (size_t i = 0; i < op_count; ++i) {
+                ShellRuntimeRedirOp *op = &ops[i];
+                switch (op->type) {
+                    case SHELL_REDIR_OP_OPEN:
+                    case SHELL_REDIR_OP_HEREDOC:
+                        if (dup2(op->source_fd, op->target_fd) < 0) {
+                            int err = errno;
+                            fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+                            _exit(126);
+                        }
+                        break;
+                    case SHELL_REDIR_OP_DUP:
+                        if (op->close_target) {
+                            close(op->target_fd);
+                        } else if (dup2(op->source_fd, op->target_fd) < 0) {
+                            int err = errno;
+                            fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+                            _exit(126);
+                        }
+                        break;
+                }
+            }
+
+            if (stdin_fd >= 0 && stdin_fd != STDIN_FILENO) {
+                close(stdin_fd);
+            }
+            if (stdout_fd >= 0 && stdout_fd != STDOUT_FILENO && stdout_fd != stderr_fd) {
+                close(stdout_fd);
+            }
+            if (stderr_fd >= 0 && stderr_fd != STDERR_FILENO) {
+                close(stderr_fd);
+            }
+
+            for (size_t i = 0; i < op_count; ++i) {
+                ShellRuntimeRedirOp *op = &ops[i];
+                if ((op->type == SHELL_REDIR_OP_OPEN || op->type == SHELL_REDIR_OP_HEREDOC) &&
+                    op->source_fd >= 0 && op->source_fd != op->target_fd) {
+                    close(op->source_fd);
+                    op->source_fd = -1;
+                }
+            }
+
+            execvp(cmd->argv[0], cmd->argv);
+            int err = errno;
+            fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+            _exit((err == ENOENT) ? 127 : 126);
+        }
         for (size_t j = 0; j < op_count; ++j) {
             ShellRuntimeRedirOp *op = &ops[j];
             if (op->type == SHELL_REDIR_OP_OPEN) {
@@ -3901,6 +3927,8 @@ static void shellResetPipeline(void) {
     }
     free(ctx->pids);
     ctx->pids = NULL;
+    free(ctx->merge_stderr);
+    ctx->merge_stderr = NULL;
     ctx->active = false;
     ctx->stage_count = 0;
     ctx->launched = 0;
@@ -3964,6 +3992,13 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     if (!ctx->pids) {
         shellResetPipeline();
         return false;
+    }
+    if (stages > 0) {
+        ctx->merge_stderr = (bool *)calloc(stages, sizeof(bool));
+        if (!ctx->merge_stderr) {
+            shellResetPipeline();
+            return false;
+        }
     }
     if (stages > 1) {
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
@@ -4135,6 +4170,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
 
     int stdin_fd = -1;
     int stdout_fd = -1;
+    int stderr_fd = -1;
     if (ctx->active) {
         if (ctx->stage_count == 1 && shellInvokeBuiltin(vm, cmd)) {
             if (assignments_applied) {
@@ -4173,6 +4209,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 stdout_fd = ctx->pipes[idx][1];
             }
         }
+        if (ctx->merge_stderr && idx < ctx->stage_count && ctx->merge_stderr[idx]) {
+            stderr_fd = stdout_fd;
+        }
     } else {
         if (shellInvokeBuiltin(vm, cmd)) {
             if (assignments_applied) {
@@ -4200,6 +4239,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     int spawn_err = shellSpawnProcess(cmd,
                                       stdin_fd,
                                       stdout_fd,
+                                      stderr_fd,
                                       &child,
                                       background_execution && !gShellRuntime.job_control_enabled);
     if (assignments_applied) {
@@ -4327,6 +4367,7 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     const char *meta = args[0].s_val;
     size_t stages = 0;
     bool negated = false;
+    char *merge_pattern = NULL;
     char *copy = strdup(meta);
     if (!copy) {
         runtimeError(vm, "shell pipeline: out of memory");
@@ -4345,6 +4386,9 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
                 stages = (size_t)strtoul(value, NULL, 10);
             } else if (strcmp(key, "negated") == 0) {
                 shellParseBool(value, &negated);
+            } else if (strcmp(key, "merge") == 0) {
+                free(merge_pattern);
+                merge_pattern = strdup(value ? value : "");
             }
         }
         if (!next) break;
@@ -4353,13 +4397,33 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     free(copy);
     if (stages == 0) {
         runtimeError(vm, "shell pipeline: invalid stage count");
+        free(merge_pattern);
         goto cleanup;
     }
     if (!shellEnsurePipeline(stages, negated)) {
         runtimeError(vm, "shell pipeline: unable to allocate context");
+        free(merge_pattern);
+        goto cleanup;
+    }
+
+    if (merge_pattern) {
+        ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+        size_t pattern_len = strlen(merge_pattern);
+        for (size_t i = 0; i < stages; ++i) {
+            bool merge = false;
+            if (i < pattern_len) {
+                merge = (merge_pattern[i] == '1');
+            }
+            if (ctx->merge_stderr && i < stages) {
+                ctx->merge_stderr[i] = merge;
+            }
+        }
+        free(merge_pattern);
+        merge_pattern = NULL;
     }
 
 cleanup:
+    free(merge_pattern);
     shellRestoreCurrentVm(previous_vm);
     return result;
 }

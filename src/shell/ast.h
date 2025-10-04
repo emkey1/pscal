@@ -92,6 +92,7 @@ typedef struct {
     size_t command_count;
     bool negated;
     bool has_explicit_negation;
+    bool *merge_stderr;
 } ShellPipeline;
 
 typedef enum {
@@ -216,6 +217,8 @@ void shellFreePipeline(ShellPipeline *pipeline);
 void shellPipelineSetNegated(ShellPipeline *pipeline, bool negated);
 bool shellPipelineIsNegated(const ShellPipeline *pipeline);
 bool shellPipelineHasExplicitNegation(const ShellPipeline *pipeline);
+void shellPipelineSetMergeStderr(ShellPipeline *pipeline, size_t index, bool merge);
+bool shellPipelineGetMergeStderr(const ShellPipeline *pipeline, size_t index);
 
 ShellLogicalList *shellCreateLogicalList(void);
 void shellLogicalListAdd(ShellLogicalList *list, ShellPipeline *pipeline, ShellLogicalConnector connector);

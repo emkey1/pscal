@@ -146,23 +146,22 @@ static char *encodeWord(const ShellWord *word) {
     return encoded;
 }
 
-static char *encodeHereDocBody(const char *body) {
-    if (!body) {
+static char *encodeHexString(const char *input) {
+    if (!input) {
         return strdup("");
     }
-    size_t len = strlen(body);
-    size_t out_len = len * 2;
-    char *encoded = (char *)malloc(out_len + 1);
+    size_t len = strlen(input);
+    char *encoded = (char *)malloc(len * 2 + 1);
     if (!encoded) {
         return NULL;
     }
     static const char hex_digits[] = "0123456789ABCDEF";
     for (size_t i = 0; i < len; ++i) {
-        unsigned char byte = (unsigned char)body[i];
+        unsigned char byte = (unsigned char)input[i];
         encoded[2 * i] = hex_digits[(byte >> 4) & 0xF];
         encoded[2 * i + 1] = hex_digits[byte & 0xF];
     }
-    encoded[out_len] = '\0';
+    encoded[len * 2] = '\0';
     return encoded;
 }
 
@@ -218,6 +217,105 @@ static const char *redirTypeName(ShellRedirectionType type) {
     return "";
 }
 
+static char *buildPipelineMetadata(const ShellPipeline *pipeline) {
+    size_t stage_count = pipeline ? pipeline->command_count : 0;
+    bool negated = pipeline ? shellPipelineHasExplicitNegation(pipeline) : false;
+    size_t merge_len = stage_count;
+
+    char *merge = (char *)malloc(merge_len + 1);
+    if (!merge) {
+        return NULL;
+    }
+    for (size_t i = 0; i < merge_len; ++i) {
+        merge[i] = shellPipelineGetMergeStderr(pipeline, i) ? '1' : '0';
+    }
+    merge[merge_len] = '\0';
+
+    size_t meta_len = (size_t)snprintf(NULL, 0, "stages=%zu;negated=%d;merge=%s",
+                                      stage_count,
+                                      negated ? 1 : 0,
+                                      merge);
+    char *meta = (char *)malloc(meta_len + 1);
+    if (!meta) {
+        free(merge);
+        return NULL;
+    }
+    snprintf(meta, meta_len + 1, "stages=%zu;negated=%d;merge=%s",
+             stage_count,
+             negated ? 1 : 0,
+             merge);
+    free(merge);
+    return meta;
+}
+
+static char *buildRedirectionMetadata(const ShellRedirection *redir) {
+    if (!redir) {
+        return NULL;
+    }
+    const char *fd_text = (redir->io_number && *redir->io_number) ? redir->io_number : "";
+    const char *type_name = redirTypeName(redir->type);
+
+    char *encoded_word = NULL;
+    {
+        ShellWord *target = shellRedirectionGetWordTarget(redir);
+        if (target) {
+            char *encoded = encodeWord(target);
+            if (encoded) {
+                encoded_word = encodeHexString(encoded);
+            }
+            free(encoded);
+        }
+    }
+    if (!encoded_word) {
+        encoded_word = strdup("");
+        if (!encoded_word) {
+            return NULL;
+        }
+    }
+
+    const char *dup_target = shellRedirectionGetDupTarget(redir);
+    char *dup_hex = encodeHexString(dup_target ? dup_target : "");
+    if (!dup_hex) {
+        free(encoded_word);
+        return NULL;
+    }
+
+    const char *here_body = shellRedirectionGetHereDocument(redir);
+    char *here_hex = encodeHexString(here_body ? here_body : "");
+    if (!here_hex) {
+        free(encoded_word);
+        free(dup_hex);
+        return NULL;
+    }
+
+    size_t meta_len = (size_t)snprintf(NULL, 0,
+                                       "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s",
+                                       fd_text,
+                                       type_name ? type_name : "",
+                                       encoded_word,
+                                       dup_hex,
+                                       here_hex);
+    char *meta = (char *)malloc(meta_len + 1);
+    if (!meta) {
+        free(encoded_word);
+        free(dup_hex);
+        free(here_hex);
+        return NULL;
+    }
+    snprintf(meta, meta_len + 1,
+             "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s",
+             fd_text,
+             type_name ? type_name : "",
+             encoded_word,
+             dup_hex,
+             here_hex);
+
+    free(encoded_word);
+    free(dup_hex);
+    free(here_hex);
+    return meta;
+}
+
 static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background);
 static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program);
 static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline, bool runs_in_background);
@@ -245,42 +343,13 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, boo
         const ShellRedirectionArray *redirs = &command->data.simple.redirections;
         for (size_t i = 0; i < redirs->count; ++i) {
             const ShellRedirection *redir = redirs->items[i];
-            const ShellWord *target = redir ? redir->target : NULL;
-            char *encoded_target = encodeWord(target);
-            const char *target_text = encoded_target ? encoded_target : "";
-            char *encoded_here_doc = NULL;
-            if (redir && redir->type == SHELL_REDIRECT_HEREDOC) {
-                encoded_here_doc = encodeHereDocBody(redir->here_document ? redir->here_document : "");
-                if (!encoded_here_doc) {
-                    encoded_here_doc = strdup("");
-                }
-            }
-            const char *fd_text = (redir && redir->io_number) ? redir->io_number : "";
-            const char *type_name = redirTypeName(redir ? redir->type : SHELL_REDIRECT_OUTPUT);
-            size_t base_len = strlen("redir:") + strlen(fd_text) + 1 + strlen(type_name) + 1 + strlen(target_text);
-            size_t extra_len = encoded_here_doc ? strlen(encoded_here_doc) : 0;
-            size_t total_len = base_len + (encoded_here_doc ? (1 + extra_len) : 0) + 1;
-            char *buffer = (char *)malloc(total_len);
-            if (!buffer) {
-                emitPushString(chunk, "", line);
+            char *serialized = buildRedirectionMetadata(redir);
+            if (!serialized) {
+                emitPushString(chunk, "redir:fd=;type=;word=;dup=;here=", line);
             } else {
-                if (encoded_here_doc) {
-                    snprintf(buffer, total_len, "redir:%s:%s:%s:%s",
-                             fd_text,
-                             type_name,
-                             target_text,
-                             encoded_here_doc);
-                } else {
-                    snprintf(buffer, total_len, "redir:%s:%s:%s",
-                             fd_text,
-                             type_name,
-                             target_text);
-                }
-                emitPushString(chunk, buffer, line);
+                emitPushString(chunk, serialized, line);
+                free(serialized);
             }
-            free(buffer);
-            free(encoded_target);
-            free(encoded_here_doc);
             arg_count++;
         }
     }
@@ -296,14 +365,15 @@ static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline,
     if (!pipeline) {
         return;
     }
-    char meta[128];
-    snprintf(meta, sizeof(meta), "stages=%zu;negated=%d",
-             pipeline->command_count,
-             pipeline->negated ? 1 : 0);
-    emitPushString(chunk, meta,
-                   pipeline->command_count > 0 && pipeline->commands[0] ? pipeline->commands[0]->line : 0);
-    emitBuiltinProc(chunk, "__shell_pipeline", 1,
-                    pipeline->command_count > 0 && pipeline->commands[0] ? pipeline->commands[0]->line : 0);
+    char *meta = buildPipelineMetadata(pipeline);
+    int line = (pipeline->command_count > 0 && pipeline->commands[0]) ? pipeline->commands[0]->line : 0;
+    if (!meta) {
+        emitPushString(chunk, "stages=0;negated=0;merge=", line);
+    } else {
+        emitPushString(chunk, meta, line);
+        free(meta);
+    }
+    emitBuiltinProc(chunk, "__shell_pipeline", 1, line);
     for (size_t i = 0; i < pipeline->command_count; ++i) {
         bool stage_background = runs_in_background && (i + 1 == pipeline->command_count);
         compileCommand(chunk, pipeline->commands[i], stage_background);

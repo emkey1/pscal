@@ -311,18 +311,29 @@ ShellPipeline *shellCreatePipeline(void) {
     pipeline->command_count = 0;
     pipeline->negated = false;
     pipeline->has_explicit_negation = false;
+    pipeline->merge_stderr = NULL;
     return pipeline;
 }
 
 void shellPipelineAddCommand(ShellPipeline *pipeline, ShellCommand *command) {
     if (!pipeline || !command) return;
-    size_t new_count = pipeline->command_count + 1;
-    ShellCommand **new_items = (ShellCommand **)realloc(pipeline->commands, new_count * sizeof(ShellCommand *));
-    if (!new_items) {
+    size_t old_count = pipeline->command_count;
+    size_t new_count = old_count + 1;
+    bool *new_merge = (bool *)realloc(pipeline->merge_stderr, new_count * sizeof(bool));
+    if (!new_merge) {
         return;
     }
+    ShellCommand **new_items = (ShellCommand **)realloc(pipeline->commands, new_count * sizeof(ShellCommand *));
+    if (!new_items) {
+        // best effort: keep the resized merge array for the existing commands
+        // The next successful append will reuse it.
+        pipeline->merge_stderr = new_merge;
+        return;
+    }
+    pipeline->merge_stderr = new_merge;
     pipeline->commands = new_items;
-    pipeline->commands[pipeline->command_count] = command;
+    pipeline->commands[old_count] = command;
+    pipeline->merge_stderr[old_count] = false;
     pipeline->command_count = new_count;
 }
 
@@ -332,6 +343,7 @@ void shellFreePipeline(ShellPipeline *pipeline) {
         shellFreeCommand(pipeline->commands[i]);
     }
     free(pipeline->commands);
+    free(pipeline->merge_stderr);
     free(pipeline);
 }
 
@@ -355,6 +367,20 @@ bool shellPipelineHasExplicitNegation(const ShellPipeline *pipeline) {
         return false;
     }
     return pipeline->has_explicit_negation;
+}
+
+void shellPipelineSetMergeStderr(ShellPipeline *pipeline, size_t index, bool merge) {
+    if (!pipeline || !pipeline->merge_stderr || index >= pipeline->command_count) {
+        return;
+    }
+    pipeline->merge_stderr[index] = merge;
+}
+
+bool shellPipelineGetMergeStderr(const ShellPipeline *pipeline, size_t index) {
+    if (!pipeline || !pipeline->merge_stderr || index >= pipeline->command_count) {
+        return false;
+    }
+    return pipeline->merge_stderr[index];
 }
 
 ShellLogicalList *shellCreateLogicalList(void) {

@@ -650,9 +650,8 @@ static ShellPipeline *parsePipeline(ShellParser *parser) {
             break;
         }
         shellPipelineAddCommand(pipeline, next);
-        if (op == SHELL_TOKEN_PIPE_AMP) {
-            shellPipelineSetNegated(pipeline, true);
-            break;
+        if (op == SHELL_TOKEN_PIPE_AMP && pipeline->command_count >= 2) {
+            shellPipelineSetMergeStderr(pipeline, pipeline->command_count - 2, true);
         }
     }
 
@@ -1284,6 +1283,16 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
 
     ShellRedirection *redir = shellCreateRedirection(type, number_token.lexeme, target, number_token.line,
                                                     number_token.column);
+    if (redir && (type == SHELL_REDIRECT_DUP_INPUT || type == SHELL_REDIRECT_DUP_OUTPUT)) {
+        char *dup_copy = parserCopyWordWithoutMarkers(target);
+        const char *text = dup_copy ? dup_copy : (target && target->text ? target->text : "");
+        if (text && text[0] == '&') {
+            shellRedirectionSetDupTarget(redir, text + 1);
+        } else {
+            shellRedirectionSetDupTarget(redir, text);
+        }
+        free(dup_copy);
+    }
     return redir;
 }
 
