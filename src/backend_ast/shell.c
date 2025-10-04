@@ -1919,10 +1919,6 @@ static char *shellExpandArraySubscriptValue(const char *name,
     char *result = NULL;
     if (subscript_len == 0) {
         result = strdup("");
-    } else if (subscript_len == 1 && subscript[0] == '#') {
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%zu", count);
-        result = strdup(buffer);
     } else if (subscript_len == 1 && (subscript[0] == '*' || subscript[0] == '@')) {
         result = shellJoinArrayValues(items, count);
     } else {
@@ -1977,18 +1973,75 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
                    (isalnum((unsigned char)*cursor) || *cursor == '_')) {
                 cursor++;
             }
-            if (cursor != closing || cursor == name_start) {
+            if (cursor == name_start) {
                 return NULL;
             }
             size_t name_len = (size_t)(cursor - name_start);
-            char *value = shellLookupParameterValue(name_start, name_len);
-            if (!value) {
+            if (cursor == closing) {
+                char *value = shellLookupParameterValue(name_start, name_len);
+                if (!value) {
+                    return NULL;
+                }
+                size_t val_len = strlen(value);
+                free(value);
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%zu", val_len);
+                return strdup(buffer);
+            }
+            if (*cursor != '[') {
                 return NULL;
             }
-            size_t val_len = strlen(value);
-            free(value);
+            const char *subscript_start = cursor + 1;
+            const char *subscript_end =
+                memchr(subscript_start, ']', (size_t)(closing - subscript_start));
+            if (!subscript_end || subscript_end > closing) {
+                return NULL;
+            }
+            size_t subscript_len = (size_t)(subscript_end - subscript_start);
+            const char *after_bracket = subscript_end + 1;
+            while (after_bracket < closing &&
+                   isspace((unsigned char)*after_bracket)) {
+                after_bracket++;
+            }
+            if (after_bracket != closing) {
+                return NULL;
+            }
+            while (subscript_len > 0 &&
+                   isspace((unsigned char)subscript_start[0])) {
+                subscript_start++;
+                subscript_len--;
+            }
+            while (subscript_len > 0 &&
+                   isspace((unsigned char)subscript_start[subscript_len - 1])) {
+                subscript_len--;
+            }
+            if (subscript_len == 1 &&
+                (subscript_start[0] == '@' || subscript_start[0] == '*')) {
+                char *raw = shellLookupParameterValue(name_start, name_len);
+                if (!raw) {
+                    return NULL;
+                }
+                char **items = NULL;
+                size_t count = 0;
+                if (!shellParseArrayValues(raw, &items, &count)) {
+                    free(raw);
+                    return NULL;
+                }
+                free(raw);
+                shellFreeArrayValues(items, count);
+                char buffer[32];
+                snprintf(buffer, sizeof(buffer), "%zu", count);
+                return strdup(buffer);
+            }
+            char *element = shellExpandArraySubscriptValue(
+                name_start, name_len, subscript_start, subscript_len);
+            if (!element) {
+                return NULL;
+            }
+            size_t elem_len = strlen(element);
+            free(element);
             char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%zu", val_len);
+            snprintf(buffer, sizeof(buffer), "%zu", elem_len);
             return strdup(buffer);
         }
 
