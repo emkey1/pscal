@@ -113,7 +113,7 @@ begin
         exit;
       Ch := Source[Index];
       case Ch of
-        '"', '\', '/': OpenAIParseJsonString := OpenAIParseJsonString + Ch;
+        '"', '', '/': OpenAIParseJsonString := OpenAIParseJsonString + Ch;
         'b': OpenAIParseJsonString := OpenAIParseJsonString + #8;
         'f': OpenAIParseJsonString := OpenAIParseJsonString + #12;
         'n': OpenAIParseJsonString := OpenAIParseJsonString + #10;
