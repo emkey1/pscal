@@ -4818,6 +4818,64 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellEval(VM *vm, int arg_count, Value *args) {
+    if (arg_count == 0) {
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    size_t total_len = 0;
+    for (int i = 0; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val) {
+            runtimeError(vm, "eval: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        total_len += strlen(args[i].s_val);
+        if (i + 1 < arg_count) {
+            total_len += 1; // Space separator.
+        }
+    }
+
+    char *script = (char *)malloc(total_len + 1);
+    if (!script) {
+        runtimeError(vm, "eval: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    char *cursor = script;
+    for (int i = 0; i < arg_count; ++i) {
+        size_t len = strlen(args[i].s_val);
+        memcpy(cursor, args[i].s_val, len);
+        cursor += len;
+        if (i + 1 < arg_count) {
+            *cursor++ = ' ';
+        }
+    }
+    *cursor = '\0';
+
+    ShellRunOptions opts = {0};
+    opts.no_cache = 1;
+    opts.quiet = true;
+    const char *frontend_path = shellRuntimeGetArg0();
+    opts.frontend_path = frontend_path ? frontend_path : "exsh";
+
+    bool exit_requested = false;
+    int status = shellRunSource(script, "<eval>", &opts, &exit_requested);
+    free(script);
+
+    if (exit_requested) {
+        gShellExitRequested = true;
+        if (vm) {
+            vm->exit_requested = true;
+        }
+    }
+
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
 Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     int code = 0;
     if (arg_count >= 1 && IS_INTLIKE(args[0])) {
