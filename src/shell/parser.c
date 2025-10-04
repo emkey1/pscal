@@ -1,44 +1,102 @@
 #include "shell/parser.h"
 #include "core/utils.h"
+#include "shell/quote_markers.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#define RULE_MASK_COMMAND_START (SHELL_LEXER_RULE_1 | SHELL_LEXER_RULE_7)
+#define RULE_MASK_COMMAND_CONTINUATION (SHELL_LEXER_RULE_7)
+#define RULE_MASK_REDIRECT_TARGET (SHELL_LEXER_RULE_2)
+#define RULE_MASK_HEREDOC_DELIMITER (SHELL_LEXER_RULE_3)
+#define RULE_MASK_CASE_PATTERN (SHELL_LEXER_RULE_4)
+#define RULE_MASK_FOR_NAME (SHELL_LEXER_RULE_5)
+#define RULE_MASK_FOR_LIST (SHELL_LEXER_RULE_6 | SHELL_LEXER_RULE_1)
+#define RULE_MASK_FUNCTION_NAME (SHELL_LEXER_RULE_8 | SHELL_LEXER_RULE_1)
+#define RULE_MASK_FUNCTION_BODY (SHELL_LEXER_RULE_9)
+
+typedef struct {
+    ShellRedirection *redir;
+    char *delimiter;
+    bool strip_tabs;
+    bool quoted;
+} ShellPendingHereDoc;
+
+typedef struct ShellPendingHereDocArray {
+    ShellPendingHereDoc *items;
+    size_t count;
+    size_t capacity;
+} ShellPendingHereDocArray;
+
+static void pendingHereDocArrayInit(ShellPendingHereDocArray *array);
+static void pendingHereDocArrayFree(ShellPendingHereDocArray *array);
+static void pendingHereDocArrayPush(ShellPendingHereDocArray *array, ShellRedirection *redir,
+                                    const char *delimiter, bool strip_tabs, bool quoted);
+
+static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask);
 static void shellParserAdvance(ShellParser *parser);
+static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
 static bool shellParserCheck(const ShellParser *parser, ShellTokenType type);
 static bool shellParserMatch(ShellParser *parser, ShellTokenType type);
-static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
 static void shellParserSynchronize(ShellParser *parser);
-static ShellCommand *parseCommand(ShellParser *parser);
+static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
+static void parserReclassifyCurrentToken(ShellParser *parser, unsigned int mask);
+
+static bool parserConsumePendingHereDocs(ShellParser *parser);
+static char *parserCopyWordWithoutMarkers(const ShellWord *word);
+
+static bool parseCompleteCommands(ShellParser *parser, ShellProgram *program);
+static bool parseCompleteCommand(ShellParser *parser, ShellProgram *program);
+static bool parseList(ShellParser *parser, ShellProgram *program);
 static ShellCommand *parseAndOr(ShellParser *parser);
 static ShellPipeline *parsePipeline(ShellParser *parser);
-static ShellCommand *parsePrimary(ShellParser *parser);
+static ShellCommand *parsePipelineCommand(ShellParser *parser);
+static ShellCommand *parseCommand(ShellParser *parser);
 static ShellCommand *parseSimpleCommand(ShellParser *parser);
-static ShellCommand *parseIfCommand(ShellParser *parser);
-static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until);
-static ShellCommand *parseForCommand(ShellParser *parser);
-static ShellCommand *parseCaseCommand(ShellParser *parser);
-static ShellCommand *parseFunctionCommand(ShellParser *parser);
-static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
-                                     ShellTokenType terminator2, ShellTokenType terminator3);
-static ShellProgram *parseBraceBody(ShellParser *parser);
-static ShellWord *parseWordToken(ShellParser *parser, const char *context);
+static ShellCommand *parseCompoundCommand(ShellParser *parser);
+static ShellCommand *parseBraceGroup(ShellParser *parser);
+static ShellCommand *parseSubshell(ShellParser *parser);
+static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType terminator1,
+                                           ShellTokenType terminator2, ShellTokenType terminator3);
+static ShellCommand *parseIfClause(ShellParser *parser);
+static ShellCommand *parseWhileClause(ShellParser *parser, bool is_until);
+static ShellCommand *parseForClause(ShellParser *parser);
+static ShellCommand *parseCaseClause(ShellParser *parser);
+static ShellCommand *parseFunctionDefinition(ShellParser *parser);
+static ShellCommand *parseFunctionDefinitionFromName(ShellParser *parser);
+static bool parserIsFunctionDefinitionStart(ShellParser *parser);
+static void parseLinebreak(ShellParser *parser);
+static bool tokenStartsCommand(const ShellToken *token);
+
+static ShellWord *parseWordToken(ShellParser *parser, const char *context_message);
+static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_out);
+
 static void populateWordExpansions(ShellWord *word);
-static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command);
-static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command);
+static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span,
+                                           char **out_command);
+static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span,
+                                             char **out_command);
 static char *normalizeDollarCommand(const char *command, size_t len);
 static char *normalizeBacktickCommand(const char *command, size_t len);
-static void parserErrorAt(ShellParser *parser, const ShellToken *token, const char *message);
 
 ShellProgram *shellParseString(const char *source, ShellParser *parser) {
     if (!parser) {
         return NULL;
     }
+
     memset(parser, 0, sizeof(*parser));
     shellInitLexer(&parser->lexer, source);
-    parser->current.lexeme = NULL;
-    parser->previous.lexeme = NULL;
+    parser->had_error = false;
+    parser->panic_mode = false;
+    parser->next_rule_mask = RULE_MASK_COMMAND_START;
+    parser->pending_here_docs = (ShellPendingHereDocArray *)calloc(1, sizeof(ShellPendingHereDocArray));
+    if (!parser->pending_here_docs) {
+        return NULL;
+    }
+    pendingHereDocArrayInit(parser->pending_here_docs);
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
 
     ShellProgram *program = shellCreateProgram();
@@ -46,29 +104,10 @@ ShellProgram *shellParseString(const char *source, ShellParser *parser) {
         return NULL;
     }
 
-    while (!parser->had_error && parser->current.type != SHELL_TOKEN_EOF) {
-        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-            continue;
-        }
-        ShellCommand *command = parseCommand(parser);
-        if (command) {
-            shellProgramAddCommand(program, command);
-        }
-        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-                shellParserAdvance(parser);
-            }
-        } else if (parser->current.type != SHELL_TOKEN_EOF) {
-            // Allow implicit separators before EOF or reserved words like fi/done
-            if (parser->current.type == SHELL_TOKEN_FI || parser->current.type == SHELL_TOKEN_DONE ||
-                parser->current.type == SHELL_TOKEN_ESAC || parser->current.type == SHELL_TOKEN_ELSE ||
-                parser->current.type == SHELL_TOKEN_ELIF) {
-                continue;
-            }
-            parserErrorAt(parser, &parser->current, "Expected command separator");
-            shellParserSynchronize(parser);
+    if (!parseCompleteCommands(parser, program)) {
+        if (parser->had_error) {
+            shellFreeProgram(program);
+            program = NULL;
         }
     }
 
@@ -81,22 +120,120 @@ void shellParserFree(ShellParser *parser) {
     }
     shellFreeToken(&parser->current);
     shellFreeToken(&parser->previous);
+    if (parser->pending_here_docs) {
+        pendingHereDocArrayFree(parser->pending_here_docs);
+        free(parser->pending_here_docs);
+        parser->pending_here_docs = NULL;
+    }
+}
+
+static void pendingHereDocArrayInit(ShellPendingHereDocArray *array) {
+    if (!array) {
+        return;
+    }
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static void pendingHereDocArrayFree(ShellPendingHereDocArray *array) {
+    if (!array) {
+        return;
+    }
+    for (size_t i = 0; i < array->count; ++i) {
+        free(array->items[i].delimiter);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static void pendingHereDocArrayPush(ShellPendingHereDocArray *array, ShellRedirection *redir,
+                                    const char *delimiter, bool strip_tabs, bool quoted) {
+    if (!array || !redir || !delimiter) {
+        return;
+    }
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        ShellPendingHereDoc *new_items =
+            (ShellPendingHereDoc *)realloc(array->items, new_capacity * sizeof(ShellPendingHereDoc));
+        if (!new_items) {
+            return;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    ShellPendingHereDoc *entry = &array->items[array->count++];
+    entry->redir = redir;
+    entry->delimiter = strdup(delimiter);
+    entry->strip_tabs = strip_tabs;
+    entry->quoted = quoted;
+}
+
+static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask) {
+    if (!parser) {
+        return;
+    }
+    parser->next_rule_mask = mask;
+}
+
+static void applyLexicalRules(ShellToken *token) {
+    if (!token) {
+        return;
+    }
+    unsigned int mask = token->rule_mask;
+    bool reserved_allowed = (mask & SHELL_LEXER_RULE_1) != 0;
+    bool treat_as_assignment = (mask & SHELL_LEXER_RULE_7) != 0;
+    bool treat_as_for_name = (mask & SHELL_LEXER_RULE_5) != 0;
+    bool treat_as_function_name = (mask & SHELL_LEXER_RULE_8) != 0;
+    bool force_word_context = (mask & (SHELL_LEXER_RULE_2 | SHELL_LEXER_RULE_3 | SHELL_LEXER_RULE_4 |
+                                      SHELL_LEXER_RULE_9)) != 0;
+
+    if (force_word_context && token->reserved_candidate) {
+        token->type = SHELL_TOKEN_WORD;
+    } else if (token->reserved_candidate) {
+        token->type = reserved_allowed ? token->reserved_type : SHELL_TOKEN_WORD;
+    }
+
+    if (!treat_as_assignment && token->type == SHELL_TOKEN_ASSIGNMENT_WORD && !token->assignment_candidate) {
+        token->type = SHELL_TOKEN_WORD;
+    }
+    if (treat_as_assignment && token->assignment_candidate) {
+        token->type = SHELL_TOKEN_ASSIGNMENT_WORD;
+    }
+
+    if ((treat_as_for_name || treat_as_function_name) && token->name_candidate) {
+        token->type = SHELL_TOKEN_NAME;
+    }
+
+    if ((mask & SHELL_LEXER_RULE_6) != 0 && token->reserved_candidate) {
+        token->type = token->reserved_type;
+    }
 }
 
 static void shellParserAdvance(ShellParser *parser) {
+    if (!parser) {
+        return;
+    }
     shellFreeToken(&parser->previous);
     parser->previous = parser->current;
-    // TODO: Incorporate lexer rule-mask metadata and reserved-word downgrades when
-    // the parser begins consuming context-sensitive productions from Rules 1-9.
+
+    if (parser->previous.type == SHELL_TOKEN_NEWLINE) {
+        parserConsumePendingHereDocs(parser);
+    }
+
+    shellLexerSetRuleMask(&parser->lexer, parser->next_rule_mask);
     parser->current = shellNextToken(&parser->lexer);
+    applyLexicalRules(&parser->current);
 }
 
 static bool shellParserCheck(const ShellParser *parser, ShellTokenType type) {
-    return parser->current.type == type;
+    return parser && parser->current.type == type;
 }
 
 static bool shellParserMatch(ShellParser *parser, ShellTokenType type) {
-    if (!shellParserCheck(parser, type)) {
+    if (!parser || !shellParserCheck(parser, type)) {
         return false;
     }
     shellParserAdvance(parser);
@@ -109,12 +246,16 @@ static void parserErrorAt(ShellParser *parser, const ShellToken *token, const ch
     }
     int line = token ? token->line : parser->lexer.line;
     int column = token ? token->column : parser->lexer.column;
-    fprintf(stderr, "shell parse error at %d:%d: %s\n", line, column, message ? message : "error");
+    fprintf(stderr, "shell parse error at %d:%d: %s\n", line, column,
+            message ? message : "error");
     parser->had_error = true;
     parser->panic_mode = true;
 }
 
 static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message) {
+    if (!parser) {
+        return;
+    }
     if (parser->current.type == type) {
         shellParserAdvance(parser);
         return;
@@ -123,6 +264,9 @@ static void shellParserConsume(ShellParser *parser, ShellTokenType type, const c
 }
 
 static void shellParserSynchronize(ShellParser *parser) {
+    if (!parser) {
+        return;
+    }
     while (parser->current.type != SHELL_TOKEN_EOF) {
         if (parser->previous.type == SHELL_TOKEN_SEMICOLON || parser->previous.type == SHELL_TOKEN_NEWLINE) {
             parser->panic_mode = false;
@@ -139,43 +283,295 @@ static void shellParserSynchronize(ShellParser *parser) {
             case SHELL_TOKEN_UNTIL:
             case SHELL_TOKEN_DO:
             case SHELL_TOKEN_DONE:
+            case SHELL_TOKEN_CASE:
+            case SHELL_TOKEN_ESAC:
                 parser->panic_mode = false;
                 return;
             default:
                 break;
         }
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
     }
 }
 
-static ShellCommand *parseCommand(ShellParser *parser) {
-    ShellCommand *command = parseAndOr(parser);
-    if (!command) {
+static void parserReclassifyCurrentToken(ShellParser *parser, unsigned int mask) {
+    if (!parser) {
+        return;
+    }
+    parser->current.rule_mask = mask;
+    applyLexicalRules(&parser->current);
+}
+
+static bool parserConsumePendingHereDocs(ShellParser *parser) {
+    if (!parser || !parser->pending_here_docs || parser->pending_here_docs->count == 0) {
+        return true;
+    }
+    ShellPendingHereDocArray *array = parser->pending_here_docs;
+    ShellLexer *lexer = &parser->lexer;
+    const char *src = lexer->src;
+    size_t length = lexer->length;
+
+    for (size_t idx = 0; idx < array->count; ++idx) {
+        ShellPendingHereDoc *pending = &array->items[idx];
+        size_t buffer_capacity = 0;
+        size_t buffer_length = 0;
+        char *buffer = NULL;
+        bool done = false;
+        while (!done) {
+            if (lexer->pos >= length) {
+                parserErrorAt(parser, NULL, "Unexpected EOF in here-document");
+                free(buffer);
+                return false;
+            }
+            size_t line_start = lexer->pos;
+            int line_number = lexer->line;
+            int column_number = lexer->column;
+            while (lexer->pos < length && src[lexer->pos] != '\n') {
+                lexer->pos++;
+                lexer->column++;
+            }
+            size_t raw_len = lexer->pos - line_start;
+            const char *raw_text = src + line_start;
+
+            char *line = (char *)malloc(raw_len + 1);
+            if (!line) {
+                free(buffer);
+                return false;
+            }
+            memcpy(line, raw_text, raw_len);
+            line[raw_len] = '\0';
+
+            if (lexer->pos < length && src[lexer->pos] == '\n') {
+                lexer->pos++;
+                lexer->line++;
+                lexer->column = 1;
+            }
+
+            const char *comparison = line;
+            if (pending->strip_tabs) {
+                while (*comparison == '\t') {
+                    comparison++;
+                }
+            }
+
+            bool matches = strcmp(comparison, pending->delimiter) == 0;
+            if (matches) {
+                free(line);
+                done = true;
+                break;
+            }
+
+            const char *body_line = line;
+            if (pending->strip_tabs) {
+                while (*body_line == '\t') {
+                    body_line++;
+                }
+            }
+
+            size_t body_len = strlen(body_line);
+            if (buffer_length + body_len + 1 > buffer_capacity) {
+                size_t new_capacity = buffer_capacity ? buffer_capacity * 2 : 64;
+                while (new_capacity < buffer_length + body_len + 1) {
+                    new_capacity *= 2;
+                }
+                char *tmp = (char *)realloc(buffer, new_capacity);
+                if (!tmp) {
+                    free(line);
+                    free(buffer);
+                    return false;
+                }
+                buffer = tmp;
+                buffer_capacity = new_capacity;
+            }
+            memcpy(buffer + buffer_length, body_line, body_len);
+            buffer_length += body_len;
+            buffer[buffer_length++] = '\n';
+            free(line);
+            (void)line_number;
+            (void)column_number;
+        }
+        if (!pending->redir) {
+            free(buffer);
+            continue;
+        }
+        if (!buffer) {
+            buffer = strdup("");
+        } else {
+            if (buffer_length == 0) {
+                char *tmp = (char *)realloc(buffer, 1);
+                if (tmp) {
+                    buffer = tmp;
+                }
+            } else {
+                char *tmp = (char *)realloc(buffer, buffer_length + 1);
+                if (tmp) {
+                    buffer = tmp;
+                }
+                buffer[buffer_length] = '\0';
+            }
+        }
+        shellRedirectionSetHereDocument(pending->redir, buffer ? buffer : "");
+        free(buffer);
+        free(pending->delimiter);
+        pending->delimiter = NULL;
+    }
+
+    array->count = 0;
+    return true;
+}
+
+static char *parserCopyWordWithoutMarkers(const ShellWord *word) {
+    if (!word || !word->text) {
         return NULL;
     }
-    if (shellParserMatch(parser, SHELL_TOKEN_AMPERSAND)) {
-        command->exec.runs_in_background = true;
-        command->exec.is_async_parent = true;
+    size_t len = strlen(word->text);
+    char *result = (char *)malloc(len + 1);
+    if (!result) {
+        return NULL;
     }
-    return command;
+    size_t out = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = word->text[i];
+        if (c == SHELL_QUOTE_MARK_SINGLE || c == SHELL_QUOTE_MARK_DOUBLE) {
+            continue;
+        }
+        result[out++] = c;
+    }
+    result[out] = '\0';
+    char *shrunk = (char *)realloc(result, out + 1);
+    return shrunk ? shrunk : result;
+}
+
+static void parseLinebreak(ShellParser *parser) {
+    if (!parser) {
+        return;
+    }
+    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+    }
+}
+
+static bool tokenStartsCommand(const ShellToken *token) {
+    if (!token) {
+        return false;
+    }
+    switch (token->type) {
+        case SHELL_TOKEN_WORD:
+        case SHELL_TOKEN_ASSIGNMENT_WORD:
+        case SHELL_TOKEN_NAME:
+        case SHELL_TOKEN_PARAMETER:
+        case SHELL_TOKEN_IO_NUMBER:
+        case SHELL_TOKEN_LPAREN:
+        case SHELL_TOKEN_LBRACE:
+        case SHELL_TOKEN_BANG:
+        case SHELL_TOKEN_FUNCTION:
+        case SHELL_TOKEN_IF:
+        case SHELL_TOKEN_WHILE:
+        case SHELL_TOKEN_UNTIL:
+        case SHELL_TOKEN_FOR:
+        case SHELL_TOKEN_CASE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool parseCompleteCommands(ShellParser *parser, ShellProgram *program) {
+    if (!parser || !program) {
+        return false;
+    }
+    parseLinebreak(parser);
+    while (!parser->had_error && parser->current.type != SHELL_TOKEN_EOF) {
+        if (!parseCompleteCommand(parser, program)) {
+            if (parser->panic_mode) {
+                shellParserSynchronize(parser);
+            } else {
+                return false;
+            }
+        }
+        parseLinebreak(parser);
+    }
+    return !parser->had_error;
+}
+
+static bool parseCompleteCommand(ShellParser *parser, ShellProgram *program) {
+    if (!parser || !program) {
+        return false;
+    }
+    if (!parseList(parser, program)) {
+        return false;
+    }
+
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_AMPERSAND) {
+        ShellTokenType sep = parser->current.type;
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        if (sep == SHELL_TOKEN_AMPERSAND && program->commands.count > 0) {
+            ShellCommand *cmd = program->commands.items[program->commands.count - 1];
+            if (cmd) {
+                cmd->exec.runs_in_background = true;
+                cmd->exec.is_async_parent = true;
+            }
+        }
+        parseLinebreak(parser);
+    }
+    return true;
+}
+
+static bool parseList(ShellParser *parser, ShellProgram *program) {
+    if (!parser || !program) {
+        return false;
+    }
+    while (true) {
+        ShellCommand *command = parseAndOr(parser);
+        if (!command) {
+            return false;
+        }
+        shellProgramAddCommand(program, command);
+
+        if (parser->current.type == SHELL_TOKEN_AMPERSAND) {
+            command->exec.runs_in_background = true;
+            command->exec.is_async_parent = true;
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+            shellParserAdvance(parser);
+            parseLinebreak(parser);
+            if (!tokenStartsCommand(&parser->current)) {
+                break;
+            }
+            continue;
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+            shellParserAdvance(parser);
+            parseLinebreak(parser);
+            if (!tokenStartsCommand(&parser->current)) {
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+    return true;
 }
 
 static ShellCommand *parseAndOr(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
     ShellPipeline *first = parsePipeline(parser);
     if (!first) {
         return NULL;
     }
 
     ShellLogicalList *logical = NULL;
-    while (true) {
-        ShellLogicalConnector connector;
-        if (shellParserMatch(parser, SHELL_TOKEN_AND_AND)) {
-            connector = SHELL_LOGICAL_AND;
-        } else if (shellParserMatch(parser, SHELL_TOKEN_OR_OR)) {
-            connector = SHELL_LOGICAL_OR;
-        } else {
-            break;
-        }
+    while (parser->current.type == SHELL_TOKEN_AND_AND || parser->current.type == SHELL_TOKEN_OR_OR) {
+        ShellLogicalConnector connector =
+            (parser->current.type == SHELL_TOKEN_AND_AND) ? SHELL_LOGICAL_AND : SHELL_LOGICAL_OR;
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parseLinebreak(parser);
         ShellPipeline *next = parsePipeline(parser);
         if (!next) {
             break;
@@ -190,137 +586,124 @@ static ShellCommand *parseAndOr(ShellParser *parser) {
     if (logical) {
         ShellCommand *cmd = shellCreateLogicalCommand(logical);
         if (cmd) {
-            cmd->line = first && first->command_count > 0 && first->commands[0]
-                            ? first->commands[0]->line
-                            : parser->current.line;
-            cmd->column = first && first->command_count > 0 && first->commands[0]
-                              ? first->commands[0]->column
-                              : parser->current.column;
+            if (first && first->command_count > 0 && first->commands[0]) {
+                cmd->line = first->commands[0]->line;
+                cmd->column = first->commands[0]->column;
+            } else {
+                cmd->line = parser->current.line;
+                cmd->column = parser->current.column;
+            }
         }
         return cmd;
     }
 
     ShellCommand *cmd = shellCreatePipelineCommand(first);
-    if (cmd) {
-        if (first && first->command_count > 0 && first->commands[0]) {
+    if (cmd && first) {
+        if (first->command_count > 0 && first->commands[0]) {
             cmd->line = first->commands[0]->line;
             cmd->column = first->commands[0]->column;
         } else {
             cmd->line = parser->current.line;
             cmd->column = parser->current.column;
         }
-        if (first && first->command_count > 0) {
-            for (size_t i = 0; i < first->command_count; ++i) {
-                first->commands[i]->exec.pipeline_index = (int)i;
-                first->commands[i]->exec.is_pipeline_head = (i == 0);
-                first->commands[i]->exec.is_pipeline_tail = (i + 1 == first->command_count);
-            }
+        for (size_t i = 0; i < first->command_count; ++i) {
+            ShellCommand *member = first->commands[i];
+            member->exec.pipeline_index = (int)i;
+            member->exec.is_pipeline_head = (i == 0);
+            member->exec.is_pipeline_tail = (i + 1 == first->command_count);
         }
     }
     return cmd;
 }
 
 static ShellPipeline *parsePipeline(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
     bool negate = false;
-    while (shellParserMatch(parser, SHELL_TOKEN_BANG)) {
+    while (parser->current.type == SHELL_TOKEN_BANG) {
         negate = !negate;
-        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parseLinebreak(parser);
     }
 
     ShellPipeline *pipeline = shellCreatePipeline();
     if (!pipeline) {
         return NULL;
     }
-
     shellPipelineSetNegated(pipeline, negate);
 
-    ShellCommand *command = parsePrimary(parser);
+    ShellCommand *command = parsePipelineCommand(parser);
     if (!command) {
         return pipeline;
     }
     shellPipelineAddCommand(pipeline, command);
 
-    while (true) {
-        if (shellParserMatch(parser, SHELL_TOKEN_PIPE)) {
-            ShellCommand *next = parsePrimary(parser);
-            if (!next) {
-                break;
-            }
-            shellPipelineAddCommand(pipeline, next);
-            continue;
-        }
-        if (shellParserMatch(parser, SHELL_TOKEN_PIPE_AMP)) {
-            pipeline->negated = true;
-            ShellCommand *next = parsePrimary(parser);
-            if (next) {
-                shellPipelineAddCommand(pipeline, next);
-            }
+    while (parser->current.type == SHELL_TOKEN_PIPE || parser->current.type == SHELL_TOKEN_PIPE_AMP) {
+        ShellTokenType op = parser->current.type;
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parseLinebreak(parser);
+        ShellCommand *next = parsePipelineCommand(parser);
+        if (!next) {
             break;
         }
-        break;
+        shellPipelineAddCommand(pipeline, next);
+        if (op == SHELL_TOKEN_PIPE_AMP) {
+            shellPipelineSetNegated(pipeline, true);
+            break;
+        }
     }
 
     for (size_t i = 0; i < pipeline->command_count; ++i) {
-        pipeline->commands[i]->exec.pipeline_index = (int)i;
-        pipeline->commands[i]->exec.is_pipeline_head = (i == 0);
-        pipeline->commands[i]->exec.is_pipeline_tail = (i + 1 == pipeline->command_count);
+        ShellCommand *member = pipeline->commands[i];
+        member->exec.pipeline_index = (int)i;
+        member->exec.is_pipeline_head = (i == 0);
+        member->exec.is_pipeline_tail = (i + 1 == pipeline->command_count);
     }
+
     return pipeline;
 }
 
-static ShellProgram *parseSubshellBody(ShellParser *parser) {
-    ShellProgram *body = shellCreateProgram();
-    while (!parser->had_error && parser->current.type != SHELL_TOKEN_RPAREN && parser->current.type != SHELL_TOKEN_EOF) {
-        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-            continue;
-        }
-        ShellCommand *command = parseCommand(parser);
-        if (command) {
-            shellProgramAddCommand(body, command);
-        }
-        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
+static ShellCommand *parsePipelineCommand(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
     }
-    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
-    return body;
+    ShellCommand *command = parseCommand(parser);
+    if (command && parser->pending_here_docs && parser->pending_here_docs->count > 0) {
+        parserConsumePendingHereDocs(parser);
+    }
+    return command;
 }
 
-static ShellCommand *parsePrimary(ShellParser *parser) {
+static ShellCommand *parseCommand(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
     switch (parser->current.type) {
-        case SHELL_TOKEN_LPAREN: {
-            int line = parser->current.line;
-            int column = parser->current.column;
-            shellParserAdvance(parser);
-            ShellProgram *body = parseSubshellBody(parser);
-            ShellCommand *cmd = shellCreateSubshellCommand(body);
-            if (cmd) {
-                cmd->line = line;
-                cmd->column = column;
-            }
-            return cmd;
-        }
         case SHELL_TOKEN_FUNCTION:
-            return parseFunctionCommand(parser);
+            return parseFunctionDefinition(parser);
+        case SHELL_TOKEN_LBRACE:
+        case SHELL_TOKEN_LPAREN:
         case SHELL_TOKEN_IF:
-            return parseIfCommand(parser);
-        case SHELL_TOKEN_WHILE:
-            return parseLoopCommand(parser, false);
-        case SHELL_TOKEN_UNTIL:
-            return parseLoopCommand(parser, true);
         case SHELL_TOKEN_FOR:
-            return parseForCommand(parser);
+        case SHELL_TOKEN_WHILE:
+        case SHELL_TOKEN_UNTIL:
         case SHELL_TOKEN_CASE:
-            return parseCaseCommand(parser);
+            return parseCompoundCommand(parser);
         default:
+            if (parserIsFunctionDefinitionStart(parser)) {
+                return parseFunctionDefinitionFromName(parser);
+            }
             return parseSimpleCommand(parser);
     }
 }
 
 static ShellCommand *parseSimpleCommand(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
     ShellCommand *command = shellCreateSimpleCommand();
     if (!command) {
         return NULL;
@@ -328,460 +711,271 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
     command->line = parser->current.line;
     command->column = parser->current.column;
 
-    bool saw_word = false;
+    bool seen_word = false;
     while (!parser->had_error) {
-        if (!saw_word && parser->current.type == SHELL_TOKEN_WORD) {
-            const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-            bool single_quoted = parser->current.single_quoted;
-            bool double_quoted = parser->current.double_quoted;
-            bool has_param = parser->current.contains_parameter_expansion;
-            bool has_arith = parser->current.contains_arithmetic_expansion;
-            int word_line = parser->current.line;
-            int word_column = parser->current.column;
-            shellParserAdvance(parser);
-            if (parser->current.type == SHELL_TOKEN_LPAREN) {
-                char *name_copy = parser->previous.lexeme ? strdup(parser->previous.lexeme) : NULL;
-                shellParserAdvance(parser);
-                shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
-                while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-                    shellParserAdvance(parser);
-                }
-                shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
-                ShellProgram *body = parseBraceBody(parser);
-                shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
-                const char *function_name = name_copy ? name_copy : "";
-                ShellFunction *function = shellCreateFunction(function_name, "", body);
-                ShellCommand *func_cmd = shellCreateFunctionCommand(function);
-                if (func_cmd) {
-                    func_cmd->line = word_line;
-                    func_cmd->column = word_column;
-                }
-                free(name_copy);
-                return func_cmd;
-            }
-            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
-                                             has_param, has_arith, word_line, word_column);
-            populateWordExpansions(word);
-            shellCommandAddWord(command, word);
-            saw_word = true;
-            continue;
-        }
-        switch (parser->current.type) {
-            case SHELL_TOKEN_WORD:
-            case SHELL_TOKEN_ASSIGNMENT:
-            case SHELL_TOKEN_PARAMETER: {
-                ShellTokenType type = parser->current.type;
-                const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-                bool single_quoted = parser->current.single_quoted;
-                bool double_quoted = parser->current.double_quoted;
-                bool has_param = parser->current.contains_parameter_expansion;
-                bool has_arith = parser->current.contains_arithmetic_expansion;
-                int line = parser->current.line;
-                int column = parser->current.column;
-                shellParserAdvance(parser);
-                ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
-                                                  has_param, has_arith, line, column);
-                if (type == SHELL_TOKEN_ASSIGNMENT && word) {
-                    word->is_assignment = true;
-                }
-                if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
-                    shellWordAddExpansion(word, lexeme + 1);
-                }
+        if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD ||
+            parser->current.type == SHELL_TOKEN_NAME || parser->current.type == SHELL_TOKEN_PARAMETER) {
+            ShellWord *word = parseWordToken(parser, NULL);
+            if (word) {
                 populateWordExpansions(word);
                 shellCommandAddWord(command, word);
-                saw_word = true;
-                continue;
+                seen_word = true;
             }
-            case SHELL_TOKEN_IO_NUMBER: {
-                int line = parser->current.line;
-                int column = parser->current.column;
-                char *io_number = parser->current.lexeme ? strdup(parser->current.lexeme) : NULL;
-                shellParserAdvance(parser);
-                ShellTokenType redir_type = parser->current.type;
-                shellParserAdvance(parser);
-                ShellRedirectionType type;
-                switch (redir_type) {
-                    case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
-                    case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
-                    case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
-                    case SHELL_TOKEN_LT_LT:
-                    case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
-                    case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
-                    case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
-                    case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
-                    default:
-                        parserErrorAt(parser, &parser->current, "Expected redirection operator");
-                        free(io_number);
-                        return command;
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+            continue;
+        }
+
+        bool strip_tabs = false;
+        ShellRedirection *redir = parseRedirection(parser, &strip_tabs);
+        if (redir) {
+            shellCommandAddRedirection(command, redir);
+            if (redir->type == SHELL_REDIRECT_HEREDOC && parser->pending_here_docs) {
+                ShellWord *target = shellRedirectionGetWordTarget(redir);
+                char *delimiter = parserCopyWordWithoutMarkers(target);
+                if (!delimiter) {
+                    delimiter = strdup("");
                 }
-                ShellWord *target = NULL;
-                if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
-                    parser->current.type == SHELL_TOKEN_PARAMETER) {
-                    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-                    bool single_quoted = parser->current.single_quoted;
-                    bool double_quoted = parser->current.double_quoted;
-                    bool has_param = parser->current.contains_parameter_expansion;
-                    bool has_arith = parser->current.contains_arithmetic_expansion;
-                    int target_line = parser->current.line;
-                    int target_column = parser->current.column;
-                    shellParserAdvance(parser);
-                    target = shellCreateWord(lexeme, single_quoted, double_quoted,
-                                             has_param, has_arith, target_line, target_column);
-                    populateWordExpansions(target);
-                } else {
-                    parserErrorAt(parser, &parser->current, "Expected redirection target");
-                }
-                ShellRedirection *redir = shellCreateRedirection(type, io_number, target, line, column);
-                shellCommandAddRedirection(command, redir);
-                free(io_number);
-                continue;
+                bool quoted = target && (target->single_quoted || target->double_quoted);
+                pendingHereDocArrayPush(parser->pending_here_docs, redir, delimiter ? delimiter : "",
+                                        strip_tabs, quoted);
+                free(delimiter);
             }
-            case SHELL_TOKEN_LT:
-            case SHELL_TOKEN_GT:
-            case SHELL_TOKEN_GT_GT:
-            case SHELL_TOKEN_LT_LT:
-            case SHELL_TOKEN_LT_AND:
-            case SHELL_TOKEN_GT_AND:
-            case SHELL_TOKEN_CLOBBER: {
-                ShellTokenType redirTokType = parser->current.type;
-                int redir_line = parser->current.line;
-                int redir_column = parser->current.column;
-                shellParserAdvance(parser);
-                ShellRedirectionType type;
-                switch (redirTokType) {
-                    case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
-                    case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
-                    case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
-                    case SHELL_TOKEN_LT_LT:
-                    case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
-                    case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
-                    case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
-                    case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
-                    default: type = SHELL_REDIRECT_OUTPUT; break;
-                }
-                ShellWord *target = NULL;
-                if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
-                    parser->current.type == SHELL_TOKEN_PARAMETER) {
-                    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-                    bool single_quoted = parser->current.single_quoted;
-                    bool double_quoted = parser->current.double_quoted;
-                    bool has_param = parser->current.contains_parameter_expansion;
-                    bool has_arith = parser->current.contains_arithmetic_expansion;
-                    int target_line = parser->current.line;
-                    int target_column = parser->current.column;
-                    shellParserAdvance(parser);
-                    target = shellCreateWord(lexeme, single_quoted, double_quoted,
-                                             has_param, has_arith, target_line, target_column);
-                    populateWordExpansions(target);
-                } else {
-                    parserErrorAt(parser, &parser->current, "Expected redirection target");
-                }
-                ShellRedirection *redir = shellCreateRedirection(type, NULL, target, redir_line, redir_column);
-                shellCommandAddRedirection(command, redir);
-                continue;
-            }
-            default:
-                break;
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+            continue;
         }
         break;
     }
 
-    if (!saw_word && command->data.simple.words.count == 0 && command->data.simple.redirections.count == 0) {
-        parserErrorAt(parser, &parser->current, "Expected command word");
+    if (!seen_word && command->data.simple.words.count == 0 && command->data.simple.redirections.count == 0) {
+        shellFreeCommand(command);
+        parserErrorAt(parser, &parser->current, "Expected command");
+        return NULL;
     }
     return command;
 }
 
-static ShellProgram *parseBlockUntil(ShellParser *parser, ShellTokenType terminator1,
-                                     ShellTokenType terminator2, ShellTokenType terminator3) {
-    ShellProgram *block = shellCreateProgram();
-    while (!parser->had_error && parser->current.type != terminator1 &&
-           parser->current.type != terminator2 && parser->current.type != terminator3 &&
-           parser->current.type != SHELL_TOKEN_EOF) {
-        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-            continue;
-        }
-        ShellCommand *command = parseCommand(parser);
-        if (command) {
-            shellProgramAddCommand(block, command);
-        }
-        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
-    }
-    return block;
-}
-
-static ShellProgram *parseBraceBody(ShellParser *parser) {
-    ShellProgram *body = shellCreateProgram();
-    while (!parser->had_error && parser->current.type != SHELL_TOKEN_RBRACE &&
-           parser->current.type != SHELL_TOKEN_EOF) {
-        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-            continue;
-        }
-        ShellCommand *command = parseCommand(parser);
-        if (command) {
-            shellProgramAddCommand(body, command);
-        }
-        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
-    }
-    return body;
-}
-
-static ShellCommand *parseFunctionCommand(ShellParser *parser) {
-    int line = parser->current.line;
-    int column = parser->current.column;
-    shellParserAdvance(parser); // consume 'function'
-    if (parser->current.type != SHELL_TOKEN_WORD) {
-        parserErrorAt(parser, &parser->current, "Expected function name after 'function'");
+static ShellCommand *parseCompoundCommand(ShellParser *parser) {
+    if (!parser) {
         return NULL;
     }
-    char *name_copy = parser->current.lexeme ? strdup(parser->current.lexeme) : NULL;
-    int name_line = parser->current.line;
-    int name_column = parser->current.column;
+    ShellCommand *command = NULL;
+    switch (parser->current.type) {
+        case SHELL_TOKEN_LBRACE:
+            command = parseBraceGroup(parser);
+            break;
+        case SHELL_TOKEN_LPAREN:
+            command = parseSubshell(parser);
+            break;
+        case SHELL_TOKEN_IF:
+            command = parseIfClause(parser);
+            break;
+        case SHELL_TOKEN_WHILE:
+            command = parseWhileClause(parser, false);
+            break;
+        case SHELL_TOKEN_UNTIL:
+            command = parseWhileClause(parser, true);
+            break;
+        case SHELL_TOKEN_FOR:
+            command = parseForClause(parser);
+            break;
+        case SHELL_TOKEN_CASE:
+            command = parseCaseClause(parser);
+            break;
+        default:
+            break;
+    }
+
+    if (!command) {
+        return NULL;
+    }
+
+    while (true) {
+        bool strip_tabs = false;
+        ShellRedirection *redir = parseRedirection(parser, &strip_tabs);
+        if (!redir) {
+            break;
+        }
+        shellCommandAddRedirection(command, redir);
+        if (redir->type == SHELL_REDIRECT_HEREDOC && parser->pending_here_docs) {
+            ShellWord *target = shellRedirectionGetWordTarget(redir);
+            char *delimiter = parserCopyWordWithoutMarkers(target);
+            if (!delimiter) {
+                delimiter = strdup("");
+            }
+            bool quoted = target && (target->single_quoted || target->double_quoted);
+            pendingHereDocArrayPush(parser->pending_here_docs, redir, delimiter ? delimiter : "",
+                                    strip_tabs, quoted);
+            free(delimiter);
+        }
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+    }
+
+    return command;
+}
+
+static ShellCommand *parseBraceGroup(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
-    const char *param_meta = NULL;
-    if (parser->current.type == SHELL_TOKEN_LPAREN) {
-        shellParserAdvance(parser);
-        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
-        param_meta = "";
-        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
+    parseLinebreak(parser);
+    ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RBRACE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close brace group");
+    ShellCommand *command = shellCreateBraceGroupCommand(body);
+    if (command) {
+        command->line = line;
+        command->column = column;
     }
-    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-        shellParserAdvance(parser);
-    }
-    shellParserConsume(parser, SHELL_TOKEN_LBRACE, "Expected '{' to start function body");
-    ShellProgram *body = parseBraceBody(parser);
-    shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close function");
-    const char *function_name = name_copy ? name_copy : "";
-    ShellFunction *function = shellCreateFunction(function_name, param_meta, body);
-    ShellCommand *cmd = shellCreateFunctionCommand(function);
-    if (cmd) {
-        cmd->line = line;
-        cmd->column = column;
-    }
-    free(name_copy);
-    (void)name_line;
-    (void)name_column;
-    return cmd;
+    return command;
 }
 
-static ShellCommand *parseIfTail(ShellParser *parser);
-
-static ShellCommand *parseIfCommand(ShellParser *parser) {
+static ShellCommand *parseSubshell(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
-    shellParserAdvance(parser); // consume 'if'
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+    parseLinebreak(parser);
+    ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RPAREN, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
+    ShellCommand *command = shellCreateSubshellCommand(body);
+    if (command) {
+        command->line = line;
+        command->column = column;
+    }
+    return command;
+}
+
+static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType terminator1,
+                                           ShellTokenType terminator2, ShellTokenType terminator3) {
+    ShellProgram *program = shellCreateProgram();
+    if (!program) {
+        return NULL;
+    }
+    parseLinebreak(parser);
+    while (!parser->had_error && parser->current.type != terminator1 && parser->current.type != terminator2 &&
+           parser->current.type != terminator3 && parser->current.type != SHELL_TOKEN_EOF) {
+        if (!parseList(parser, program)) {
+            break;
+        }
+        if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_AMPERSAND) {
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+            shellParserAdvance(parser);
+            parseLinebreak(parser);
+        }
+        parseLinebreak(parser);
+    }
+    return program;
+}
+
+static ShellCommand *parseIfClause(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
     ShellPipeline *condition = parsePipeline(parser);
-    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-        shellParserAdvance(parser);
-    }
+    parseLinebreak(parser);
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
+        parseLinebreak(parser);
     }
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_THEN, "Expected 'then' after if condition");
-    ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
-    ShellProgram *else_block = NULL;
+    parseLinebreak(parser);
+    ShellProgram *then_block = parseCompoundListUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
 
-    if (shellParserMatch(parser, SHELL_TOKEN_ELIF)) {
-        ShellCommand *elif_cmd = parseIfTail(parser);
+    ShellProgram *else_block = NULL;
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    if (parser->current.type == SHELL_TOKEN_ELIF) {
+        ShellCommand *elif_cmd = parseIfClause(parser);
         else_block = shellCreateProgram();
         shellProgramAddCommand(else_block, elif_cmd);
-    } else if (shellParserMatch(parser, SHELL_TOKEN_ELSE)) {
-        else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
-        goto done;
-    } else {
-        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
-    }
-
-done:
-    ShellConditional *conditional = shellCreateConditional(condition, then_block, else_block);
-    ShellCommand *cmd = shellCreateConditionalCommand(conditional);
-    if (cmd) {
-        cmd->line = line;
-        cmd->column = column;
-    }
-    return cmd;
-}
-
-static ShellCommand *parseIfTail(ShellParser *parser) {
-    int line = parser->previous.line;
-    int column = parser->previous.column;
-    // parser currently after 'elif'
-    ShellPipeline *condition = parsePipeline(parser);
-    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+    } else if (parser->current.type == SHELL_TOKEN_ELSE) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
-    }
-    if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
-        shellParserAdvance(parser);
-    }
-    shellParserConsume(parser, SHELL_TOKEN_THEN, "Expected 'then' after elif condition");
-    ShellProgram *then_block = parseBlockUntil(parser, SHELL_TOKEN_ELIF, SHELL_TOKEN_ELSE, SHELL_TOKEN_FI);
-    ShellProgram *else_block = NULL;
-    if (shellParserMatch(parser, SHELL_TOKEN_ELIF)) {
-        ShellCommand *elif_cmd = parseIfTail(parser);
-        else_block = shellCreateProgram();
-        shellProgramAddCommand(else_block, elif_cmd);
-    } else if (shellParserMatch(parser, SHELL_TOKEN_ELSE)) {
-        else_block = parseBlockUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+        parseLinebreak(parser);
+        else_block = parseCompoundListUntil(parser, SHELL_TOKEN_FI, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     } else {
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     }
+
     ShellConditional *conditional = shellCreateConditional(condition, then_block, else_block);
-    ShellCommand *cmd = shellCreateConditionalCommand(conditional);
-    if (cmd) {
-        cmd->line = line;
-        cmd->column = column;
+    ShellCommand *command = shellCreateConditionalCommand(conditional);
+    if (command) {
+        command->line = line;
+        command->column = column;
     }
-    return cmd;
+    return command;
 }
 
-static ShellCommand *parseLoopCommand(ShellParser *parser, bool is_until) {
+static ShellCommand *parseWhileClause(ShellParser *parser, bool is_until) {
     int line = parser->current.line;
     int column = parser->current.column;
-    shellParserAdvance(parser); // consume keyword
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
     ShellPipeline *condition = parsePipeline(parser);
-    while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-        shellParserAdvance(parser);
-    }
+    parseLinebreak(parser);
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
-        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
+        parseLinebreak(parser);
     }
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' after loop condition");
-    ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parseLinebreak(parser);
+    ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close loop");
     ShellLoop *loop = shellCreateLoop(is_until, condition, body);
-    ShellCommand *cmd = shellCreateLoopCommand(loop);
-    if (cmd) {
-        cmd->line = line;
-        cmd->column = column;
+    ShellCommand *command = shellCreateLoopCommand(loop);
+    if (command) {
+        command->line = line;
+        command->column = column;
     }
-    return cmd;
+    return command;
 }
 
-static ShellCommand *parseCaseCommand(ShellParser *parser) {
+static ShellCommand *parseForClause(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
-    ShellWord *subject = parseWordToken(parser, "Expected subject after 'case'");
-    if (!subject) {
-        return NULL;
-    }
-    shellParserConsume(parser, SHELL_TOKEN_IN, "Expected 'in' after case subject");
-    while (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
-        shellParserAdvance(parser);
-    }
-    ShellCase *case_stmt = shellCreateCase(subject);
-    if (!case_stmt) {
-        shellFreeWord(subject);
-        return NULL;
-    }
-    while (!parser->had_error && parser->current.type != SHELL_TOKEN_ESAC && parser->current.type != SHELL_TOKEN_EOF) {
-        if (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
-            shellParserAdvance(parser);
-            continue;
-        }
-        if (shellParserMatch(parser, SHELL_TOKEN_LPAREN)) {
-            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-                shellParserAdvance(parser);
-            }
-        }
-        if (parser->current.type == SHELL_TOKEN_ESAC || parser->current.type == SHELL_TOKEN_EOF) {
-            break;
-        }
-        int clause_line = parser->current.line;
-        int clause_column = parser->current.column;
-        ShellCaseClause *clause = shellCreateCaseClause(clause_line, clause_column);
-        if (!clause) {
-            break;
-        }
-        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
-               parser->current.type == SHELL_TOKEN_PARAMETER) {
-            ShellWord *pattern = parseWordToken(parser, "Expected pattern in case clause");
-            if (pattern) {
-                shellCaseClauseAddPattern(clause, pattern);
-            }
-            if (!shellParserMatch(parser, SHELL_TOKEN_PIPE)) {
-                break;
-            }
-            while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-                shellParserAdvance(parser);
-            }
-        }
-        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
-            shellParserAdvance(parser);
-        }
-        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after case pattern");
-        ShellProgram *body = parseBlockUntil(parser, SHELL_TOKEN_DSEMI, SHELL_TOKEN_ESAC, SHELL_TOKEN_EOF);
-        shellCaseClauseSetBody(clause, body);
-        shellCaseAddClause(case_stmt, clause);
-        if (parser->current.type == SHELL_TOKEN_DSEMI) {
-            shellParserAdvance(parser);
-        }
-        while (parser->current.type == SHELL_TOKEN_NEWLINE || parser->current.type == SHELL_TOKEN_SEMICOLON) {
-            shellParserAdvance(parser);
-        }
-        if (parser->current.type == SHELL_TOKEN_ESAC) {
-            break;
-        }
-    }
-    shellParserConsume(parser, SHELL_TOKEN_ESAC, "Expected 'esac' to close case");
-    ShellCommand *cmd = shellCreateCaseCommand(case_stmt);
-    if (!cmd) {
-        shellFreeCase(case_stmt);
-        return NULL;
-    }
-    cmd->line = line;
-    cmd->column = column;
-    return cmd;
-}
 
-static ShellCommand *parseForCommand(ShellParser *parser) {
-    int line = parser->current.line;
-    int column = parser->current.column;
-    shellParserAdvance(parser); // consume 'for'
-    if (parser->current.type != SHELL_TOKEN_WORD && parser->current.type != SHELL_TOKEN_ASSIGNMENT) {
-        parserErrorAt(parser, &parser->current, "Expected identifier after for");
-    }
-    const char *var_lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-    int var_line = parser->current.line;
-    int var_column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_FOR_NAME);
     shellParserAdvance(parser);
-    ShellCommand *command = shellCreateSimpleCommand();
-    ShellWord *var_word = shellCreateWord(var_lexeme, false, false, false, false, var_line, var_column);
-    shellCommandAddWord(command, var_word);
+    if (parser->previous.type != SHELL_TOKEN_NAME && parser->previous.type != SHELL_TOKEN_WORD) {
+        parserErrorAt(parser, &parser->previous, "Expected name after 'for'");
+        return NULL;
+    }
+    const char *name_text = parser->previous.lexeme ? parser->previous.lexeme : "";
+    ShellWord *name_word = shellCreateWord(name_text, false, false, false, false, parser->previous.line,
+                                           parser->previous.column);
 
     ShellProgram *body = NULL;
-    if (shellParserMatch(parser, SHELL_TOKEN_IN)) {
-        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT ||
-               parser->current.type == SHELL_TOKEN_PARAMETER) {
-            const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-            bool single_quoted = parser->current.single_quoted;
-            bool double_quoted = parser->current.double_quoted;
-            bool has_param = parser->current.contains_parameter_expansion;
-            bool has_arith = parser->current.contains_arithmetic_expansion;
-            int word_line = parser->current.line;
-            int word_column = parser->current.column;
-            ShellTokenType token_type = parser->current.type;
-            shellParserAdvance(parser);
-            ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted,
-                                              has_param, has_arith, word_line, word_column);
-            if (token_type == SHELL_TOKEN_ASSIGNMENT && word) {
-                word->is_assignment = true;
+    ShellCommand *iterator_command = shellCreateSimpleCommand();
+    if (name_word && iterator_command) {
+        shellCommandAddWord(iterator_command, name_word);
+    }
+
+    parseLinebreak(parser);
+    parserReclassifyCurrentToken(parser, RULE_MASK_FOR_LIST);
+    if (parser->current.type == SHELL_TOKEN_IN) {
+        parserScheduleRuleMask(parser, RULE_MASK_FOR_LIST);
+        shellParserAdvance(parser);
+        parseLinebreak(parser);
+        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD ||
+               parser->current.type == SHELL_TOKEN_NAME || parser->current.type == SHELL_TOKEN_PARAMETER) {
+            ShellWord *word = parseWordToken(parser, NULL);
+            if (word) {
+                populateWordExpansions(word);
+                shellCommandAddWord(iterator_command, word);
             }
-            populateWordExpansions(word);
-            shellCommandAddWord(command, word);
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
             if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
                 break;
             }
@@ -789,169 +983,364 @@ static ShellCommand *parseForCommand(ShellParser *parser) {
     }
 
     if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
+        parseLinebreak(parser);
     }
-    shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' after for list");
-    body = parseBlockUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
-    shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for loop");
+
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' in for clause");
+    parseLinebreak(parser);
+    body = parseCompoundListUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for clause");
 
     ShellPipeline *condition = shellCreatePipeline();
-    if (condition) {
-        shellPipelineAddCommand(condition, command);
+    if (!condition) {
+        shellFreeCommand(iterator_command);
+        return NULL;
     }
+    shellPipelineAddCommand(condition, iterator_command);
     ShellLoop *loop = shellCreateLoop(false, condition, body);
-    ShellCommand *cmd = shellCreateLoopCommand(loop);
-    if (cmd) {
-        cmd->line = line;
-        cmd->column = column;
+    ShellCommand *command = shellCreateLoopCommand(loop);
+    if (command) {
+        command->line = line;
+        command->column = column;
     }
-    return cmd;
+    return command;
 }
 
-static ShellWord *parseWordToken(ShellParser *parser, const char *context) {
-    if (parser->current.type != SHELL_TOKEN_WORD &&
-        parser->current.type != SHELL_TOKEN_ASSIGNMENT &&
-        parser->current.type != SHELL_TOKEN_PARAMETER) {
-        if (context) {
-            parserErrorAt(parser, &parser->current, context);
+static ShellCommand *parseCaseClause(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+    ShellWord *subject = parseWordToken(parser, "Expected word after 'case'");
+    parseLinebreak(parser);
+    parserScheduleRuleMask(parser, RULE_MASK_FOR_LIST);
+    parserReclassifyCurrentToken(parser, RULE_MASK_FOR_LIST);
+    shellParserConsume(parser, SHELL_TOKEN_IN, "Expected 'in' after case value");
+    parseLinebreak(parser);
+
+    ShellCase *case_stmt = shellCreateCase(subject);
+    if (!case_stmt) {
+        return NULL;
+    }
+
+    while (parser->current.type != SHELL_TOKEN_ESAC && parser->current.type != SHELL_TOKEN_EOF) {
+        if (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            parseLinebreak(parser);
+            continue;
+        }
+        ShellCaseClause *clause = shellCreateCaseClause(parser->current.line, parser->current.column);
+        if (!clause) {
+            shellFreeCase(case_stmt);
+            return NULL;
+        }
+        parserScheduleRuleMask(parser, RULE_MASK_CASE_PATTERN);
+        while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_NAME ||
+               parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD || parser->current.type == SHELL_TOKEN_PARAMETER) {
+            ShellWord *pattern = parseWordToken(parser, "Expected pattern");
+            if (pattern) {
+                populateWordExpansions(pattern);
+                shellCaseClauseAddPattern(clause, pattern);
+            }
+            if (!shellParserMatch(parser, SHELL_TOKEN_PIPE)) {
+                break;
+            }
+            parserScheduleRuleMask(parser, RULE_MASK_CASE_PATTERN);
+        }
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after case pattern");
+        parseLinebreak(parser);
+        ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_DSEMI, SHELL_TOKEN_ESAC, SHELL_TOKEN_EOF);
+        clause->body = body;
+        shellCaseAddClause(case_stmt, clause);
+        if (parser->current.type == SHELL_TOKEN_DSEMI) {
+            parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+            shellParserAdvance(parser);
+            parseLinebreak(parser);
+        } else {
+            break;
+        }
+    }
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_ESAC, "Expected 'esac' to close case");
+
+    ShellCommand *command = shellCreateCaseCommand(case_stmt);
+    if (command) {
+        command->line = line;
+        command->column = column;
+    }
+    return command;
+}
+
+static bool parserIsFunctionDefinitionStart(ShellParser *parser) {
+    if (!parser) {
+        return false;
+    }
+    const ShellToken *token = &parser->current;
+    bool is_name_token = (token->type == SHELL_TOKEN_NAME) ||
+                         (token->type == SHELL_TOKEN_WORD && token->name_candidate && !token->reserved_candidate);
+    if (!is_name_token) {
+        return false;
+    }
+
+    ShellLexer lookahead = parser->lexer;
+    shellLexerSetRuleMask(&lookahead, RULE_MASK_COMMAND_START);
+    ShellToken next = shellNextToken(&lookahead);
+    applyLexicalRules(&next);
+    bool result = false;
+    if (next.type == SHELL_TOKEN_LPAREN) {
+        shellFreeToken(&next);
+        shellLexerSetRuleMask(&lookahead, RULE_MASK_COMMAND_START);
+        ShellToken closing = shellNextToken(&lookahead);
+        applyLexicalRules(&closing);
+        if (closing.type == SHELL_TOKEN_RPAREN) {
+            result = true;
+        }
+        shellFreeToken(&closing);
+    } else {
+        shellFreeToken(&next);
+    }
+    return result;
+}
+
+static ShellCommand *parseFunctionDefinitionFromName(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+    int line = parser->current.line;
+    int column = parser->current.column;
+    const char *name_lexeme = parser->current.lexeme ? parser->current.lexeme : "";
+    char *name_copy = strdup(name_lexeme);
+    if (!name_copy) {
+        parserErrorAt(parser, &parser->current, "Out of memory");
+        return NULL;
+    }
+
+    parserScheduleRuleMask(parser, RULE_MASK_FUNCTION_NAME);
+    shellParserAdvance(parser);
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_LPAREN, "Expected '(' after function name");
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+    parseLinebreak(parser);
+
+    ShellCommand *body_command = parseCompoundCommand(parser);
+    if (!body_command) {
+        free(name_copy);
+        return NULL;
+    }
+
+    ShellProgram *body_program = shellCreateProgram();
+    shellProgramAddCommand(body_program, body_command);
+
+    ShellFunction *function = shellCreateFunction(name_copy, "", body_program);
+    free(name_copy);
+    ShellCommand *command = shellCreateFunctionCommand(function);
+    if (command) {
+        command->line = line;
+        command->column = column;
+    }
+    return command;
+}
+
+static ShellCommand *parseFunctionDefinition(ShellParser *parser) {
+    int line = parser->current.line;
+    int column = parser->current.column;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+
+    parserScheduleRuleMask(parser, RULE_MASK_FUNCTION_NAME);
+    shellParserAdvance(parser);
+    if (parser->previous.type != SHELL_TOKEN_NAME && parser->previous.type != SHELL_TOKEN_WORD) {
+        parserErrorAt(parser, &parser->previous, "Expected function name");
+        return NULL;
+    }
+    const char *name_lexeme = parser->previous.lexeme ? parser->previous.lexeme : "";
+    char *name_copy = strdup(name_lexeme);
+    if (!name_copy) {
+        parserErrorAt(parser, &parser->previous, "Out of memory");
+        return NULL;
+    }
+
+    if (parser->current.type == SHELL_TOKEN_LPAREN) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+        parseLinebreak(parser);
+    }
+
+    ShellCommand *body_command = parseCompoundCommand(parser);
+    if (!body_command) {
+        free(name_copy);
+        return NULL;
+    }
+
+    ShellProgram *body_program = shellCreateProgram();
+    shellProgramAddCommand(body_program, body_command);
+
+    ShellFunction *function = shellCreateFunction(name_copy, "", body_program);
+    free(name_copy);
+    ShellCommand *command = shellCreateFunctionCommand(function);
+    if (command) {
+        command->line = line;
+        command->column = column;
+    }
+    return command;
+}
+
+static ShellWord *parseWordToken(ShellParser *parser, const char *context_message) {
+    if (!parser) {
+        return NULL;
+    }
+    if (parser->current.type != SHELL_TOKEN_WORD && parser->current.type != SHELL_TOKEN_ASSIGNMENT_WORD &&
+        parser->current.type != SHELL_TOKEN_NAME && parser->current.type != SHELL_TOKEN_PARAMETER) {
+        if (context_message) {
+            parserErrorAt(parser, &parser->current, context_message);
         } else {
             parserErrorAt(parser, &parser->current, "Expected word");
         }
         return NULL;
     }
-    ShellTokenType type = parser->current.type;
-    const char *lexeme = parser->current.lexeme ? parser->current.lexeme : "";
-    bool single_quoted = parser->current.single_quoted;
-    bool double_quoted = parser->current.double_quoted;
-    bool has_param = parser->current.contains_parameter_expansion;
-    bool has_arith = parser->current.contains_arithmetic_expansion;
-    bool has_command = parser->current.contains_command_substitution;
-    int line = parser->current.line;
-    int column = parser->current.column;
+    ShellToken token = parser->current;
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
     shellParserAdvance(parser);
-    ShellWord *word = shellCreateWord(lexeme, single_quoted, double_quoted, has_param, has_arith, line, column);
-    if (word && has_command) {
-        word->has_command_substitution = true;
-    }
-    if (type == SHELL_TOKEN_ASSIGNMENT && word) {
-        word->is_assignment = true;
-    }
-    if (type == SHELL_TOKEN_PARAMETER && lexeme && lexeme[0] == '$' && lexeme[1]) {
-        if (lexeme[1] != '(') {
-            shellWordAddExpansion(word, lexeme + 1);
+    ShellWord *word = shellCreateWord(token.lexeme ? token.lexeme : "", token.single_quoted, token.double_quoted,
+                                      token.contains_parameter_expansion, token.contains_arithmetic_expansion,
+                                      token.line, token.column);
+    if (word) {
+        if (token.type == SHELL_TOKEN_ASSIGNMENT_WORD) {
+            word->is_assignment = true;
+        }
+        if (token.contains_command_substitution) {
+            word->has_command_substitution = true;
+        }
+        if (token.type == SHELL_TOKEN_PARAMETER && token.lexeme && token.lexeme[0] == '$' && token.lexeme[1]) {
+            shellWordAddExpansion(word, token.lexeme + 1);
         }
     }
-    populateWordExpansions(word);
     return word;
 }
 
-static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command) {
-    if (out_span) *out_span = 0;
-    if (out_command) *out_command = NULL;
-    if (!text || text[start] != '$' || text[start + 1] != '(') {
+static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_out) {
+    if (strip_tabs_out) {
+        *strip_tabs_out = false;
+    }
+    if (!parser) {
+        return NULL;
+    }
+    ShellToken number_token = parser->current;
+    ShellTokenType redir_type = SHELL_TOKEN_ERROR;
+    if (parser->current.type == SHELL_TOKEN_IO_NUMBER) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        redir_type = parser->current.type;
+    } else if (parser->current.type == SHELL_TOKEN_LT || parser->current.type == SHELL_TOKEN_GT ||
+               parser->current.type == SHELL_TOKEN_DGREAT || parser->current.type == SHELL_TOKEN_DLESS ||
+               parser->current.type == SHELL_TOKEN_DLESSDASH || parser->current.type == SHELL_TOKEN_GREATAND ||
+               parser->current.type == SHELL_TOKEN_LESSAND || parser->current.type == SHELL_TOKEN_LESSGREAT ||
+               parser->current.type == SHELL_TOKEN_CLOBBER) {
+        redir_type = parser->current.type;
+    } else {
+        return NULL;
+    }
+
+    if (number_token.type != SHELL_TOKEN_IO_NUMBER) {
+        number_token.lexeme = NULL;
+    }
+
+    bool strip_tabs = (redir_type == SHELL_TOKEN_DLESSDASH);
+    if (strip_tabs_out) {
+        *strip_tabs_out = strip_tabs;
+    }
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+
+    ShellRedirectionType type;
+    switch (redir_type) {
+        case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
+        case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
+        case SHELL_TOKEN_DGREAT: type = SHELL_REDIRECT_APPEND; break;
+        case SHELL_TOKEN_DLESS:
+        case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
+        case SHELL_TOKEN_LESSAND: type = SHELL_REDIRECT_DUP_INPUT; break;
+        case SHELL_TOKEN_GREATAND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
+        case SHELL_TOKEN_LESSGREAT: type = SHELL_REDIRECT_INPUT; break;
+        case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
+        default: return NULL;
+    }
+
+    parserScheduleRuleMask(parser,
+                           type == SHELL_REDIRECT_HEREDOC ? RULE_MASK_HEREDOC_DELIMITER : RULE_MASK_REDIRECT_TARGET);
+    ShellWord *target = parseWordToken(parser, "Expected redirection target");
+    if (!target) {
+        return NULL;
+    }
+    populateWordExpansions(target);
+
+    ShellRedirection *redir = shellCreateRedirection(type, number_token.lexeme, target, number_token.line,
+                                                    number_token.column);
+    return redir;
+}
+
+static bool parseDollarCommandSubstitution(const char *text, size_t start, size_t *out_span,
+                                           char **out_command) {
+    if (!text || start >= strlen(text) || text[start] != '$' || text[start + 1] != '(') {
         return false;
     }
     size_t i = start + 2;
     int depth = 1;
-    bool in_single = false;
-    bool in_double = false;
-    while (text[i]) {
-        char c = text[i];
-        if (c == '\\') {
-            if (text[i + 1]) {
-                i += 2;
-                continue;
-            }
-            break;
-        }
-        if (!in_double && c == 39) {
-            in_single = !in_single;
-            i++;
-            continue;
-        }
-        if (!in_single && c == '"') {
-            in_double = !in_double;
-            i++;
-            continue;
-        }
-        if (!in_single && !in_double) {
-            if (c == '(') {
-                depth++;
-            } else if (c == ')') {
-                depth--;
-                if (depth == 0) {
-                    size_t end = i;
-                    size_t span = end - start + 1;
-                    size_t command_start = start + 2;
-                    size_t command_len = end - command_start;
-                    char *raw = (char *)malloc(command_len + 1);
-                    if (!raw) {
-                        return false;
-                    }
-                    memcpy(raw, text + command_start, command_len);
-                    raw[command_len] = '\0';
-                    char *normalized = normalizeDollarCommand(raw, command_len);
-                    free(raw);
-                    if (!normalized) {
-                        return false;
-                    }
-                    if (out_span) *out_span = span;
-                    if (out_command) {
-                        *out_command = normalized;
-                    } else {
-                        free(normalized);
-                    }
-                    return true;
-                }
-            }
+    while (text[i] && depth > 0) {
+        if (text[i] == '(') {
+            depth++;
+        } else if (text[i] == ')') {
+            depth--;
         }
         i++;
     }
-    return false;
+    if (depth != 0) {
+        return false;
+    }
+    size_t len = i - start;
+    if (out_span) {
+        *out_span = len;
+    }
+    if (out_command) {
+        *out_command = normalizeDollarCommand(text + start + 2, len - 3);
+    }
+    return true;
 }
 
-static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span, char **out_command) {
-    if (out_span) *out_span = 0;
-    if (out_command) *out_command = NULL;
+static bool parseBacktickCommandSubstitution(const char *text, size_t start, size_t *out_span,
+                                             char **out_command) {
     if (!text || text[start] != '`') {
         return false;
     }
     size_t i = start + 1;
     while (text[i]) {
-        char c = text[i];
-        if (c == '\\') {
-            if (text[i + 1]) {
-                i += 2;
-                continue;
-            }
+        if (text[i] == '`') {
             break;
         }
-        if (c == '`') {
-            size_t span = (i - start) + 1;
-            size_t command_start = start + 1;
-            size_t command_len = i - command_start;
-            char *raw = (char *)malloc(command_len + 1);
-            if (!raw) {
-                return false;
-            }
-            memcpy(raw, text + command_start, command_len);
-            raw[command_len] = '\0';
-            char *normalized = normalizeBacktickCommand(raw, command_len);
-            free(raw);
-            if (!normalized) {
-                return false;
-            }
-            if (out_span) *out_span = span;
-            if (out_command) {
-                *out_command = normalized;
-            } else {
-                free(normalized);
-            }
-            return true;
+        if (text[i] == '\\' && text[i + 1]) {
+            i += 2;
+            continue;
         }
         i++;
     }
-    return false;
+    if (text[i] != '`') {
+        return false;
+    }
+    if (out_span) {
+        *out_span = i - start + 1;
+    }
+    if (out_command) {
+        *out_command = normalizeBacktickCommand(text + start + 1, i - start - 1);
+    }
+    return true;
 }
 
 static char *normalizeDollarCommand(const char *command, size_t len) {
@@ -965,12 +1354,9 @@ static char *normalizeDollarCommand(const char *command, size_t len) {
     size_t j = 0;
     for (size_t i = 0; i < len; ++i) {
         char c = command[i];
-        if (c == '\\' && i + 1 < len) {
-            char next = command[i + 1];
-            if (next == '\n') {
-                i++;
-                continue;
-            }
+        if (c == '\\' && i + 1 < len && command[i + 1] == '\n') {
+            i++;
+            continue;
         }
         out[j++] = c;
     }
@@ -1023,7 +1409,6 @@ static void populateWordExpansions(ShellWord *word) {
             char *command = NULL;
             if (i + 1 < len && text[i + 1] == '(') {
                 if (i + 2 < len && text[i + 2] == '(') {
-                    /* Treat $(( as arithmetic expansion; do not parse as command substitution. */
                 } else if (parseDollarCommandSubstitution(text, i, &span, &command)) {
                     if (command) {
                         shellWordAddCommandSubstitution(word, SHELL_COMMAND_SUBSTITUTION_DOLLAR, command, span);
