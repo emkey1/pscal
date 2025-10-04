@@ -293,13 +293,39 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     if (!loop) {
         return;
     }
+
+    int loopStart = chunk->count;
     char meta[64];
     snprintf(meta, sizeof(meta), "until=%d", loop->is_until ? 1 : 0);
     emitPushString(chunk, meta, line);
     emitBuiltinProc(chunk, "__shell_loop", 1, line);
+
     compilePipeline(chunk, loop->condition, false);
+    emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
+    emitPushInt(chunk, 0, line);
+    writeBytecodeChunk(chunk, EQUAL, line);
+    if (loop->is_until) {
+        writeBytecodeChunk(chunk, NOT, line);
+    }
+    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+    int exitJump = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
+
     compileProgram(chunk, loop->body);
     emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
+
+    writeBytecodeChunk(chunk, JUMP, line);
+    int loopJump = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
+
+    int exitLabel = chunk->count;
+    emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
+
+    uint16_t loopOffset = (uint16_t)(loopStart - (loopJump + 2));
+    patchShort(chunk, loopJump, loopOffset);
+
+    uint16_t exitOffset = (uint16_t)(exitLabel - (exitJump + 2));
+    patchShort(chunk, exitJump, exitOffset);
 }
 
 static void compileConditional(BytecodeChunk *chunk, const ShellConditional *conditional, int line) {
