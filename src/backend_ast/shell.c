@@ -27,11 +27,22 @@
 
 extern char **environ;
 
+typedef enum {
+    SHELL_RUNTIME_REDIR_OPEN,
+    SHELL_RUNTIME_REDIR_DUP,
+    SHELL_RUNTIME_REDIR_HEREDOC
+} ShellRuntimeRedirectionKind;
+
 typedef struct {
     int fd;
+    ShellRuntimeRedirectionKind kind;
     int flags;
     mode_t mode;
     char *path;
+    int dup_target_fd;
+    bool close_target;
+    char *here_doc;
+    size_t here_doc_length;
 } ShellRedirection;
 
 typedef struct {
@@ -2258,6 +2269,7 @@ static void shellFreeRedirections(ShellCommand *cmd) {
     }
     for (size_t i = 0; i < cmd->redir_count; ++i) {
         free(cmd->redirs[i].path);
+        free(cmd->redirs[i].here_doc);
     }
     free(cmd->redirs);
     cmd->redirs = NULL;
@@ -3338,8 +3350,59 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     return true;
 }
 
+static int decodeHexDigit(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    return -1;
+}
+
+static char *decodeHereDocBody(const char *hex, size_t *out_len) {
+    if (out_len) {
+        *out_len = 0;
+    }
+    if (!hex || *hex == '\0') {
+        if (out_len) {
+            *out_len = 0;
+        }
+        return strdup("");
+    }
+    size_t len = strlen(hex);
+    if ((len & 1) != 0) {
+        return NULL;
+    }
+    size_t decoded_len = len / 2;
+    char *decoded = (char *)malloc(decoded_len + 1);
+    if (!decoded) {
+        return NULL;
+    }
+    for (size_t i = 0; i < decoded_len; ++i) {
+        int high = decodeHexDigit(hex[i * 2]);
+        int low = decodeHexDigit(hex[i * 2 + 1]);
+        if (high < 0 || low < 0) {
+            free(decoded);
+            return NULL;
+        }
+        decoded[i] = (char)((high << 4) | low);
+    }
+    decoded[decoded_len] = '\0';
+    if (out_len) {
+        *out_len = decoded_len;
+    }
+    return decoded;
+}
+
 static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     if (!cmd || !spec) {
+        return false;
+    }
+    if (strncmp(spec, "redir:", 6) != 0) {
         return false;
     }
     const char *payload = spec + strlen("redir:");
@@ -3347,70 +3410,151 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     if (!copy) {
         return false;
     }
-    char *parts[3] = {NULL, NULL, NULL};
+
+    char *parts[4] = {NULL, NULL, NULL, NULL};
     size_t part_index = 0;
     char *cursor = copy;
-    while (cursor && part_index < 3) {
+    while (cursor && part_index < 4) {
+        if (part_index == 3) {
+            parts[part_index++] = cursor;
+            cursor = NULL;
+            break;
+        }
         char *next = strchr(cursor, ':');
         if (next) {
             *next = '\0';
+            parts[part_index++] = cursor;
+            cursor = next + 1;
+        } else {
+            parts[part_index++] = cursor;
+            cursor = NULL;
         }
-        parts[part_index++] = cursor;
-        if (!next) {
-            break;
-        }
-        cursor = next + 1;
     }
-    if (part_index < 3) {
+    if (cursor) {
         free(copy);
         return false;
     }
+    size_t part_count = part_index;
+    if (part_count < 3) {
+        free(copy);
+        return false;
+    }
+
     const char *fd_str = parts[0];
     const char *type = parts[1];
     const char *target_spec = parts[2];
+    const char *extra_spec = (part_count >= 4) ? parts[3] : NULL;
+    if (!type || !target_spec) {
+        free(copy);
+        return false;
+    }
+
     int fd = -1;
     if (fd_str && *fd_str) {
         fd = atoi(fd_str);
-    } else if (strcmp(type, "<") == 0) {
+    } else if (strcmp(type, "<") == 0 || strcmp(type, "<<") == 0 || strcmp(type, "<&") == 0 || strcmp(type, "<>") == 0) {
         fd = STDIN_FILENO;
     } else {
         fd = STDOUT_FILENO;
     }
-    int flags = 0;
-    mode_t mode = 0;
-    if (strcmp(type, "<") == 0) {
-        flags = O_RDONLY;
-    } else if (strcmp(type, ">") == 0) {
-        flags = O_WRONLY | O_CREAT | O_TRUNC;
-        mode = 0666;
-    } else if (strcmp(type, ">>") == 0) {
-        flags = O_WRONLY | O_CREAT | O_APPEND;
-        mode = 0666;
-    } else {
-        free(copy);
-        return false;
-    }
-    ShellRedirection *new_redirs = realloc(cmd->redirs, sizeof(ShellRedirection) * (cmd->redir_count + 1));
-    if (!new_redirs) {
-        free(copy);
-        return false;
-    }
-    cmd->redirs = new_redirs;
-    ShellRedirection *redir = &cmd->redirs[cmd->redir_count++];
-    redir->fd = fd;
-    redir->flags = flags;
-    redir->mode = mode;
+
+    ShellRedirection redir;
+    memset(&redir, 0, sizeof(redir));
+    redir.fd = fd;
+
     const char *target_text = NULL;
     const char *target_meta = NULL;
     size_t target_meta_len = 0;
     uint8_t target_flags = 0;
     shellDecodeWordSpec(target_spec, &target_text, &target_flags, &target_meta, &target_meta_len);
-    redir->path = shellExpandWord(target_text, target_flags, target_meta, target_meta_len);
-    free(copy);
-    if (!redir->path) {
-        cmd->redir_count--;
+
+    char *expanded_target = NULL;
+    if (strcmp(type, "<<") != 0) {
+        expanded_target = shellExpandWord(target_text, target_flags, target_meta, target_meta_len);
+        if (!expanded_target) {
+            free(copy);
+            return false;
+        }
+    }
+
+    if (strcmp(type, "<") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_RDONLY;
+        redir.mode = 0;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+    } else if (strcmp(type, ">") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_WRONLY | O_CREAT | O_TRUNC;
+        redir.mode = 0666;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+    } else if (strcmp(type, ">>") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_WRONLY | O_CREAT | O_APPEND;
+        redir.mode = 0666;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+    } else if (strcmp(type, "<>") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_RDWR | O_CREAT;
+        redir.mode = 0666;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+    } else if (strcmp(type, ">|") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_WRONLY | O_CREAT | O_TRUNC;
+        redir.mode = 0666;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+    } else if (strcmp(type, "<&") == 0 || strcmp(type, ">&") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_DUP;
+        if (!expanded_target) {
+            free(copy);
+            return false;
+        }
+        if (strcmp(expanded_target, "-") == 0) {
+            redir.close_target = true;
+        } else {
+            char *endptr = NULL;
+            errno = 0;
+            long value = strtol(expanded_target, &endptr, 10);
+            if (errno != 0 || !endptr || *endptr != '\0') {
+                free(expanded_target);
+                free(copy);
+                return false;
+            }
+            redir.dup_target_fd = (int)value;
+        }
+        free(expanded_target);
+        expanded_target = NULL;
+    } else if (strcmp(type, "<<") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_HEREDOC;
+        size_t body_len = 0;
+        char *decoded = decodeHereDocBody(extra_spec ? extra_spec : "", &body_len);
+        if (!decoded) {
+            free(copy);
+            return false;
+        }
+        redir.here_doc = decoded;
+        redir.here_doc_length = body_len;
+    } else {
+        free(expanded_target);
+        free(copy);
         return false;
     }
+
+    ShellRedirection *new_redirs = realloc(cmd->redirs, sizeof(ShellRedirection) * (cmd->redir_count + 1));
+    if (!new_redirs) {
+        free(expanded_target);
+        free(redir.path);
+        free(redir.here_doc);
+        free(copy);
+        return false;
+    }
+    cmd->redirs = new_redirs;
+    cmd->redirs[cmd->redir_count++] = redir;
+    free(copy);
     return true;
 }
 
@@ -3454,6 +3598,22 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
     return true;
 }
 
+typedef enum {
+    SHELL_REDIR_OP_OPEN,
+    SHELL_REDIR_OP_DUP,
+    SHELL_REDIR_OP_HEREDOC
+} ShellRuntimeRedirOpType;
+
+typedef struct {
+    ShellRuntimeRedirOpType type;
+    int target_fd;
+    int source_fd;
+    int write_fd;
+    const char *here_body;
+    size_t here_length;
+    bool close_target;
+} ShellRuntimeRedirOp;
+
 static int shellSpawnProcess(const ShellCommand *cmd,
                              int stdin_fd,
                              int stdout_fd,
@@ -3463,70 +3623,82 @@ static int shellSpawnProcess(const ShellCommand *cmd,
         return EINVAL;
     }
 
-    int local_fds[16];
-    int local_targets[16];
-    int *opened_fds = local_fds;
-    int *opened_targets = local_targets;
-    size_t opened_capacity = sizeof(local_fds) / sizeof(local_fds[0]);
-    size_t opened_count = 0;
-
-    if (cmd->redir_count > opened_capacity) {
-        opened_fds = (int *)malloc(sizeof(int) * cmd->redir_count);
-        opened_targets = (int *)malloc(sizeof(int) * cmd->redir_count);
-        if (!opened_fds || !opened_targets) {
-            free(opened_fds);
-            free(opened_targets);
+    ShellRuntimeRedirOp local_ops[16];
+    memset(local_ops, 0, sizeof(local_ops));
+    ShellRuntimeRedirOp *ops = local_ops;
+    size_t op_capacity = sizeof(local_ops) / sizeof(local_ops[0]);
+    if (cmd->redir_count > op_capacity) {
+        ops = (ShellRuntimeRedirOp *)calloc(cmd->redir_count, sizeof(ShellRuntimeRedirOp));
+        if (!ops) {
             return ENOMEM;
         }
-        opened_capacity = cmd->redir_count;
+        op_capacity = cmd->redir_count;
     }
 
-    for (size_t i = 0; i < opened_capacity; ++i) {
-        opened_fds[i] = -1;
-        opened_targets[i] = -1;
-    }
-
+    size_t op_count = 0;
+    int prep_error = 0;
     for (size_t i = 0; i < cmd->redir_count; ++i) {
+        if (op_count >= op_capacity) {
+            prep_error = ENOMEM;
+            goto spawn_cleanup;
+        }
         const ShellRedirection *redir = &cmd->redirs[i];
-        int fd = open(redir->path, redir->flags, redir->mode);
-        if (fd < 0) {
-            int saved = errno;
-            for (size_t j = 0; j < opened_count; ++j) {
-                if (opened_fds[j] >= 0) {
-                    close(opened_fds[j]);
+        ShellRuntimeRedirOp op;
+        memset(&op, 0, sizeof(op));
+        op.target_fd = redir->fd;
+        switch (redir->kind) {
+            case SHELL_RUNTIME_REDIR_OPEN: {
+                if (!redir->path) {
+                    prep_error = EINVAL;
+                    goto spawn_cleanup;
                 }
+                int fd = open(redir->path, redir->flags, redir->mode);
+                if (fd < 0) {
+                    prep_error = errno;
+                    goto spawn_cleanup;
+                }
+                op.type = SHELL_REDIR_OP_OPEN;
+                op.source_fd = fd;
+                break;
             }
-            if (opened_fds != local_fds) {
-                free(opened_fds);
+            case SHELL_RUNTIME_REDIR_DUP: {
+                op.type = SHELL_REDIR_OP_DUP;
+                op.close_target = redir->close_target;
+                op.source_fd = redir->dup_target_fd;
+                if (!op.close_target && op.source_fd < 0) {
+                    prep_error = EBADF;
+                    goto spawn_cleanup;
+                }
+                break;
             }
-            if (opened_targets != local_targets) {
-                free(opened_targets);
+            case SHELL_RUNTIME_REDIR_HEREDOC: {
+                int pipefd[2];
+                if (pipe(pipefd) != 0) {
+                    prep_error = errno;
+                    goto spawn_cleanup;
+                }
+                op.type = SHELL_REDIR_OP_HEREDOC;
+                op.source_fd = pipefd[0];
+                op.write_fd = pipefd[1];
+                op.here_body = redir->here_doc ? redir->here_doc : "";
+                op.here_length = redir->here_doc_length;
+                break;
             }
-            return saved;
+            default:
+                prep_error = EINVAL;
+                goto spawn_cleanup;
         }
-        opened_fds[opened_count] = fd;
-        opened_targets[opened_count] = redir->fd;
-        opened_count++;
+        ops[op_count++] = op;
     }
 
-    pid_t child = fork();
-    if (child < 0) {
-        int saved = errno;
-        for (size_t j = 0; j < opened_count; ++j) {
-            if (opened_fds[j] >= 0) {
-                close(opened_fds[j]);
-            }
+    {
+        pid_t child = fork();
+        if (child < 0) {
+            prep_error = errno;
+            goto spawn_cleanup;
         }
-        if (opened_fds != local_fds) {
-            free(opened_fds);
-        }
-        if (opened_targets != local_targets) {
-            free(opened_targets);
-        }
-        return saved;
-    }
 
-    if (child == 0) {
+        if (child == 0) {
         ShellPipelineContext *ctx = &gShellRuntime.pipeline;
         pid_t desired_pgid = getpid();
         if (ctx->active && ctx->pgid > 0) {
@@ -3573,14 +3745,34 @@ static int shellSpawnProcess(const ShellCommand *cmd,
             _exit(126);
         }
 
-        for (size_t i = 0; i < opened_count; ++i) {
-            if (opened_fds[i] < 0) {
-                continue;
+        for (size_t i = 0; i < op_count; ++i) {
+            ShellRuntimeRedirOp *op = &ops[i];
+            if (op->type == SHELL_REDIR_OP_HEREDOC && op->write_fd >= 0) {
+                close(op->write_fd);
+                op->write_fd = -1;
             }
-            if (dup2(opened_fds[i], opened_targets[i]) < 0) {
-                int err = errno;
-                fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
-                _exit(126);
+        }
+
+        for (size_t i = 0; i < op_count; ++i) {
+            ShellRuntimeRedirOp *op = &ops[i];
+            switch (op->type) {
+                case SHELL_REDIR_OP_OPEN:
+                case SHELL_REDIR_OP_HEREDOC:
+                    if (dup2(op->source_fd, op->target_fd) < 0) {
+                        int err = errno;
+                        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+                        _exit(126);
+                    }
+                    break;
+                case SHELL_REDIR_OP_DUP:
+                    if (op->close_target) {
+                        close(op->target_fd);
+                    } else if (dup2(op->source_fd, op->target_fd) < 0) {
+                        int err = errno;
+                        fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
+                        _exit(126);
+                    }
+                    break;
             }
         }
 
@@ -3590,9 +3782,13 @@ static int shellSpawnProcess(const ShellCommand *cmd,
         if (stdout_fd >= 0 && stdout_fd != STDOUT_FILENO) {
             close(stdout_fd);
         }
-        for (size_t i = 0; i < opened_count; ++i) {
-            if (opened_fds[i] >= 0 && opened_fds[i] != opened_targets[i]) {
-                close(opened_fds[i]);
+
+        for (size_t i = 0; i < op_count; ++i) {
+            ShellRuntimeRedirOp *op = &ops[i];
+            if ((op->type == SHELL_REDIR_OP_OPEN || op->type == SHELL_REDIR_OP_HEREDOC) &&
+                op->source_fd >= 0 && op->source_fd != op->target_fd) {
+                close(op->source_fd);
+                op->source_fd = -1;
             }
         }
 
@@ -3601,21 +3797,62 @@ static int shellSpawnProcess(const ShellCommand *cmd,
         fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
         _exit((err == ENOENT) ? 127 : 126);
     }
+        for (size_t j = 0; j < op_count; ++j) {
+            ShellRuntimeRedirOp *op = &ops[j];
+            if (op->type == SHELL_REDIR_OP_OPEN) {
+                if (op->source_fd >= 0) {
+                    close(op->source_fd);
+                    op->source_fd = -1;
+                }
+            } else if (op->type == SHELL_REDIR_OP_HEREDOC) {
+                if (op->source_fd >= 0) {
+                    close(op->source_fd);
+                    op->source_fd = -1;
+                }
+                if (op->write_fd >= 0) {
+                    const char *body = op->here_body ? op->here_body : "";
+                    size_t remaining = op->here_length;
+                    const char *cursor = body;
+                    while (remaining > 0) {
+                        ssize_t written = write(op->write_fd, cursor, remaining);
+                        if (written < 0) {
+                            if (errno == EINTR) {
+                                continue;
+                            }
+                            break;
+                        }
+                        cursor += written;
+                        remaining -= (size_t)written;
+                    }
+                    close(op->write_fd);
+                    op->write_fd = -1;
+                }
+            }
+        }
+        if (ops != local_ops) {
+            free(ops);
+        }
+        *child_pid = child;
+        return 0;
+    }
 
-    for (size_t j = 0; j < opened_count; ++j) {
-        if (opened_fds[j] >= 0) {
-            close(opened_fds[j]);
+spawn_cleanup:
+    for (size_t j = 0; j < op_count; ++j) {
+        if (ops[j].type == SHELL_REDIR_OP_OPEN || ops[j].type == SHELL_REDIR_OP_HEREDOC) {
+            if (ops[j].source_fd >= 0) {
+                close(ops[j].source_fd);
+                ops[j].source_fd = -1;
+            }
+        }
+        if (ops[j].type == SHELL_REDIR_OP_HEREDOC && ops[j].write_fd >= 0) {
+            close(ops[j].write_fd);
+            ops[j].write_fd = -1;
         }
     }
-    if (opened_fds != local_fds) {
-        free(opened_fds);
+    if (ops != local_ops) {
+        free(ops);
     }
-    if (opened_targets != local_targets) {
-        free(opened_targets);
-    }
-
-    *child_pid = child;
-    return 0;
+    return prep_error;
 }
 
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
@@ -3858,7 +4095,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellUpdateStatus(0);
         }
         if (ctx->active) {
-            ctx->last_status = gShellRuntime.last_status;
+            int status = gShellRuntime.last_status;
+            if (ctx->stage_count <= 1 && ctx->negated) {
+                status = (status == 0) ? 1 : 0;
+                shellUpdateStatus(status);
+            }
+            ctx->last_status = status;
             if (ctx->stage_count <= 1) {
                 shellResetPipeline();
             }
@@ -3901,7 +4143,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 assignment_backups = NULL;
                 assignment_backup_count = 0;
             }
-            ctx->last_status = gShellRuntime.last_status;
+            int status = gShellRuntime.last_status;
+            if (ctx->negated) {
+                status = (status == 0) ? 1 : 0;
+                shellUpdateStatus(status);
+            }
+            ctx->last_status = status;
             shellResetPipeline();
             shellFreeCommand(cmd);
             return makeVoid();
