@@ -1,0 +1,7 @@
+echo "parser-for-valid:start"
+
+for foo in one two three; do
+  echo "parser-for-valid:body:$foo"
+done
+
+echo "parser-for-valid:end"

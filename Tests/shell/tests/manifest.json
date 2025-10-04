@@ -191,6 +191,24 @@
             "script": "Tests/shell/tests/for_case_layouts.psh",
             "expect": "runtime_ok",
             "expected_stdout": "for-case:start\ncase:one\ncase:two-three:two\ncase:two-three:three\ncase:quoted:quoted value\ncase:rest:four\nfor-case:end"
+        },
+        {
+            "id": "grammar_for_valid_name",
+            "name": "For loops require valid shell names",
+            "category": "grammar",
+            "description": "Simple for loop with a valid name parses and executes.",
+            "script": "Tests/shell/tests/parser_for_valid_name.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "parser-for-valid:start\nparser-for-valid:body:one\nparser-for-valid:body:two\nparser-for-valid:body:three\nparser-for-valid:end"
+        },
+        {
+            "id": "grammar_for_invalid_name",
+            "name": "For loops reject invalid names",
+            "category": "grammar",
+            "description": "Parser emits a syntax error when the loop variable is not a name token.",
+            "script": "Tests/shell/tests/parser_for_invalid_name.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected name after 'for'"
         }
     ]
 }
