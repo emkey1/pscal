@@ -1,5 +1,5 @@
 echo "heredoc:start"
-VALUE="xyz"
+setenv VALUE xyz
 
 cat <<EOF
 plain:$VALUE

@@ -1,9 +1,7 @@
 echo "for-case:start"
 
 for value in one \
-             two three
-
-do
+  two three; do
   case "$value" in
     one)
       echo "case:one"
@@ -20,7 +18,8 @@ done
 
 for name in \
   "quoted value" \
-  four; do case "$name" in
+  four; do
+  case "$name" in
     "quoted value")
       echo "case:quoted:$name"
       ;;

@@ -13,7 +13,7 @@ fi
 ! printf 'line\n' | grep -q line
 echo "bang-pipeline:status:$?"
 
-! { printf 'foo\n'; printf 'bar\n'; } | grep -q baz
+! { false; } | false
 echo "bang-pipeline:brace-status:$?"
 
 echo "bang-pipeline:end"
