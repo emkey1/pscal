@@ -1,0 +1,7 @@
+echo "parser-function-missing-parens:start"
+
+function greet {
+  echo "parser-function-missing-parens:body"
+}
+
+echo "parser-function-missing-parens:end"

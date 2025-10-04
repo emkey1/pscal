@@ -1,0 +1,7 @@
+echo "parser-function-invalid-name:start"
+
+function 1bad() {
+  echo "parser-function-invalid-name:body"
+}
+
+echo "parser-function-invalid-name:end"

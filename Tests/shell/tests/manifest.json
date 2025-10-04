@@ -209,6 +209,33 @@
             "script": "Tests/shell/tests/parser_for_invalid_name.psh",
             "expect": "parse_error",
             "expected_stderr_substring": "Expected name after 'for'"
+        },
+        {
+            "id": "grammar_function_valid_keyword",
+            "name": "function keyword requires parentheses",
+            "category": "grammar",
+            "description": "function foo() form registers and executes a shell function.",
+            "script": "Tests/shell/tests/parser_function_valid_keyword.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "parser-function-valid:start\nparser-function-valid:body\nparser-function-valid:end"
+        },
+        {
+            "id": "grammar_function_invalid_name",
+            "name": "function keyword rejects invalid names",
+            "category": "grammar",
+            "description": "Parser emits a syntax error when function names are not NAME tokens.",
+            "script": "Tests/shell/tests/parser_function_invalid_name.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected function name"
+        },
+        {
+            "id": "grammar_function_missing_parens",
+            "name": "function keyword requires parentheses before body",
+            "category": "grammar",
+            "description": "Missing parentheses before the function body triggers a parse error.",
+            "script": "Tests/shell/tests/parser_function_missing_parens.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected '(' after function name"
         }
     ]
 }
