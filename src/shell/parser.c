@@ -947,7 +947,7 @@ static ShellCommand *parseForClause(ShellParser *parser) {
 
     parserScheduleRuleMask(parser, RULE_MASK_FOR_NAME);
     shellParserAdvance(parser);
-    if (parser->previous.type != SHELL_TOKEN_NAME && parser->previous.type != SHELL_TOKEN_WORD) {
+    if (parser->previous.type != SHELL_TOKEN_NAME) {
         parserErrorAt(parser, &parser->previous, "Expected name after 'for'");
         return NULL;
     }
