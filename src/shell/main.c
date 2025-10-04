@@ -2322,6 +2322,7 @@ int main(int argc, char **argv) {
     }
 
     setenv("PSCALSHELL_LAST_STATUS", "0", 1);
+    shellRuntimeInitSignals();
 
     if (path) {
         char *src = shellLoadFile(path);
