@@ -127,6 +127,7 @@ VM. For instructions on adding your own routines, see
 | cd | (path: String) | void | Change the current working directory and update the `PWD` environment variable. |
 | pwd | () | void | Print the current working directory. |
 | exit | ([code: Integer]) | void | Exit the current shell script with the provided status code. |
+| eval | (chunks: String...) | void | Concatenate arguments with spaces and execute the resulting source in the current shell context. |
 | export | (assignments: String...) | void | Set one or more environment variables using `NAME=value` pairs. |
 | unset | (names: String...) | void | Remove environment variables from the current process. |
 | alias | ([assignments: String...]) | void | Define shell aliases or list existing ones when called without arguments. |

@@ -120,6 +120,7 @@ Value vmBuiltinShellDefineFunction(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPwd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSource(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellEval(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
