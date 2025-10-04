@@ -48,7 +48,7 @@ option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
-option(SDL "Enable SDL-based graphics and audio" OFF)
+option(SDL "Enable SDL-based graphics and audio" ON)
 set(PSCAL_SDL_PLATFORM_LIBS "")
 
 if(SDL)
