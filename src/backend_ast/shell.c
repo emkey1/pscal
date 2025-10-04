@@ -2527,6 +2527,7 @@ void shellRuntimeInitSignals(void) {
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
     action.sa_handler = shellSignalHandler;
+    action.sa_flags |= SA_RESTART;
 
     sigaction(SIGINT, &action, NULL);
     sigaction(SIGQUIT, &action, NULL);
