@@ -229,9 +229,13 @@ static ShellToken scanParameter(ShellLexer *lexer) {
             }
         }
     } else {
-        while (isalnum(c) || c == '_' || c == '#') {
+        if (c == '?' || c == '@' || c == '*' || c == '!' || c == '-' || c == '$') {
             advanceChar(lexer);
-            c = peekChar(lexer);
+        } else {
+            while (isalnum(c) || c == '_' || c == '#') {
+                advanceChar(lexer);
+                c = peekChar(lexer);
+            }
         }
     }
     size_t end = lexer->pos;
@@ -430,7 +434,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 eqSuppressDepth--;
                 continue;
             } else {
-                while (isalnum(next) || next == '_' || next == '#') {
+                if (next == '?' || next == '@' || next == '*' || next == '!' || next == '-' || next == '$') {
                     if (bufLen + 1 >= bufCap) {
                         bufCap = bufCap ? bufCap * 2 : 32;
                         char *tmp3 = (char *)realloc(buffer, bufCap);
@@ -441,7 +445,20 @@ static ShellToken scanWord(ShellLexer *lexer) {
                         buffer = tmp3;
                     }
                     buffer[bufLen++] = (char)advanceChar(lexer);
-                    next = peekChar(lexer);
+                } else {
+                    while (isalnum(next) || next == '_' || next == '#') {
+                        if (bufLen + 1 >= bufCap) {
+                            bufCap = bufCap ? bufCap * 2 : 32;
+                            char *tmp3 = (char *)realloc(buffer, bufCap);
+                            if (!tmp3) {
+                                free(buffer);
+                                return makeErrorToken(lexer, "Out of memory while scanning word");
+                            }
+                            buffer = tmp3;
+                        }
+                        buffer[bufLen++] = (char)advanceChar(lexer);
+                        next = peekChar(lexer);
+                    }
                 }
                 continue;
             }
