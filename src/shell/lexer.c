@@ -269,6 +269,9 @@ static ShellToken scanWord(ShellLexer *lexer) {
     bool hasCommand = false;
     bool hasArithmetic = false;
 
+    bool inArrayLiteral = false;
+    int arrayParenDepth = 0;
+
     int eqSuppressDepth = 0;
     size_t firstUnquotedEq = (size_t)-1;
 
@@ -281,18 +284,47 @@ static ShellToken scanWord(ShellLexer *lexer) {
         if (c == EOF) {
             break;
         }
+        bool startingArrayLiteral = false;
         if (!singleQuoted && !doubleQuoted) {
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
-                break;
+            if (!inArrayLiteral && firstUnquotedEq != (size_t)-1 && eqSuppressDepth == 0 && c == '(' &&
+                bufLen == firstUnquotedEq + 1) {
+                startingArrayLiteral = true;
             }
-            if (isOperatorDelimiter(c)) {
-                break;
+
+            bool allowArrayWhitespace = inArrayLiteral && arrayParenDepth > 0;
+            if (!allowArrayWhitespace) {
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
+                    break;
+                }
+                if (c == '\n') {
+                    break;
+                }
             }
-            if (c == '\n') {
-                break;
+
+            if (!(startingArrayLiteral || (inArrayLiteral && arrayParenDepth > 0 && (c == '(' || c == ')')))) {
+                if (isOperatorDelimiter(c)) {
+                    break;
+                }
             }
         }
         advanceChar(lexer);
+        if (!singleQuoted && !doubleQuoted && eqSuppressDepth == 0 && firstUnquotedEq != (size_t)-1) {
+            if (startingArrayLiteral) {
+                inArrayLiteral = true;
+                arrayParenDepth = 1;
+            } else if (inArrayLiteral) {
+                if (c == '(') {
+                    arrayParenDepth++;
+                } else if (c == ')') {
+                    if (arrayParenDepth > 0) {
+                        arrayParenDepth--;
+                        if (arrayParenDepth == 0) {
+                            inArrayLiteral = false;
+                        }
+                    }
+                }
+            }
+        }
         if (c == '\\') {
             int next = peekChar(lexer);
             if (singleQuoted || next == EOF) {

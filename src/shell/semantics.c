@@ -243,7 +243,12 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
         return;
     }
     ShellWord *first = words->items[0];
-    if (first && first->text && !shellIsBuiltinName(first->text)) {
+    if (first && first->is_assignment) {
+        // Plain assignments at the start of a simple command do not perform
+        // command lookup. They only update shell variables, so suppress the
+        // unknown command warning for constructs like "VAR=value" or
+        // "array=(a b)".
+    } else if (first && first->text && !shellIsBuiltinName(first->text)) {
         bool known_builtin = hashTableLookup(ctx->builtin_table, first->text) != NULL;
         bool known_function = ctx->function_table && hashTableLookup(ctx->function_table, first->text);
         if (!shellWordIsDynamicCommand(first) && !known_builtin && !known_function) {

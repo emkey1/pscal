@@ -139,6 +139,15 @@
             "expected_stdout": "lexer-assignment:ok"
         },
         {
+            "id": "lexer_array_assignment",
+            "name": "Array assignments stay intact",
+            "category": "lexer",
+            "description": "name=(...) remains a single assignment word so complex initialisers survive parsing.",
+            "script": "Tests/shell/tests/array_assignment.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-array-assignment:ok"
+        },
+        {
             "id": "lexer_expansion_shapes",
             "name": "Parameter and arithmetic expansions retain metadata",
             "category": "lexer",
