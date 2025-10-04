@@ -94,6 +94,15 @@
             "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
         },
         {
+            "id": "parameter_default",
+            "name": "Parameter default expansion uses fallback",
+            "category": "expansion",
+            "description": "The ${var:-word} form substitutes word when the variable is unset or empty.",
+            "script": "Tests/shell/tests/parameter_default.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "param-default:start\nunset:fallback\nempty:fallback\nset:value\nparam-default:end"
+        },
+        {
             "id": "grammar_here_documents",
             "name": "Here documents expand and quote correctly",
             "category": "grammar",
