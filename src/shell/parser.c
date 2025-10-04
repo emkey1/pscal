@@ -234,7 +234,7 @@ static ShellPipeline *parsePipeline(ShellParser *parser) {
         return NULL;
     }
 
-    pipeline->negated = negate;
+    shellPipelineSetNegated(pipeline, negate);
 
     ShellCommand *command = parsePrimary(parser);
     if (!command) {

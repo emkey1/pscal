@@ -258,6 +258,8 @@ ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *
     redir->type = type;
     redir->io_number = io_number ? strdup(io_number) : NULL;
     redir->target = target;
+    redir->here_document = NULL;
+    redir->dup_target = NULL;
     redir->line = line;
     redir->column = column;
     return redir;
@@ -267,7 +269,37 @@ void shellFreeRedirection(ShellRedirection *redir) {
     if (!redir) return;
     free(redir->io_number);
     shellFreeWord(redir->target);
+    free(redir->here_document);
+    free(redir->dup_target);
     free(redir);
+}
+
+void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload) {
+    if (!redir) {
+        return;
+    }
+    free(redir->here_document);
+    redir->here_document = payload ? strdup(payload) : NULL;
+}
+
+const char *shellRedirectionGetHereDocument(const ShellRedirection *redir) {
+    return redir ? redir->here_document : NULL;
+}
+
+void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target) {
+    if (!redir) {
+        return;
+    }
+    free(redir->dup_target);
+    redir->dup_target = target ? strdup(target) : NULL;
+}
+
+const char *shellRedirectionGetDupTarget(const ShellRedirection *redir) {
+    return redir ? redir->dup_target : NULL;
+}
+
+ShellWord *shellRedirectionGetWordTarget(const ShellRedirection *redir) {
+    return redir ? redir->target : NULL;
 }
 
 ShellPipeline *shellCreatePipeline(void) {
@@ -278,6 +310,7 @@ ShellPipeline *shellCreatePipeline(void) {
     pipeline->commands = NULL;
     pipeline->command_count = 0;
     pipeline->negated = false;
+    pipeline->has_explicit_negation = false;
     return pipeline;
 }
 
@@ -300,6 +333,28 @@ void shellFreePipeline(ShellPipeline *pipeline) {
     }
     free(pipeline->commands);
     free(pipeline);
+}
+
+void shellPipelineSetNegated(ShellPipeline *pipeline, bool negated) {
+    if (!pipeline) {
+        return;
+    }
+    pipeline->negated = negated;
+    pipeline->has_explicit_negation = negated;
+}
+
+bool shellPipelineIsNegated(const ShellPipeline *pipeline) {
+    if (!pipeline) {
+        return false;
+    }
+    return pipeline->negated;
+}
+
+bool shellPipelineHasExplicitNegation(const ShellPipeline *pipeline) {
+    if (!pipeline) {
+        return false;
+    }
+    return pipeline->has_explicit_negation;
 }
 
 ShellLogicalList *shellCreateLogicalList(void) {
@@ -445,6 +500,9 @@ static ShellCommand *shellCreateCommandInternal(ShellCommandType type) {
     if (type == SHELL_COMMAND_SIMPLE) {
         shellWordArrayInit(&command->data.simple.words);
         shellRedirectionArrayInit(&command->data.simple.redirections);
+    } else if (type == SHELL_COMMAND_BRACE_GROUP) {
+        command->data.brace_group.body = NULL;
+        shellRedirectionArrayInit(&command->data.brace_group.redirections);
     }
     return command;
 }
@@ -473,6 +531,14 @@ ShellCommand *shellCreateSubshellCommand(ShellProgram *body) {
     ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_SUBSHELL);
     if (cmd) {
         cmd->data.subshell.body = body;
+    }
+    return cmd;
+}
+
+ShellCommand *shellCreateBraceGroupCommand(ShellProgram *body) {
+    ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_BRACE_GROUP);
+    if (cmd) {
+        cmd->data.brace_group.body = body;
     }
     return cmd;
 }
@@ -538,9 +604,52 @@ void shellCommandAddWord(ShellCommand *command, ShellWord *word) {
     shellWordArrayAppend(&command->data.simple.words, word);
 }
 
+static ShellRedirectionArray *shellCommandResolveRedirections(ShellCommand *command) {
+    if (!command) {
+        return NULL;
+    }
+    switch (command->type) {
+        case SHELL_COMMAND_SIMPLE:
+            return &command->data.simple.redirections;
+        case SHELL_COMMAND_BRACE_GROUP:
+            return &command->data.brace_group.redirections;
+        default:
+            return NULL;
+    }
+}
+
+static const ShellRedirectionArray *shellCommandResolveRedirectionsConst(const ShellCommand *command) {
+    if (!command) {
+        return NULL;
+    }
+    switch (command->type) {
+        case SHELL_COMMAND_SIMPLE:
+            return &command->data.simple.redirections;
+        case SHELL_COMMAND_BRACE_GROUP:
+            return &command->data.brace_group.redirections;
+        default:
+            return NULL;
+    }
+}
+
 void shellCommandAddRedirection(ShellCommand *command, ShellRedirection *redir) {
-    if (!command || command->type != SHELL_COMMAND_SIMPLE) return;
-    shellRedirectionArrayAppend(&command->data.simple.redirections, redir);
+    if (!command || !redir) {
+        return;
+    }
+    ShellRedirectionArray *array = shellCommandResolveRedirections(command);
+    if (!array) {
+        shellFreeRedirection(redir);
+        return;
+    }
+    shellRedirectionArrayAppend(array, redir);
+}
+
+ShellRedirectionArray *shellCommandGetMutableRedirections(ShellCommand *command) {
+    return shellCommandResolveRedirections(command);
+}
+
+const ShellRedirectionArray *shellCommandGetRedirections(const ShellCommand *command) {
+    return shellCommandResolveRedirectionsConst(command);
 }
 
 void shellFreeCommand(ShellCommand *command) {
@@ -558,6 +667,10 @@ void shellFreeCommand(ShellCommand *command) {
             break;
         case SHELL_COMMAND_SUBSHELL:
             shellFreeProgram(command->data.subshell.body);
+            break;
+        case SHELL_COMMAND_BRACE_GROUP:
+            shellFreeProgram(command->data.brace_group.body);
+            shellRedirectionArrayFree(&command->data.brace_group.redirections);
             break;
         case SHELL_COMMAND_LOOP:
             shellFreeLoop(command->data.loop);
@@ -667,6 +780,14 @@ static void shellDumpRedirectionJson(FILE *out, const ShellRedirection *redir, i
     } else {
         fprintf(out, "null\n");
     }
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"hereDocument\": %s,\n",
+            (redir && redir->here_document) ? "true" : "false");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"hereDocumentPayload\": \"%s\",\n",
+            (redir && redir->here_document) ? redir->here_document : "");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"dupTarget\": \"%s\"\n", (redir && redir->dup_target) ? redir->dup_target : "");
     shellPrintIndent(out, indent);
     fprintf(out, "}");
 }
@@ -678,6 +799,9 @@ static void shellDumpPipelineJson(FILE *out, const ShellPipeline *pipeline, int 
     fprintf(out, "{\n");
     shellPrintIndent(out, indent + 2);
     fprintf(out, "\"negated\": %s,\n", pipeline && pipeline->negated ? "true" : "false");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"explicitNegation\": %s,\n",
+            pipeline && pipeline->has_explicit_negation ? "true" : "false");
     shellPrintIndent(out, indent + 2);
     fprintf(out, "\"commands\": [\n");
     if (pipeline) {
@@ -801,6 +925,30 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
         case SHELL_COMMAND_SUBSHELL:
             shellDumpProgramJson(out, command->data.subshell.body, indent + 2);
             fprintf(out, "\n");
+            break;
+        case SHELL_COMMAND_BRACE_GROUP:
+            fprintf(out, "{\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"body\": ");
+            shellDumpProgramJson(out, command->data.brace_group.body, indent + 4);
+            fprintf(out, ",\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"redirections\": [\n");
+            const ShellRedirectionArray *brace_redirs =
+                shellCommandGetRedirections(command);
+            size_t brace_count = brace_redirs ? brace_redirs->count : 0;
+            for (size_t i = 0; i < brace_count; ++i) {
+                shellDumpRedirectionJson(out, brace_redirs->items[i], indent + 6);
+                if (i + 1 < brace_count) {
+                    fprintf(out, ",\n");
+                } else {
+                    fprintf(out, "\n");
+                }
+            }
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "]\n");
+            shellPrintIndent(out, indent + 2);
+            fprintf(out, "}\n");
             break;
         case SHELL_COMMAND_LOOP:
             fprintf(out, "{\n");

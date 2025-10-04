@@ -63,6 +63,8 @@ typedef struct {
     ShellRedirectionType type;
     char *io_number;
     ShellWord *target;
+    char *here_document;
+    char *dup_target;
     int line;
     int column;
 } ShellRedirection;
@@ -89,6 +91,7 @@ typedef struct {
     struct ShellCommand **commands;
     size_t command_count;
     bool negated;
+    bool has_explicit_negation;
 } ShellPipeline;
 
 typedef enum {
@@ -132,6 +135,11 @@ typedef struct ShellCase {
     ShellCaseClauseArray clauses;
 } ShellCase;
 
+typedef struct ShellBraceGroup {
+    struct ShellProgram *body;
+    ShellRedirectionArray redirections;
+} ShellBraceGroup;
+
 typedef struct ShellFunction {
     char *name;
     char *parameter_metadata;
@@ -143,6 +151,7 @@ typedef enum {
     SHELL_COMMAND_PIPELINE,
     SHELL_COMMAND_LOGICAL,
     SHELL_COMMAND_SUBSHELL,
+    SHELL_COMMAND_BRACE_GROUP,
     SHELL_COMMAND_LOOP,
     SHELL_COMMAND_CONDITIONAL,
     SHELL_COMMAND_CASE,
@@ -172,6 +181,7 @@ typedef struct ShellCommand {
         struct {
             struct ShellProgram *body;
         } subshell;
+        ShellBraceGroup brace_group;
         ShellLoop *loop;
         ShellConditional *conditional;
         ShellCase *case_stmt;
@@ -194,10 +204,18 @@ void shellFreeWord(ShellWord *word);
 ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *io_number,
                                          ShellWord *target, int line, int column);
 void shellFreeRedirection(ShellRedirection *redir);
+void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload);
+const char *shellRedirectionGetHereDocument(const ShellRedirection *redir);
+void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target);
+const char *shellRedirectionGetDupTarget(const ShellRedirection *redir);
+ShellWord *shellRedirectionGetWordTarget(const ShellRedirection *redir);
 
 ShellPipeline *shellCreatePipeline(void);
 void shellPipelineAddCommand(ShellPipeline *pipeline, ShellCommand *command);
 void shellFreePipeline(ShellPipeline *pipeline);
+void shellPipelineSetNegated(ShellPipeline *pipeline, bool negated);
+bool shellPipelineIsNegated(const ShellPipeline *pipeline);
+bool shellPipelineHasExplicitNegation(const ShellPipeline *pipeline);
 
 ShellLogicalList *shellCreateLogicalList(void);
 void shellLogicalListAdd(ShellLogicalList *list, ShellPipeline *pipeline, ShellLogicalConnector connector);
@@ -222,6 +240,7 @@ ShellCommand *shellCreateSimpleCommand(void);
 ShellCommand *shellCreatePipelineCommand(ShellPipeline *pipeline);
 ShellCommand *shellCreateLogicalCommand(ShellLogicalList *logical);
 ShellCommand *shellCreateSubshellCommand(ShellProgram *body);
+ShellCommand *shellCreateBraceGroupCommand(ShellProgram *body);
 ShellCommand *shellCreateLoopCommand(ShellLoop *loop);
 ShellCommand *shellCreateConditionalCommand(ShellConditional *conditional);
 ShellCommand *shellCreateCaseCommand(ShellCase *case_stmt);
@@ -231,6 +250,8 @@ ShellFunction *shellCreateFunction(const char *name, const char *parameter_metad
 void shellFreeFunction(ShellFunction *function);
 void shellCommandAddWord(ShellCommand *command, ShellWord *word);
 void shellCommandAddRedirection(ShellCommand *command, ShellRedirection *redir);
+ShellRedirectionArray *shellCommandGetMutableRedirections(ShellCommand *command);
+const ShellRedirectionArray *shellCommandGetRedirections(const ShellCommand *command);
 void shellFreeCommand(ShellCommand *command);
 
 ShellProgram *shellCreateProgram(void);

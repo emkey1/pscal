@@ -482,6 +482,9 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bo
         case SHELL_COMMAND_SUBSHELL:
             compileSubshell(chunk, command->data.subshell.body, command->line, command->exec.pipeline_index);
             break;
+        case SHELL_COMMAND_BRACE_GROUP:
+            compileProgram(chunk, command->data.brace_group.body);
+            break;
         case SHELL_COMMAND_LOOP:
             compileLoop(chunk, command->data.loop, command->line);
             break;
