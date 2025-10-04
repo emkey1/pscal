@@ -221,10 +221,20 @@ static ShellCommand *parseAndOr(ShellParser *parser) {
 }
 
 static ShellPipeline *parsePipeline(ShellParser *parser) {
+    bool negate = false;
+    while (shellParserMatch(parser, SHELL_TOKEN_BANG)) {
+        negate = !negate;
+        while (parser->current.type == SHELL_TOKEN_NEWLINE) {
+            shellParserAdvance(parser);
+        }
+    }
+
     ShellPipeline *pipeline = shellCreatePipeline();
     if (!pipeline) {
         return NULL;
     }
+
+    pipeline->negated = negate;
 
     ShellCommand *command = parsePrimary(parser);
     if (!command) {
@@ -394,7 +404,8 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
                     case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
                     case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
-                    case SHELL_TOKEN_LT_LT: type = SHELL_REDIRECT_HEREDOC; break;
+                    case SHELL_TOKEN_LT_LT:
+                    case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
                     case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
                     case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
                     case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
@@ -441,7 +452,8 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
                     case SHELL_TOKEN_LT: type = SHELL_REDIRECT_INPUT; break;
                     case SHELL_TOKEN_GT: type = SHELL_REDIRECT_OUTPUT; break;
                     case SHELL_TOKEN_GT_GT: type = SHELL_REDIRECT_APPEND; break;
-                    case SHELL_TOKEN_LT_LT: type = SHELL_REDIRECT_HEREDOC; break;
+                    case SHELL_TOKEN_LT_LT:
+                    case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
                     case SHELL_TOKEN_LT_AND: type = SHELL_REDIRECT_DUP_INPUT; break;
                     case SHELL_TOKEN_GT_AND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
                     case SHELL_TOKEN_CLOBBER: type = SHELL_REDIRECT_CLOBBER; break;
