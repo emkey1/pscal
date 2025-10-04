@@ -112,6 +112,7 @@ static ShellRuntimeState gShellRuntime = {
 static bool gShellExitRequested = false;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
+static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
 
 static bool shellLoopEnsureCapacity(size_t needed) {
     if (gShellLoopStackCapacity >= needed) {
@@ -157,6 +158,13 @@ static void shellLoopPopFrame(void) {
         gShellRuntime.break_requested_levels = 0;
         gShellRuntime.continue_requested_levels = 0;
     }
+}
+
+static void shellSignalHandler(int signo) {
+    if (signo <= 0 || signo >= NSIG) {
+        return;
+    }
+    gShellPendingSignals[signo] = 1;
 }
 
 static bool shellLoopSkipActive(void) {
@@ -447,7 +455,11 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                                            const char **out_failed_assignment,
                                            bool *out_invalid_assignment);
 static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count);
-static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid);
+static int shellSpawnProcess(const ShellCommand *cmd,
+                             int stdin_fd,
+                             int stdout_fd,
+                             pid_t *child_pid,
+                             bool ignore_job_signals);
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped);
 static void shellFreeCommand(ShellCommand *cmd);
 static void shellUpdateStatus(int status);
@@ -605,7 +617,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     pid_t child = -1;
-    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], &child);
+    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], &child, false);
     close(pipes[1]);
     pipes[1] = -1;
     if (spawn_err != 0) {
@@ -642,6 +654,7 @@ static char *shellRunCommandSubstitution(const char *command) {
 
     int status = 0;
     shellWaitPid(child, &status, false, NULL);
+    shellRuntimeProcessPendingSignals();
     shellFreeCommand(&cmd);
 
     if (!output) {
@@ -2472,6 +2485,55 @@ static void shellUpdateStatus(int status) {
     }
 }
 
+/*
+ * POSIX specifies that foreground commands should see the shell's inherited
+ * signal dispositions, except that asynchronous lists without job control must
+ * inherit SIG_IGN for SIGINT and SIGQUIT, and that traps fire only after the
+ * foreground job or wait completes.  We record pending signals in an
+ * async-signal-safe manner and reconcile them once we're back in the main
+ * interpreter loop so the runtime can unwind cleanly before honouring traps.
+ */
+static void shellHandlePendingSignal(int signo) {
+    if (signo != SIGINT && signo != SIGQUIT && signo != SIGTSTP) {
+        return;
+    }
+
+    shellUpdateStatus(128 + signo);
+
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = true;
+        gShellCurrentVm->current_builtin_name = "signal";
+    }
+
+    if (gShellLoopStackSize > 0) {
+        gShellRuntime.break_requested = true;
+        gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+        shellLoopRequestBreakLevels((int)gShellLoopStackSize);
+    }
+}
+
+void shellRuntimeProcessPendingSignals(void) {
+    for (int signo = 1; signo < NSIG; ++signo) {
+        if (!gShellPendingSignals[signo]) {
+            continue;
+        }
+        gShellPendingSignals[signo] = 0;
+        shellHandlePendingSignal(signo);
+    }
+}
+
+void shellRuntimeInitSignals(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = shellSignalHandler;
+    action.sa_flags |= SA_RESTART;
+
+    sigaction(SIGINT, &action, NULL);
+    sigaction(SIGQUIT, &action, NULL);
+    sigaction(SIGTSTP, &action, NULL);
+}
+
 static bool shellHistoryEnsureCapacity(size_t needed) {
     if (gShellHistory.capacity >= needed) {
         return true;
@@ -3392,7 +3454,11 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
     return true;
 }
 
-static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_fd, pid_t *child_pid) {
+static int shellSpawnProcess(const ShellCommand *cmd,
+                             int stdin_fd,
+                             int stdout_fd,
+                             pid_t *child_pid,
+                             bool ignore_job_signals) {
     if (!cmd || cmd->argc == 0 || !cmd->argv || !cmd->argv[0] || !child_pid) {
         return EINVAL;
     }
@@ -3470,8 +3536,13 @@ static int shellSpawnProcess(const ShellCommand *cmd, int stdin_fd, int stdout_f
             /* best-effort; ignore errors */
         }
 
-        signal(SIGINT, SIG_DFL);
-        signal(SIGQUIT, SIG_DFL);
+        if (ignore_job_signals) {
+            signal(SIGINT, SIG_IGN);
+            signal(SIGQUIT, SIG_IGN);
+        } else {
+            signal(SIGINT, SIG_DFL);
+            signal(SIGQUIT, SIG_DFL);
+        }
         signal(SIGTSTP, SIG_DFL);
         signal(SIGTTIN, SIG_DFL);
         signal(SIGTTOU, SIG_DFL);
@@ -3717,6 +3788,8 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             shellJobControlRestoreForeground();
         }
 
+        shellRuntimeProcessPendingSignals();
+
         if (stopped_job && job_control) {
             ShellJob *job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
             if (job) {
@@ -3753,6 +3826,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (!cmd) {
         return makeVoid();
     }
+    shellRuntimeProcessPendingSignals();
     if (shellLoopSkipActive()) {
         shellFreeCommand(cmd);
         return makeVoid();
@@ -3865,8 +3939,22 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         }
     }
 
+    bool background_execution = cmd->background;
+    if (ctx->active) {
+        if (ctx->background) {
+            background_execution = true;
+        }
+        if (cmd->background) {
+            ctx->background = true;
+        }
+    }
+
     pid_t child = -1;
-    int spawn_err = shellSpawnProcess(cmd, stdin_fd, stdout_fd, &child);
+    int spawn_err = shellSpawnProcess(cmd,
+                                      stdin_fd,
+                                      stdout_fd,
+                                      &child,
+                                      background_execution && !gShellRuntime.job_control_enabled);
     if (assignments_applied) {
         shellRestoreAssignments(assignment_backups, assignment_backup_count);
         assignments_applied = false;
@@ -3916,6 +4004,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         if (cmd->is_pipeline_tail) {
             ctx->background = cmd->background;
             shellFinishPipeline(cmd);
+            shellRuntimeProcessPendingSignals();
         }
     } else {
         int status = 0;
@@ -3930,6 +4019,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (job_control) {
                 shellJobControlRestoreForeground();
             }
+            shellRuntimeProcessPendingSignals();
             if (stopped && job_control) {
                 pid_t job_pids[1];
                 job_pids[0] = child;
@@ -3955,6 +4045,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             status = 0;
         }
         shellUpdateStatus(status);
+        shellRuntimeProcessPendingSignals();
     }
 
     shellFreeCommand(cmd);
@@ -4951,6 +5042,7 @@ Value vmHostShellLastStatus(VM *vm) {
 
 Value vmHostShellLoopShouldBreak(VM *vm) {
     (void)vm;
+    shellRuntimeProcessPendingSignals();
     ShellLoopFrame *frame = shellLoopTop();
     bool should_break = frame && frame->break_pending;
     return makeBoolean(should_break);
