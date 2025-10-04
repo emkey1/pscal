@@ -86,6 +86,8 @@ void shellParserFree(ShellParser *parser) {
 static void shellParserAdvance(ShellParser *parser) {
     shellFreeToken(&parser->previous);
     parser->previous = parser->current;
+    // TODO: Incorporate lexer rule-mask metadata and reserved-word downgrades when
+    // the parser begins consuming context-sensitive productions from Rules 1-9.
     parser->current = shellNextToken(&parser->lexer);
 }
 

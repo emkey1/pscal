@@ -1,115 +1,133 @@
 {
-  "version": 1,
-  "tests": [
-    {
-      "id": "pipeline_basic",
-      "name": "Pipeline echoes through cat",
-      "category": "pipeline",
-      "description": "Single pipeline stage forwards data between commands.",
-      "script": "Examples/psh/pipeline.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "pipeline:start\nalpha\npipeline:end"
-    },
-    {
-      "id": "conditionals_loop",
-      "name": "Conditionals syntax placeholder",
-      "category": "control",
-      "description": "if/then/else syntax is parsed (branches execute sequentially until flow control lands).",
-      "script": "Examples/psh/conditionals.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
-    },
-    {
-      "id": "builtin_functions",
-      "name": "Builtins update environment and status",
-      "category": "builtins",
-      "description": "export/unset update environment and shell status variables.",
-      "script": "Examples/psh/functions.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
-    },
-    {
-      "id": "shell_function_definition",
-      "name": "Shell functions execute stored bodies",
-      "category": "functions",
-      "description": "function keyword and name() syntax register and invoke shell functions.",
-      "script": "Examples/psh/user_functions.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
-    },
-    {
-      "id": "builtin_setenv",
-      "name": "setenv/unsetenv mirror POSIX behaviour",
-      "category": "builtins",
-      "description": "setenv updates variables, prints the environment, and unsetenv removes entries.",
-      "script": "Examples/psh/env.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
-    },
-    {
-      "id": "pipeline_cache_hit",
-      "name": "Pipeline cache reuse emits notice",
-      "category": "cache",
-      "description": "Second run loads cached bytecode for the same script.",
-      "script": "Examples/psh/pipeline.psh",
-      "expect": "runtime_ok",
-      "prime_cache": true,
-      "expected_stdout": "pipeline:start\nalpha\npipeline:end",
-      "expected_stderr_substring": "Loaded cached bytecode"
-    },
-    {
-      "id": "case_basic",
-      "name": "Case statements dispatch patterns",
-      "category": "control",
-      "description": "case selects the first matching clause and defaults otherwise.",
-      "script": "Examples/psh/case.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
-    },
-    {
-      "id": "command_substitution",
-      "name": "Command substitution captures stdout",
-      "category": "expansion",
-      "description": "$(...) trims trailing newlines and supports line continuations.",
-      "script": "Tests/shell/tests/command_substitution.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
-    },
-    {
-      "id": "backtick_substitution",
-      "name": "Legacy backtick substitution is supported",
-      "category": "expansion",
-      "description": "Backtick command substitution trims trailing newlines and honors escapes.",
-      "script": "Tests/shell/tests/backtick_substitution.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
-    },
-    {
-      "id": "arithmetic_expansion",
-      "name": "Arithmetic expansion evaluates expressions",
-      "category": "expansion",
-      "description": "Handles integer math, variables, and syntax errors with preserved text.",
-      "script": "Tests/shell/tests/arithmetic_expansion.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
-    },
-    {
-      "id": "jobs_foreground",
-      "name": "jobs lists and fg reaps background work",
-      "category": "jobs",
-      "description": "jobs reports running background jobs and fg waits for completion.",
-      "script": "Tests/shell/tests/jobs_foreground.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "jobs-foreground:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\njobs:after-start\njobs:after-end\njobs-foreground:end"
-    },
-    {
-      "id": "jobs_wait",
-      "name": "bg resumes jobs and wait observes completion",
-      "category": "jobs",
-      "description": "bg continues the latest background job and wait blocks until it exits.",
-      "script": "Tests/shell/tests/jobs_wait.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
-    }
-  ]
+    "version": 1,
+    "tests": [
+        {
+            "id": "pipeline_basic",
+            "name": "Pipeline echoes through cat",
+            "category": "pipeline",
+            "description": "Single pipeline stage forwards data between commands.",
+            "script": "Examples/psh/pipeline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+        },
+        {
+            "id": "conditionals_loop",
+            "name": "Conditionals syntax placeholder",
+            "category": "control",
+            "description": "if/then/else syntax is parsed (branches execute sequentially until flow control lands).",
+            "script": "Examples/psh/conditionals.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
+        },
+        {
+            "id": "builtin_functions",
+            "name": "Builtins update environment and status",
+            "category": "builtins",
+            "description": "export/unset update environment and shell status variables.",
+            "script": "Examples/psh/functions.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
+        },
+        {
+            "id": "shell_function_definition",
+            "name": "Shell functions execute stored bodies",
+            "category": "functions",
+            "description": "function keyword and name() syntax register and invoke shell functions.",
+            "script": "Examples/psh/user_functions.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
+        },
+        {
+            "id": "builtin_setenv",
+            "name": "setenv/unsetenv mirror POSIX behaviour",
+            "category": "builtins",
+            "description": "setenv updates variables, prints the environment, and unsetenv removes entries.",
+            "script": "Examples/psh/env.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
+        },
+        {
+            "id": "pipeline_cache_hit",
+            "name": "Pipeline cache reuse emits notice",
+            "category": "cache",
+            "description": "Second run loads cached bytecode for the same script.",
+            "script": "Examples/psh/pipeline.psh",
+            "expect": "runtime_ok",
+            "prime_cache": true,
+            "expected_stdout": "pipeline:start\nalpha\npipeline:end",
+            "expected_stderr_substring": "Loaded cached bytecode"
+        },
+        {
+            "id": "case_basic",
+            "name": "Case statements dispatch patterns",
+            "category": "control",
+            "description": "case selects the first matching clause and defaults otherwise.",
+            "script": "Examples/psh/case.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
+        },
+        {
+            "id": "command_substitution",
+            "name": "Command substitution captures stdout",
+            "category": "expansion",
+            "description": "$(...) trims trailing newlines and supports line continuations.",
+            "script": "Tests/shell/tests/command_substitution.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
+        },
+        {
+            "id": "backtick_substitution",
+            "name": "Legacy backtick substitution is supported",
+            "category": "expansion",
+            "description": "Backtick command substitution trims trailing newlines and honors escapes.",
+            "script": "Tests/shell/tests/backtick_substitution.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
+        },
+        {
+            "id": "arithmetic_expansion",
+            "name": "Arithmetic expansion evaluates expressions",
+            "category": "expansion",
+            "description": "Handles integer math, variables, and syntax errors with preserved text.",
+            "script": "Tests/shell/tests/arithmetic_expansion.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
+        },
+        {
+            "id": "jobs_foreground",
+            "name": "jobs lists and fg reaps background work",
+            "category": "jobs",
+            "description": "jobs reports running background jobs and fg waits for completion.",
+            "script": "Tests/shell/tests/jobs_foreground.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "jobs-foreground:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\njobs:after-start\njobs:after-end\njobs-foreground:end"
+        },
+        {
+            "id": "jobs_wait",
+            "name": "bg resumes jobs and wait observes completion",
+            "category": "jobs",
+            "description": "bg continues the latest background job and wait blocks until it exits.",
+            "script": "Tests/shell/tests/jobs_wait.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
+        },
+        {
+            "id": "lexer_assignment_context",
+            "name": "Assignment detection respects arithmetic words",
+            "category": "lexer",
+            "description": "Reserved contexts mark plain VAR=value as assignment but skip words containing arithmetic substitutions.",
+            "script": "Tests/shell/tests/lexer_assignment_context.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-assignment:ok"
+        },
+        {
+            "id": "lexer_expansion_shapes",
+            "name": "Parameter and arithmetic expansions retain metadata",
+            "category": "lexer",
+            "description": "${name} records variable names while $((..)) is distinguished as arithmetic expansion.",
+            "script": "Tests/shell/tests/lexer_expansion_shapes.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-expansions:ok"
+        }
+    ]
 }
