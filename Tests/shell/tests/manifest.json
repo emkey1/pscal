@@ -47,6 +47,15 @@
             "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
         },
         {
+            "id": "source_dot_alias",
+            "name": "dot builtin sources scripts",
+            "category": "builtins",
+            "description": "The '.' command aliases source and runs helpers in the current environment.",
+            "script": "Tests/shell/tests/source_dot_alias.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "source-dot:start\nsource-dot-helper:start\nsource-dot-helper:end\nafter:from-dot\nsource-dot:end"
+        },
+        {
             "id": "pipeline_cache_hit",
             "name": "Pipeline cache reuse emits notice",
             "category": "cache",
