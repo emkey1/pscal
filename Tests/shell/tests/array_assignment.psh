@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(pwd)
+EXSH="$ROOT/build/bin/exsh"
+
+SRC=$(mktemp)
+AST_JSON=$(mktemp)
+PY_SCRIPT=$(mktemp)
+
+printf '%s\n' 'array=("alpha" "beta" "gamma")' >"$SRC"
+"$EXSH" --dump-ast-json "$SRC" >"$AST_JSON"
+
+cat <<'PY' >"$PY_SCRIPT"
+import json
+import sys
+
+
+def first_word(doc):
+    return doc["commands"][0]["payload"]["commands"][0]["payload"]["words"][0]
+
+
+raw = open(sys.argv[1], "rb").read()
+raw = raw.replace(b"\x01", b"'").replace(b"\x02", b'\\"')
+doc = json.loads(raw.decode("utf-8"))
+word = first_word(doc)
+if not word.get("isAssignment"):
+    raise SystemExit("array assignment not marked as assignment")
+text = word.get("text")
+if text != 'array=("alpha" "beta" "gamma")':
+    raise SystemExit(f"unexpected word text: {text!r}")
+print("lexer-array-assignment:ok")
+PY
+
+python3 "$PY_SCRIPT" "$AST_JSON"
+
+rm -f "$SRC" "$AST_JSON" "$PY_SCRIPT"
