@@ -1648,8 +1648,14 @@ static char *shellJoinPositionalParameters(void) {
     return result;
 }
 
-static char *shellLookupParameterValue(const char *name, size_t len) {
+static char *shellLookupParameterValueInternal(const char *name, size_t len, bool *out_is_set) {
+    if (out_is_set) {
+        *out_is_set = false;
+    }
     if (!name || len == 0) {
+        if (out_is_set) {
+            *out_is_set = true;
+        }
         return strdup("");
     }
     if (len == 1) {
@@ -1657,22 +1663,38 @@ static char *shellLookupParameterValue(const char *name, size_t len) {
             case '?': {
                 char buffer[32];
                 snprintf(buffer, sizeof(buffer), "%d", gShellRuntime.last_status);
+                if (out_is_set) {
+                    *out_is_set = true;
+                }
                 return strdup(buffer);
             }
             case '$': {
                 char buffer[32];
                 snprintf(buffer, sizeof(buffer), "%d", (int)getpid());
+                if (out_is_set) {
+                    *out_is_set = true;
+                }
                 return strdup(buffer);
             }
             case '#': {
                 char buffer[32];
                 snprintf(buffer, sizeof(buffer), "%d", gParamCount);
+                if (out_is_set) {
+                    *out_is_set = true;
+                }
                 return strdup(buffer);
             }
             case '*':
-            case '@':
+            case '@': {
+                if (out_is_set) {
+                    *out_is_set = gParamCount > 0;
+                }
                 return shellJoinPositionalParameters();
+            }
             case '0': {
+                if (out_is_set) {
+                    *out_is_set = true;
+                }
                 if (gShellArg0) {
                     return strdup(gShellArg0);
                 }
@@ -1692,11 +1714,15 @@ static char *shellLookupParameterValue(const char *name, size_t len) {
     }
     if (numeric) {
         long index = strtol(name, NULL, 10);
-        if (index >= 1 && index <= gParamCount && gParamValues) {
-            const char *value = gParamValues[index - 1] ? gParamValues[index - 1] : "";
-            return strdup(value);
+        bool have_value = (index >= 1 && index <= gParamCount && gParamValues);
+        const char *value = "";
+        if (have_value) {
+            value = gParamValues[index - 1] ? gParamValues[index - 1] : "";
         }
-        return strdup("");
+        if (out_is_set) {
+            *out_is_set = have_value;
+        }
+        return strdup(value);
     }
 
     char *key = (char *)malloc(len + 1);
@@ -1706,11 +1732,18 @@ static char *shellLookupParameterValue(const char *name, size_t len) {
     memcpy(key, name, len);
     key[len] = '\0';
     const char *env = getenv(key);
+    if (out_is_set) {
+        *out_is_set = (env != NULL);
+    }
     free(key);
     if (!env) {
         return strdup("");
     }
     return strdup(env);
+}
+
+static char *shellLookupParameterValue(const char *name, size_t len) {
+    return shellLookupParameterValueInternal(name, len, NULL);
 }
 
 static void shellFreeArrayValues(char **items, size_t count) {
@@ -1943,6 +1976,8 @@ static char *shellExpandArraySubscriptValue(const char *name,
     return result;
 }
 
+static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len);
+
 static char *shellExpandParameter(const char *input, size_t *out_consumed) {
     if (out_consumed) {
         *out_consumed = 0;
@@ -2045,9 +2080,88 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
             return strdup(buffer);
         }
 
+        const char *inner_end = inner + inner_len;
+        const char *default_pos = NULL;
+        bool default_requires_value = false;
+        size_t bracket_depth = 0;
+        for (const char *scan = inner; scan < inner_end; ++scan) {
+            char ch = *scan;
+            if (ch == '[') {
+                bracket_depth++;
+                continue;
+            }
+            if (ch == ']' && bracket_depth > 0) {
+                bracket_depth--;
+                continue;
+            }
+            if (bracket_depth > 0) {
+                continue;
+            }
+            if (ch == ':' && (scan + 1) < inner_end && scan[1] == '-') {
+                default_pos = scan;
+                default_requires_value = true;
+                break;
+            }
+            if (ch == '-' && (scan == inner || scan[-1] != ':')) {
+                default_pos = scan;
+                default_requires_value = false;
+                break;
+            }
+        }
+        if (default_pos) {
+            size_t name_len = (size_t)(default_pos - inner);
+            if (name_len == 0) {
+                return NULL;
+            }
+            bool simple_name = false;
+            if (name_len == 1) {
+                unsigned char first = (unsigned char)inner[0];
+                if (isalnum(first) || first == '_' || first == '*' || first == '@' ||
+                    first == '#' || first == '?' || first == '$') {
+                    simple_name = true;
+                }
+            } else {
+                simple_name = true;
+                for (size_t i = 0; i < name_len; ++i) {
+                    unsigned char ch = (unsigned char)inner[i];
+                    if (!isalnum(ch) && ch != '_') {
+                        simple_name = false;
+                        break;
+                    }
+                }
+            }
+            if (simple_name) {
+                bool is_set = false;
+                char *value = shellLookupParameterValueInternal(inner, name_len, &is_set);
+                if (!value) {
+                    return NULL;
+                }
+                bool use_default = !is_set || (default_requires_value && value[0] == '\0');
+                if (!use_default) {
+                    return value;
+                }
+                free(value);
+                const char *default_start = default_pos + (default_requires_value ? 2 : 1);
+                size_t default_len = (size_t)(inner_end - default_start);
+                char *raw_default = (char *)malloc(default_len + 1);
+                if (!raw_default) {
+                    return NULL;
+                }
+                if (default_len > 0) {
+                    memcpy(raw_default, default_start, default_len);
+                }
+                raw_default[default_len] = '\0';
+                char *expanded_default = shellExpandWord(raw_default, 0, NULL, 0);
+                free(raw_default);
+                if (!expanded_default) {
+                    return NULL;
+                }
+                return expanded_default;
+            }
+        }
+
         const char *colon = memchr(inner, ':', inner_len);
         if (colon && colon > inner) {
-            const char *inner_end = inner + inner_len;
             const char *offset_start = colon + 1;
             if (offset_start >= inner_end ||
                 !isdigit((unsigned char)*offset_start)) {

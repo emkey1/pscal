@@ -1,0 +1,11 @@
+echo "param-default:start"
+unset __PSC_PARAM_DEFAULT_TEST
+# Unset variables fall back to the default.
+echo "unset:${__PSC_PARAM_DEFAULT_TEST:-fallback}"
+# Empty variables also use the default with the :- operator.
+__PSC_PARAM_DEFAULT_TEST=""
+echo "empty:${__PSC_PARAM_DEFAULT_TEST:-fallback}"
+# Non-empty values bypass the default.
+__PSC_PARAM_DEFAULT_TEST="value"
+echo "set:${__PSC_PARAM_DEFAULT_TEST:-fallback}"
+echo "param-default:end"
