@@ -156,6 +156,29 @@ static void emitPushWord(BytecodeChunk *chunk, const ShellWord *word, int line) 
     free(encoded);
 }
 
+static char *encodeHereDocBody(const char *body) {
+    if (!body) {
+        return strdup("");
+    }
+    size_t len = strlen(body);
+    if (len == 0) {
+        return strdup("");
+    }
+    static const char digits[] = "0123456789ABCDEF";
+    size_t encoded_len = len * 2;
+    char *encoded = (char *)malloc(encoded_len + 1);
+    if (!encoded) {
+        return NULL;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)body[i];
+        encoded[i * 2] = digits[(c >> 4) & 0xF];
+        encoded[i * 2 + 1] = digits[c & 0xF];
+    }
+    encoded[encoded_len] = '\0';
+    return encoded;
+}
+
 static void emitPushInt(BytecodeChunk *chunk, int value, int line) {
     Value constant = makeInt(value);
     int index = addConstantToChunk(chunk, &constant);
@@ -225,15 +248,39 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, boo
         const ShellRedirectionArray *redirs = &command->data.simple.redirections;
         for (size_t i = 0; i < redirs->count; ++i) {
             const ShellRedirection *redir = redirs->items[i];
-            char buffer[256];
             const ShellWord *target = redir ? redir->target : NULL;
             char *encoded_target = encodeWord(target);
             const char *target_text = encoded_target ? encoded_target : "";
-            snprintf(buffer, sizeof(buffer), "redir:%s:%s:%s",
-                     redir && redir->io_number ? redir->io_number : "",
-                     redirTypeName(redir ? redir->type : SHELL_REDIRECT_OUTPUT),
-                     target_text);
+            const char *io_number = (redir && redir->io_number) ? redir->io_number : "";
+            const char *type_name = redirTypeName(redir ? redir->type : SHELL_REDIRECT_OUTPUT);
+            char *encoded_here_doc = NULL;
+            const char *extra_spec = NULL;
+            if (redir && redir->type == SHELL_REDIRECT_HEREDOC) {
+                encoded_here_doc = encodeHereDocBody(shellRedirectionGetHereDocument(redir));
+                if (!encoded_here_doc) {
+                    free(encoded_target);
+                    return;
+                }
+                extra_spec = encoded_here_doc;
+            }
+            size_t needed = strlen("redir:") + strlen(io_number) + 1 + strlen(type_name) + 1 + strlen(target_text) + 1;
+            if (extra_spec) {
+                needed += strlen(extra_spec) + 1;
+            }
+            char *buffer = (char *)malloc(needed);
+            if (!buffer) {
+                free(encoded_here_doc);
+                free(encoded_target);
+                return;
+            }
+            if (extra_spec) {
+                snprintf(buffer, needed, "redir:%s:%s:%s:%s", io_number, type_name, target_text, extra_spec);
+            } else {
+                snprintf(buffer, needed, "redir:%s:%s:%s", io_number, type_name, target_text);
+            }
             emitPushString(chunk, buffer, line);
+            free(encoded_here_doc);
+            free(buffer);
             free(encoded_target);
             arg_count++;
         }
