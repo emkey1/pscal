@@ -312,6 +312,16 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     emitShort(chunk, 0xFFFF, line);
 
     compileProgram(chunk, loop->body);
+    emitCallHost(chunk, HOST_FN_SHELL_LOOP_SHOULD_BREAK, line);
+    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+    int continueJump = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
+
+    writeBytecodeChunk(chunk, JUMP, line);
+    int breakJump = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
+
+    int continueLabel = chunk->count;
     emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
 
     writeBytecodeChunk(chunk, JUMP, line);
@@ -320,6 +330,12 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
 
     int exitLabel = chunk->count;
     emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
+
+    uint16_t continueOffset = (uint16_t)(continueLabel - (continueJump + 2));
+    patchShort(chunk, continueJump, continueOffset);
+
+    uint16_t breakOffset = (uint16_t)(exitLabel - (breakJump + 2));
+    patchShort(chunk, breakJump, breakOffset);
 
     uint16_t loopOffset = (uint16_t)(loopStart - (loopJump + 2));
     patchShort(chunk, loopJump, loopOffset);
