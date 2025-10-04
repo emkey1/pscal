@@ -137,6 +137,7 @@ Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellPollJobs(struct VM_s* vm);
 bool shellRuntimeConsumeExitRequested(void);
