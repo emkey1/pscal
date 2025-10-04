@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(pwd)
+EXSH="$ROOT/build/bin/exsh"
+
+ASSIGN_SRC=$(mktemp)
+NO_ASSIGN_SRC=$(mktemp)
+ASSIGN_JSON=$(mktemp)
+NO_ASSIGN_JSON=$(mktemp)
+PY_SCRIPT=$(mktemp)
+
+printf '%s\n' 'VAR=value echo ok' >"$ASSIGN_SRC"
+printf '%s\n' 'foo$((BAR=1)) echo hi' >"$NO_ASSIGN_SRC"
+
+"$EXSH" --dump-ast-json "$ASSIGN_SRC" >"$ASSIGN_JSON"
+"$EXSH" --dump-ast-json "$NO_ASSIGN_SRC" >"$NO_ASSIGN_JSON"
+
+printf '%s\n' 'import json, sys' >"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'assign = json.load(open(sys.argv[1]))' >>"$PY_SCRIPT"
+printf '%s\n' 'no_assign = json.load(open(sys.argv[2]))' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'def first_word(doc):' >>"$PY_SCRIPT"
+printf '%s\n' '    return doc["commands"][0]["payload"]["commands"][0]["payload"]["words"][0]' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'a = first_word(assign)' >>"$PY_SCRIPT"
+printf '%s\n' 'b = first_word(no_assign)' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'if not a.get("isAssignment"):' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("assignment word not flagged")' >>"$PY_SCRIPT"
+printf '%s\n' 'if b.get("isAssignment"):' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("arithmetic word misclassified")' >>"$PY_SCRIPT"
+printf '%s\n' 'print("lexer-assignment:ok")' >>"$PY_SCRIPT"
+
+python3 "$PY_SCRIPT" "$ASSIGN_JSON" "$NO_ASSIGN_JSON"
+
+rm -f "$ASSIGN_SRC" "$NO_ASSIGN_SRC" "$ASSIGN_JSON" "$NO_ASSIGN_JSON" "$PY_SCRIPT"

@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(pwd)
+EXSH="$ROOT/build/bin/exsh"
+
+PARAM_SRC=$(mktemp)
+ARITH_SRC=$(mktemp)
+PARAM_JSON=$(mktemp)
+ARITH_JSON=$(mktemp)
+PY_SCRIPT=$(mktemp)
+
+printf '%s\n' 'echo foo${bar}' >"$PARAM_SRC"
+printf '%s\n' 'echo foo$((1+2))' >"$ARITH_SRC"
+
+"$EXSH" --dump-ast-json "$PARAM_SRC" >"$PARAM_JSON"
+"$EXSH" --dump-ast-json "$ARITH_SRC" >"$ARITH_JSON"
+
+printf '%s\n' 'import json, sys' >"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'param = json.load(open(sys.argv[1]))' >>"$PY_SCRIPT"
+printf '%s\n' 'arith = json.load(open(sys.argv[2]))' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'def second_word(doc):' >>"$PY_SCRIPT"
+printf '%s\n' '    return doc["commands"][0]["payload"]["commands"][0]["payload"]["words"][1]' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'p = second_word(param)' >>"$PY_SCRIPT"
+printf '%s\n' 'a = second_word(arith)' >>"$PY_SCRIPT"
+printf '%s\n' '' >>"$PY_SCRIPT"
+printf '%s\n' 'if not p.get("hasParameterExpansion"):' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("parameter expansion not detected")' >>"$PY_SCRIPT"
+printf '%s\n' 'if p.get("expansions") != ["bar"]:' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("parameter expansion names missing")' >>"$PY_SCRIPT"
+printf '%s\n' 'if not a.get("hasParameterExpansion"):' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("arithmetic expansion lost")' >>"$PY_SCRIPT"
+printf '%s\n' 'if a.get("expansions"):' >>"$PY_SCRIPT"
+printf '%s\n' '    raise SystemExit("arithmetic expansion reported parameter names")' >>"$PY_SCRIPT"
+printf '%s\n' 'print("lexer-expansions:ok")' >>"$PY_SCRIPT"
+
+python3 "$PY_SCRIPT" "$PARAM_JSON" "$ARITH_JSON"
+
+rm -f "$PARAM_SRC" "$ARITH_SRC" "$PARAM_JSON" "$ARITH_JSON" "$PY_SCRIPT"
