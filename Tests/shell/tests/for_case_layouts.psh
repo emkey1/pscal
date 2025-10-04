@@ -1,0 +1,33 @@
+echo "for-case:start"
+
+for value in one \
+             two three
+
+do
+  case "$value" in
+    one)
+      echo "case:one"
+      ;;
+    two | \
+three)
+      echo "case:two-three:$value"
+      ;;
+    *)
+      echo "case:other:$value"
+      ;;
+  esac
+done
+
+for name in \
+  "quoted value" \
+  four; do case "$name" in
+    "quoted value")
+      echo "case:quoted:$name"
+      ;;
+    *)
+      echo "case:rest:$name"
+      ;;
+  esac
+done
+
+echo "for-case:end"

@@ -1,0 +1,15 @@
+echo "brace-group:start"
+count=0
+
+{ count=$((count + 1)); echo "group:inner:$count"; }
+
+echo "group:outer:$count"
+
+{
+  echo "group:block-line"
+  echo "group:block-second"
+}
+
+{ printf "group:pipeline\n"; } | tr '[:lower:]' '[:upper:]'
+
+echo "brace-group:end"

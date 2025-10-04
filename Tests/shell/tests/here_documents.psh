@@ -1,0 +1,17 @@
+echo "heredoc:start"
+VALUE="xyz"
+
+cat <<EOF
+plain:$VALUE
+EOF
+
+cat <<'EOF'
+literal:$VALUE
+EOF
+
+cat <<EOF
+multiline
+content
+EOF
+
+echo "heredoc:end"

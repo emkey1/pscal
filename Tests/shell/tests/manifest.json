@@ -85,6 +85,15 @@
             "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
         },
         {
+            "id": "grammar_here_documents",
+            "name": "Here documents expand and quote correctly",
+            "category": "grammar",
+            "description": "Exercises unquoted, single-quoted, and multi-line here documents.",
+            "script": "Tests/shell/tests/here_documents.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "heredoc:start\nplain:xyz\nliteral:$VALUE\nmultiline\ncontent\nheredoc:end"
+        },
+        {
             "id": "arithmetic_expansion",
             "name": "Arithmetic expansion evaluates expressions",
             "category": "expansion",
@@ -128,6 +137,33 @@
             "script": "Tests/shell/tests/lexer_expansion_shapes.psh",
             "expect": "runtime_ok",
             "expected_stdout": "lexer-expansions:ok"
+        },
+        {
+            "id": "grammar_brace_groups",
+            "name": "Brace groups share scope and join pipelines",
+            "category": "grammar",
+            "description": "Validates inline, multi-line, and piped brace groups.",
+            "script": "Tests/shell/tests/brace_groups.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "brace-group:start\ngroup:inner:1\ngroup:outer:1\ngroup:block-line\ngroup:block-second\nGROUP:PIPELINE\nbrace-group:end"
+        },
+        {
+            "id": "grammar_bang_pipeline",
+            "name": "Bang prefixes invert pipeline status",
+            "category": "grammar",
+            "description": "Covers ! pipelines inside conditionals and at the top level.",
+            "script": "Tests/shell/tests/bang_pipeline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "bang-pipeline:start\nbang-pipeline:alpha\nbang-pipeline:beta\nbang-pipeline:status:1\nbang-pipeline:brace-status:0\nbang-pipeline:end"
+        },
+        {
+            "id": "grammar_for_case_layouts",
+            "name": "Complex for/case layouts parse correctly",
+            "category": "grammar",
+            "description": "Exercises multiline for lists and case patterns with continuations.",
+            "script": "Tests/shell/tests/for_case_layouts.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "for-case:start\ncase:one\ncase:two-three:two\ncase:two-three:three\ncase:quoted:quoted value\ncase:rest:four\nfor-case:end"
         }
     ]
 }
