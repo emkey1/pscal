@@ -9,12 +9,16 @@
 extern "C" {
 #endif
 
+typedef struct ShellPendingHereDocArray ShellPendingHereDocArray;
+
 typedef struct {
     ShellLexer lexer;
     ShellToken current;
     ShellToken previous;
     bool had_error;
     bool panic_mode;
+    unsigned int next_rule_mask;
+    ShellPendingHereDocArray *pending_here_docs;
 } ShellParser;
 
 ShellProgram *shellParseString(const char *source, ShellParser *parser);
