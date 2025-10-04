@@ -1721,35 +1721,134 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
         return NULL;
     }
     if (*input == '{') {
-        const char *cursor = input + 1;
-        bool length_only = false;
-        if (*cursor == '#') {
-            length_only = true;
-            cursor++;
-        }
-        const char *name_start = cursor;
-        while (*cursor && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-            cursor++;
-        }
-        if (*cursor != '}' || cursor == name_start) {
+        const char *closing = strchr(input + 1, '}');
+        if (!closing) {
             return NULL;
         }
-        size_t name_len = (size_t)(cursor - name_start);
         if (out_consumed) {
-            *out_consumed = (size_t)(cursor - input) + 1;
+            *out_consumed = (size_t)(closing - input + 1);
         }
-        char *value = shellLookupParameterValue(name_start, name_len);
-        if (!value) {
-            return NULL;
+        const char *inner = input + 1;
+        size_t inner_len = (size_t)(closing - inner);
+        if (inner_len == 0) {
+            return strdup("");
         }
-        if (length_only) {
+        if (*inner == '#') {
+            const char *name_start = inner + 1;
+            if (name_start >= closing) {
+                return NULL;
+            }
+            const char *cursor = name_start;
+            while (cursor < closing &&
+                   (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+                cursor++;
+            }
+            if (cursor != closing || cursor == name_start) {
+                return NULL;
+            }
+            size_t name_len = (size_t)(cursor - name_start);
+            char *value = shellLookupParameterValue(name_start, name_len);
+            if (!value) {
+                return NULL;
+            }
             size_t val_len = strlen(value);
             free(value);
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%zu", val_len);
             return strdup(buffer);
         }
-        return value;
+
+        const char *colon = memchr(inner, ':', inner_len);
+        if (colon && colon > inner) {
+            const char *inner_end = inner + inner_len;
+            const char *offset_start = colon + 1;
+            if (offset_start >= inner_end ||
+                !isdigit((unsigned char)*offset_start)) {
+                return NULL;
+            }
+            size_t offset_value = 0;
+            size_t offset_digits = 0;
+            const char *cursor = offset_start;
+            while (cursor < inner_end && isdigit((unsigned char)*cursor)) {
+                if (offset_value > (SIZE_MAX - 9) / 10) {
+                    offset_value = SIZE_MAX;
+                } else {
+                    offset_value = offset_value * 10 + (size_t)(*cursor - '0');
+                }
+                cursor++;
+                offset_digits++;
+            }
+            if (offset_digits == 0) {
+                return NULL;
+            }
+            const char *after_offset = cursor;
+            bool have_length = false;
+            size_t length_value = 0;
+            if (after_offset < inner_end) {
+                if (*after_offset != ':') {
+                    return NULL;
+                }
+                const char *length_start = after_offset + 1;
+                if (length_start >= inner_end ||
+                    !isdigit((unsigned char)*length_start)) {
+                    return NULL;
+                }
+                const char *length_cursor = length_start;
+                size_t length_digits = 0;
+                while (length_cursor < inner_end &&
+                       isdigit((unsigned char)*length_cursor)) {
+                    if (length_value > (SIZE_MAX - 9) / 10) {
+                        length_value = SIZE_MAX;
+                    } else {
+                        length_value =
+                            length_value * 10 + (size_t)(*length_cursor - '0');
+                    }
+                    length_cursor++;
+                    length_digits++;
+                }
+                if (length_digits == 0 || length_cursor != inner_end) {
+                    return NULL;
+                }
+                have_length = true;
+            }
+            size_t name_len = (size_t)(colon - inner);
+            char *value = shellLookupParameterValue(inner, name_len);
+            if (!value) {
+                return NULL;
+            }
+            size_t value_len = strlen(value);
+            size_t start_index = offset_value;
+            if (start_index > value_len) {
+                start_index = value_len;
+            }
+            size_t available = value_len - start_index;
+            size_t copy_len = available;
+            if (have_length && length_value < copy_len) {
+                copy_len = length_value;
+            }
+            char *result = (char *)malloc(copy_len + 1);
+            if (!result) {
+                free(value);
+                return NULL;
+            }
+            if (copy_len > 0) {
+                memcpy(result, value + start_index, copy_len);
+            }
+            result[copy_len] = '\0';
+            free(value);
+            return result;
+        }
+
+        const char *cursor = inner;
+        while (cursor < closing &&
+               (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+            cursor++;
+        }
+        if (cursor != closing || cursor == inner) {
+            return NULL;
+        }
+        size_t name_len = (size_t)(cursor - inner);
+        return shellLookupParameterValue(inner, name_len);
     }
 
     if (*input == '$') {
