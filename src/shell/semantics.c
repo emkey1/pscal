@@ -370,6 +370,9 @@ static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command
         case SHELL_COMMAND_SUBSHELL:
             shellAnalyzeProgramInternal(ctx, command->data.subshell.body);
             break;
+        case SHELL_COMMAND_BRACE_GROUP:
+            shellAnalyzeProgramInternal(ctx, command->data.brace_group.body);
+            break;
         case SHELL_COMMAND_LOOP:
             shellAnalyzeLoop(ctx, command->data.loop);
             break;
