@@ -2875,7 +2875,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export",  "unset",    "setenv",   "unsetenv",
                                       "set",   "trap",   "local",  "break",   "continue", "alias",    "history",
-                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source"};
+                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
@@ -4315,6 +4315,14 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     printf("%s\n", cwd);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellColon(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
     shellUpdateStatus(0);
     return makeVoid();
 }
