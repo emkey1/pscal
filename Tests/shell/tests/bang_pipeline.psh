@@ -1,0 +1,19 @@
+echo "bang-pipeline:start"
+
+if ! printf 'alpha\n' | grep -q alpha; then
+  echo "bang-pipeline:unexpected-alpha"
+else
+  echo "bang-pipeline:alpha"
+fi
+
+if ! printf 'beta\n' | grep -q alpha; then
+  echo "bang-pipeline:beta"
+fi
+
+! printf 'line\n' | grep -q line
+echo "bang-pipeline:status:$?"
+
+! { false; } | false
+echo "bang-pipeline:brace-status:$?"
+
+echo "bang-pipeline:end"

@@ -92,6 +92,17 @@ placeholder helpers above. Those helpers currently execute sequentially, so
 scripts that rely on branching should gate behaviour using the exported status
 variable or external utilities until proper VM jumps are wired in.
 
+## Grammar coverage
+
+The parser now accepts the broader POSIX grammar expected by automation-heavy
+scripts. Here documents honour quoting rules (`<<word` expands variables while
+`<<'word'` keeps literal text), brace groups run in the current shell context
+and can appear inside pipelines, and leading `!` prefixes invert pipeline exit
+statuses. Multi-line `for` loops with backslash continuations and complex
+`case` clauses split across lines (including pattern alternation with `|`) are
+all recognised. Targeted regression scripts under `Tests/shell/tests/`
+exercise these constructs so future grammar work can expand safely.
+
 Because `exsh` feeds every script through the same VM, shell programs can invoke
 VM builtins directly—for example calling `HttpRequest` from a pipeline stage or
 mixing shell conditionals with VM networking. Extended builtin groups that are
