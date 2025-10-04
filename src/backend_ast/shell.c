@@ -2951,7 +2951,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export",  "unset",    "setenv",   "unsetenv",
                                       "set",   "trap",   "local",  "break",   "continue", "alias",    "history",
-                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":"};
+                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":",       "eval"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
