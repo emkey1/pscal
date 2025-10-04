@@ -34,6 +34,10 @@ static void pendingHereDocArrayFree(ShellPendingHereDocArray *array);
 static void pendingHereDocArrayPush(ShellPendingHereDocArray *array, ShellRedirection *redir,
                                     const char *delimiter, bool strip_tabs, bool quoted);
 
+static void parserWordArrayInit(ShellWordArray *array);
+static bool parserWordArrayAppend(ShellWordArray *array, ShellWord *word);
+static void parserWordArrayFree(ShellWordArray *array);
+
 static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask);
 static void shellParserAdvance(ShellParser *parser);
 static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
@@ -169,6 +173,45 @@ static void pendingHereDocArrayPush(ShellPendingHereDocArray *array, ShellRedire
     entry->delimiter = strdup(delimiter);
     entry->strip_tabs = strip_tabs;
     entry->quoted = quoted;
+}
+
+static void parserWordArrayInit(ShellWordArray *array) {
+    if (!array) {
+        return;
+    }
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static bool parserWordArrayAppend(ShellWordArray *array, ShellWord *word) {
+    if (!array || !word) {
+        return false;
+    }
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        ShellWord **new_items = (ShellWord **)realloc(array->items, new_capacity * sizeof(ShellWord *));
+        if (!new_items) {
+            return false;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    array->items[array->count++] = word;
+    return true;
+}
+
+static void parserWordArrayFree(ShellWordArray *array) {
+    if (!array) {
+        return;
+    }
+    for (size_t i = 0; i < array->count; ++i) {
+        shellFreeWord(array->items[i]);
+    }
+    free(array->items);
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
 }
 
 static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask) {
@@ -946,6 +989,7 @@ static ShellCommand *parseForClause(ShellParser *parser) {
     shellParserAdvance(parser);
 
     parserScheduleRuleMask(parser, RULE_MASK_FOR_NAME);
+    parserReclassifyCurrentToken(parser, RULE_MASK_FOR_NAME);
     shellParserAdvance(parser);
     if (parser->previous.type != SHELL_TOKEN_NAME) {
         parserErrorAt(parser, &parser->previous, "Expected name after 'for'");
@@ -956,10 +1000,8 @@ static ShellCommand *parseForClause(ShellParser *parser) {
                                            parser->previous.column);
 
     ShellProgram *body = NULL;
-    ShellCommand *iterator_command = shellCreateSimpleCommand();
-    if (name_word && iterator_command) {
-        shellCommandAddWord(iterator_command, name_word);
-    }
+    ShellWordArray value_words;
+    parserWordArrayInit(&value_words);
 
     parseLinebreak(parser);
     parserReclassifyCurrentToken(parser, RULE_MASK_FOR_LIST);
@@ -972,7 +1014,12 @@ static ShellCommand *parseForClause(ShellParser *parser) {
             ShellWord *word = parseWordToken(parser, NULL);
             if (word) {
                 populateWordExpansions(word);
-                shellCommandAddWord(iterator_command, word);
+                if (!parserWordArrayAppend(&value_words, word)) {
+                    shellFreeWord(word);
+                    parserWordArrayFree(&value_words);
+                    shellFreeWord(name_word);
+                    return NULL;
+                }
             }
             parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
             if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_NEWLINE) {
@@ -994,13 +1041,12 @@ static ShellCommand *parseForClause(ShellParser *parser) {
     parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for clause");
 
-    ShellPipeline *condition = shellCreatePipeline();
-    if (!condition) {
-        shellFreeCommand(iterator_command);
+    ShellLoop *loop = shellCreateForLoop(name_word, &value_words, body);
+    if (!loop) {
+        parserWordArrayFree(&value_words);
+        shellFreeWord(name_word);
         return NULL;
     }
-    shellPipelineAddCommand(condition, iterator_command);
-    ShellLoop *loop = shellCreateLoop(false, condition, body);
     ShellCommand *command = shellCreateLoopCommand(loop);
     if (command) {
         command->line = line;

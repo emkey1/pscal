@@ -108,6 +108,9 @@ typedef struct {
 
 typedef struct ShellLoop {
     bool is_until;
+    bool is_for;
+    ShellWord *for_variable;
+    ShellWordArray for_values;
     ShellPipeline *condition;
     struct ShellProgram *body;
 } ShellLoop;
@@ -225,6 +228,7 @@ void shellLogicalListAdd(ShellLogicalList *list, ShellPipeline *pipeline, ShellL
 void shellFreeLogicalList(ShellLogicalList *list);
 
 ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram *body);
+ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, ShellProgram *body);
 void shellFreeLoop(ShellLoop *loop);
 
 ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram *then_branch,

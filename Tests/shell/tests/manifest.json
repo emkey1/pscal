@@ -12,12 +12,30 @@
         },
         {
             "id": "conditionals_loop",
-            "name": "Conditionals syntax placeholder",
+            "name": "Conditionals execute matching branches",
             "category": "control",
-            "description": "if/then/else syntax is parsed (branches execute sequentially until flow control lands).",
+            "description": "if/then/else executes only the branch whose condition succeeds.",
             "script": "Examples/psh/conditionals.psh",
             "expect": "runtime_ok",
             "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
+        },
+        {
+            "id": "if_truthy_falsy",
+            "name": "If statements respect truthiness",
+            "category": "control",
+            "description": "true selects the then branch and false triggers the else branch.",
+            "script": "Tests/shell/tests/if_truthy_falsy.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-eval:start\nif:true\nif:false-else\nif-eval:end"
+        },
+        {
+            "id": "loop_counters",
+            "name": "Loops iterate expected counts",
+            "category": "control",
+            "description": "while, until, and for loops iterate until their conditions change.",
+            "script": "Tests/shell/tests/loop_counters.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
         },
         {
             "id": "builtin_functions",

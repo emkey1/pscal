@@ -88,10 +88,22 @@ typedef struct {
     int continue_requested_levels;
 } ShellRuntimeState;
 
+typedef enum {
+    SHELL_LOOP_KIND_WHILE,
+    SHELL_LOOP_KIND_UNTIL,
+    SHELL_LOOP_KIND_FOR
+} ShellLoopKind;
+
 typedef struct {
+    ShellLoopKind kind;
     bool skip_body;
     bool break_pending;
     bool continue_pending;
+    char *for_variable;
+    char **for_values;
+    size_t for_count;
+    size_t for_index;
+    bool for_active;
 } ShellLoopFrame;
 
 static ShellLoopFrame *gShellLoopStack = NULL;
@@ -143,11 +155,50 @@ static bool shellLoopEnsureCapacity(size_t needed) {
     return true;
 }
 
-static ShellLoopFrame *shellLoopPushFrame(void) {
+static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
+    if (!frame) {
+        return;
+    }
+    if (frame->for_variable) {
+        free(frame->for_variable);
+        frame->for_variable = NULL;
+    }
+    if (frame->for_values) {
+        for (size_t i = 0; i < frame->for_count; ++i) {
+            free(frame->for_values[i]);
+        }
+        free(frame->for_values);
+        frame->for_values = NULL;
+    }
+    frame->for_count = 0;
+    frame->for_index = 0;
+    frame->for_active = false;
+}
+
+static bool shellAssignLoopVariable(const char *name, const char *value) {
+    if (!name) {
+        return false;
+    }
+    if (!value) {
+        value = "";
+    }
+    return setenv(name, value, 1) == 0;
+}
+
+static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     if (!shellLoopEnsureCapacity(gShellLoopStackSize + 1)) {
         return NULL;
     }
-    ShellLoopFrame frame = {false, false, false};
+    ShellLoopFrame frame;
+    frame.kind = kind;
+    frame.skip_body = false;
+    frame.break_pending = false;
+    frame.continue_pending = false;
+    frame.for_variable = NULL;
+    frame.for_values = NULL;
+    frame.for_count = 0;
+    frame.for_index = 0;
+    frame.for_active = false;
     gShellLoopStack[gShellLoopStackSize++] = frame;
     return &gShellLoopStack[gShellLoopStackSize - 1];
 }
@@ -163,6 +214,8 @@ static void shellLoopPopFrame(void) {
     if (gShellLoopStackSize == 0) {
         return;
     }
+    ShellLoopFrame *frame = &gShellLoopStack[gShellLoopStackSize - 1];
+    shellLoopFrameFreeData(frame);
     gShellLoopStackSize--;
     if (gShellLoopStackSize == 0) {
         gShellRuntime.break_requested = false;
@@ -4980,22 +5033,138 @@ Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
-    (void)arg_count;
-    (void)args;
+    Value result = makeVoid();
+    const char *meta = NULL;
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val) {
+        meta = args[0].s_val;
+    }
+
+    ShellLoopKind kind = SHELL_LOOP_KIND_WHILE;
+    bool until_flag = false;
+    if (meta && *meta) {
+        char *copy = strdup(meta);
+        if (copy) {
+            for (char *token = strtok(copy, ";"); token; token = strtok(NULL, ";")) {
+                char *eq = strchr(token, '=');
+                if (eq) {
+                    *eq = '\0';
+                    const char *key = token;
+                    const char *value = eq + 1;
+                    if (strcmp(key, "mode") == 0) {
+                        if (strcasecmp(value, "for") == 0) {
+                            kind = SHELL_LOOP_KIND_FOR;
+                        } else if (strcasecmp(value, "until") == 0) {
+                            kind = SHELL_LOOP_KIND_UNTIL;
+                        } else if (strcasecmp(value, "while") == 0) {
+                            kind = SHELL_LOOP_KIND_WHILE;
+                        }
+                    } else if (strcmp(key, "until") == 0) {
+                        until_flag = (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
+                    }
+                }
+            }
+            free(copy);
+        }
+    }
+    if (kind != SHELL_LOOP_KIND_FOR && until_flag) {
+        kind = SHELL_LOOP_KIND_UNTIL;
+    }
+
     bool parent_skip = shellLoopSkipActive();
-    ShellLoopFrame *frame = shellLoopPushFrame();
+    ShellLoopFrame *frame = shellLoopPushFrame(kind);
     if (!frame) {
         runtimeError(vm, "shell loop: out of memory");
         shellRestoreCurrentVm(previous_vm);
         shellUpdateStatus(1);
-        return makeVoid();
+        return result;
     }
-    if (parent_skip) {
-        frame->skip_body = true;
+    frame->skip_body = parent_skip;
+    frame->break_pending = false;
+    frame->continue_pending = false;
+
+    bool ok = true;
+
+    if (kind == SHELL_LOOP_KIND_FOR) {
+        if (arg_count < 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
+            runtimeError(vm, "shell loop: expected iterator name");
+            ok = false;
+        } else {
+            const char *spec = args[1].s_val;
+            const char *text = spec;
+            const char *word_meta = NULL;
+            size_t word_meta_len = 0;
+            uint8_t word_flags = 0;
+            if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
+                text = spec ? spec : "";
+            }
+            frame->for_variable = strdup(text ? text : "");
+            if (!frame->for_variable) {
+                ok = false;
+            }
+        }
+
+        size_t value_start = 2;
+        size_t available = (arg_count > (int)value_start) ? (size_t)(arg_count - (int)value_start) : 0;
+        if (ok && available > 0) {
+            frame->for_values = (char **)calloc(available, sizeof(char *));
+            if (!frame->for_values) {
+                ok = false;
+            } else {
+                for (size_t i = 0; i < available; ++i) {
+                    Value *val = &args[value_start + i];
+                    if (val->type != TYPE_STRING || !val->s_val) {
+                        frame->for_values[frame->for_count++] = strdup("");
+                        if (!frame->for_values[frame->for_count - 1]) {
+                            ok = false;
+                            break;
+                        }
+                        continue;
+                    }
+                    const char *spec = val->s_val;
+                    const char *text = spec;
+                    const char *word_meta = NULL;
+                    size_t word_meta_len = 0;
+                    uint8_t word_flags = 0;
+                    if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
+                        text = spec ? spec : "";
+                        word_flags = 0;
+                    }
+                    char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len);
+                    if (!expanded) {
+                        ok = false;
+                        break;
+                    }
+                    frame->for_values[frame->for_count++] = expanded;
+                }
+            }
+        }
+
+        if (!ok || !frame->for_variable) {
+            frame->skip_body = true;
+            frame->break_pending = true;
+        } else if (frame->for_count == 0) {
+            frame->skip_body = true;
+            frame->for_active = false;
+        } else {
+            if (!shellAssignLoopVariable(frame->for_variable, frame->for_values[0])) {
+                runtimeError(vm, "shell loop: failed to assign '%s'", frame->for_variable);
+                frame->skip_body = true;
+                frame->break_pending = true;
+                ok = false;
+            } else {
+                frame->for_index = 1;
+                frame->for_active = true;
+            }
+        }
     }
+
+    if (!ok) {
+        shellUpdateStatus(1);
+    }
+
     shellResetPipeline();
     shellRestoreCurrentVm(previous_vm);
-    return makeVoid();
+    return result;
 }
 
 Value vmBuiltinShellLoopEnd(VM *vm, int arg_count, Value *args) {
@@ -5928,12 +6097,67 @@ Value vmHostShellLastStatus(VM *vm) {
     return makeInt(gShellRuntime.last_status);
 }
 
-Value vmHostShellLoopShouldBreak(VM *vm) {
+Value vmHostShellLoopIsReady(VM *vm) {
     (void)vm;
     shellRuntimeProcessPendingSignals();
     ShellLoopFrame *frame = shellLoopTop();
-    bool should_break = frame && frame->break_pending;
-    return makeBoolean(should_break);
+    bool ready = false;
+    if (frame) {
+        if (frame->break_pending) {
+            ready = false;
+        } else if (frame->kind == SHELL_LOOP_KIND_FOR) {
+            ready = frame->for_active && !frame->skip_body;
+        } else {
+            ready = !frame->skip_body;
+        }
+    }
+    return makeBoolean(ready);
+}
+
+Value vmHostShellLoopAdvance(VM *vm) {
+    (void)vm;
+    shellRuntimeProcessPendingSignals();
+    ShellLoopFrame *frame = shellLoopTop();
+    if (!frame) {
+        return makeBoolean(false);
+    }
+
+    if (frame->break_pending) {
+        frame->break_pending = false;
+        frame->continue_pending = false;
+        frame->skip_body = false;
+        frame->for_active = false;
+        shellResetPipeline();
+        return makeBoolean(false);
+    }
+
+    if (frame->continue_pending) {
+        frame->continue_pending = false;
+    }
+
+    bool should_continue = true;
+    if (frame->kind == SHELL_LOOP_KIND_FOR) {
+        if (frame->for_index < frame->for_count) {
+            if (!shellAssignLoopVariable(frame->for_variable, frame->for_values[frame->for_index])) {
+                runtimeError(vm, "shell loop: failed to assign '%s'", frame->for_variable ? frame->for_variable : "<var>");
+                shellUpdateStatus(1);
+                frame->skip_body = false;
+                frame->for_active = false;
+                shellResetPipeline();
+                return makeBoolean(false);
+            }
+            frame->for_index++;
+            frame->for_active = true;
+            should_continue = true;
+        } else {
+            frame->for_active = false;
+            should_continue = false;
+        }
+    }
+
+    frame->skip_body = false;
+    shellResetPipeline();
+    return makeBoolean(should_continue);
 }
 
 Value vmHostShellPollJobs(VM *vm) {

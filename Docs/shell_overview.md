@@ -87,10 +87,10 @@ default; prefix a token with `int:`, `float:`/`double:`/`real:`, `bool:` or
 value, `builtin` prints it to `stdout`; procedures that return `void` simply set
 `PSCALSHELL_LAST_STATUS` to `0` on success.
 
-High-level control-flow syntax (`if`, loops) is parsed and lowered to the
-placeholder helpers above. Those helpers currently execute sequentially, so
-scripts that rely on branching should gate behaviour using the exported status
-variable or external utilities until proper VM jumps are wired in.
+High-level control-flow syntax (`if`, `while`/`until`, and `for`) lowers to the
+loop helpers above, which cooperate with real VM jump opcodes. The runtime
+evaluates conditions using shell truthiness rules and only executes the branch
+or loop body whose guard succeeds.
 
 ## Grammar coverage
 
