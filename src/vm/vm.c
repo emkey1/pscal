@@ -1335,11 +1335,20 @@ static Value vmHostShellLastStatusHost(VM* vm) {
     return vmHostShellLastStatus(vm);
 }
 
+static Value vmHostShellLoopShouldBreakHost(VM* vm) {
+    return vmHostShellLoopShouldBreak(vm);
+}
+
 static Value vmHostShellPollJobsHost(VM* vm) {
     return vmHostShellPollJobs(vm);
 }
 #else
 static Value vmHostShellLastStatusHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellLoopShouldBreakHost(VM* vm) {
     (void)vm;
     return makeNil();
 }
@@ -1402,6 +1411,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
     registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
+    registerHostFunction(vm, HOST_FN_SHELL_LOOP_SHOULD_BREAK, vmHostShellLoopShouldBreakHost);
     registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
 
     // Default: tracing disabled

@@ -41,6 +41,7 @@ typedef enum {
     HOST_FN_WAIT_THREAD,
     HOST_FN_PRINTF,
     HOST_FN_SHELL_LAST_STATUS,
+    HOST_FN_SHELL_LOOP_SHOULD_BREAK,
     HOST_FN_SHELL_POLL_JOBS,
     // ... add other host function IDs here ...
     HOST_FN_COUNT

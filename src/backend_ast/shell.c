@@ -4949,6 +4949,13 @@ Value vmHostShellLastStatus(VM *vm) {
     return makeInt(gShellRuntime.last_status);
 }
 
+Value vmHostShellLoopShouldBreak(VM *vm) {
+    (void)vm;
+    ShellLoopFrame *frame = shellLoopTop();
+    bool should_break = frame && frame->break_pending;
+    return makeBoolean(should_break);
+}
+
 Value vmHostShellPollJobs(VM *vm) {
     (void)vm;
     return makeInt(shellCollectJobs());
