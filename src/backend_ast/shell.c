@@ -5144,6 +5144,7 @@ cleanup:
 Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
+    char *merge_pattern = NULL;
     if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
         runtimeError(vm, "shell pipeline: expected metadata string");
         goto cleanup;
@@ -5154,7 +5155,6 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
     const char *meta = args[0].s_val;
     size_t stages = 0;
     bool negated = false;
-    char *merge_pattern = NULL;
     char *copy = strdup(meta);
     if (!copy) {
         runtimeError(vm, "shell pipeline: out of memory");
