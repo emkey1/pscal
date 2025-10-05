@@ -315,7 +315,7 @@ static char *shellReadExtractField(char **cursor, bool last_field) {
         text++;
     }
     if (last_field) {
-        char *value = strdup(text ? text : "");
+        char *value = strdup(text);
         if (!value) {
             return NULL;
         }
