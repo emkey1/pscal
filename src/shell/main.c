@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <signal.h>
 #include <termios.h>
 #include <time.h>
@@ -1118,6 +1119,56 @@ static size_t interactiveFindWordStart(const char *buffer, size_t length) {
     return index;
 }
 
+static bool interactiveExtractCommandToken(const char *buffer,
+                                           size_t length,
+                                           size_t word_start,
+                                           size_t *out_start,
+                                           size_t *out_len) {
+    if (!buffer || word_start > length) {
+        return false;
+    }
+
+    size_t command_start = 0;
+    for (size_t i = 0; i < word_start; ++i) {
+        unsigned char c = (unsigned char)buffer[i];
+        if (c == ';' || c == '&' || c == '|' || c == '\n' || c == '\r' ||
+            c == '(' || c == ')') {
+            command_start = i + 1;
+        }
+    }
+
+    while (command_start < word_start &&
+           isspace((unsigned char)buffer[command_start])) {
+        command_start++;
+    }
+
+    if (command_start >= length) {
+        return false;
+    }
+
+    size_t command_end = command_start;
+    while (command_end < length) {
+        unsigned char c = (unsigned char)buffer[command_end];
+        if (isspace(c) || c == ';' || c == '&' || c == '|' ||
+            c == '(' || c == ')') {
+            break;
+        }
+        command_end++;
+    }
+
+    if (command_end <= command_start) {
+        return false;
+    }
+
+    if (out_start) {
+        *out_start = command_start;
+    }
+    if (out_len) {
+        *out_len = command_end - command_start;
+    }
+    return true;
+}
+
 static bool interactiveWordLooksDynamic(const char *word) {
     if (!word || !*word) {
         return false;
@@ -1178,9 +1229,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         return false;
     }
     size_t word_start = interactiveFindWordStart(*buffer, *length);
-    if (word_start >= *length) {
-        return false;
-    }
     char *word = *buffer + word_start;
     size_t word_len = *length - word_start;
     if (interactiveWordLooksDynamic(word)) {
@@ -1209,6 +1257,42 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     if (glob_status != 0 || results.gl_pathc == 0) {
         globfree(&results);
         return false;
+    }
+
+    size_t command_start = 0;
+    size_t command_len = 0;
+    bool command_is_cd = false;
+    if (interactiveExtractCommandToken(*buffer,
+                                       *length,
+                                       word_start,
+                                       &command_start,
+                                       &command_len) &&
+        word_start > command_start) {
+        const char *command = *buffer + command_start;
+        if (command_len == 2) {
+            if (strncasecmp(command, "cd", command_len) == 0) {
+                command_is_cd = true;
+            }
+        }
+    }
+
+    if (command_is_cd) {
+        size_t write_index = 0;
+        for (size_t i = 0; i < results.gl_pathc; ++i) {
+            const char *match = results.gl_pathv[i];
+            if (!match) {
+                continue;
+            }
+            size_t match_len = strlen(match);
+            if (match_len > 0 && match[match_len - 1] == '/') {
+                results.gl_pathv[write_index++] = results.gl_pathv[i];
+            }
+        }
+        results.gl_pathc = write_index;
+        if (results.gl_pathc == 0) {
+            globfree(&results);
+            return false;
+        }
     }
 
     size_t replacement_len = 0;
@@ -1258,11 +1342,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         return false;
     }
 
-    if (results.gl_pathc == 1) {
-        memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
-    } else {
-        memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
-    }
+    memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
     if (append_space) {
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
