@@ -66,6 +66,14 @@ expression lookups (`!?/expr/?`) and substitution designators (`!:s/old/new/` or
 `!:gs/old/new/`) are honoured as well, with replacement strings supporting tab
 escapes via `\t`.
 
+### Interactive startup configuration
+
+When `exsh` starts in interactive mode it looks for `~/.exshrc` and sources the
+file before presenting the prompt. The repository includes a ready-to-use
+template under `etc/skel/.exshrc` that configures a colourful prompt, quality of
+life aliases, PSCAL builtin helpers, and hooks for per-machine overrides. Copy
+the file to your home directory (or use it as a reference when building your
+own) to get a sensible default environment immediately.
 ## Builtins and interaction with the VM
 
 exsh reuses the shared builtin registry defined in `backend_ast/builtin.c` and
