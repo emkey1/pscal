@@ -175,6 +175,71 @@ static bool promptBufferAppendString(char **buffer,
     return true;
 }
 
+static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_status) {
+    if (out_status) {
+        *out_status = EXIT_SUCCESS;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !*home) {
+        return false;
+    }
+    size_t home_len = strlen(home);
+    const char *rc_name = ".exshrc";
+    bool needs_separator = (home_len > 0 && home[home_len - 1] == '/') ? false : true;
+    size_t rc_name_len = strlen(rc_name);
+    size_t path_len = home_len + (needs_separator ? 1 : 0) + rc_name_len + 1;
+    char *rc_path = (char *)malloc(path_len);
+    if (!rc_path) {
+        return false;
+    }
+    if (needs_separator) {
+        int written = snprintf(rc_path, path_len, "%s/%s", home, rc_name);
+        if (written < 0 || (size_t)written >= path_len) {
+            free(rc_path);
+            return false;
+        }
+    } else {
+        int written = snprintf(rc_path, path_len, "%s%s", home, rc_name);
+        if (written < 0 || (size_t)written >= path_len) {
+            free(rc_path);
+            return false;
+        }
+    }
+    if (access(rc_path, F_OK) != 0) {
+        free(rc_path);
+        return false;
+    }
+    char *source = shellLoadFile(rc_path);
+    if (!source) {
+        free(rc_path);
+        return false;
+    }
+
+    ShellRunOptions rc_options = {0};
+    if (base_options) {
+        rc_options.verbose_errors = base_options->verbose_errors;
+        rc_options.frontend_path = base_options->frontend_path;
+    }
+    rc_options.no_cache = 1;
+    rc_options.quiet = true;
+
+    const char *restore_path = (base_options && base_options->frontend_path)
+                                   ? base_options->frontend_path
+                                   : NULL;
+    gParamCount = 0;
+    gParamValues = NULL;
+    shellRuntimeSetArg0(rc_path);
+    bool exit_requested = false;
+    int status = shellRunSource(source, rc_path, &rc_options, &exit_requested);
+    free(source);
+    shellRuntimeSetArg0(restore_path);
+    free(rc_path);
+    if (out_status) {
+        *out_status = status;
+    }
+    return exit_requested;
+}
+
 static bool promptBufferAppendTime(char **buffer,
                                    size_t *length,
                                    size_t *capacity,
@@ -2346,6 +2411,10 @@ int main(int argc, char **argv) {
     gParamValues = NULL;
 
     if (isatty(STDIN_FILENO)) {
+        int rc_status = EXIT_SUCCESS;
+        if (shellRunStartupConfig(&options, &rc_status)) {
+            return vmExitWithCleanup(rc_status);
+        }
         shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
         return vmExitWithCleanup(status);
