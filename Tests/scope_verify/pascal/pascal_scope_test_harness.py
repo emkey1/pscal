@@ -244,21 +244,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     for case in filtered:
         result = run_case(case, args.cmd, args.out_dir, args.timeout)
         status = "PASS" if result.passed else "FAIL"
-        print(f"[{status}] {case.test_id} ({case.category})")
+        print(f"[{status}] {case.test_id} – {case.name}")
         if not result.passed and result.reason:
             print(f"    Reason: {result.reason}")
-            if result.stderr:
-                print(textwrap.indent(result.stderr, "    stderr: "))
+            if result.stdout.strip():
+                print("    stdout:")
+                for line in result.stdout.strip().splitlines():
+                    print(f"        {line}")
+            if result.stderr.strip():
+                print("    stderr:")
+                for line in result.stderr.strip().splitlines():
+                    print(f"        {line}")
         results.append(result)
 
     if args.csv:
         write_csv(results, args.csv)
 
-    passed = sum(1 for r in results if r.passed)
-    total = len(results)
-    print(f"\nSummary: {passed}/{total} tests passed")
+    failures = [r for r in results if not r.passed]
 
-    return 0 if passed == total else 1
+    print()
+    print(f"Ran {len(results)} pascal scope test(s); {len(failures)} failure(s)")
+
+    return 0 if not failures else 1
 
 
 if __name__ == "__main__":
