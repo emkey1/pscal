@@ -25,7 +25,11 @@
 #include <string.h>
 #include <strings.h>
 
+#ifdef ENABLE_EXT_BUILTIN_3D
 extern void cleanupBalls3DRenderingResources(void);
+#else
+static void cleanupBalls3DRenderingResources(void) {}
+#endif
 
 #ifdef SDL_VIDEO_DRIVER_X11
 #include <X11/Xlib.h>
