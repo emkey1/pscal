@@ -958,6 +958,35 @@ static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value) {
     return true;
 }
 
+static void shellRewriteDoubleBracketTest(ShellCommand *cmd) {
+    if (!cmd || cmd->argc < 2 || !cmd->argv) {
+        return;
+    }
+    char *first = cmd->argv[0];
+    if (!first || strcmp(first, "[[") != 0) {
+        return;
+    }
+    size_t last_index = cmd->argc - 1;
+    char *last = cmd->argv[last_index];
+    if (!last || strcmp(last, "]]") != 0) {
+        return;
+    }
+
+    free(last);
+    cmd->argv[last_index] = NULL;
+    cmd->argc = last_index;
+
+    if (cmd->argv) {
+        cmd->argv[cmd->argc] = NULL;
+    }
+
+    char *replacement = strdup("test");
+    if (replacement) {
+        free(first);
+        cmd->argv[0] = replacement;
+    }
+}
+
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value) {
     if (!cmd || !value) {
         free(value);
@@ -4718,6 +4747,7 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
             }
         }
     }
+    shellRewriteDoubleBracketTest(out_cmd);
     return true;
 }
 
