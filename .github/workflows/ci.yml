@@ -20,7 +20,7 @@ jobs:
         run: cd build && ctest --output-on-failure
       - name: Run CLike tests
         run: Tests/run_clike_tests.sh
-      - name: Run Shell tests
+      - name: Run exsh tests
         run: Tests/run_shell_tests.sh
       - name: Run Pascal tests
         run: Tests/run_pascal_tests.sh
@@ -47,13 +47,13 @@ jobs:
               build/bin/clike --dump-bytecode-only "$f" >/dev/null
             fi
           done
-      - name: Compile Shell examples (dump-only)
+      - name: Compile exsh examples (dump-only)
         run: |
           set -e
-          for f in Examples/psh/*.psh; do
+          for f in Examples/exsh/*.psh; do
             if [ -f "$f" ]; then
               bn=$(basename "$f")
-              echo "Shell example: $bn"
+              echo "exsh example: $bn"
               build/bin/exsh --dump-bytecode-only "$f" >/dev/null
             fi
           done

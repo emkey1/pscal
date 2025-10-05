@@ -112,14 +112,14 @@ VM. For instructions on adding your own routines, see
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
 
-## Shell orchestration
+## exsh orchestration
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
 | __shell_exec | (meta: String, argv: String...) | void | Launch a process described by the metadata/argument vector. Supports `bg=1` metadata for background execution and simple `<`, `>`, `>>` redirections encoded as argument tokens. |
 | __shell_pipeline | (meta: String) | void | Initialise pipeline state before emitting a sequence of `__shell_exec` calls. The metadata string carries the stage count and negation flag. |
-| __shell_and | (meta: String) | void | Update the shell status for `&&` lists. Primarily used by the shell compiler. |
-| __shell_or | (meta: String) | void | Update the shell status for `||` lists. Primarily used by the shell compiler. |
+| __shell_and | (meta: String) | void | Update the shell status for `&&` lists. Primarily used by the exsh compiler. |
+| __shell_or | (meta: String) | void | Update the shell status for `||` lists. Primarily used by the exsh compiler. |
 | __shell_subshell | (meta: String) | void | Reset pipeline/bookkeeping before running a subshell block. |
 | __shell_loop | (meta: String) | void | Reset pipeline/bookkeeping before running a loop body. |
 | __shell_loop_end | () | void | Signal the end of the current loop body, allowing loop-control requests to unwind. |

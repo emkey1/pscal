@@ -1,6 +1,6 @@
-# Shell Front End (`exsh`)
+# exsh Front End
 
-The shell front end compiles POSIX-style shell scripts to PSCAL bytecode and
+The exsh front end compiles POSIX-style shell scripts to PSCAL bytecode and
 executes them through the shared virtual machine. It focuses on orchestrating
 external processes, pipelines, and the existing PSCAL builtin catalog instead of
 implementing a full interactive shell.
@@ -27,19 +27,19 @@ ends:
 - `--vm-trace-head=<N>` traces the first `N` VM instructions (the same toggle as
   the Pascal and CLike front ends).
 
-Example scripts live under `Examples/psh/` and cover pipelines, conditionals,
+Example scripts live under `Examples/exsh/` and cover pipelines, conditionals,
 and environment-aware builtins.
 
 ## Bytecode caching
 
 Compiled scripts are cached in `~/.pscal/bc_cache`. Cache entries are now keyed
-by both the source path and the compiler identifier (`shell`), so the new front
+by both the source path and the compiler identifier reported by exsh, so the front
 end can coexist with Pascal, CLike and Rea bytecode without collisions. Use
 `--no-cache` to force a recompile for the current script.
 
 ## Environment variables
 
-The shell front end honours the standard process environment:
+The exsh front end honours the standard process environment:
 
 - Builtins such as `export`, `setenv`, and `unset` mutate the host environment
   for the current process. External utilities like `printenv` observe those changes
@@ -68,7 +68,7 @@ escapes via `\t`.
 
 ## Builtins and interaction with the VM
 
-`shell` reuses the shared builtin registry defined in `backend_ast/builtin.c` and
+exsh reuses the shared builtin registry defined in `backend_ast/builtin.c` and
 extends it with orchestration helpers implemented in
 `backend_ast/shell.c`. The following categories are available out of the box:
 
@@ -100,19 +100,19 @@ scripts. Here documents honour quoting rules (`<<word` expands variables while
 and can appear inside pipelines, and leading `!` prefixes invert pipeline exit
 statuses. Multi-line `for` loops with backslash continuations and complex
 `case` clauses split across lines (including pattern alternation with `|`) are
-all recognised. Targeted regression scripts under `Tests/shell/tests/`
+all recognised. Targeted regression scripts under `Tests/exsh/tests/`
 exercise these constructs so future grammar work can expand safely.
 
 Because `exsh` feeds every script through the same VM, shell programs can invoke
 VM builtins directly—for example calling `HttpRequest` from a pipeline stage or
 mixing shell conditionals with VM networking. Extended builtin groups that are
-enabled at configure time are linked into the shell binary automatically and
+enabled at configure time are linked into the exsh binary automatically and
 exposed through the same dispatch table as other front ends.
 
 ## Working with examples and tests
 
 Sample scripts demonstrating pipelines, conditionals, and environment-focused
-builtins live in `Examples/psh/`. The regression suite under `Tests/shell/`
+builtins live in `Examples/exsh/`. The regression suite under `Tests/exsh/`
 runs these scripts through `build/bin/exsh`, checks stdout/stderr, and verifies
 exit codes. The CI workflow executes the new suite alongside the Pascal, CLike,
 and Rea test runs.

@@ -429,7 +429,7 @@ if(BUILD_PSCALD)
     set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
 endif()
 
-# Shell front-end executable
+# exsh front-end executable
 set(SHELL_SOURCES
     src/shell/main.c
     src/shell/lexer.c

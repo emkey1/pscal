@@ -1,9 +1,9 @@
 # `exsh` Example Scripts
 
-The shell front end ships with a few minimal scripts that are used by the
+The exsh front end ships with a few minimal scripts that are used by the
 regression suite and serve as reference material for new programs. Each script
 lives alongside this README so you can run it directly with the `exsh`
-executable (for example, `build/bin/exsh Examples/psh/pipeline.psh`).
+executable (for example, `build/bin/exsh Examples/exsh/pipeline.psh`).
 
 ## `pipeline.psh`
 
@@ -64,7 +64,7 @@ complex workflows.
 ```sh
 #!/usr/bin/env exsh
 builtin IntToStr int:42
-builtin Length str:psh-demo
+builtin Length str:exsh-demo
 builtin getEnv str:HOME
 builtin ParamCount
 builtin atoi str:1337
@@ -108,10 +108,10 @@ branches execute when paired with the standard `true`/`false` utilities.
 ```sh
 #!/usr/bin/env exsh
 echo "redirection:start"
-echo "alpha" > tmp_psh_redirection.txt
-echo "beta" >> tmp_psh_redirection.txt
-cat < tmp_psh_redirection.txt
-rm -f tmp_psh_redirection.txt
+echo "alpha" > tmp_exsh_redirection.txt
+echo "beta" >> tmp_exsh_redirection.txt
+cat < tmp_exsh_redirection.txt
+rm -f tmp_exsh_redirection.txt
 echo "redirection:end"
 ```
 
@@ -151,7 +151,7 @@ cmake --build build
 You can then run any script directly:
 
 ```sh
-build/bin/exsh Examples/psh/pipeline.psh
+build/bin/exsh Examples/exsh/pipeline.psh
 ```
 
 Pass additional arguments after the script path to expose them to `$0`, `$1`,

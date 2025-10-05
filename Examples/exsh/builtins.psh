@@ -1,5 +1,5 @@
 #!/usr/bin/env exsh
-# Demonstrate invoking VM builtins from the shell frontend.
+# Demonstrate invoking VM builtins from the exsh front end.
 
 setenv ORIGINAL_STATUS $PSCALSHELL_LAST_STATUS
 
@@ -7,7 +7,7 @@ echo "builtins:start"
 
 # Core builtin: convert an integer to a string and report its length.
 builtin IntToStr int:42
-builtin Length str:psh-demo
+builtin Length str:exsh-demo
 
 # Core builtin returning process metadata.
 builtin getEnv str:HOME

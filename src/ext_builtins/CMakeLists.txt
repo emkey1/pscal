@@ -65,7 +65,7 @@ if(ENABLE_EXT_BUILTIN_OPENAI)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_OPENAI_SOURCES})
 endif()
 
-# Shell front-end builtins are exposed separately so only the `exsh`
+# exsh front-end builtins are exposed separately so only the `exsh`
 # executable pulls them in by default.
 set(EXSH_EXT_BUILTIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/shell_frontend.c

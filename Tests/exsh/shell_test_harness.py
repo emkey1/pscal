@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manifest-driven regression harness for the PSCAL shell front end."""
+"""Manifest-driven regression harness for the PSCAL exsh front end."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def run_case(executable: Path, case: TestCase) -> TestResult:
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run shell front-end regression tests")
+    parser = argparse.ArgumentParser(description="Run exsh front-end regression tests")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST, help="Path to test manifest")
     parser.add_argument("--only", type=str, default=None, help="Run only tests whose id contains this substring")
     parser.add_argument("--list", action="store_true", help="List available tests and exit")
@@ -177,7 +177,7 @@ def main(argv: List[str]) -> int:
                 print("    stderr:\n" + "\n".join(f"        {line}" for line in result.stderr.strip().splitlines()))
 
     print()
-    print(f"Ran {len(results)} shell test(s); {len(failures)} failure(s)")
+    print(f"Ran {len(results)} exsh test(s); {len(failures)} failure(s)")
     return 0 if not failures else 1
 
 

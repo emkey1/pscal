@@ -1,0 +1,7 @@
+#!/usr/bin/env exsh
+echo "redirection:start"
+echo "alpha" > tmp_exsh_redirection.txt
+echo "beta" >> tmp_exsh_redirection.txt
+cat < tmp_exsh_redirection.txt
+rm -f tmp_exsh_redirection.txt
+echo "redirection:end"
