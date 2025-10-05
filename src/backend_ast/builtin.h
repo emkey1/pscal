@@ -156,6 +156,8 @@ const char *shellRuntimeGetArg0(void);
 void shellRuntimeInitJobControl(void);
 void shellRuntimeInitSignals(void);
 void shellRuntimeProcessPendingSignals(void);
+void shellRuntimeSetExitOnSignal(bool enabled);
+bool shellRuntimeExitOnSignal(void);
 size_t shellRuntimeHistoryCount(void);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,

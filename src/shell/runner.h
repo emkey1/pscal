@@ -15,6 +15,7 @@ typedef struct ShellRunOptions {
     int vm_trace_head;
     bool quiet;
     bool verbose_errors;
+    bool exit_on_signal;
     const char *frontend_path;
 } ShellRunOptions;
 

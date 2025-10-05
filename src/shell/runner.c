@@ -71,6 +71,11 @@ int shellRunSource(const char *source,
     int define_count = 0;
     char *pre_src = preprocessConditionals(source, defines, define_count);
 
+    bool previous_exit_on_signal = shellRuntimeExitOnSignal();
+    if (options->exit_on_signal) {
+        shellRuntimeSetExitOnSignal(true);
+    }
+
     globalSymbols = createHashTable();
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
@@ -175,6 +180,7 @@ int shellRunSource(const char *source,
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
 
 cleanup:
+    shellRuntimeSetExitOnSignal(previous_exit_on_signal);
     if (out_exit_requested) {
         *out_exit_requested = exit_flag;
     } else {
