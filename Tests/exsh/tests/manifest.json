@@ -139,6 +139,15 @@
             "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
         },
         {
+            "id": "random_parameter",
+            "name": "RANDOM parameter generates seeded pseudo-random values",
+            "category": "expansion",
+            "description": "RANDOM supports seeding and yields 0-32767 values rather than a constant.",
+            "script": "Tests/exsh/tests/random_parameter.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "random:test-start\nrandom:first:16838\nrandom:second:5758\nrandom:reset:16838\nrandom:test-end"
+        },
+        {
             "id": "jobs_foreground",
             "name": "jobs lists and fg reaps background work",
             "category": "jobs",
