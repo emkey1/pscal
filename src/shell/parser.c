@@ -932,8 +932,6 @@ static ShellCommand *parseIfClause(ShellParser *parser) {
         ShellCommand *elif_cmd = parseIfClause(parser);
         else_block = shellCreateProgram();
         shellProgramAddCommand(else_block, elif_cmd);
-        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
-        shellParserConsume(parser, SHELL_TOKEN_FI, "Expected 'fi' to close if");
     } else if (parser->current.type == SHELL_TOKEN_ELSE) {
         parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
         shellParserAdvance(parser);
