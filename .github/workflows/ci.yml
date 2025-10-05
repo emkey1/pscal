@@ -206,6 +206,7 @@ jobs:
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"targets={' '.join(unique_targets)}\n")
+              fh.write(f"targets_json={json.dumps(unique_targets)}\n")
               fh.write(f"run_ctest={'true' if run_ctest else 'false'}\n")
               for name, should in run_frontend.items():
                   fh.write(f"run_{name}={'true' if should else 'false'}\n")
@@ -226,8 +227,35 @@ jobs:
         if: steps.plan.outputs.skip != 'true'
         run: cmake -S . -B build
       - name: Build selected targets
-        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.targets != ''
-        run: cmake --build build --target ${{ steps.plan.outputs.targets }}
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          TARGETS_JSON: ${{ steps.plan.outputs.targets_json }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          raw = (os.environ.get("TARGETS_JSON", "").strip() or "[]")
+          try:
+              targets = json.loads(raw)
+          except json.JSONDecodeError:
+              print(f"Unable to parse TARGETS_JSON payload: {raw}", file=sys.stderr)
+              targets = []
+
+          if not targets:
+              print("No explicit targets provided; building default target.")
+              subprocess.check_call(["cmake", "--build", "build"])
+          else:
+              for target in targets:
+                  target = target.strip()
+                  if not target:
+                      continue
+                  print(f"Building target {target}")
+                  subprocess.check_call(["cmake", "--build", "build", "--target", target])
+          PY
       - name: CTest
         if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_ctest == 'true'
         run: cd build && ctest --output-on-failure
