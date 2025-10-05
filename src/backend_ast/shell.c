@@ -34,6 +34,208 @@ static bool shellIsValidEnvName(const char *name);
 static void shellExportPrintEnvironment(void);
 static bool shellParseReturnStatus(const char *text, int *out_status);
 
+static bool gShellPositionalOwned = false;
+
+static void shellFreeParameterArray(char **values, int count) {
+    if (!values) {
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        free(values[i]);
+    }
+    free(values);
+}
+
+static void shellFreeOwnedPositionalParameters(void) {
+    if (!gShellPositionalOwned) {
+        return;
+    }
+    if (gParamValues && gParamCount > 0) {
+        shellFreeParameterArray(gParamValues, gParamCount);
+    } else if (gParamValues) {
+        free(gParamValues);
+    }
+    gParamValues = NULL;
+    gParamCount = 0;
+    gShellPositionalOwned = false;
+}
+
+static char *shellRemovePatternPrefix(const char *value, const char *pattern, bool longest) {
+    if (!value) {
+        return strdup("");
+    }
+    if (!pattern) {
+        return strdup(value);
+    }
+    size_t value_len = strlen(value);
+    size_t pattern_len = strlen(pattern);
+    if (pattern_len == 0) {
+        return strdup(value);
+    }
+    size_t match_len = SIZE_MAX;
+    if (longest) {
+        for (size_t len = value_len; ; --len) {
+            char *prefix = (char *)malloc(len + 1);
+            if (!prefix) {
+                return NULL;
+            }
+            if (len > 0) {
+                memcpy(prefix, value, len);
+            }
+            prefix[len] = '\0';
+            int rc = fnmatch(pattern, prefix, 0);
+            free(prefix);
+            if (rc == 0) {
+                match_len = len;
+                break;
+            }
+            if (len == 0) {
+                break;
+            }
+        }
+    } else {
+        for (size_t len = 0; len <= value_len; ++len) {
+            char *prefix = (char *)malloc(len + 1);
+            if (!prefix) {
+                return NULL;
+            }
+            if (len > 0) {
+                memcpy(prefix, value, len);
+            }
+            prefix[len] = '\0';
+            int rc = fnmatch(pattern, prefix, 0);
+            free(prefix);
+            if (rc == 0) {
+                match_len = len;
+                break;
+            }
+        }
+    }
+    if (match_len == SIZE_MAX) {
+        return strdup(value);
+    }
+    if (match_len >= value_len) {
+        return strdup("");
+    }
+    const char *remainder = value + match_len;
+    return strdup(remainder);
+}
+
+static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c);
+static void shellBufferAppendString(char **buffer, size_t *length, size_t *capacity, const char *str);
+static char *shellExpandParameter(const char *input, size_t *out_consumed);
+
+static char *shellRemovePatternSuffix(const char *value, const char *pattern, bool longest) {
+    if (!value) {
+        return strdup("");
+    }
+    if (!pattern) {
+        return strdup(value);
+    }
+    size_t value_len = strlen(value);
+    size_t pattern_len = strlen(pattern);
+    if (pattern_len == 0) {
+        return strdup(value);
+    }
+    size_t match_len = SIZE_MAX;
+    if (longest) {
+        for (size_t len = value_len; ; --len) {
+            size_t offset = value_len - len;
+            const char *suffix = value + offset;
+            if (fnmatch(pattern, suffix, 0) == 0) {
+                match_len = len;
+                break;
+            }
+            if (len == 0) {
+                break;
+            }
+        }
+    } else {
+        for (size_t len = 0; len <= value_len; ++len) {
+            size_t offset = value_len - len;
+            const char *suffix = value + offset;
+            if (fnmatch(pattern, suffix, 0) == 0) {
+                match_len = len;
+                break;
+            }
+        }
+    }
+    if (match_len == SIZE_MAX) {
+        return strdup(value);
+    }
+    if (match_len >= value_len) {
+        return strdup("");
+    }
+    size_t keep_len = value_len - match_len;
+    char *result = (char *)malloc(keep_len + 1);
+    if (!result) {
+        return NULL;
+    }
+    if (keep_len > 0) {
+        memcpy(result, value, keep_len);
+    }
+    result[keep_len] = '\0';
+    return result;
+}
+
+static char *shellExpandPatternText(const char *pattern, size_t len) {
+    char *buffer = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    bool in_single = false;
+    bool in_double = false;
+    size_t i = 0;
+    while (i < len) {
+        char c = pattern[i];
+        if (!in_double && c == '\'') {
+            in_single = !in_single;
+            i++;
+            continue;
+        }
+        if (!in_single && c == '"') {
+            in_double = !in_double;
+            i++;
+            continue;
+        }
+        if (c == '\\' && in_double && i + 1 < len) {
+            char next = pattern[i + 1];
+            if (next == '\\' || next == '"' || next == '$' || next == '`') {
+                if (in_single || in_double) {
+                    if (next == '*' || next == '?' || next == '[' || next == ']') {
+                        shellBufferAppendChar(&buffer, &length, &capacity, '\\');
+                    }
+                }
+                shellBufferAppendChar(&buffer, &length, &capacity, next);
+                i += 2;
+                continue;
+            }
+        }
+        if (!in_single) {
+            if (c == '$') {
+                size_t consumed = 0;
+                char *expanded = shellExpandParameter(pattern + i + 1, &consumed);
+                if (expanded) {
+                    shellBufferAppendString(&buffer, &length, &capacity, expanded);
+                    free(expanded);
+                    i += consumed + 1;
+                    continue;
+                }
+            }
+        }
+        if (in_single || in_double) {
+            if (c == '*' || c == '?' || c == '[' || c == ']') {
+                shellBufferAppendChar(&buffer, &length, &capacity, '\\');
+            }
+        }
+        shellBufferAppendChar(&buffer, &length, &capacity, c);
+        i++;
+    }
+    if (!buffer) {
+        return strdup("");
+    }
+    return buffer;
+}
+
 typedef enum {
     SHELL_RUNTIME_REDIR_OPEN,
     SHELL_RUNTIME_REDIR_DUP,
@@ -2909,6 +3111,32 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
             }
             return shellExpandArraySubscriptValue(inner, name_len, subscript_start, subscript_len);
         }
+        if (cursor < closing && (*cursor == '%' || *cursor == '#')) {
+            bool remove_suffix = (*cursor == '%');
+            bool longest = false;
+            char op = *cursor;
+            cursor++;
+            if (cursor < closing && *cursor == op) {
+                longest = true;
+                cursor++;
+            }
+            const char *pattern_start = cursor;
+            size_t pattern_len = (size_t)(closing - pattern_start);
+            char *expanded_pattern = shellExpandPatternText(pattern_start, pattern_len);
+            if (!expanded_pattern) {
+                return NULL;
+            }
+            char *value = shellLookupParameterValue(inner, name_len);
+            if (!value) {
+                free(expanded_pattern);
+                return NULL;
+            }
+            char *result = remove_suffix ? shellRemovePatternSuffix(value, expanded_pattern, longest)
+                                         : shellRemovePatternPrefix(value, expanded_pattern, longest);
+            free(value);
+            free(expanded_pattern);
+            return result;
+        }
         if (cursor != closing) {
             return NULL;
         }
@@ -4198,6 +4426,44 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     if (!entry || !entry->compiled) {
         return false;
     }
+    char **saved_params = gParamValues;
+    int saved_count = gParamCount;
+    bool saved_owned = gShellPositionalOwned;
+    char **function_params = NULL;
+    int function_count = (cmd->argc > 1) ? (int)cmd->argc - 1 : 0;
+    if (function_count > 0) {
+        function_params = (char **)calloc((size_t)function_count, sizeof(char *));
+        if (!function_params) {
+            runtimeError(vm, "%s: out of memory", name);
+            shellUpdateStatus(1);
+            return true;
+        }
+        bool ok = true;
+        for (int i = 0; i < function_count; ++i) {
+            const char *arg = cmd->argv[i + 1] ? cmd->argv[i + 1] : "";
+            function_params[i] = strdup(arg);
+            if (!function_params[i]) {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            for (int i = 0; i < function_count; ++i) {
+                free(function_params[i]);
+            }
+            free(function_params);
+            runtimeError(vm, "%s: out of memory", name);
+            shellUpdateStatus(1);
+            return true;
+        }
+        gParamValues = function_params;
+        gParamCount = function_count;
+        gShellPositionalOwned = true;
+    } else {
+        gParamValues = NULL;
+        gParamCount = 0;
+        gShellPositionalOwned = false;
+    }
     VM function_vm;
     initVM(&function_vm);
     InterpretResult result = interpretBytecode(&function_vm, &entry->compiled->chunk,
@@ -4208,6 +4474,15 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         shellUpdateStatus(shellRuntimeLastStatus());
     }
     freeVM(&function_vm);
+    if (gShellPositionalOwned) {
+        shellFreeOwnedPositionalParameters();
+    } else {
+        gParamValues = NULL;
+        gParamCount = 0;
+    }
+    gParamValues = saved_params;
+    gParamCount = saved_count;
+    gShellPositionalOwned = saved_owned;
     return true;
 }
 
@@ -4534,49 +4809,82 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
             return true;
         }
     }
-    if (shellWordShouldGlob(flags, expanded)) {
-        glob_t glob_result;
-        int glob_status = glob(expanded, 0, NULL, &glob_result);
-        if (glob_status == 0) {
-            size_t original_argc = cmd->argc;
-            bool ok = true;
-            for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
-                char *dup = strdup(glob_result.gl_pathv[i]);
-                if (!dup) {
-                    ok = false;
-                    break;
-                }
-                if (!shellCommandAppendArgOwned(cmd, dup)) {
-                    ok = false;
-                    break;
-                }
-            }
-            if (!ok) {
-                while (cmd->argc > original_argc) {
-                    free(cmd->argv[cmd->argc - 1]);
-                    cmd->argc--;
-                }
-                if (cmd->argv) {
-                    cmd->argv[cmd->argc] = NULL;
-                }
-                globfree(&glob_result);
-                free(expanded);
-                return false;
-            }
-            globfree(&glob_result);
-            free(expanded);
-            if (saw_command_word) {
-                *saw_command_word = true;
-            }
-            return true;
-        }
-        if (glob_status != GLOB_NOMATCH) {
-            fprintf(stderr, "exsh: glob failed for '%s'\n", expanded);
-        }
-    }
-    if (!shellCommandAppendArgOwned(cmd, expanded)) {
+    char **fields = NULL;
+    size_t field_count = 0;
+    if (!shellSplitExpandedWord(expanded, flags, &fields, &field_count)) {
+        free(expanded);
         return false;
     }
+    free(expanded);
+    if (field_count == 0) {
+        free(fields);
+        return true;
+    }
+
+    for (size_t i = 0; i < field_count; ++i) {
+        char *field = fields[i];
+        if (!field) {
+            continue;
+        }
+        bool appended = false;
+        if (shellWordShouldGlob(flags, field)) {
+            glob_t glob_result;
+            int glob_status = glob(field, 0, NULL, &glob_result);
+            if (glob_status == 0) {
+                size_t original_argc = cmd->argc;
+                bool ok = true;
+                for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
+                    char *dup = strdup(glob_result.gl_pathv[g]);
+                    if (!dup) {
+                        ok = false;
+                        break;
+                    }
+                    if (!shellCommandAppendArgOwned(cmd, dup)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) {
+                    while (cmd->argc > original_argc) {
+                        free(cmd->argv[cmd->argc - 1]);
+                        cmd->argc--;
+                    }
+                    if (cmd->argv) {
+                        cmd->argv[cmd->argc] = NULL;
+                    }
+                    globfree(&glob_result);
+                    for (size_t j = i; j < field_count; ++j) {
+                        if (fields[j]) {
+                            free(fields[j]);
+                        }
+                    }
+                    free(fields);
+                    free(field);
+                    return false;
+                }
+                globfree(&glob_result);
+                appended = true;
+            } else if (glob_status != GLOB_NOMATCH) {
+                fprintf(stderr, "exsh: glob failed for '%s'\n", field);
+            }
+        }
+        if (!appended) {
+            if (!shellCommandAppendArgOwned(cmd, field)) {
+                for (size_t j = i + 1; j < field_count; ++j) {
+                    if (fields[j]) {
+                        free(fields[j]);
+                    }
+                }
+                free(fields);
+                return false;
+            }
+            appended = true;
+        } else {
+            free(field);
+        }
+        fields[i] = NULL;
+    }
+    free(fields);
     if (saw_command_word) {
         *saw_command_word = true;
     }
@@ -5902,6 +6210,20 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
             }
         }
 
+        if (ok && frame->for_count == 0 && gParamCount > 0 && gParamValues) {
+            for (int i = 0; i < gParamCount; ++i) {
+                const char *param = gParamValues[i] ? gParamValues[i] : "";
+                char *dup = strdup(param);
+                if (!dup || !shellLoopFrameAppendValue(frame, &values_capacity, dup)) {
+                    if (dup) {
+                        free(dup);
+                    }
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
         if (!ok || !frame->for_variable) {
             frame->skip_body = true;
             frame->break_pending = true;
@@ -6260,6 +6582,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
 
     char **saved_params = gParamValues;
     int saved_count = gParamCount;
+    bool saved_owned = gShellPositionalOwned;
 
     int new_count = (arg_count > 1) ? (arg_count - 1) : 0;
     char **new_params = NULL;
@@ -6274,10 +6597,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
         }
         for (int i = 0; i < new_count; ++i) {
             if (args[i + 1].type != TYPE_STRING || !args[i + 1].s_val) {
-                for (int j = 0; j < i; ++j) {
-                    free(new_params[j]);
-                }
-                free(new_params);
+                shellFreeParameterArray(new_params, i);
                 free(source);
                 runtimeError(vm, "source: arguments must be strings");
                 shellUpdateStatus(1);
@@ -6285,10 +6605,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
             }
             new_params[i] = strdup(args[i + 1].s_val);
             if (!new_params[i]) {
-                for (int j = 0; j < i; ++j) {
-                    free(new_params[j]);
-                }
-                free(new_params);
+                shellFreeParameterArray(new_params, i);
                 free(source);
                 runtimeError(vm, "source: out of memory");
                 shellUpdateStatus(1);
@@ -6297,6 +6614,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
         }
         gParamValues = new_params;
         gParamCount = new_count;
+        gShellPositionalOwned = true;
         replaced_params = true;
     }
 
@@ -6311,16 +6629,16 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     int status = shellRunSource(source, path, &opts, &exit_requested);
     free(source);
 
-    if (new_params) {
-        for (int i = 0; i < new_count; ++i) {
-            free(new_params[i]);
-        }
-        free(new_params);
-    }
-
     if (replaced_params) {
+        if (gShellPositionalOwned) {
+            shellFreeOwnedPositionalParameters();
+        } else {
+            gParamValues = NULL;
+            gParamCount = 0;
+        }
         gParamValues = saved_params;
         gParamCount = saved_count;
+        gShellPositionalOwned = saved_owned;
     }
 
     if (exit_requested) {
@@ -6822,6 +7140,7 @@ static bool shellParseReturnStatus(const char *text, int *out_status) {
 Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
     bool ok = true;
     bool parsing_options = true;
+    int positional_start = arg_count;
     for (int i = 0; i < arg_count && ok; ++i) {
         Value v = args[i];
         if (v.type != TYPE_STRING || !v.s_val) {
@@ -6830,12 +7149,13 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
             break;
         }
         const char *token = v.s_val;
-        if (parsing_options && strcmp(token, "--") == 0) {
-            parsing_options = false;
-            continue;
-        }
         if (!parsing_options) {
             continue;
+        }
+        if (strcmp(token, "--") == 0) {
+            positional_start = i + 1;
+            parsing_options = false;
+            break;
         }
         if (strcmp(token, "-e") == 0) {
             gShellRuntime.errexit_enabled = true;
@@ -6862,8 +7182,63 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
                     gShellRuntime.errexit_pending = false;
                 }
             }
+        } else if (token[0] == '-' || token[0] == '+') {
+            // Unsupported option, ignore for now to match previous behaviour.
+        } else {
+            positional_start = i;
+            parsing_options = false;
+            break;
         }
     }
+
+    if (ok && positional_start < arg_count) {
+        int new_count = arg_count - positional_start;
+        char **new_params = NULL;
+        if (new_count > 0) {
+            new_params = (char **)calloc((size_t)new_count, sizeof(char *));
+            if (!new_params) {
+                runtimeError(vm, "set: out of memory");
+                ok = false;
+            } else {
+                for (int i = 0; i < new_count && ok; ++i) {
+                    Value val = args[positional_start + i];
+                    if (val.type != TYPE_STRING || !val.s_val) {
+                        runtimeError(vm, "set: positional arguments must be strings");
+                        ok = false;
+                        break;
+                    }
+                    new_params[i] = strdup(val.s_val);
+                    if (!new_params[i]) {
+                        runtimeError(vm, "set: out of memory");
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (ok) {
+            if (gShellPositionalOwned) {
+                shellFreeOwnedPositionalParameters();
+            } else {
+                gParamValues = NULL;
+                gParamCount = 0;
+            }
+            if (new_count > 0) {
+                gParamValues = new_params;
+                gParamCount = new_count;
+                gShellPositionalOwned = true;
+                new_params = NULL;
+            } else {
+                gShellPositionalOwned = false;
+            }
+        }
+
+        if (new_params) {
+            shellFreeParameterArray(new_params, new_count);
+        }
+    }
+
     shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }

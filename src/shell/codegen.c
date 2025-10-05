@@ -391,20 +391,58 @@ static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline,
 }
 
 static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical, int line) {
-    if (!logical) {
+    if (!logical || logical->count == 0) {
         return;
     }
-    for (size_t i = 0; i < logical->count; ++i) {
-        compilePipeline(chunk, logical->pipelines[i], false);
-        if (i + 1 < logical->count) {
-            ShellLogicalConnector connector = logical->connectors[i + 1];
-            const char *name = connector == SHELL_LOGICAL_AND ? "__shell_and" : "__shell_or";
-            char meta[32];
-            snprintf(meta, sizeof(meta), "connector=%s", connector == SHELL_LOGICAL_AND ? "&&" : "||");
-            emitPushString(chunk, meta, line);
-            emitBuiltinProc(chunk, name, 1, line);
-        }
+
+    size_t pipeline_count = logical->count;
+    size_t connector_count = (pipeline_count > 0) ? (pipeline_count - 1) : 0;
+
+    if (connector_count == 0) {
+        compilePipeline(chunk, logical->pipelines[0], false);
+        return;
     }
+
+    int *patch_sites = (int *)malloc(connector_count * sizeof(int));
+    if (!patch_sites) {
+        for (size_t i = 0; i < pipeline_count; ++i) {
+            compilePipeline(chunk, logical->pipelines[i], false);
+            if (i + 1 < pipeline_count) {
+                ShellLogicalConnector connector = logical->connectors[i + 1];
+                const char *name = connector == SHELL_LOGICAL_AND ? "__shell_and" : "__shell_or";
+                char meta[32];
+                snprintf(meta, sizeof(meta), "connector=%s", connector == SHELL_LOGICAL_AND ? "&&" : "||");
+                emitPushString(chunk, meta, line);
+                emitBuiltinProc(chunk, name, 1, line);
+            }
+        }
+        return;
+    }
+
+    size_t patch_count = 0;
+    for (size_t i = 0; i < pipeline_count - 1; ++i) {
+        compilePipeline(chunk, logical->pipelines[i], false);
+        emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
+        emitPushInt(chunk, 0, line);
+        writeBytecodeChunk(chunk, EQUAL, line);
+        if (logical->connectors[i + 1] == SHELL_LOGICAL_OR) {
+            writeBytecodeChunk(chunk, NOT, line);
+        }
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        patch_sites[patch_count++] = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+    }
+
+    compilePipeline(chunk, logical->pipelines[pipeline_count - 1], false);
+
+    int end_label = chunk->count;
+    for (size_t i = 0; i < patch_count; ++i) {
+        int index = patch_sites[i];
+        uint16_t offset = (uint16_t)(end_label - (index + 2));
+        patchShort(chunk, index, offset);
+    }
+
+    free(patch_sites);
 }
 
 static void compileSubshell(BytecodeChunk *chunk, const ShellProgram *body, int line, int index) {
