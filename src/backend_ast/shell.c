@@ -142,6 +142,7 @@ static ShellRuntimeState gShellRuntime = {
 };
 
 static bool gShellExitRequested = false;
+static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
@@ -3715,6 +3716,26 @@ static void shellHandlePendingSignal(int signo) {
         gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
         shellLoopRequestBreakLevels((int)gShellLoopStackSize);
     }
+
+    bool propagate_default =
+        (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
+         !gShellRuntime.trap_enabled);
+
+    if (propagate_default) {
+        struct sigaction action;
+        memset(&action, 0, sizeof(action));
+        sigemptyset(&action.sa_mask);
+        action.sa_handler = SIG_DFL;
+        sigaction(signo, &action, NULL);
+        raise(signo);
+        if (signo == SIGTSTP) {
+            memset(&action, 0, sizeof(action));
+            sigemptyset(&action.sa_mask);
+            action.sa_handler = shellSignalHandler;
+            action.sa_flags |= SA_RESTART;
+            sigaction(signo, &action, NULL);
+        }
+    }
 }
 
 void shellRuntimeProcessPendingSignals(void) {
@@ -3725,6 +3746,14 @@ void shellRuntimeProcessPendingSignals(void) {
         gShellPendingSignals[signo] = 0;
         shellHandlePendingSignal(signo);
     }
+}
+
+void shellRuntimeSetExitOnSignal(bool enabled) {
+    gShellExitOnSignalFlag = enabled ? 1 : 0;
+}
+
+bool shellRuntimeExitOnSignal(void) {
+    return gShellExitOnSignalFlag != 0;
 }
 
 void shellRuntimeInitSignals(void) {
@@ -6265,6 +6294,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     opts.quiet = true;
     const char *frontend_path = shellRuntimeGetArg0();
     opts.frontend_path = frontend_path ? frontend_path : "exsh";
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
 
     bool exit_requested = false;
     int status = shellRunSource(source, path, &opts, &exit_requested);
@@ -6335,6 +6365,7 @@ Value vmBuiltinShellEval(VM *vm, int arg_count, Value *args) {
     opts.quiet = true;
     const char *frontend_path = shellRuntimeGetArg0();
     opts.frontend_path = frontend_path ? frontend_path : "exsh";
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
 
     bool exit_requested = false;
     int status = shellRunSource(script, "<eval>", &opts, &exit_requested);
