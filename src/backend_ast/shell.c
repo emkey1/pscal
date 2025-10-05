@@ -3710,7 +3710,7 @@ static void shellHandlePendingSignal(int signo) {
         gShellCurrentVm->current_builtin_name = "signal";
     }
 
-    if (!gShellRuntime.job_control_initialized) {
+    if (!gShellRuntime.job_control_enabled) {
         gShellExitRequested = true;
     }
 
