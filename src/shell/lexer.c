@@ -284,6 +284,21 @@ static bool isStructuralWordCandidate(int c) {
     }
 }
 
+static bool lexerAllowsStructuralWordLiterals(const ShellLexer *lexer) {
+    if (!lexer) {
+        return false;
+    }
+
+    unsigned int mask = lexer->rule_mask;
+    if ((mask & SHELL_LEXER_RULE_4) != 0) {
+        // Case patterns rely on ')' remaining a structural token even though
+        // they are parsed outside command-start contexts.
+        return false;
+    }
+
+    return true;
+}
+
 static ShellToken scanWord(ShellLexer *lexer) {
     bool singleQuoted = false;
     bool doubleQuoted = false;
@@ -689,7 +704,7 @@ ShellToken shellNextToken(ShellLexer *lexer) {
     }
 
     bool command_starts = (lexer->rule_mask & SHELL_LEXER_RULE_1) != 0;
-    if (!command_starts && isStructuralWordCandidate(c)) {
+    if (!command_starts && lexerAllowsStructuralWordLiterals(lexer) && isStructuralWordCandidate(c)) {
         ShellToken word = scanWord(lexer);
         if (!word.lexeme) {
             return makeErrorToken(lexer, "Failed to allocate word");
