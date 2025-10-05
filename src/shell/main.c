@@ -66,6 +66,7 @@ static void interactiveSigintHandler(int signo) {
 }
 
 static const char *SHELL_USAGE =
+    "EXtensible SHell (sh/bash/zsh replacement)\n\n"
     "Usage: exsh <options> <script.sh> [args...]\n"
     "   Options:\n"
     "     -v                          Display version information.\n"
