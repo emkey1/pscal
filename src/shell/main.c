@@ -1814,7 +1814,15 @@ static char *readInteractiveLine(const char *prompt,
     while (!done) {
         unsigned char ch = 0;
         ssize_t read_count = read(STDIN_FILENO, &ch, 1);
-        if (read_count <= 0) {
+        if (read_count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            eof_requested = true;
+            break;
+        }
+
+        if (read_count == 0) {
             eof_requested = true;
             break;
         }
