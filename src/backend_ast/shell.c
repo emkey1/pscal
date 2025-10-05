@@ -1522,7 +1522,47 @@ static void shellFreeStringArray(char **items, size_t count) {
     free(items);
 }
 
+static bool shellQuotedMapEnsureCapacity(bool track, bool **map, size_t *length, size_t *capacity, size_t extra) {
+    if (!track) {
+        return true;
+    }
+    size_t needed = *length + extra;
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_capacity = (*capacity == 0) ? 32 : *capacity;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    bool *resized = (bool *)realloc(*map, new_capacity * sizeof(bool));
+    if (!resized) {
+        return false;
+    }
+    *map = resized;
+    *capacity = new_capacity;
+    return true;
+}
+
+static bool shellQuotedMapAppendRepeated(bool track,
+                                         bool **map,
+                                         size_t *length,
+                                         size_t *capacity,
+                                         bool flag,
+                                         size_t count) {
+    if (!shellQuotedMapEnsureCapacity(track, map, length, capacity, count)) {
+        return false;
+    }
+    if (!track) {
+        return true;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        (*map)[(*length)++] = flag;
+    }
+    return true;
+}
+
 static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
+                                   const bool *quoted_map, size_t quoted_len,
                                    char ***out_fields, size_t *out_field_count) {
     if (out_fields) {
         *out_fields = NULL;
@@ -1536,11 +1576,23 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
     if (!expanded) {
         return true;
     }
+
+    size_t length = strlen(expanded);
+    bool use_map = quoted_map && quoted_len == length;
     const char *ifs = getenv("IFS");
     if (!ifs) {
         ifs = " \t\n";
     }
     bool quoted = (word_flags & (SHELL_WORD_FLAG_SINGLE_QUOTED | SHELL_WORD_FLAG_DOUBLE_QUOTED)) != 0;
+    if (!quoted && use_map) {
+        quoted = true;
+        for (size_t i = 0; i < length; ++i) {
+            if (!quoted_map[i]) {
+                quoted = false;
+                break;
+            }
+        }
+    }
     if (quoted || *ifs == '\0') {
         char *dup = strdup(expanded);
         if (!dup) {
@@ -1570,15 +1622,25 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
         }
     }
 
-    ShellStringArray fields = {0};
+    ShellStringArray fields = (ShellStringArray){0};
     const char *cursor = expanded;
-    while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+    while (*cursor) {
+        size_t index = (size_t)(cursor - expanded);
+        if (use_map && quoted_map[index]) {
+            break;
+        }
+        if (!whitespace_map[(unsigned char)*cursor]) {
+            break;
+        }
         cursor++;
     }
+
     bool last_non_wh_delim = false;
     while (*cursor) {
         unsigned char ch = (unsigned char)*cursor;
-        if (delim_map[ch] && !whitespace_map[ch]) {
+        size_t index = (size_t)(cursor - expanded);
+        bool char_quoted = use_map && quoted_map[index];
+        if (!char_quoted && delim_map[ch] && !whitespace_map[ch]) {
             char *empty = strdup("");
             if (!empty || !shellStringArrayAppend(&fields, empty)) {
                 free(empty);
@@ -1586,7 +1648,14 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
                 return false;
             }
             cursor++;
-            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+            while (*cursor) {
+                size_t ws_index = (size_t)(cursor - expanded);
+                if (use_map && quoted_map[ws_index]) {
+                    break;
+                }
+                if (!whitespace_map[(unsigned char)*cursor]) {
+                    break;
+                }
                 cursor++;
             }
             last_non_wh_delim = true;
@@ -1596,20 +1665,22 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
         const char *start = cursor;
         while (*cursor) {
             unsigned char inner = (unsigned char)*cursor;
-            if (delim_map[inner]) {
+            size_t inner_index = (size_t)(cursor - expanded);
+            bool inner_quoted = use_map && quoted_map[inner_index];
+            if (!inner_quoted && delim_map[inner]) {
                 break;
             }
             cursor++;
         }
-        size_t len = (size_t)(cursor - start);
-        if (len > 0) {
-            char *segment = (char *)malloc(len + 1);
+        size_t span = (size_t)(cursor - start);
+        if (span > 0) {
+            char *segment = (char *)malloc(span + 1);
             if (!segment) {
                 shellStringArrayFree(&fields);
                 return false;
             }
-            memcpy(segment, start, len);
-            segment[len] = '\0';
+            memcpy(segment, start, span);
+            segment[span] = '\0';
             if (!shellStringArrayAppend(&fields, segment)) {
                 free(segment);
                 shellStringArrayFree(&fields);
@@ -1622,17 +1693,31 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
             break;
         }
 
-        if (delim_map[(unsigned char)*cursor] && !whitespace_map[(unsigned char)*cursor]) {
+        if (!char_quoted && delim_map[(unsigned char)*cursor] && !whitespace_map[(unsigned char)*cursor]) {
             cursor++;
             last_non_wh_delim = true;
         } else {
-            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+            while (*cursor) {
+                size_t ws_index = (size_t)(cursor - expanded);
+                if (use_map && quoted_map[ws_index]) {
+                    break;
+                }
+                if (!whitespace_map[(unsigned char)*cursor]) {
+                    break;
+                }
                 cursor++;
             }
             last_non_wh_delim = false;
         }
 
-        while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+        while (*cursor) {
+            size_t ws_index = (size_t)(cursor - expanded);
+            if (use_map && quoted_map[ws_index]) {
+                break;
+            }
+            if (!whitespace_map[(unsigned char)*cursor]) {
+                break;
+            }
             cursor++;
         }
     }
@@ -2660,7 +2745,12 @@ static char *shellExpandArraySubscriptValue(const char *name,
     return result;
 }
 
-static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len);
+static char *shellExpandWord(const char *text,
+                             uint8_t flags,
+                             const char *meta,
+                             size_t meta_len,
+                             bool **out_quoted_map,
+                             size_t *out_quoted_len);
 
 static char *shellNormalizeDollarCommandInline(const char *command, size_t len) {
     if (!command) {
@@ -2821,7 +2911,7 @@ static char *shellExpandHereDocument(const char *body, bool quoted) {
     if (quoted) {
         return body ? strdup(body) : strdup("");
     }
-    return shellExpandWord(body, SHELL_WORD_FLAG_HAS_ARITHMETIC, NULL, 0);
+    return shellExpandWord(body, SHELL_WORD_FLAG_HAS_ARITHMETIC, NULL, 0, NULL, NULL);
 }
 
 static char *shellExpandParameter(const char *input, size_t *out_consumed) {
@@ -2997,7 +3087,7 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
                     memcpy(raw_default, default_start, default_len);
                 }
                 raw_default[default_len] = '\0';
-                char *expanded_default = shellExpandWord(raw_default, 0, NULL, 0);
+                char *expanded_default = shellExpandWord(raw_default, 0, NULL, 0, NULL, NULL);
                 free(raw_default);
                 if (!expanded_default) {
                     return NULL;
@@ -3488,16 +3578,34 @@ static char *shellEvaluateArithmetic(const char *expr, bool *out_error) {
     return result;
 }
 
-static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len) {
+static char *shellExpandWord(const char *text,
+                             uint8_t flags,
+                             const char *meta,
+                             size_t meta_len,
+                             bool **out_quoted_map,
+                             size_t *out_quoted_len) {
+    if (out_quoted_map) {
+        *out_quoted_map = NULL;
+    }
+    if (out_quoted_len) {
+        *out_quoted_len = 0;
+    }
     if (!text) {
         return strdup("");
     }
+
+    bool track_quotes = out_quoted_map && out_quoted_len;
+    bool *quoted_map = NULL;
+    size_t quoted_len = 0;
+    size_t quoted_cap = 0;
+
     ShellMetaSubstitution *subs = NULL;
     size_t sub_count = 0;
     if (!shellParseCommandMetadata(meta, meta_len, &subs, &sub_count)) {
         subs = NULL;
         sub_count = 0;
     }
+
     size_t text_len = strlen(text);
     size_t length = 0;
     size_t capacity = text_len + 1;
@@ -3510,6 +3618,7 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
         return NULL;
     }
     buffer[0] = '\0';
+
     bool base_single = (flags & SHELL_WORD_FLAG_SINGLE_QUOTED) != 0;
     bool base_double = (flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
     bool in_single_segment = false;
@@ -3518,6 +3627,7 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
     bool saw_double_marker = false;
     bool has_arithmetic = (flags & SHELL_WORD_FLAG_HAS_ARITHMETIC) != 0;
     size_t sub_index = 0;
+
     for (size_t i = 0; i < text_len;) {
         char c = text[i];
         if (c == SHELL_QUOTE_MARK_SINGLE) {
@@ -3532,13 +3642,20 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
             i++;
             continue;
         }
+
         bool effective_single = in_single_segment || (!saw_single_marker && base_single);
         bool effective_double = in_double_segment || (!saw_double_marker && base_double);
+        bool quoted_flag = effective_single || effective_double;
+
         if (effective_single) {
+            if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap, true, 1)) {
+                goto expand_error;
+            }
             shellBufferAppendChar(&buffer, &length, &capacity, c);
             i++;
             continue;
         }
+
         bool handled = false;
         if (sub_index < sub_count) {
             ShellMetaSubstitution *sub = &subs[sub_index];
@@ -3547,6 +3664,12 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 if (span > 0 && i + span <= text_len) {
                     char *output = shellRunCommandSubstitution(sub->command);
                     if (output) {
+                        size_t out_len = strlen(output);
+                        if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                          quoted_flag, out_len)) {
+                            free(output);
+                            goto expand_error;
+                        }
                         shellBufferAppendString(&buffer, &length, &capacity, output);
                         free(output);
                     }
@@ -3560,6 +3683,12 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 if (span > 0 && i + span <= text_len) {
                     char *output = shellRunCommandSubstitution(sub->command);
                     if (output) {
+                        size_t out_len = strlen(output);
+                        if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                          quoted_flag, out_len)) {
+                            free(output);
+                            goto expand_error;
+                        }
                         shellBufferAppendString(&buffer, &length, &capacity, output);
                         free(output);
                     }
@@ -3574,6 +3703,7 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
         if (handled) {
             continue;
         }
+
         if (sub_count == 0 && c == '$' && i + 1 < text_len && text[i + 1] == '(' &&
             !(i + 2 < text_len && text[i + 2] == '(')) {
             size_t span = 0;
@@ -3582,6 +3712,12 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 char *output = shellRunCommandSubstitution(command);
                 free(command);
                 if (output) {
+                    size_t out_len = strlen(output);
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, out_len)) {
+                        free(output);
+                        goto expand_error;
+                    }
                     shellBufferAppendString(&buffer, &length, &capacity, output);
                     free(output);
                 }
@@ -3596,6 +3732,12 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 char *output = shellRunCommandSubstitution(command);
                 free(command);
                 if (output) {
+                    size_t out_len = strlen(output);
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, out_len)) {
+                        free(output);
+                        goto expand_error;
+                    }
                     shellBufferAppendString(&buffer, &length, &capacity, output);
                     free(output);
                 }
@@ -3603,6 +3745,7 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 continue;
             }
         }
+
         if (c == '$' && has_arithmetic && i + 2 < text_len && text[i + 1] == '(' && text[i + 2] == '(') {
             size_t expr_start = i + 3;
             size_t j = expr_start;
@@ -3626,6 +3769,10 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 char *expr = (char *)malloc(expr_len + 1);
                 if (!expr) {
                     shellMarkArithmeticError();
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, span)) {
+                        goto expand_error;
+                    }
                     shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
                     i += span;
                     continue;
@@ -3638,10 +3785,20 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
                 char *result = shellEvaluateArithmetic(expr, &eval_error);
                 free(expr);
                 if (!eval_error && result) {
+                    size_t out_len = strlen(result);
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, out_len)) {
+                        free(result);
+                        goto expand_error;
+                    }
                     shellBufferAppendString(&buffer, &length, &capacity, result);
                     free(result);
                 } else {
                     shellMarkArithmeticError();
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, span)) {
+                        goto expand_error;
+                    }
                     shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
                 }
                 i += span;
@@ -3649,40 +3806,78 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
             } else {
                 span = text_len - i;
                 shellMarkArithmeticError();
+                if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                  quoted_flag, span)) {
+                    goto expand_error;
+                }
                 shellBufferAppendSlice(&buffer, &length, &capacity, text + i, span);
                 i = text_len;
                 continue;
             }
         }
+
         bool treat_as_double = effective_double;
         if (c == '\\') {
             if (i + 1 < text_len) {
                 char next = text[i + 1];
                 if (!treat_as_double || next == '$' || next == '"' || next == '\\' || next == '`' || next == '\n') {
+                    if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                      quoted_flag, 1)) {
+                        goto expand_error;
+                    }
                     shellBufferAppendChar(&buffer, &length, &capacity, next);
                     i += 2;
                     continue;
                 }
             }
+            if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                              quoted_flag, 1)) {
+                goto expand_error;
+            }
             shellBufferAppendChar(&buffer, &length, &capacity, c);
             i++;
             continue;
         }
+
         if (c == '$') {
             size_t consumed = 0;
             char *expanded = shellExpandParameter(text + i + 1, &consumed);
             if (expanded) {
+                size_t out_len = strlen(expanded);
+                if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                                  quoted_flag, out_len)) {
+                    free(expanded);
+                    goto expand_error;
+                }
                 shellBufferAppendString(&buffer, &length, &capacity, expanded);
                 free(expanded);
                 i += consumed + 1;
                 continue;
             }
         }
+
+        if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
+                                          quoted_flag, 1)) {
+            goto expand_error;
+        }
         shellBufferAppendChar(&buffer, &length, &capacity, c);
         i++;
     }
+
     shellFreeMetaSubstitutions(subs, sub_count);
+    if (track_quotes) {
+        *out_quoted_map = quoted_map;
+        *out_quoted_len = quoted_len;
+    } else {
+        free(quoted_map);
+    }
     return buffer;
+
+expand_error:
+    shellFreeMetaSubstitutions(subs, sub_count);
+    free(buffer);
+    free(quoted_map);
+    return NULL;
 }
 
 static void shellFreeRedirections(ShellCommand *cmd) {
@@ -4797,33 +4992,41 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     if (!shellDecodeWordSpec(arg, &text, &flags, &meta, &meta_len)) {
         return false;
     }
-    char *expanded = shellExpandWord(text, flags, meta, meta_len);
+    bool *quoted_map = NULL;
+    size_t quoted_len = 0;
+    char *expanded = shellExpandWord(text, flags, meta, meta_len, &quoted_map, &quoted_len);
     if (!expanded) {
         return false;
     }
     if (saw_command_word && !*saw_command_word) {
         if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
             if (!shellCommandAppendAssignmentOwned(cmd, expanded)) {
+                free(quoted_map);
                 return false;
             }
+            free(quoted_map);
             return true;
         }
     } else if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
         if (!shellCommandAppendArgOwned(cmd, expanded)) {
+            free(quoted_map);
             return false;
         }
         if (saw_command_word) {
             *saw_command_word = true;
         }
+        free(quoted_map);
         return true;
     }
     char **fields = NULL;
     size_t field_count = 0;
-    if (!shellSplitExpandedWord(expanded, flags, &fields, &field_count)) {
+    if (!shellSplitExpandedWord(expanded, flags, quoted_map, quoted_len, &fields, &field_count)) {
         free(expanded);
+        free(quoted_map);
         return false;
     }
     free(expanded);
+    free(quoted_map);
     if (field_count == 0) {
         free(fields);
         return true;
@@ -5031,7 +5234,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
             free(copy);
             return false;
         }
-        expanded_target = shellExpandWord(target_text, target_flags, target_meta, target_meta_len);
+        expanded_target = shellExpandWord(target_text, target_flags, target_meta, target_meta_len, NULL, NULL);
         if (!expanded_target) {
             free(word_encoded);
             free(copy);
@@ -6148,24 +6351,29 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                     text = spec ? spec : "";
                     word_flags = 0;
                 }
-                char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len);
+                bool *quoted_map = NULL;
+                size_t quoted_len = 0;
+                char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len, &quoted_map, &quoted_len);
                 if (!expanded) {
                     ok = false;
                     break;
                 }
                 char **fields = NULL;
                 size_t field_count = 0;
-                if (!shellSplitExpandedWord(expanded, word_flags, &fields, &field_count)) {
+                if (!shellSplitExpandedWord(expanded, word_flags, quoted_map, quoted_len, &fields, &field_count)) {
                     free(expanded);
+                    free(quoted_map);
                     ok = false;
                     break;
                 }
                 if (field_count == 0) {
                     free(expanded);
+                    free(quoted_map);
                     shellFreeStringArray(fields, field_count);
                     continue;
                 }
                 free(expanded);
+                free(quoted_map);
                 for (size_t f = 0; f < field_count; ++f) {
                     char *field_value = fields[f];
                     if (!field_value) {
@@ -6310,7 +6518,7 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
         subject_text = subject_spec ? subject_spec : "";
         subject_flags = 0;
     }
-    char *expanded_subject = shellExpandWord(subject_text, subject_flags, subject_meta, subject_meta_len);
+    char *expanded_subject = shellExpandWord(subject_text, subject_flags, subject_meta, subject_meta_len, NULL, NULL);
     if (!expanded_subject) {
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
@@ -6363,7 +6571,7 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
             pattern_text = pattern_spec ? pattern_spec : "";
             pattern_flags = 0;
         }
-        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags, pattern_meta, pattern_meta_len);
+        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags, pattern_meta, pattern_meta_len, NULL, NULL);
         if (!expanded_pattern) {
             runtimeError(vm, "shell case clause: out of memory");
             shellUpdateStatus(1);
