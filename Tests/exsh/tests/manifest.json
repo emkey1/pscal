@@ -256,6 +256,15 @@
             "expected_stderr_substring": "Expected '(' after function name"
         },
         {
+            "id": "grammar_double_bracket_negation",
+            "name": "[[ ! -f ]] conditions accept unary negation",
+            "category": "grammar",
+            "description": "Double-bracket tests treat ! as part of the conditional expression when not at command start.",
+            "script": "Tests/exsh/tests/parser_double_bracket_negation.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "double-bracket:start\nbranch:missing\nbranch:now-present\ndouble-bracket:end"
+        },
+        {
             "id": "grammar_if_comment_boundary",
             "name": "Comments between branches preserve newline separators",
             "category": "grammar",
