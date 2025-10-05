@@ -25,6 +25,11 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
+static bool s_vmVerboseErrors = false;
+
+void vmSetVerboseErrors(bool enabled) {
+    s_vmVerboseErrors = enabled;
+}
 
 // --- VM Helper Functions ---
 static void resetStack(VM* vm) {
@@ -136,6 +141,66 @@ static bool coerceValueToBoolean(const Value* value, bool* out_truth) {
         return true;
     }
     return false;
+}
+
+static bool vmResolveStringIndex(VM* vm,
+                                 long long raw_index,
+                                 size_t len,
+                                 size_t* out_offset,
+                                 bool allow_length_query,
+                                 bool* out_length_query) {
+#ifndef FRONTEND_SHELL
+    if (allow_length_query && raw_index == 0) {
+        if (out_length_query) {
+            *out_length_query = true;
+        }
+        if (out_offset) {
+            *out_offset = 0;
+        }
+        return true;
+    }
+
+    if (raw_index < 1 || (size_t)raw_index > len) {
+        runtimeError(vm,
+                     "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                     raw_index,
+                     len);
+        return false;
+    }
+
+    if (out_length_query) {
+        *out_length_query = false;
+    }
+    if (out_offset) {
+        *out_offset = (size_t)(raw_index - 1);
+    }
+    return true;
+#else
+    (void)allow_length_query;
+    if (raw_index < 0 || (size_t)raw_index >= len) {
+        runtimeError(vm,
+                     "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                     raw_index,
+                     len);
+        return false;
+    }
+
+    if (out_length_query) {
+        *out_length_query = false;
+    }
+    if (out_offset) {
+        *out_offset = (size_t)raw_index;
+    }
+    return true;
+#endif
+}
+
+static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
+#ifndef FRONTEND_SHELL
+    return (unsigned long long)(offset + 1);
+#else
+    return (unsigned long long)offset;
+#endif
 }
 
 static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
@@ -811,7 +876,9 @@ void runtimeWarning(VM* vm, const char* format, ...) {
     fputc('\n', stderr);
     fflush(stderr);
 
-    emitRuntimeLocation(vm, "[Warning Location]");
+    if (s_vmVerboseErrors) {
+        emitRuntimeLocation(vm, "[Warning Location]");
+    }
 }
 
 // runtimeError - Assuming your existing one is fine.
@@ -838,47 +905,40 @@ void runtimeError(VM* vm, const char* format, ...) {
 
     size_t instruction_offset = 0;
     int error_line = 0;
-    computeRuntimeLocation(vm, &instruction_offset, &error_line);
-    (void)error_line;
-    emitRuntimeLocation(vm, "[Error Location]");
-
-    // --- NEW: Dump crash context (instructions and full stack) ---
-    fprintf(stderr, "\n--- VM Crash Context ---\n");
+    bool have_runtime_location = false;
     if (vm) {
+        computeRuntimeLocation(vm, &instruction_offset, &error_line);
+        fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+        have_runtime_location = true;
+    }
+
+    if (s_vmVerboseErrors && vm) {
+        fprintf(stderr, "\n--- VM Crash Context ---\n");
         fprintf(stderr, "Instruction Pointer (IP): %p\n", (void*)vm->ip);
-        fprintf(stderr, "Code Base: %p\n", vm && vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
-    }
+        fprintf(stderr, "Code Base: %p\n", vm->chunk ? (void*)vm->chunk->code : (void*)NULL);
 
-    // Dump current instruction (at vm->ip)
-    fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
-    if (vm && vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
-        // disassembleInstruction will advance vm->ip temporarily.
-        // We want to disassemble at vm->ip's current position.
-        // Temporarily store vm->ip and restore it if disassembleInstruction modifies it.
-        // However, disassembleInstruction itself returns the new offset, so safer to pass the current IP's offset.
-        disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
-    } else {
-        fprintf(stderr, "  (IP is out of bytecode bounds: %p)\n", (void*)vm->ip);
-    }
-
-    // Dump preceding instructions for context
-    int start_dump_offset = (int)instruction_offset - 10; // Dump last 10 instructions
-    if (start_dump_offset < 0) start_dump_offset = 0;
-
-    fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
-    if (vm && vm->chunk) {
-        for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
-            offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+        fprintf(stderr, "Current Instruction (at IP, might be the instruction that IP tried to fetch/decode):\n");
+        if (vm->chunk && vm->ip >= vm->chunk->code && (vm->ip - vm->chunk->code) < vm->chunk->count) {
+            disassembleInstruction(vm->chunk, (int)(vm->ip - vm->chunk->code), vm->procedureTable);
+        } else {
+            fprintf(stderr, "  (IP is out of bytecode bounds: %p)\n", (void*)vm->ip);
         }
-    }
-    if (start_dump_offset == (int)instruction_offset) {
-        fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
-    }
 
-    // Dump full stack contents
-    if (vm) vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
+        int start_dump_offset = (int)instruction_offset - 10;
+        if (!have_runtime_location || start_dump_offset < 0) start_dump_offset = 0;
 
-    // --- END NEW DUMP ---
+        fprintf(stderr, "\nLast Instructions executed (leading to crash, up to %d bytes before error point):\n", (int)instruction_offset - start_dump_offset);
+        if (vm->chunk) {
+            for (int offset = start_dump_offset; offset < (int)instruction_offset; ) {
+                offset = disassembleInstruction(vm->chunk, offset, vm->procedureTable);
+            }
+        }
+        if (start_dump_offset == (int)instruction_offset) {
+            fprintf(stderr, "  (No preceding instructions in buffer to display)\n");
+        }
+
+        vmDumpStackInfoDetailed(vm, "Full Stack at Crash");
+    }
 
     // resetStack(vm); // Keep this commented out for post-mortem analysis purposes if you want to inspect stack in debugger
     // ... (rest of runtimeError function, calls EXIT_FAILURE_HANDLER()) ...
@@ -1270,6 +1330,44 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
+#ifdef FRONTEND_SHELL
+static Value vmHostShellLastStatusHost(VM* vm) {
+    return vmHostShellLastStatus(vm);
+}
+
+static Value vmHostShellLoopAdvanceHost(VM* vm) {
+    return vmHostShellLoopAdvance(vm);
+}
+
+static Value vmHostShellPollJobsHost(VM* vm) {
+    return vmHostShellPollJobs(vm);
+}
+
+static Value vmHostShellLoopIsReadyHost(VM* vm) {
+    return vmHostShellLoopIsReady(vm);
+}
+#else
+static Value vmHostShellLastStatusHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellLoopAdvanceHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellPollJobsHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellLoopIsReadyHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+#endif
+
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
     if (!vm) return false;
@@ -1321,6 +1419,10 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
+    registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
+    registerHostFunction(vm, HOST_FN_SHELL_LOOP_ADVANCE, vmHostShellLoopAdvanceHost);
+    registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
+    registerHostFunction(vm, HOST_FN_SHELL_LOOP_IS_READY, vmHostShellLoopIsReadyHost);
 
     // Default: tracing disabled
     vm->trace_head_instructions = 0;
@@ -2019,18 +2121,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 const char* str = string_val->s_val ? string_val->s_val : "";
                 size_t len = strlen(str);
 
-                if (pscal_index < 1 || (size_t)pscal_index > len) {
-                    runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                size_t char_offset = 0;
+                if (!vmResolveStringIndex(vm, pscal_index, len, &char_offset, false, NULL)) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                // Pop the old string address pointer from the stack
                 Value popped_string_ptr = pop(vm);
                 freeValue(&popped_string_ptr);
 
-                // Push a new pointer directly to the character's memory location
-                // We use a special marker in base_type_node to identify this as a char pointer
-                push(vm, makePointer(&string_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
+                push(vm, makePointer(&string_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
                 break;
             }
             case GET_GLOBAL_ADDRESS: {
@@ -2828,26 +2927,29 @@ comparison_error_label:
                         freeValue(&index_val);
 
                         size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
-
-                        if (pscal_index == 0) {
-                            // Special case: element 0 returns the string length.
-                            push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
-                            freeValue(&operand);
-                            break; // Exit the case
-                        }
-
-                        if (pscal_index < 0 || (size_t)pscal_index > len) {
-                            runtimeError(vm,
-                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                                         pscal_index, len);
+                        size_t char_offset = 0;
+                        bool wants_length = false;
+                        if (!vmResolveStringIndex(vm,
+                                                  pscal_index,
+                                                  len,
+                                                  &char_offset,
+                                                  true,
+                                                  &wants_length)) {
                             freeValue(&operand);
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-                        // Push a special pointer to the character's memory location
-                        push(vm, makePointer(&base_val->s_val[pscal_index - 1], STRING_CHAR_PTR_SENTINEL));
+#ifndef FRONTEND_SHELL
+                        if (wants_length) {
+                            push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
+                            freeValue(&operand);
+                            break;
+                        }
+#endif
+
+                        push(vm, makePointer(&base_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
                         freeValue(&operand);
-                        break; // Exit the case
+                        break;
                     }
                 }
 
@@ -2948,6 +3050,27 @@ comparison_error_label:
                 uint32_t flat_offset = READ_UINT32(vm);
                 Value operand = pop(vm);
 
+                if (operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        const char* str = base_val->s_val ? base_val->s_val : "";
+                        size_t len = strlen(str);
+
+                        if ((size_t)flat_offset >= len) {
+                            unsigned long long display_index = vmDisplayIndexFromOffset(flat_offset);
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%llu) out of bounds for string of length %zu.",
+                                         display_index, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        push(vm, makePointer(&base_val->s_val[flat_offset], STRING_CHAR_PTR_SENTINEL));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
+
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
                 temp_wrapper.lower_bounds = NULL;
@@ -3042,20 +3165,29 @@ comparison_error_label:
                         freeValue(&index_val);
 
                         size_t len = base_val->s_val ? strlen(base_val->s_val) : 0;
-                        if (pscal_index == 0) {
-                            push(vm, makeInt((long long)len));
-                            freeValue(&operand);
-                            break;
-                        }
-                        if (pscal_index < 1 || (size_t)pscal_index > len) {
-                            runtimeError(vm,
-                                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                                         pscal_index, len);
+                        size_t char_offset = 0;
+                        bool wants_length = false;
+                        if (!vmResolveStringIndex(vm,
+                                                  pscal_index,
+                                                  len,
+                                                  &char_offset,
+                                                  true,
+                                                  &wants_length)) {
                             freeValue(&operand);
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-                        char ch = base_val->s_val ? base_val->s_val[pscal_index - 1] : '\0';
+#ifndef FRONTEND_SHELL
+                        if (wants_length) {
+                            push(vm, makeInt((long long)len));
+                            freeValue(&operand);
+                            break;
+                        }
+#else
+                        (void)wants_length;
+#endif
+
+                        char ch = base_val->s_val ? base_val->s_val[char_offset] : '\0';
                         push(vm, makeChar(ch));
                         freeValue(&operand);
                         break;
@@ -3167,6 +3299,27 @@ comparison_error_label:
 
                 Value operand = pop(vm);
 
+                if (operand.type == TYPE_POINTER) {
+                    Value* base_val = (Value*)operand.ptr_val;
+                    if (base_val && base_val->type == TYPE_STRING) {
+                        const char* str = base_val->s_val ? base_val->s_val : "";
+                        size_t len = strlen(str);
+
+                        if ((size_t)flat_offset >= len) {
+                            unsigned long long display_index = vmDisplayIndexFromOffset(flat_offset);
+                            runtimeError(vm,
+                                         "Runtime Error: String index (%llu) out of bounds for string of length %zu.",
+                                         display_index, len);
+                            freeValue(&operand);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        push(vm, makeChar(str[flat_offset]));
+                        freeValue(&operand);
+                        break;
+                    }
+                }
+
                 Value* array_val_ptr = NULL;
                 Value temp_wrapper;
                 temp_wrapper.lower_bounds = NULL;
@@ -3275,12 +3428,18 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+#ifndef FRONTEND_SHELL
                 } else if (pointer_to_lvalue.base_type_node == STRING_LENGTH_SENTINEL) {
                     runtimeError(vm, "VM Error: Cannot assign to string length.");
                     freeValue(&value_to_set);
                     freeValue(&pointer_to_lvalue);
                     return INTERPRET_RUNTIME_ERROR;
-                } else { // This is the start of your existing logic for other types
+                } else
+#else
+                } else
+#endif
+                {
+                    // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
                         runtimeError(vm, "VM Error: SET_INDIRECT called with a nil LValue pointer.");
@@ -3452,12 +3611,16 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     push(vm, makeChar(*char_target_addr));
+#ifndef FRONTEND_SHELL
                 } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL) {
                     // Special case: request for string length via element 0.
                     Value* str_val = (Value*)pointer_val.ptr_val;
                     size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
                     push(vm, makeInt((long long)len));
                 } else {
+#else
+                } else {
+#endif
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
@@ -3485,18 +3648,26 @@ comparison_error_label:
                  if (base_val.type == TYPE_STRING) {
                      const char* str = base_val.s_val ? base_val.s_val : "";
                      size_t len = strlen(str);
-                     if (pscal_index < 1 || (size_t)pscal_index > len) {
-                         runtimeError(vm, "Runtime Error: String index (%lld) out of bounds [1..%zu].", pscal_index, len);
+                     size_t char_offset = 0;
+                     if (!vmResolveStringIndex(vm, pscal_index, len, &char_offset, false, NULL)) {
                          freeValue(&index_val); freeValue(&base_val);
                          return INTERPRET_RUNTIME_ERROR;
                      }
-                     result_char = str[pscal_index - 1];
+                     result_char = str[char_offset];
                  } else if (base_val.type == TYPE_CHAR) {
+#ifdef FRONTEND_SHELL
+                     if (pscal_index != 0) {
+                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 0, got %lld.", pscal_index);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+#else
                      if (pscal_index != 1) {
                          runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
                          freeValue(&index_val); freeValue(&base_val);
                          return INTERPRET_RUNTIME_ERROR;
                      }
+#endif
                      result_char = base_val.c_val;
                  } else {
                      runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));

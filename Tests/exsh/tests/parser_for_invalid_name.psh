@@ -1,0 +1,7 @@
+echo "parser-for-invalid:start"
+
+for 1bad in one two; do
+  echo "parser-for-invalid:body"
+done
+
+echo "parser-for-invalid:end"

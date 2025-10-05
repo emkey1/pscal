@@ -1,0 +1,10 @@
+echo "arithmetic:start"
+setenv FOO 7
+setenv BAR 3
+echo "math:$((2 + 3 * 4))"
+echo "vars:$((FOO + BAR))"
+echo "dollar:$(( $FOO - 1 ))"
+echo "nested:$(( (FOO + 3) / BAR ))"
+echo "bad:$((BAR+))"
+echo "status:$?"
+echo "arithmetic:end"

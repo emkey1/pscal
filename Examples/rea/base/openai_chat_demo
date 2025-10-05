@@ -1,0 +1,1500 @@
+#!/usr/bin/env rea
+// Generic chat completion demo using the Rea front end.
+//
+// This sample targets any OpenAI-compatible chat completion server. It can point
+// at the public OpenAI API, a local proxy such as LM Studio, or other services
+// that expose the same HTTP interface.
+//
+// Usage examples:
+//   LLM_API_KEY=sk-... ./openai_chat_demo "Say hello in one sentence."
+//   ./openai_chat_demo --base-url http://192.168.110.209:1234/v1 \
+//       --model llama-3.1-8b --options '{"temperature":0.2}' \
+//       "Summarise the PSCAL toolchain in 40 words."
+//   # LM Studio (local server enabled on port 1234)
+//   ./openai_chat_demo --lmstudio --model llama-3.1-8b-instruct \
+//       "List three fun weekend projects."
+//
+// Command line options:
+//   --model <id>        Override the model name (default gpt-4.1-mini)
+//   --system <prompt>   Provide a custom system prompt
+//   --base-url <url>    Set the API base URL (default http://127.0.0.1:1234/v1)
+//   --endpoint <path>   Override the chat completion endpoint (default /chat/completions)
+//   --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY or OPENAI_API_KEY)
+//   --temperature <n>   Adjust the temperature (numeric literal)
+//   --options <json>    Send a raw JSON object with additional top-level parameters
+//   --lmstudio          Shortcut for LM Studio defaults (base=http://127.0.0.1:1234,
+//                      endpoint=/v1/chat/completions)
+//   --help, -h          Display this message
+
+const str DEFAULT_MODEL = "gpt-4.1-mini";
+const str DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
+const str DEFAULT_ENDPOINT = "/chat/completions";
+const str DEFAULT_SYSTEM_PROMPT = "You are a concise assistant for PSCAL demo programs.";
+const str DEFAULT_OPTIONS = "{\"temperature\":0.7}";
+const int DEFAULT_TIMEOUT_MS = 30000;
+const str DEFAULT_USER_AGENT = "PSCALChatDemo/1.0";
+
+void printUsage(str programName) {
+  writeln("Usage: ", programName, " [options] <prompt>");
+  writeln("  --model <id>        Override the model name (default gpt-4.1-mini)");
+  writeln("  --system <prompt>   Provide a custom system prompt");
+  writeln("  --base-url <url>    Set the API base URL (default http://127.0.0.1:1234/v1)");
+  writeln("  --endpoint <path>   Override the chat completion endpoint (default /chat/completions)");
+  writeln("  --api-key <key>     Supply a bearer token (defaults to LLM_API_KEY/OPENAI_API_KEY)");
+  writeln("  --temperature <n>   Adjust the temperature (numeric literal)");
+  writeln("  --options <json>    Send a raw JSON object with additional parameters");
+  writeln("  --lmstudio          Shortcut for LM Studio defaults (base=http://127.0.0.1:1234, endpoint=/v1/chat/completions)");
+  writeln("  --help, -h          Display this message");
+}
+
+bool isDigit(char ch) {
+  return ch >= '0' && ch <= '9';
+}
+
+bool hasEnvValue(str name) {
+  if (name == "") {
+    return false;
+  }
+  str value = getenv(name);
+  return value != "";
+}
+
+bool isValidNumber(str value) {
+  int len = length(value);
+  if (len == 0) {
+    return false;
+  }
+  int index = 1;
+  char first = value[1];
+  if (first == '+' || first == '-') {
+    if (len == 1) {
+      return false;
+    }
+    index = 2;
+  }
+  bool seenDigit = false;
+  int dotCount = 0;
+  while (index <= len) {
+    char ch = value[index];
+    if (isDigit(ch)) {
+      seenDigit = true;
+    } else if (ch == '.') {
+      dotCount = dotCount + 1;
+      if (dotCount > 1) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+    index = index + 1;
+  }
+  return seenDigit;
+}
+
+str hexDigits() {
+  return "0123456789ABCDEF";
+}
+
+str charToString(char ch) {
+  str result;
+  setlength(result, 1);
+  result[1] = ch;
+  return result;
+}
+
+str duplicateString(str value) {
+  int len = length(value);
+  str result;
+  setlength(result, len);
+  int index = 1;
+  while (index <= len) {
+    result[index] = value[index];
+    index = index + 1;
+  }
+  return result;
+}
+
+str repeatChar(char ch, int count) {
+  if (count <= 0) {
+    return "";
+  }
+  str result;
+  setlength(result, count);
+  int index = 1;
+  while (index <= count) {
+    result[index] = ch;
+    index = index + 1;
+  }
+  return result;
+}
+
+str substringRange(str text, int startIndex, int endIndex) {
+  if (startIndex > endIndex) {
+    return "";
+  }
+  int len = length(text);
+  if (startIndex < 1) {
+    startIndex = 1;
+  }
+  if (endIndex > len) {
+    endIndex = len;
+  }
+  if (startIndex > endIndex) {
+    return "";
+  }
+  str result = "";
+  int i = startIndex;
+  while (i <= endIndex) {
+    result = result + charToString(text[i]);
+    i = i + 1;
+  }
+  return result;
+}
+
+str maskSecret(str value) {
+  if (value == "") {
+    return "(not set)";
+  }
+  int len = length(value);
+  if (len <= 4) {
+    return repeatChar('*', len);
+  }
+  if (len <= 8) {
+    return repeatChar('*', len);
+  }
+  int visible = 4;
+  str prefix = substringRange(value, 1, visible);
+  str suffix;
+  if (len > visible) {
+    int start = len - visible + 1;
+    if (start < visible + 1) {
+      start = visible + 1;
+    }
+    suffix = substringRange(value, start, len);
+  } else {
+    suffix = "";
+  }
+  int maskedCount = len - length(prefix) - length(suffix);
+  if (maskedCount < 0) {
+    maskedCount = 0;
+  }
+  str mask = repeatChar('*', maskedCount);
+  return prefix + mask + suffix;
+}
+
+str describeAuthorization(str apiKey) {
+  if (apiKey == "") {
+    return "(not set)";
+  }
+  return "Bearer " + maskSecret(apiKey);
+}
+
+str resolveEnvOrDefault(str primary, str secondary, str fallback) {
+  if (primary != "") {
+    str value = getenv(primary);
+    if (value != "") {
+      return duplicateString(value);
+    }
+  }
+  if (secondary != "") {
+    str alt = getenv(secondary);
+    if (alt != "") {
+      return duplicateString(alt);
+    }
+  }
+  return duplicateString(fallback);
+}
+
+bool isHighSurrogate(int codePoint) {
+  return codePoint >= 0xD800 && codePoint <= 0xDBFF;
+}
+
+bool isLowSurrogate(int codePoint) {
+  return codePoint >= 0xDC00 && codePoint <= 0xDFFF;
+}
+
+int decodeSurrogatePair(int high, int low) {
+  return 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+}
+
+str encodeUtf8CodePoint(int codePoint) {
+  int value = codePoint;
+  if (value < 0 || value > 0x10FFFF) {
+    value = 0xFFFD;
+  }
+  if (value <= 0x7F) {
+    return charToString(tochar(value));
+  }
+  str result;
+  if (value <= 0x7FF) {
+    setlength(result, 2);
+    result[1] = tochar(0xC0 | (value >> 6));
+    result[2] = tochar(0x80 | (value & 0x3F));
+    return result;
+  }
+  if (value <= 0xFFFF) {
+    setlength(result, 3);
+    result[1] = tochar(0xE0 | (value >> 12));
+    result[2] = tochar(0x80 | ((value >> 6) & 0x3F));
+    result[3] = tochar(0x80 | (value & 0x3F));
+    return result;
+  }
+  setlength(result, 4);
+  result[1] = tochar(0xF0 | (value >> 18));
+  result[2] = tochar(0x80 | ((value >> 12) & 0x3F));
+  result[3] = tochar(0x80 | ((value >> 6) & 0x3F));
+  result[4] = tochar(0x80 | (value & 0x3F));
+  return result;
+}
+
+int hexDigitValue(char ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ord(ch) - ord('0');
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ord(ch) - ord('A') + 10;
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ord(ch) - ord('a') + 10;
+  }
+  return -1;
+}
+
+int parseHexAt(str text, int index) {
+  int len = length(text);
+  if (index + 3 > len) {
+    return -1;
+  }
+  int value = 0;
+  int i = 0;
+  while (i < 4) {
+    char ch = text[index + i];
+    int digit = hexDigitValue(ch);
+    if (digit < 0) {
+      return -1;
+    }
+    value = (value << 4) + digit;
+    i = i + 1;
+  }
+  return value;
+}
+
+str jsonEscape(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  int outLen = 0;
+  int index = 1;
+  while (index <= len) {
+    char ch = text[index];
+    int code = ord(ch);
+    if (ch == '"' || ch == '\\') {
+      outLen = outLen + 2;
+    } else if (code == 8 || code == 9 || code == 10 || code == 12 ||
+               code == 13) {
+      outLen = outLen + 2;
+    } else if (code < 32) {
+      outLen = outLen + 6;
+    } else {
+      outLen = outLen + 1;
+    }
+    index = index + 1;
+  }
+
+  str result;
+  setlength(result, outLen);
+  int outIndex = 1;
+  index = 1;
+  while (index <= len) {
+    char ch = text[index];
+    int code = ord(ch);
+    if (ch == '"') {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = '"';
+      outIndex = outIndex + 2;
+    } else if (ch == '\\') {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = '\\';
+      outIndex = outIndex + 2;
+    } else if (code == 8) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 'b';
+      outIndex = outIndex + 2;
+    } else if (code == 9) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 't';
+      outIndex = outIndex + 2;
+    } else if (code == 10) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 'n';
+      outIndex = outIndex + 2;
+    } else if (code == 12) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 'f';
+      outIndex = outIndex + 2;
+    } else if (code == 13) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 'r';
+      outIndex = outIndex + 2;
+    } else if (code < 32) {
+      result[outIndex] = '\\';
+      result[outIndex + 1] = 'u';
+      result[outIndex + 2] = '0';
+      result[outIndex + 3] = '0';
+      str digits = hexDigits();
+      int high = ((code >> 4) & 15) + 1;
+      int low = (code & 15) + 1;
+      result[outIndex + 4] = digits[high];
+      result[outIndex + 5] = digits[low];
+      outIndex = outIndex + 6;
+    } else {
+      result[outIndex] = ch;
+      outIndex = outIndex + 1;
+    }
+    index = index + 1;
+  }
+  return result;
+}
+
+bool isWhitespace(char ch) {
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+int skipWhitespace(str text, int index) {
+  int len = length(text);
+  while (index <= len) {
+    if (!isWhitespace(text[index])) {
+      break;
+    }
+    index = index + 1;
+  }
+  return index;
+}
+
+str trim(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  int startIndex = 1;
+  while (startIndex <= len && isWhitespace(text[startIndex])) {
+    startIndex = startIndex + 1;
+  }
+  int endIndex = len;
+  while (endIndex >= startIndex && isWhitespace(text[endIndex])) {
+    endIndex = endIndex - 1;
+  }
+  if (startIndex > endIndex) {
+    return "";
+  }
+  return substringRange(text, startIndex, endIndex);
+}
+
+bool isControlCharacter(char ch) {
+  int code = ord(ch);
+  return (code >= 0 && code < 32) || code == 127;
+}
+
+str trimWhitespace(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  int start = 1;
+  while (start <= len && isWhitespace(text[start])) {
+    start = start + 1;
+  }
+  int finish = len;
+  while (finish >= start && isWhitespace(text[finish])) {
+    finish = finish - 1;
+  }
+  if (start > finish) {
+    return "";
+  }
+  str result;
+  setlength(result, finish - start + 1);
+  int outIndex = 1;
+  int i = start;
+  while (i <= finish) {
+    result[outIndex] = text[i];
+    outIndex = outIndex + 1;
+    i = i + 1;
+  }
+  return result;
+}
+
+str stripControlCharacters(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return "";
+  }
+  str result;
+  setlength(result, len);
+  int outIndex = 1;
+  int index = 1;
+  while (index <= len) {
+    char ch = text[index];
+    if (!isControlCharacter(ch)) {
+      result[outIndex] = ch;
+      outIndex = outIndex + 1;
+    }
+    index = index + 1;
+  }
+  setlength(result, outIndex - 1);
+  return result;
+}
+
+str normaliseModelIdentifier(str value) {
+  str trimmed = trimWhitespace(value);
+  if (trimmed == "") {
+    return "";
+  }
+  str cleaned = stripControlCharacters(trimmed);
+  if (cleaned == "") {
+    return "";
+  }
+  return trimWhitespace(cleaned);
+}
+
+bool startsWith(str text, str prefix) {
+  int textLen = length(text);
+  int prefixLen = length(prefix);
+  if (prefixLen == 0) {
+    return true;
+  }
+  if (prefixLen > textLen) {
+    return false;
+  }
+  int i = 1;
+  while (i <= prefixLen) {
+    if (text[i] != prefix[i]) {
+      return false;
+    }
+    i = i + 1;
+  }
+  return true;
+}
+
+str trimTrailingSlash(str text) {
+  int len = length(text);
+  if (len == 0) {
+    return text;
+  }
+  int endIndex = len;
+  while (endIndex > 0 && text[endIndex] == '/') {
+    endIndex = endIndex - 1;
+  }
+  if (endIndex == len) {
+    return text;
+  }
+  return substringRange(text, 1, endIndex);
+}
+
+str ensureLeadingSlash(str text) {
+  if (text == "") {
+    return text;
+  }
+  if (text[1] == '/') {
+    return text;
+  }
+  return "/" + text;
+}
+
+int findSubstring(str haystack, str needle, int startIndex) {
+  int hayLen = length(haystack);
+  int needleLen = length(needle);
+  if (needleLen == 0) {
+    return startIndex;
+  }
+  int limit = hayLen - needleLen + 1;
+  int i = startIndex;
+  while (i <= limit) {
+    bool match = true;
+    int j = 1;
+    while (j <= needleLen) {
+      if (haystack[i + j - 1] != needle[j]) {
+        match = false;
+        break;
+      }
+      j = j + 1;
+    }
+    if (match) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+str extractFirstContent(str response) {
+  int len = length(response);
+  int searchStart = 1;
+  while (searchStart <= len) {
+    int idx = findSubstring(response, "\"content\"", searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + 9;
+    cursor = skipWhitespace(response, cursor);
+    if (cursor <= len && response[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(response, cursor);
+      if (cursor <= len && response[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = response[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = response[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(response, index + 1);
+              if (code < 0) {
+                break;
+              }
+              index = index + 4;
+              if (isHighSurrogate(code)) {
+                int pairStart = index + 1;
+                if (pairStart + 5 <= len && response[pairStart] == '\\' &&
+                    response[pairStart + 1] == 'u') {
+                  int low = parseHexAt(response, pairStart + 2);
+                  if (isLowSurrogate(low)) {
+                    code = decodeSurrogatePair(code, low);
+                    index = pairStart + 5;
+                  } else {
+                    code = 0xFFFD;
+                  }
+                } else {
+                  code = 0xFFFD;
+                }
+              } else if (isLowSurrogate(code)) {
+                code = 0xFFFD;
+              }
+              decoded = decoded + encodeUtf8CodePoint(code);
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok) {
+          return decoded;
+        }
+      }
+    }
+    searchStart = idx + 8;
+  }
+  return response;
+}
+
+bool containsModelId(str json, str modelId) {
+  str fieldName = "\"id\"";
+  int len = length(json);
+  int searchStart = 1;
+  int fieldLen = length(fieldName);
+  str target = trim(modelId);
+  if (target == "") {
+    return false;
+  }
+  while (searchStart <= len) {
+    int idx = findSubstring(json, fieldName, searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + fieldLen;
+    cursor = skipWhitespace(json, cursor);
+    if (cursor <= len && json[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(json, cursor);
+      if (cursor <= len && json[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = json[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = json[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(json, index + 1);
+              if (code < 0) {
+                break;
+              }
+              index = index + 4;
+              if (isHighSurrogate(code)) {
+                int pairStart = index + 1;
+                if (pairStart + 5 <= len && json[pairStart] == '\\' &&
+                    json[pairStart + 1] == 'u') {
+                  int low = parseHexAt(json, pairStart + 2);
+                  if (isLowSurrogate(low)) {
+                    code = decodeSurrogatePair(code, low);
+                    index = pairStart + 5;
+                  } else {
+                    code = 0xFFFD;
+                  }
+                } else {
+                  code = 0xFFFD;
+                }
+              } else if (isLowSurrogate(code)) {
+                code = 0xFFFD;
+              }
+              decoded = decoded + encodeUtf8CodePoint(code);
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok && decoded == target) {
+          return true;
+        }
+      }
+    }
+    searchStart = idx + fieldLen;
+  }
+  return false;
+}
+
+str collectModelIds(str json) {
+  str fieldName = "\"id\"";
+  int len = length(json);
+  int searchStart = 1;
+  int fieldLen = length(fieldName);
+  str result = "";
+  bool first = true;
+  while (searchStart <= len) {
+    int idx = findSubstring(json, fieldName, searchStart);
+    if (idx <= 0) {
+      break;
+    }
+    int cursor = idx + fieldLen;
+    cursor = skipWhitespace(json, cursor);
+    if (cursor <= len && json[cursor] == ':') {
+      cursor = cursor + 1;
+      cursor = skipWhitespace(json, cursor);
+      if (cursor <= len && json[cursor] == '"') {
+        cursor = cursor + 1;
+        str decoded = "";
+        bool ok = false;
+        int index = cursor;
+        while (index <= len) {
+          char ch = json[index];
+          if (ch == '"') {
+            ok = true;
+            index = index + 1;
+            break;
+          } else if (ch == '\\') {
+            index = index + 1;
+            if (index > len) {
+              break;
+            }
+            char esc = json[index];
+            if (esc == '"' || esc == '\\' || esc == '/') {
+              decoded = decoded + charToString(esc);
+            } else if (esc == 'b') {
+              decoded = decoded + tochar(8);
+            } else if (esc == 'f') {
+              decoded = decoded + tochar(12);
+            } else if (esc == 'n') {
+              decoded = decoded + "\n";
+            } else if (esc == 'r') {
+              decoded = decoded + "\r";
+            } else if (esc == 't') {
+              decoded = decoded + "\t";
+            } else if (esc == 'u') {
+              int code = parseHexAt(json, index + 1);
+              if (code < 0) {
+                break;
+              }
+              index = index + 4;
+              if (isHighSurrogate(code)) {
+                int pairStart = index + 1;
+                if (pairStart + 5 <= len && json[pairStart] == '\\' &&
+                    json[pairStart + 1] == 'u') {
+                  int low = parseHexAt(json, pairStart + 2);
+                  if (isLowSurrogate(low)) {
+                    code = decodeSurrogatePair(code, low);
+                    index = pairStart + 5;
+                  } else {
+                    code = 0xFFFD;
+                  }
+                } else {
+                  code = 0xFFFD;
+                }
+              } else if (isLowSurrogate(code)) {
+                code = 0xFFFD;
+              }
+              decoded = decoded + encodeUtf8CodePoint(code);
+            } else {
+              decoded = decoded + charToString(esc);
+            }
+          } else {
+            decoded = decoded + charToString(ch);
+          }
+          index = index + 1;
+        }
+        if (ok) {
+          if (!first) {
+            result = result + ", ";
+          }
+          result = result + decoded;
+          first = false;
+        }
+      }
+    }
+    searchStart = idx + fieldLen;
+  }
+  return result;
+}
+
+str extractFirstModelId(str modelList) {
+  str trimmedList = trim(modelList);
+  if (trimmedList == "") {
+    return "";
+  }
+  int len = length(trimmedList);
+  int index = 1;
+  str first = "";
+  while (index <= len) {
+    char ch = trimmedList[index];
+    if (ch == ',') {
+      break;
+    }
+    first = first + charToString(ch);
+    index = index + 1;
+  }
+  return trim(first);
+}
+
+str normaliseOptions(str optionsJson) {
+  str trimmed = trim(optionsJson);
+  if (trimmed == "") {
+    return "";
+  }
+  int len = length(trimmed);
+  int startIndex = 1;
+  int endIndex = len;
+  if (trimmed[startIndex] == '{' && trimmed[endIndex] == '}' && endIndex - startIndex >= 1) {
+    startIndex = startIndex + 1;
+    endIndex = endIndex - 1;
+    while (startIndex <= endIndex && isWhitespace(trimmed[startIndex])) {
+      startIndex = startIndex + 1;
+    }
+    while (endIndex >= startIndex && isWhitespace(trimmed[endIndex])) {
+      endIndex = endIndex - 1;
+    }
+    if (startIndex > endIndex) {
+      return "";
+    }
+    return substringRange(trimmed, startIndex, endIndex);
+  }
+  return trimmed;
+}
+
+str buildRequestBody(str model, str systemPrompt, str userPrompt, str optionsJson) {
+  str escapedModel = jsonEscape(model);
+  str escapedSystem = jsonEscape(systemPrompt);
+  str escapedUser = jsonEscape(userPrompt);
+  str optionsPayload = normaliseOptions(optionsJson);
+  bool includeSystem = length(systemPrompt) > 0;
+
+
+  int totalLen = 0;
+  totalLen = totalLen + length("{\"model\":\"");
+  totalLen = totalLen + length(escapedModel);
+  totalLen = totalLen + length("\",\"messages\":[");
+  if (includeSystem) {
+    totalLen = totalLen + length("{\"role\":\"system\",\"content\":\"");
+    totalLen = totalLen + length(escapedSystem);
+    totalLen = totalLen + length("\"}");
+    totalLen = totalLen + 1;  // Comma before user message.
+  }
+  totalLen = totalLen + length("{\"role\":\"user\",\"content\":\"");
+  totalLen = totalLen + length(escapedUser);
+  totalLen = totalLen + length("\"}]");
+  if (optionsPayload != "") {
+    totalLen = totalLen + 1;
+    totalLen = totalLen + length(optionsPayload);
+  }
+  totalLen = totalLen + 1;
+
+  str body;
+  setlength(body, totalLen);
+  int outIndex = 1;
+
+  str literal = "{\"model\":\"";
+  int litLen = length(literal);
+  int i = 1;
+  while (i <= litLen) {
+    body[outIndex] = literal[i];
+    outIndex = outIndex + 1;
+    i = i + 1;
+  }
+
+  int modelLen = length(escapedModel);
+  i = 1;
+  while (i <= modelLen) {
+    body[outIndex] = escapedModel[i];
+    outIndex = outIndex + 1;
+    i = i + 1;
+  }
+
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = ',';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'm';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'e';
+  outIndex = outIndex + 1;
+  body[outIndex] = 's';
+  outIndex = outIndex + 1;
+  body[outIndex] = 's';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'a';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'g';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'e';
+  outIndex = outIndex + 1;
+  body[outIndex] = 's';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = ':';
+  outIndex = outIndex + 1;
+  body[outIndex] = '[';
+  outIndex = outIndex + 1;
+
+  if (includeSystem) {
+    body[outIndex] = '{';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'r';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'o';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'l';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'e';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = ':';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = 's';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'y';
+    outIndex = outIndex + 1;
+    body[outIndex] = 's';
+    outIndex = outIndex + 1;
+    body[outIndex] = 't';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'e';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'm';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = ',';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'c';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'o';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'n';
+    outIndex = outIndex + 1;
+    body[outIndex] = 't';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'e';
+    outIndex = outIndex + 1;
+    body[outIndex] = 'n';
+    outIndex = outIndex + 1;
+    body[outIndex] = 't';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = ':';
+    outIndex = outIndex + 1;
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+
+    int systemLen = length(escapedSystem);
+    i = 1;
+    while (i <= systemLen) {
+      body[outIndex] = escapedSystem[i];
+      outIndex = outIndex + 1;
+      i = i + 1;
+    }
+
+    body[outIndex] = '"';
+    outIndex = outIndex + 1;
+    body[outIndex] = '}';
+    outIndex = outIndex + 1;
+    body[outIndex] = ',';
+    outIndex = outIndex + 1;
+  }
+
+  body[outIndex] = '{';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'r';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'o';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'l';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'e';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = ':';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'u';
+  outIndex = outIndex + 1;
+  body[outIndex] = 's';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'e';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'r';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = ',';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'c';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'o';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'n';
+  outIndex = outIndex + 1;
+  body[outIndex] = 't';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'e';
+  outIndex = outIndex + 1;
+  body[outIndex] = 'n';
+  outIndex = outIndex + 1;
+  body[outIndex] = 't';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = ':';
+  outIndex = outIndex + 1;
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+
+  int userLen = length(escapedUser);
+  i = 1;
+  while (i <= userLen) {
+    body[outIndex] = escapedUser[i];
+    outIndex = outIndex + 1;
+    i = i + 1;
+  }
+
+  body[outIndex] = '"';
+  outIndex = outIndex + 1;
+  body[outIndex] = '}';
+  outIndex = outIndex + 1;
+  body[outIndex] = ']';
+  outIndex = outIndex + 1;
+
+  if (optionsPayload != "") {
+    body[outIndex] = ',';
+    outIndex = outIndex + 1;
+    int optionsLen = length(optionsPayload);
+    i = 1;
+    while (i <= optionsLen) {
+      body[outIndex] = optionsPayload[i];
+      outIndex = outIndex + 1;
+      i = i + 1;
+    }
+  }
+
+  body[outIndex] = '}';
+  outIndex = outIndex + 1;
+  if (outIndex - 1 != totalLen) {
+    setlength(body, outIndex - 1);
+  }
+  return body;
+}
+
+str buildUrl(str baseUrl, str endpoint) {
+  str trimmedEndpoint = trim(endpoint);
+  if (trimmedEndpoint == "") {
+    trimmedEndpoint = DEFAULT_ENDPOINT;
+  }
+  if (startsWith(trimmedEndpoint, "http://") || startsWith(trimmedEndpoint, "https://")) {
+    return trimmedEndpoint;
+  }
+  str base = trim(baseUrl);
+  if (base == "") {
+    base = DEFAULT_BASE_URL;
+  }
+  str prefix = trimTrailingSlash(base);
+  str suffix = ensureLeadingSlash(trimmedEndpoint);
+  return prefix + suffix;
+}
+
+str autoDetectLmStudioModel(str baseUrl, str apiKey, str userAgent) {
+  str modelsUrl = buildUrl(baseUrl, "/v1/models");
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Error: Unable to allocate an HTTP session for LM Studio model discovery.");
+    return "";
+  }
+
+  httpsetoption(session, "timeout_ms", DEFAULT_TIMEOUT_MS);
+  httpsetheader(session, "Accept", "application/json");
+  if (userAgent != "") {
+    httpsetheader(session, "User-Agent", userAgent);
+  }
+  if (apiKey != "") {
+    httpsetheader(session, "Authorization", "Bearer " + apiKey);
+  }
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "GET", modelsUrl, nil, out);
+  str responseBody = mstreambuffer(out);
+
+  if (status < 0) {
+    writeln("Error: Unable to query LM Studio model list (status ", status, ").");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return "";
+  }
+
+  if (status < 200 || status >= 300) {
+    writeln("Error: LM Studio returned HTTP status ", status, " when listing models.");
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return "";
+  }
+
+  str allModels = collectModelIds(responseBody);
+  str firstModel = extractFirstModelId(allModels);
+  if (firstModel == "") {
+    writeln("Error: LM Studio did not report any loaded models. Load a model in the API panel and retry.");
+    mstreamfree(out);
+    httpclose(session);
+    return "";
+  }
+
+  writeln("Info: Auto-detected LM Studio model '", firstModel, "'. Use --model to override.");
+
+  mstreamfree(out);
+  httpclose(session);
+  return firstModel;
+}
+
+bool verifyLmStudioModel(str baseUrl, str apiKey, str userAgent, str modelId) {
+  str trimmedModel = trim(modelId);
+  if (trimmedModel == "") {
+    return true;
+  }
+
+  str modelsUrl = buildUrl(baseUrl, "/v1/models");
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Warning: Unable to allocate an HTTP session for LM Studio model validation.");
+    return true;
+  }
+
+  httpsetoption(session, "timeout_ms", DEFAULT_TIMEOUT_MS);
+  httpsetheader(session, "Accept", "application/json");
+  if (userAgent != "") {
+    httpsetheader(session, "User-Agent", userAgent);
+  }
+  if (apiKey != "") {
+    httpsetheader(session, "Authorization", "Bearer " + apiKey);
+  }
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "GET", modelsUrl, nil, out);
+  str responseBody = mstreambuffer(out);
+
+  if (status < 0) {
+    writeln("Warning: Unable to query LM Studio model list (status ", status, ").");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return true;
+  }
+
+  bool ok = true;
+  if (status >= 200 && status < 300) {
+    if (!containsModelId(responseBody, trimmedModel)) {
+      writeln("Error: Model '", trimmedModel, "' is not available on the LM Studio server.");
+      str available = collectModelIds(responseBody);
+      if (available != "") {
+        writeln("Available models: ", available);
+      } else {
+        writeln("The server did not report any loaded models. Load a model in LM Studio's API panel and retry.");
+      }
+      writeln("Tip: Open LM Studio's API panel and copy the model identifier exactly as it appears in the HTTP API section.");
+      ok = false;
+    }
+  } else {
+    writeln("Warning: LM Studio returned HTTP status ", status, " when listing models.");
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+  }
+
+  mstreamfree(out);
+  httpclose(session);
+  return ok;
+}
+
+int main() {
+  // Duplicate command-line arguments immediately; paramstr reuses an internal
+  // buffer so later calls would otherwise clobber previously read values.
+  str programName = duplicateString(paramstr(0));
+  str model;
+  setlength(model, 0);
+  model = resolveEnvOrDefault("LLM_MODEL", "OPENAI_MODEL", DEFAULT_MODEL);
+  model = normaliseModelIdentifier(model);
+  bool modelExplicit = hasEnvValue("LLM_MODEL") || hasEnvValue("OPENAI_MODEL");
+  str baseUrl;
+  setlength(baseUrl, 0);
+  baseUrl = resolveEnvOrDefault("LLM_API_BASE_URL", "OPENAI_BASE_URL", DEFAULT_BASE_URL);
+  str endpoint;
+  setlength(endpoint, 0);
+  endpoint = resolveEnvOrDefault("LLM_API_ENDPOINT", "OPENAI_API_ENDPOINT", DEFAULT_ENDPOINT);
+  str apiKey;
+  setlength(apiKey, 0);
+  apiKey = resolveEnvOrDefault("LLM_API_KEY", "OPENAI_API_KEY", "");
+  str systemPrompt;
+  setlength(systemPrompt, 0);
+  systemPrompt = resolveEnvOrDefault("LLM_SYSTEM_PROMPT", "OPENAI_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
+  str userAgent;
+  setlength(userAgent, 0);
+  userAgent = resolveEnvOrDefault("LLM_USER_AGENT", "OPENAI_USER_AGENT", DEFAULT_USER_AGENT);
+  str optionsOverride = "";
+  bool hasOptionsOverride = false;
+  bool temperatureProvided = false;
+  str temperatureValue = "";
+  str userPrompt = "";
+  str endpointOverride = "";
+  bool useLmStudioPreset = false;
+  bool baseUrlExplicit = false;
+  bool endpointExplicit = false;
+
+  int argc = paramcount();
+  int i = 1;
+  while (i <= argc) {
+    // Copy each argument immediately; paramstr reuses an internal buffer so
+    // later calls would otherwise overwrite earlier results (e.g. option
+    // values with slashes such as "qwen/qwen3-4b-thinking-2507").
+    str arg = duplicateString(paramstr(i));
+    if (arg == "--help" || arg == "-h") {
+      printUsage(programName);
+      return 0;
+    } else if (arg == "--model") {
+      if (i + 1 > argc) {
+        writeln("Error: --model requires a value.");
+        return 1;
+      }
+      str modelArg = duplicateString(paramstr(i + 1));
+      str cleanedModel = normaliseModelIdentifier(modelArg);
+      if (cleanedModel == "") {
+        writeln("Error: --model requires a non-empty identifier.");
+        return 1;
+      }
+      model = cleanedModel;
+      modelExplicit = true;
+      i = i + 2;
+      continue;
+    } else if (arg == "--system") {
+      if (i + 1 > argc) {
+        writeln("Error: --system requires a value.");
+        return 1;
+      }
+      str systemArg = duplicateString(paramstr(i + 1));
+      systemPrompt = systemArg;
+      i = i + 2;
+      continue;
+    } else if (arg == "--base-url") {
+      if (i + 1 > argc) {
+        writeln("Error: --base-url requires a value.");
+        return 1;
+      }
+      str baseArg = duplicateString(paramstr(i + 1));
+      baseUrl = baseArg;
+      baseUrlExplicit = true;
+      i = i + 2;
+      continue;
+    } else if (arg == "--endpoint") {
+      if (i + 1 > argc) {
+        writeln("Error: --endpoint requires a value.");
+        return 1;
+      }
+      str endpointArg = duplicateString(paramstr(i + 1));
+      endpointOverride = endpointArg;
+      endpointExplicit = true;
+      i = i + 2;
+      continue;
+    } else if (arg == "--api-key") {
+      if (i + 1 > argc) {
+        writeln("Error: --api-key requires a value.");
+        return 1;
+      }
+      str keyArg = duplicateString(paramstr(i + 1));
+      apiKey = keyArg;
+      i = i + 2;
+      continue;
+    } else if (arg == "--temperature") {
+      if (i + 1 > argc) {
+        writeln("Error: --temperature requires a value.");
+        return 1;
+      }
+      str value = duplicateString(paramstr(i + 1));
+      if (!isValidNumber(value)) {
+        writeln("Error: --temperature expects a numeric literal (e.g. 0.7).");
+        return 1;
+      }
+      temperatureProvided = true;
+      temperatureValue = duplicateString(value);
+      i = i + 2;
+      continue;
+    } else if (arg == "--options") {
+      if (i + 1 > argc) {
+        writeln("Error: --options requires a JSON object value.");
+        return 1;
+      }
+      hasOptionsOverride = true;
+      str optionsArg = duplicateString(paramstr(i + 1));
+      optionsOverride = optionsArg;
+      i = i + 2;
+      continue;
+    } else if (arg == "--lmstudio") {
+      useLmStudioPreset = true;
+      i = i + 1;
+      continue;
+    } else {
+      if (userPrompt != "") {
+        userPrompt = userPrompt + " ";
+      }
+      userPrompt = userPrompt + arg;
+      i = i + 1;
+    }
+  }
+
+  if (userPrompt == "") {
+    printUsage(programName);
+    return 1;
+  }
+
+  model = normaliseModelIdentifier(model);
+
+  str optionsJson = DEFAULT_OPTIONS;
+  if (temperatureProvided) {
+    optionsJson = "{\"temperature\":" + temperatureValue + "}";
+  }
+  if (hasOptionsOverride) {
+    optionsJson = optionsOverride;
+  }
+
+  if (useLmStudioPreset) {
+    if (!baseUrlExplicit) {
+      baseUrl = "http://127.0.0.1:1234";
+    }
+    if (!endpointExplicit) {
+      endpointOverride = "/v1/chat/completions";
+    }
+    if (!modelExplicit || model == "") {
+      model = autoDetectLmStudioModel(baseUrl, apiKey, userAgent);
+      model = normaliseModelIdentifier(model);
+      if (model == "") {
+        return 1;
+      }
+    } else {
+      if (!verifyLmStudioModel(baseUrl, apiKey, userAgent, model)) {
+        return 1;
+      }
+    }
+  }
+
+  model = normaliseModelIdentifier(model);
+  if (model == "") {
+    if (modelExplicit) {
+      writeln("Error: Model identifier cannot be blank. Provide a non-empty value with --model or the LLM_MODEL/OPENAI_MODEL environment variables.");
+      return 1;
+    }
+    model = DEFAULT_MODEL;
+  }
+
+  if (endpointOverride != "") {
+    endpoint = endpointOverride;
+  }
+
+  str url = buildUrl(baseUrl, endpoint);
+  str body = buildRequestBody(model, systemPrompt, userPrompt, optionsJson);
+
+  writeln("Model: ", model);
+  writeln("Base URL: ", baseUrl);
+  writeln("Endpoint: ", endpoint);
+  writeln("Resolved request URL: ", url);
+  writeln("System prompt: ", systemPrompt);
+  writeln("Request options: ", optionsJson);
+  writeln("Request payload: ", body);
+  writeln("Authorization header: ", describeAuthorization(apiKey));
+  if (userAgent != "") {
+    writeln("User-Agent header: ", userAgent);
+  } else {
+    writeln("User-Agent header: (not set)");
+  }
+  writeln("HTTP timeout (ms): ", DEFAULT_TIMEOUT_MS);
+  writeln("Prompt: ", userPrompt);
+  if (useLmStudioPreset) {
+    writeln("LM Studio preset active. Ensure the local server is running and copy the exact model ID from the LM Studio API panel.");
+  }
+  writeln("---");
+
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Error: Unable to allocate an HTTP session.");
+    return 1;
+  }
+
+  httpsetoption(session, "timeout_ms", DEFAULT_TIMEOUT_MS);
+  httpsetheader(session, "Accept", "application/json");
+  httpsetheader(session, "Content-Type", "application/json");
+  if (userAgent != "") {
+    httpsetheader(session, "User-Agent", userAgent);
+  }
+  if (apiKey != "") {
+    httpsetheader(session, "Authorization", "Bearer " + apiKey);
+  }
+
+  mstream out = mstreamcreate();
+  int status = httprequest(session, "POST", url, body, out);
+  str responseBody = mstreambuffer(out);
+
+  if (status < 0) {
+    writeln("Error: HTTP request failed (status ", status, ")");
+    int errCode = httperrorcode(session);
+    str errMsg = httplasterror(session);
+    if (errCode != 0) {
+      writeln("HTTP error code: ", errCode);
+    }
+    if (errMsg != "") {
+      writeln("HTTP error message: ", errMsg);
+    }
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return 1;
+  }
+
+  if (status >= 400) {
+    writeln("Error: Server returned HTTP status ", status, ".");
+    if (responseBody != "") {
+      writeln("Response: ", responseBody);
+    }
+    writeln("Request payload (repeated for debugging): ", body);
+    writeln("Authorization header state: ", describeAuthorization(apiKey));
+    writeln("Resolved request URL (repeated): ", url);
+    if (status == 400) {
+      writeln("Hint: Double-check the endpoint and model identifier. LM Studio returns HTTP 400 when the local server is disabled or the model slug does not match the value in its API panel.");
+    }
+    mstreamfree(out);
+    httpclose(session);
+    return 1;
+  }
+
+  str reply = responseBody;
+  if (reply != "") {
+    str extracted = extractFirstContent(reply);
+    if (extracted != "") {
+      reply = extracted;
+    }
+  }
+
+  if (reply == "") {
+    writeln("Warning: Empty response body returned by the server.");
+  } else {
+    writeln(reply);
+  }
+
+  mstreamfree(out);
+  httpclose(session);
+  return 0;
+}

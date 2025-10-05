@@ -9,7 +9,7 @@ int main() {
     scanf(j);
     if(j > 92) {
        printf("Values > 92 not supported\n");
-       exit();
+       exit(1);
     }
     while (i <= j) {
         printf("%lld: %lld\n", i, fibonacci(i));

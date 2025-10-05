@@ -24,6 +24,7 @@ Date: 2025-10-01
   - Pascal's address-of operator works on array elements, and byte arguments now coerce safely when invoking integer-only builtins.
   - CRT helpers track text attributes for the CLike runtime, enabling color-preserving libraries and test fixtures.
   - Front ends share a conditional preprocessor so `#ifdef` checks can test for extended builtin categories at compile time.
+  - The exsh front end recognises here documents, brace groups, bang-prefixed pipelines, and complex `for`/`case` layouts; new regression scripts in `Tests/exsh/tests/` keep the expanded grammar covered in CI.
 - Tooling & IDE
   - Examples reorganized into `Examples/{pascal,rea}/{base,sdl}` families with updated assets and bake steps for vertex data.
   - Added a hand-maintained Xcode project and generator (`xcode/`) with configurable run schemes for Pascal, CLike, and Rea binaries.

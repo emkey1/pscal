@@ -2,10 +2,11 @@
 
 Pscal started out as a Pascal interpreter, written for the most part with the help of various AI's.  Most notably Google's Gemini 2.5 Pro and more recently OpenAI's GPT5 in conjunction with their codex.  It has quickly evolved into a VM with multiple front ends, documented below.
 
-There are currently three front end languages:
+There are currently four front end languages:
 
 - Pascal: Implements a significant subset of classic Pascal.
 - CLike:  Implements a C like language that has native support for strings and some other enhancements.
+- exsh:   Compiles shell scripts that orchestrate processes and PSCAL builtins.
 - Rea:    Implements an Object Oriented Programming Language (OOP)
 
 The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  
@@ -228,6 +229,41 @@ Configure per-session knobs via `HttpSetOption/httpsetoption`:
 - DNS overrides:
   - `resolve_add`: add an entry `host:port:address` (e.g., `example.com:443:93.184.216.34`).
   - `resolve_clear`: clear all resolve overrides.
+
+## exsh front end
+
+`build/bin/exsh` compiles shell-style orchestration scripts to PSCAL bytecode.
+Pipelines, background jobs, and conditionals map to dedicated VM
+builtins implemented in `backend_ast/shell.c`, while the full PSCAL builtin
+catalog (HTTP, sockets, extended math/string helpers, optional SDL/SQLite
+bindings) is available via the `builtin` command. Prefix arguments with
+`int:`, `float:`/`double:`/`real:`, `bool:`, `str:` or `nil` to coerce shell
+tokens to the appropriate VM types before dispatch.
+
+Example usage:
+
+```sh
+build/bin/exsh Examples/exsh/pipeline.psh
+build/bin/exsh --dump-bytecode Examples/exsh/functions.psh
+build/bin/exsh Examples/exsh/builtins.psh
+```
+
+Bytecode for each script is cached in `~/.pscal/bc_cache` under a
+`<identifier>-<hash>.bc` name derived from exsh's compiler identifier; pass `--no-cache` to force recompilation. The runtime
+exports `PSCALSHELL_LAST_STATUS` after every builtin invocation so scripts can
+inspect the most recent exit code without parsing stderr. Builtins such as
+`export` and `unset` mutate the process environment for subsequent commands, and
+standard utilities (`printenv`, `env`) reflect those changes immediately.
+Direct parameter interpolation (`$NAME`, `${NAME}`) is parsed but not yet
+expanded; rely on the environment tooling above when you need to inspect
+variables from a script.
+
+Control-flow helpers (`if`, loop syntax) are currently placeholders that execute
+both branches. Gate behaviour using the exported status variable until the VM
+gains proper jump support for the exsh front end.
+
+More details and operational tips live in
+[Docs/shell_overview.md](Docs/shell_overview.md).
 
 ## AST JSON → Bytecode (pscaljson2bc)
 

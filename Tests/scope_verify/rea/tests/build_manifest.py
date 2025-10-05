@@ -1896,6 +1896,195 @@ add({
 })
 
 # ---------------------------------------------------------------------------
+# Category J: Classes and object-oriented features
+# ---------------------------------------------------------------------------
+
+add({
+    "id": "class_constructor_sets_and_reads",
+    "name": "Constructors assign fields and methods observe them",
+    "category": "class_scope",
+    "description": "Instantiating a class should run its constructor, and instance methods should read updated fields via implicit self.",
+    "expect": "runtime_ok",
+    "code": """
+        class Counter {
+            int value;
+
+            void Counter(int start) {
+                my.value = start;
+            }
+
+            void increment() {
+                my.value = my.value + 1;
+            }
+
+            int current() {
+                return my.value;
+            }
+        }
+
+        int main() {
+            Counter counter = new Counter(5);
+            counter.increment();
+            writeln("current=", counter.current());
+            return 0;
+        }
+    """,
+    "expected_stdout": """
+        current=6
+    """,
+})
+
+add({
+    "id": "class_method_my_alias_updates_fields",
+    "name": "`my` and `myself` aliases mutate object state",
+    "category": "class_scope",
+    "description": "Both `my` and `myself` should reference the implicit receiver inside methods, enabling field swaps across aliases.",
+    "expect": "runtime_ok",
+    "code": """
+        class Pair {
+            int left;
+            int right;
+
+            void Pair(int l, int r) {
+                my.left = l;
+                myself.right = r;
+            }
+
+            void swap() {
+                int temp = my.left;
+                my.left = myself.right;
+                myself.right = temp;
+            }
+        }
+
+        int main() {
+            Pair pair = new Pair(1, 2);
+            pair.swap();
+            writeln("left=", pair.left);
+            writeln("right=", pair.right);
+            return 0;
+        }
+    """,
+    "expected_stdout": """
+        left=2
+        right=1
+    """,
+})
+
+add({
+    "id": "class_inheritance_super_constructor_and_method",
+    "name": "Subclass can call super constructor and methods",
+    "category": "class_scope",
+    "description": "A subclass constructor should invoke its parent constructor via `super`, and overridden methods may delegate back to the parent.",
+    "expect": "runtime_ok",
+    "code": """
+        class BaseCounter {
+            int total;
+
+            void BaseCounter(int start) {
+                my.total = start;
+            }
+
+            void add(int amount) {
+                my.total = my.total + amount;
+            }
+
+            int current() {
+                return my.total;
+            }
+        }
+
+        class BonusCounter extends BaseCounter {
+            void BonusCounter(int start) {
+                super(start);
+            }
+
+            void add(int amount) {
+                super.add(amount + 1);
+            }
+
+            int current() {
+                return super.current();
+            }
+        }
+
+        int main() {
+            BonusCounter counter = new BonusCounter(2);
+            counter.add(3);
+            writeln("total=", counter.current());
+            return 0;
+        }
+    """,
+    "expected_stdout": """
+        total=6
+    """,
+})
+
+add({
+    "id": "class_unknown_parent_error",
+    "name": "Extending an unknown parent is rejected",
+    "category": "class_scope",
+    "description": "Referencing a non-existent superclass should emit a semantic error identifying the missing parent.",
+    "expect": "compile_error",
+    "code": """
+        class Orphan extends MissingParent {
+            int value;
+        }
+
+        int main() {
+            return 0;
+        }
+    """,
+    "expected_stderr_substring": "Unknown parent class",
+    "failure_reason": "Inheritance chains must reference classes that have been declared.",
+})
+
+add({
+    "id": "class_duplicate_field_error",
+    "name": "Duplicate class fields are rejected",
+    "category": "class_scope",
+    "description": "A class may not declare two fields with the same identifier.",
+    "expect": "compile_error",
+    "code": """
+        class Point {
+            int x;
+            int x;
+        }
+
+        int main() {
+            Point point = new Point();
+            return 0;
+        }
+    """,
+    "expected_stderr_substring": "Duplicate field",
+    "failure_reason": "Field identifiers must be unique within a class body.",
+})
+
+add({
+    "id": "class_unknown_field_access_error",
+    "name": "Accessing missing fields surfaces an error",
+    "category": "class_scope",
+    "description": "Referencing a field that is not declared on the receiver class should produce a helpful diagnostic.",
+    "expect": "compile_error",
+    "code": """
+        class Bucket {
+            int capacity;
+
+            int remaining() {
+                return my.level;
+            }
+        }
+
+        int main() {
+            Bucket bucket = new Bucket();
+            return bucket.remaining();
+        }
+    """,
+    "expected_stderr_substring": "Unknown field",
+    "failure_reason": "Only declared fields may be accessed through `my`/`myself`.",
+})
+
+# ---------------------------------------------------------------------------
 # Emit manifest
 # ---------------------------------------------------------------------------
 

@@ -2400,6 +2400,41 @@ static void collectClasses(AST *node) {
     }
 }
 
+static void ensureConstructorAliasForClass(const char *cls, Symbol *target) {
+    if (!cls || !target || !procedure_table) return;
+
+    char classLower[MAX_SYMBOL_LENGTH];
+    lowerCopy(cls, classLower);
+
+    Symbol *existing = hashTableLookup(procedure_table, classLower);
+    if (existing) {
+        if (existing->is_alias && existing->real_symbol == target) {
+            return;
+        }
+        if (existing->type_def && existing->type_def != target->type_def) {
+            freeAST(existing->type_def);
+        }
+        existing->is_alias = true;
+        existing->real_symbol = target;
+        existing->type = target->type;
+        existing->type_def = target->type_def ? copyAST(target->type_def) : NULL;
+        return;
+    }
+
+    Symbol *alias = (Symbol *)calloc(1, sizeof(Symbol));
+    if (!alias) return;
+    alias->name = strdup(classLower);
+    if (!alias->name) {
+        free(alias);
+        return;
+    }
+    alias->is_alias = true;
+    alias->real_symbol = target;
+    alias->type = target->type;
+    alias->type_def = target->type_def ? copyAST(target->type_def) : NULL;
+    hashTableInsert(procedure_table, alias);
+}
+
 static void ensureSelfParam(AST *node, const char *cls) {
     if (!node || !cls) return;
     bool hasSelf = false;
@@ -2502,6 +2537,9 @@ static void collectMethods(AST *node) {
                                     pv->ptr_val = (Value *)node;
                                 }
                                 existing->real_symbol = sym;
+                                if (mname && cls && strcasecmp(mname, cls) == 0) {
+                                    ensureConstructorAliasForClass(cls, existing);
+                                }
                             }
                         } else {
                             free(sym); free(v); free(lname);
@@ -2650,16 +2688,26 @@ static void collectMethods(AST *node) {
                                 hashTableInsert(ci->methods, sym);
                                 char lowerName[MAX_SYMBOL_LENGTH];
                                 lowerCopy(fullname, lowerName);
-                                if (!lookupProcedure(lowerName)) {
+                                Symbol *procSym = lookupProcedure(lowerName);
+                                if (!procSym) {
                                     Symbol *ps = (Symbol *)calloc(1, sizeof(Symbol));
                                     if (ps) {
                                         ps->name = strdup(lowerName);
                                         ps->type_def = node;
                                         hashTableInsert(procedure_table, ps);
+                                        procSym = ps;
+                                    }
+                                }
+                                if (procSym && cls && fullname) {
+                                    const char *methodName = fullname + strlen(cls) + 1;
+                                    if (methodName && strcasecmp(methodName, cls) == 0) {
+                                        ensureConstructorAliasForClass(cls, procSym);
                                     }
                                 }
                             } else {
-                                free(sym); free(v); free(lname);
+                                free(sym);
+                                free(v);
+                                free(lname);
                             }
                         }
                     }

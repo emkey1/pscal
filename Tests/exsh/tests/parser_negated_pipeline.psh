@@ -1,0 +1,26 @@
+echo "bang:start"
+if ! false; then
+  echo "negate-false"
+fi
+
+if ! true; then
+  echo "negate-true"
+else
+  echo "negate-true-else"
+fi
+
+if ! ! true; then
+  echo "double-negation"
+fi
+
+if ! printf 'foo\n' | grep -q foo; then
+  echo "pipeline-negated"
+else
+  echo "pipeline-negated-else"
+fi
+
+! printf 'status\n' >/dev/null
+if [ "$?" -ne 0 ]; then
+  echo "negated-pipeline-status"
+fi
+echo "bang:end"

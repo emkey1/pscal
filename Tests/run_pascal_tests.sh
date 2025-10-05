@@ -324,7 +324,11 @@ for src in "$SCRIPT_DIR"/Pascal/*; do
   perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
   perl -ne 'print unless /Compiler warning: assigning .* may lose precision/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  head -n 2 "$actual_err" > "$actual_err.trim" && mv "$actual_err.trim" "$actual_err"
+  # Preserve the full stderr when a fixture exists so tests can assert on
+  # complete diagnostic streams (e.g. range-check location reporting).
+  if [ ! -f "$err_file" ]; then
+    head -n 2 "$actual_err" > "$actual_err.trim" && mv "$actual_err.trim" "$actual_err"
+  fi
   perl -pe 's/pid=[0-9]+/pid=<PID>/g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
   # Remove ISO-like date lines (e.g., 2024-09-01 ...), not generic 4-digit prefixes
   perl -ne 'print unless /^[12][0-9]{3}-[01][0-9]-[0-3][0-9]/' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"

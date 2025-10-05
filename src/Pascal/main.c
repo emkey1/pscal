@@ -106,6 +106,8 @@ const char *PASCAL_USAGE =
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
+static const char *const kPascalCompilerId = "pascal";
+
 void initSymbolSystem(void) {
 #ifdef DEBUG
     inserted_global_names = createList();
@@ -210,7 +212,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
             }
 
             if (!no_cache_flag) {
-                used_cache = loadBytecodeFromCache(programName, frontend_path, dep_array, dep_count, &chunk);
+                used_cache = loadBytecodeFromCache(programName, kPascalCompilerId, frontend_path, dep_array, dep_count, &chunk);
             }
             if (dep_array) {
                 free(dep_array);
@@ -228,7 +230,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 compilation_ok_for_vm = compileASTToBytecode(GlobalAST, &chunk);
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
-                    saveBytecodeToCache(programName, &chunk);
+                    saveBytecodeToCache(programName, kPascalCompilerId, &chunk);
                     // Silence successful compilation message for cleaner test stderr.
                     // fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
@@ -256,6 +258,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 } else {
                 VM vm;
                 initVM(&vm);
+                vmSetVerboseErrors(true);
                 // Inline trace toggle via source comment: {trace on} / {trace off}
                 if (s_vm_trace_head > 0) vm.trace_head_instructions = s_vm_trace_head;
                 else if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
@@ -378,7 +381,10 @@ int main(int argc, char *argv[]) {
     // Parse options first
     int i = 1;
     for (; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("%s\n", PASCAL_USAGE);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "-v") == 0) {
             printf("Pascal Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);

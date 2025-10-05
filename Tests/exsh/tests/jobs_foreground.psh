@@ -1,0 +1,10 @@
+echo "jobs-foreground:start"
+sleep 0.4 &
+echo "jobs:before-start"
+jobs
+echo "jobs:before-end"
+fg
+echo "jobs:after-start"
+jobs
+echo "jobs:after-end"
+echo "jobs-foreground:end"

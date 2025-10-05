@@ -69,6 +69,8 @@ static const char *CLIKE_USAGE =
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n";
 
+static const char *const kClikeCompilerId = "clike";
+
 static char* resolveImportPath(const char* orig_path) {
     FILE *f = fopen(orig_path, "rb");
     if (f) { fclose(f); return strdup(orig_path); }
@@ -111,7 +113,10 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("%s", CLIKE_USAGE);
+            return vmExitWithCleanup(EXIT_SUCCESS);
+        } else if (strcmp(argv[i], "-v") == 0) {
             printf("Clike Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             return vmExitWithCleanup(EXIT_SUCCESS);
@@ -252,7 +257,7 @@ int main(int argc, char **argv) {
     initBytecodeChunk(&chunk);
     bool used_cache = false;
     if (!no_cache_flag) {
-        used_cache = loadBytecodeFromCache(path, argv[0], (const char**)dep_paths, clike_import_count, &chunk);
+        used_cache = loadBytecodeFromCache(path, kClikeCompilerId, argv[0], (const char**)dep_paths, clike_import_count, &chunk);
     }
     if (dep_paths) {
         for (int i = 0; i < clike_import_count; ++i) free(dep_paths[i]);
@@ -264,7 +269,7 @@ int main(int argc, char **argv) {
 #else
 #define PSCAL_STAT_SEC(st) ((st).st_mtim.tv_sec)
 #endif
-        char* cache_path = buildCachePath(path);
+        char* cache_path = buildCachePath(path, kClikeCompilerId);
         struct stat cache_stat;
         if (!cache_path || stat(cache_path, &cache_stat) != 0) {
             if (cache_path) free(cache_path);
@@ -288,7 +293,7 @@ int main(int argc, char **argv) {
     }
     if (!used_cache) {
         clikeCompile(prog, &chunk);
-        saveBytecodeToCache(path, &chunk);
+        saveBytecodeToCache(path, kClikeCompilerId, &chunk);
         fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {

@@ -48,12 +48,8 @@ option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 
 # Optionally enable SDL-based features
-option(SDL "Enable SDL-based graphics and audio" OFF)
+option(SDL "Enable SDL-based graphics and audio" ON)
 set(PSCAL_SDL_PLATFORM_LIBS "")
-
-if(SDL)
-    add_compile_definitions(SDL)
-endif()
 
 # ---- Extended builtin categories ----
 option(ENABLE_EXT_BUILTIN_MATH "Enable extended math builtins" ON)
@@ -64,6 +60,7 @@ option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
 option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ON)
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
+option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
 
 if(ENABLE_EXT_BUILTIN_MATH)
     add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
@@ -85,6 +82,9 @@ if(ENABLE_EXT_BUILTIN_3D)
 endif()
 if(ENABLE_EXT_BUILTIN_GRAPHICS)
     add_compile_definitions(ENABLE_EXT_BUILTIN_GRAPHICS)
+endif()
+if(ENABLE_EXT_BUILTIN_OPENAI)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
 endif()
 
 set(PSCAL_SQLITE_LIBS "")
@@ -141,51 +141,75 @@ set(PSCAL_OPENGL_TARGET "")
 if(SDL)
     find_package(PkgConfig REQUIRED)
 
-    # --- SDL2 Core ---
-    find_package(SDL2 REQUIRED)
-    message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
-    message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
+    set(_PSCAL_SDL2_FOUND FALSE)
+    set(_PSCAL_SDL2_PROVIDER "")
 
-    # --- SDL2_image ---
-    pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
-    message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
-    message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
-    message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
-    message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
-
-    # --- SDL2_mixer ---
-    pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
-    message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
-    message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
-    message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
-    message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
-
-    # --- SDL2_ttf ---
-    pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
-    message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
-    message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
-    message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
-    message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
-
-    if(UNIX AND NOT APPLE)
-        find_package(X11)
-        if(X11_FOUND)
-            if(TARGET X11::X11)
-                list(APPEND PSCAL_SDL_PLATFORM_LIBS X11::X11)
-            else()
-                list(APPEND PSCAL_SDL_PLATFORM_LIBS ${X11_LIBRARIES})
-            endif()
-            message(STATUS "Found X11 for SDL backend: ${PSCAL_SDL_PLATFORM_LIBS}")
+    # --- SDL2 Core (CMake config first, pkg-config fallback) ---
+    find_package(SDL2 QUIET)
+    if(SDL2_FOUND)
+        set(_PSCAL_SDL2_FOUND TRUE)
+        set(_PSCAL_SDL2_PROVIDER "CMake package")
+    else()
+        pkg_check_modules(PC_SDL2 QUIET sdl2)
+        if(PC_SDL2_FOUND)
+            set(_PSCAL_SDL2_FOUND TRUE)
+            set(_PSCAL_SDL2_PROVIDER "pkg-config")
+            set(SDL2_INCLUDE_DIRS ${PC_SDL2_INCLUDE_DIRS})
+            set(SDL2_LIBRARIES ${PC_SDL2_LIBRARIES})
         endif()
     endif()
 
-    find_package(OpenGL REQUIRED)
-    if(TARGET OpenGL::GL)
-        set(PSCAL_OPENGL_TARGET OpenGL::GL)
-    elseif(TARGET OpenGL::OpenGL)
-        set(PSCAL_OPENGL_TARGET OpenGL::OpenGL)
-    elseif(OPENGL_LIBRARIES)
-        set(PSCAL_OPENGL_TARGET ${OPENGL_LIBRARIES})
+    if(NOT _PSCAL_SDL2_FOUND)
+        message(WARNING "SDL2 development files not found; disabling SDL support. Re-run with -DSDL=OFF to silence this warning.")
+        set(SDL OFF)
+        set(SDL OFF CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
+    else()
+        add_compile_definitions(SDL)
+        message(STATUS "SDL2 detected via ${_PSCAL_SDL2_PROVIDER}")
+        message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
+        message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
+
+        # --- SDL2_image ---
+        pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
+        message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
+        message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
+        message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
+        message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
+
+        # --- SDL2_mixer ---
+        pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
+        message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
+        message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
+        message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
+        message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
+
+        # --- SDL2_ttf ---
+        pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
+        message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
+        message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
+        message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
+        message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+
+        if(UNIX AND NOT APPLE)
+            find_package(X11)
+            if(X11_FOUND)
+                if(TARGET X11::X11)
+                    list(APPEND PSCAL_SDL_PLATFORM_LIBS X11::X11)
+                else()
+                    list(APPEND PSCAL_SDL_PLATFORM_LIBS ${X11_LIBRARIES})
+                endif()
+                message(STATUS "Found X11 for SDL backend: ${PSCAL_SDL_PLATFORM_LIBS}")
+            endif()
+        endif()
+
+        find_package(OpenGL REQUIRED)
+        if(TARGET OpenGL::GL)
+            set(PSCAL_OPENGL_TARGET OpenGL::GL)
+        elseif(TARGET OpenGL::OpenGL)
+            set(PSCAL_OPENGL_TARGET OpenGL::OpenGL)
+        elseif(OPENGL_LIBRARIES)
+            set(PSCAL_OPENGL_TARGET ${OPENGL_LIBRARIES})
+        endif()
     endif()
 endif()
 
@@ -403,6 +427,91 @@ if(BUILD_PSCALD)
     set(PSCAL_SOURCES ${DISASSEMBLER_SOURCES})
     add_pscal_executable(pscald)
     set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+endif()
+
+# exsh front-end executable
+set(SHELL_SOURCES
+    src/shell/main.c
+    src/shell/lexer.c
+    src/shell/parser.c
+    src/shell/ast.c
+    src/shell/semantics.c
+    src/shell/codegen.c
+    src/shell/builtins.c
+    src/shell/runner.c
+    src/shell/opt.c
+    src/shell/stubs.c
+    src/backend_ast/builtin.c
+    src/backend_ast/shell.c
+    src/backend_ast/builtin_network_api.c
+    src/Pascal/globals.c
+    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
+    src/compiler/bytecode.c
+    src/vm/vm.c
+    src/symbol/symbol.c
+)
+
+list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
+list(APPEND SHELL_SOURCES src/third_party/yyjson/yyjson.c)
+
+if(SDL)
+    list(APPEND SHELL_SOURCES
+        src/backend_ast/sdl.c
+        src/backend_ast/sdl3d.c
+        src/backend_ast/gl.c
+        src/backend_ast/audio.c
+    )
+endif()
+
+add_executable(exsh ${SHELL_SOURCES})
+target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
+if(TARGET CURL::libcurl)
+    target_link_libraries(exsh PRIVATE CURL::libcurl m Threads::Threads)
+else()
+    target_link_libraries(exsh PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
+endif()
+
+if(SDL)
+    target_include_directories(exsh PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL2_MIXER_INCLUDE_DIRS}
+        ${PC_SDL2_TTF_INCLUDE_DIRS}
+    )
+
+    target_link_directories(exsh PRIVATE
+        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL2_MIXER_LIBRARY_DIRS}
+        ${PC_SDL2_TTF_LIBRARY_DIRS}
+    )
+
+    set(EXSH_SDL_LIBS "")
+    if(TARGET SDL2::SDL2)
+        list(APPEND EXSH_SDL_LIBS SDL2::SDL2)
+    else()
+        list(APPEND EXSH_SDL_LIBS ${SDL2_LIBRARIES})
+    endif()
+    list(APPEND EXSH_SDL_LIBS
+        ${PC_SDL2_IMAGE_LIBRARIES}
+        ${PC_SDL2_MIXER_LIBRARIES}
+        ${PC_SDL2_TTF_LIBRARIES}
+        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+    )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND EXSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND EXSH_SDL_LIBS ${OPENGL_LIBRARIES})
+    endif()
+    list(APPEND EXSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+    list(REMOVE_DUPLICATES EXSH_SDL_LIBS)
+    target_link_libraries(exsh PRIVATE ${EXSH_SDL_LIBS})
+    target_compile_definitions(exsh PRIVATE SDL)
 endif()
 
 # Tiny C front-end executable

@@ -40,6 +40,10 @@ typedef enum {
     HOST_FN_CREATE_THREAD_ADDR,
     HOST_FN_WAIT_THREAD,
     HOST_FN_PRINTF,
+    HOST_FN_SHELL_LAST_STATUS,
+    HOST_FN_SHELL_LOOP_ADVANCE,
+    HOST_FN_SHELL_POLL_JOBS,
+    HOST_FN_SHELL_LOOP_IS_READY,
     // ... add other host function IDs here ...
     HOST_FN_COUNT
 } HostFunctionID;
@@ -133,5 +137,6 @@ void runtimeError(VM* vm, const char* format, ...);
 void runtimeWarning(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
+void vmSetVerboseErrors(bool enabled);
 
 #endif // PSCAL_VM_H

@@ -1,0 +1,122 @@
+# ~/.exshrc - default interactive configuration for exsh
+#
+# This startup file is sourced by interactive exsh sessions.  It provides
+# sensible defaults while remaining easy to extend.  Copy it to your home
+# directory and adjust any sections that need to be customised.
+
+# ---------------------------------------------------------------------------
+# PATH management helpers
+# ---------------------------------------------------------------------------
+# Prepend a directory to PATH if it exists and is not already present.  The
+# function intentionally ignores missing directories so it can be called with
+# common locations on every startup.
+path_prepend() {
+    if [ $# -eq 0 ]; then
+        return 1
+    fi
+
+    local dir=$1
+    if [ -d "$dir" ]; then
+        case ":$PATH:" in
+            *":$dir:") ;;
+            *) PATH="$dir:$PATH" ;;
+        esac
+    fi
+}
+
+# Expose user-level executables first when available.
+path_prepend "$HOME/.local/bin"
+path_prepend "$HOME/bin"
+export PATH
+
+# ---------------------------------------------------------------------------
+# Environment defaults
+# ---------------------------------------------------------------------------
+# Pick a sensible editor for tools that honour $EDITOR.  Users who prefer a
+# different editor can override it before starting exsh or inside ~/.exshrc.local.
+if [ -z "${EDITOR:-}" ]; then
+    export EDITOR=vi
+fi
+
+# Provide coloured prompts when attached to a terminal.  The prompt tokens are
+# the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
+# minimal "exsh$" prompt so scripts are unaffected.
+if [ -t 1 ]; then
+    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]\u@\h \[\033[1;34m\]\W\[\033[0m\]\$ "
+else
+    export PS1="exsh$ "
+fi
+
+# Keep the terminal safe for pagers that consult $LESS.
+if [ -z "${LESS:-}" ]; then
+    export LESS=FRX
+fi
+
+# ---------------------------------------------------------------------------
+# Handy aliases
+# ---------------------------------------------------------------------------
+# Quality-of-life aliases modelled after common Unix shells.
+alias ls='ls --color=auto'
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+alias grep='grep --color=auto'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias reload='. ~/.exshrc'
+alias hist='history'
+
+# ---------------------------------------------------------------------------
+# Convenience functions
+# ---------------------------------------------------------------------------
+# Create a directory (and parents) before changing into it.
+mkcd() {
+    if [ $# -eq 0 ]; then
+        echo "mkcd: missing directory name" >&2
+        return 1
+    fi
+
+    local target=$1
+    mkdir -p "$target" && cd "$target"
+}
+
+# Wrapper around the PSCAL builtin bridge that prints a short usage hint when
+# called without arguments.  When a builtin succeeds its exit status is exposed
+# through PSCALSHELL_LAST_STATUS, mirroring standard command behaviour.
+psbuiltin() {
+    if [ $# -eq 0 ]; then
+        echo "usage: psbuiltin <BuiltinName> [args...]" >&2
+        return 1
+    fi
+
+    builtin "$@"
+    return ${PSCALSHELL_LAST_STATUS:-0}
+}
+
+# Summarise the most recent PSCAL/VM exit status in human-readable form.
+psstatus() {
+    echo "PSCALSHELL_LAST_STATUS=${PSCALSHELL_LAST_STATUS:-0}"
+}
+
+# Quickly dump the available shell and VM builtins when the standalone exsh
+# binary is on PATH.  This is helpful when exploring the VM catalogue.
+if [ -n "${PATH:-}" ]; then
+    _exshrc_old_ifs=$IFS
+    IFS=:
+    for _exshrc_dir in $PATH; do
+        [ -n "$_exshrc_dir" ] || _exshrc_dir=.
+        if [ -x "$_exshrc_dir/exsh" ]; then
+            alias dump-builtins='exsh --dump-ext-builtins'
+            break
+        fi
+    done
+    IFS=$_exshrc_old_ifs
+    unset _exshrc_dir _exshrc_old_ifs
+fi
+
+# Allow per-machine customisations without modifying this file.  If present,
+# ~/.exshrc.local is sourced at the end so users can extend or override any of
+# the defaults above.
+if [ -r "$HOME/.exshrc.local" ]; then
+    . "$HOME/.exshrc.local"
+fi

@@ -4,6 +4,8 @@
 #include "core/types.h"
 #include "ast/ast.h"
 #include "Pascal/globals.h"
+#include <stdbool.h>
+#include <stddef.h>
 
 struct VM_s;
 
@@ -101,6 +103,65 @@ Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
+
+/* Shell builtins */
+Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPipeline(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellAnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellOr(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSubshell(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLoop(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLoopEnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCase(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCaseClause(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCaseEnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellDefineFunction(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPwd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSource(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellEval(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellRead(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellShift(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellUnsetenv(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellSet(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellTrap(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLocal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellBreak(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellContinue(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellHistory(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellJobs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellFinger(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellReturn(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellHelp(struct VM_s* vm, int arg_count, Value* args);
+Value vmHostShellLastStatus(struct VM_s* vm);
+Value vmHostShellLoopAdvance(struct VM_s* vm);
+Value vmHostShellLoopIsReady(struct VM_s* vm);
+Value vmHostShellPollJobs(struct VM_s* vm);
+bool shellRuntimeConsumeExitRequested(void);
+int shellRuntimeLastStatus(void);
+void shellRuntimeRecordHistory(const char *line);
+void shellRuntimeSetArg0(const char *name);
+const char *shellRuntimeGetArg0(void);
+void shellRuntimeInitJobControl(void);
+void shellRuntimeInitSignals(void);
+void shellRuntimeProcessPendingSignals(void);
+size_t shellRuntimeHistoryCount(void);
+bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
+bool shellRuntimeExpandHistoryReference(const char *input,
+                                        char **out_line,
+                                        bool *out_did_expand,
+                                        char **out_error_token);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);

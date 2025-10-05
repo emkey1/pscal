@@ -7,6 +7,7 @@ void registerSystemBuiltins(void);
 void registerUserBuiltins(void);
 void registerThreeDBuiltins(void);
 void registerGraphicsBuiltins(void);
+void registerOpenAIBuiltins(void);
 
 void registerSqliteBuiltins(void);
 
@@ -14,6 +15,10 @@ void registerYyjsonBuiltins(void);
 void registerHasExtBuiltin(void);
 
 void registerExtBuiltinQueryBuiltins(void);
+
+#ifdef FRONTEND_SHELL
+void registerShellFrontendBuiltins(void);
+#endif
 
 static pthread_once_t s_ext_builtin_once = PTHREAD_ONCE_INIT;
 
@@ -42,6 +47,12 @@ static void registerExtendedBuiltinsOnce(void) {
 #endif
 #ifdef ENABLE_EXT_BUILTIN_GRAPHICS
   registerGraphicsBuiltins();
+#endif
+#ifdef ENABLE_EXT_BUILTIN_OPENAI
+  registerOpenAIBuiltins();
+#endif
+#ifdef FRONTEND_SHELL
+  registerShellFrontendBuiltins();
 #endif
 }
 

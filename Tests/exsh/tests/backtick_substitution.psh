@@ -1,0 +1,6 @@
+echo "backtick:start"
+echo "name:`printf one; echo`"
+echo "legacy:`printf 'X'\\
+'Y'`"
+echo "combo:z`printf 1; echo; printf 2`z"
+echo "backtick:end"

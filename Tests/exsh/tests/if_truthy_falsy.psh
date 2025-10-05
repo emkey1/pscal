@@ -1,0 +1,12 @@
+echo "if-eval:start"
+if true; then
+  echo "if:true"
+else
+  echo "if:false"
+fi
+if false; then
+  echo "if:false-then"
+else
+  echo "if:false-else"
+fi
+echo "if-eval:end"

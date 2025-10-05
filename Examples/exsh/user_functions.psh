@@ -1,0 +1,14 @@
+echo "functions:start"
+
+greet () {
+    echo "hello from greet"
+}
+
+function farewell () {
+    echo "goodbye from farewell"
+}
+
+greet
+farewell
+
+echo "functions:end"

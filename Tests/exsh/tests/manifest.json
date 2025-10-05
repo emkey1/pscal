@@ -1,0 +1,295 @@
+{
+    "version": 1,
+    "tests": [
+        {
+            "id": "pipeline_basic",
+            "name": "Pipeline echoes through cat",
+            "category": "pipeline",
+            "description": "Single pipeline stage forwards data between commands.",
+            "script": "Examples/exsh/pipeline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+        },
+        {
+            "id": "conditionals_loop",
+            "name": "Conditionals execute matching branches",
+            "category": "control",
+            "description": "if/then/else executes only the branch whose condition succeeds.",
+            "script": "Examples/exsh/conditionals.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
+        },
+        {
+            "id": "if_truthy_falsy",
+            "name": "If statements respect truthiness",
+            "category": "control",
+            "description": "true selects the then branch and false triggers the else branch.",
+            "script": "Tests/exsh/tests/if_truthy_falsy.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-eval:start\nif:true\nif:false-else\nif-eval:end"
+        },
+        {
+            "id": "loop_counters",
+            "name": "Loops iterate expected counts",
+            "category": "control",
+            "description": "while, until, and for loops iterate until their conditions change.",
+            "script": "Tests/exsh/tests/loop_counters.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
+        },
+        {
+            "id": "builtin_functions",
+            "name": "Builtins update environment and status",
+            "category": "builtins",
+            "description": "export/unset update environment and shell status variables.",
+            "script": "Examples/exsh/functions.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
+        },
+        {
+            "id": "shell_function_definition",
+            "name": "Shell functions execute stored bodies",
+            "category": "functions",
+            "description": "function keyword and name() syntax register and invoke shell functions.",
+            "script": "Examples/exsh/user_functions.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
+        },
+        {
+            "id": "builtin_setenv",
+            "name": "setenv/unsetenv mirror POSIX behaviour",
+            "category": "builtins",
+            "description": "setenv updates variables, prints the environment, and unsetenv removes entries.",
+            "script": "Examples/exsh/env.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
+        },
+        {
+            "id": "source_dot_alias",
+            "name": "dot builtin sources scripts",
+            "category": "builtins",
+            "description": "The '.' command aliases source and runs helpers in the current environment.",
+            "script": "Tests/exsh/tests/source_dot_alias.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "source-dot:start\nsource-dot-helper:start\nsource-dot-helper:end\nafter:from-dot\nsource-dot:end"
+        },
+        {
+            "id": "help_builtin",
+            "name": "help lists shell builtins",
+            "category": "builtins",
+            "description": "help without arguments lists builtins; help name shows details and honours aliases.",
+            "script": "Tests/exsh/tests/help_builtin.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "exsh builtins. Type 'help name' for detailed usage.\n\nBuiltin     Summary\n------      -------\nalias       Define or display shell aliases.\nbg          Resume a stopped job in the background.\nbreak       Exit from the innermost loop(s).\nbuiltin     Invoke a PSCAL VM builtin directly.\ncd          Change the current working directory.\ncontinue    Skip to the next loop iteration.\neval        Execute words as an inline script.\nexit        Request that the shell terminate.\nexport      Set environment variables or print the environment.\nfg          Move a job to the foreground.\nfinger      Display basic account information.\nhelp        List builtins or describe a specific builtin.\nhistory     Print the interactive history list.\njobs        List active background jobs.\nlocal       Activate the shell's local scope flag.\npwd         Print the current working directory.\nread        Read a line from standard input.\nreturn      Return from the current shell function.\nset         Update shell option flags.\nsetenv      Set or print environment variables.\nshift       Rotate positional parameters to the left.\nsource (.)  Execute a file in the current shell environment.\ntrap        Toggle the shell's trap flag.\nunset       Remove variables from the environment.\nunsetenv    Alias for unset.\nwait        Wait for a job to change state.\n:           Do nothing and succeed.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\n"
+        },
+        {
+            "id": "pipeline_cache_hit",
+            "name": "Pipeline cache reuse emits notice",
+            "category": "cache",
+            "description": "Second run loads cached bytecode for the same script.",
+            "script": "Examples/exsh/pipeline.psh",
+            "expect": "runtime_ok",
+            "prime_cache": true,
+            "expected_stdout": "pipeline:start\nalpha\npipeline:end",
+            "expected_stderr_substring": "Loaded cached bytecode"
+        },
+        {
+            "id": "case_basic",
+            "name": "Case statements dispatch patterns",
+            "category": "control",
+            "description": "case selects the first matching clause and defaults otherwise.",
+            "script": "Examples/exsh/case.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
+        },
+        {
+            "id": "command_substitution",
+            "name": "Command substitution captures stdout",
+            "category": "expansion",
+            "description": "$(...) trims trailing newlines and supports line continuations.",
+            "script": "Tests/exsh/tests/command_substitution.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
+        },
+        {
+            "id": "backtick_substitution",
+            "name": "Legacy backtick substitution is supported",
+            "category": "expansion",
+            "description": "Backtick command substitution trims trailing newlines and honors escapes.",
+            "script": "Tests/exsh/tests/backtick_substitution.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
+        },
+        {
+            "id": "parameter_default",
+            "name": "Parameter default expansion uses fallback",
+            "category": "expansion",
+            "description": "The ${var:-word} form substitutes word when the variable is unset or empty.",
+            "script": "Tests/exsh/tests/parameter_default.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "param-default:start\nunset:fallback\nempty:fallback\nset:value\nparam-default:end"
+        },
+        {
+            "id": "grammar_here_documents",
+            "name": "Here documents expand and quote correctly",
+            "category": "grammar",
+            "description": "Exercises unquoted, single-quoted, and multi-line here documents.",
+            "script": "Tests/exsh/tests/here_documents.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "heredoc:start\nplain:xyz\nliteral:$VALUE\nmultiline\ncontent\nheredoc:end"
+        },
+        {
+            "id": "arithmetic_expansion",
+            "name": "Arithmetic expansion evaluates expressions",
+            "category": "expansion",
+            "description": "Handles integer math, variables, and syntax errors with preserved text.",
+            "script": "Tests/exsh/tests/arithmetic_expansion.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
+        },
+        {
+            "id": "random_parameter",
+            "name": "RANDOM parameter generates seeded pseudo-random values",
+            "category": "expansion",
+            "description": "RANDOM supports seeding and yields 0-32767 values rather than a constant.",
+            "script": "Tests/exsh/tests/random_parameter.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "random:test-start\nrandom:first:16838\nrandom:second:5758\nrandom:reset:16838\nrandom:test-end"
+        },
+        {
+            "id": "jobs_foreground",
+            "name": "jobs lists and fg reaps background work",
+            "category": "jobs",
+            "description": "jobs reports running background jobs and fg waits for completion.",
+            "script": "Tests/exsh/tests/jobs_foreground.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "jobs-foreground:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\njobs:after-start\njobs:after-end\njobs-foreground:end"
+        },
+        {
+            "id": "jobs_wait",
+            "name": "bg resumes jobs and wait observes completion",
+            "category": "jobs",
+            "description": "bg continues the latest background job and wait blocks until it exits.",
+            "script": "Tests/exsh/tests/jobs_wait.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
+        },
+        {
+            "id": "lexer_assignment_context",
+            "name": "Assignment detection respects arithmetic words",
+            "category": "lexer",
+            "description": "Reserved contexts mark plain VAR=value as assignment but skip words containing arithmetic substitutions.",
+            "script": "Tests/exsh/tests/lexer_assignment_context.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-assignment:ok"
+        },
+        {
+            "id": "lexer_array_assignment",
+            "name": "Array assignments stay intact",
+            "category": "lexer",
+            "description": "name=(...) remains a single assignment word so complex initialisers survive parsing.",
+            "script": "Tests/exsh/tests/array_assignment.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-array-assignment:ok"
+        },
+        {
+            "id": "lexer_expansion_shapes",
+            "name": "Parameter and arithmetic expansions retain metadata",
+            "category": "lexer",
+            "description": "${name} records variable names while $((..)) is distinguished as arithmetic expansion.",
+            "script": "Tests/exsh/tests/lexer_expansion_shapes.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "lexer-expansions:ok"
+        },
+        {
+            "id": "grammar_brace_groups",
+            "name": "Brace groups share scope and join pipelines",
+            "category": "grammar",
+            "description": "Validates inline, multi-line, and piped brace groups.",
+            "script": "Tests/exsh/tests/brace_groups.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "brace-group:start\ngroup:inner:1\ngroup:outer:1\ngroup:block-line\ngroup:block-second\nGROUP:PIPELINE\nbrace-group:end"
+        },
+        {
+            "id": "grammar_bang_pipeline",
+            "name": "Bang prefixes invert pipeline status",
+            "category": "grammar",
+            "description": "Covers ! pipelines inside conditionals and at the top level.",
+            "script": "Tests/exsh/tests/bang_pipeline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "bang-pipeline:start\nbang-pipeline:alpha\nbang-pipeline:beta\nbang-pipeline:status:1\nbang-pipeline:brace-status:0\nbang-pipeline:end"
+        },
+        {
+            "id": "grammar_for_case_layouts",
+            "name": "Complex for/case layouts parse correctly",
+            "category": "grammar",
+            "description": "Exercises multiline for lists and case patterns with continuations.",
+            "script": "Tests/exsh/tests/for_case_layouts.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "for-case:start\ncase:one\ncase:two-three:two\ncase:two-three:three\ncase:quoted:quoted value\ncase:rest:four\nfor-case:end"
+        },
+        {
+            "id": "grammar_for_valid_name",
+            "name": "For loops require valid shell names",
+            "category": "grammar",
+            "description": "Simple for loop with a valid name parses and executes.",
+            "script": "Tests/exsh/tests/parser_for_valid_name.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "parser-for-valid:start\nparser-for-valid:body:one\nparser-for-valid:body:two\nparser-for-valid:body:three\nparser-for-valid:end"
+        },
+        {
+            "id": "grammar_for_invalid_name",
+            "name": "For loops reject invalid names",
+            "category": "grammar",
+            "description": "Parser emits a syntax error when the loop variable is not a name token.",
+            "script": "Tests/exsh/tests/parser_for_invalid_name.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected name after 'for'"
+        },
+        {
+            "id": "grammar_function_valid_keyword",
+            "name": "function keyword requires parentheses",
+            "category": "grammar",
+            "description": "function foo() form registers and executes a shell function.",
+            "script": "Tests/exsh/tests/parser_function_valid_keyword.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "parser-function-valid:start\nparser-function-valid:body\nparser-function-valid:end"
+        },
+        {
+            "id": "grammar_function_invalid_name",
+            "name": "function keyword rejects invalid names",
+            "category": "grammar",
+            "description": "Parser emits a syntax error when function names are not NAME tokens.",
+            "script": "Tests/exsh/tests/parser_function_invalid_name.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected function name"
+        },
+        {
+            "id": "grammar_function_missing_parens",
+            "name": "function keyword requires parentheses before body",
+            "category": "grammar",
+            "description": "Missing parentheses before the function body triggers a parse error.",
+            "script": "Tests/exsh/tests/parser_function_missing_parens.psh",
+            "expect": "parse_error",
+            "expected_stderr_substring": "Expected '(' after function name"
+        },
+        {
+            "id": "grammar_double_bracket_negation",
+            "name": "[[ ! -f ]] conditions accept unary negation",
+            "category": "grammar",
+            "description": "Double-bracket tests treat ! as part of the conditional expression when not at command start.",
+            "script": "Tests/exsh/tests/parser_double_bracket_negation.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "double-bracket:start\nbranch:missing\nbranch:now-present\ndouble-bracket:end"
+        },
+        {
+            "id": "grammar_if_comment_boundary",
+            "name": "Comments between branches preserve newline separators",
+            "category": "grammar",
+            "description": "Ensures comments between then/elif do not remove the separating newline.",
+            "script": "Tests/exsh/tests/parser_if_comment_boundary.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
+        }
+    ]
+}

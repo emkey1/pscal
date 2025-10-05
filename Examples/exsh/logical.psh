@@ -1,0 +1,7 @@
+#!/usr/bin/env exsh
+echo "logical:start"
+false && echo "and-skipped"
+true && echo "and-ran"
+true || echo "or-skipped"
+false || echo "or-ran"
+echo "logical:end"

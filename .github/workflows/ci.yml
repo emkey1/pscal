@@ -10,29 +10,220 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Compute changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+      - name: Determine build plan
+        id: plan
+        env:
+          CHANGED_FILES_JSON: ${{ steps.changed-files.outputs.all_changed_files_json }}
+        run: |
+          python3 - <<'PY'
+          import fnmatch
+          import json
+          import os
+
+          raw = os.environ.get("CHANGED_FILES_JSON", "[]")
+          raw = raw.strip() or "[]"
+          try:
+              changed = json.loads(raw)
+          except json.JSONDecodeError:
+              print(f"Unable to parse changed files payload: {raw}")
+              changed = []
+
+          frontends = {
+              "clike": [
+                  "src/clike/*",
+                  "Tests/clike/*",
+                  "Tests/libs/clike/*",
+                  "Tests/run_clike_tests.sh",
+                  "Tests/scope_verify/clike/*",
+                  "Examples/clike/*",
+                  "lib/clike/*",
+              ],
+              "exsh": [
+                  "src/shell/*",
+                  "Tests/exsh/*",
+                  "Tests/run_shell_tests.sh",
+                  "Examples/exsh/*",
+              ],
+              "pascal": [
+                  "src/Pascal/*",
+                  "Tests/Pascal/*",
+                  "Tests/libs/pascal/*",
+                  "Tests/run_pascal_tests.sh",
+                  "Tests/scope_verify/pascal/*",
+                  "Examples/Pascal/*",
+                  "lib/pascal/*",
+              ],
+              "rea": [
+                  "src/rea/*",
+                  "Tests/rea/*",
+                  "Tests/rea_negatives/*",
+                  "Tests/libs/rea/*",
+                  "Tests/run_rea_tests.sh",
+                  "Tests/scope_verify/rea/*",
+                  "Examples/rea/*",
+                  "lib/rea/*",
+              ],
+          }
+
+          core_patterns = [
+              "CMakeLists.txt",
+              "cmake/*",
+              "src/core/*",
+              "src/compiler/*",
+              "src/ast/*",
+              "src/backend_ast/*",
+              "src/ext_builtins/*",
+              "src/symbol/*",
+              "src/tools/*",
+              "src/vm/*",
+              "src/third_party/*",
+              "lib/misc/*",
+              "lib/sounds/*",
+              "Tests/run_all_tests",
+              "Tests/run_all_suites.py",
+              "Tests/run_json2bc_tests.sh",
+              "Tests/tools/*",
+              "tools/*",
+              "fonts/*",
+              "Examples/shared/*",
+          ]
+
+          docs_patterns = [
+              "Docs/*",
+              "README.md",
+              "CHANGELOG.md",
+              "CONTRIBUTING.md",
+              "LICENSE",
+              "RELEASE_NOTES_*",
+              "TODO",
+          ]
+
+          workflow_patterns = [
+              ".github/*",
+          ]
+
+          def matches(path: str, patterns: list[str]) -> bool:
+              return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+
+          run_frontend = {name: False for name in frontends}
+          run_ctest = False
+          unclassified = False
+          any_code_changes = False
+
+          for path in changed:
+              if matches(path, docs_patterns) or matches(path, workflow_patterns):
+                  continue
+
+              any_code_changes = True
+
+              if matches(path, core_patterns):
+                  for key in run_frontend:
+                      run_frontend[key] = True
+                  run_ctest = True
+                  continue
+
+              matched_frontend = False
+              for name, patterns in frontends.items():
+                  if matches(path, patterns):
+                      run_frontend[name] = True
+                      matched_frontend = True
+
+              if not matched_frontend:
+                  unclassified = True
+
+          if unclassified:
+              for key in run_frontend:
+                  run_frontend[key] = True
+              run_ctest = True
+
+          selected_frontends = [name for name, should in run_frontend.items() if should]
+
+          skip = not selected_frontends and not run_ctest and not any_code_changes
+
+          if not selected_frontends and (run_ctest or any_code_changes) and not skip:
+              # Fall back to exercising every frontend when the change touches code
+              # we could not classify to a specific component.
+              selected_frontends = list(run_frontend.keys())
+              for key in selected_frontends:
+                  run_frontend[key] = True
+              run_ctest = True
+
+          build_targets: list[str] = []
+          target_mapping = {
+              "clike": "clike",
+              "exsh": "exsh",
+              "pascal": "pascal",
+              "rea": "rea",
+          }
+          for name in selected_frontends:
+              build_targets.append(target_mapping[name])
+
+          if run_ctest:
+              build_targets.append("pscaljson2bc")
+
+          # Remove duplicates while preserving order
+          unique_targets: list[str] = []
+          for target in build_targets:
+              if target not in unique_targets:
+                  unique_targets.append(target)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"targets={' '.join(unique_targets)}\n")
+              fh.write(f"run_ctest={'true' if run_ctest else 'false'}\n")
+              for name, should in run_frontend.items():
+                  fh.write(f"run_{name}={'true' if should else 'false'}\n")
+              fh.write(f"skip={'true' if skip else 'false'}\n")
+
+          if skip:
+              print("No code changes requiring a build were detected; skipping build and tests.")
+          else:
+              selected = ", ".join(selected_frontends) if selected_frontends else "(none)"
+              print(f"Frontends to exercise: {selected}")
+              print(f"cmake targets: {' '.join(unique_targets) if unique_targets else '(none)'}")
+              print(f"Run ctest: {run_ctest}")
+          PY
       - name: Install dependencies
+        if: steps.plan.outputs.skip != 'true'
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake libcurl4-openssl-dev
       - name: Configure
+        if: steps.plan.outputs.skip != 'true'
         run: cmake -S . -B build
-      - name: Build
-        run: cmake --build build
+      - name: Build selected targets
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.targets != ''
+        run: cmake --build build --target ${{ steps.plan.outputs.targets }}
       - name: CTest
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_ctest == 'true'
         run: cd build && ctest --output-on-failure
       - name: Run CLike tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_clike == 'true'
         run: Tests/run_clike_tests.sh
+      - name: Run exsh tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_exsh == 'true'
+        run: Tests/run_shell_tests.sh
       - name: Run Pascal tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_pascal == 'true'
         run: Tests/run_pascal_tests.sh
       - name: Run Rea tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_rea == 'true'
         env:
           REA_SKIP_TESTS: "constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr"
         run: Tests/run_rea_tests.sh
       - name: Run CLike scope tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_clike == 'true'
         run: python3 Tests/scope_verify/clike/clike_scope_test_harness.py --manifest Tests/scope_verify/clike/tests/manifest.json
       - name: Run Pascal scope tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_pascal == 'true'
         run: python3 Tests/scope_verify/pascal/pascal_scope_test_harness.py --manifest Tests/scope_verify/pascal/tests/manifest.json
       - name: Run Rea scope tests
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_rea == 'true'
         run: python3 Tests/scope_verify/rea/rea_scope_test_harness.py --manifest Tests/scope_verify/rea/tests/manifest.json
       - name: Compile CLike examples (dump-only)
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_clike == 'true'
         run: |
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
@@ -45,7 +236,19 @@ jobs:
               build/bin/clike --dump-bytecode-only "$f" >/dev/null
             fi
           done
+      - name: Compile exsh examples (dump-only)
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_exsh == 'true'
+        run: |
+          set -e
+          for f in Examples/exsh/*.psh; do
+            if [ -f "$f" ]; then
+              bn=$(basename "$f")
+              echo "exsh example: $bn"
+              build/bin/exsh --dump-bytecode-only "$f" >/dev/null
+            fi
+          done
       - name: Compile Pascal examples (dump-only)
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_pascal == 'true'
         run: |
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
@@ -71,6 +274,7 @@ jobs:
             fi
           done
       - name: Compile Rea examples (dump-only)
+        if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_rea == 'true'
         run: |
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy

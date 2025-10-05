@@ -1,0 +1,13 @@
+#!/usr/bin/env exsh
+
+echo "random:test-start"
+RANDOM=1
+first=$RANDOM
+second=$RANDOM
+echo "random:first:$first"
+echo "random:second:$second"
+RANDOM=1
+reset=$RANDOM
+echo "random:reset:$reset"
+echo "random:test-end"
+

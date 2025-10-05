@@ -3,7 +3,7 @@ var
   catCount, fnCount, i, j, k, groupCount, groupFnCount, groupTotal: integer;
   catName, fnName, groupName: string;
   success, foundSystem, foundGetPid, foundUser, foundLandscapeRendering,
-  foundLandscapePrecompute: boolean;
+  foundLandscapePrecompute, foundOpenAI, foundOpenAIChat: boolean;
 begin
   success := true;
   foundSystem := false;
@@ -11,6 +11,8 @@ begin
   foundUser := false;
   foundLandscapeRendering := false;
   foundLandscapePrecompute := false;
+  foundOpenAI := false;
+  foundOpenAIChat := false;
   catCount := ExtBuiltinCategoryCount();
   for i := 0 to catCount - 1 do
   begin
@@ -39,6 +41,15 @@ begin
             foundLandscapeRendering := true
           else if groupName = 'landscape/precompute' then
             foundLandscapePrecompute := true;
+        end
+        else if (catName = 'openai') then
+        begin
+          foundOpenAI := true;
+          if groupName = 'chat' then
+          begin
+            if fnName = 'OpenAIChatCompletions' then
+              foundOpenAIChat := true;
+          end;
         end;
       end;
     end;
@@ -48,6 +59,8 @@ begin
       foundSystem := true;
     if catName = 'user' then
       foundUser := true;
+    if catName = 'openai' then
+      foundOpenAI := true;
   end;
   if HasExtBuiltin('system', 'GetPid') then
   begin
@@ -62,6 +75,11 @@ begin
   if HasExtBuiltin('user', 'LandscapePrecomputeWorldCoords') then
   begin
     if not (foundUser and foundLandscapePrecompute) then
+      success := false;
+  end;
+  if HasExtBuiltin('openai', 'OpenAIChatCompletions') then
+  begin
+    if not (foundOpenAI and foundOpenAIChat) then
       success := false;
   end;
   if success then

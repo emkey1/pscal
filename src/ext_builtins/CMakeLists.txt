@@ -9,6 +9,7 @@ option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
 option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ON)
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
+option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
 
 # Base sources that are always built
 set(PSCAL_EXT_BUILTIN_SOURCES
@@ -59,5 +60,17 @@ if(ENABLE_EXT_BUILTIN_GRAPHICS)
     list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_GRAPHICS_SOURCES})
 endif()
 
+if(ENABLE_EXT_BUILTIN_OPENAI)
+    add_subdirectory(openai)
+    list(APPEND PSCAL_EXT_BUILTIN_SOURCES ${EXT_BUILTIN_OPENAI_SOURCES})
+endif()
+
+# exsh front-end builtins are exposed separately so only the `exsh`
+# executable pulls them in by default.
+set(EXSH_EXT_BUILTIN_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/shell_frontend.c
+)
+
 # Expose sources to parent scope
 set(PSCAL_EXT_BUILTIN_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES} PARENT_SCOPE)
+set(EXSH_EXT_BUILTIN_SOURCES ${EXSH_EXT_BUILTIN_SOURCES} PARENT_SCOPE)
