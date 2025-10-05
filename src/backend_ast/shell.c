@@ -3710,6 +3710,10 @@ static void shellHandlePendingSignal(int signo) {
         gShellCurrentVm->current_builtin_name = "signal";
     }
 
+    if (!gShellRuntime.job_control_initialized) {
+        gShellExitRequested = true;
+    }
+
     if (gShellLoopStackSize > 0) {
         gShellRuntime.break_requested = true;
         gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
@@ -5269,6 +5273,10 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             shellJobControlRestoreForeground();
         }
 
+        if (!ctx->background && final_status >= 128 && final_status < 128 + NSIG) {
+            shellHandlePendingSignal(final_status - 128);
+        }
+
         shellRuntimeProcessPendingSignals();
 
         if (stopped_job && job_control) {
@@ -5524,6 +5532,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellWaitPid(child, &status, job_control, &stopped);
             if (job_control) {
                 shellJobControlRestoreForeground();
+            }
+            if (!cmd->background && status >= 128 && status < 128 + NSIG) {
+                shellHandlePendingSignal(status - 128);
             }
             shellRuntimeProcessPendingSignals();
             if (stopped && job_control) {
