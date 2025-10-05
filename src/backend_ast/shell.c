@@ -25,6 +25,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <pwd.h>
 
 extern char **environ;
 
@@ -6055,6 +6056,70 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     printf("%s\n", cwd);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellFinger(VM *vm, int arg_count, Value *args) {
+    const char *target_user = NULL;
+    if (arg_count > 1) {
+        runtimeError(vm, "finger: expected at most one username");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (arg_count == 1) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val || !*args[0].s_val) {
+            runtimeError(vm, "finger: expected username as string");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        target_user = args[0].s_val;
+    }
+
+    struct passwd *pw = NULL;
+    if (target_user) {
+        pw = getpwnam(target_user);
+        if (!pw) {
+            runtimeError(vm, "finger: user '%s' not found", target_user);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    } else {
+        pw = getpwuid(getuid());
+        if (!pw) {
+            runtimeError(vm, "finger: unable to determine current user");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+
+    const char *login = (pw->pw_name && *pw->pw_name) ? pw->pw_name : "(unknown)";
+    const char *gecos = (pw->pw_gecos && *pw->pw_gecos) ? pw->pw_gecos : "";
+    const char *directory = (pw->pw_dir && *pw->pw_dir) ? pw->pw_dir : "(unknown)";
+    const char *shell_path = (pw->pw_shell && *pw->pw_shell) ? pw->pw_shell : "(unknown)";
+
+    char name_buffer[256];
+    const char *display_name = gecos;
+    if (*display_name) {
+        const char *comma = strchr(display_name, ',');
+        if (comma) {
+            size_t copy_len = (size_t)(comma - display_name);
+            if (copy_len >= sizeof(name_buffer)) {
+                copy_len = sizeof(name_buffer) - 1;
+            }
+            memcpy(name_buffer, display_name, copy_len);
+            name_buffer[copy_len] = '\0';
+            display_name = name_buffer;
+        }
+    } else {
+        display_name = "(unknown)";
+    }
+
+    printf("Login: %s\tName: %s\n", login, display_name);
+    printf("Directory: %s\n", directory);
+    printf("Shell: %s\n", shell_path);
+    fflush(stdout);
+
     shellUpdateStatus(0);
     return makeVoid();
 }
