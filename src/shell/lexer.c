@@ -272,6 +272,33 @@ static bool isOperatorDelimiter(int c) {
     }
 }
 
+static bool isStructuralWordCandidate(int c) {
+    switch (c) {
+        case '(':
+        case ')':
+        case '{':
+        case '}':
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool lexerAllowsStructuralWordLiterals(const ShellLexer *lexer) {
+    if (!lexer) {
+        return false;
+    }
+
+    unsigned int mask = lexer->rule_mask;
+    if ((mask & SHELL_LEXER_RULE_4) != 0) {
+        // Case patterns rely on ')' remaining a structural token even though
+        // they are parsed outside command-start contexts.
+        return false;
+    }
+
+    return true;
+}
+
 static ShellToken scanWord(ShellLexer *lexer) {
     bool singleQuoted = false;
     bool doubleQuoted = false;
@@ -315,7 +342,12 @@ static ShellToken scanWord(ShellLexer *lexer) {
             }
 
             if (!(startingArrayLiteral || (inArrayLiteral && arrayParenDepth > 0 && (c == '(' || c == ')')))) {
-                if (isOperatorDelimiter(c)) {
+                bool treat_as_operator = isOperatorDelimiter(c);
+                if (treat_as_operator && isStructuralWordCandidate(c) &&
+                    (lexer->rule_mask & SHELL_LEXER_RULE_1) == 0) {
+                    treat_as_operator = false;
+                }
+                if (treat_as_operator) {
                     break;
                 }
             }
@@ -669,6 +701,15 @@ ShellToken shellNextToken(ShellLexer *lexer) {
     int c = peekChar(lexer);
     if (c == EOF) {
         return makeEOFToken(lexer);
+    }
+
+    bool command_starts = (lexer->rule_mask & SHELL_LEXER_RULE_1) != 0;
+    if (!command_starts && lexerAllowsStructuralWordLiterals(lexer) && isStructuralWordCandidate(c)) {
+        ShellToken word = scanWord(lexer);
+        if (!word.lexeme) {
+            return makeErrorToken(lexer, "Failed to allocate word");
+        }
+        return word;
     }
 
     if (isdigit(c)) {
