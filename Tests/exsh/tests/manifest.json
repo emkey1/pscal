@@ -254,6 +254,15 @@
             "script": "Tests/exsh/tests/parser_function_missing_parens.psh",
             "expect": "parse_error",
             "expected_stderr_substring": "Expected '(' after function name"
+        },
+        {
+            "id": "grammar_if_comment_boundary",
+            "name": "Comments between branches preserve newline separators",
+            "category": "grammar",
+            "description": "Ensures comments between then/elif do not remove the separating newline.",
+            "script": "Tests/exsh/tests/parser_if_comment_boundary.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
         }
     ]
 }

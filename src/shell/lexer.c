@@ -44,6 +44,21 @@ static int advanceChar(ShellLexer *lexer) {
     return c;
 }
 
+static void skipCommentToNewline(ShellLexer *lexer) {
+    if (!lexer) {
+        return;
+    }
+    // The caller peeked '#' but has not consumed it yet.
+    advanceChar(lexer); // consume '#'
+    while (true) {
+        int next = peekChar(lexer);
+        if (next == '\n' || next == EOF) {
+            break;
+        }
+        advanceChar(lexer);
+    }
+}
+
 static void skipInlineWhitespace(ShellLexer *lexer) {
     while (true) {
         int c = peekChar(lexer);
@@ -52,10 +67,8 @@ static void skipInlineWhitespace(ShellLexer *lexer) {
             continue;
         }
         if (c == '#') {
-            // Shell comments: skip until newline
-            while (c != '\n' && c != EOF) {
-                c = advanceChar(lexer);
-            }
+            // Shell comments: skip until newline but preserve the newline itself.
+            skipCommentToNewline(lexer);
             continue;
         }
         break;
@@ -644,10 +657,8 @@ ShellToken shellNextToken(ShellLexer *lexer) {
             continue;
         }
         if (c == '#') {
-            // skip comment until newline
-            while (c != '\n' && c != EOF) {
-                c = advanceChar(lexer);
-            }
+            // Skip comment but leave newline for subsequent handling.
+            skipCommentToNewline(lexer);
             continue;
         }
         break;
