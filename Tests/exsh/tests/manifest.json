@@ -38,6 +38,15 @@
             "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
         },
         {
+            "id": "loop_colon_builtin",
+            "name": "Colon builtin drives control flow",
+            "category": "control",
+            "description": "The ':' builtin executes in-place so while loops can spin without launching processes.",
+            "script": "Tests/exsh/tests/colon_builtin.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "tick"
+        },
+        {
             "id": "builtin_functions",
             "name": "Builtins update environment and status",
             "category": "builtins",
