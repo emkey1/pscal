@@ -6,7 +6,7 @@ There are currently four front end languages:
 
 - Pascal: Implements a significant subset of classic Pascal.
 - CLike:  Implements a C like language that has native support for strings and some other enhancements.
-- Shell:  Compiles shell scripts that orchestrate processes and PSCAL builtins.
+- exsh:   Compiles shell scripts that orchestrate processes and PSCAL builtins.
 - Rea:    Implements an Object Oriented Programming Language (OOP)
 
 The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  
@@ -230,7 +230,7 @@ Configure per-session knobs via `HttpSetOption/httpsetoption`:
   - `resolve_add`: add an entry `host:port:address` (e.g., `example.com:443:93.184.216.34`).
   - `resolve_clear`: clear all resolve overrides.
 
-## Shell front end
+## exsh front end
 
 `build/bin/exsh` compiles shell-style orchestration scripts to PSCAL bytecode.
 Pipelines, background jobs, and conditionals map to dedicated VM
@@ -243,13 +243,13 @@ tokens to the appropriate VM types before dispatch.
 Example usage:
 
 ```sh
-build/bin/exsh Examples/psh/pipeline.psh
-build/bin/exsh --dump-bytecode Examples/psh/functions.psh
-build/bin/exsh Examples/psh/builtins.psh
+build/bin/exsh Examples/exsh/pipeline.psh
+build/bin/exsh --dump-bytecode Examples/exsh/functions.psh
+build/bin/exsh Examples/exsh/builtins.psh
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a
-`shell-<hash>.bc` name; pass `--no-cache` to force recompilation. The runtime
+`<identifier>-<hash>.bc` name derived from exsh's compiler identifier; pass `--no-cache` to force recompilation. The runtime
 exports `PSCALSHELL_LAST_STATUS` after every builtin invocation so scripts can
 inspect the most recent exit code without parsing stderr. Builtins such as
 `export` and `unset` mutate the process environment for subsequent commands, and
@@ -260,7 +260,7 @@ variables from a script.
 
 Control-flow helpers (`if`, loop syntax) are currently placeholders that execute
 both branches. Gate behaviour using the exported status variable until the VM
-gains proper jump support for the shell front end.
+gains proper jump support for the exsh front end.
 
 More details and operational tips live in
 [Docs/shell_overview.md](Docs/shell_overview.md).

@@ -64,10 +64,10 @@ variable. All three front ends ship helper libraries that build message arrays,
 invoke the builtin, and extract the assistant's response text for quick
 integration.
 
-### Shell orchestration built-ins
+### exsh orchestration built-ins
 
 The system category now enumerates a `shell` group that mirrors the runtime
-helpers used by the standalone shell front end. These routines are implemented
+helpers used by the standalone exsh front end. These routines are implemented
 inside the VM, so scripts can orchestrate processes without spawning additional
 interpreters.
 
@@ -84,7 +84,7 @@ interpreters.
   entirely inside the interpreter so callers avoid forking when they need to
   mutate the current environment.
 
-Although primarily targeted by the shell front end, these routines are exposed
+Although primarily targeted by the exsh front end, these routines are exposed
 to every VM client via the builtin registry and host function table.
 
 ## Discovering available categories at runtime
