@@ -2415,6 +2415,8 @@ static bool shellParseInlineDollarCommand(const char *text,
     }
     size_t i = start + 2;
     int depth = 1;
+    bool in_single = false;
+    bool in_double = false;
     while (i < text_len) {
         char c = text[i];
         if (c == '\\' && i + 1 < text_len) {
@@ -2422,6 +2424,24 @@ static bool shellParseInlineDollarCommand(const char *text,
                 i += 2;
                 continue;
             }
+            if (!in_single) {
+                i += 2;
+                continue;
+            }
+        }
+        if (!in_double && c == '\'') {
+            in_single = !in_single;
+            i++;
+            continue;
+        }
+        if (!in_single && c == '"') {
+            in_double = !in_double;
+            i++;
+            continue;
+        }
+        if (in_single || in_double) {
+            i++;
+            continue;
         }
         if (c == '(') {
             depth++;
