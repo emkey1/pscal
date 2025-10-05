@@ -7239,6 +7239,23 @@ static void shellHelpPrintList(void) {
         }
     }
 
+    printf("help\n");
+    printf("exsh is the PSCAL shell front end, providing an interactive environment for orchestrating VM builtins and external commands.\n\n");
+    printf("exsh can evaluate shell scripts, manage pipelines, and redirect input and output just like a traditional POSIX-style shell. Use '>' to overwrite files, '>>' to append, and '|' to connect commands.\n\n");
+    printf("- Source ~/.exshrc to customise prompts, aliases, and startup behaviour.\n");
+    printf("- Use bookmark helpers (bookmark, showmarks, jump) to save and revisit directories quickly.\n");
+    printf("- Manage jobs with bg, fg, jobs, wait, and trap.\n");
+    printf("- exit leaves the shell; builtin invokes PSCAL VM helpers directly.\n\n");
+    printf("- Project files live in ~/Documents/ when running under the default workspace layout.\n");
+    printf("- Example programs ship under Examples/exsh/ in the repository tree.\n");
+    printf("- exsh loads ~/.exshrc on startup when the file is present.\n\n");
+    printf("- Navigate the interface with familiar terminal gestures when embedded in supporting environments.\n");
+    printf("- Edit with vim or pico, transfer data via curl, scp, or sftp, and inspect the network with ping, host, or nslookup.\n");
+    printf("- Extend the runtime with PSCAL packages and builtins compiled via the toolchain.\n\n");
+    printf("- Compiled scripts are cached in ~/.pscal/bc_cache; use --no-cache to force recompilation.\n\n");
+    printf("Documentation: Docs/exsh_overview.md inside the repository.\n");
+    printf("Support: Report issues on the PSCAL project tracker or community channels.\n\n");
+    printf("For the builtin catalog, see below or request a specific topic with 'help name'.\n\n");
     printf("exsh builtins. Type 'help name' for detailed usage.\n\n");
     printf("%-*s  %s\n", (int)width, "Builtin", "Summary");
     printf("%-*s  %s\n", (int)width, "------", "-------");
