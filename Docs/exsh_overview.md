@@ -30,6 +30,42 @@ ends:
 Example scripts live under `Examples/exsh/` and cover pipelines, conditionals,
 and environment-aware builtins.
 
+## Interactive mode
+
+When `exsh` starts with a controlling TTY it first looks for `~/.exshrc`. If the
+file exists it is executed with caching disabled; requesting `exit` inside the
+file terminates the shell before the interactive loop begins.【F:src/shell/main.c†L178-L241】
+Job control is initialised after the RC hook runs. The runtime only enables job
+control when `exsh` owns the terminal; otherwise foreground/background helpers
+degrade gracefully.【F:src/shell/main.c†L2413-L2420】【F:src/backend_ast/shell.c†L404-L485】【F:src/backend_ast/shell.c†L3729-L3731】
+
+### Prompt customisation
+
+`exsh` honours the `PS1` environment variable for its prompt. Bash-style escape
+sequences are expanded, including time specifiers (`\t`, `\T`, `\@`, `\A`,
+`\d`, `\D`), working-directory markers (`\w`, `\W`), user and host tokens
+(`\u`, `\h`, `\H`), alert/escape characters, and octal/hex escapes. If `PS1`
+is unset, the shell defaults to `exsh$ `.【F:src/shell/main.c†L354-L557】
+
+### Line editing, search, and completion
+
+Interactive sessions provide an Emacs-style editing experience. Common control
+keys jump to the start/end of the line (`Ctrl-A`, `Ctrl-E`), move the cursor
+(`Ctrl-B`, `Ctrl-F`), and navigate history (`Ctrl-P`, `Ctrl-N`). Kill and yank
+commands (`Ctrl-U`, `Ctrl-K`, `Ctrl-W`, `Ctrl-Y`) manipulate the kill buffer,
+while `Ctrl-L` repaints the screen. Incremental reverse search (`Ctrl-R`) and
+`Alt-.` style last-argument insertion reuse the recorded history list. Tab
+completion expands the current word via pathname globbing and prints ambiguous
+matches in the familiar column layout.【F:src/shell/main.c†L1562-L1760】【F:src/shell/main.c†L2089-L2165】【F:src/shell/main.c†L1120-L1284】
+
+### History handling
+
+The interactive loop performs history expansion before executing a command and
+echoes the expanded text when appropriate. All non-empty lines are recorded so
+subsequent sessions can navigate, search, and reinsert previous commands. Tilde
+expansion runs after history resolution so `!$` and friends can still be joined
+with home-directory shortcuts.【F:src/shell/main.c†L2295-L2335】【F:src/backend_ast/shell.c†L3733-L3800】【F:src/backend_ast/shell.c†L3865-L3923】
+
 ## Bytecode caching
 
 Compiled scripts are cached in `~/.pscal/bc_cache`. Cache entries are now keyed
