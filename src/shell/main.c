@@ -83,6 +83,56 @@ static void interactiveAdvancePosition(size_t term_width,
     }
 }
 
+static const unsigned char *interactiveSkipAnsiSequence(const unsigned char *p) {
+    if (!p || *p != '\033') {
+        return p;
+    }
+    ++p;
+    if (!*p) {
+        return p;
+    }
+
+    if (*p == '[') {
+        ++p;
+        while (*p && !(*p >= '@' && *p <= '~')) {
+            ++p;
+        }
+        if (*p) {
+            ++p;
+        }
+        return p;
+    }
+
+    if (*p == ']' || *p == 'P' || *p == '^' || *p == '_') {
+        ++p;
+        while (*p) {
+            if (*p == '\a') {
+                ++p;
+                break;
+            }
+            if (*p == '\033' && p[1] == '\\') {
+                p += 2;
+                break;
+            }
+            ++p;
+        }
+        return p;
+    }
+
+    if ((*p >= '(' && *p <= '/') || *p == '%') {
+        ++p;
+        if (*p) {
+            ++p;
+        }
+        return p;
+    }
+
+    if (*p) {
+        ++p;
+    }
+    return p;
+}
+
 static void interactiveComputeDisplayMetrics(const char *prompt,
                                              const char *buffer,
                                              size_t length,
@@ -98,12 +148,23 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     size_t total_rows = 1;
 
     if (prompt) {
-        for (const unsigned char *p = (const unsigned char *)prompt; *p; ++p) {
+        const unsigned char *p = (const unsigned char *)prompt;
+        while (*p) {
+            if (*p == '\033') {
+                const unsigned char *next = interactiveSkipAnsiSequence(p);
+                if (next == p) {
+                    ++p;
+                } else {
+                    p = next;
+                }
+                continue;
+            }
             interactiveAdvancePosition(term_width, &row, &col, *p);
             size_t used_rows = row + 1;
             if (used_rows > total_rows) {
                 total_rows = used_rows;
             }
+            ++p;
         }
     }
 
