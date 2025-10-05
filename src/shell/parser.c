@@ -454,7 +454,7 @@ static bool parserConsumePendingHereDocs(ShellParser *parser) {
                 buffer[buffer_length] = '\0';
             }
         }
-        shellRedirectionSetHereDocument(pending->redir, buffer ? buffer : "");
+        shellRedirectionSetHereDocument(pending->redir, buffer ? buffer : "", pending->quoted);
         free(buffer);
         free(pending->delimiter);
         pending->delimiter = NULL;
@@ -1165,6 +1165,7 @@ static ShellCommand *parseFunctionDefinitionFromName(ShellParser *parser) {
     }
 
     parserScheduleRuleMask(parser, RULE_MASK_FUNCTION_NAME);
+    parserReclassifyCurrentToken(parser, RULE_MASK_FUNCTION_NAME);
     shellParserAdvance(parser);
 
     parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
@@ -1199,6 +1200,7 @@ static ShellCommand *parseFunctionDefinition(ShellParser *parser) {
     shellParserAdvance(parser);
 
     parserScheduleRuleMask(parser, RULE_MASK_FUNCTION_NAME);
+    parserReclassifyCurrentToken(parser, RULE_MASK_FUNCTION_NAME);
     shellParserAdvance(parser);
     if (parser->previous.type != SHELL_TOKEN_NAME) {
         parserErrorAt(parser, &parser->previous, "Expected function name");

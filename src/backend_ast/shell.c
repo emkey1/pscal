@@ -3,6 +3,7 @@
 #include "shell/word_encoding.h"
 #include "shell/quote_markers.h"
 #include "shell/function.h"
+#include "shell/builtins.h"
 #include "shell/runner.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
@@ -43,6 +44,7 @@ typedef struct {
     bool close_target;
     char *here_doc;
     size_t here_doc_length;
+    bool here_doc_quoted;
 } ShellRedirection;
 
 typedef struct {
@@ -2351,6 +2353,168 @@ static char *shellExpandArraySubscriptValue(const char *name,
 
 static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, size_t meta_len);
 
+static char *shellNormalizeDollarCommandInline(const char *command, size_t len) {
+    if (!command) {
+        return NULL;
+    }
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    size_t j = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = command[i];
+        if (c == '\\' && i + 1 < len && command[i + 1] == '\n') {
+            i++;
+            continue;
+        }
+        out[j++] = c;
+    }
+    out[j] = '\0';
+    char *shrunk = (char *)realloc(out, j + 1);
+    return shrunk ? shrunk : out;
+}
+
+static char *shellNormalizeBacktickCommandInline(const char *command, size_t len) {
+    if (!command) {
+        return NULL;
+    }
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    size_t j = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char c = command[i];
+        if (c == '\\' && i + 1 < len) {
+            char next = command[i + 1];
+            if (next == '\n') {
+                i++;
+                continue;
+            }
+            if (next == '\\' || next == '`' || next == '$') {
+                out[j++] = next;
+                i++;
+                continue;
+            }
+        }
+        out[j++] = c;
+    }
+    out[j] = '\0';
+    char *shrunk = (char *)realloc(out, j + 1);
+    return shrunk ? shrunk : out;
+}
+
+static bool shellParseInlineDollarCommand(const char *text,
+                                         size_t start,
+                                         size_t text_len,
+                                         size_t *out_span,
+                                         char **out_command) {
+    if (!text || start + 1 >= text_len || text[start] != '$' || text[start + 1] != '(') {
+        return false;
+    }
+    size_t i = start + 2;
+    int depth = 1;
+    bool in_single = false;
+    bool in_double = false;
+    while (i < text_len) {
+        char c = text[i];
+        if (c == '\\' && i + 1 < text_len) {
+            if (text[i + 1] == '\n') {
+                i += 2;
+                continue;
+            }
+            if (!in_single) {
+                i += 2;
+                continue;
+            }
+        }
+        if (!in_double && c == '\'') {
+            in_single = !in_single;
+            i++;
+            continue;
+        }
+        if (!in_single && c == '"') {
+            in_double = !in_double;
+            i++;
+            continue;
+        }
+        if (in_single || in_double) {
+            i++;
+            continue;
+        }
+        if (c == '(') {
+            depth++;
+        } else if (c == ')') {
+            depth--;
+            if (depth == 0) {
+                break;
+            }
+        }
+        i++;
+    }
+    if (depth != 0 || i >= text_len || text[i] != ')') {
+        return false;
+    }
+    size_t span = (i + 1) - start;
+    if (out_span) {
+        *out_span = span;
+    }
+    if (out_command) {
+        size_t inner_start = start + 2;
+        size_t inner_len = i - inner_start;
+        *out_command = shellNormalizeDollarCommandInline(text + inner_start, inner_len);
+        if (!*out_command) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool shellParseInlineBacktickCommand(const char *text,
+                                            size_t start,
+                                            size_t text_len,
+                                            size_t *out_span,
+                                            char **out_command) {
+    if (!text || start >= text_len || text[start] != '`') {
+        return false;
+    }
+    size_t i = start + 1;
+    while (i < text_len) {
+        char c = text[i];
+        if (c == '`') {
+            break;
+        }
+        if (c == '\\' && i + 1 < text_len) {
+            i += 2;
+            continue;
+        }
+        i++;
+    }
+    if (i >= text_len || text[i] != '`') {
+        return false;
+    }
+    size_t span = (i + 1) - start;
+    if (out_span) {
+        *out_span = span;
+    }
+    if (out_command) {
+        size_t inner_len = (i - start) - 1;
+        *out_command = shellNormalizeBacktickCommandInline(text + start + 1, inner_len);
+        if (!*out_command) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static char *shellExpandHereDocument(const char *body, bool quoted) {
+    if (quoted) {
+        return body ? strdup(body) : strdup("");
+    }
+    return shellExpandWord(body, SHELL_WORD_FLAG_HAS_ARITHMETIC, NULL, 0);
+}
+
 static char *shellExpandParameter(const char *input, size_t *out_consumed) {
     if (out_consumed) {
         *out_consumed = 0;
@@ -3074,6 +3238,35 @@ static char *shellExpandWord(const char *text, uint8_t flags, const char *meta, 
         }
         if (handled) {
             continue;
+        }
+        if (sub_count == 0 && c == '$' && i + 1 < text_len && text[i + 1] == '(' &&
+            !(i + 2 < text_len && text[i + 2] == '(')) {
+            size_t span = 0;
+            char *command = NULL;
+            if (shellParseInlineDollarCommand(text, i, text_len, &span, &command)) {
+                char *output = shellRunCommandSubstitution(command);
+                free(command);
+                if (output) {
+                    shellBufferAppendString(&buffer, &length, &capacity, output);
+                    free(output);
+                }
+                i += span;
+                continue;
+            }
+        }
+        if (sub_count == 0 && c == '`') {
+            size_t span = 0;
+            char *command = NULL;
+            if (shellParseInlineBacktickCommand(text, i, text_len, &span, &command)) {
+                char *output = shellRunCommandSubstitution(command);
+                free(command);
+                if (output) {
+                    shellBufferAppendString(&buffer, &length, &capacity, output);
+                    free(output);
+                }
+                i += span;
+                continue;
+            }
         }
         if (c == '$' && has_arithmetic && i + 2 < text_len && text[i + 1] == '(' && text[i + 2] == '(') {
             size_t expr_start = i + 3;
@@ -3847,8 +4040,10 @@ static bool shellIsRuntimeBuiltin(const char *name) {
                                       "read"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
+    const char *canonical = shellBuiltinCanonicalName(name);
     for (size_t i = 0; i < count; ++i) {
-        if (strcasecmp(name, kBuiltins[i]) == 0) {
+        if (strcasecmp(name, kBuiltins[i]) == 0 ||
+            (canonical && strcasecmp(canonical, kBuiltins[i]) == 0)) {
             return true;
         }
     }
@@ -3888,7 +4083,11 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!name || !shellIsRuntimeBuiltin(name)) {
         return false;
     }
-    VmBuiltinFn handler = getVmBuiltinHandler(name);
+    const char *canonical = shellBuiltinCanonicalName(name);
+    VmBuiltinFn handler = getVmBuiltinHandler(canonical);
+    if (!handler && canonical && canonical != name) {
+        handler = getVmBuiltinHandler(name);
+    }
     if (!handler) {
         return false;
     }
@@ -4310,6 +4509,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     const char *type_text = "";
     const char *word_hex = "";
     const char *here_hex = "";
+    bool here_quoted = false;
 
     char *cursor = copy;
     while (cursor && *cursor) {
@@ -4332,6 +4532,8 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
             word_hex = value;
         } else if (strcmp(key, "here") == 0) {
             here_hex = value;
+        } else if (strcmp(key, "hereq") == 0) {
+            shellParseBool(value, &here_quoted);
         }
         if (!next) {
             break;
@@ -4443,8 +4645,15 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
             free(copy);
             return false;
         }
-        redir.here_doc = decoded;
-        redir.here_doc_length = body_len;
+        char *expanded = shellExpandHereDocument(decoded, here_quoted);
+        if (!expanded) {
+            expanded = decoded;
+        } else {
+            free(decoded);
+        }
+        redir.here_doc = expanded;
+        redir.here_doc_length = expanded ? strlen(expanded) : 0;
+        redir.here_doc_quoted = here_quoted;
     } else {
         free(expanded_target);
         free(word_encoded);
@@ -4997,6 +5206,16 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         return makeVoid();
     }
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    bool pipeline_head = cmd->is_pipeline_head;
+    bool pipeline_tail = cmd->is_pipeline_tail;
+    if (ctx->active && cmd->pipeline_index >= 0) {
+        size_t stage_count = ctx->stage_count;
+        int index = cmd->pipeline_index;
+        if (index >= 0 && (size_t)index < stage_count) {
+            pipeline_head = (index == 0);
+            pipeline_tail = ((size_t)index + 1 == stage_count);
+        }
+    }
     ShellAssignmentBackup *assignment_backups = NULL;
     size_t assignment_backup_count = 0;
     bool assignments_applied = false;
@@ -5095,10 +5314,10 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             return makeVoid();
         }
         if (ctx->stage_count > 1) {
-            if (!cmd->is_pipeline_head) {
+            if (!pipeline_head) {
                 stdin_fd = ctx->pipes[idx - 1][0];
             }
-            if (!cmd->is_pipeline_tail) {
+            if (!pipeline_tail) {
                 stdout_fd = ctx->pipes[idx][1];
             }
         }
@@ -5170,18 +5389,18 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
 
     if (ctx->active) {
-        if (!cmd->is_pipeline_head && stdin_fd >= 0) {
+        if (!pipeline_head && stdin_fd >= 0) {
             close(stdin_fd);
             if (cmd->pipeline_index > 0) {
                 ctx->pipes[cmd->pipeline_index - 1][0] = -1;
             }
         }
-        if (!cmd->is_pipeline_tail && stdout_fd >= 0) {
+        if (!pipeline_tail && stdout_fd >= 0) {
             close(stdout_fd);
             ctx->pipes[cmd->pipeline_index][1] = -1;
         }
         ctx->pids[ctx->launched++] = child;
-        if (cmd->is_pipeline_tail) {
+        if (pipeline_tail) {
             ctx->background = cmd->background;
             shellFinishPipeline(cmd);
             shellRuntimeProcessPendingSignals();
@@ -5288,35 +5507,53 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
         cursor = next + 1;
     }
     free(copy);
-    if (stages == 0) {
-        runtimeError(vm, "shell pipeline: invalid stage count");
-        free(merge_pattern);
-        goto cleanup;
-    }
-    if (!shellEnsurePipeline(stages, negated)) {
-        runtimeError(vm, "shell pipeline: unable to allocate context");
-        free(merge_pattern);
-        goto cleanup;
-    }
-
-    if (merge_pattern) {
-        ShellPipelineContext *ctx = &gShellRuntime.pipeline;
-        size_t pattern_len = strlen(merge_pattern);
-        for (size_t i = 0; i < stages; ++i) {
-            bool merge = false;
-            if (i < pattern_len) {
-                merge = (merge_pattern[i] == '1');
-            }
-            if (ctx->merge_stderr && i < stages) {
-                ctx->merge_stderr[i] = merge;
+    bool skip_pipeline = false;
+    ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    if (ctx->active && stages == 1 && !negated) {
+        bool has_merge = false;
+        if (merge_pattern) {
+            for (const char *p = merge_pattern; *p; ++p) {
+                if (*p != '0') {
+                    has_merge = true;
+                    break;
+                }
             }
         }
-        free(merge_pattern);
-        merge_pattern = NULL;
+        if (!has_merge) {
+            skip_pipeline = true;
+        }
     }
 
-cleanup:
+    if (!skip_pipeline) {
+        if (stages == 0) {
+            runtimeError(vm, "shell pipeline: invalid stage count");
+            free(merge_pattern);
+            goto cleanup;
+        }
+        if (!shellEnsurePipeline(stages, negated)) {
+            runtimeError(vm, "shell pipeline: unable to allocate context");
+            free(merge_pattern);
+            goto cleanup;
+        }
+
+        if (merge_pattern) {
+            size_t pattern_len = strlen(merge_pattern);
+            for (size_t i = 0; i < stages; ++i) {
+                bool merge = false;
+                if (i < pattern_len) {
+                    merge = (merge_pattern[i] == '1');
+                }
+                if (ctx->merge_stderr && i < stages) {
+                    ctx->merge_stderr[i] = merge;
+                }
+            }
+        }
+    }
+
     free(merge_pattern);
+    merge_pattern = NULL;
+
+cleanup:
     shellRestoreCurrentVm(previous_vm);
     return result;
 }

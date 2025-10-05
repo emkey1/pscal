@@ -65,6 +65,7 @@ typedef struct {
     ShellWord *target;
     char *here_document;
     char *dup_target;
+    bool here_document_quoted;
     int line;
     int column;
 } ShellRedirection;
@@ -208,8 +209,9 @@ void shellFreeWord(ShellWord *word);
 ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *io_number,
                                          ShellWord *target, int line, int column);
 void shellFreeRedirection(ShellRedirection *redir);
-void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload);
+void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload, bool quoted);
 const char *shellRedirectionGetHereDocument(const ShellRedirection *redir);
+bool shellRedirectionHereDocumentIsQuoted(const ShellRedirection *redir);
 void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target);
 const char *shellRedirectionGetDupTarget(const ShellRedirection *redir);
 ShellWord *shellRedirectionGetWordTarget(const ShellRedirection *redir);
@@ -264,6 +266,10 @@ void shellFreeCommand(ShellCommand *command);
 ShellProgram *shellCreateProgram(void);
 void shellProgramAddCommand(ShellProgram *program, ShellCommand *command);
 void shellFreeProgram(ShellProgram *program);
+void shellCommandPropagatePipelineMetadata(ShellCommand *command,
+                                           int pipeline_index,
+                                           bool is_pipeline_head,
+                                           bool is_pipeline_tail);
 
 void shellDumpAstJson(FILE *out, const ShellProgram *program);
 
