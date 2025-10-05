@@ -1,0 +1,15 @@
+echo "double-bracket:start"
+FILE="tmp_exsh_double_bracket.txt"
+if [[ ! -f "$FILE" ]]; then
+  echo "branch:missing"
+else
+  echo "branch:present"
+fi
+touch "$FILE"
+if [[ ! -f "$FILE" ]]; then
+  echo "branch:still-missing"
+else
+  echo "branch:now-present"
+fi
+rm -f "$FILE"
+echo "double-bracket:end"

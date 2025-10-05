@@ -704,8 +704,11 @@ ShellToken shellNextToken(ShellLexer *lexer) {
             return makeSimpleToken(lexer, SHELL_TOKEN_AMPERSAND, "&", 1);
         }
         case '!': {
-            advanceChar(lexer);
-            return makeSimpleToken(lexer, SHELL_TOKEN_BANG, "!", 1);
+            if ((lexer->rule_mask & SHELL_LEXER_RULE_1) != 0) {
+                advanceChar(lexer);
+                return makeSimpleToken(lexer, SHELL_TOKEN_BANG, "!", 1);
+            }
+            break;
         }
         case '|': {
             advanceChar(lexer);
