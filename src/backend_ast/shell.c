@@ -28,6 +28,10 @@
 
 extern char **environ;
 
+static bool shellIsValidEnvName(const char *name);
+static void shellExportPrintEnvironment(void);
+static bool shellParseReturnStatus(const char *text, int *out_status);
+
 typedef enum {
     SHELL_RUNTIME_REDIR_OPEN,
     SHELL_RUNTIME_REDIR_DUP,
@@ -4034,10 +4038,10 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export",  "unset",    "setenv",   "unsetenv",
-                                      "set",   "trap",   "local",  "break",   "continue", "alias",    "history",
-                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":",       "eval",
-                                      "read"};
+    static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "export",  "unset",    "setenv",  "unsetenv",
+                                      "set",    "trap",    "local",   "break",   "continue", "alias",   "history",
+                                      "jobs",   "fg",      "bg",      "wait",    "builtin",  "source",  ":",      "eval",
+                                      "read",   "shift",   "return"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -6192,6 +6196,44 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellReturn(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    int status = gShellRuntime.last_status;
+
+    if (arg_count > 1) {
+        runtimeError(vm, "return: too many arguments");
+        shellUpdateStatus(1);
+        shellRestoreCurrentVm(previous_vm);
+        return makeVoid();
+    }
+
+    if (arg_count == 1) {
+        Value v = args[0];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "return: status must be a string number");
+            shellUpdateStatus(1);
+            shellRestoreCurrentVm(previous_vm);
+            return makeVoid();
+        }
+        int parsed = 0;
+        if (!shellParseReturnStatus(v.s_val, &parsed)) {
+            runtimeError(vm, "return: invalid status '%s'", v.s_val);
+            shellUpdateStatus(1);
+            shellRestoreCurrentVm(previous_vm);
+            return makeVoid();
+        }
+        status = parsed;
+    }
+
+    shellUpdateStatus(status);
+    if (vm) {
+        vm->exit_requested = true;
+        vm->current_builtin_name = "return";
+    }
+    shellRestoreCurrentVm(previous_vm);
+    return makeVoid();
+}
+
 Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     const char *prompt = NULL;
     const char **variables = NULL;
@@ -6309,6 +6351,58 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellShift(VM *vm, int arg_count, Value *args) {
+    int shift_count = 1;
+    if (arg_count > 1) {
+        runtimeError(vm, "shift: expected optional non-negative count");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (arg_count == 1) {
+        Value v = args[0];
+        if (v.type != TYPE_STRING || !v.s_val || !*v.s_val) {
+            runtimeError(vm, "shift: expected numeric argument");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        char *end = NULL;
+        errno = 0;
+        long parsed = strtol(v.s_val, &end, 10);
+        if (errno != 0 || !end || *end != '\0' || parsed < 0 || parsed > INT_MAX) {
+            runtimeError(vm, "shift: invalid count '%s'", v.s_val);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        shift_count = (int)parsed;
+    }
+
+    if (shift_count == 0) {
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    if (shift_count > gParamCount || gParamCount <= 0 || !gParamValues) {
+        runtimeError(vm, "shift: count out of range");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    for (int i = 0; i + shift_count < gParamCount; ++i) {
+        gParamValues[i] = gParamValues[i + shift_count];
+    }
+    for (int i = gParamCount - shift_count; i < gParamCount; ++i) {
+        if (i >= 0) {
+            gParamValues[i] = NULL;
+        }
+    }
+    gParamCount -= shift_count;
+    if (gParamCount < 0) {
+        gParamCount = 0;
+    }
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
     if (arg_count == 0) {
         if (environ) {
@@ -6326,6 +6420,11 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
     }
     if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
         runtimeError(vm, "setenv: variable name must be a non-empty string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (!shellIsValidEnvName(args[0].s_val)) {
+        runtimeError(vm, "setenv: invalid variable name '%s'", args[0].s_val);
         shellUpdateStatus(1);
         return makeVoid();
     }
@@ -6353,30 +6452,88 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
+    bool print_env = (arg_count == 0);
+    bool parsing_options = true;
+    bool processed_assignment = false;
+
     for (int i = 0; i < arg_count; ++i) {
-        if (args[i].type != TYPE_STRING || !args[i].s_val) {
-            runtimeError(vm, "export: expected name=value string");
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "export: arguments must be strings");
             shellUpdateStatus(1);
             return makeVoid();
         }
-        const char *assignment = args[i].s_val;
-        const char *eq = strchr(assignment, '=');
-        if (!eq || eq == assignment) {
-            runtimeError(vm, "export: invalid assignment '%s'", assignment);
-            shellUpdateStatus(1);
-            return makeVoid();
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (strcmp(text, "-p") == 0) {
+                print_env = true;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                runtimeError(vm, "export: unsupported option '%s'", text);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            parsing_options = false;
         }
-        size_t name_len = (size_t)(eq - assignment);
-        char *name = strndup(assignment, name_len);
-        const char *value = eq + 1;
-        if (!name) {
-            runtimeError(vm, "export: out of memory");
-            shellUpdateStatus(1);
-            return makeVoid();
+        if (parsing_options) {
+            continue;
         }
-        setenv(name, value, 1);
-        free(name);
+        processed_assignment = true;
+        const char *eq = strchr(text, '=');
+        if (eq) {
+            size_t name_len = (size_t)(eq - text);
+            if (name_len == 0) {
+                runtimeError(vm, "export: invalid assignment '%s'", text);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            char *name = strndup(text, name_len);
+            if (!name) {
+                runtimeError(vm, "export: out of memory");
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            if (!shellIsValidEnvName(name)) {
+                runtimeError(vm, "export: invalid variable name '%s'", name);
+                free(name);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            const char *value = eq + 1;
+            if (setenv(name, value, 1) != 0) {
+                runtimeError(vm, "export: unable to set '%s': %s", name, strerror(errno));
+                free(name);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            free(name);
+        } else {
+            if (!shellIsValidEnvName(text)) {
+                runtimeError(vm, "export: invalid variable name '%s'", text);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            const char *value = getenv(text);
+            if (!value) {
+                value = "";
+            }
+            if (setenv(text, value, 1) != 0) {
+                runtimeError(vm, "export: unable to set '%s': %s", text, strerror(errno));
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
     }
+
+    if (print_env || (!processed_assignment && arg_count == 0)) {
+        shellExportPrintEnvironment();
+    }
+
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -6409,6 +6566,47 @@ static bool shellParseLoopLevel(const char *text, int *out_level) {
         return false;
     }
     *out_level = (int)value;
+    return true;
+}
+
+static bool shellIsValidEnvName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    unsigned char first = (unsigned char)name[0];
+    if (!(isalpha(first) || first == '_')) {
+        return false;
+    }
+    for (const char *cursor = name + 1; *cursor; ++cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (!(isalnum(ch) || ch == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void shellExportPrintEnvironment(void) {
+    if (!environ) {
+        return;
+    }
+    for (char **env = environ; *env; ++env) {
+        printf("export %s\n", *env);
+    }
+}
+
+static bool shellParseReturnStatus(const char *text, int *out_status) {
+    if (!text || !out_status || *text == '\0') {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    int status = (int)((unsigned long)value & 0xFFu);
+    *out_status = status;
     return true;
 }
 
