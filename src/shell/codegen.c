@@ -410,35 +410,65 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         return;
     }
 
-    int loopStart = chunk->count;
-    char meta[64];
-    snprintf(meta, sizeof(meta), "until=%d", loop->is_until ? 1 : 0);
-    emitPushString(chunk, meta, line);
-    emitBuiltinProc(chunk, "__shell_loop", 1, line);
-
-    compilePipeline(chunk, loop->condition, false);
-    emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
-    emitPushInt(chunk, 0, line);
-    writeBytecodeChunk(chunk, EQUAL, line);
-    if (loop->is_until) {
-        writeBytecodeChunk(chunk, NOT, line);
+    bool isFor = loop->is_for;
+    char meta[128];
+    if (isFor) {
+        snprintf(meta, sizeof(meta), "mode=for");
+    } else {
+        snprintf(meta, sizeof(meta), "mode=%s", loop->is_until ? "until" : "while");
     }
-    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-    int exitJump = chunk->count;
-    emitShort(chunk, 0xFFFF, line);
+    emitPushString(chunk, meta, line);
+
+    uint8_t arg_count = 1;
+    if (isFor) {
+        if (loop->for_variable) {
+            emitPushWord(chunk, loop->for_variable, line);
+            arg_count++;
+        } else {
+            emitPushString(chunk, "", line);
+            arg_count++;
+        }
+        size_t list_count = loop->for_values.count;
+        if (list_count + 2 > 255) {
+            fprintf(stderr, "shell codegen warning: for loop list truncated (%zu).\n", list_count);
+            list_count = 253;
+        }
+        for (size_t i = 0; i < list_count; ++i) {
+            emitPushWord(chunk, loop->for_values.items[i], line);
+            if (arg_count < 255) {
+                arg_count++;
+            }
+        }
+    }
+    emitBuiltinProc(chunk, "__shell_loop", arg_count, line);
+
+    int conditionStart = chunk->count;
+    int exitJump = -1;
+
+    if (isFor) {
+        emitCallHost(chunk, HOST_FN_SHELL_LOOP_IS_READY, line);
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        exitJump = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+    } else {
+        compilePipeline(chunk, loop->condition, false);
+        emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
+        emitPushInt(chunk, 0, line);
+        writeBytecodeChunk(chunk, EQUAL, line);
+        if (loop->is_until) {
+            writeBytecodeChunk(chunk, NOT, line);
+        }
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        exitJump = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+    }
 
     compileProgram(chunk, loop->body);
-    emitCallHost(chunk, HOST_FN_SHELL_LOOP_SHOULD_BREAK, line);
+
+    emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
     writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-    int continueJump = chunk->count;
+    int exitJump2 = chunk->count;
     emitShort(chunk, 0xFFFF, line);
-
-    writeBytecodeChunk(chunk, JUMP, line);
-    int breakJump = chunk->count;
-    emitShort(chunk, 0xFFFF, line);
-
-    int continueLabel = chunk->count;
-    emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
 
     writeBytecodeChunk(chunk, JUMP, line);
     int loopJump = chunk->count;
@@ -447,17 +477,16 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     int exitLabel = chunk->count;
     emitBuiltinProc(chunk, "__shell_loop_end", 0, line);
 
-    uint16_t continueOffset = (uint16_t)(continueLabel - (continueJump + 2));
-    patchShort(chunk, continueJump, continueOffset);
-
-    uint16_t breakOffset = (uint16_t)(exitLabel - (breakJump + 2));
-    patchShort(chunk, breakJump, breakOffset);
-
-    uint16_t loopOffset = (uint16_t)(loopStart - (loopJump + 2));
+    uint16_t loopOffset = (uint16_t)(conditionStart - (loopJump + 2));
     patchShort(chunk, loopJump, loopOffset);
 
-    uint16_t exitOffset = (uint16_t)(exitLabel - (exitJump + 2));
-    patchShort(chunk, exitJump, exitOffset);
+    if (exitJump >= 0) {
+        uint16_t exitOffset = (uint16_t)(exitLabel - (exitJump + 2));
+        patchShort(chunk, exitJump, exitOffset);
+    }
+
+    uint16_t exitOffset2 = (uint16_t)(exitLabel - (exitJump2 + 2));
+    patchShort(chunk, exitJump2, exitOffset2);
 }
 
 static void compileConditional(BytecodeChunk *chunk, const ShellConditional *conditional, int line) {

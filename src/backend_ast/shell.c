@@ -88,10 +88,22 @@ typedef struct {
     int continue_requested_levels;
 } ShellRuntimeState;
 
+typedef enum {
+    SHELL_LOOP_KIND_WHILE,
+    SHELL_LOOP_KIND_UNTIL,
+    SHELL_LOOP_KIND_FOR
+} ShellLoopKind;
+
 typedef struct {
+    ShellLoopKind kind;
     bool skip_body;
     bool break_pending;
     bool continue_pending;
+    char *for_variable;
+    char **for_values;
+    size_t for_count;
+    size_t for_index;
+    bool for_active;
 } ShellLoopFrame;
 
 static ShellLoopFrame *gShellLoopStack = NULL;
@@ -143,11 +155,50 @@ static bool shellLoopEnsureCapacity(size_t needed) {
     return true;
 }
 
-static ShellLoopFrame *shellLoopPushFrame(void) {
+static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
+    if (!frame) {
+        return;
+    }
+    if (frame->for_variable) {
+        free(frame->for_variable);
+        frame->for_variable = NULL;
+    }
+    if (frame->for_values) {
+        for (size_t i = 0; i < frame->for_count; ++i) {
+            free(frame->for_values[i]);
+        }
+        free(frame->for_values);
+        frame->for_values = NULL;
+    }
+    frame->for_count = 0;
+    frame->for_index = 0;
+    frame->for_active = false;
+}
+
+static bool shellAssignLoopVariable(const char *name, const char *value) {
+    if (!name) {
+        return false;
+    }
+    if (!value) {
+        value = "";
+    }
+    return setenv(name, value, 1) == 0;
+}
+
+static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     if (!shellLoopEnsureCapacity(gShellLoopStackSize + 1)) {
         return NULL;
     }
-    ShellLoopFrame frame = {false, false, false};
+    ShellLoopFrame frame;
+    frame.kind = kind;
+    frame.skip_body = false;
+    frame.break_pending = false;
+    frame.continue_pending = false;
+    frame.for_variable = NULL;
+    frame.for_values = NULL;
+    frame.for_count = 0;
+    frame.for_index = 0;
+    frame.for_active = false;
     gShellLoopStack[gShellLoopStackSize++] = frame;
     return &gShellLoopStack[gShellLoopStackSize - 1];
 }
@@ -163,6 +214,8 @@ static void shellLoopPopFrame(void) {
     if (gShellLoopStackSize == 0) {
         return;
     }
+    ShellLoopFrame *frame = &gShellLoopStack[gShellLoopStackSize - 1];
+    shellLoopFrameFreeData(frame);
     gShellLoopStackSize--;
     if (gShellLoopStackSize == 0) {
         gShellRuntime.break_requested = false;
@@ -1013,6 +1066,221 @@ static bool shellWordShouldGlob(uint8_t flags, const char *text) {
         }
     }
     return false;
+}
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellStringArray;
+
+static void shellStringArrayFree(ShellStringArray *array) {
+    if (!array) {
+        return;
+    }
+    if (array->items) {
+        for (size_t i = 0; i < array->count; ++i) {
+            free(array->items[i]);
+        }
+        free(array->items);
+    }
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static bool shellStringArrayAppend(ShellStringArray *array, char *value) {
+    if (!array || !value) {
+        return false;
+    }
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        char **new_items = (char **)realloc(array->items, new_capacity * sizeof(char *));
+        if (!new_items) {
+            return false;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    array->items[array->count++] = value;
+    return true;
+}
+
+static void shellFreeStringArray(char **items, size_t count) {
+    if (!items) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(items[i]);
+    }
+    free(items);
+}
+
+static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
+                                   char ***out_fields, size_t *out_field_count) {
+    if (out_fields) {
+        *out_fields = NULL;
+    }
+    if (out_field_count) {
+        *out_field_count = 0;
+    }
+    if (!out_fields || !out_field_count) {
+        return false;
+    }
+    if (!expanded) {
+        return true;
+    }
+    const char *ifs = getenv("IFS");
+    if (!ifs) {
+        ifs = " \t\n";
+    }
+    bool quoted = (word_flags & (SHELL_WORD_FLAG_SINGLE_QUOTED | SHELL_WORD_FLAG_DOUBLE_QUOTED)) != 0;
+    if (quoted || *ifs == '\0') {
+        char *dup = strdup(expanded);
+        if (!dup) {
+            return false;
+        }
+        char **items = (char **)malloc(sizeof(char *));
+        if (!items) {
+            free(dup);
+            return false;
+        }
+        items[0] = dup;
+        *out_fields = items;
+        *out_field_count = 1;
+        return true;
+    }
+    if (*expanded == '\0') {
+        return true;
+    }
+
+    bool delim_map[256] = {false};
+    bool whitespace_map[256] = {false};
+    for (const char *cursor = ifs; *cursor; ++cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        delim_map[ch] = true;
+        if (isspace((unsigned char)*cursor)) {
+            whitespace_map[ch] = true;
+        }
+    }
+
+    ShellStringArray fields = {0};
+    const char *cursor = expanded;
+    while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+        cursor++;
+    }
+    bool last_non_wh_delim = false;
+    while (*cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (delim_map[ch] && !whitespace_map[ch]) {
+            char *empty = strdup("");
+            if (!empty || !shellStringArrayAppend(&fields, empty)) {
+                free(empty);
+                shellStringArrayFree(&fields);
+                return false;
+            }
+            cursor++;
+            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+                cursor++;
+            }
+            last_non_wh_delim = true;
+            continue;
+        }
+
+        const char *start = cursor;
+        while (*cursor) {
+            unsigned char inner = (unsigned char)*cursor;
+            if (delim_map[inner]) {
+                break;
+            }
+            cursor++;
+        }
+        size_t len = (size_t)(cursor - start);
+        if (len > 0) {
+            char *segment = (char *)malloc(len + 1);
+            if (!segment) {
+                shellStringArrayFree(&fields);
+                return false;
+            }
+            memcpy(segment, start, len);
+            segment[len] = '\0';
+            if (!shellStringArrayAppend(&fields, segment)) {
+                free(segment);
+                shellStringArrayFree(&fields);
+                return false;
+            }
+        }
+
+        if (!*cursor) {
+            last_non_wh_delim = false;
+            break;
+        }
+
+        if (delim_map[(unsigned char)*cursor] && !whitespace_map[(unsigned char)*cursor]) {
+            cursor++;
+            last_non_wh_delim = true;
+        } else {
+            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+                cursor++;
+            }
+            last_non_wh_delim = false;
+        }
+
+        while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+            cursor++;
+        }
+    }
+
+    if (last_non_wh_delim) {
+        char *empty = strdup("");
+        if (!empty || !shellStringArrayAppend(&fields, empty)) {
+            free(empty);
+            shellStringArrayFree(&fields);
+            return false;
+        }
+    }
+
+    if (fields.count == 0) {
+        free(fields.items);
+        return true;
+    }
+
+    *out_fields = fields.items;
+    *out_field_count = fields.count;
+    return true;
+}
+
+static bool shellLoopFrameEnsureValueCapacity(ShellLoopFrame *frame, size_t *capacity, size_t needed) {
+    if (!frame || !capacity) {
+        return false;
+    }
+    if (*capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = (*capacity == 0) ? 4 : *capacity;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    char **resized = (char **)realloc(frame->for_values, new_capacity * sizeof(char *));
+    if (!resized) {
+        return false;
+    }
+    frame->for_values = resized;
+    *capacity = new_capacity;
+    return true;
+}
+
+static bool shellLoopFrameAppendValue(ShellLoopFrame *frame, size_t *capacity, char *value) {
+    if (!frame || !capacity || !value) {
+        free(value);
+        return false;
+    }
+    if (!shellLoopFrameEnsureValueCapacity(frame, capacity, frame->for_count + 1)) {
+        free(value);
+        return false;
+    }
+    frame->for_values[frame->for_count++] = value;
+    return true;
 }
 
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c) {
@@ -4980,22 +5248,196 @@ Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
-    (void)arg_count;
-    (void)args;
+    Value result = makeVoid();
+    const char *meta = NULL;
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val) {
+        meta = args[0].s_val;
+    }
+
+    ShellLoopKind kind = SHELL_LOOP_KIND_WHILE;
+    bool until_flag = false;
+    if (meta && *meta) {
+        char *copy = strdup(meta);
+        if (copy) {
+            for (char *token = strtok(copy, ";"); token; token = strtok(NULL, ";")) {
+                char *eq = strchr(token, '=');
+                if (eq) {
+                    *eq = '\0';
+                    const char *key = token;
+                    const char *value = eq + 1;
+                    if (strcmp(key, "mode") == 0) {
+                        if (strcasecmp(value, "for") == 0) {
+                            kind = SHELL_LOOP_KIND_FOR;
+                        } else if (strcasecmp(value, "until") == 0) {
+                            kind = SHELL_LOOP_KIND_UNTIL;
+                        } else if (strcasecmp(value, "while") == 0) {
+                            kind = SHELL_LOOP_KIND_WHILE;
+                        }
+                    } else if (strcmp(key, "until") == 0) {
+                        until_flag = (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
+                    }
+                }
+            }
+            free(copy);
+        }
+    }
+    if (kind != SHELL_LOOP_KIND_FOR && until_flag) {
+        kind = SHELL_LOOP_KIND_UNTIL;
+    }
+
     bool parent_skip = shellLoopSkipActive();
-    ShellLoopFrame *frame = shellLoopPushFrame();
+    ShellLoopFrame *frame = shellLoopPushFrame(kind);
     if (!frame) {
         runtimeError(vm, "shell loop: out of memory");
         shellRestoreCurrentVm(previous_vm);
         shellUpdateStatus(1);
-        return makeVoid();
+        return result;
     }
-    if (parent_skip) {
-        frame->skip_body = true;
+    frame->skip_body = parent_skip;
+    frame->break_pending = false;
+    frame->continue_pending = false;
+
+    bool ok = true;
+
+    if (kind == SHELL_LOOP_KIND_FOR) {
+        if (arg_count < 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
+            runtimeError(vm, "shell loop: expected iterator name");
+            ok = false;
+        } else {
+            const char *spec = args[1].s_val;
+            const char *text = spec;
+            const char *word_meta = NULL;
+            size_t word_meta_len = 0;
+            uint8_t word_flags = 0;
+            if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
+                text = spec ? spec : "";
+            }
+            frame->for_variable = strdup(text ? text : "");
+            if (!frame->for_variable) {
+                ok = false;
+            }
+        }
+
+        size_t value_start = 2;
+        size_t available = (arg_count > (int)value_start) ? (size_t)(arg_count - (int)value_start) : 0;
+        size_t values_capacity = 0;
+        if (ok && available > 0) {
+            for (size_t i = 0; i < available; ++i) {
+                Value *val = &args[value_start + i];
+                if (val->type != TYPE_STRING || !val->s_val) {
+                    char *empty = strdup("");
+                    if (!empty || !shellLoopFrameAppendValue(frame, &values_capacity, empty)) {
+                        free(empty);
+                        ok = false;
+                        break;
+                    }
+                    continue;
+                }
+                const char *spec = val->s_val;
+                const char *text = spec;
+                const char *word_meta = NULL;
+                size_t word_meta_len = 0;
+                uint8_t word_flags = 0;
+                if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
+                    text = spec ? spec : "";
+                    word_flags = 0;
+                }
+                char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len);
+                if (!expanded) {
+                    ok = false;
+                    break;
+                }
+                char **fields = NULL;
+                size_t field_count = 0;
+                if (!shellSplitExpandedWord(expanded, word_flags, &fields, &field_count)) {
+                    free(expanded);
+                    ok = false;
+                    break;
+                }
+                if (field_count == 0) {
+                    free(expanded);
+                    shellFreeStringArray(fields, field_count);
+                    continue;
+                }
+                free(expanded);
+                for (size_t f = 0; f < field_count; ++f) {
+                    char *field_value = fields[f];
+                    if (!field_value) {
+                        continue;
+                    }
+                    if (shellWordShouldGlob(word_flags, field_value)) {
+                        glob_t glob_result;
+                        int glob_status = glob(field_value, 0, NULL, &glob_result);
+                        if (glob_status == 0) {
+                            bool glob_ok = true;
+                            for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
+                                char *dup = strdup(glob_result.gl_pathv[g]);
+                                if (!dup || !shellLoopFrameAppendValue(frame, &values_capacity, dup)) {
+                                    if (dup) {
+                                        free(dup);
+                                    }
+                                    glob_ok = false;
+                                    break;
+                                }
+                            }
+                            globfree(&glob_result);
+                            free(field_value);
+                            fields[f] = NULL;
+                            if (!glob_ok) {
+                                ok = false;
+                                break;
+                            }
+                        } else {
+                            if (glob_status != GLOB_NOMATCH) {
+                                fprintf(stderr, "exsh: glob failed for '%s'\n", field_value);
+                            }
+                        }
+                    }
+                    if (!ok) {
+                        break;
+                    }
+                    if (field_value) {
+                        if (!shellLoopFrameAppendValue(frame, &values_capacity, field_value)) {
+                            ok = false;
+                            fields[f] = NULL;
+                            break;
+                        }
+                        fields[f] = NULL;
+                    }
+                }
+                shellFreeStringArray(fields, field_count);
+                if (!ok) {
+                    break;
+                }
+            }
+        }
+
+        if (!ok || !frame->for_variable) {
+            frame->skip_body = true;
+            frame->break_pending = true;
+        } else if (frame->for_count == 0) {
+            frame->skip_body = true;
+            frame->for_active = false;
+        } else {
+            if (!shellAssignLoopVariable(frame->for_variable, frame->for_values[0])) {
+                runtimeError(vm, "shell loop: failed to assign '%s'", frame->for_variable);
+                frame->skip_body = true;
+                frame->break_pending = true;
+                ok = false;
+            } else {
+                frame->for_index = 1;
+                frame->for_active = true;
+            }
+        }
     }
+
+    if (!ok) {
+        shellUpdateStatus(1);
+    }
+
     shellResetPipeline();
     shellRestoreCurrentVm(previous_vm);
-    return makeVoid();
+    return result;
 }
 
 Value vmBuiltinShellLoopEnd(VM *vm, int arg_count, Value *args) {
@@ -5928,12 +6370,67 @@ Value vmHostShellLastStatus(VM *vm) {
     return makeInt(gShellRuntime.last_status);
 }
 
-Value vmHostShellLoopShouldBreak(VM *vm) {
+Value vmHostShellLoopIsReady(VM *vm) {
     (void)vm;
     shellRuntimeProcessPendingSignals();
     ShellLoopFrame *frame = shellLoopTop();
-    bool should_break = frame && frame->break_pending;
-    return makeBoolean(should_break);
+    bool ready = false;
+    if (frame) {
+        if (frame->break_pending) {
+            ready = false;
+        } else if (frame->kind == SHELL_LOOP_KIND_FOR) {
+            ready = frame->for_active && !frame->skip_body;
+        } else {
+            ready = !frame->skip_body;
+        }
+    }
+    return makeBoolean(ready);
+}
+
+Value vmHostShellLoopAdvance(VM *vm) {
+    (void)vm;
+    shellRuntimeProcessPendingSignals();
+    ShellLoopFrame *frame = shellLoopTop();
+    if (!frame) {
+        return makeBoolean(false);
+    }
+
+    if (frame->break_pending) {
+        frame->break_pending = false;
+        frame->continue_pending = false;
+        frame->skip_body = false;
+        frame->for_active = false;
+        shellResetPipeline();
+        return makeBoolean(false);
+    }
+
+    if (frame->continue_pending) {
+        frame->continue_pending = false;
+    }
+
+    bool should_continue = true;
+    if (frame->kind == SHELL_LOOP_KIND_FOR) {
+        if (frame->for_index < frame->for_count) {
+            if (!shellAssignLoopVariable(frame->for_variable, frame->for_values[frame->for_index])) {
+                runtimeError(vm, "shell loop: failed to assign '%s'", frame->for_variable ? frame->for_variable : "<var>");
+                shellUpdateStatus(1);
+                frame->skip_body = false;
+                frame->for_active = false;
+                shellResetPipeline();
+                return makeBoolean(false);
+            }
+            frame->for_index++;
+            frame->for_active = true;
+            should_continue = true;
+        } else {
+            frame->for_active = false;
+            should_continue = false;
+        }
+    }
+
+    frame->skip_body = false;
+    shellResetPipeline();
+    return makeBoolean(should_continue);
 }
 
 Value vmHostShellPollJobs(VM *vm) {

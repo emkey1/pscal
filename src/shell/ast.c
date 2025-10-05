@@ -427,13 +427,41 @@ ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram
         return NULL;
     }
     loop->is_until = is_until;
+    loop->is_for = false;
+    loop->for_variable = NULL;
+    shellWordArrayInit(&loop->for_values);
     loop->condition = condition;
+    loop->body = body;
+    return loop;
+}
+
+ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, ShellProgram *body) {
+    ShellLoop *loop = (ShellLoop *)calloc(1, sizeof(ShellLoop));
+    if (!loop) {
+        return NULL;
+    }
+    loop->is_until = false;
+    loop->is_for = true;
+    loop->for_variable = variable;
+    if (values) {
+        loop->for_values = *values;
+        values->items = NULL;
+        values->count = 0;
+        values->capacity = 0;
+    } else {
+        shellWordArrayInit(&loop->for_values);
+    }
+    loop->condition = NULL;
     loop->body = body;
     return loop;
 }
 
 void shellFreeLoop(ShellLoop *loop) {
     if (!loop) return;
+    if (loop->for_variable) {
+        shellFreeWord(loop->for_variable);
+    }
+    shellWordArrayFree(&loop->for_values);
     shellFreePipeline(loop->condition);
     shellFreeProgram(loop->body);
     free(loop);

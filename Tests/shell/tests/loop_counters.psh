@@ -1,0 +1,18 @@
+echo "loop:start"
+count=0
+while [ "$count" -lt 3 ]; do
+  echo "while:$count"
+  count=$(expr $count + 1)
+done
+
+count=0
+until [ "$count" -ge 2 ]; do
+  echo "until:$count"
+  count=$(expr $count + 1)
+done
+
+for item in one two; do
+  echo "for:$item"
+done
+
+echo "loop:end"
