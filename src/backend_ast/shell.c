@@ -1068,6 +1068,221 @@ static bool shellWordShouldGlob(uint8_t flags, const char *text) {
     return false;
 }
 
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellStringArray;
+
+static void shellStringArrayFree(ShellStringArray *array) {
+    if (!array) {
+        return;
+    }
+    if (array->items) {
+        for (size_t i = 0; i < array->count; ++i) {
+            free(array->items[i]);
+        }
+        free(array->items);
+    }
+    array->items = NULL;
+    array->count = 0;
+    array->capacity = 0;
+}
+
+static bool shellStringArrayAppend(ShellStringArray *array, char *value) {
+    if (!array || !value) {
+        return false;
+    }
+    if (array->count + 1 > array->capacity) {
+        size_t new_capacity = array->capacity ? array->capacity * 2 : 4;
+        char **new_items = (char **)realloc(array->items, new_capacity * sizeof(char *));
+        if (!new_items) {
+            return false;
+        }
+        array->items = new_items;
+        array->capacity = new_capacity;
+    }
+    array->items[array->count++] = value;
+    return true;
+}
+
+static void shellFreeStringArray(char **items, size_t count) {
+    if (!items) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(items[i]);
+    }
+    free(items);
+}
+
+static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
+                                   char ***out_fields, size_t *out_field_count) {
+    if (out_fields) {
+        *out_fields = NULL;
+    }
+    if (out_field_count) {
+        *out_field_count = 0;
+    }
+    if (!out_fields || !out_field_count) {
+        return false;
+    }
+    if (!expanded) {
+        return true;
+    }
+    const char *ifs = getenv("IFS");
+    if (!ifs) {
+        ifs = " \t\n";
+    }
+    bool quoted = (word_flags & (SHELL_WORD_FLAG_SINGLE_QUOTED | SHELL_WORD_FLAG_DOUBLE_QUOTED)) != 0;
+    if (quoted || *ifs == '\0') {
+        char *dup = strdup(expanded);
+        if (!dup) {
+            return false;
+        }
+        char **items = (char **)malloc(sizeof(char *));
+        if (!items) {
+            free(dup);
+            return false;
+        }
+        items[0] = dup;
+        *out_fields = items;
+        *out_field_count = 1;
+        return true;
+    }
+    if (*expanded == '\0') {
+        return true;
+    }
+
+    bool delim_map[256] = {false};
+    bool whitespace_map[256] = {false};
+    for (const char *cursor = ifs; *cursor; ++cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        delim_map[ch] = true;
+        if (isspace((unsigned char)*cursor)) {
+            whitespace_map[ch] = true;
+        }
+    }
+
+    ShellStringArray fields = {0};
+    const char *cursor = expanded;
+    while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+        cursor++;
+    }
+    bool last_non_wh_delim = false;
+    while (*cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (delim_map[ch] && !whitespace_map[ch]) {
+            char *empty = strdup("");
+            if (!empty || !shellStringArrayAppend(&fields, empty)) {
+                free(empty);
+                shellStringArrayFree(&fields);
+                return false;
+            }
+            cursor++;
+            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+                cursor++;
+            }
+            last_non_wh_delim = true;
+            continue;
+        }
+
+        const char *start = cursor;
+        while (*cursor) {
+            unsigned char inner = (unsigned char)*cursor;
+            if (delim_map[inner]) {
+                break;
+            }
+            cursor++;
+        }
+        size_t len = (size_t)(cursor - start);
+        if (len > 0) {
+            char *segment = (char *)malloc(len + 1);
+            if (!segment) {
+                shellStringArrayFree(&fields);
+                return false;
+            }
+            memcpy(segment, start, len);
+            segment[len] = '\0';
+            if (!shellStringArrayAppend(&fields, segment)) {
+                free(segment);
+                shellStringArrayFree(&fields);
+                return false;
+            }
+        }
+
+        if (!*cursor) {
+            last_non_wh_delim = false;
+            break;
+        }
+
+        if (delim_map[(unsigned char)*cursor] && !whitespace_map[(unsigned char)*cursor]) {
+            cursor++;
+            last_non_wh_delim = true;
+        } else {
+            while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+                cursor++;
+            }
+            last_non_wh_delim = false;
+        }
+
+        while (*cursor && whitespace_map[(unsigned char)*cursor]) {
+            cursor++;
+        }
+    }
+
+    if (last_non_wh_delim) {
+        char *empty = strdup("");
+        if (!empty || !shellStringArrayAppend(&fields, empty)) {
+            free(empty);
+            shellStringArrayFree(&fields);
+            return false;
+        }
+    }
+
+    if (fields.count == 0) {
+        free(fields.items);
+        return true;
+    }
+
+    *out_fields = fields.items;
+    *out_field_count = fields.count;
+    return true;
+}
+
+static bool shellLoopFrameEnsureValueCapacity(ShellLoopFrame *frame, size_t *capacity, size_t needed) {
+    if (!frame || !capacity) {
+        return false;
+    }
+    if (*capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = (*capacity == 0) ? 4 : *capacity;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    char **resized = (char **)realloc(frame->for_values, new_capacity * sizeof(char *));
+    if (!resized) {
+        return false;
+    }
+    frame->for_values = resized;
+    *capacity = new_capacity;
+    return true;
+}
+
+static bool shellLoopFrameAppendValue(ShellLoopFrame *frame, size_t *capacity, char *value) {
+    if (!frame || !capacity || !value) {
+        free(value);
+        return false;
+    }
+    if (!shellLoopFrameEnsureValueCapacity(frame, capacity, frame->for_count + 1)) {
+        free(value);
+        return false;
+    }
+    frame->for_values[frame->for_count++] = value;
+    return true;
+}
+
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c) {
     if (!shellBufferEnsure(buffer, length, capacity, 1)) {
         return;
@@ -5105,36 +5320,94 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
 
         size_t value_start = 2;
         size_t available = (arg_count > (int)value_start) ? (size_t)(arg_count - (int)value_start) : 0;
+        size_t values_capacity = 0;
         if (ok && available > 0) {
-            frame->for_values = (char **)calloc(available, sizeof(char *));
-            if (!frame->for_values) {
-                ok = false;
-            } else {
-                for (size_t i = 0; i < available; ++i) {
-                    Value *val = &args[value_start + i];
-                    if (val->type != TYPE_STRING || !val->s_val) {
-                        frame->for_values[frame->for_count++] = strdup("");
-                        if (!frame->for_values[frame->for_count - 1]) {
-                            ok = false;
-                            break;
-                        }
-                        continue;
-                    }
-                    const char *spec = val->s_val;
-                    const char *text = spec;
-                    const char *word_meta = NULL;
-                    size_t word_meta_len = 0;
-                    uint8_t word_flags = 0;
-                    if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
-                        text = spec ? spec : "";
-                        word_flags = 0;
-                    }
-                    char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len);
-                    if (!expanded) {
+            for (size_t i = 0; i < available; ++i) {
+                Value *val = &args[value_start + i];
+                if (val->type != TYPE_STRING || !val->s_val) {
+                    char *empty = strdup("");
+                    if (!empty || !shellLoopFrameAppendValue(frame, &values_capacity, empty)) {
+                        free(empty);
                         ok = false;
                         break;
                     }
-                    frame->for_values[frame->for_count++] = expanded;
+                    continue;
+                }
+                const char *spec = val->s_val;
+                const char *text = spec;
+                const char *word_meta = NULL;
+                size_t word_meta_len = 0;
+                uint8_t word_flags = 0;
+                if (!shellDecodeWordSpec(spec, &text, &word_flags, &word_meta, &word_meta_len)) {
+                    text = spec ? spec : "";
+                    word_flags = 0;
+                }
+                char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len);
+                if (!expanded) {
+                    ok = false;
+                    break;
+                }
+                char **fields = NULL;
+                size_t field_count = 0;
+                if (!shellSplitExpandedWord(expanded, word_flags, &fields, &field_count)) {
+                    free(expanded);
+                    ok = false;
+                    break;
+                }
+                if (field_count == 0) {
+                    free(expanded);
+                    shellFreeStringArray(fields, field_count);
+                    continue;
+                }
+                free(expanded);
+                for (size_t f = 0; f < field_count; ++f) {
+                    char *field_value = fields[f];
+                    if (!field_value) {
+                        continue;
+                    }
+                    if (shellWordShouldGlob(word_flags, field_value)) {
+                        glob_t glob_result;
+                        int glob_status = glob(field_value, 0, NULL, &glob_result);
+                        if (glob_status == 0) {
+                            bool glob_ok = true;
+                            for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
+                                char *dup = strdup(glob_result.gl_pathv[g]);
+                                if (!dup || !shellLoopFrameAppendValue(frame, &values_capacity, dup)) {
+                                    if (dup) {
+                                        free(dup);
+                                    }
+                                    glob_ok = false;
+                                    break;
+                                }
+                            }
+                            globfree(&glob_result);
+                            free(field_value);
+                            fields[f] = NULL;
+                            if (!glob_ok) {
+                                ok = false;
+                                break;
+                            }
+                        } else {
+                            if (glob_status != GLOB_NOMATCH) {
+                                fprintf(stderr, "exsh: glob failed for '%s'\n", field_value);
+                            }
+                        }
+                    }
+                    if (!ok) {
+                        break;
+                    }
+                    if (field_value) {
+                        if (!shellLoopFrameAppendValue(frame, &values_capacity, field_value)) {
+                            ok = false;
+                            fields[f] = NULL;
+                            break;
+                        }
+                        fields[f] = NULL;
+                    }
+                }
+                shellFreeStringArray(fields, field_count);
+                if (!ok) {
+                    break;
                 }
             }
         }
