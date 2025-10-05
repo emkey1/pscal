@@ -1,0 +1,10 @@
+echo "if-comment:start"
+if true; then
+  echo "branch:then"
+# comment bridging then/elif
+elif false; then
+  echo "branch:elif"
+else
+  echo "branch:else"
+fi
+echo "if-comment:end"
