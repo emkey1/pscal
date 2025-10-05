@@ -259,6 +259,7 @@ ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *
     redir->io_number = io_number ? strdup(io_number) : NULL;
     redir->target = target;
     redir->here_document = NULL;
+    redir->here_document_quoted = false;
     redir->dup_target = NULL;
     redir->line = line;
     redir->column = column;
@@ -274,16 +275,21 @@ void shellFreeRedirection(ShellRedirection *redir) {
     free(redir);
 }
 
-void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload) {
+void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload, bool quoted) {
     if (!redir) {
         return;
     }
     free(redir->here_document);
     redir->here_document = payload ? strdup(payload) : NULL;
+    redir->here_document_quoted = quoted;
 }
 
 const char *shellRedirectionGetHereDocument(const ShellRedirection *redir) {
     return redir ? redir->here_document : NULL;
+}
+
+bool shellRedirectionHereDocumentIsQuoted(const ShellRedirection *redir) {
+    return redir ? redir->here_document_quoted : false;
 }
 
 void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target) {
@@ -651,6 +657,68 @@ void shellFreeFunction(ShellFunction *function) {
     free(function->parameter_metadata);
     shellFreeProgram(function->body);
     free(function);
+}
+
+static void shellProgramPropagatePipelineMetadata(ShellProgram *program,
+                                                  int pipeline_index,
+                                                  bool is_pipeline_head,
+                                                  bool is_pipeline_tail);
+
+void shellCommandPropagatePipelineMetadata(ShellCommand *command,
+                                           int pipeline_index,
+                                           bool is_pipeline_head,
+                                           bool is_pipeline_tail) {
+    if (!command) {
+        return;
+    }
+
+    if (pipeline_index >= 0) {
+        command->exec.pipeline_index = pipeline_index;
+        command->exec.is_pipeline_head = is_pipeline_head;
+        command->exec.is_pipeline_tail = is_pipeline_tail;
+    }
+
+    switch (command->type) {
+        case SHELL_COMMAND_BRACE_GROUP:
+            shellProgramPropagatePipelineMetadata(command->data.brace_group.body,
+                                                  pipeline_index,
+                                                  is_pipeline_head,
+                                                  is_pipeline_tail);
+            break;
+        case SHELL_COMMAND_PIPELINE: {
+            ShellPipeline *pipeline = command->data.pipeline;
+            if (!pipeline) {
+                break;
+            }
+            if (pipeline->command_count == 1 && pipeline->commands) {
+                ShellCommand *member = pipeline->commands[0];
+                shellCommandPropagatePipelineMetadata(member,
+                                                      pipeline_index,
+                                                      is_pipeline_head,
+                                                      is_pipeline_tail);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static void shellProgramPropagatePipelineMetadata(ShellProgram *program,
+                                                  int pipeline_index,
+                                                  bool is_pipeline_head,
+                                                  bool is_pipeline_tail) {
+    if (!program) {
+        return;
+    }
+
+    for (size_t i = 0; i < program->commands.count; ++i) {
+        ShellCommand *member = program->commands.items[i];
+        shellCommandPropagatePipelineMetadata(member,
+                                              pipeline_index,
+                                              is_pipeline_head,
+                                              is_pipeline_tail);
+    }
 }
 
 void shellCommandAddWord(ShellCommand *command, ShellWord *word) {

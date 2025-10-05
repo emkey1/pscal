@@ -281,6 +281,7 @@ static char *buildRedirectionMetadata(const ShellRedirection *redir) {
     }
 
     const char *here_body = shellRedirectionGetHereDocument(redir);
+    bool here_quoted = shellRedirectionHereDocumentIsQuoted(redir);
     char *here_hex = encodeHexString(here_body ? here_body : "");
     if (!here_hex) {
         free(encoded_word);
@@ -289,12 +290,13 @@ static char *buildRedirectionMetadata(const ShellRedirection *redir) {
     }
 
     size_t meta_len = (size_t)snprintf(NULL, 0,
-                                       "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s",
+                                       "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s;hereq=%d",
                                        fd_text,
                                        type_name ? type_name : "",
                                        encoded_word,
                                        dup_hex,
-                                       here_hex);
+                                       here_hex,
+                                       here_quoted ? 1 : 0);
     char *meta = (char *)malloc(meta_len + 1);
     if (!meta) {
         free(encoded_word);
@@ -303,12 +305,13 @@ static char *buildRedirectionMetadata(const ShellRedirection *redir) {
         return NULL;
     }
     snprintf(meta, meta_len + 1,
-             "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s",
+             "redir:fd=%s;type=%s;word=%s;dup=%s;here=%s;hereq=%d",
              fd_text,
              type_name ? type_name : "",
              encoded_word,
              dup_hex,
-             here_hex);
+             here_hex,
+             here_quoted ? 1 : 0);
 
     free(encoded_word);
     free(dup_hex);
@@ -376,6 +379,13 @@ static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline,
     emitBuiltinProc(chunk, "__shell_pipeline", 1, line);
     for (size_t i = 0; i < pipeline->command_count; ++i) {
         bool stage_background = runs_in_background && (i + 1 == pipeline->command_count);
+        ShellCommand *stage_command = pipeline->commands[i];
+        if (stage_command) {
+            shellCommandPropagatePipelineMetadata(stage_command,
+                                                  (int)i,
+                                                  i == 0,
+                                                  (i + 1) == pipeline->command_count);
+        }
         compileCommand(chunk, pipeline->commands[i], stage_background);
     }
 }

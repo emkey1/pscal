@@ -4,7 +4,7 @@ greet () {
     echo "hello from greet"
 }
 
-function farewell {
+function farewell () {
     echo "goodbye from farewell"
 }
 
