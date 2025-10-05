@@ -186,16 +186,17 @@ jobs:
 
           build_targets: list[str] = []
           target_mapping = {
-              "clike": "clike",
-              "exsh": "exsh",
-              "pascal": "pascal",
-              "rea": "rea",
+              "clike": ["clike"],
+              "exsh": ["exsh"],
+              "pascal": ["pascal", "pscalvm"],
+              "rea": ["rea", "pscalvm"],
           }
           for name in selected_frontends:
-              build_targets.append(target_mapping[name])
+              build_targets.extend(target_mapping.get(name, []))
 
           if run_ctest:
               build_targets.append("pscaljson2bc")
+              build_targets.append("pscalvm")
 
           # Remove duplicates while preserving order
           unique_targets: list[str] = []
