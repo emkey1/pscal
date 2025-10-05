@@ -26,6 +26,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <time.h>
 
 extern char **environ;
 
@@ -144,6 +145,56 @@ static bool gShellExitRequested = false;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
+static unsigned int gShellRandomSeed = 0;
+static bool gShellRandomSeedInitialized = false;
+
+static void shellRandomEnsureSeeded(void) {
+    if (gShellRandomSeedInitialized) {
+        return;
+    }
+    unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid();
+    if (seed == 0) {
+        seed = 1;
+    }
+    gShellRandomSeed = seed;
+    gShellRandomSeedInitialized = true;
+}
+
+static void shellRandomReseed(unsigned int seed) {
+    gShellRandomSeed = seed;
+    gShellRandomSeedInitialized = true;
+}
+
+static void shellRandomAssignFromText(const char *value) {
+    if (!value) {
+        shellRandomReseed(0u);
+        return;
+    }
+    errno = 0;
+    char *endptr = NULL;
+    unsigned long parsed = strtoul(value, &endptr, 10);
+    if (errno != 0 || endptr == value) {
+        parsed = 0;
+    }
+    shellRandomReseed((unsigned int)parsed);
+}
+
+static unsigned int shellRandomNextValue(void) {
+    shellRandomEnsureSeeded();
+    gShellRandomSeed = gShellRandomSeed * 1103515245u + 12345u;
+    return (gShellRandomSeed / 65536u) % 32768u;
+}
+
+static bool shellHandleSpecialAssignment(const char *name, const char *value) {
+    if (!name) {
+        return false;
+    }
+    if (strcmp(name, "RANDOM") == 0) {
+        shellRandomAssignFromText(value);
+        return true;
+    }
+    return false;
+}
 
 static bool shellLoopEnsureCapacity(size_t needed) {
     if (gShellLoopStackCapacity >= needed) {
@@ -1092,6 +1143,10 @@ static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
             free(name);
             return false;
         }
+        if (shellHandleSpecialAssignment(name, value)) {
+            free(name);
+            continue;
+        }
         if (setenv(name, value ? value : "", 1) != 0) {
             if (out_failed_assignment) {
                 *out_failed_assignment = assignment;
@@ -1161,6 +1216,13 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
             }
             shellRestoreAssignments(backups, i);
             return false;
+        }
+        if (shellHandleSpecialAssignment(name, value)) {
+            free(name);
+            backups[i].name = NULL;
+            backups[i].previous_value = NULL;
+            backups[i].had_previous = false;
+            continue;
         }
         backups[i].name = name;
         const char *previous = getenv(name);
@@ -2112,6 +2174,16 @@ static char *shellLookupParameterValueInternal(const char *name, size_t len, boo
             default:
                 break;
         }
+    }
+
+    if (len == 6 && strncmp(name, "RANDOM", 6) == 0) {
+        unsigned int value = shellRandomNextValue();
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%u", value);
+        if (out_is_set) {
+            *out_is_set = true;
+        }
+        return strdup(buffer);
     }
 
     bool numeric = true;
