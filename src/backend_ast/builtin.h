@@ -143,6 +143,7 @@ Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellFinger(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellReturn(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellHelp(struct VM_s* vm, int arg_count, Value* args);
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellLoopAdvance(struct VM_s* vm);
 Value vmHostShellLoopIsReady(struct VM_s* vm);

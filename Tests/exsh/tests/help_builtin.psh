@@ -1,0 +1,4 @@
+#!/usr/bin/env exsh
+help
+help source
+help .

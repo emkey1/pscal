@@ -4071,7 +4071,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "export",  "unset",    "setenv",  "unsetenv",
                                       "set",    "trap",    "local",   "break",   "continue", "alias",   "history",
                                       "jobs",   "fg",      "bg",      "wait",    "builtin",  "source",  ":",      "eval",
-                                      "read",   "shift",   "return"};
+                                      "read",   "shift",   "return",  "help"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -6865,6 +6865,373 @@ static bool shellSetAlias(const char *name, const char *value) {
         return false;
     }
     return true;
+}
+
+typedef struct {
+    const char *name;
+    const char *summary;
+    const char *usage;
+    const char *detail;
+    const char *const *aliases;
+    size_t alias_count;
+} ShellHelpTopic;
+
+static const char *const kShellHelpSourceAliases[] = {"."};
+
+static const ShellHelpTopic kShellHelpTopics[] = {
+    {
+        "alias",
+        "Define or display shell aliases.",
+        "alias [name=value ...]",
+        "Without arguments prints the stored alias definitions as "
+        "alias name='value'. Each NAME=VALUE argument updates or creates an alias.",
+        NULL,
+        0
+    },
+    {
+        "bg",
+        "Resume a stopped job in the background.",
+        "bg [job]",
+        "Targets the most recently launched job when no job is supplied. Job"
+        " specifiers may be numeric indexes or begin with '%'.",
+        NULL,
+        0
+    },
+    {
+        "break",
+        "Exit from the innermost loop(s).",
+        "break [n]",
+        "Accepts an optional positive integer count; the default of 1 exits only"
+        " the innermost active loop.",
+        NULL,
+        0
+    },
+    {
+        "builtin",
+        "Invoke a PSCAL VM builtin directly.",
+        "builtin name [args ...]",
+        "Arguments are forwarded to the named VM builtin. Prefix an argument with"
+        " int:, float:/double:/real:, bool:/boolean:, str:/string:/raw:, or"
+        " nil: to coerce the value; other arguments are passed as strings. When"
+        " the VM builtin returns a non-void value it is printed to stdout on"
+        " success.",
+        NULL,
+        0
+    },
+    {
+        "cd",
+        "Change the current working directory.",
+        "cd [dir]",
+        "With no arguments cd switches to $HOME. Successful runs update the PWD"
+        " environment variable.",
+        NULL,
+        0
+    },
+    {
+        "continue",
+        "Skip to the next loop iteration.",
+        "continue [n]",
+        "Accepts an optional positive integer count and marks the requested"
+        " number of enclosing loops to continue.",
+        NULL,
+        0
+    },
+    {
+        "eval",
+        "Execute words as an inline script.",
+        "eval [word ...]",
+        "Concatenates the provided words with single spaces and executes the"
+        " resulting text without caching bytecode.",
+        NULL,
+        0
+    },
+    {
+        "exit",
+        "Request that the shell terminate.",
+        "exit [status]",
+        "Marks the shell for exit after running cleanup handlers. If an integer"
+        " value is supplied it becomes the process exit code; otherwise the"
+        " status defaults to 0.",
+        NULL,
+        0
+    },
+    {
+        "export",
+        "Set environment variables or print the environment.",
+        "export [-p] [name[=value] ...]",
+        "Without arguments (or with -p) prints the environment as export"
+        " assignments. Each name or NAME=VALUE argument updates the process"
+        " environment. Only -p and -- are recognised options.",
+        NULL,
+        0
+    },
+    {
+        "fg",
+        "Move a job to the foreground.",
+        "fg [job]",
+        "Targets the most recently launched job when no argument is supplied."
+        " Job specifiers may be numeric indexes or begin with '%'.",
+        NULL,
+        0
+    },
+    {
+        "finger",
+        "Display basic account information.",
+        "finger [user]",
+        "Prints the login, gecos name, home directory, and shell for the"
+        " selected account. Defaults to the current user when no argument is"
+        " provided.",
+        NULL,
+        0
+    },
+    {
+        "help",
+        "List builtins or describe a specific builtin.",
+        "help [builtin]",
+        "Without arguments prints the builtin catalog. Supplying a builtin name"
+        " shows its usage summary.",
+        NULL,
+        0
+    },
+    {
+        "history",
+        "Print the interactive history list.",
+        "history",
+        "Writes each recorded interactive command with its history index.",
+        NULL,
+        0
+    },
+    {
+        "jobs",
+        "List active background jobs.",
+        "jobs",
+        "Reports each tracked job with its index, status, and command line.",
+        NULL,
+        0
+    },
+    {
+        "local",
+        "Activate the shell's local scope flag.",
+        "local",
+        "Sets the runtime flag that marks the current function scope as local-aware."
+        " Accepts no arguments.",
+        NULL,
+        0
+    },
+    {
+        "pwd",
+        "Print the current working directory.",
+        "pwd",
+        "Outputs the absolute path returned by getcwd(3).",
+        NULL,
+        0
+    },
+    {
+        "read",
+        "Read a line from standard input.",
+        "read [-p prompt] [name ...]",
+        "Reads a line, splits it into words, and assigns them to the requested"
+        " environment variables. Without explicit names the value is stored in"
+        " REPLY. Only the -p prompt option is supported.",
+        NULL,
+        0
+    },
+    {
+        "return",
+        "Return from the current shell function.",
+        "return [status]",
+        "Exits the innermost shell function. The optional status is parsed as an"
+        " integer and limited to the range 0–255.",
+        NULL,
+        0
+    },
+    {
+        "set",
+        "Update shell option flags.",
+        "set [--] [-e|+e] [-o errexit|+o errexit]",
+        "Toggles the shell's errexit flag. Options other than -e/+e and"
+        " -o/+o errexit are rejected.",
+        NULL,
+        0
+    },
+    {
+        "setenv",
+        "Set or print environment variables.",
+        "setenv [name [value]]",
+        "With no arguments prints the environment. NAME assigns an empty string"
+        " and NAME VALUE assigns the provided string. Invalid names raise an"
+        " error.",
+        NULL,
+        0
+    },
+    {
+        "shift",
+        "Rotate positional parameters to the left.",
+        "shift [count]",
+        "Removes COUNT positional parameters (default 1). COUNT must be a"
+        " non-negative integer that does not exceed the current parameter"
+        " count.",
+        NULL,
+        0
+    },
+    {
+        "source",
+        "Execute a file in the current shell environment.",
+        "source file [args ...]",
+        "Loads the named file and executes it without spawning a subshell."
+        " Positional parameters are temporarily replaced when arguments are"
+        " supplied. The '.' builtin is an alias.",
+        kShellHelpSourceAliases,
+        1
+    },
+    {
+        "trap",
+        "Toggle the shell's trap flag.",
+        "trap [commands ...]",
+        "Calling trap with arguments enables the runtime trap flag; running it"
+        " with no arguments clears the flag. Trap handlers are not yet"
+        " parameterised per signal.",
+        NULL,
+        0
+    },
+    {
+        "unset",
+        "Remove variables from the environment.",
+        "unset name [name ...]",
+        "Clears each named environment variable via unsetenv(3).",
+        NULL,
+        0
+    },
+    {
+        "unsetenv",
+        "Alias for unset.",
+        "unsetenv name [name ...]",
+        "This is a synonym for unset and removes environment variables via"
+        " unsetenv(3).",
+        NULL,
+        0
+    },
+    {
+        "wait",
+        "Wait for a job to change state.",
+        "wait [job]",
+        "Waits for the specified job (or the most recent one) to finish. Job"
+        " specifiers may be numeric indexes or begin with '%'.",
+        NULL,
+        0
+    },
+    {
+        ":",
+        "Do nothing and succeed.",
+        ":",
+        "A no-op builtin that always reports success.",
+        NULL,
+        0
+    }
+};
+
+static const ShellHelpTopic *shellHelpFindTopic(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    size_t topic_count = sizeof(kShellHelpTopics) / sizeof(kShellHelpTopics[0]);
+    for (size_t i = 0; i < topic_count; ++i) {
+        const ShellHelpTopic *topic = &kShellHelpTopics[i];
+        if (strcasecmp(name, topic->name) == 0) {
+            return topic;
+        }
+        for (size_t j = 0; j < topic->alias_count; ++j) {
+            if (topic->aliases && strcasecmp(name, topic->aliases[j]) == 0) {
+                return topic;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void shellHelpPrintList(void) {
+    size_t topic_count = sizeof(kShellHelpTopics) / sizeof(kShellHelpTopics[0]);
+    size_t width = strlen("Builtin");
+    char display[64];
+
+    for (size_t i = 0; i < topic_count; ++i) {
+        const ShellHelpTopic *topic = &kShellHelpTopics[i];
+        const char *name = topic->name;
+        if (topic->alias_count > 0 && topic->aliases) {
+            snprintf(display, sizeof(display), "%s (%s)", name, topic->aliases[0]);
+            name = display;
+        }
+        size_t len = strlen(name);
+        if (len > width) {
+            width = len;
+        }
+    }
+
+    printf("exsh builtins. Type 'help name' for detailed usage.\n\n");
+    printf("%-*s  %s\n", (int)width, "Builtin", "Summary");
+    printf("%-*s  %s\n", (int)width, "------", "-------");
+
+    for (size_t i = 0; i < topic_count; ++i) {
+        const ShellHelpTopic *topic = &kShellHelpTopics[i];
+        const char *name = topic->name;
+        if (topic->alias_count > 0 && topic->aliases) {
+            snprintf(display, sizeof(display), "%s (%s)", name, topic->aliases[0]);
+            name = display;
+        }
+        printf("%-*s  %s\n", (int)width, name, topic->summary);
+    }
+}
+
+static void shellHelpPrintTopic(const ShellHelpTopic *topic) {
+    if (!topic) {
+        return;
+    }
+    printf("%s - %s\n", topic->name, topic->summary);
+    if (topic->alias_count > 0 && topic->aliases) {
+        printf("Aliases: ");
+        for (size_t i = 0; i < topic->alias_count; ++i) {
+            printf("%s%s", topic->aliases[i], (i + 1 < topic->alias_count) ? " " : "\n");
+        }
+    }
+    if (topic->usage && *topic->usage) {
+        printf("Usage: %s\n", topic->usage);
+    }
+    if (topic->detail && *topic->detail) {
+        printf("\n%s\n", topic->detail);
+    }
+}
+
+Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
+    if (arg_count == 0) {
+        shellHelpPrintList();
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    if (arg_count > 1) {
+        runtimeError(vm, "help: expected at most one builtin name");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "help: expected builtin name as string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    const char *requested = args[0].s_val;
+    const char *canonical = shellBuiltinCanonicalName(requested);
+    const ShellHelpTopic *topic = shellHelpFindTopic(canonical);
+    if (!topic) {
+        runtimeError(vm, "help: unknown builtin '%s'", requested);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    shellHelpPrintTopic(topic);
+    shellUpdateStatus(0);
+    return makeVoid();
 }
 
 Value vmBuiltinShellAlias(VM *vm, int arg_count, Value *args) {
