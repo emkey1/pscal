@@ -175,6 +175,111 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
     frame->for_active = false;
 }
 
+typedef enum {
+    SHELL_READ_LINE_OK,
+    SHELL_READ_LINE_EOF,
+    SHELL_READ_LINE_ERROR
+} ShellReadLineResult;
+
+static ShellReadLineResult shellReadLineFromStream(FILE *stream,
+                                                   char **out_line,
+                                                   size_t *out_length) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (out_length) {
+        *out_length = 0;
+    }
+    if (!stream) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t length = 0;
+    bool saw_any = false;
+    while (true) {
+        int ch = fgetc(stream);
+        if (ch == EOF) {
+            if (ferror(stream)) {
+                free(buffer);
+                clearerr(stream);
+                return SHELL_READ_LINE_ERROR;
+            }
+            if (!saw_any) {
+                free(buffer);
+                return SHELL_READ_LINE_EOF;
+            }
+            break;
+        }
+        saw_any = true;
+        if (length + 1 >= capacity) {
+            size_t new_capacity = capacity * 2;
+            char *resized = (char *)realloc(buffer, new_capacity);
+            if (!resized) {
+                free(buffer);
+                return SHELL_READ_LINE_ERROR;
+            }
+            buffer = resized;
+            capacity = new_capacity;
+        }
+        buffer[length++] = (char)ch;
+        if (ch == '\n') {
+            break;
+        }
+    }
+
+    buffer[length] = '\0';
+    if (out_line) {
+        *out_line = buffer;
+    } else {
+        free(buffer);
+    }
+    if (out_length) {
+        *out_length = length;
+    }
+    return SHELL_READ_LINE_OK;
+}
+
+static char *shellReadExtractField(char **cursor, bool last_field) {
+    if (!cursor) {
+        return strdup("");
+    }
+    char *text = *cursor;
+    if (!text) {
+        return strdup("");
+    }
+    while (*text && isspace((unsigned char)*text)) {
+        text++;
+    }
+    if (last_field) {
+        char *value = strdup(text ? text : "");
+        if (!value) {
+            return NULL;
+        }
+        *cursor = text + strlen(text);
+        return value;
+    }
+    char *end = text;
+    while (*end && !isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (end == text) {
+        *cursor = end;
+        return strdup("");
+    }
+    char saved = *end;
+    *end = '\0';
+    char *value = strdup(text);
+    *end = saved;
+    *cursor = end;
+    return value;
+}
+
 static bool shellAssignLoopVariable(const char *name, const char *value) {
     if (!name) {
         return false;
@@ -3738,7 +3843,8 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",    "pwd",    "exit",    "export",  "unset",    "setenv",   "unsetenv",
                                       "set",   "trap",   "local",  "break",   "continue", "alias",    "history",
-                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":",       "eval"};
+                                      "jobs",  "fg",     "bg",     "wait",    "builtin",  "source",   ":",       "eval",
+                                      "read"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     for (size_t i = 0; i < count; ++i) {
@@ -5846,6 +5952,123 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     gShellExitRequested = true;
     vm->exit_requested = true;
     vm->current_builtin_name = "exit";
+    return makeVoid();
+}
+
+Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
+    const char *prompt = NULL;
+    const char **variables = NULL;
+    size_t variable_count = 0;
+    bool parsing_options = true;
+    bool ok = true;
+
+    for (int i = 0; i < arg_count && ok; ++i) {
+        Value val = args[i];
+        if (val.type != TYPE_STRING || !val.s_val) {
+            runtimeError(vm, "read: arguments must be strings");
+            ok = false;
+            break;
+        }
+        const char *token = val.s_val;
+        if (parsing_options) {
+            if (strcmp(token, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (strcmp(token, "-p") == 0) {
+                if (i + 1 >= arg_count) {
+                    runtimeError(vm, "read: option -p requires an argument");
+                    ok = false;
+                    break;
+                }
+                Value prompt_val = args[++i];
+                if (prompt_val.type != TYPE_STRING || !prompt_val.s_val) {
+                    runtimeError(vm, "read: prompt must be a string");
+                    ok = false;
+                    break;
+                }
+                prompt = prompt_val.s_val;
+                continue;
+            }
+            if (token[0] == '-') {
+                runtimeError(vm, "read: unsupported option '%s'", token);
+                ok = false;
+                break;
+            }
+            parsing_options = false;
+        }
+        const char **resized = (const char **)realloc(variables, (variable_count + 1) * sizeof(const char *));
+        if (!resized) {
+            runtimeError(vm, "read: out of memory");
+            ok = false;
+            break;
+        }
+        variables = resized;
+        variables[variable_count++] = token;
+    }
+
+    if (ok && variable_count == 0) {
+        variables = (const char **)malloc(sizeof(const char *));
+        if (!variables) {
+            runtimeError(vm, "read: out of memory");
+            ok = false;
+        } else {
+            variables[0] = "REPLY";
+            variable_count = 1;
+        }
+    }
+
+    ShellReadLineResult read_result = SHELL_READ_LINE_ERROR;
+    char *line = NULL;
+    size_t line_length = 0;
+    if (ok) {
+        if (prompt) {
+            fputs(prompt, stdout);
+            fflush(stdout);
+        }
+        read_result = shellReadLineFromStream(stdin, &line, &line_length);
+        if (read_result == SHELL_READ_LINE_OK && line_length > 0 && line[line_length - 1] == '\n') {
+            line[--line_length] = '\0';
+        }
+        if (read_result == SHELL_READ_LINE_ERROR) {
+            runtimeError(vm, "read: failed to read input");
+        }
+    }
+
+    bool assign_ok = ok;
+    if (ok && (read_result == SHELL_READ_LINE_OK || read_result == SHELL_READ_LINE_EOF)) {
+        char *cursor = line;
+        for (size_t i = 0; i < variable_count; ++i) {
+            bool last = (i + 1 == variable_count);
+            char *value_copy = NULL;
+            if (read_result == SHELL_READ_LINE_OK) {
+                value_copy = shellReadExtractField(&cursor, last);
+            } else {
+                value_copy = strdup("");
+            }
+            if (!value_copy) {
+                runtimeError(vm, "read: out of memory");
+                assign_ok = false;
+                break;
+            }
+            if (setenv(variables[i], value_copy, 1) != 0) {
+                runtimeError(vm, "read: unable to set '%s': %s", variables[i], strerror(errno));
+                free(value_copy);
+                assign_ok = false;
+                break;
+            }
+            free(value_copy);
+        }
+    }
+
+    free(line);
+    free(variables);
+
+    if (!ok || !assign_ok || read_result != SHELL_READ_LINE_OK) {
+        shellUpdateStatus(1);
+    } else {
+        shellUpdateStatus(0);
+    }
     return makeVoid();
 }
 
