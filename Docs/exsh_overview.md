@@ -117,7 +117,8 @@ extends it with orchestration helpers implemented in
 `backend_ast/shell.c`. The following categories are available out of the box:
 
 - Shell control builtins (`cd`, `pwd`, `exit`, `alias`, `export`, `setenv`,
-  `unset`, `unsetenv`).
+  `unset`, `unsetenv`) and an interactive `help` builtin for listing and
+  describing available commands.
 - Pipeline helpers (`__shell_exec`, `__shell_pipeline`, `__shell_and`,
   `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`).
 - The complete PSCAL builtin catalog (HTTP, sockets, JSON, extended math/string
