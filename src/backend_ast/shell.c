@@ -7638,7 +7638,25 @@ static const ShellHelpTopic *shellHelpFindTopic(const char *name) {
     return NULL;
 }
 
-static void shellHelpPrintList(void) {
+static void shellHelpPrintOverview(void) {
+    printf("help\n");
+    printf("exsh is the PSCAL shell front end, providing an interactive environment for orchestrating VM builtins and external commands.\n\n");
+    printf("exsh can evaluate shell scripts, manage pipelines, and redirect input and output just like a traditional POSIX-style shell. Use '>' to overwrite files, '>>' to append, and '|' to connect commands.\n\n");
+    printf("- Source ~/.exshrc to customise prompts, aliases, and startup behaviour.\n");
+    printf("- Use bookmark helpers (bookmark, showmarks, jump) to save and revisit directories quickly.\n");
+    printf("- Manage jobs with bg, fg, jobs, wait, and trap.\n");
+    printf("- exit leaves the shell; builtin invokes PSCAL VM helpers directly.\n\n");
+    printf("- exsh loads ~/.exshrc on startup when the file is present.\n\n");
+    printf("- Navigate the interface with familiar terminal controls when used in supporting environments.\n");
+    printf("- Edit with vim or pico, transfer data via curl, scp, or sftp, and inspect the network with ping, host, or nslookup.\n");
+    printf("- Extend the runtime with PSCAL packages and builtins compiled via the toolchain.\n\n");
+    printf("- Compiled scripts are cached in ~/.pscal/bc_cache; use --no-cache to force recompilation.\n\n");
+    printf("Documentation: Docs/exsh_overview.md inside the repository.\n");
+    printf("Support: Report issues on the GitHub PSCAL project tracker or Discord community channels.\n\n");
+    printf("Type 'help -l' for a list of functions, or 'help <function>' for help on a specific shell function.\n");
+}
+
+static void shellHelpPrintCatalog(void) {
     size_t topic_count = sizeof(kShellHelpTopics) / sizeof(kShellHelpTopics[0]);
     size_t width = strlen("Builtin");
     char display[64];
@@ -7656,22 +7674,7 @@ static void shellHelpPrintList(void) {
         }
     }
 
-    printf("help\n");
-    printf("exsh is the PSCAL shell front end, providing an interactive environment for orchestrating VM builtins and external commands.\n\n");
-    printf("exsh can evaluate shell scripts, manage pipelines, and redirect input and output just like a traditional POSIX-style shell. Use '>' to overwrite files, '>>' to append, and '|' to connect commands.\n\n");
-    printf("- Source ~/.exshrc to customise prompts, aliases, and startup behaviour.\n");
-    printf("- Use bookmark helpers (bookmark, showmarks, jump) to save and revisit directories quickly.\n");
-    printf("- Manage jobs with bg, fg, jobs, wait, and trap.\n");
-    printf("- exit leaves the shell; builtin invokes PSCAL VM helpers directly.\n\n");
-    printf("- exsh loads ~/.exshrc on startup when the file is present.\n\n");
-    printf("- Navigate the interface with familiar terminal controls when used in supporting environments.\n");
-    printf("- Edit with vim or pico, transfer data via curl, scp, or sftp, and inspect the network with ping, host, or nslookup.\n");
-    printf("- Extend the runtime with PSCAL packages and builtins compiled via the toolchain.\n\n");
-    printf("- Compiled scripts are cached in ~/.pscal/bc_cache; use --no-cache to force recompilation.\n\n");
-    printf("Documentation: Docs/exsh_overview.md inside the repository.\n");
-    printf("Support: Report issues on the GitHub PSCAL project tracker or Discord community channels.\n\n");
-    printf("For the builtin catalog, see below or request a specific topic with 'help name'.\n\n");
-    printf("exsh builtins. Type 'help name' for detailed usage.\n\n");
+    printf("exsh builtins. Type 'help <function>' for detailed usage.\n\n");
     printf("%-*s  %s\n", (int)width, "Builtin", "Summary");
     printf("%-*s  %s\n", (int)width, "------", "-------");
 
@@ -7707,7 +7710,7 @@ static void shellHelpPrintTopic(const ShellHelpTopic *topic) {
 
 Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     if (arg_count == 0) {
-        shellHelpPrintList();
+        shellHelpPrintOverview();
         shellUpdateStatus(0);
         return makeVoid();
     }
@@ -7725,6 +7728,12 @@ Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     }
 
     const char *requested = args[0].s_val;
+    if (strcmp(requested, "-l") == 0) {
+        shellHelpPrintCatalog();
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
     const char *canonical = shellBuiltinCanonicalName(requested);
     const ShellHelpTopic *topic = shellHelpFindTopic(canonical);
     if (!topic) {
