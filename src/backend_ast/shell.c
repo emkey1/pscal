@@ -4808,6 +4808,14 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
             }
             return true;
         }
+    } else if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
+        if (!shellCommandAppendArgOwned(cmd, expanded)) {
+            return false;
+        }
+        if (saw_command_word) {
+            *saw_command_word = true;
+        }
+        return true;
     }
     char **fields = NULL;
     size_t field_count = 0;
