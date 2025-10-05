@@ -136,6 +136,27 @@ loop helpers above, which cooperate with real VM jump opcodes. The runtime
 evaluates conditions using shell truthiness rules and only executes the branch
 or loop body whose guard succeeds.
 
+## Accessing core and extended builtins
+
+`shellRunSource` registers the full PSCAL builtin catalog before compiling a
+script, so every shell run has access to the same VM services as the Pascal and
+C-like front ends.【F:src/shell/runner.c†L53-L105】 Shell-specific helpers are
+compiled into the runtime and exposed through builtin handlers such as `cd`,
+`jobs`, `fg`, and `bg` for job control, along with `builtin` for invoking VM
+routines directly.【F:src/backend_ast/shell.c†L5985-L6767】
+
+The `builtin` command accepts the VM builtin name followed by arguments. Prefix
+tokens with `int:`, `float:`/`double:`/`real:`, `bool:`, `str:`/`raw:`, or
+`nil`/`nil:` to coerce shell words into the expected VM type; otherwise values
+are passed as strings. Return values are printed automatically when the
+underlying builtin reports success.【F:src/backend_ast/shell.c†L3462-L3561】【F:src/backend_ast/shell.c†L6767-L6805】
+
+Extended builtin groups are linked at build time. You can inspect the compiled
+inventory by running `exsh --dump-ext-builtins`, which produces the same
+category/group/function listing used by other front ends.【F:src/shell/main.c†L2351-L2387】
+Available categories include math, system, SQLite, graphics, yyjson, and other
+optional modules controlled by the `-DENABLE_EXT_BUILTIN_*` CMake flags.【F:Docs/extended_builtins.md†L15-L44】
+
 ## Grammar coverage
 
 The parser now accepts the broader POSIX grammar expected by automation-heavy
@@ -160,3 +181,19 @@ builtins live in `Examples/exsh/`. The regression suite under `Tests/exsh/`
 runs these scripts through `build/bin/exsh`, checks stdout/stderr, and verifies
 exit codes. The CI workflow executes the new suite alongside the Pascal, CLike,
 and Rea test runs.
+
+
+## POSIX deviations (non-additive)
+
+`exsh` intentionally omits or simplifies a handful of POSIX behaviours. These
+differences are not additive extensions:
+
+- `set` only recognises `-e`, `+e`, and `-o/+o errexit`; other options are
+  ignored or flagged as errors.【F:src/backend_ast/shell.c†L6415-L6459】
+- `trap` merely toggles a global flag—no handler strings are registered or
+  executed, and non-string arguments fail validation.【F:src/backend_ast/shell.c†L6464-L6481】
+- `local` does not introduce a new scope; it simply flips an internal marker and
+  returns success.【F:src/backend_ast/shell.c†L6484-L6489】
+- `read` supports `-p` prompts and `--` but otherwise rejects option flags, and
+  assigns results by exporting environment variables (defaulting to `REPLY`)
+  instead of populating shell-local variables.【F:src/backend_ast/shell.c†L6195-L6307】
