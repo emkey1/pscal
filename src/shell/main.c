@@ -11,6 +11,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -37,6 +38,171 @@ static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length);
+
+static int interactiveTerminalWidth(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
+        return ws.ws_col;
+    }
+    const char *columns_env = getenv("COLUMNS");
+    if (columns_env && *columns_env) {
+        char *endptr = NULL;
+        long value = strtol(columns_env, &endptr, 10);
+        if (endptr && *endptr == '\0' && value > 0 && value <= INT_MAX) {
+            return (int)value;
+        }
+    }
+    return 80;
+}
+
+static void interactiveAdvancePosition(size_t term_width,
+                                       size_t *row,
+                                       size_t *col,
+                                       unsigned char ch) {
+    if (!row || !col) {
+        return;
+    }
+    if (ch == '\n') {
+        (*row)++;
+        *col = 0;
+        return;
+    }
+    if (ch == '\r') {
+        *col = 0;
+        return;
+    }
+    if (ch == '\t') {
+        size_t next_tab_stop = ((*col) / 8 + 1) * 8;
+        *col = next_tab_stop;
+    } else {
+        (*col)++;
+    }
+    if (term_width > 0 && *col >= term_width) {
+        *row += *col / term_width;
+        *col %= term_width;
+    }
+}
+
+static const unsigned char *interactiveSkipAnsiSequence(const unsigned char *p) {
+    if (!p || *p != '\033') {
+        return p;
+    }
+    ++p;
+    if (!*p) {
+        return p;
+    }
+
+    if (*p == '[') {
+        ++p;
+        while (*p && !(*p >= '@' && *p <= '~')) {
+            ++p;
+        }
+        if (*p) {
+            ++p;
+        }
+        return p;
+    }
+
+    if (*p == ']' || *p == 'P' || *p == '^' || *p == '_') {
+        ++p;
+        while (*p) {
+            if (*p == '\a') {
+                ++p;
+                break;
+            }
+            if (*p == '\033' && p[1] == '\\') {
+                p += 2;
+                break;
+            }
+            ++p;
+        }
+        return p;
+    }
+
+    if ((*p >= '(' && *p <= '/') || *p == '%') {
+        ++p;
+        if (*p) {
+            ++p;
+        }
+        return p;
+    }
+
+    if (*p) {
+        ++p;
+    }
+    return p;
+}
+
+static void interactiveComputeDisplayMetrics(const char *prompt,
+                                             const char *buffer,
+                                             size_t length,
+                                             size_t cursor,
+                                             size_t term_width,
+                                             size_t *out_total_rows,
+                                             size_t *out_cursor_row,
+                                             size_t *out_cursor_col,
+                                             size_t *out_end_row,
+                                             size_t *out_end_col) {
+    size_t row = 0;
+    size_t col = 0;
+    size_t total_rows = 1;
+
+    if (prompt) {
+        const unsigned char *p = (const unsigned char *)prompt;
+        while (*p) {
+            if (*p == '\033') {
+                const unsigned char *next = interactiveSkipAnsiSequence(p);
+                if (next == p) {
+                    ++p;
+                } else {
+                    p = next;
+                }
+                continue;
+            }
+            interactiveAdvancePosition(term_width, &row, &col, *p);
+            size_t used_rows = row + 1;
+            if (used_rows > total_rows) {
+                total_rows = used_rows;
+            }
+            ++p;
+        }
+    }
+
+    if (cursor == 0 && out_cursor_row && out_cursor_col) {
+        *out_cursor_row = row;
+        *out_cursor_col = col;
+    }
+
+    if (buffer && length > 0) {
+        for (size_t i = 0; i < length; ++i) {
+            if (i == cursor && out_cursor_row && out_cursor_col) {
+                *out_cursor_row = row;
+                *out_cursor_col = col;
+            }
+            interactiveAdvancePosition(term_width, &row, &col,
+                                       (unsigned char)buffer[i]);
+            size_t used_rows = row + 1;
+            if (used_rows > total_rows) {
+                total_rows = used_rows;
+            }
+        }
+    }
+
+    if (cursor >= length && out_cursor_row && out_cursor_col) {
+        *out_cursor_row = row;
+        *out_cursor_col = col;
+    }
+
+    if (out_end_row) {
+        *out_end_row = row;
+    }
+    if (out_end_col) {
+        *out_end_col = col;
+    }
+    if (out_total_rows) {
+        *out_total_rows = total_rows;
+    }
+}
 
 static void interactiveRestoreTerminal(void) {
     if (gInteractiveTermiosValid) {
@@ -566,16 +732,22 @@ static char *shellResolveInteractivePrompt(void) {
 }
 
 static size_t shellPromptLineBreakCount(const char *prompt) {
-    if (!prompt) {
+    size_t total_rows = 1;
+    size_t term_width = (size_t)interactiveTerminalWidth();
+    interactiveComputeDisplayMetrics(prompt,
+                                     NULL,
+                                     0,
+                                     0,
+                                     term_width,
+                                     &total_rows,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL);
+    if (total_rows == 0) {
         return 0;
     }
-    size_t count = 0;
-    for (const char *cursor = prompt; *cursor; ++cursor) {
-        if (*cursor == '\n') {
-            ++count;
-        }
-    }
-    return count;
+    return (total_rows > 0) ? (total_rows - 1) : 0;
 }
 
 static void redrawInteractiveLine(const char *prompt,
@@ -584,41 +756,70 @@ static void redrawInteractiveLine(const char *prompt,
                                   size_t cursor,
                                   size_t *displayed_length,
                                   size_t *displayed_prompt_lines) {
-    size_t previous = displayed_length ? *displayed_length : 0;
     size_t previous_prompt_lines =
         displayed_prompt_lines ? *displayed_prompt_lines : 0;
+    size_t term_width = (size_t)interactiveTerminalWidth();
+
+    size_t total_rows = 1;
+    size_t cursor_row = 0;
+    size_t cursor_col = 0;
+    size_t end_row = 0;
+    size_t end_col = 0;
+    interactiveComputeDisplayMetrics(prompt,
+                                     buffer,
+                                     length,
+                                     cursor,
+                                     term_width,
+                                     &total_rows,
+                                     &cursor_row,
+                                     &cursor_col,
+                                     &end_row,
+                                     &end_col);
+
     fputs("\r", stdout);
     for (size_t i = 0; i < previous_prompt_lines; ++i) {
         fputs("\033[A", stdout);
     }
+    fputs("\033[J", stdout);
     if (prompt) {
         fputs(prompt, stdout);
     }
     if (buffer && length > 0) {
         fwrite(buffer, 1, length, stdout);
     }
-    if (previous > length) {
-        size_t diff = previous - length;
+    fflush(stdout);
+
+    if (end_row > cursor_row) {
+        size_t diff = end_row - cursor_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputc(' ', stdout);
+            fputs("\033[A", stdout);
         }
+    } else if (cursor_row > end_row) {
+        size_t diff = cursor_row - end_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputc('\b', stdout);
+            fputs("\033[B", stdout);
         }
     }
-    size_t desired_cursor = cursor;
-    if (desired_cursor < length) {
-        size_t moves = length - desired_cursor;
-        for (size_t i = 0; i < moves; ++i) {
-            fputc('\b', stdout);
+
+    if (end_col > cursor_col) {
+        size_t diff = end_col - cursor_col;
+        for (size_t i = 0; i < diff; ++i) {
+            fputs("\033[D", stdout);
+        }
+    } else if (cursor_col > end_col) {
+        size_t diff = cursor_col - end_col;
+        for (size_t i = 0; i < diff; ++i) {
+            fputs("\033[C", stdout);
         }
     }
     fflush(stdout);
+
     if (displayed_length) {
         *displayed_length = length;
     }
     if (displayed_prompt_lines) {
-        *displayed_prompt_lines = shellPromptLineBreakCount(prompt);
+        *displayed_prompt_lines =
+            (total_rows > 0) ? (total_rows - 1) : 0;
     }
 }
 
@@ -1214,6 +1415,88 @@ static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
     return prefix_len;
 }
 
+static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
+    if (!items || count == 0) {
+        return;
+    }
+
+    size_t valid_count = 0;
+    size_t max_len = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!items[i]) {
+            continue;
+        }
+        size_t len = strlen(items[i]);
+        if (len > max_len) {
+            max_len = len;
+        }
+        valid_count++;
+    }
+    if (valid_count == 0) {
+        return;
+    }
+
+    char **entries = (char **)malloc(valid_count * sizeof(char *));
+    if (!entries) {
+        for (size_t i = 0; i < count; ++i) {
+            if (!items[i]) {
+                continue;
+            }
+            fputs(items[i], stdout);
+            fputc('\n', stdout);
+        }
+        return;
+    }
+
+    size_t index = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!items[i]) {
+            continue;
+        }
+        entries[index++] = items[i];
+    }
+
+    int width = interactiveTerminalWidth();
+    if (width <= 0) {
+        width = 80;
+    }
+
+    size_t col_width = (max_len > 0 ? max_len : 1) + 2;
+    if ((size_t)width <= col_width) {
+        col_width = (max_len > 0 ? max_len : 1) + 1;
+    }
+
+    size_t columns = (size_t)width / col_width;
+    if (columns == 0) {
+        columns = 1;
+    }
+    size_t rows = (valid_count + columns - 1) / columns;
+
+    for (size_t row = 0; row < rows; ++row) {
+        for (size_t col = 0; col < columns; ++col) {
+            size_t entry_index = col * rows + row;
+            if (entry_index >= valid_count) {
+                continue;
+            }
+            const char *entry = entries[entry_index];
+            size_t len = strlen(entry);
+            fputs(entry, stdout);
+            if (col + 1 < columns) {
+                size_t next_index = (col + 1) * rows + row;
+                if (next_index < valid_count) {
+                    size_t padding = (col_width > len) ? (col_width - len) : 1;
+                    for (size_t pad = 0; pad < padding; ++pad) {
+                        fputc(' ', stdout);
+                    }
+                }
+            }
+        }
+        fputc('\n', stdout);
+    }
+
+    free(entries);
+}
+
 static bool interactiveHandleTabCompletion(const char *prompt,
                                            char **buffer,
                                            size_t *length,
@@ -1311,14 +1594,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         replacement_len = interactiveCommonPrefixLength(results.gl_pathv, results.gl_pathc);
         if (replacement_len <= word_len) {
             putchar('\n');
-            for (size_t i = 0; i < results.gl_pathc; ++i) {
-                const char *match = results.gl_pathv[i];
-                if (!match) {
-                    continue;
-                }
-                fputs(match, stdout);
-                fputc('\n', stdout);
-            }
+            interactivePrintMatchesInColumns(results.gl_pathv, results.gl_pathc);
             globfree(&results);
             fflush(stdout);
 
