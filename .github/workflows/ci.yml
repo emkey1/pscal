@@ -23,23 +23,6 @@ jobs:
           python3 - <<'PY'
           import json
           import os
-          from pathlib import PurePosixPath
-
-          raw = os.environ.get("CHANGED_FILES_JSON", "[]")
-          raw = raw.strip() or "[]"
-          try:
-              changed = json.loads(raw)
-          except json.JSONDecodeError:
-              print(f"Unable to parse changed files payload: {raw}")
-              changed = []
-
-          def normalize(path: str) -> PurePosixPath:
-              normalized = path.replace("\\", "/")
-              if normalized.startswith("./"):
-                  normalized = normalized[2:]
-              return PurePosixPath(normalized)
-
-          changed_paths = [normalize(path) for path in changed]
 
           frontends = {
               "clike": [
@@ -78,111 +61,13 @@ jobs:
               ],
           }
 
-          core_patterns = [
-              "CMakeLists.txt",
-              "cmake/**",
-              "src/core/**",
-              "src/compiler/**",
-              "src/ast/**",
-              "src/backend_ast/**",
-              "src/ext_builtins/**",
-              "src/symbol/**",
-              "src/tools/**",
-              "src/vm/**",
-              "src/third_party/**",
-              "lib/misc/**",
-              "lib/sounds/**",
-              "Tests/run_all_tests",
-              "Tests/run_all_suites.py",
-              "Tests/run_json2bc_tests.sh",
-              "Tests/tools/**",
-              "tools/**",
-              "fonts/**",
-              "Examples/shared/**",
-          ]
-
-          docs_patterns = [
-              "Docs/**",
-              "README.md",
-              "CHANGELOG.md",
-              "CONTRIBUTING.md",
-              "LICENSE",
-              "RELEASE_NOTES_*",
-              "TODO",
-          ]
-
-          workflow_patterns = [
-              ".github/**",
-          ]
-
-          def matches(path: PurePosixPath, patterns: list[str]) -> bool:
-              for pattern in patterns:
-                  normalized_pattern = pattern.replace("\\", "/")
-
-                  if normalized_pattern.endswith("/**"):
-                      root = PurePosixPath(normalized_pattern[:-3])
-                      if root == path or root in path.parents:
-                          return True
-                      continue
-
-                  if normalized_pattern.endswith("/*"):
-                      root = PurePosixPath(normalized_pattern[:-2])
-                      if root == path or root in path.parents:
-                          return True
-                      continue
-
-                  if any(ch in normalized_pattern for ch in "*?["):
-                      if path.match(normalized_pattern):
-                          return True
-                      continue
-
-                  if path == PurePosixPath(normalized_pattern):
-                      return True
-
-              return False
-
-          run_frontend = {name: False for name in frontends}
-          run_ctest = False
-          unclassified = False
-          any_code_changes = False
-
-          for path in changed_paths:
-              if matches(path, docs_patterns) or matches(path, workflow_patterns):
-                  continue
-
-              any_code_changes = True
-
-              if matches(path, core_patterns):
-                  for key in run_frontend:
-                      run_frontend[key] = True
-                  run_ctest = True
-                  continue
-
-              matched_frontend = False
-              for name, patterns in frontends.items():
-                  if matches(path, patterns):
-                      run_frontend[name] = True
-                      matched_frontend = True
-
-              if not matched_frontend:
-                  unclassified = True
-
-          if unclassified:
-              for key in run_frontend:
-                  run_frontend[key] = True
-              run_ctest = True
-
-          selected_frontends = [name for name, should in run_frontend.items() if should]
-
-          skip = not selected_frontends and not run_ctest and not any_code_changes
-
-          if not selected_frontends and (run_ctest or any_code_changes) and not skip:
-              # Fall back to exercising every frontend when the change touches code
-              # we could not classify to a specific component.
-              selected_frontends = list(run_frontend.keys())
-              for key in selected_frontends:
-                  run_frontend[key] = True
-              run_ctest = True
+          # Always exercise every frontend. The conditional build plan caused
+          # coverage gaps (e.g. exsh sources not being rebuilt after shell
+          # lexer changes), so revert to the original "build everything"
+          # behaviour to guarantee CI safety.
+          run_frontend = {name: True for name in frontends}
+          run_ctest = True
+          selected_frontends = list(run_frontend.keys())
 
           build_targets: list[str] = []
           target_mapping = {
@@ -210,15 +95,12 @@ jobs:
               fh.write(f"run_ctest={'true' if run_ctest else 'false'}\n")
               for name, should in run_frontend.items():
                   fh.write(f"run_{name}={'true' if should else 'false'}\n")
-              fh.write(f"skip={'true' if skip else 'false'}\n")
+              fh.write("skip=false\n")
 
-          if skip:
-              print("No code changes requiring a build were detected; skipping build and tests.")
-          else:
-              selected = ", ".join(selected_frontends) if selected_frontends else "(none)"
-              print(f"Frontends to exercise: {selected}")
-              print(f"cmake targets: {' '.join(unique_targets) if unique_targets else '(none)'}")
-              print(f"Run ctest: {run_ctest}")
+          selected = ", ".join(selected_frontends) if selected_frontends else "(none)"
+          print(f"Frontends to exercise: {selected}")
+          print(f"cmake targets: {' '.join(unique_targets) if unique_targets else '(none)'}")
+          print(f"Run ctest: {run_ctest}")
           PY
       - name: Install dependencies
         if: steps.plan.outputs.skip != 'true'
