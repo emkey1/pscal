@@ -309,6 +309,8 @@ static ShellToken scanWord(ShellLexer *lexer) {
     bool hasCommand = false;
     bool hasArithmetic = false;
 
+    bool allowStructuralLiterals = lexerAllowsStructuralWordLiterals(lexer);
+
     bool inArrayLiteral = false;
     int arrayParenDepth = 0;
 
@@ -343,9 +345,10 @@ static ShellToken scanWord(ShellLexer *lexer) {
 
             if (!(startingArrayLiteral || (inArrayLiteral && arrayParenDepth > 0 && (c == '(' || c == ')')))) {
                 bool treat_as_operator = isOperatorDelimiter(c);
-                if (treat_as_operator && isStructuralWordCandidate(c) &&
-                    (lexer->rule_mask & SHELL_LEXER_RULE_1) == 0) {
-                    treat_as_operator = false;
+                if (treat_as_operator && isStructuralWordCandidate(c)) {
+                    if (allowStructuralLiterals && (lexer->rule_mask & SHELL_LEXER_RULE_1) == 0) {
+                        treat_as_operator = false;
+                    }
                 }
                 if (treat_as_operator) {
                     break;
