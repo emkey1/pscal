@@ -2,8 +2,20 @@
 # Render the Sierpinski triangle using concurrent shell jobs that call PSCAL
 # console builtins. Inspired by Examples/pascal/base/SierpinskiTriangleThreads.
 
+have_exsh_builtin() {
+    command -v builtin >/dev/null 2>&1 || return 1
+
+    builtin "$@" >/dev/null 2>&1
+}
+
+run_exsh_builtin() {
+    command -v builtin >/dev/null 2>&1 || return 1
+
+    builtin "$@" 2>/dev/null
+}
+
 ensure_exsh() {
-    if builtin ScreenRows >/dev/null 2>&1; then
+    if have_exsh_builtin ScreenRows; then
         return 0
     fi
 
@@ -53,27 +65,60 @@ MAX_X=0
 MAX_Y=0
 
 cleanup() {
-    builtin ShowCursor >/dev/null 2>&1 || :
+    run_exsh_builtin ShowCursor >/dev/null 2>&1 || :
 }
 
 trap 'cleanup' EXIT INT TERM
 
-builtin ClrScr
-builtin HideCursor
-
-MAX_Y=$(builtin ScreenRows)
-MAX_X=$(builtin ScreenCols)
-
-if [ -z "$MAX_X" ]; then
-    echo "Failed to query terminal dimensions."
-    exit 1
-elif [ -z "$MAX_Y" ]; then
-    echo "Failed to query terminal dimensions."
+if ! run_exsh_builtin ClrScr; then
+    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
     exit 1
 fi
 
+if ! run_exsh_builtin HideCursor; then
+    echo "sierpinski_threads.psh: failed to hide cursor; ensure exsh console builtins are available." >&2
+    exit 1
+fi
+
+MAX_Y="$(run_exsh_builtin ScreenRows || :)"
+MAX_X="$(run_exsh_builtin ScreenCols || :)"
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    if [ -t 1 ] && command -v stty >/dev/null 2>&1; then
+        # stty size prints "rows cols"
+        stty_size=$(stty size 2>/dev/null || printf '')
+        if [ -n "$stty_size" ]; then
+            IFS=' ' read -r stty_rows stty_cols <<EOF
+$stty_size
+EOF
+            if [ -z "$MAX_Y" ] && [ -n "$stty_rows" ]; then
+                MAX_Y="$stty_rows"
+            fi
+            if [ -z "$MAX_X" ] && [ -n "$stty_cols" ]; then
+                MAX_X="$stty_cols"
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    if command -v tput >/dev/null 2>&1; then
+        if [ -z "$MAX_Y" ]; then
+            MAX_Y="$(tput lines 2>/dev/null || printf '')"
+        fi
+        if [ -z "$MAX_X" ]; then
+            MAX_X="$(tput cols 2>/dev/null || printf '')"
+        fi
+    fi
+fi
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    MAX_Y=${MAX_Y:-24}
+    MAX_X=${MAX_X:-80}
+fi
+
 echo "Drawing Sierpinski Triangle with threads (Level $MAX_LEVEL)..."
-builtin Delay int:1000
+run_exsh_builtin Delay int:1000
 
 X1=$((MAX_X / 2))
 Y1=2
@@ -92,8 +137,8 @@ MY3=$(((Y3 + Y1) / 2))
 draw_point() {
     local x="$1"
     local y="$2"
-    builtin GotoXY "int:$x" "int:$y"
-    builtin Write "str:$CHAR_TO_DRAW"
+    run_exsh_builtin GotoXY "int:$x" "int:$y"
+    run_exsh_builtin Write "str:$CHAR_TO_DRAW"
 }
 
 draw_sierpinski() {
@@ -140,11 +185,11 @@ wait "$PID0"
 wait "$PID1"
 wait "$PID2"
 
-builtin GotoXY "int:1" "int:$MAX_Y"
-builtin ShowCursor
-builtin Write "str:Done. Press any key to exit."
-builtin ReadKey >/dev/null
-builtin ClrScr
+run_exsh_builtin GotoXY "int:1" "int:$MAX_Y"
+run_exsh_builtin ShowCursor
+run_exsh_builtin Write "str:Done. Press any key to exit."
+run_exsh_builtin ReadKey >/dev/null
+run_exsh_builtin ClrScr
 
 trap - EXIT INT TERM
 cleanup
