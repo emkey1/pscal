@@ -48,11 +48,10 @@ static bool shellArrayRegistryStore(const char *name, char **items, size_t count
 static void shellArrayRegistryRemove(const char *name);
 static const ShellArrayVariable *shellArrayRegistryLookup(const char *name, size_t len);
 static void shellArrayRegistryAssignFromText(const char *name, const char *value);
-static bool shellValueLooksLikeArrayLiteral(const char *value);
 static bool shellSetTrackedVariable(const char *name, const char *value, bool is_array_literal);
 static void shellUnsetTrackedVariable(const char *name);
 static char *shellLookupRawEnvironmentValue(const char *name, size_t len);
-static bool shellAssignmentIsArrayLiteral(const char *assignment, const bool *quoted_map, size_t quoted_len);
+static bool shellAssignmentIsArrayLiteral(const char *raw_assignment, uint8_t word_flags);
 
 static bool shellIsValidEnvName(const char *name);
 static void shellExportPrintEnvironment(void);
@@ -562,65 +561,78 @@ static const ShellArrayVariable *shellArrayRegistryLookup(const char *name, size
     return NULL;
 }
 
-static bool shellValueLooksLikeArrayLiteral(const char *value) {
-    if (!value) {
+static bool shellAssignmentIsArrayLiteral(const char *raw_assignment, uint8_t word_flags) {
+    if (!raw_assignment) {
         return false;
     }
-    const char *start = value;
-    while (*start && isspace((unsigned char)*start)) {
-        start++;
-    }
-    if (*start != '(') {
-        return false;
-    }
-    const char *end = value + strlen(value);
-    while (end > start && isspace((unsigned char)end[-1])) {
-        end--;
-    }
-    if (end <= start) {
-        return false;
-    }
-    return end[-1] == ')';
-}
-
-static bool shellAssignmentIsArrayLiteral(const char *assignment, const bool *quoted_map, size_t quoted_len) {
-    if (!assignment) {
-        return false;
-    }
-    const char *eq = strchr(assignment, '=');
+    const char *eq = strchr(raw_assignment, '=');
     if (!eq) {
         return false;
     }
-    const char *value = eq + 1;
-    size_t offset = (size_t)(value - assignment);
-    while (*value && isspace((unsigned char)*value)) {
-        value++;
-        offset++;
+
+    bool base_single = (word_flags & SHELL_WORD_FLAG_SINGLE_QUOTED) != 0;
+    bool base_double = (word_flags & SHELL_WORD_FLAG_DOUBLE_QUOTED) != 0;
+    bool saw_single_marker = false;
+    bool saw_double_marker = false;
+    bool in_single_segment = false;
+    bool in_double_segment = false;
+
+    for (const char *cursor = raw_assignment; cursor < eq && *cursor; ++cursor) {
+        if (*cursor == SHELL_QUOTE_MARK_SINGLE) {
+            saw_single_marker = true;
+            in_single_segment = !in_single_segment;
+        } else if (*cursor == SHELL_QUOTE_MARK_DOUBLE) {
+            saw_double_marker = true;
+            in_double_segment = !in_double_segment;
+        }
     }
-    if (*value != '(') {
+
+    const char *value_start = eq + 1;
+    const char *first_char = NULL;
+    bool first_quoted = false;
+    const char *last_char = NULL;
+    bool last_quoted = false;
+
+    for (const char *cursor = value_start; *cursor; ++cursor) {
+        char ch = *cursor;
+        if (ch == SHELL_QUOTE_MARK_SINGLE) {
+            saw_single_marker = true;
+            in_single_segment = !in_single_segment;
+            continue;
+        }
+        if (ch == SHELL_QUOTE_MARK_DOUBLE) {
+            saw_double_marker = true;
+            in_double_segment = !in_double_segment;
+            continue;
+        }
+
+        bool effective_single = in_single_segment || (!saw_single_marker && base_single);
+        bool effective_double = in_double_segment || (!saw_double_marker && base_double);
+        bool quoted = effective_single || effective_double;
+
+        if (!first_char) {
+            if (!quoted && isspace((unsigned char)ch)) {
+                continue;
+            }
+            first_char = cursor;
+            first_quoted = quoted;
+        }
+
+        if (!quoted && isspace((unsigned char)ch)) {
+            continue;
+        }
+
+        last_char = cursor;
+        last_quoted = quoted;
+    }
+
+    if (!first_char || !last_char) {
         return false;
     }
-    size_t open_index = (size_t)(value - assignment);
-    if (quoted_map && quoted_len > open_index && quoted_map[open_index]) {
+    if (first_quoted || last_quoted) {
         return false;
     }
-    const char *end = assignment + strlen(assignment);
-    size_t close_index = (size_t)(end - assignment);
-    while (end > value && isspace((unsigned char)end[-1])) {
-        end--;
-        close_index--;
-    }
-    if (end <= value || end[-1] != ')') {
-        return false;
-    }
-    size_t close_pos = close_index - 1;
-    if (quoted_map && quoted_len > close_pos && quoted_map[close_pos]) {
-        return false;
-    }
-    if (!quoted_map) {
-        return shellValueLooksLikeArrayLiteral(value);
-    }
-    return true;
+    return *first_char == '(' && *last_char == ')';
 }
 
 static bool shellLoopEnsureCapacity(size_t needed) {
@@ -5321,7 +5333,7 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     }
     if (saw_command_word && !*saw_command_word) {
         if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
-            bool is_array_literal = shellAssignmentIsArrayLiteral(expanded, quoted_map, quoted_len);
+            bool is_array_literal = shellAssignmentIsArrayLiteral(text, flags);
             if (!shellCommandAppendAssignmentOwned(cmd, expanded, is_array_literal)) {
                 free(quoted_map);
                 return false;

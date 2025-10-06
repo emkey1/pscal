@@ -211,6 +211,15 @@
             "expected_stdout": "lexer-array-assignment:ok"
         },
         {
+            "id": "array_assignment_expansion_scalar",
+            "name": "Scalar assignments with parentheses stay scalars",
+            "category": "builtins",
+            "description": "Values that gain parentheses via expansion should not be treated as array literals.",
+            "script": "Tests/exsh/tests/array_assignment_expansion_scalar.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "scalar=(1 2)"
+        },
+        {
             "id": "lexer_expansion_shapes",
             "name": "Parameter and arithmetic expansions retain metadata",
             "category": "lexer",
