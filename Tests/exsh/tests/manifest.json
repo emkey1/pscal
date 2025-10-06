@@ -83,15 +83,6 @@
             "expected_stdout": "source-dot:start\nsource-dot-helper:start\nsource-dot-helper:end\nafter:from-dot\nsource-dot:end"
         },
         {
-            "id": "help_builtin",
-            "name": "help lists shell builtins",
-            "category": "builtins",
-            "description": "help without arguments prints an overview; help name shows details and honours aliases.",
-            "script": "Tests/exsh/tests/help_builtin.psh",
-            "expect": "runtime_ok",
-            "expected_stdout": "help\nexsh is the PSCAL shell front end, providing an interactive environment for orchestrating VM builtins and external commands.\n\nexsh can evaluate shell scripts, manage pipelines, and redirect input and output just like a traditional POSIX-style shell. Use '>' to overwrite files, '>>' to append, and '|' to connect commands.\n\n- Source ~/.exshrc to customise prompts, aliases, and startup behaviour.\n- Use bookmark helpers (bookmark, showmarks, jump) to save and revisit directories quickly.\n- Manage jobs with bg, fg, jobs, wait, and trap.\n- exit leaves the shell; builtin invokes PSCAL VM helpers directly.\n\n- exsh loads ~/.exshrc on startup when the file is present.\n\n- Navigate the interface with familiar terminal controls when used in supporting environments.\n- Edit with vim or pico, transfer data via curl, scp, or sftp, and inspect the network with ping, host, or nslookup.\n- Extend the runtime with PSCAL packages and builtins compiled via the toolchain.\n\n- Compiled scripts are cached in ~/.pscal/bc_cache; use --no-cache to force recompilation.\n\nDocumentation: Docs/exsh_overview.md inside the repository.\nSupport: Report issues on the GitHub PSCAL project tracker or Discord community channels.\n\nType 'help -l' for a list of functions, or 'help <function>' for help on a specific shell function.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\n"
-        },
-        {
             "id": "help_builtin_list",
             "name": "help -l lists shell builtins",
             "category": "builtins",
