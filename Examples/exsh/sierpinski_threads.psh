@@ -192,6 +192,13 @@ handle_tstp() {
         done
     fi
     kill -s TSTP "$$" >/dev/null 2>&1 || :
+    if [ -n "$WORKER_PIDS" ]; then
+        for pid in $WORKER_PIDS; do
+            if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+                kill -s CONT "$pid" >/dev/null 2>&1 || :
+            fi
+        done
+    fi
     if [ "$CURSOR_SHOULD_HIDE" = "1" ]; then
         if run_exsh_builtin HideCursor >/dev/null 2>&1; then
             CURSOR_HIDDEN=1
