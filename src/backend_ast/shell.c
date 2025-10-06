@@ -355,6 +355,13 @@ typedef struct {
     bool previous_was_array;
 } ShellAssignmentBackup;
 
+typedef struct {
+    int target_fd;
+    int saved_fd;
+    bool saved_valid;
+    bool was_closed;
+} ShellExecRedirBackup;
+
 static ShellRuntimeState gShellRuntime = {
     .last_status = 0,
     .pipeline = {0},
@@ -1128,6 +1135,19 @@ static int shellSpawnProcess(const ShellCommand *cmd,
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped);
 static void shellFreeCommand(ShellCommand *cmd);
 static void shellUpdateStatus(int status);
+static bool shellCommandIsExecBuiltin(const ShellCommand *cmd);
+static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd);
+static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
+                                       ShellExecRedirBackup **out_backups,
+                                       size_t *out_count);
+static bool shellEnsureExecRedirBackup(int target_fd,
+                                       ShellExecRedirBackup **backups,
+                                       size_t *count,
+                                       size_t *capacity);
+static void shellRestoreExecRedirections(ShellExecRedirBackup *backups,
+                                         size_t count);
+static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups,
+                                      size_t count);
 
 static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags,
                                 const char **out_meta, size_t *out_meta_len) {
@@ -4929,10 +4949,10 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "export",  "unset",    "setenv",  "unsetenv",
-                                      "set",    "trap",    "local",   "break",   "continue", "alias",   "history",
-                                      "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",  "source",
-                                      "read",   "shift",   "return",  "help",    ":"};
+    static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
+                                      "unsetenv", "set",    "trap",    "local",   "break",   "continue", "alias",
+                                      "history", "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",
+                                      "source", "read",   "shift",   "return",  "help",    ":"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -6193,6 +6213,283 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
     return final_status;
 }
 
+static bool shellCommandIsExecBuiltin(const ShellCommand *cmd) {
+    if (!cmd || cmd->argc == 0 || !cmd->argv || !cmd->argv[0]) {
+        return false;
+    }
+    const char *name = cmd->argv[0];
+    const char *canonical = shellBuiltinCanonicalName(name);
+    if (!canonical) {
+        canonical = name;
+    }
+    return strcasecmp(canonical, "exec") == 0;
+}
+
+static bool shellEnsureExecRedirBackup(int target_fd,
+                                       ShellExecRedirBackup **backups,
+                                       size_t *count,
+                                       size_t *capacity) {
+    if (target_fd < 0 || !backups || !count || !capacity) {
+        return false;
+    }
+    for (size_t i = 0; i < *count; ++i) {
+        if ((*backups)[i].target_fd == target_fd) {
+            return true;
+        }
+    }
+    ShellExecRedirBackup backup;
+    backup.target_fd = target_fd;
+    backup.saved_fd = -1;
+    backup.saved_valid = false;
+    backup.was_closed = false;
+    int dup_fd = dup(target_fd);
+    if (dup_fd >= 0) {
+        backup.saved_fd = dup_fd;
+        backup.saved_valid = true;
+        fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
+    } else if (errno == EBADF) {
+        backup.was_closed = true;
+    } else {
+        return false;
+    }
+    if (*count >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        ShellExecRedirBackup *resized =
+            (ShellExecRedirBackup *)realloc(*backups, new_capacity * sizeof(ShellExecRedirBackup));
+        if (!resized) {
+            if (backup.saved_valid && backup.saved_fd >= 0) {
+                close(backup.saved_fd);
+            }
+            return false;
+        }
+        *backups = resized;
+        *capacity = new_capacity;
+    }
+    (*backups)[*count] = backup;
+    (*count)++;
+    return true;
+}
+
+static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count) {
+    if (!backups) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        ShellExecRedirBackup *backup = &backups[i];
+        if (backup->saved_valid && backup->saved_fd >= 0) {
+            dup2(backup->saved_fd, backup->target_fd);
+        } else if (backup->was_closed) {
+            close(backup->target_fd);
+        }
+    }
+}
+
+static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t count) {
+    if (!backups) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (backups[i].saved_valid && backups[i].saved_fd >= 0) {
+            close(backups[i].saved_fd);
+            backups[i].saved_fd = -1;
+        }
+    }
+    free(backups);
+}
+
+static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
+                                       ShellExecRedirBackup **out_backups,
+                                       size_t *out_count) {
+    if (out_backups) {
+        *out_backups = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!cmd || cmd->redir_count == 0) {
+        return true;
+    }
+
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    size_t backup_capacity = 0;
+
+    for (size_t i = 0; i < cmd->redir_count; ++i) {
+        const ShellRedirection *redir = &cmd->redirs[i];
+        int target_fd = redir->fd;
+        if (!shellEnsureExecRedirBackup(target_fd, &backups, &backup_count, &backup_capacity)) {
+            int err = errno;
+            if (err == 0) {
+                err = ENOMEM;
+            }
+            runtimeError(vm, "exec: failed to prepare redirection for fd %d: %s",
+                         target_fd, strerror(err));
+            shellUpdateStatus(err ? err : 1);
+            goto redir_error;
+        }
+        switch (redir->kind) {
+            case SHELL_RUNTIME_REDIR_OPEN: {
+                if (!redir->path) {
+                    runtimeError(vm, "exec: missing redirection target");
+                    shellUpdateStatus(1);
+                    goto redir_error;
+                }
+                int fd = open(redir->path, redir->flags, redir->mode);
+                if (fd < 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    goto redir_error;
+                }
+                if (dup2(fd, target_fd) < 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    close(fd);
+                    goto redir_error;
+                }
+                close(fd);
+                break;
+            }
+            case SHELL_RUNTIME_REDIR_DUP: {
+                if (redir->close_target) {
+                    if (close(target_fd) != 0 && errno != EBADF) {
+                        int err = errno;
+                        runtimeError(vm, "exec: failed to close fd %d: %s", target_fd, strerror(err));
+                        shellUpdateStatus(err ? err : 1);
+                        goto redir_error;
+                    }
+                } else {
+                    if (redir->dup_target_fd < 0) {
+                        runtimeError(vm, "exec: invalid file descriptor %d", redir->dup_target_fd);
+                        shellUpdateStatus(1);
+                        goto redir_error;
+                    }
+                    if (dup2(redir->dup_target_fd, target_fd) < 0) {
+                        int err = errno;
+                        runtimeError(vm, "exec: failed to duplicate fd %d: %s",
+                                     redir->dup_target_fd, strerror(err));
+                        shellUpdateStatus(err ? err : 1);
+                        goto redir_error;
+                    }
+                }
+                break;
+            }
+            case SHELL_RUNTIME_REDIR_HEREDOC: {
+                int pipefd[2];
+                if (pipe(pipefd) != 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: failed to create heredoc pipe: %s", strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    goto redir_error;
+                }
+                const char *body = redir->here_doc ? redir->here_doc : "";
+                size_t remaining = redir->here_doc_length;
+                if (remaining == 0) {
+                    remaining = strlen(body);
+                }
+                const char *cursor = body;
+                while (remaining > 0) {
+                    ssize_t written = write(pipefd[1], cursor, remaining);
+                    if (written < 0) {
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        int err = errno;
+                        runtimeError(vm, "exec: failed to write heredoc: %s", strerror(err));
+                        shellUpdateStatus(err ? err : 1);
+                        close(pipefd[0]);
+                        close(pipefd[1]);
+                        goto redir_error;
+                    }
+                    cursor += written;
+                    remaining -= (size_t)written;
+                }
+                close(pipefd[1]);
+                if (dup2(pipefd[0], target_fd) < 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: failed to apply heredoc: %s", strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    close(pipefd[0]);
+                    goto redir_error;
+                }
+                close(pipefd[0]);
+                break;
+            }
+            default:
+                runtimeError(vm, "exec: unsupported redirection");
+                shellUpdateStatus(1);
+                goto redir_error;
+        }
+    }
+
+    if (out_backups) {
+        *out_backups = backups;
+    } else {
+        shellFreeExecRedirBackups(backups, backup_count);
+    }
+    if (out_count) {
+        *out_count = backup_count;
+    }
+    return true;
+
+redir_error:
+    shellRestoreExecRedirections(backups, backup_count);
+    shellFreeExecRedirBackups(backups, backup_count);
+    if (out_backups) {
+        *out_backups = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    return false;
+}
+
+static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
+    if (!shellCommandIsExecBuiltin(cmd)) {
+        return false;
+    }
+    if (cmd->background) {
+        runtimeError(vm, "exec: cannot be used in background");
+        shellUpdateStatus(1);
+        return true;
+    }
+
+    if (cmd->argc <= 1) {
+        ShellExecRedirBackup *backups = NULL;
+        size_t backup_count = 0;
+        if (!shellApplyExecRedirections(vm, cmd, &backups, &backup_count)) {
+            return true;
+        }
+        shellFreeExecRedirBackups(backups, backup_count);
+        shellUpdateStatus(0);
+        return true;
+    }
+
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    if (!shellApplyExecRedirections(vm, cmd, &backups, &backup_count)) {
+        return true;
+    }
+
+    char **argv = &cmd->argv[1];
+    if (!argv || !argv[0] || argv[0][0] == '\0') {
+        runtimeError(vm, "exec: expected command");
+        shellRestoreExecRedirections(backups, backup_count);
+        shellFreeExecRedirBackups(backups, backup_count);
+        shellUpdateStatus(1);
+        return true;
+    }
+
+    execvp(argv[0], argv);
+    int err = errno;
+    runtimeError(vm, "exec: %s: %s", argv[0], strerror(err));
+    shellRestoreExecRedirections(backups, backup_count);
+    shellFreeExecRedirBackups(backups, backup_count);
+    shellUpdateStatus((err == ENOENT) ? 127 : 126);
+    return true;
+}
+
 static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (!cmd) {
         return makeVoid();
@@ -6281,6 +6578,24 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     int stdout_fd = -1;
     int stderr_fd = -1;
     if (ctx->active) {
+        if (ctx->stage_count == 1 && shellCommandIsExecBuiltin(cmd)) {
+            shellExecuteExecBuiltin(vm, cmd);
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
+            int status = gShellRuntime.last_status;
+            if (ctx->negated) {
+                status = (status == 0) ? 1 : 0;
+                shellUpdateStatus(status);
+            }
+            ctx->last_status = status;
+            shellResetPipeline();
+            shellFreeCommand(cmd);
+            return makeVoid();
+        }
         if (ctx->stage_count == 1 && shellInvokeBuiltin(vm, cmd)) {
             if (assignments_applied) {
                 shellRestoreAssignments(assignment_backups, assignment_backup_count);
@@ -6322,6 +6637,17 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             stderr_fd = stdout_fd;
         }
     } else {
+        if (shellCommandIsExecBuiltin(cmd)) {
+            shellExecuteExecBuiltin(vm, cmd);
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
+            shellFreeCommand(cmd);
+            return makeVoid();
+        }
         if (shellInvokeBuiltin(vm, cmd)) {
             if (assignments_applied) {
                 shellRestoreAssignments(assignment_backups, assignment_backup_count);
@@ -7270,6 +7596,59 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     gShellExitRequested = true;
     vm->exit_requested = true;
     vm->current_builtin_name = "exit";
+    return makeVoid();
+}
+
+Value vmBuiltinShellExecCommand(VM *vm, int arg_count, Value *args) {
+    ShellCommand cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.pipeline_index = -1;
+
+    size_t total_args = (arg_count > 0) ? (size_t)arg_count : 0;
+    cmd.argv = (char **)calloc(total_args + 2, sizeof(char *));
+    if (!cmd.argv) {
+        runtimeError(vm, "exec: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    cmd.argv[0] = strdup("exec");
+    if (!cmd.argv[0]) {
+        free(cmd.argv);
+        runtimeError(vm, "exec: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    cmd.argc = 1;
+    cmd.argv[cmd.argc] = NULL;
+
+    bool ok = true;
+    for (int i = 0; i < arg_count && ok; ++i) {
+        Value val = args[i];
+        if (val.type != TYPE_STRING || !val.s_val) {
+            runtimeError(vm, "exec: arguments must be strings");
+            shellUpdateStatus(1);
+            ok = false;
+            break;
+        }
+        char *copy = strdup(val.s_val);
+        if (!copy) {
+            runtimeError(vm, "exec: out of memory");
+            shellUpdateStatus(1);
+            ok = false;
+            break;
+        }
+        cmd.argv[cmd.argc++] = copy;
+        cmd.argv[cmd.argc] = NULL;
+    }
+
+    if (ok) {
+        if (!shellExecuteExecBuiltin(vm, &cmd)) {
+            shellUpdateStatus(1);
+        }
+    }
+
+    shellFreeCommand(&cmd);
     return makeVoid();
 }
 

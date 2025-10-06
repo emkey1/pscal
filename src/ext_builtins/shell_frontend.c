@@ -35,6 +35,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "read", vmBuiltinShellRead);
     registerShellBuiltin(category, command_group, "eval", vmBuiltinShellEval);
     registerShellBuiltin(category, command_group, "exit", vmBuiltinShellExit);
+    registerShellBuiltin(category, command_group, "exec", vmBuiltinShellExecCommand);
     registerShellBuiltin(category, command_group, "shift", vmBuiltinShellShift);
     registerShellBuiltin(category, command_group, "set", vmBuiltinShellSet);
     registerShellBuiltin(category, command_group, "setenv", vmBuiltinShellSetenv);

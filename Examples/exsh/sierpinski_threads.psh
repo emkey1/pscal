@@ -88,7 +88,7 @@ if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
         # stty size prints "rows cols"
         stty_size=$(stty size 2>/dev/null || printf '')
         if [ -n "$stty_size" ]; then
-            IFS=' ' read -r stty_rows stty_cols <<EOF
+            IFS=' ' read stty_rows stty_cols <<EOF
 $stty_size
 EOF
             if [ -z "$MAX_Y" ] && [ -n "$stty_rows" ]; then
