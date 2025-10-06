@@ -43,7 +43,10 @@ builtin HideCursor
 MAX_Y=$(builtin ScreenRows)
 MAX_X=$(builtin ScreenCols)
 
-if [ -z "$MAX_X" ] || [ -z "$MAX_Y" ]; then
+if [ -z "$MAX_X" ]; then
+    echo "Failed to query terminal dimensions."
+    exit 1
+elif [ -z "$MAX_Y" ]; then
     echo "Failed to query terminal dimensions."
     exit 1
 fi
@@ -68,7 +71,7 @@ MY3=$(((Y3 + Y1) / 2))
 draw_point() {
     local x="$1"
     local y="$2"
-    builtin GoToXY "int:$x" "int:$y"
+    builtin GotoXY "int:$x" "int:$y"
     builtin Write "str:$CHAR_TO_DRAW"
 }
 
@@ -116,7 +119,7 @@ wait "$PID0"
 wait "$PID1"
 wait "$PID2"
 
-builtin GoToXY "int:1" "int:$MAX_Y"
+builtin GotoXY "int:1" "int:$MAX_Y"
 builtin ShowCursor
 builtin Write "str:Done. Press any key to exit."
 builtin ReadKey >/dev/null
