@@ -23,4 +23,5 @@
 - Always read existing globals before introducing new ones—regressions often come from missing reset logic during module/unit compiles.
 - Tests are slow; when editing the compiler, run at least the relevant front-end suite prior to broader sweeps.
 - Document any env vars you touch (`SDL_VIDEODRIVER`, `RUN_SDL`, etc.) in commits/PRs; future agents look here for quick bootstrapping.
+- Binaries tend to have both a --dump-ast-json and --dump-bytecode options which can provide substantial clues as to what is going on in the AST building and compilation portions of the code when debugging.
 
