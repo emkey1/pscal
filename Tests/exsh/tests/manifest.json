@@ -326,6 +326,15 @@
             "script": "Tests/exsh/tests/parser_if_comment_boundary.psh",
             "expect": "runtime_ok",
             "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
+        },
+        {
+            "id": "grammar_if_and_or_conditions",
+            "name": "Logical connectors work in if/while conditions",
+            "category": "grammar",
+            "description": "Allows && and || lists in conditional and loop headers.",
+            "script": "Tests/exsh/tests/parser_if_and_or.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
         }
     ]
 }
