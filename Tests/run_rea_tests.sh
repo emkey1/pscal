@@ -326,14 +326,22 @@ run_rea_fixture() {
     fi
 
     local arg_list=()
+    local args_source=""
+    local args_file_present=0
     if [ -f "$args_file" ]; then
-        if read -r args < "$args_file"; then
-            if [ -n "$args" ]; then
-                read -r -a arg_list <<< "$args"
-            fi
+        args_file_present=1
+        # Read the first line verbatim; empty files intentionally signal
+        # "no extra arguments", so treat a failed read as an empty string.
+        if IFS= read -r args_source < "$args_file"; then
+            :
+        else
+            args_source=""
         fi
     fi
-    if [ ${#arg_list[@]} -eq 0 ]; then
+
+    if [ -n "$args_source" ]; then
+        read -r -a arg_list <<< "$args_source"
+    elif [ $args_file_present -eq 0 ]; then
         arg_list=(--dump-bytecode-only)
     fi
 
