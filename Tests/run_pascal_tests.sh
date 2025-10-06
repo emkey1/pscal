@@ -6,10 +6,14 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
 PASCAL_ARGS=(--no-cache)
 
+# Shared result formatting helpers
+. "$SCRIPT_DIR/tools/harness_utils.sh"
+harness_init
+
 shift_mtime() {
-  local path="$1"
-  local delta="$2"
-  python3 - "$path" "$delta" <<'PY'
+    local path="$1"
+    local delta="$2"
+    python3 - "$path" "$delta" <<'PY'
 import os
 import sys
 import time
@@ -32,26 +36,69 @@ os.utime(path, (target, target))
 PY
 }
 
-check_ext_builtin_dump() {
-  local binary="$1"
-  local label="$2"
-  local tmp_out
-  local tmp_err
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
-  local status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "Failed to dump extended builtins for $label (exit $status)" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif [ -s "$tmp_err" ]; then
-    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! python3 - "$tmp_out" <<'PY'
+has_ext_builtin_category() {
+    local binary="$1"
+    local category="$2"
+    set +e
+    "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}$" >/dev/null
+    local status=$?
+    set -e
+    return $status
+}
+
+strip_ansi_inplace() {
+    local path="$1"
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(?:\a|\e\\)//g' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+}
+
+normalise_pascal_stdout() {
+    local path="$1"
+    strip_ansi_inplace "$path"
+    perl -pe 's/pid=[0-9]+/pid=<PID>/g' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+    perl -ne 'print unless /^[12][0-9]{3}-[01][0-9]-[0-3][0-9]/' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+}
+
+normalise_pascal_stderr() {
+    local path="$1"
+    strip_ansi_inplace "$path"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+    perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+    perl -ne 'print unless /Compiler warning: assigning .* may lose precision/' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+}
+
+run_pascal_ext_builtin_dump() {
+    local label="$1"
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$PASCAL_BIN" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    if [ $status -ne 0 ]; then
+        printf 'pascal --dump-ext-builtins exited with %d for %s\n' "$status" "$label"
+        if [ -s "$tmp_err" ]; then
+            printf 'stderr:\n%s\n' "$(cat "$tmp_err")"
+        fi
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    if [ -s "$tmp_err" ]; then
+        printf 'pascal --dump-ext-builtins produced stderr for %s:\n%s\n' "$label" "$(cat "$tmp_err")"
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    if ! python3 - "$tmp_out" <<'PY'
 import sys
 
 path = sys.argv[1]
@@ -97,108 +144,340 @@ with open(path, 'r', encoding='utf-8') as fh:
             sys.exit(1)
 sys.exit(0)
 PY
-  then
-    echo "Unexpected output format from $label --dump-ext-builtins" >&2
-    cat "$tmp_out" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
+    then
+        printf 'pascal --dump-ext-builtins emitted unexpected directives for %s\n' "$label"
+        printf '%s\n' "$(cat "$tmp_out")"
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+    return 0
 }
 
-exercise_pascal_cli_smoke() {
-  local fixture="$ROOT_DIR/Tests/tools/fixtures/cli_pascal.pas"
-  if [ ! -f "$fixture" ]; then
-    echo "Pascal CLI fixture missing at $fixture" >&2
-    EXIT_CODE=1
-    return
-  fi
+pascal_cli_version() {
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
 
-  local tmp_out tmp_err status
+    set +e
+    "$PASCAL_BIN" -v >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
 
-  echo "---- PascalCLIVersion ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$PASCAL_BIN" -v >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "pascal -v exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif [ -s "$tmp_err" ]; then
-    echo "pascal -v emitted stderr:" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "latest tag:" "$tmp_out"; then
-    echo "pascal -v output missing latest tag:" >&2
-    cat "$tmp_out" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("pascal -v exited with $status")
+    fi
+    if [ -s "$tmp_err" ]; then
+        issues+=("pascal -v wrote to stderr:\n$(cat "$tmp_err")")
+    fi
+    if ! grep -q "latest tag:" "$tmp_out"; then
+        issues+=("pascal -v stdout missing 'latest tag:' line:\n$(cat "$tmp_out")")
+    fi
 
-  echo "---- PascalCLIAstJson ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$PASCAL_BIN" --no-cache --dump-ast-json "$fixture" >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "pascal --dump-ast-json failed with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "Dumping AST" "$tmp_err"; then
-    echo "pascal --dump-ast-json missing progress messages" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q '"type"' "$tmp_out"; then
-    echo "pascal --dump-ast-json produced unexpected stdout" >&2
-    cat "$tmp_out" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    rm -f "$tmp_out" "$tmp_err"
 
-  echo "---- PascalCLITrace ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$PASCAL_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "pascal --vm-trace-head exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "\[VM-TRACE\]" "$tmp_err"; then
-    echo "pascal --vm-trace-head did not emit trace output" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
 
+    printf '%s\n' "${issues[@]}"
+    return 1
 }
 
-has_ext_builtin_category() {
-  local binary="$1"
-  local category="$2"
-  set +e
-  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
-  local status=$?
-  set -e
-  return $status
+pascal_cli_dump_ast_json() {
+    local fixture="$SCRIPT_DIR/tools/fixtures/cli_pascal.pas"
+    if [ ! -f "$fixture" ]; then
+        printf 'Pascal CLI fixture missing at %s\n' "$fixture"
+        return 1
+    fi
 
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$PASCAL_BIN" --no-cache --dump-ast-json "$fixture" >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("pascal --dump-ast-json exited with $status")
+    fi
+    if ! grep -q "Dumping AST" "$tmp_err"; then
+        issues+=("stderr missing 'Dumping AST' banner:\n$(cat "$tmp_err")")
+    fi
+    if ! grep -q '"type"' "$tmp_out"; then
+        issues+=("stdout missing type entries:\n$(cat "$tmp_out")")
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+pascal_cli_vm_trace() {
+    local fixture="$SCRIPT_DIR/tools/fixtures/cli_pascal.pas"
+    if [ ! -f "$fixture" ]; then
+        printf 'Pascal CLI fixture missing at %s\n' "$fixture"
+        return 1
+    fi
+
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$PASCAL_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("pascal --vm-trace-head exited with $status")
+    fi
+    if ! grep -q "[VM-TRACE]" "$tmp_err"; then
+        issues+=("stderr missing [VM-TRACE] entries:\n$(cat "$tmp_err")")
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+run_pascal_fixture() {
+    local test_name="$1"
+    local input_file="$SCRIPT_DIR/Pascal/$test_name.in"
+    local stdout_expect="$SCRIPT_DIR/Pascal/$test_name.out"
+    local stderr_expect="$SCRIPT_DIR/Pascal/$test_name.err"
+    local disasm_expect="$SCRIPT_DIR/Pascal/$test_name.disasm"
+    local sqlite_marker="$SCRIPT_DIR/Pascal/$test_name.sqlite"
+    local net_marker="$SCRIPT_DIR/Pascal/$test_name.net"
+
+    local details=()
+    local status="PASS"
+
+    if [ "$test_name" = "SDLFeaturesTest" ]; then
+        if [ "$PASCAL_GRAPHICS_AVAILABLE" -ne 1 ]; then
+            harness_report SKIP "pascal_${test_name}" "Pascal fixture $test_name" "Graphics builtins unavailable"
+            return
+        fi
+        if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; }; then
+            harness_report SKIP "pascal_${test_name}" "Pascal fixture $test_name" "SDL disabled"
+            return
+        fi
+    fi
+
+    if [ -f "$sqlite_marker" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then
+        harness_report SKIP "pascal_${test_name}" "Pascal fixture $test_name" "SQLite builtins disabled"
+        return
+    fi
+
+    if [ -f "$net_marker" ] && [ "${RUN_NET_TESTS:-0}" != "1" ]; then
+        harness_report SKIP "pascal_${test_name}" "Pascal fixture $test_name" "Network tests disabled (set RUN_NET_TESTS=1)"
+        return
+    fi
+
+    local actual_out actual_err disasm_stderr
+    actual_out=$(mktemp)
+    actual_err=$(mktemp)
+
+    if [ -f "$disasm_expect" ]; then
+        disasm_stderr=$(mktemp)
+        set +e
+        (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" --dump-bytecode-only "Pascal/$test_name") \
+            > /dev/null 2> "$disasm_stderr"
+        local disasm_status=$?
+        set -e
+        strip_ansi_inplace "$disasm_stderr"
+        perl -ne 'print unless /^Loaded cached byte code/' "$disasm_stderr" > "$disasm_stderr.clean"
+        mv "$disasm_stderr.clean" "$disasm_stderr"
+        if [ $disasm_status -ne 0 ]; then
+            status="FAIL"
+            details+=("Disassembly exited with status $disasm_status")
+            if [ -s "$disasm_stderr" ]; then
+                details+=("Disassembly stderr:\n$(cat "$disasm_stderr")")
+            fi
+        else
+            set +e
+            diff_output=$(diff -u "$disasm_expect" "$disasm_stderr")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("Disassembly mismatch:\n$diff_output")
+                else
+                    details+=("Disassembly diff failed with status $diff_status")
+                fi
+            fi
+        fi
+        rm -f "$disasm_stderr"
+    fi
+
+    if [ "$status" = "PASS" ]; then
+        set +e
+        if [ "$test_name" = "SDLFeaturesTest" ]; then
+            (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+        elif [ -f "$input_file" ]; then
+            (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" < "$input_file" > "$actual_out" 2> "$actual_err")
+        else
+            (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
+        fi
+        local run_status=$?
+        set -e
+
+        normalise_pascal_stdout "$actual_out"
+        normalise_pascal_stderr "$actual_err"
+        if [ ! -f "$stderr_expect" ]; then
+            head -n 2 "$actual_err" > "$actual_err.trim"
+            mv "$actual_err.trim" "$actual_err"
+        fi
+
+        if [ -f "$stdout_expect" ]; then
+            set +e
+            diff_output=$(diff -u "$stdout_expect" "$actual_out")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("stdout mismatch:\n$diff_output")
+                else
+                    details+=("diff on stdout failed with status $diff_status")
+                fi
+            fi
+        else
+            if [ -s "$actual_out" ]; then
+                status="FAIL"
+                details+=("Unexpected stdout:\n$(cat "$actual_out")")
+            fi
+        fi
+
+        if [ -f "$stderr_expect" ]; then
+            set +e
+            diff_output=$(diff -u "$stderr_expect" "$actual_err")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("stderr mismatch:\n$diff_output")
+                else
+                    details+=("diff on stderr failed with status $diff_status")
+                fi
+            fi
+            if [ $run_status -eq 0 ] && [ "$status" = "PASS" ]; then
+                status="FAIL"
+                details+=("Expected non-zero exit but got $run_status")
+            fi
+        else
+            if [ $run_status -ne 0 ]; then
+                status="FAIL"
+                details+=("pscal run exited with $run_status")
+                if [ -s "$actual_err" ]; then
+                    details+=("stderr:\n$(cat "$actual_err")")
+                fi
+            elif [ -s "$actual_err" ]; then
+                status="FAIL"
+                details+=("Unexpected stderr:\n$(cat "$actual_err")")
+            fi
+        fi
+    fi
+
+    rm -f "$actual_out" "$actual_err"
+
+    if [ "$status" = "PASS" ]; then
+        harness_report PASS "pascal_${test_name}" "Pascal fixture $test_name"
+    else
+        harness_report FAIL "pascal_${test_name}" "Pascal fixture $test_name" "${details[@]}"
+    fi
+}
+
+run_cache_staleness_test() {
+    local tmp_home src_dir src_file
+    tmp_home=$(mktemp -d)
+    src_dir=$(mktemp -d)
+    src_file="$src_dir/CacheStalenessTest"
+
+    cat > "$src_file" <<'EOF'
+program CacheStalenessTest;
+begin
+  writeln('first');
+end.
+EOF
+
+    shift_mtime "$src_file" -5
+
+    set +e
+    (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out1" 2> "$tmp_home/err1")
+    local status1=$?
+    set -e
+
+    if [ $status1 -ne 0 ]; then
+        printf 'Initial run exited with %d\n' "$status1"
+        printf 'stderr:\n%s\n' "$(cat "$tmp_home/err1")"
+        rm -rf "$tmp_home" "$src_dir"
+        return 1
+    fi
+
+    if ! grep -q 'first' "$tmp_home/out1"; then
+        printf 'Initial run output missing expected text\n'
+        rm -rf "$tmp_home" "$src_dir"
+        return 1
+    fi
+
+    cat > "$src_file" <<'EOF'
+program CacheStalenessTest;
+begin
+  writeln('second');
+end.
+EOF
+
+    shift_mtime "$src_file" 5
+
+    set +e
+    (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
+    local status2=$?
+    set -e
+
+    local issues=()
+
+    if [ $status2 -ne 0 ]; then
+        issues+=("Second run exited with $status2")
+    fi
+
+    if ! grep -q 'second' "$tmp_home/out2"; then
+        issues+=("Cache invalidation failed; stdout:\n$(cat "$tmp_home/out2")")
+    fi
+
+    rm -rf "$tmp_home" "$src_dir"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
 }
 
 if [ ! -x "$PASCAL_BIN" ]; then
-  echo "pascal binary not found at $PASCAL_BIN" >&2
-  exit 1
+    echo "pascal binary not found at $PASCAL_BIN" >&2
+    exit 1
 fi
 
-# Use an isolated HOME to avoid interference from any existing caches.
 TEST_HOME=$(mktemp -d)
 export HOME="$TEST_HOME"
 trap 'rm -rf "$TEST_HOME"' EXIT
@@ -211,286 +490,74 @@ export PSCAL_LIB_DIR="$PASCAL_LIB_DIR"
 mkdir -p "$PASCAL_LIB_ROOT"
 cp -R "$ROOT_DIR/lib/." "$PASCAL_LIB_ROOT/"
 if [ -f "$CRT_UNIT" ]; then
-  cp "$CRT_UNIT" "$PASCAL_LIB_DIR/crt.pl"
+    cp "$CRT_UNIT" "$PASCAL_LIB_DIR/crt.pl"
 fi
 
 if grep -q '^SDL:BOOL=ON$' "$ROOT_DIR/build/CMakeCache.txt" 2>/dev/null; then
-  SDL_ENABLED=1
+    SDL_ENABLED=1
 else
-  SDL_ENABLED=0
+    SDL_ENABLED=0
 fi
 
-# Headless-friendly defaults unless RUN_SDL=1 is explicitly set by the caller
 if [ "${RUN_SDL:-0}" != "1" ] && [ "$SDL_ENABLED" -eq 1 ]; then
-  export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
-  export SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-dummy}
+    export SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-dummy}
+    export SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-dummy}
 fi
-
-EXIT_CODE=0
-
-check_ext_builtin_dump "$PASCAL_BIN" pascal
-exercise_pascal_cli_smoke
 
 if has_ext_builtin_category "$PASCAL_BIN" sqlite; then
-  PASCAL_SQLITE_AVAILABLE=1
+    PASCAL_SQLITE_AVAILABLE=1
 else
-  PASCAL_SQLITE_AVAILABLE=0
+    PASCAL_SQLITE_AVAILABLE=0
 fi
 
 if has_ext_builtin_category "$PASCAL_BIN" graphics; then
-  PASCAL_GRAPHICS_AVAILABLE=1
+    PASCAL_GRAPHICS_AVAILABLE=1
 else
-  PASCAL_GRAPHICS_AVAILABLE=0
+    PASCAL_GRAPHICS_AVAILABLE=0
 fi
 
-# Iterate over Pascal test sources (files without extensions)
+if details=$(run_pascal_ext_builtin_dump pascal); then
+    harness_report PASS "pascal_ext_builtin_dump" "pascal --dump-ext-builtins validates structure"
+else
+    harness_report FAIL "pascal_ext_builtin_dump" "pascal --dump-ext-builtins validates structure" "$details"
+fi
+
+if details=$(pascal_cli_version); then
+    harness_report PASS "pascal_cli_version" "pascal -v reports latest tag"
+else
+    harness_report FAIL "pascal_cli_version" "pascal -v reports latest tag" "$details"
+fi
+
+if details=$(pascal_cli_dump_ast_json); then
+    harness_report PASS "pascal_cli_dump_ast_json" "pascal --dump-ast-json emits JSON"
+else
+    harness_report FAIL "pascal_cli_dump_ast_json" "pascal --dump-ast-json emits JSON" "$details"
+fi
+
+if details=$(pascal_cli_vm_trace); then
+    harness_report PASS "pascal_cli_vm_trace" "pascal --vm-trace-head produces trace"
+else
+    harness_report FAIL "pascal_cli_vm_trace" "pascal --vm-trace-head produces trace" "$details"
+fi
+
+shopt -s nullglob
 for src in "$SCRIPT_DIR"/Pascal/*; do
-  test_name=$(basename "$src")
-  if [[ "$test_name" == *.* ]]; then
-    continue
-  fi
-  # Skip SDL-dependent test unless RUN_SDL=1 forces it
-  if [ "$test_name" = "SDLFeaturesTest" ]; then
-    if [ "$PASCAL_GRAPHICS_AVAILABLE" -ne 1 ]; then
-      echo "Skipping $test_name (graphics builtins unavailable)"
-      echo
-      continue
+    test_name=$(basename "$src")
+    if [[ "$test_name" == *.* ]]; then
+        continue
     fi
-
-    if [ "${RUN_SDL:-0}" != "1" ] && { [ "$SDL_ENABLED" -eq 0 ] || [ "${SDL_VIDEODRIVER:-}" = "dummy" ]; }; then
-      echo "Skipping $test_name (SDL disabled)"
-      echo
-      continue
-    fi
-  fi
-
-  if [ -f "$SCRIPT_DIR/Pascal/$test_name.sqlite" ] && [ "$PASCAL_SQLITE_AVAILABLE" -ne 1 ]; then
-    echo "Skipping $test_name (SQLite builtins disabled)"
-    echo
-    continue
-  fi
-
-  # Skip network-labeled tests unless RUN_NET_TESTS=1
-  if [ -f "$SCRIPT_DIR/Pascal/$test_name.net" ] && [ "${RUN_NET_TESTS:-0}" != "1" ]; then
-    echo "Skipping $test_name (network test; set RUN_NET_TESTS=1 to enable)"
-    echo
-    continue
-  fi
-
-  in_file="$SCRIPT_DIR/Pascal/$test_name.in"
-  out_file="$SCRIPT_DIR/Pascal/$test_name.out"
-  err_file="$SCRIPT_DIR/Pascal/$test_name.err"
-  actual_out=$(mktemp)
-  actual_err=$(mktemp)
-  disasm_file="$SCRIPT_DIR/Pascal/$test_name.disasm"
-  disasm_stdout=""
-  disasm_stderr=""
-
-  echo "---- $test_name ----"
-
-  if [ -f "$disasm_file" ]; then
-    disasm_stdout=$(mktemp)
-    disasm_stderr=$(mktemp)
-    set +e
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" --dump-bytecode-only "Pascal/$test_name") \
-      > "$disasm_stdout" 2> "$disasm_stderr"
-    disasm_status=$?
-    set -e
-    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
-    perl -ne 'print unless /^Loaded cached byte code/' "$disasm_stderr" > "$disasm_stderr.clean" && mv "$disasm_stderr.clean" "$disasm_stderr"
-    if [ $disasm_status -ne 0 ]; then
-      echo "Disassembly run exited with $disasm_status: $test_name" >&2
-      cat "$disasm_stderr"
-      EXIT_CODE=1
-    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
-      echo "Disassembly mismatch: $test_name" >&2
-      EXIT_CODE=1
-    fi
-  fi
-
-  set +e
-  if [ "$test_name" = "SDLFeaturesTest" ]; then
-    (cd "$SCRIPT_DIR" && printf 'Q\n' | "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
-  elif [ -f "$in_file" ]; then
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" < "$in_file" > "$actual_out" 2> "$actual_err")
-  else
-    (cd "$SCRIPT_DIR" && "$PASCAL_BIN" "${PASCAL_ARGS[@]}" "Pascal/$test_name" > "$actual_out" 2> "$actual_err")
-  fi
-  run_status=$?
-  set -e
-
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  perl -ne 'print unless /Compiler warning: assigning .* may lose precision/' "$actual_err" > "$actual_err.clean" && mv "$actual_err.clean" "$actual_err"
-  # Preserve the full stderr when a fixture exists so tests can assert on
-  # complete diagnostic streams (e.g. range-check location reporting).
-  if [ ! -f "$err_file" ]; then
-    head -n 2 "$actual_err" > "$actual_err.trim" && mv "$actual_err.trim" "$actual_err"
-  fi
-  perl -pe 's/pid=[0-9]+/pid=<PID>/g' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
-  # Remove ISO-like date lines (e.g., 2024-09-01 ...), not generic 4-digit prefixes
-  perl -ne 'print unless /^[12][0-9]{3}-[01][0-9]-[0-3][0-9]/' "$actual_out" > "$actual_out.clean" && mv "$actual_out.clean" "$actual_out"
-
-  if [ -f "$out_file" ]; then
-    if ! diff -u "$out_file" "$actual_out"; then
-      echo "Test failed (stdout mismatch): $test_name" >&2
-      EXIT_CODE=1
-    fi
-  elif [ -s "$actual_out" ] && [ ! -f "$err_file" ]; then
-    echo "Test produced unexpected stdout: $test_name" >&2
-    cat "$actual_out"
-    EXIT_CODE=1
-  fi
-
-  if [ -f "$err_file" ]; then
-    if ! diff -u "$err_file" "$actual_err"; then
-      echo "Test failed (stderr mismatch): $test_name" >&2
-      EXIT_CODE=1
-    fi
-    if [ $run_status -eq 0 ]; then
-      echo "Test expected failure but exited with 0: $test_name" >&2
-      EXIT_CODE=1
-    fi
-  else
-    if [ $run_status -ne 0 ]; then
-      echo "Test exited with $run_status: $test_name" >&2
-      cat "$actual_err"
-      EXIT_CODE=1
-    elif [ -s "$actual_err" ]; then
-      echo "Unexpected stderr output in $test_name:" >&2
-      cat "$actual_err"
-      EXIT_CODE=1
-    fi
-  fi
-
-  rm -f "$SCRIPT_DIR/Pascal/$test_name.dbg"
-  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
-  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
-  rm -f "$actual_out" "$actual_err"
-  echo
-  echo
-
+    run_pascal_fixture "$test_name"
 done
+shopt -u nullglob
 
-# Regression test to ensure cached bytecode is invalidated when the
-# source file shares the same timestamp as the cache entry.
-echo "---- CacheStalenessTest ----"
-tmp_home=$(mktemp -d)
-src_dir=$(mktemp -d)
-src_file="$src_dir/CacheStalenessTest"
-cat > "$src_file" <<'EOF'
-program CacheStalenessTest;
-begin
-  writeln('first');
-end.
-EOF
-
-# Ensure the cache entry's timestamp exceeds the source file's mtime.
-shift_mtime "$src_file" -5
-
-# First run to populate the cache
-set +e
-(cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out1" 2> "$tmp_home/err1")
-status1=$?
-set -e
-
-if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  # Second run should use the cache
-  set +e
-  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out_cache" 2> "$tmp_home/err_cache")
-  status_cache=$?
-  set -e
-
-  if [ $status_cache -ne 0 ] || ! grep -q 'Loaded cached byte code' "$tmp_home/err_cache" || ! grep -q 'first' "$tmp_home/out_cache"; then
-    echo "Cache reuse test failed: expected cached bytecode" >&2
-    EXIT_CODE=1
-  fi
-
-  cache_file=$(find "$tmp_home/.pscal/bc_cache" -name '*.bc' | head -n 1)
-
-  src_real=$(realpath "$src_file")
-  if ! python3 - "$cache_file" "$src_real" <<'PY'
-import sys, struct, os
-cf, expected = sys.argv[1], sys.argv[2]
-with open(cf, "rb") as f:
-    f.read(8)
-    data = f.read(4)
-    if len(data) != 4:
-        sys.exit(1)
-    stored = struct.unpack("<i", data)[0]
-    if stored >= 0:
-        sys.exit(1)
-    path = f.read(-stored).decode("utf-8")
-    sys.exit(0 if os.path.realpath(path) == os.path.realpath(expected) else 1)
-PY
-  then
-    echo "Cache file does not embed source path" >&2
-    EXIT_CODE=1
-  fi
-
-  cat > "$src_file" <<'EOF'
-program CacheStalenessTest;
-begin
-  writeln('second');
-end.
-EOF
-  # Copy the cache file's timestamp to the source file so their mtimes match.
-  # Using "touch -r" avoids reliance on GNU-specific options like
-  # "stat -c" or "touch -d", improving portability (e.g., macOS).
-  touch -r "$cache_file" "$src_file"
-
-  set +e
-  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" "CacheStalenessTest" > "$tmp_home/out2" 2> "$tmp_home/err2")
-  status2=$?
-  set -e
-
-  if [ $status2 -ne 0 ] || ! grep -q 'second' "$tmp_home/out2"; then
-    echo "Cache staleness test failed: expected recompilation" >&2
-    EXIT_CODE=1
-  fi
+if details=$(run_cache_staleness_test); then
+    harness_report PASS "pascal_cache_staleness" "Cache invalidation honours matching timestamps"
 else
-  echo "Cache staleness test failed to run" >&2
-  EXIT_CODE=1
+    harness_report FAIL "pascal_cache_staleness" "Cache invalidation honours matching timestamps" "$details"
 fi
 
-rm -rf "$tmp_home" "$src_dir"
-echo
-echo
-
-# Cache invalidation test when the Pascal binary is newer than the cache
-echo "---- CacheBinaryStalenessTest ----"
-tmp_home=$(mktemp -d)
-src_dir=$(mktemp -d)
-cat > "$src_dir/BinaryTest" <<'EOF'
-program BinaryTest;
-begin
-  writeln('first');
-end.
-EOF
-
-# Ensure cache timestamp precedes binary update
-shift_mtime "$src_dir/BinaryTest" -5
-set +e
-(cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out1" 2> "$tmp_home/err1")
-status1=$?
-set -e
-if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  shift_mtime "$PASCAL_BIN" 5
-  set +e
-  (cd "$src_dir" && HOME="$tmp_home" "$PASCAL_BIN" BinaryTest > "$tmp_home/out2" 2> "$tmp_home/err2")
-  status2=$?
-  set -e
-  if [ $status2 -ne 0 ] || grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
-    echo "Cache binary staleness test failed: expected cache invalidation" >&2
-    EXIT_CODE=1
-  fi
-else
-  echo "Cache binary staleness test failed to run" >&2
-  EXIT_CODE=1
+harness_summary "Pascal"
+if harness_exit_code; then
+    exit 0
 fi
-rm -rf "$tmp_home" "$src_dir"
-echo
-
-exit $EXIT_CODE
+exit 1

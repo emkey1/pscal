@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Resolve the script directory and repository root using realpath to ensure
-# the canonical filesystem casing is preserved even when the script is invoked
-# via a differently-cased path (e.g. "tests" vs "Tests").  macOS filesystems
-# are typically case-insensitive, which previously led to lowercase paths being
-# passed to the compiler and causing test diffs.
 SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.dirname(sys.argv[1])))' "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/..")"
 REA_BIN="$ROOT_DIR/build/bin/rea"
 RUNNER_PY="$ROOT_DIR/Tests/tools/run_with_timeout.py"
 TEST_TIMEOUT="${TEST_TIMEOUT:-25}"
 
+. "$SCRIPT_DIR/tools/harness_utils.sh"
+harness_init
+
 shift_mtime() {
-  local path="$1"
-  local delta="$2"
-  python3 - "$path" "$delta" <<'PY'
+    local path="$1"
+    local delta="$2"
+    python3 - "$path" "$delta" <<'PY'
 import os
 import sys
 import time
@@ -38,26 +36,59 @@ os.utime(path, (target, target))
 PY
 }
 
-check_ext_builtin_dump() {
-  local binary="$1"
-  local label="$2"
-  local tmp_out
-  local tmp_err
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$binary" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
-  local status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "Failed to dump extended builtins for $label (exit $status)" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif [ -s "$tmp_err" ]; then
-    echo "Unexpected stderr from $label --dump-ext-builtins:" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! python3 - "$tmp_out" <<'PY'
+strip_ansi_inplace() {
+    local path="$1"
+    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+}
+
+normalise_rea_stdout() {
+    strip_ansi_inplace "$1"
+}
+
+normalise_rea_stderr() {
+    strip_ansi_inplace "$1"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$1" > "$1.clean"
+    mv "$1.clean" "$1"
+}
+
+has_ext_builtin_category() {
+    local binary="$1"
+    local category="$2"
+    set +e
+    "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}$" >/dev/null
+    local status=$?
+    set -e
+    return $status
+}
+
+run_rea_ext_builtin_dump() {
+    local label="$1"
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$REA_BIN" --dump-ext-builtins >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    if [ $status -ne 0 ]; then
+        printf 'rea --dump-ext-builtins exited with %d for %s\n' "$status" "$label"
+        if [ -s "$tmp_err" ]; then
+            printf 'stderr:\n%s\n' "$(cat "$tmp_err")"
+        fi
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    if [ -s "$tmp_err" ]; then
+        printf 'rea --dump-ext-builtins produced stderr for %s:\n%s\n' "$label" "$(cat "$tmp_err")"
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    if ! python3 - "$tmp_out" <<'PY'
 import sys
 
 path = sys.argv[1]
@@ -103,301 +134,335 @@ with open(path, 'r', encoding='utf-8') as fh:
             sys.exit(1)
 sys.exit(0)
 PY
-  then
-    echo "Unexpected output format from $label --dump-ext-builtins" >&2
-    cat "$tmp_out" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
+    then
+        printf 'rea --dump-ext-builtins emitted unexpected directives for %s\n' "$label"
+        printf '%s\n' "$(cat "$tmp_out")"
+        rm -f "$tmp_out" "$tmp_err"
+        return 1
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+    return 0
 }
 
-exercise_rea_cli_smoke() {
-  local fixture="$ROOT_DIR/Tests/tools/fixtures/cli_rea.rea"
-  if [ ! -f "$fixture" ]; then
-    echo "Rea CLI fixture missing at $fixture" >&2
-    EXIT_CODE=1
-    return
-  fi
+rea_cli_version() {
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
 
-  local tmp_out tmp_err status
+    set +e
+    "$REA_BIN" -v >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
 
-  echo "---- ReaCLIVersion ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$REA_BIN" -v >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "rea -v exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif [ -s "$tmp_err" ]; then
-    echo "rea -v emitted stderr:" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "latest tag:" "$tmp_out"; then
-    echo "rea -v output missing latest tag:" >&2
-    cat "$tmp_out" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("rea -v exited with $status")
+    fi
+    if [ -s "$tmp_err" ]; then
+        issues+=("rea -v wrote to stderr:\n$(cat "$tmp_err")")
+    fi
+    if ! grep -q "latest tag:" "$tmp_out"; then
+        issues+=("rea -v stdout missing 'latest tag:' line:\n$(cat "$tmp_out")")
+    fi
 
-  echo "---- ReaCLIStrict ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$REA_BIN" --no-cache --strict --dump-bytecode-only "$fixture" >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "rea --strict --dump-bytecode-only exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "Compiling Main Program AST to Bytecode" "$tmp_err"; then
-    echo "rea --strict --dump-bytecode-only missing disassembly banner" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    rm -f "$tmp_out" "$tmp_err"
 
-  echo "---- ReaCLINoRun ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$REA_BIN" --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "rea --no-run exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif [ -s "$tmp_out" ]; then
-    echo "rea --no-run produced unexpected stdout" >&2
-    cat "$tmp_out"
-    EXIT_CODE=1
-  elif ! grep -q "Compilation successful" "$tmp_err"; then
-    echo "rea --no-run missing compilation banner" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif grep -q -- "--- executing Program" "$tmp_err"; then
-    echo "rea --no-run should not announce VM execution" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
 
-  echo "---- ReaCLITrace ----"
-  tmp_out=$(mktemp)
-  tmp_err=$(mktemp)
-  set +e
-  "$REA_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
-  status=$?
-  set -e
-  if [ $status -ne 0 ]; then
-    echo "rea --vm-trace-head exited with $status" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  elif ! grep -q "\[VM-TRACE\]" "$tmp_err"; then
-    echo "rea --vm-trace-head did not emit trace output" >&2
-    cat "$tmp_err" >&2
-    EXIT_CODE=1
-  fi
-  rm -f "$tmp_out" "$tmp_err"
-  echo
-
+    printf '%s\n' "${issues[@]}"
+    return 1
 }
 
-has_ext_builtin_category() {
-  local binary="$1"
-  local category="$2"
-  set +e
-  "$binary" --dump-ext-builtins | grep -Ei "^category[[:space:]]+${category}\$" >/dev/null
-  local status=$?
-  set -e
-  return $status
+rea_cli_strict_dump() {
+    local fixture="$SCRIPT_DIR/tools/fixtures/cli_rea.rea"
+    if [ ! -f "$fixture" ]; then
+        printf 'Rea CLI fixture missing at %s\n' "$fixture"
+        return 1
+    fi
 
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$REA_BIN" --no-cache --strict --dump-bytecode-only "$fixture" >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("rea --strict --dump-bytecode-only exited with $status")
+    fi
+    if ! grep -q "Compiling Main Program AST to Bytecode" "$tmp_err"; then
+        issues+=("stderr missing disassembly banner:\n$(cat "$tmp_err")")
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
 }
 
-# Initialize array of tests to skip. When REA_SKIP_TESTS is unset or empty,
-# avoid "unbound variable" errors under `set -u` by explicitly declaring an
-# empty array. Otherwise, split the space-separated environment variable into
-# an array.
-SKIP_TESTS=(foo)
-if [[ -n "${REA_SKIP_TESTS:-}" ]]; then
-  IFS=' ' read -r -a SKIP_TESTS <<< "$REA_SKIP_TESTS"
+rea_cli_no_run() {
+    local fixture="$SCRIPT_DIR/tools/fixtures/cli_rea.rea"
+    if [ ! -f "$fixture" ]; then
+        printf 'Rea CLI fixture missing at %s\n' "$fixture"
+        return 1
+    fi
+
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$REA_BIN" --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("rea --no-run exited with $status")
+    fi
+    if [ -s "$tmp_out" ]; then
+        issues+=("rea --no-run produced stdout:\n$(cat "$tmp_out")")
+    fi
+    if ! grep -q "Compilation successful" "$tmp_err"; then
+        issues+=("stderr missing compilation banner:\n$(cat "$tmp_err")")
+    fi
+    if grep -q -- "--- executing Program" "$tmp_err"; then
+        issues+=("stderr should not announce VM execution:\n$(cat "$tmp_err")")
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+rea_cli_vm_trace() {
+    local fixture="$SCRIPT_DIR/tools/fixtures/cli_rea.rea"
+    if [ ! -f "$fixture" ]; then
+        printf 'Rea CLI fixture missing at %s\n' "$fixture"
+        return 1
+    fi
+
+    local tmp_out tmp_err
+    tmp_out=$(mktemp)
+    tmp_err=$(mktemp)
+
+    set +e
+    "$REA_BIN" --no-cache --vm-trace-head=3 "$fixture" >"$tmp_out" 2>"$tmp_err"
+    local status=$?
+    set -e
+
+    local issues=()
+    if [ $status -ne 0 ]; then
+        issues+=("rea --vm-trace-head exited with $status")
+    fi
+    if ! grep -q "[VM-TRACE]" "$tmp_err"; then
+        issues+=("stderr missing [VM-TRACE] entries:\n$(cat "$tmp_err")")
+    fi
+
+    rm -f "$tmp_out" "$tmp_err"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+SKIP_TESTS=()
+if [ -n "${REA_SKIP_TESTS:-}" ]; then
+    IFS=' ' read -r -a SKIP_TESTS <<< "$REA_SKIP_TESTS"
 fi
 
 should_skip() {
-  local t="$1"
-  for s in "${SKIP_TESTS[@]}"; do
-    if [[ "$s" == "$t" ]]; then
-      return 0
-    fi
-  done
-  return 1
+    local candidate="$1"
+    for entry in "${SKIP_TESTS[@]}"; do
+        if [ "$entry" = "$candidate" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
-if [ ! -x "$REA_BIN" ]; then
-  echo "rea binary not found at $REA_BIN" >&2
-  exit 1
-fi
+run_rea_fixture() {
+    local test_name="$1"
+    local src="$SCRIPT_DIR/rea/$test_name.rea"
+    local src_rel="${src#$ROOT_DIR/}"
+    local input_file="$SCRIPT_DIR/rea/$test_name.in"
+    local stdout_expect="$SCRIPT_DIR/rea/$test_name.out"
+    local stderr_expect="$SCRIPT_DIR/rea/$test_name.err"
+    local disasm_expect="$SCRIPT_DIR/rea/$test_name.disasm"
+    local sqlite_marker="$SCRIPT_DIR/rea/$test_name.sqlite"
+    local args_file="$SCRIPT_DIR/rea/$test_name.args"
 
-# Use an isolated HOME to avoid interference from existing caches.
-TEST_HOME=$(mktemp -d)
-export HOME="$TEST_HOME"
-trap 'rm -rf "$TEST_HOME"' EXIT
+    if should_skip "$test_name"; then
+        harness_report SKIP "rea_${test_name}" "Rea fixture $test_name" "Skipped via REA_SKIP_TESTS"
+        return
+    fi
 
-cd "$ROOT_DIR"
-EXIT_CODE=0
+    if [ -f "$sqlite_marker" ] && [ "$REA_SQLITE_AVAILABLE" -ne 1 ]; then
+        harness_report SKIP "rea_${test_name}" "Rea fixture $test_name" "SQLite builtins disabled"
+        return
+    fi
 
-check_ext_builtin_dump "$REA_BIN" rea
-exercise_rea_cli_smoke
+    if [ "$REA_THREED_AVAILABLE" -ne 1 ] && { [ "$test_name" = "balls3d_builtin_compare" ] || [ "$test_name" = "balls3d_demo_regression" ]; }; then
+        harness_report SKIP "rea_${test_name}" "Rea fixture $test_name" "3D builtins disabled"
+        return
+    fi
 
-if has_ext_builtin_category "$REA_BIN" sqlite; then
-  REA_SQLITE_AVAILABLE=1
-else
-  REA_SQLITE_AVAILABLE=0
-fi
+    local arg_list=()
+    if [ -f "$args_file" ]; then
+        if read -r args < "$args_file"; then
+            if [ -n "$args" ]; then
+                read -r -a arg_list <<< "$args"
+            fi
+        fi
+    fi
+    if [ ${#arg_list[@]} -eq 0 ]; then
+        arg_list=(--dump-bytecode-only)
+    fi
 
-if has_ext_builtin_category "$REA_BIN" 3d; then
-  REA_THREED_AVAILABLE=1
-else
-  REA_THREED_AVAILABLE=0
-fi
+    local details=()
+    local status="PASS"
 
-for src in "$SCRIPT_DIR"/rea/*.rea; do
-  test_name=$(basename "$src" .rea)
+    if [ -f "$disasm_expect" ]; then
+        local disasm_stderr=$(mktemp)
+        set +e
+        python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --dump-bytecode-only "$src_rel" > /dev/null 2> "$disasm_stderr"
+        local disasm_status=$?
+        set -e
+        strip_ansi_inplace "$disasm_stderr"
+        perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+        mv "$disasm_stderr.clean" "$disasm_stderr"
+        rel_src="Tests/rea/$test_name.rea"
+        sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
+        rm -f "$disasm_stderr.bak"
+        if [ $disasm_status -ne 0 ]; then
+            status="FAIL"
+            details+=("Disassembly exited with status $disasm_status")
+            if [ -s "$disasm_stderr" ]; then
+                details+=("Disassembly stderr:\n$(cat "$disasm_stderr")")
+            fi
+        else
+            set +e
+            diff_output=$(diff -u "$disasm_expect" "$disasm_stderr")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("Disassembly mismatch:\n$diff_output")
+                else
+                    details+=("Disassembly diff failed with status $diff_status")
+                fi
+            fi
+        fi
+        rm -f "$disasm_stderr"
+    fi
 
-  if should_skip "$test_name"; then
-    echo "---- $test_name (skipped) ----"
-    continue
-  fi
-  if [ -f "$SCRIPT_DIR/rea/$test_name.sqlite" ] && [ "$REA_SQLITE_AVAILABLE" -ne 1 ]; then
-    echo "---- $test_name (skipped: SQLite builtins disabled) ----"
-    continue
-  fi
-  if [ "$REA_THREED_AVAILABLE" -ne 1 ] && { [ "$test_name" = "balls3d_builtin_compare" ] || [ "$test_name" = "balls3d_demo_regression" ]; }; then
-    echo "---- $test_name (skipped: 3D builtins disabled) ----"
-    continue
-  fi
-  in_file="$SCRIPT_DIR/rea/$test_name.in"
-  out_file="$SCRIPT_DIR/rea/$test_name.out"
-  err_file="$SCRIPT_DIR/rea/$test_name.err"
-  src_rel=${src#$ROOT_DIR/}
-  disasm_file="$SCRIPT_DIR/rea/$test_name.disasm"
-  disasm_stdout=""
-  disasm_stderr=""
+    local actual_out=$(mktemp)
+    local actual_err=$(mktemp)
 
-  if [ -f "$disasm_file" ]; then
-    disasm_stdout=$(mktemp)
-    disasm_stderr=$(mktemp)
+    if [ "$status" = "PASS" ]; then
+        set +e
+        if [ -f "$input_file" ]; then
+            python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" "${arg_list[@]}" "$src_rel" < "$input_file" > "$actual_out" 2> "$actual_err"
+        else
+            python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" "${arg_list[@]}" "$src_rel" > "$actual_out" 2> "$actual_err"
+        fi
+        local run_status=$?
+        set -e
+
+        normalise_rea_stdout "$actual_out"
+        normalise_rea_stderr "$actual_err"
+
+        if [ -f "$stdout_expect" ]; then
+            set +e
+            diff_output=$(diff -u "$stdout_expect" "$actual_out")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("stdout mismatch:\n$diff_output")
+                else
+                    details+=("diff on stdout failed with status $diff_status")
+                fi
+            fi
+        else
+            if [ -s "$actual_out" ]; then
+                status="FAIL"
+                details+=("Unexpected stdout:\n$(cat "$actual_out")")
+            fi
+        fi
+
+        if [ -f "$stderr_expect" ]; then
+            set +e
+            diff_output=$(diff -u "$stderr_expect" "$actual_err")
+            local diff_status=$?
+            set -e
+            if [ $diff_status -ne 0 ]; then
+                status="FAIL"
+                if [ $diff_status -eq 1 ]; then
+                    details+=("stderr mismatch:\n$diff_output")
+                else
+                    details+=("diff on stderr failed with status $diff_status")
+                fi
+            fi
+        else
+            if [ -s "$actual_err" ]; then
+                status="FAIL"
+                details+=("Unexpected stderr:\n$(cat "$actual_err")")
+            fi
+        fi
+
+        if [ $run_status -ne 0 ]; then
+            status="FAIL"
+            details+=("Rea invocation exited with $run_status")
+        fi
+    fi
+
+    rm -f "$actual_out" "$actual_err"
+
+    if [ "$status" = "PASS" ]; then
+        harness_report PASS "rea_${test_name}" "Rea fixture $test_name"
+    else
+        harness_report FAIL "rea_${test_name}" "Rea fixture $test_name" "${details[@]}"
+    fi
+}
+
+rea_hangman_example() {
+    local disasm=$(mktemp)
     set +e
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --dump-bytecode-only "$src_rel" \
-      > "$disasm_stdout" 2> "$disasm_stderr"
-    disasm_status=$?
+    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/base/hangman5 > /dev/null 2> "$disasm"
+    local status=$?
     set -e
-    perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$disasm_stderr" > "$disasm_stderr.clean"
-    mv "$disasm_stderr.clean" "$disasm_stderr"
-    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
-    mv "$disasm_stderr.clean" "$disasm_stderr"
-    rel_src="Tests/rea/$test_name.rea"
-    sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
-    rm -f "$disasm_stderr.bak"
-    if [ $disasm_status -ne 0 ]; then
-      echo "Disassembly run exited with $disasm_status: $test_name" >&2
-      cat "$disasm_stderr"
-      EXIT_CODE=1
-    elif ! diff -u "$disasm_file" "$disasm_stderr"; then
-      echo "Disassembly mismatch: $test_name" >&2
-      EXIT_CODE=1
+
+    normalise_rea_stderr "$disasm"
+
+    if [ $status -ne 0 ]; then
+        printf 'Hangman example failed to compile\n'
+        printf '%s\n' "$(cat "$disasm")"
+        rm -f "$disasm"
+        return 1
     fi
-  fi
 
-  args_file="$SCRIPT_DIR/rea/$test_name.args"
-  if [ -f "$args_file" ]; then
-    if ! read -r args < "$args_file"; then
-      args=""
-    fi
-  else
-    args="--dump-bytecode-only"
-  fi
-  actual_out=$(mktemp)
-  actual_err=$(mktemp)
-
-  echo "---- $test_name ----"
-  set +e
-  if [ -f "$in_file" ]; then
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" $args "$src_rel" < "$in_file" > "$actual_out" 2> "$actual_err"
-  else
-    python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" $args "$src_rel" > "$actual_out" 2> "$actual_err"
-  fi
-  run_status=$?
-  set -e
-
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_out" > "$actual_out.clean"
-  mv "$actual_out.clean" "$actual_out"
-  perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$actual_err" > "$actual_err.clean"
-  mv "$actual_err.clean" "$actual_err"
-  perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$actual_err" > "$actual_err.clean"
-  mv "$actual_err.clean" "$actual_err"
-
-  if [ -f "$out_file" ]; then
-    if ! diff -u "$out_file" "$actual_out"; then
-      echo "Test failed (stdout mismatch): $test_name" >&2
-      EXIT_CODE=1
-    fi
-  elif [ -s "$actual_out" ]; then
-    echo "Test produced unexpected stdout: $test_name" >&2
-    cat "$actual_out"
-    EXIT_CODE=1
-  fi
-
-  if [ -f "$err_file" ]; then
-    if ! diff -u "$err_file" "$actual_err"; then
-      echo "Test failed (stderr mismatch): $test_name" >&2
-      EXIT_CODE=1
-    fi
-  elif [ -s "$actual_err" ]; then
-    echo "Unexpected stderr output in $test_name:" >&2
-    cat "$actual_err"
-    EXIT_CODE=1
-  fi
-
-  if [ $run_status -ne 0 ]; then
-    echo "Test exited with $run_status: $test_name" >&2
-    EXIT_CODE=1
-  fi
-
-  if [ -n "$disasm_stdout" ]; then rm -f "$disasm_stdout"; fi
-  if [ -n "$disasm_stderr" ]; then rm -f "$disasm_stderr"; fi
-  rm -f "$actual_out" "$actual_err"
-  echo
-  echo
-done
-
-# Ensure the Hangman example compiles cleanly and that the compiler emits
-# the WordRepository vtable before the global HangmanGame constructor runs.
-echo "---- HangmanExample ----"
-hangman_disasm=$(mktemp)
-set +e
-python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" --no-cache --dump-bytecode-only Examples/rea/base/hangman5 \
-  > /dev/null 2> "$hangman_disasm"
-status=$?
-set -e
-perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]|\e\][^\a]*(?:\a|\e\\)//g' "$hangman_disasm" > "$hangman_disasm.clean"
-mv "$hangman_disasm.clean" "$hangman_disasm"
-perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$hangman_disasm" > "$hangman_disasm.clean"
-mv "$hangman_disasm.clean" "$hangman_disasm"
-if [ $status -ne 0 ]; then
-  echo "Hangman example failed to compile" >&2
-  cat "$hangman_disasm"
-  EXIT_CODE=1
-else
-  if ! python3 - "$hangman_disasm" <<'PY'
+    if python3 - "$disasm" <<'PY'
 import sys
 from pathlib import Path
 
@@ -421,69 +486,178 @@ if def_line > call_line:
     )
     sys.exit(1)
 PY
-  then
-    EXIT_CODE=1
-  fi
-fi
-rm -f "$hangman_disasm"
-echo
-echo
+    then
+        rm -f "$disasm"
+        return 0
+    fi
 
-# Basic cache reuse test for the Rea front end
-echo "---- CacheReuseTest ----"
-tmp_home=$(mktemp -d)
-src_dir=$(mktemp -d)
-cat > "$src_dir/CacheTest.rea" <<'EOF'
+    rm -f "$disasm"
+    return 1
+}
+
+rea_cache_reuse_test() {
+    local tmp_home src_dir
+    tmp_home=$(mktemp -d)
+    src_dir=$(mktemp -d)
+    cat > "$src_dir/CacheTest.rea" <<'EOF'
 writeln("first");
 EOF
-shift_mtime "$src_dir/CacheTest.rea" -5
-set +e
-(cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
-status1=$?
-set -e
-if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  set +e
-  (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
-  status2=$?
-  set -e
-  if [ $status2 -ne 0 ] || ! grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
-    echo "Cache reuse test failed: expected cached bytecode" >&2
-    EXIT_CODE=1
-  fi
-else
-  echo "Cache reuse test failed to run" >&2
-  EXIT_CODE=1
-fi
-rm -rf "$tmp_home" "$src_dir"
-echo
+    shift_mtime "$src_dir/CacheTest.rea" -5
 
-# Cache invalidation test when the Rea binary is newer than the cache
-echo "---- CacheBinaryStalenessTest ----"
-tmp_home=$(mktemp -d)
-src_dir=$(mktemp -d)
-cat > "$src_dir/BinaryTest.rea" <<'EOF'
+    set +e
+    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
+    local status1=$?
+    set -e
+
+    local issues=()
+    if [ $status1 -ne 0 ]; then
+        issues+=("Initial compile exited with $status1")
+    elif ! grep -q 'first' "$tmp_home/out1"; then
+        issues+=("Initial compile missing expected stdout")
+    else
+        set +e
+        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
+        local status2=$?
+        set -e
+        if [ $status2 -ne 0 ]; then
+            issues+=("Cached compile exited with $status2")
+        elif ! grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
+            issues+=("Expected cached byte code notice missing")
+        fi
+    fi
+
+    rm -rf "$tmp_home" "$src_dir"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+rea_cache_binary_staleness_test() {
+    local tmp_home src_dir
+    tmp_home=$(mktemp -d)
+    src_dir=$(mktemp -d)
+    cat > "$src_dir/BinaryTest.rea" <<'EOF'
 writeln("first");
 EOF
-shift_mtime "$src_dir/BinaryTest.rea" -5
-set +e
-(cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
-status1=$?
-set -e
-if [ $status1 -eq 0 ] && grep -q 'first' "$tmp_home/out1"; then
-  shift_mtime "$REA_BIN" 5
-  set +e
-  (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
-  status2=$?
-  set -e
-  if [ $status2 -ne 0 ] || grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
-    echo "Cache binary staleness test failed: expected cache invalidation" >&2
-    EXIT_CODE=1
-  fi
-else
-  echo "Cache binary staleness test failed to run" >&2
-  EXIT_CODE=1
-fi
-rm -rf "$tmp_home" "$src_dir"
-echo
+    shift_mtime "$src_dir/BinaryTest.rea" -5
 
-exit $EXIT_CODE
+    set +e
+    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
+    local status1=$?
+    set -e
+
+    local issues=()
+    if [ $status1 -ne 0 ]; then
+        issues+=("Initial compile exited with $status1")
+    elif ! grep -q 'first' "$tmp_home/out1"; then
+        issues+=("Initial compile missing expected stdout")
+    else
+        shift_mtime "$REA_BIN" 5
+        set +e
+        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
+        local status2=$?
+        set -e
+        if [ $status2 -ne 0 ]; then
+            issues+=("Recompile after binary touch exited with $status2")
+        elif grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
+            issues+=("Cache should have been invalidated after binary change")
+        fi
+    fi
+
+    rm -rf "$tmp_home" "$src_dir"
+
+    if [ ${#issues[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    printf '%s\n' "${issues[@]}"
+    return 1
+}
+
+if [ ! -x "$REA_BIN" ]; then
+    echo "rea binary not found at $REA_BIN" >&2
+    exit 1
+fi
+
+TEST_HOME=$(mktemp -d)
+export HOME="$TEST_HOME"
+trap 'rm -rf "$TEST_HOME"' EXIT
+
+cd "$ROOT_DIR"
+
+if details=$(run_rea_ext_builtin_dump rea); then
+    harness_report PASS "rea_ext_builtin_dump" "rea --dump-ext-builtins validates structure"
+else
+    harness_report FAIL "rea_ext_builtin_dump" "rea --dump-ext-builtins validates structure" "$details"
+fi
+
+if details=$(rea_cli_version); then
+    harness_report PASS "rea_cli_version" "rea -v reports latest tag"
+else
+    harness_report FAIL "rea_cli_version" "rea -v reports latest tag" "$details"
+fi
+
+if details=$(rea_cli_strict_dump); then
+    harness_report PASS "rea_cli_strict_dump" "rea --strict --dump-bytecode-only prints banner"
+else
+    harness_report FAIL "rea_cli_strict_dump" "rea --strict --dump-bytecode-only prints banner" "$details"
+fi
+
+if details=$(rea_cli_no_run); then
+    harness_report PASS "rea_cli_no_run" "rea --no-run compiles without executing"
+else
+    harness_report FAIL "rea_cli_no_run" "rea --no-run compiles without executing" "$details"
+fi
+
+if details=$(rea_cli_vm_trace); then
+    harness_report PASS "rea_cli_vm_trace" "rea --vm-trace-head produces trace"
+else
+    harness_report FAIL "rea_cli_vm_trace" "rea --vm-trace-head produces trace" "$details"
+fi
+
+if has_ext_builtin_category "$REA_BIN" sqlite; then
+    REA_SQLITE_AVAILABLE=1
+else
+    REA_SQLITE_AVAILABLE=0
+fi
+
+if has_ext_builtin_category "$REA_BIN" 3d; then
+    REA_THREED_AVAILABLE=1
+else
+    REA_THREED_AVAILABLE=0
+fi
+
+shopt -s nullglob
+for src in "$SCRIPT_DIR"/rea/*.rea; do
+    test_name=$(basename "$src" .rea)
+    run_rea_fixture "$test_name"
+done
+shopt -u nullglob
+
+if details=$(rea_hangman_example); then
+    harness_report PASS "rea_hangman_example" "Hangman example emits vtable before constructor"
+else
+    harness_report FAIL "rea_hangman_example" "Hangman example emits vtable before constructor" "$details"
+fi
+
+if details=$(rea_cache_reuse_test); then
+    harness_report PASS "rea_cache_reuse" "Cache reuse surfaces bytecode reuse notice"
+else
+    harness_report FAIL "rea_cache_reuse" "Cache reuse surfaces bytecode reuse notice" "$details"
+fi
+
+if details=$(rea_cache_binary_staleness_test); then
+    harness_report PASS "rea_cache_binary_staleness" "Binary timestamp invalidates cached bytecode"
+else
+    harness_report FAIL "rea_cache_binary_staleness" "Binary timestamp invalidates cached bytecode" "$details"
+fi
+
+harness_summary "Rea"
+if harness_exit_code; then
+    exit 0
+fi
+exit 1
