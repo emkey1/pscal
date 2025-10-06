@@ -7,7 +7,34 @@ have_exsh_builtin() {
         return 0
     fi
 
-    builtin "$@" >/dev/null 2>&1
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
+
+    case "$#" in
+        0)
+            builtin "$name" >/dev/null 2>&1
+            ;;
+        1)
+            builtin "$name" "$1" >/dev/null 2>&1
+            ;;
+        2)
+            builtin "$name" "$1" "$2" >/dev/null 2>&1
+            ;;
+        3)
+            builtin "$name" "$1" "$2" "$3" >/dev/null 2>&1
+            ;;
+        4)
+            builtin "$name" "$1" "$2" "$3" "$4" >/dev/null 2>&1
+            ;;
+        *)
+            builtin "$name" "$1" "$2" "$3" "$4" "$5" >/dev/null 2>&1
+            ;;
+    esac
 }
 
 run_exsh_builtin() {
@@ -15,7 +42,34 @@ run_exsh_builtin() {
         return 0
     fi
 
-    builtin "$@" 2>/dev/null
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
+
+    case "$#" in
+        0)
+            builtin "$name" 2>/dev/null
+            ;;
+        1)
+            builtin "$name" "$1" 2>/dev/null
+            ;;
+        2)
+            builtin "$name" "$1" "$2" 2>/dev/null
+            ;;
+        3)
+            builtin "$name" "$1" "$2" "$3" 2>/dev/null
+            ;;
+        4)
+            builtin "$name" "$1" "$2" "$3" "$4" 2>/dev/null
+            ;;
+        *)
+            builtin "$name" "$1" "$2" "$3" "$4" "$5" 2>/dev/null
+            ;;
+    esac
 }
 
 run_exsh_builtin_capture() {
@@ -37,18 +91,69 @@ run_exsh_builtin_capture() {
     fi
 
     local tmp_file status
+    status=1
+
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
 
     tmp_file=$(mktemp "${TMPDIR:-/tmp}/sierpinski_threads.XXXXXX" 2>/dev/null) || return 1
 
-    if builtin "$@" >"$tmp_file" 2>/dev/null; then
+    case "$#" in
+        0)
+            if builtin "$name" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+        1)
+            if builtin "$name" "$1" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+        2)
+            if builtin "$name" "$1" "$2" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+        3)
+            if builtin "$name" "$1" "$2" "$3" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+        4)
+            if builtin "$name" "$1" "$2" "$3" "$4" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+        *)
+            if builtin "$name" "$1" "$2" "$3" "$4" "$5" >"$tmp_file" 2>/dev/null; then
+                status=0
+            else
+                status=$?
+            fi
+            ;;
+    esac
+
+    if [ "$status" -eq 0 ]; then
         if IFS= read -r RUN_EXSH_BUILTIN_STDOUT <"$tmp_file"; then
             :
         else
             RUN_EXSH_BUILTIN_STDOUT=""
         fi
-        status=0
-    else
-        status=$?
     fi
 
     rm -f "$tmp_file"
@@ -420,21 +525,31 @@ else
 
     worker_failure=0
 
-    if wait "$PID0"; then
-        :
+    jobs_remaining=0
+    if [ -n "$PID0" ]; then
+        jobs_remaining=$((jobs_remaining + 1))
     else
         worker_failure=1
     fi
-    if wait "$PID1"; then
-        :
+    if [ -n "$PID1" ]; then
+        jobs_remaining=$((jobs_remaining + 1))
     else
         worker_failure=1
     fi
-    if wait "$PID2"; then
-        :
+    if [ -n "$PID2" ]; then
+        jobs_remaining=$((jobs_remaining + 1))
     else
         worker_failure=1
     fi
+
+    while [ "$jobs_remaining" -gt 0 ]; do
+        if wait; then
+            :
+        else
+            worker_failure=1
+        fi
+        jobs_remaining=$((jobs_remaining - 1))
+    done
 
     WORKER_PIDS=""
 

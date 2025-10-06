@@ -751,41 +751,6 @@ static ShellReadLineResult shellReadLineFromStream(FILE *stream,
     return SHELL_READ_LINE_OK;
 }
 
-static char *shellReadExtractField(char **cursor, bool last_field) {
-    if (!cursor) {
-        return strdup("");
-    }
-    char *text = *cursor;
-    if (!text) {
-        return strdup("");
-    }
-    while (*text && isspace((unsigned char)*text)) {
-        text++;
-    }
-    if (last_field) {
-        char *value = strdup(text);
-        if (!value) {
-            return NULL;
-        }
-        *cursor = text + strlen(text);
-        return value;
-    }
-    char *end = text;
-    while (*end && !isspace((unsigned char)*end)) {
-        end++;
-    }
-    if (end == text) {
-        *cursor = end;
-        return strdup("");
-    }
-    char saved = *end;
-    *end = '\0';
-    char *value = strdup(text);
-    *end = saved;
-    *cursor = end;
-    return value;
-}
-
 static bool shellAssignLoopVariable(const char *name, const char *value) {
     if (!name) {
         return false;
@@ -7693,12 +7658,86 @@ Value vmBuiltinShellReturn(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static char *shellReadCopyValue(const char *text, bool raw_mode) {
+    if (!text) {
+        return strdup("");
+    }
+
+    if (raw_mode) {
+        return strdup(text);
+    }
+
+    size_t length = strlen(text);
+    char *copy = (char *)malloc(length + 1);
+    if (!copy) {
+        return NULL;
+    }
+
+    size_t out_index = 0;
+    for (size_t i = 0; i < length; ++i) {
+        char ch = text[i];
+        if (ch == '\\' && i + 1 < length) {
+            copy[out_index++] = text[++i];
+        } else {
+            copy[out_index++] = ch;
+        }
+    }
+    copy[out_index] = '\0';
+    return copy;
+}
+
+static char *shellReadExtractField(char **cursor, bool last_field, bool raw_mode) {
+    if (!cursor) {
+        return strdup("");
+    }
+    char *text = *cursor;
+    if (!text) {
+        return strdup("");
+    }
+
+    while (*text && isspace((unsigned char)*text)) {
+        text++;
+    }
+
+    if (last_field) {
+        char *value = shellReadCopyValue(text, raw_mode);
+        if (!value) {
+            return NULL;
+        }
+        *cursor = text + strlen(text);
+        return value;
+    }
+
+    char *scan = text;
+    while (*scan) {
+        if (!raw_mode && *scan == '\\') {
+            if (scan[1] == '\0') {
+                break;
+            }
+            scan += 2;
+            continue;
+        }
+        if (isspace((unsigned char)*scan)) {
+            break;
+        }
+        scan++;
+    }
+
+    char saved = *scan;
+    *scan = '\0';
+    char *value = shellReadCopyValue(text, raw_mode);
+    *scan = saved;
+    *cursor = scan;
+    return value;
+}
+
 Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     const char *prompt = NULL;
     const char **variables = NULL;
     size_t variable_count = 0;
     bool parsing_options = true;
     bool ok = true;
+    bool raw_mode = false;
 
     for (int i = 0; i < arg_count && ok; ++i) {
         Value val = args[i];
@@ -7713,25 +7752,42 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
                 parsing_options = false;
                 continue;
             }
-            if (strcmp(token, "-p") == 0) {
-                if (i + 1 >= arg_count) {
-                    runtimeError(vm, "read: option -p requires an argument");
-                    ok = false;
+            if (token[0] == '-' && token[1] != '\0') {
+                size_t option_length = strlen(token);
+                bool pending_prompt = false;
+                for (size_t opt_index = 1; opt_index < option_length && ok; ++opt_index) {
+                    char opt = token[opt_index];
+                    switch (opt) {
+                        case 'r':
+                            raw_mode = true;
+                            break;
+                        case 'p':
+                            pending_prompt = true;
+                            break;
+                        default:
+                            runtimeError(vm, "read: unsupported option '-%c'", opt);
+                            ok = false;
+                            break;
+                    }
+                }
+                if (!ok) {
                     break;
                 }
-                Value prompt_val = args[++i];
-                if (prompt_val.type != TYPE_STRING || !prompt_val.s_val) {
-                    runtimeError(vm, "read: prompt must be a string");
-                    ok = false;
-                    break;
+                if (pending_prompt) {
+                    if (i + 1 >= arg_count) {
+                        runtimeError(vm, "read: option -p requires an argument");
+                        ok = false;
+                        break;
+                    }
+                    Value prompt_val = args[++i];
+                    if (prompt_val.type != TYPE_STRING || !prompt_val.s_val) {
+                        runtimeError(vm, "read: prompt must be a string");
+                        ok = false;
+                        break;
+                    }
+                    prompt = prompt_val.s_val;
                 }
-                prompt = prompt_val.s_val;
                 continue;
-            }
-            if (token[0] == '-') {
-                runtimeError(vm, "read: unsupported option '%s'", token);
-                ok = false;
-                break;
             }
             parsing_options = false;
         }
@@ -7780,7 +7836,7 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
             bool last = (i + 1 == variable_count);
             char *value_copy = NULL;
             if (read_result == SHELL_READ_LINE_OK) {
-                value_copy = shellReadExtractField(&cursor, last);
+                value_copy = shellReadExtractField(&cursor, last, raw_mode);
             } else {
                 value_copy = strdup("");
             }
