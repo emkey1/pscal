@@ -1255,7 +1255,12 @@ static ShellWord *parseWordToken(ShellParser *parser, const char *context_messag
         return NULL;
     }
     ShellToken token = parser->current;
-    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+    unsigned int scheduled_mask = parser->next_rule_mask;
+    unsigned int continuation_mask = RULE_MASK_COMMAND_CONTINUATION;
+    if ((parser->current.rule_mask & SHELL_LEXER_RULE_4) != 0u || (scheduled_mask & SHELL_LEXER_RULE_4) != 0u) {
+        continuation_mask = RULE_MASK_CASE_PATTERN;
+    }
+    parserScheduleRuleMask(parser, continuation_mask);
     shellParserAdvance(parser);
     ShellWord *word = shellCreateWord(token.lexeme ? token.lexeme : "", token.single_quoted, token.double_quoted,
                                       token.contains_parameter_expansion, token.contains_arithmetic_expansion,

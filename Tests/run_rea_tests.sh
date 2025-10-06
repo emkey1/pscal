@@ -263,6 +263,12 @@ else
   REA_SQLITE_AVAILABLE=0
 fi
 
+if has_ext_builtin_category "$REA_BIN" 3d; then
+  REA_THREED_AVAILABLE=1
+else
+  REA_THREED_AVAILABLE=0
+fi
+
 for src in "$SCRIPT_DIR"/rea/*.rea; do
   test_name=$(basename "$src" .rea)
 
@@ -272,6 +278,10 @@ for src in "$SCRIPT_DIR"/rea/*.rea; do
   fi
   if [ -f "$SCRIPT_DIR/rea/$test_name.sqlite" ] && [ "$REA_SQLITE_AVAILABLE" -ne 1 ]; then
     echo "---- $test_name (skipped: SQLite builtins disabled) ----"
+    continue
+  fi
+  if [ "$REA_THREED_AVAILABLE" -ne 1 ] && { [ "$test_name" = "balls3d_builtin_compare" ] || [ "$test_name" = "balls3d_demo_regression" ]; }; then
+    echo "---- $test_name (skipped: 3D builtins disabled) ----"
     continue
   fi
   in_file="$SCRIPT_DIR/rea/$test_name.in"

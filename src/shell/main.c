@@ -2609,6 +2609,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     ShellRunOptions exec_opts = *options;
     exec_opts.no_cache = 1;
     exec_opts.quiet = true;
+    exec_opts.exit_on_signal = false;
 
     int last_status = shellRuntimeLastStatus();
     bool tty = isatty(STDIN_FILENO);
@@ -2765,7 +2766,9 @@ int main(int argc, char **argv) {
         }
         shellRuntimeSetArg0(path);
         bool exit_requested = false;
-        int status = shellRunSource(src, path, &options, &exit_requested);
+        ShellRunOptions script_options = options;
+        script_options.exit_on_signal = true;
+        int status = shellRunSource(src, path, &script_options, &exit_requested);
         (void)exit_requested;
         free(src);
         shellRuntimeSetArg0(options.frontend_path);
@@ -2793,6 +2796,7 @@ int main(int argc, char **argv) {
     ShellRunOptions stdin_opts = options;
     stdin_opts.no_cache = 1;
     stdin_opts.quiet = true;
+    stdin_opts.exit_on_signal = true;
     bool exit_requested = false;
     int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
     (void)exit_requested;

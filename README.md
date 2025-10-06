@@ -263,7 +263,7 @@ both branches. Gate behaviour using the exported status variable until the VM
 gains proper jump support for the exsh front end.
 
 More details and operational tips live in
-[Docs/shell_overview.md](Docs/shell_overview.md).
+[Docs/exsh_overview.md](Docs/exsh_overview.md).
 
 ## AST JSON → Bytecode (pscaljson2bc)
 

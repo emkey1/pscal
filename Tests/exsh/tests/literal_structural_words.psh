@@ -1,0 +1,2 @@
+#!/usr/bin/env exsh
+printf '%s %s %s %s\n' ( ) {} \;

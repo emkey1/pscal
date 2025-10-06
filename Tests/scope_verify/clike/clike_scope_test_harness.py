@@ -393,7 +393,7 @@ def evaluate_test(
     args: argparse.Namespace,
     command_template: str,
     out_root: Path,
-) -> Tuple[bool, str, subprocess.Popen]:
+) -> Tuple[bool, str, Optional[subprocess.CompletedProcess[str]]]:
     command = build_command(command_template, resolved.main_path, resolved.support_files)
     try:
         proc = subprocess.run(
@@ -499,12 +499,6 @@ def matches_filter(entry: Dict[str, Any], patterns: List[str]) -> bool:
     return any(pattern.lower() in haystack for pattern in patterns)
 
 
-def summarise_results(results: List[Tuple[ResolvedTest, bool, str]]) -> Tuple[int, int]:
-    passed = sum(1 for _, ok, _ in results if ok)
-    failed = len(results) - passed
-    return passed, failed
-
-
 def write_csv_report(out_root: Path, rows: List[List[Any]]) -> None:
     ensure_directory(out_root)
     csv_path = out_root / "report.csv"
@@ -536,7 +530,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         return 0
 
     rows: List[List[Any]] = []
-    results: List[Tuple[ResolvedTest, bool, str]] = []
+    results: List[Tuple[ResolvedTest, bool, str, Optional[subprocess.CompletedProcess[str]]]] = []
     for entry in tests:
         resolved = materialise_test(
             entry=entry,
@@ -550,8 +544,21 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             continue
         ok, reason, proc = evaluate_test(resolved, args, args.cmd, out_root)
         status = "PASS" if ok else "FAIL"
-        print(f"[{status}] {resolved.short_status()} :: {reason}")
-        results.append((resolved, ok, reason))
+        print(f"[{status}] {resolved.test_id} – {resolved.name}")
+        if not ok:
+            print(f"    Reason: {reason}")
+            if proc is not None:
+                stdout = normalize_output(proc.stdout)
+                stderr = normalize_output(proc.stderr)
+                if stdout.strip():
+                    print("    stdout:")
+                    for line in stdout.strip().splitlines():
+                        print(f"        {line}")
+                if stderr.strip():
+                    print("    stderr:")
+                    for line in stderr.strip().splitlines():
+                        print(f"        {line}")
+        results.append((resolved, ok, reason, proc))
         rows.append([
             resolved.test_id,
             resolved.category,
@@ -562,11 +569,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         ])
     if rows:
         write_csv_report(out_root, rows)
-    passed, failed = summarise_results(results)
-    print("-" * 60)
-    print(f"Seed: {args.seed}")
-    print(f"Total: {len(results)} | Passed: {passed} | Failed: {failed}")
-    return 0 if failed == 0 else 1
+
+    failures = [entry for entry in results if not entry[1]]
+
+    print()
+    print(f"Ran {len(results)} clike scope test(s); {len(failures)} failure(s)")
+
+    return 0 if not failures else 1
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ Start here to explore the available guides and references in this directory.
 - [clike_repl_tutorial.md](clike_repl_tutorial.md): interact with the language through the REPL.
 
 ## exsh front end
-- [shell_overview.md](shell_overview.md): running shell scripts on the PSCAL VM, caching and builtin integration for exsh.
+- [exsh_overview.md](exsh_overview.md): running shell scripts on the PSCAL VM, caching and builtin integration for exsh.
 
 ## Rea front end
 - [rea_overview.md](rea_overview.md): architecture and roadmap of the experimental Rea compiler.
