@@ -15,6 +15,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"pwd", "pwd", 2},
     {"echo", "echo", 3},
     {"exit", "exit", 4},
+    {"exec", "exec", 31},
     {"true", "true", 5},
     {"false", "false", 6},
     {"set", "set", 7},
