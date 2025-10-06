@@ -108,6 +108,7 @@ copy_dir_contents "$REPO_ROOT/lib/rea" "$PREFIX/lib/rea" "Rea import library"
 copy_dir_contents "$REPO_ROOT/fonts" "$PS_PREFIX/fonts" "fonts"
 copy_dir_contents "$REPO_ROOT/etc" "$PS_PREFIX/etc" "configuration files"
 copy_dir_contents "$REPO_ROOT/Tests/libs" "$PS_PREFIX/etc/tests" "test configuration files"
+copy_dir_contents "$REPO_ROOT/Docs" "$PS_PREFIX/docs" "Doc files"
 
 # Backwards compatibility shims for legacy layouts
 create_compat_link() {
