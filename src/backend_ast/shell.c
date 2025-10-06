@@ -30,6 +30,30 @@
 
 extern char **environ;
 
+typedef struct {
+    char *name;
+    char **values;
+    size_t count;
+} ShellArrayVariable;
+
+static ShellArrayVariable *gShellArrayVars = NULL;
+static size_t gShellArrayVarCount = 0;
+static size_t gShellArrayVarCapacity = 0;
+
+static void shellArrayVariableClear(ShellArrayVariable *var);
+static bool shellArrayRegistryEnsureCapacity(size_t needed);
+static ShellArrayVariable *shellArrayRegistryFindMutable(const char *name);
+static const ShellArrayVariable *shellArrayRegistryFindConst(const char *name);
+static bool shellArrayRegistryStore(const char *name, char **items, size_t count);
+static void shellArrayRegistryRemove(const char *name);
+static const ShellArrayVariable *shellArrayRegistryLookup(const char *name, size_t len);
+static void shellArrayRegistryAssignFromText(const char *name, const char *value);
+static bool shellValueLooksLikeArrayLiteral(const char *value);
+static bool shellSetTrackedVariable(const char *name, const char *value, bool is_array_literal);
+static void shellUnsetTrackedVariable(const char *name);
+static char *shellLookupRawEnvironmentValue(const char *name, size_t len);
+static bool shellAssignmentIsArrayLiteral(const char *assignment, const bool *quoted_map, size_t quoted_len);
+
 static bool shellIsValidEnvName(const char *name);
 static void shellExportPrintEnvironment(void);
 static bool shellParseReturnStatus(const char *text, int *out_status);
@@ -256,9 +280,14 @@ typedef struct {
 } ShellRedirection;
 
 typedef struct {
+    char *text;
+    bool is_array_literal;
+} ShellAssignmentEntry;
+
+typedef struct {
     char **argv;
     size_t argc;
-    char **assignments;
+    ShellAssignmentEntry *assignments;
     size_t assignment_count;
     ShellRedirection *redirs;
     size_t redir_count;
@@ -324,6 +353,7 @@ typedef struct {
     char *name;
     char *previous_value;
     bool had_previous;
+    bool previous_was_array;
 } ShellAssignmentBackup;
 
 static ShellRuntimeState gShellRuntime = {
@@ -397,6 +427,200 @@ static bool shellHandleSpecialAssignment(const char *name, const char *value) {
         return true;
     }
     return false;
+}
+
+static void shellArrayVariableClear(ShellArrayVariable *var) {
+    if (!var) {
+        return;
+    }
+    if (var->values) {
+        for (size_t i = 0; i < var->count; ++i) {
+            free(var->values[i]);
+        }
+        free(var->values);
+    }
+    var->values = NULL;
+    var->count = 0;
+}
+
+static bool shellArrayRegistryEnsureCapacity(size_t needed) {
+    if (gShellArrayVarCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellArrayVarCapacity ? (gShellArrayVarCapacity * 2) : 8;
+    if (new_capacity < needed) {
+        new_capacity = needed;
+    }
+    ShellArrayVariable *resized =
+        (ShellArrayVariable *)realloc(gShellArrayVars, new_capacity * sizeof(ShellArrayVariable));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellArrayVarCapacity; i < new_capacity; ++i) {
+        resized[i].name = NULL;
+        resized[i].values = NULL;
+        resized[i].count = 0;
+    }
+    gShellArrayVars = resized;
+    gShellArrayVarCapacity = new_capacity;
+    return true;
+}
+
+static ShellArrayVariable *shellArrayRegistryFindMutable(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellArrayVarCount; ++i) {
+        ShellArrayVariable *var = &gShellArrayVars[i];
+        if (var->name && strcmp(var->name, name) == 0) {
+            return var;
+        }
+    }
+    return NULL;
+}
+
+static const ShellArrayVariable *shellArrayRegistryFindConst(const char *name) {
+    return shellArrayRegistryFindMutable(name);
+}
+
+static bool shellArrayRegistryStore(const char *name, char **items, size_t count) {
+    if (!name) {
+        return false;
+    }
+    ShellArrayVariable *var = shellArrayRegistryFindMutable(name);
+    if (!var) {
+        if (!shellArrayRegistryEnsureCapacity(gShellArrayVarCount + 1)) {
+            return false;
+        }
+        var = &gShellArrayVars[gShellArrayVarCount++];
+        var->name = strdup(name);
+        if (!var->name) {
+            gShellArrayVarCount--;
+            return false;
+        }
+        var->values = NULL;
+        var->count = 0;
+    } else {
+        shellArrayVariableClear(var);
+    }
+
+    if (count == 0) {
+        return true;
+    }
+
+    var->values = (char **)calloc(count, sizeof(char *));
+    if (!var->values) {
+        shellArrayRegistryRemove(name);
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        const char *item = items[i] ? items[i] : "";
+        var->values[i] = strdup(item);
+        if (!var->values[i]) {
+            shellArrayRegistryRemove(name);
+            return false;
+        }
+    }
+    var->count = count;
+    return true;
+}
+
+static void shellArrayRegistryRemove(const char *name) {
+    if (!name) {
+        return;
+    }
+    for (size_t i = 0; i < gShellArrayVarCount; ++i) {
+        ShellArrayVariable *var = &gShellArrayVars[i];
+        if (!var->name || strcmp(var->name, name) != 0) {
+            continue;
+        }
+        free(var->name);
+        var->name = NULL;
+        shellArrayVariableClear(var);
+        if (i + 1 < gShellArrayVarCount) {
+            gShellArrayVars[i] = gShellArrayVars[gShellArrayVarCount - 1];
+        }
+        gShellArrayVarCount--;
+        return;
+    }
+}
+
+static const ShellArrayVariable *shellArrayRegistryLookup(const char *name, size_t len) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellArrayVarCount; ++i) {
+        ShellArrayVariable *var = &gShellArrayVars[i];
+        if (!var->name) {
+            continue;
+        }
+        size_t stored_len = strlen(var->name);
+        if (stored_len == len && strncmp(var->name, name, len) == 0) {
+            return var;
+        }
+    }
+    return NULL;
+}
+
+static bool shellValueLooksLikeArrayLiteral(const char *value) {
+    if (!value) {
+        return false;
+    }
+    const char *start = value;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    if (*start != '(') {
+        return false;
+    }
+    const char *end = value + strlen(value);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (end <= start) {
+        return false;
+    }
+    return end[-1] == ')';
+}
+
+static bool shellAssignmentIsArrayLiteral(const char *assignment, const bool *quoted_map, size_t quoted_len) {
+    if (!assignment) {
+        return false;
+    }
+    const char *eq = strchr(assignment, '=');
+    if (!eq) {
+        return false;
+    }
+    const char *value = eq + 1;
+    size_t offset = (size_t)(value - assignment);
+    while (*value && isspace((unsigned char)*value)) {
+        value++;
+        offset++;
+    }
+    if (*value != '(') {
+        return false;
+    }
+    size_t open_index = (size_t)(value - assignment);
+    if (quoted_map && quoted_len > open_index && quoted_map[open_index]) {
+        return false;
+    }
+    const char *end = assignment + strlen(assignment);
+    size_t close_index = (size_t)(end - assignment);
+    while (end > value && isspace((unsigned char)end[-1])) {
+        end--;
+        close_index--;
+    }
+    if (end <= value || end[-1] != ')') {
+        return false;
+    }
+    size_t close_pos = close_index - 1;
+    if (quoted_map && quoted_len > close_pos && quoted_map[close_pos]) {
+        return false;
+    }
+    if (!quoted_map) {
+        return shellValueLooksLikeArrayLiteral(value);
+    }
+    return true;
 }
 
 static bool shellLoopEnsureCapacity(size_t needed) {
@@ -545,10 +769,7 @@ static bool shellAssignLoopVariable(const char *name, const char *value) {
     if (!name) {
         return false;
     }
-    if (!value) {
-        value = "";
-    }
-    return setenv(name, value, 1) == 0;
+    return shellSetTrackedVariable(name, value, false);
 }
 
 static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
@@ -874,7 +1095,7 @@ typedef struct {
 
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
-static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value);
+static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);
 static bool shellLooksLikeAssignment(const char *text);
 static bool shellParseAssignment(const char *assignment, char **out_name, const char **out_value);
 static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
@@ -1242,18 +1463,22 @@ static void shellRewriteDoubleBracketTest(ShellCommand *cmd) {
     }
 }
 
-static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value) {
+static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal) {
     if (!cmd || !value) {
         free(value);
         return false;
     }
-    char **new_assignments = realloc(cmd->assignments, sizeof(char *) * (cmd->assignment_count + 1));
-    if (!new_assignments) {
+    ShellAssignmentEntry *entries =
+        (ShellAssignmentEntry *)realloc(cmd->assignments,
+                                        sizeof(ShellAssignmentEntry) * (cmd->assignment_count + 1));
+    if (!entries) {
         free(value);
         return false;
     }
-    cmd->assignments = new_assignments;
-    cmd->assignments[cmd->assignment_count++] = value;
+    cmd->assignments = entries;
+    cmd->assignments[cmd->assignment_count].text = value;
+    cmd->assignments[cmd->assignment_count].is_array_literal = is_array_literal;
+    cmd->assignment_count++;
     return true;
 }
 
@@ -1333,7 +1558,8 @@ static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
         return true;
     }
     for (size_t i = 0; i < cmd->assignment_count; ++i) {
-        const char *assignment = cmd->assignments[i];
+        const ShellAssignmentEntry *entry = &cmd->assignments[i];
+        const char *assignment = entry->text;
         char *name = NULL;
         const char *value = NULL;
         if (!shellParseAssignment(assignment, &name, &value)) {
@@ -1350,7 +1576,7 @@ static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
             free(name);
             continue;
         }
-        if (setenv(name, value ? value : "", 1) != 0) {
+        if (!shellSetTrackedVariable(name, value, entry->is_array_literal)) {
             if (out_failed_assignment) {
                 *out_failed_assignment = assignment;
             }
@@ -1372,9 +1598,9 @@ static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count
             continue;
         }
         if (backup->had_previous) {
-            setenv(backup->name, backup->previous_value ? backup->previous_value : "", 1);
+            shellSetTrackedVariable(backup->name, backup->previous_value, backup->previous_was_array);
         } else {
-            unsetenv(backup->name);
+            shellUnsetTrackedVariable(backup->name);
         }
         free(backup->name);
         free(backup->previous_value);
@@ -1407,7 +1633,8 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
         return false;
     }
     for (size_t i = 0; i < cmd->assignment_count; ++i) {
-        const char *assignment = cmd->assignments[i];
+        const ShellAssignmentEntry *entry = &cmd->assignments[i];
+        const char *assignment = entry->text;
         char *name = NULL;
         const char *value = NULL;
         if (!shellParseAssignment(assignment, &name, &value)) {
@@ -1425,6 +1652,7 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
             backups[i].name = NULL;
             backups[i].previous_value = NULL;
             backups[i].had_previous = false;
+            backups[i].previous_was_array = false;
             continue;
         }
         backups[i].name = name;
@@ -1436,11 +1664,13 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                 return false;
             }
             backups[i].had_previous = true;
+            backups[i].previous_was_array = (shellArrayRegistryFindConst(name) != NULL);
         } else {
             backups[i].previous_value = NULL;
             backups[i].had_previous = false;
+            backups[i].previous_was_array = false;
         }
-        if (setenv(name, value ? value : "", 1) != 0) {
+        if (!shellSetTrackedVariable(name, value, entry->is_array_literal)) {
             if (out_failed_assignment) {
                 *out_failed_assignment = assignment;
             }
@@ -2500,6 +2730,18 @@ static char *shellLookupParameterValueInternal(const char *name, size_t len, boo
     }
     memcpy(key, name, len);
     key[len] = '\0';
+    const ShellArrayVariable *array_var = shellArrayRegistryFindConst(key);
+    if (array_var) {
+        if (out_is_set) {
+            *out_is_set = true;
+        }
+        const char *first = (array_var->count > 0 && array_var->values)
+                                ? (array_var->values[0] ? array_var->values[0] : "")
+                                : "";
+        char *result = strdup(first ? first : "");
+        free(key);
+        return result;
+    }
     const char *env = getenv(key);
     if (out_is_set) {
         *out_is_set = (env != NULL);
@@ -2673,6 +2915,69 @@ static bool shellParseArrayValues(const char *value, char ***out_items, size_t *
     return true;
 }
 
+static void shellArrayRegistryAssignFromText(const char *name, const char *value) {
+    if (!name) {
+        return;
+    }
+    if (!value) {
+        shellArrayRegistryRemove(name);
+        return;
+    }
+    char **items = NULL;
+    size_t count = 0;
+    if (!shellParseArrayValues(value, &items, &count)) {
+        shellArrayRegistryRemove(name);
+        return;
+    }
+    if (!shellArrayRegistryStore(name, items, count)) {
+        shellArrayRegistryRemove(name);
+    }
+    shellFreeArrayValues(items, count);
+}
+
+static bool shellSetTrackedVariable(const char *name, const char *value, bool is_array_literal) {
+    if (!name) {
+        return false;
+    }
+    const char *text = value ? value : "";
+    if (setenv(name, text, 1) != 0) {
+        return false;
+    }
+    if (is_array_literal) {
+        const char *current = getenv(name);
+        shellArrayRegistryAssignFromText(name, current);
+    } else {
+        shellArrayRegistryRemove(name);
+    }
+    return true;
+}
+
+static void shellUnsetTrackedVariable(const char *name) {
+    if (!name) {
+        return;
+    }
+    unsetenv(name);
+    shellArrayRegistryRemove(name);
+}
+
+static char *shellLookupRawEnvironmentValue(const char *name, size_t len) {
+    if (!name) {
+        return strdup("");
+    }
+    char *key = (char *)malloc(len + 1);
+    if (!key) {
+        return NULL;
+    }
+    memcpy(key, name, len);
+    key[len] = '\0';
+    const char *env = getenv(key);
+    free(key);
+    if (!env) {
+        return strdup("");
+    }
+    return strdup(env);
+}
+
 static char *shellJoinArrayValues(char **items, size_t count) {
     if (!items || count == 0) {
         return strdup("");
@@ -2706,17 +3011,25 @@ static char *shellExpandArraySubscriptValue(const char *name,
     while (subscript_len > 0 && isspace((unsigned char)subscript[subscript_len - 1])) {
         subscript_len--;
     }
-    char *raw = shellLookupParameterValue(name, name_len);
-    if (!raw) {
-        return NULL;
-    }
+    const ShellArrayVariable *array_var = shellArrayRegistryLookup(name, name_len);
     char **items = NULL;
     size_t count = 0;
-    if (!shellParseArrayValues(raw, &items, &count)) {
+    bool using_registry = false;
+    if (array_var) {
+        items = array_var->values;
+        count = array_var->count;
+        using_registry = true;
+    } else {
+        char *raw = shellLookupRawEnvironmentValue(name, name_len);
+        if (!raw) {
+            return NULL;
+        }
+        if (!shellParseArrayValues(raw, &items, &count)) {
+            free(raw);
+            return NULL;
+        }
         free(raw);
-        return NULL;
     }
-    free(raw);
 
     char *result = NULL;
     if (subscript_len == 0) {
@@ -2738,7 +3051,9 @@ static char *shellExpandArraySubscriptValue(const char *name,
             free(index_text);
         }
     }
-    shellFreeArrayValues(items, count);
+    if (!using_registry) {
+        shellFreeArrayValues(items, count);
+    }
     if (!result) {
         result = strdup("");
     }
@@ -2988,18 +3303,24 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
             }
             if (subscript_len == 1 &&
                 (subscript_start[0] == '@' || subscript_start[0] == '*')) {
-                char *raw = shellLookupParameterValue(name_start, name_len);
-                if (!raw) {
-                    return NULL;
-                }
-                char **items = NULL;
+                const ShellArrayVariable *array_var =
+                    shellArrayRegistryLookup(name_start, name_len);
                 size_t count = 0;
-                if (!shellParseArrayValues(raw, &items, &count)) {
+                if (array_var) {
+                    count = array_var->count;
+                } else {
+                    char *raw = shellLookupRawEnvironmentValue(name_start, name_len);
+                    if (!raw) {
+                        return NULL;
+                    }
+                    char **items = NULL;
+                    if (!shellParseArrayValues(raw, &items, &count)) {
+                        free(raw);
+                        return NULL;
+                    }
                     free(raw);
-                    return NULL;
+                    shellFreeArrayValues(items, count);
                 }
-                free(raw);
-                shellFreeArrayValues(items, count);
                 char buffer[32];
                 snprintf(buffer, sizeof(buffer), "%zu", count);
                 return strdup(buffer);
@@ -3898,7 +4219,7 @@ static void shellFreeCommand(ShellCommand *cmd) {
         return;
     }
     for (size_t i = 0; i < cmd->assignment_count; ++i) {
-        free(cmd->assignments[i]);
+        free(cmd->assignments[i].text);
     }
     free(cmd->assignments);
     cmd->assignments = NULL;
@@ -4098,7 +4419,7 @@ static void shellUpdateStatus(int status) {
     gShellRuntime.last_status = status;
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%d", status);
-    setenv("PSCALSHELL_LAST_STATUS", buffer, 1);
+    shellSetTrackedVariable("PSCALSHELL_LAST_STATUS", buffer, false);
     if (status != 0) {
         if (gShellRuntime.errexit_enabled) {
             gShellRuntime.errexit_pending = true;
@@ -5000,7 +5321,8 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     }
     if (saw_command_word && !*saw_command_word) {
         if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
-            if (!shellCommandAppendAssignmentOwned(cmd, expanded)) {
+            bool is_array_literal = shellAssignmentIsArrayLiteral(expanded, quoted_map, quoted_len);
+            if (!shellCommandAppendAssignmentOwned(cmd, expanded, is_array_literal)) {
                 free(quoted_map);
                 return false;
             }
@@ -6690,7 +7012,7 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     }
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd))) {
-        setenv("PWD", cwd, 1);
+        shellSetTrackedVariable("PWD", cwd, false);
     }
     shellUpdateStatus(0);
     return makeVoid();
@@ -7073,7 +7395,7 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
                 assign_ok = false;
                 break;
             }
-            if (setenv(variables[i], value_copy, 1) != 0) {
+            if (!shellSetTrackedVariable(variables[i], value_copy, false)) {
                 runtimeError(vm, "read: unable to set '%s': %s", variables[i], strerror(errno));
                 free(value_copy);
                 assign_ok = false;
@@ -7185,7 +7507,7 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
         }
         value = args[1].s_val;
     }
-    if (setenv(args[0].s_val, value, 1) != 0) {
+    if (!shellSetTrackedVariable(args[0].s_val, value, false)) {
         runtimeError(vm, "setenv: unable to set '%s': %s", args[0].s_val, strerror(errno));
         shellUpdateStatus(1);
         return makeVoid();
@@ -7248,7 +7570,7 @@ Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
                 return makeVoid();
             }
             const char *value = eq + 1;
-            if (setenv(name, value, 1) != 0) {
+            if (!shellSetTrackedVariable(name, value, false)) {
                 runtimeError(vm, "export: unable to set '%s': %s", name, strerror(errno));
                 free(name);
                 shellUpdateStatus(1);
@@ -7265,7 +7587,7 @@ Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
             if (!value) {
                 value = "";
             }
-            if (setenv(text, value, 1) != 0) {
+            if (!shellSetTrackedVariable(text, value, false)) {
                 runtimeError(vm, "export: unable to set '%s': %s", text, strerror(errno));
                 shellUpdateStatus(1);
                 return makeVoid();
@@ -7288,7 +7610,7 @@ Value vmBuiltinShellUnset(VM *vm, int arg_count, Value *args) {
             shellUpdateStatus(1);
             return makeVoid();
         }
-        unsetenv(args[i].s_val);
+        shellUnsetTrackedVariable(args[i].s_val);
     }
     shellUpdateStatus(0);
     return makeVoid();
