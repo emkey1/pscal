@@ -6486,7 +6486,7 @@ static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
     runtimeError(vm, "exec: %s: %s", argv[0], strerror(err));
     shellRestoreExecRedirections(backups, backup_count);
     shellFreeExecRedirBackups(backups, backup_count);
-    shellUpdateStatus((err == ENOENT) ? 127 : (err ? err : 126));
+    shellUpdateStatus((err == ENOENT) ? 127 : 126);
     return true;
 }
 
