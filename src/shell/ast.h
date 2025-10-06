@@ -112,12 +112,12 @@ typedef struct ShellLoop {
     bool is_for;
     ShellWord *for_variable;
     ShellWordArray for_values;
-    ShellPipeline *condition;
+    struct ShellCommand *condition;
     struct ShellProgram *body;
 } ShellLoop;
 
 typedef struct ShellConditional {
-    ShellPipeline *condition;
+    struct ShellCommand *condition;
     struct ShellProgram *then_branch;
     struct ShellProgram *else_branch;
 } ShellConditional;
@@ -229,11 +229,11 @@ ShellLogicalList *shellCreateLogicalList(void);
 void shellLogicalListAdd(ShellLogicalList *list, ShellPipeline *pipeline, ShellLogicalConnector connector);
 void shellFreeLogicalList(ShellLogicalList *list);
 
-ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram *body);
+ShellLoop *shellCreateLoop(bool is_until, struct ShellCommand *condition, ShellProgram *body);
 ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, ShellProgram *body);
 void shellFreeLoop(ShellLoop *loop);
 
-ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram *then_branch,
+ShellConditional *shellCreateConditional(struct ShellCommand *condition, ShellProgram *then_branch,
                                          ShellProgram *else_branch);
 void shellFreeConditional(ShellConditional *conditional);
 

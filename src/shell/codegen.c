@@ -499,7 +499,7 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         exitJump = chunk->count;
         emitShort(chunk, 0xFFFF, line);
     } else {
-        compilePipeline(chunk, loop->condition, false);
+        compileCommand(chunk, loop->condition, false);
         emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
         emitPushInt(chunk, 0, line);
         writeBytecodeChunk(chunk, EQUAL, line);
@@ -543,7 +543,7 @@ static void compileConditional(BytecodeChunk *chunk, const ShellConditional *con
     }
     emitPushString(chunk, "branch=if", line);
     emitBuiltinProc(chunk, "__shell_if", 1, line);
-    compilePipeline(chunk, conditional->condition, false);
+    compileCommand(chunk, conditional->condition, false);
     emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
     emitPushInt(chunk, 0, line);
     writeBytecodeChunk(chunk, EQUAL, line);

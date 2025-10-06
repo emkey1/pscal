@@ -2,6 +2,27 @@
 # Render the Sierpinski triangle using concurrent shell jobs that call PSCAL
 # console builtins. Inspired by Examples/pascal/base/SierpinskiTriangleThreads.
 
+ensure_exsh() {
+    if builtin ScreenRows >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if type exsh >/dev/null 2>&1; then
+        exec exsh "$0" "$@"
+    fi
+
+    repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+    if [ -n "$repo_root" ] && [ -x "$repo_root/build/bin/exsh" ]; then
+        exec "$repo_root/build/bin/exsh" "$0" "$@"
+    fi
+
+    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
+    echo "Build exsh via CMake and ensure it is on PATH before running the script." >&2
+    exit 1
+}
+
+ensure_exsh "$@"
+
 CHAR_TO_DRAW="${SIERPINSKI_CHAR:-+}"
 MAX_LEVEL_RAW="${SIERPINSKI_LEVEL:-13}"
 

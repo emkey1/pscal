@@ -427,7 +427,7 @@ void shellFreeLogicalList(ShellLogicalList *list) {
     free(list);
 }
 
-ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram *body) {
+ShellLoop *shellCreateLoop(bool is_until, ShellCommand *condition, ShellProgram *body) {
     ShellLoop *loop = (ShellLoop *)calloc(1, sizeof(ShellLoop));
     if (!loop) {
         return NULL;
@@ -468,12 +468,12 @@ void shellFreeLoop(ShellLoop *loop) {
         shellFreeWord(loop->for_variable);
     }
     shellWordArrayFree(&loop->for_values);
-    shellFreePipeline(loop->condition);
+    shellFreeCommand(loop->condition);
     shellFreeProgram(loop->body);
     free(loop);
 }
 
-ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram *then_branch,
+ShellConditional *shellCreateConditional(ShellCommand *condition, ShellProgram *then_branch,
                                          ShellProgram *else_branch) {
     ShellConditional *conditional = (ShellConditional *)calloc(1, sizeof(ShellConditional));
     if (!conditional) {
@@ -487,7 +487,7 @@ ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram 
 
 void shellFreeConditional(ShellConditional *conditional) {
     if (!conditional) return;
-    shellFreePipeline(conditional->condition);
+    shellFreeCommand(conditional->condition);
     shellFreeProgram(conditional->then_branch);
     shellFreeProgram(conditional->else_branch);
     free(conditional);
@@ -1078,7 +1078,11 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, "\"isUntil\": %s,\n", command->data.loop && command->data.loop->is_until ? "true" : "false");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"condition\": ");
-            shellDumpPipelineJson(out, command->data.loop ? command->data.loop->condition : NULL, indent + 4);
+            if (command->data.loop && command->data.loop->condition) {
+                shellDumpCommandJson(out, command->data.loop->condition, indent + 4);
+            } else {
+                fprintf(out, "null\n");
+            }
             fprintf(out, ",\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"body\": ");
@@ -1091,7 +1095,11 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, "{\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"condition\": ");
-            shellDumpPipelineJson(out, command->data.conditional ? command->data.conditional->condition : NULL, indent + 4);
+            if (command->data.conditional && command->data.conditional->condition) {
+                shellDumpCommandJson(out, command->data.conditional->condition, indent + 4);
+            } else {
+                fprintf(out, "null\n");
+            }
             fprintf(out, ",\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"then\": ");

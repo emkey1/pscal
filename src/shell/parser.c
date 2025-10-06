@@ -914,7 +914,7 @@ static ShellCommand *parseIfClause(ShellParser *parser) {
     int column = parser->current.column;
     parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
-    ShellPipeline *condition = parsePipeline(parser);
+    ShellCommand *condition = parseAndOr(parser);
     parseLinebreak(parser);
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
         parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
@@ -958,7 +958,7 @@ static ShellCommand *parseWhileClause(ShellParser *parser, bool is_until) {
     int column = parser->current.column;
     parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
-    ShellPipeline *condition = parsePipeline(parser);
+    ShellCommand *condition = parseAndOr(parser);
     parseLinebreak(parser);
     if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
         parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
