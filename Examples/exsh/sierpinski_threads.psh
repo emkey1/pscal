@@ -1,0 +1,126 @@
+#!/usr/bin/env exsh
+# Render the Sierpinski triangle using concurrent shell jobs that call PSCAL
+# console builtins. Inspired by Examples/pascal/base/SierpinskiTriangleThreads.
+
+CHAR_TO_DRAW="${SIERPINSKI_CHAR:-+}"
+MAX_LEVEL_RAW="${SIERPINSKI_LEVEL:-13}"
+
+case "$MAX_LEVEL_RAW" in
+    ''|*[!0-9]*)
+        MAX_LEVEL=13
+        ;;
+    *)
+        MAX_LEVEL=$MAX_LEVEL_RAW
+        ;;
+esac
+
+if [ "$MAX_LEVEL" -lt 1 ]; then
+    MAX_LEVEL=1
+fi
+
+if [ "$MAX_LEVEL" -gt 13 ]; then
+    MAX_LEVEL=13
+fi
+
+if [ "$MAX_LEVEL" -gt 1 ]; then
+    THREAD_LEVEL=$((MAX_LEVEL - 1))
+else
+    THREAD_LEVEL=0
+fi
+
+MAX_X=0
+MAX_Y=0
+
+cleanup() {
+    builtin ShowCursor >/dev/null 2>&1 || :
+}
+
+trap 'cleanup' EXIT INT TERM
+
+builtin ClrScr
+builtin HideCursor
+
+MAX_Y=$(builtin ScreenRows)
+MAX_X=$(builtin ScreenCols)
+
+if [ -z "$MAX_X" ] || [ -z "$MAX_Y" ]; then
+    echo "Failed to query terminal dimensions."
+    exit 1
+fi
+
+echo "Drawing Sierpinski Triangle with threads (Level $MAX_LEVEL)..."
+builtin Delay int:1000
+
+X1=$((MAX_X / 2))
+Y1=2
+X2=2
+Y2=$((MAX_Y - 1))
+X3=$((MAX_X - 1))
+Y3=$((MAX_Y - 1))
+
+MX1=$(((X1 + X2) / 2))
+MY1=$(((Y1 + Y2) / 2))
+MX2=$(((X2 + X3) / 2))
+MY2=$(((Y2 + Y3) / 2))
+MX3=$(((X3 + X1) / 2))
+MY3=$(((Y3 + Y1) / 2))
+
+draw_point() {
+    local x="$1"
+    local y="$2"
+    builtin GoToXY "int:$x" "int:$y"
+    builtin Write "str:$CHAR_TO_DRAW"
+}
+
+draw_sierpinski() {
+    local x1="$1"
+    local y1="$2"
+    local x2="$3"
+    local y2="$4"
+    local x3="$5"
+    local y3="$6"
+    local level="$7"
+
+    if [ "$level" -le 0 ]; then
+        draw_point "$x1" "$y1"
+        draw_point "$x2" "$y2"
+        draw_point "$x3" "$y3"
+        return
+    fi
+
+    local mx1=$(((x1 + x2) / 2))
+    local my1=$(((y1 + y2) / 2))
+    local mx2=$(((x2 + x3) / 2))
+    local my2=$(((y2 + y3) / 2))
+    local mx3=$(((x3 + x1) / 2))
+    local my3=$(((y3 + y1) / 2))
+    local next_level=$((level - 1))
+
+    draw_sierpinski "$x1" "$y1" "$mx1" "$my1" "$mx3" "$my3" "$next_level"
+    draw_sierpinski "$mx1" "$my1" "$x2" "$y2" "$mx2" "$my2" "$next_level"
+    draw_sierpinski "$mx3" "$my3" "$mx2" "$my2" "$x3" "$y3" "$next_level"
+}
+
+sierpinski_thread() {
+    draw_sierpinski "$@"
+}
+
+sierpinski_thread "$X1" "$Y1" "$MX1" "$MY1" "$MX3" "$MY3" "$THREAD_LEVEL" &
+PID0=$!
+sierpinski_thread "$MX1" "$MY1" "$X2" "$Y2" "$MX2" "$MY2" "$THREAD_LEVEL" &
+PID1=$!
+sierpinski_thread "$MX3" "$MY3" "$MX2" "$MY2" "$X3" "$Y3" "$THREAD_LEVEL" &
+PID2=$!
+
+wait "$PID0"
+wait "$PID1"
+wait "$PID2"
+
+builtin GoToXY "int:1" "int:$MAX_Y"
+builtin ShowCursor
+builtin Write "str:Done. Press any key to exit."
+builtin ReadKey >/dev/null
+builtin ClrScr
+
+trap - EXIT INT TERM
+cleanup
