@@ -1,0 +1,5 @@
+# Ensure scalar assignments that expand to parenthesised strings stay scalars.
+tmp="(1 2)"
+arr=$tmp
+printf 'scalar=%s\n' "$arr"
+
