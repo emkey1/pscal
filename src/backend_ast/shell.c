@@ -379,6 +379,8 @@ static ShellRuntimeState gShellRuntime = {
     .continue_requested_levels = 0
 };
 
+static unsigned long gShellStatusVersion = 0;
+
 static bool gShellExitRequested = false;
 static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
 static bool gShellArithmeticErrorPending = false;
@@ -4444,6 +4446,7 @@ static Value shellConvertBuiltinArgument(const char *text) {
 }
 
 static void shellUpdateStatus(int status) {
+    gShellStatusVersion++;
     if (gShellArithmeticErrorPending) {
         status = 1;
         gShellArithmeticErrorPending = false;
@@ -8902,6 +8905,7 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
         }
     }
 
+    unsigned long status_version = gShellStatusVersion;
     int previous_status = shellRuntimeLastStatus();
     Value result = handler(vm, call_argc, call_args);
 
@@ -8912,11 +8916,25 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
         free(call_args);
     }
 
-    if (vm && vm->abort_requested && shellRuntimeLastStatus() == previous_status) {
-        shellUpdateStatus(1);
-    }
-
+    /*
+     * Shell builtins historically report success by default, with individual
+     * helpers only overriding the exit status when they hit an error.  The
+     * shell runtime used to leave gShellRuntime.last_status untouched before
+     * dispatching the builtin which meant a prior non-zero status would leak
+     * through and make every subsequent builtin appear to fail.  Scripts such
+     * as the threaded Sierpinski demo rely on checking the builtin exit code,
+     * so we normalise the status to success afterwards when the handler didn't
+     * touch it.
+     */
+    bool status_untouched = (gShellStatusVersion == status_version);
     int status = shellRuntimeLastStatus();
+    if (vm && vm->abort_requested && (status_untouched || status == previous_status)) {
+        status = 1;
+        shellUpdateStatus(1);
+    } else if (status_untouched && status != 0) {
+        status = 0;
+        shellUpdateStatus(0);
+    }
 
     if (status == 0 && result.type != TYPE_VOID) {
         printValueToStream(result, stdout);
