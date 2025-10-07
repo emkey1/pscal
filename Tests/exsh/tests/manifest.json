@@ -327,6 +327,15 @@
             "expected_stdout": "double-bracket:start\nbranch:missing\nbranch:now-present\ndouble-bracket:end"
         },
         {
+            "id": "grammar_double_bracket_file_tests",
+            "name": "[[ ]] handles file-test operators",
+            "category": "grammar",
+            "description": "File-test operators like -e, -f, -d, -L, -s, -nt, -ot, and -ef evaluate correctly within double brackets.",
+            "script": "Tests/exsh/tests/parser_double_bracket_file_tests.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "file-tests:start\nmissing-before\nexists-after\nis-regular\nis-directory\nis-symlink\nempty-before\nnon-empty-after\nnot-newer-before\nolder-before\nnewer-after\nnot-older-after\nsame-inode\nfile-tests:end"
+        },
+        {
             "id": "lexer_structural_words",
             "name": "Structural tokens can be literal words",
             "category": "lexer",
