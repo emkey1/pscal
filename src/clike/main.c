@@ -38,6 +38,7 @@
 #include "clike/preproc.h"
 #include "vm/vm.h"
 #include "core/cache.h"
+#include "pscal_paths.h"
 #include "core/utils.h"
 #include "core/build_info.h"
 #include "symbol/symbol.h"
@@ -85,7 +86,7 @@ static char* resolveImportPath(const char* orig_path) {
             free(path);
         }
     }
-    const char *default_dir = "/usr/local/pscal/clike/lib";
+    const char *default_dir = PSCAL_CLIKE_LIB_DIR;
     size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
     char *path = (char*)malloc(len);
     if (!path) return NULL;

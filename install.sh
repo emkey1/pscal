@@ -3,10 +3,14 @@ set -eu
 
 usage() {
     cat <<'USAGE'
-Usage: install.sh [--prefix DIR] [--build-dir DIR]
+Usage: install.sh [--prefix DIR] [--pscal-dir DIR] [--build-dir DIR]
 
 Options:
   --prefix DIR      Installation prefix (default: /usr/local)
+  --pscal-dir DIR   Destination for PSCAL libraries and assets.
+                    Defaults to the compiled-in install root when available,
+                    otherwise "$PREFIX/pscal". Relative paths are resolved
+                    against --prefix.
   --build-dir DIR   Location of built binaries relative to the repository
                     root or as an absolute path (default: build/bin)
   -h, --help        Show this help message and exit
@@ -15,6 +19,7 @@ USAGE
 
 PREFIX=/usr/local
 BUILD_DIR=build/bin
+PSCAL_DIR_OVERRIDE=
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -33,6 +38,14 @@ while [ "$#" -gt 0 ]; do
             shift
             [ "$#" -gt 0 ] || { echo "Error: missing value for --build-dir" >&2; exit 1; }
             BUILD_DIR=$1
+            ;;
+        --pscal-dir=*)
+            PSCAL_DIR_OVERRIDE=${1#*=}
+            ;;
+        --pscal-dir)
+            shift
+            [ "$#" -gt 0 ] || { echo "Error: missing value for --pscal-dir" >&2; exit 1; }
+            PSCAL_DIR_OVERRIDE=$1
             ;;
         -h|--help)
             usage
@@ -62,6 +75,45 @@ case $BUILD_DIR in
         ;;
 esac
 
+BUILD_ROOT=$(dirname "$BIN_SRC")
+
+resolve_pscal_dir() {
+    candidate=$1
+    if [ -z "$candidate" ]; then
+        return
+    fi
+    case $candidate in
+        /*)
+            printf '%s' "${candidate%/}"
+            ;;
+        *)
+            printf '%s' "${PREFIX%/}/$candidate"
+            ;;
+    esac
+}
+
+PS_PREFIX=""
+
+if [ -n "$PSCAL_DIR_OVERRIDE" ]; then
+    PS_PREFIX=$(resolve_pscal_dir "$PSCAL_DIR_OVERRIDE")
+fi
+
+if [ -z "$PS_PREFIX" ] && [ -n "${PSCAL_INSTALL_ROOT:-}" ]; then
+    PS_PREFIX=$(resolve_pscal_dir "$PSCAL_INSTALL_ROOT")
+fi
+
+if [ -z "$PS_PREFIX" ] && [ -f "$BUILD_ROOT/pscal_install_root.txt" ]; then
+    if read -r line <"$BUILD_ROOT/pscal_install_root.txt"; then
+        PS_PREFIX=$(resolve_pscal_dir "$line")
+    fi
+fi
+
+if [ -z "$PS_PREFIX" ]; then
+    PS_PREFIX=${PREFIX%/}/pscal
+fi
+
+PS_PREFIX=${PS_PREFIX%/}
+
 if ! mkdir -p "$PREFIX" 2>/dev/null; then
     echo "Error: unable to create or access $PREFIX" >&2
     exit 1
@@ -77,7 +129,20 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 BINDIR=$PREFIX/bin
-PS_PREFIX=$PREFIX/pscal
+
+if ! mkdir -p "$PS_PREFIX" 2>/dev/null; then
+    echo "Error: unable to create or access $PS_PREFIX" >&2
+    exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    TEST_DIR=$PS_PREFIX/.pscal-install-test.$$
+    if ! mkdir -p "$TEST_DIR" 2>/dev/null; then
+        echo "Error: insufficient permissions to write to $PS_PREFIX" >&2
+        exit 1
+    fi
+    rmdir "$TEST_DIR"
+fi
 
 copy_dir_contents() {
     src=$1

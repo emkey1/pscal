@@ -68,7 +68,12 @@ class WordRepository {
       ok = my.load(paramstr(1));
     }
     if (!ok) {
-      ok = my.load("/usr/local/pscal/etc/words");
+      str installRoot;
+      installRoot = getenv("PSCAL_INSTALL_ROOT");
+      if (length(installRoot) == 0) {
+        installRoot = "/usr/local/pscal";
+      }
+      ok = my.load(installRoot + "/etc/words");
     }
     if (!ok) {
       ok = my.load("etc/words");

@@ -43,6 +43,13 @@ add_compile_definitions(
     PSCAL_GIT_TAG="${PSCAL_GIT_TAG}"
 )
 
+set(PSCAL_INSTALL_ROOT "/usr/local/pscal" CACHE PATH "Default PSCAL runtime asset directory")
+string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
+include_directories("${CMAKE_BINARY_DIR}/generated")
+file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
+
 # Optionally build additional binaries
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
