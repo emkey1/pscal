@@ -140,7 +140,7 @@ int shellRunSource(const char *source,
             saveBytecodeToCache(path, kShellCompilerId, &chunk);
         }
         if (!options->quiet) {
-            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+            fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
                     chunk.count, chunk.constants_count);
         }
         if (options->dump_bytecode) {
@@ -152,7 +152,7 @@ int shellRunSource(const char *source,
         }
     } else {
         if (!options->quiet) {
-            fprintf(stderr, "Loaded cached bytecode. Byte code size: %d bytes, Constants: %d\n",
+            fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
                     chunk.count, chunk.constants_count);
         }
         if (options->dump_bytecode) {

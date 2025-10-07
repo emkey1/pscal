@@ -104,7 +104,7 @@ The example source lives at `Examples/pascal/base/ThreadsProcPtrDemo`.
 
 A minimal compiler for a small educational language, often called *tiny*, is
 provided in `tools/tiny`.  It is written in Python and provides an example of 
-how to add a custom stand alone front end that can generate byte code that the
+how to add a custom stand alone front end that can generate bytecode that the
 pscal VM/back end can execute.  It compiles source code that follows the grammar
 described in the project documentation and emits bytecode that can be executed
 by the virtual machine.
@@ -123,7 +123,7 @@ language can be found in `Examples/tiny`.
 
 ## CLike front end
 
-`build/bin/clike` implements a compact C-like byte code compiler that integrates
+`build/bin/clike` implements a compact C-like bytecode compiler that integrates
 with the pscal vm.  The grammar covers variable and function declarations,
 conditionals, loops and expressions. VM builtins can be invoked simply by
 calling a function name that lacks a user definition.

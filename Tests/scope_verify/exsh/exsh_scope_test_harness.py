@@ -37,7 +37,7 @@ DEFAULT_OUT_DIR = HARNESS_ROOT / "out"
 DEFAULT_TIMEOUT = 20.0
 IGNORED_PARITY_STDERR_PREFIXES = (
     "Compilation successful.",
-    "Loaded cached byte code",
+    "Loaded cached bytecode",
     "Loaded cached bytecode",
 )
 

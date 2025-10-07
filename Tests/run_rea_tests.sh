@@ -48,7 +48,7 @@ normalise_rea_stdout() {
 
 normalise_rea_stderr() {
     strip_ansi_inplace "$1"
-    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$1" > "$1.clean"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached bytecode.*\n//m' "$1" > "$1.clean"
     mv "$1.clean" "$1"
 }
 
@@ -355,7 +355,7 @@ run_rea_fixture() {
         local disasm_status=$?
         set -e
         strip_ansi_inplace "$disasm_stderr"
-        perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
+        perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached bytecode.*\n//m' "$disasm_stderr" > "$disasm_stderr.clean"
         mv "$disasm_stderr.clean" "$disasm_stderr"
         rel_src="Tests/rea/$test_name.rea"
         sed -i.bak "s|$src|$rel_src|" "$disasm_stderr" 2>/dev/null || true
@@ -529,8 +529,8 @@ EOF
         set -e
         if [ $status2 -ne 0 ]; then
             issues+=("Cached compile exited with $status2")
-        elif ! grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
-            issues+=("Expected cached byte code notice missing")
+        elif ! grep -q 'Loaded cached bytecode' "$tmp_home/err2"; then
+            issues+=("Expected cached bytecode notice missing")
         fi
     fi
 
@@ -571,7 +571,7 @@ EOF
         set -e
         if [ $status2 -ne 0 ]; then
             issues+=("Recompile after binary touch exited with $status2")
-        elif grep -q 'Loaded cached byte code' "$tmp_home/err2"; then
+        elif grep -q 'Loaded cached bytecode' "$tmp_home/err2"; then
             issues+=("Cache should have been invalidated after binary change")
         fi
     fi

@@ -441,7 +441,7 @@ int main(int argc, char **argv) {
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, kReaCompilerId, &chunk);
-            fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+        fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
                     chunk.count, chunk.constants_count);
             if (dump_bytecode_flag) {
                 fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
@@ -456,7 +456,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Compilation failed with errors.\n");
         }
     } else {
-        fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n",
+        fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
