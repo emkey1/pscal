@@ -8111,12 +8111,69 @@ static bool shellIsValidEnvName(const char *name) {
     return true;
 }
 
+static int shellCompareEnvStrings(const void *lhs, const void *rhs) {
+    const char *const *a = (const char *const *)lhs;
+    const char *const *b = (const char *const *)rhs;
+    if (!a || !b) {
+        return 0;
+    }
+    if (!*a) {
+        return *b ? -1 : 0;
+    }
+    if (!*b) {
+        return 1;
+    }
+    return strcmp(*a, *b);
+}
+
+static void shellPrintExportEntry(const char *entry) {
+    if (!entry) {
+        return;
+    }
+    const char *eq = strchr(entry, '=');
+    if (!eq) {
+        printf("declare -x %s\n", entry);
+        return;
+    }
+    size_t name_len = (size_t)(eq - entry);
+    const char *value = eq + 1;
+    printf("declare -x %.*s=\"", (int)name_len, entry);
+    for (const char *cursor = value; *cursor; ++cursor) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '"' || ch == '\\') {
+            putchar('\\');
+        }
+        putchar(ch);
+    }
+    printf("\"\n");
+}
+
 static void shellExportPrintEnvironment(void) {
     if (!environ) {
         return;
     }
-    for (char **env = environ; *env; ++env) {
-        printf("export %s\n", *env);
+    size_t env_count = 0;
+    while (environ[env_count]) {
+        env_count++;
+    }
+    if (env_count == 0) {
+        return;
+    }
+
+    char **sorted = (char **)malloc(env_count * sizeof(char *));
+    if (sorted) {
+        for (size_t i = 0; i < env_count; ++i) {
+            sorted[i] = environ[i];
+        }
+        qsort(sorted, env_count, sizeof(char *), shellCompareEnvStrings);
+        for (size_t i = 0; i < env_count; ++i) {
+            shellPrintExportEntry(sorted[i]);
+        }
+        free(sorted);
+    } else {
+        for (char **env = environ; *env; ++env) {
+            shellPrintExportEntry(*env);
+        }
     }
 }
 
