@@ -38,6 +38,15 @@
             "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
         },
         {
+            "id": "loop_c_style_for",
+            "name": "C-style for loops execute arithmetic clauses",
+            "category": "control",
+            "description": "initializer, condition, and update clauses drive numeric for (( )) loops.",
+            "script": "Tests/exsh/tests/for_c_style.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "cfor:start\ncfor:inc:0\ncfor:inc:1\ncfor:inc:2\ncfor:dec:start\ncfor:dec:5\ncfor:dec:3\ncfor:cond-missing:start\ncfor:cond:0\ncfor:cond:1\ncfor:end"
+        },
+        {
             "id": "loop_colon_builtin",
             "name": "Colon builtin drives control flow",
             "category": "control",

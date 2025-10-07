@@ -434,11 +434,15 @@ ShellLoop *shellCreateLoop(bool is_until, ShellCommand *condition, ShellProgram 
     }
     loop->is_until = is_until;
     loop->is_for = false;
+    loop->is_cstyle_for = false;
     loop->for_variable = NULL;
     shellWordArrayInit(&loop->for_values);
     loop->condition = condition;
     loop->body = body;
     shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = NULL;
+    loop->cstyle_condition = NULL;
+    loop->cstyle_update = NULL;
     return loop;
 }
 
@@ -449,6 +453,7 @@ ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, Shell
     }
     loop->is_until = false;
     loop->is_for = true;
+    loop->is_cstyle_for = false;
     loop->for_variable = variable;
     if (values) {
         loop->for_values = *values;
@@ -461,6 +466,39 @@ ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, Shell
     loop->condition = NULL;
     loop->body = body;
     shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = NULL;
+    loop->cstyle_condition = NULL;
+    loop->cstyle_update = NULL;
+    return loop;
+}
+
+ShellLoop *shellCreateCStyleForLoop(const char *initializer, const char *condition, const char *update,
+                                    ShellProgram *body) {
+    ShellLoop *loop = (ShellLoop *)calloc(1, sizeof(ShellLoop));
+    if (!loop) {
+        return NULL;
+    }
+    loop->is_until = false;
+    loop->is_for = false;
+    loop->is_cstyle_for = true;
+    loop->for_variable = NULL;
+    shellWordArrayInit(&loop->for_values);
+    loop->condition = NULL;
+    loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = initializer ? strdup(initializer) : NULL;
+    loop->cstyle_condition = condition ? strdup(condition) : NULL;
+    loop->cstyle_update = update ? strdup(update) : NULL;
+    if ((initializer && !loop->cstyle_init) || (condition && !loop->cstyle_condition) ||
+        (update && !loop->cstyle_update)) {
+        free(loop->cstyle_init);
+        free(loop->cstyle_condition);
+        free(loop->cstyle_update);
+        shellWordArrayFree(&loop->for_values);
+        shellRedirectionArrayFree(&loop->redirections);
+        free(loop);
+        return NULL;
+    }
     return loop;
 }
 
@@ -473,6 +511,9 @@ void shellFreeLoop(ShellLoop *loop) {
     shellFreeCommand(loop->condition);
     shellFreeProgram(loop->body);
     shellRedirectionArrayFree(&loop->redirections);
+    free(loop->cstyle_init);
+    free(loop->cstyle_condition);
+    free(loop->cstyle_update);
     free(loop);
 }
 
