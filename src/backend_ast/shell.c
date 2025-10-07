@@ -158,6 +158,13 @@ typedef struct {
 
 static ShellBindOption *gShellBindOptions = NULL;
 static size_t gShellBindOptionCount = 0;
+static int gShellCurrentCommandLine = 0;
+static int gShellCurrentCommandColumn = 0;
+
+static void shellRuntimeSetCurrentCommandLocation(int line, int column) {
+    gShellCurrentCommandLine = line;
+    gShellCurrentCommandColumn = column;
+}
 
 static void shellFreeParameterArray(char **values, int count) {
     if (!values) {
@@ -400,6 +407,8 @@ typedef struct {
     int pipeline_index;
     bool is_pipeline_head;
     bool is_pipeline_tail;
+    int line;
+    int column;
 } ShellCommand;
 
 typedef struct {
@@ -6367,6 +6376,14 @@ const char *shellRuntimeGetArg0(void) {
     return gShellArg0;
 }
 
+int shellRuntimeCurrentCommandLine(void) {
+    return gShellCurrentCommandLine;
+}
+
+int shellRuntimeCurrentCommandColumn(void) {
+    return gShellCurrentCommandColumn;
+}
+
 void shellRuntimeInitJobControl(void) {
     shellEnsureJobControl();
 }
@@ -6677,8 +6694,9 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
                                       "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
-                                      "history", "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",
-                                      "source", "read",   "shift",   "return",  "help",    ":",       "__shell_double_bracket"};
+                                      "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
+                                      "builtin", "source", "read",    "shift",   "return",  "help",    ":",
+                                      "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -6788,11 +6806,15 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     }
     int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
     Value *args = NULL;
+    int previous_line = gShellCurrentCommandLine;
+    int previous_column = gShellCurrentCommandColumn;
+    shellRuntimeSetCurrentCommandLocation(cmd->line, cmd->column);
     if (arg_count > 0) {
         args = calloc((size_t)arg_count, sizeof(Value));
         if (!args) {
             runtimeError(vm, "shell builtin '%s': out of memory", name);
             shellUpdateStatus(1);
+            shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
             return true;
         }
         for (int i = 0; i < arg_count; ++i) {
@@ -6806,6 +6828,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         }
         free(args);
     }
+    shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
     return true;
 }
 
@@ -7057,6 +7080,10 @@ static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
                 shellParseBool(value, &cmd->is_pipeline_head);
             } else if (strcmp(key, "tail") == 0) {
                 shellParseBool(value, &cmd->is_pipeline_tail);
+            } else if (strcmp(key, "line") == 0) {
+                cmd->line = atoi(value);
+            } else if (strcmp(key, "col") == 0) {
+                cmd->column = atoi(value);
             }
         }
         if (!next) {
@@ -10332,7 +10359,6 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
     int index = 0;
     bool parsing_options = true;
     bool interactive = shellRuntimeIsInteractive();
-
     while (index < arg_count && parsing_options && ok) {
         Value v = args[index];
         if (v.type != TYPE_STRING || !v.s_val) {
@@ -10420,7 +10446,21 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
         shellBindPrintOptions();
     }
 
-    int status = ok ? (interactive ? 0 : 1) : 1;
+    if (ok && !interactive) {
+        const char *script = shellRuntimeGetArg0();
+        if (!script || !*script) {
+            script = "exsh";
+        }
+        int line = shellRuntimeCurrentCommandLine();
+        if (line > 0) {
+            fprintf(stderr, "%s: line %d: bind: warning: line editing not enabled\n", script, line);
+        } else {
+            fprintf(stderr, "%s: bind: warning: line editing not enabled\n", script);
+        }
+    }
+
+    /* Preserve legacy behavior: bind should succeed regardless of interactive mode. */
+    int status = ok ? 0 : 1;
     shellUpdateStatus(status);
     return makeVoid();
 }

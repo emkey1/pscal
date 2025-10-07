@@ -329,11 +329,13 @@ static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function,
 static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
     int line = command ? command->line : 0;
     char meta[128];
-    snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d",
+    snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d;line=%d;col=%d",
              (command && command->exec.runs_in_background) || runs_in_background ? 1 : 0,
              command ? command->exec.pipeline_index : -1,
              command && command->exec.is_pipeline_head ? 1 : 0,
-             command && command->exec.is_pipeline_tail ? 1 : 0);
+             command && command->exec.is_pipeline_tail ? 1 : 0,
+             command ? command->line : 0,
+             command ? command->column : 0);
     emitPushString(chunk, meta, line);
 
     size_t arg_count = 1; // metadata entry

@@ -171,6 +171,8 @@ bool shellRuntimeExpandHistoryReference(const char *input,
                                         char **out_line,
                                         bool *out_did_expand,
                                         char **out_error_token);
+int shellRuntimeCurrentCommandLine(void);
+int shellRuntimeCurrentCommandColumn(void);
 
 /* VM-native file I/O */
 Value vmBuiltinAssign(struct VM_s* vm, int arg_count, Value* args);
