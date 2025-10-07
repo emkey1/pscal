@@ -9711,6 +9711,7 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
 Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
     bool ok = true;
     bool associative = false;
+    bool global_scope = false;
     int index = 0;
     while (index < arg_count) {
         Value v = args[index];
@@ -9731,6 +9732,10 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 associative = true;
             } else if (opt == 'A' && token[0] == '+') {
                 associative = false;
+            } else if (opt == 'g' && token[0] == '-') {
+                global_scope = true;
+            } else if (opt == 'g' && token[0] == '+') {
+                global_scope = false;
             } else {
                 runtimeError(vm, "declare: -%c: unsupported option", opt);
                 ok = false;
@@ -9800,6 +9805,8 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         }
         free(name);
     }
+
+    (void)global_scope;
 
     shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();

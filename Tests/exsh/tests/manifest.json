@@ -83,6 +83,15 @@
             "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
         },
         {
+            "id": "declare_global_scope",
+            "name": "declare -g updates global scope",
+            "category": "builtins",
+            "description": "declare -g assigns to the global scope even when run inside functions.",
+            "script": "Tests/exsh/tests/declare_global.psh",
+            "expect": "match_bash",
+            "expected_stdout": "mp_prompt_loaded=yes\n"
+        },
+        {
             "id": "source_dot_alias",
             "name": "dot builtin sources scripts",
             "category": "builtins",
