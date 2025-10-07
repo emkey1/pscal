@@ -2161,11 +2161,59 @@ static void shellRewriteDoubleBracketTest(ShellCommand *cmd) {
         cmd->argv[cmd->argc] = NULL;
     }
 
-    char *replacement = strdup("test");
+    if (cmd->redirs && cmd->redir_count > 0) {
+        for (size_t i = 0; i < cmd->redir_count; ++i) {
+            ShellRedirection *redir = &cmd->redirs[i];
+            if (!redir) {
+                continue;
+            }
+
+            const char *op = NULL;
+            if (redir->kind == SHELL_RUNTIME_REDIR_OPEN) {
+                int mode = redir->flags & O_ACCMODE;
+                if (mode == O_RDONLY) {
+                    op = "<";
+                } else if (mode == O_WRONLY || mode == O_RDWR) {
+                    op = (redir->flags & O_APPEND) ? ">>" : ">";
+                }
+            }
+
+            if (!op) {
+                continue;
+            }
+
+            char *op_copy = strdup(op);
+            if (op_copy) {
+                shellCommandAppendArgOwned(cmd, op_copy);
+            }
+
+            char *target = NULL;
+            if (redir->path) {
+                target = redir->path;
+                redir->path = NULL;
+            }
+            if (!target) {
+                target = strdup("");
+            }
+            if (target) {
+                shellCommandAppendArgOwned(cmd, target);
+            }
+
+            free(redir->here_doc);
+            redir->here_doc = NULL;
+        }
+
+        free(cmd->redirs);
+        cmd->redirs = NULL;
+        cmd->redir_count = 0;
+    }
+
+    char *replacement = strdup("__shell_double_bracket");
     if (replacement) {
         free(first);
         cmd->argv[0] = replacement;
     }
+
 }
 
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal) {
@@ -6481,7 +6529,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
                                       "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
                                       "history", "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",
-                                      "source", "read",   "shift",   "return",  "help",    ":"};
+                                      "source", "read",   "shift",   "return",  "help",    ":",       "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -8992,6 +9040,138 @@ Value vmBuiltinShellDefineFunction(VM *vm, int arg_count, Value *args) {
 cleanup:
     shellRestoreCurrentVm(previous_vm);
     return result;
+}
+
+static bool shellParseLong(const char *text, long *out_value) {
+    if (!out_value || !text || *text == '\0') {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellEvaluateNumericComparison(const char *left,
+                                          const char *op,
+                                          const char *right,
+                                          bool *out_result) {
+    if (!left || !op || !right || !out_result) {
+        return false;
+    }
+    long lhs = 0;
+    long rhs = 0;
+    if (!shellParseLong(left, &lhs) || !shellParseLong(right, &rhs)) {
+        return false;
+    }
+    if (strcmp(op, "-eq") == 0) {
+        *out_result = (lhs == rhs);
+        return true;
+    }
+    if (strcmp(op, "-ne") == 0) {
+        *out_result = (lhs != rhs);
+        return true;
+    }
+    if (strcmp(op, "-gt") == 0) {
+        *out_result = (lhs > rhs);
+        return true;
+    }
+    if (strcmp(op, "-lt") == 0) {
+        *out_result = (lhs < rhs);
+        return true;
+    }
+    if (strcmp(op, "-ge") == 0) {
+        *out_result = (lhs >= rhs);
+        return true;
+    }
+    if (strcmp(op, "-le") == 0) {
+        *out_result = (lhs <= rhs);
+        return true;
+    }
+    return false;
+}
+
+Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    bool negate = false;
+    int index = 0;
+    while (index < arg_count) {
+        const Value *value = &args[index];
+        const char *text = (value->type == TYPE_STRING && value->s_val) ? value->s_val : "";
+        if (strcmp(text, "!") != 0) {
+            break;
+        }
+        negate = !negate;
+        index++;
+    }
+
+    bool result = false;
+    int remaining = arg_count - index;
+    if (remaining <= 0) {
+        goto done;
+    }
+
+    const char *first = (args[index].type == TYPE_STRING && args[index].s_val) ? args[index].s_val : "";
+    if (remaining == 1) {
+        result = (first[0] != '\0');
+        goto done;
+    }
+
+    if (remaining == 2) {
+        const char *operand = (args[index + 1].type == TYPE_STRING && args[index + 1].s_val)
+                                  ? args[index + 1].s_val
+                                  : "";
+        if (strcmp(first, "-z") == 0) {
+            result = (operand[0] == '\0');
+        } else if (strcmp(first, "-n") == 0) {
+            result = (operand[0] != '\0');
+        } else {
+            result = (operand[0] != '\0');
+        }
+        goto done;
+    }
+
+    if (remaining >= 3) {
+        const char *left = first;
+        const char *op = (args[index + 1].type == TYPE_STRING && args[index + 1].s_val)
+                             ? args[index + 1].s_val
+                             : "";
+        const char *right = (args[index + 2].type == TYPE_STRING && args[index + 2].s_val)
+                                ? args[index + 2].s_val
+                                : "";
+
+        bool compared = false;
+        if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
+            result = (strcmp(left, right) == 0);
+            compared = true;
+        } else if (strcmp(op, "!=") == 0) {
+            result = (strcmp(left, right) != 0);
+            compared = true;
+        } else if (strcmp(op, ">") == 0) {
+            result = (strcmp(left, right) > 0);
+            compared = true;
+        } else if (strcmp(op, "<") == 0) {
+            result = (strcmp(left, right) < 0);
+            compared = true;
+        } else if (shellEvaluateNumericComparison(left, op, right, &result)) {
+            compared = true;
+        }
+
+        if (!compared) {
+            result = false;
+        }
+    }
+
+done:
+    if (negate) {
+        result = !result;
+    }
+    shellUpdateStatus(result ? 0 : 1);
+    return makeVoid();
 }
 
 Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
