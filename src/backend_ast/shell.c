@@ -1256,30 +1256,58 @@ static bool shellParseCommandMetadata(const char *meta, size_t meta_len,
 
 static char *shellRunCommandSubstitution(const char *command) {
     int pipes[2] = {-1, -1};
-    ShellCommand cmd;
-    memset(&cmd, 0, sizeof(cmd));
+    int saved_stdout = -1;
+    char *output = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
 
     if (pipe(pipes) != 0) {
         return strdup("");
     }
-    const char *shell_path = "/bin/sh";
-    if (!shellCommandAppendArgOwned(&cmd, strdup(shell_path)) ||
-        !shellCommandAppendArgOwned(&cmd, strdup("-c")) ||
-        !shellCommandAppendArgOwned(&cmd, strdup(command ? command : ""))) {
-        goto cleanup;
+
+    saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout < 0) {
+        close(pipes[0]);
+        close(pipes[1]);
+        return strdup("");
     }
 
-    pid_t child = -1;
-    int spawn_err = shellSpawnProcess(gShellCurrentVm, &cmd, -1, pipes[1], -1, &child, false);
+    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+        int err = errno;
+        close(pipes[0]);
+        close(pipes[1]);
+        dup2(saved_stdout, STDOUT_FILENO);
+        close(saved_stdout);
+        fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
+        return strdup("");
+    }
     close(pipes[1]);
-    pipes[1] = -1;
-    if (spawn_err != 0) {
-        goto cleanup;
-    }
 
-    char *output = NULL;
-    size_t length = 0;
-    size_t capacity = 0;
+    ShellRunOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.no_cache = 1;
+    opts.quiet = true;
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
+    const char *frontend_path = shellRuntimeGetArg0();
+    opts.frontend_path = frontend_path ? frontend_path : "exsh";
+
+    const char *source = command ? command : "";
+    bool exit_requested = false;
+    int status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
+    fflush(stdout);
+
+    if (dup2(saved_stdout, STDOUT_FILENO) < 0) {
+        /* best effort; continue */
+    }
+    close(saved_stdout);
+
+    if (exit_requested || status == EXIT_SUCCESS) {
+        status = gShellRuntime.last_status;
+    } else {
+        status = gShellRuntime.last_status;
+    }
+    shellUpdateStatus(status);
+
     char buffer[256];
     while (true) {
         ssize_t n = read(pipes[0], buffer, sizeof(buffer));
@@ -1303,12 +1331,6 @@ static char *shellRunCommandSubstitution(const char *command) {
         }
     }
     close(pipes[0]);
-    pipes[0] = -1;
-
-    int status = 0;
-    shellWaitPid(child, &status, false, NULL);
-    shellRuntimeProcessPendingSignals();
-    shellFreeCommand(&cmd);
 
     if (!output) {
         return strdup("");
@@ -1317,16 +1339,6 @@ static char *shellRunCommandSubstitution(const char *command) {
         output[--length] = '\0';
     }
     return output;
-
-cleanup:
-    if (pipes[0] >= 0) {
-        close(pipes[0]);
-    }
-    if (pipes[1] >= 0) {
-        close(pipes[1]);
-    }
-    shellFreeCommand(&cmd);
-    return strdup("");
 }
 
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra) {
@@ -5020,7 +5032,14 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         handler = getVmBuiltinHandler(name);
     }
     if (!handler) {
-        return false;
+        const char *label = canonical ? canonical : name;
+        if (vm) {
+            runtimeError(vm, "shell builtin '%s': not available", label ? label : "<builtin>");
+        } else {
+            fprintf(stderr, "exsh: shell builtin '%s' is not available\n", label ? label : "<builtin>");
+        }
+        shellUpdateStatus(127);
+        return true;
     }
     int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
     Value *args = NULL;
