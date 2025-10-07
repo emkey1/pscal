@@ -826,10 +826,18 @@ ShellToken shellNextToken(ShellLexer *lexer) {
         }
         case '(': {
             advanceChar(lexer);
+            if (peekChar(lexer) == '(') {
+                advanceChar(lexer);
+                return makeSimpleToken(lexer, SHELL_TOKEN_DLPAREN, "((", 2);
+            }
             return makeSimpleToken(lexer, SHELL_TOKEN_LPAREN, "(", 1);
         }
         case ')': {
             advanceChar(lexer);
+            if (peekChar(lexer) == ')') {
+                advanceChar(lexer);
+                return makeSimpleToken(lexer, SHELL_TOKEN_DRPAREN, "))", 2);
+            }
             return makeSimpleToken(lexer, SHELL_TOKEN_RPAREN, ")", 1);
         }
         case '{': {
@@ -913,6 +921,8 @@ const char *shellTokenTypeName(ShellTokenType type) {
         case SHELL_TOKEN_OR_OR: return "OR_OR";
         case SHELL_TOKEN_LPAREN: return "LPAREN";
         case SHELL_TOKEN_RPAREN: return "RPAREN";
+        case SHELL_TOKEN_DLPAREN: return "DLPAREN";
+        case SHELL_TOKEN_DRPAREN: return "DRPAREN";
         case SHELL_TOKEN_LBRACE: return "LBRACE";
         case SHELL_TOKEN_RBRACE: return "RBRACE";
         case SHELL_TOKEN_FUNCTION: return "FUNCTION";

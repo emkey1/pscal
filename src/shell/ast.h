@@ -111,11 +111,15 @@ typedef struct {
 typedef struct ShellLoop {
     bool is_until;
     bool is_for;
+    bool is_cstyle_for;
     ShellWord *for_variable;
     ShellWordArray for_values;
     struct ShellCommand *condition;
     struct ShellProgram *body;
     ShellRedirectionArray redirections;
+    char *cstyle_init;
+    char *cstyle_condition;
+    char *cstyle_update;
 } ShellLoop;
 
 typedef struct ShellConditional {
@@ -233,6 +237,8 @@ void shellFreeLogicalList(ShellLogicalList *list);
 
 ShellLoop *shellCreateLoop(bool is_until, struct ShellCommand *condition, ShellProgram *body);
 ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, ShellProgram *body);
+ShellLoop *shellCreateCStyleForLoop(const char *initializer, const char *condition, const char *update,
+                                    ShellProgram *body);
 void shellFreeLoop(ShellLoop *loop);
 
 ShellConditional *shellCreateConditional(struct ShellCommand *condition, ShellProgram *then_branch,

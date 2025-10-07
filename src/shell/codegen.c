@@ -460,12 +460,15 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     }
 
     bool isFor = loop->is_for;
+    bool isCStyle = loop->is_cstyle_for;
     const ShellRedirectionArray *redirs = loop ? &loop->redirections : NULL;
     size_t redir_count = redirs ? redirs->count : 0;
 
     char meta[128];
     if (isFor) {
         snprintf(meta, sizeof(meta), "mode=for;redirs=%zu", redir_count);
+    } else if (isCStyle) {
+        snprintf(meta, sizeof(meta), "mode=cfor;redirs=%zu", redir_count);
     } else {
         snprintf(meta, sizeof(meta), "mode=%s;redirs=%zu", loop->is_until ? "until" : "while", redir_count);
     }
@@ -491,6 +494,16 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
                 arg_count++;
             }
         }
+    } else if (isCStyle) {
+        const char *init = loop->cstyle_init ? loop->cstyle_init : "";
+        const char *cond = loop->cstyle_condition ? loop->cstyle_condition : "";
+        const char *update = loop->cstyle_update ? loop->cstyle_update : "";
+        emitPushString(chunk, init, line);
+        if (arg_count < 255) arg_count++;
+        emitPushString(chunk, cond, line);
+        if (arg_count < 255) arg_count++;
+        emitPushString(chunk, update, line);
+        if (arg_count < 255) arg_count++;
     }
 
     if (redirs && redir_count > 0) {
@@ -523,7 +536,8 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     int conditionStart = chunk->count;
     int exitJump = -1;
 
-    if (isFor) {
+    bool usesLoopReady = isFor || isCStyle;
+    if (usesLoopReady) {
         emitCallHost(chunk, HOST_FN_SHELL_LOOP_IS_READY, line);
         writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
         exitJump = chunk->count;

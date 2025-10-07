@@ -49,6 +49,9 @@ static void parserReclassifyCurrentToken(ShellParser *parser, unsigned int mask)
 
 static bool parserConsumePendingHereDocs(ShellParser *parser);
 static char *parserCopyWordWithoutMarkers(const ShellWord *word);
+static char *parserCopyTrimmedRange(const char *src, size_t start, size_t end);
+static bool parserExtractCStyleForSegments(ShellParser *parser, size_t start_pos, char **init_out, char **cond_out,
+                                          char **update_out);
 
 static bool parseCompleteCommands(ShellParser *parser, ShellProgram *program);
 static bool parseCompleteCommand(ShellParser *parser, ShellProgram *program);
@@ -66,6 +69,7 @@ static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType 
 static ShellCommand *parseIfClause(ShellParser *parser);
 static ShellCommand *parseWhileClause(ShellParser *parser, bool is_until);
 static ShellCommand *parseForClause(ShellParser *parser);
+static ShellCommand *parseCStyleForClause(ShellParser *parser, int line, int column);
 static ShellCommand *parseCaseClause(ShellParser *parser);
 static ShellCommand *parseFunctionDefinition(ShellParser *parser);
 static ShellCommand *parseFunctionDefinitionFromName(ShellParser *parser);
@@ -484,6 +488,132 @@ static char *parserCopyWordWithoutMarkers(const ShellWord *word) {
     result[out] = '\0';
     char *shrunk = (char *)realloc(result, out + 1);
     return shrunk ? shrunk : result;
+}
+
+static char *parserCopyTrimmedRange(const char *src, size_t start, size_t end) {
+    if (!src || end <= start) {
+        return strdup("");
+    }
+    while (start < end && isspace((unsigned char)src[start])) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)src[end - 1])) {
+        end--;
+    }
+    size_t len = end > start ? (end - start) : 0;
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+    if (len > 0) {
+        memcpy(out, src + start, len);
+    }
+    out[len] = '\0';
+    return out;
+}
+
+static bool parserExtractCStyleForSegments(ShellParser *parser, size_t start_pos, char **init_out, char **cond_out,
+                                          char **update_out) {
+    if (!parser || !parser->lexer.src) {
+        return false;
+    }
+    ShellLexer *lexer = &parser->lexer;
+    const char *src = lexer->src;
+    size_t length = lexer->length;
+    size_t pos = start_pos;
+    int depth = 1;
+    size_t semicolons[2] = {SIZE_MAX, SIZE_MAX};
+    size_t semicolon_count = 0;
+    size_t expr_end = SIZE_MAX;
+    int line = lexer->line;
+    int column = lexer->column;
+
+    while (pos < length) {
+        char ch = src[pos];
+        if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+            if (depth == 0) {
+                expr_end = pos;
+                pos++;
+                column++;
+                break;
+            }
+        } else if (ch == ';' && depth == 1 && semicolon_count < 2) {
+            semicolons[semicolon_count++] = pos;
+        }
+        if (ch == '\n') {
+            line++;
+            column = 1;
+        } else {
+            column++;
+        }
+        pos++;
+    }
+
+    if (expr_end == SIZE_MAX) {
+        parserErrorAt(parser, &parser->current, "Expected '))' to close arithmetic for clause");
+        return false;
+    }
+    if (pos >= length || src[pos] != ')') {
+        parserErrorAt(parser, &parser->current, "Expected '))' to close arithmetic for clause");
+        return false;
+    }
+
+    column++;
+    pos++;
+
+    if (semicolon_count < 2 || semicolons[0] == SIZE_MAX || semicolons[1] == SIZE_MAX) {
+        parserErrorAt(parser, &parser->current,
+                      "Arithmetic for clause requires two ';' separators");
+        return false;
+    }
+
+    size_t init_start = start_pos;
+    size_t init_end = semicolons[0];
+    size_t cond_start = semicolons[0] + 1;
+    size_t cond_end = semicolons[1];
+    size_t update_start = semicolons[1] + 1;
+    size_t update_end = expr_end;
+
+    char *init = parserCopyTrimmedRange(src, init_start, init_end);
+    char *cond = parserCopyTrimmedRange(src, cond_start, cond_end);
+    char *update = parserCopyTrimmedRange(src, update_start, update_end);
+    if (!init || !cond || !update) {
+        free(init);
+        free(cond);
+        free(update);
+        parserErrorAt(parser, &parser->current, "Out of memory parsing arithmetic for clause");
+        return false;
+    }
+
+    if (init_out) {
+        *init_out = init;
+    } else {
+        free(init);
+    }
+    if (cond_out) {
+        *cond_out = cond;
+    } else {
+        free(cond);
+    }
+    if (update_out) {
+        *update_out = update;
+    } else {
+        free(update);
+    }
+
+    lexer->pos = pos;
+    lexer->line = line;
+    lexer->column = column;
+    lexer->at_line_start = (column == 1);
+
+    shellLexerSetRuleMask(lexer, parser->next_rule_mask);
+    shellFreeToken(&parser->current);
+    parser->current = shellNextToken(lexer);
+    applyLexicalRules(&parser->current);
+    return true;
 }
 
 static void parseLinebreak(ShellParser *parser) {
@@ -980,11 +1110,68 @@ static ShellCommand *parseWhileClause(ShellParser *parser, bool is_until) {
     return command;
 }
 
+static ShellCommand *parseCStyleForClause(ShellParser *parser, int line, int column) {
+    if (!parser) {
+        return NULL;
+    }
+    char *init = NULL;
+    char *cond = NULL;
+    char *update = NULL;
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+
+    size_t start_pos = parser->lexer.pos;
+    if (parser->current.length <= parser->lexer.pos) {
+        start_pos = parser->lexer.pos - parser->current.length;
+    }
+
+    if (!parserExtractCStyleForSegments(parser, start_pos, &init, &cond, &update)) {
+        free(init);
+        free(cond);
+        free(update);
+        return NULL;
+    }
+
+    parseLinebreak(parser);
+    if (parser->current.type == SHELL_TOKEN_SEMICOLON) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parseLinebreak(parser);
+    }
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_DO, "Expected 'do' in for clause");
+    parseLinebreak(parser);
+    ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_DONE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+    shellParserConsume(parser, SHELL_TOKEN_DONE, "Expected 'done' to close for clause");
+
+    ShellLoop *loop = shellCreateCStyleForLoop(init, cond, update, body);
+    free(init);
+    free(cond);
+    free(update);
+    if (!loop) {
+        shellFreeProgram(body);
+        return NULL;
+    }
+
+    ShellCommand *command = shellCreateLoopCommand(loop);
+    if (command) {
+        command->line = line;
+        command->column = column;
+    }
+    return command;
+}
+
 static ShellCommand *parseForClause(ShellParser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
     parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
     shellParserAdvance(parser);
+
+    if (parser->current.type == SHELL_TOKEN_DLPAREN) {
+        return parseCStyleForClause(parser, line, column);
+    }
 
     parserScheduleRuleMask(parser, RULE_MASK_FOR_NAME);
     parserReclassifyCurrentToken(parser, RULE_MASK_FOR_NAME);
