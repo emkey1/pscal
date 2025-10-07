@@ -1,0 +1,5 @@
+echo "here-string:start"
+VALUE="alpha beta"
+cat <<<"$VALUE"
+cat <<<foo
+echo "here-string:end"

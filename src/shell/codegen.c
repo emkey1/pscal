@@ -210,6 +210,7 @@ static const char *redirTypeName(ShellRedirectionType type) {
         case SHELL_REDIRECT_OUTPUT: return ">";
         case SHELL_REDIRECT_APPEND: return ">>";
         case SHELL_REDIRECT_HEREDOC: return "<<";
+        case SHELL_REDIRECT_HERE_STRING: return "<<<";
         case SHELL_REDIRECT_DUP_INPUT: return "<&";
         case SHELL_REDIRECT_DUP_OUTPUT: return ">&";
         case SHELL_REDIRECT_CLOBBER: return ">|";

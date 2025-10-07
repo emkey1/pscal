@@ -1294,7 +1294,8 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
         redir_type = parser->current.type;
     } else if (parser->current.type == SHELL_TOKEN_LT || parser->current.type == SHELL_TOKEN_GT ||
                parser->current.type == SHELL_TOKEN_DGREAT || parser->current.type == SHELL_TOKEN_DLESS ||
-               parser->current.type == SHELL_TOKEN_DLESSDASH || parser->current.type == SHELL_TOKEN_GREATAND ||
+               parser->current.type == SHELL_TOKEN_DLESSDASH || parser->current.type == SHELL_TOKEN_TLESS ||
+               parser->current.type == SHELL_TOKEN_GREATAND ||
                parser->current.type == SHELL_TOKEN_LESSAND || parser->current.type == SHELL_TOKEN_LESSGREAT ||
                parser->current.type == SHELL_TOKEN_CLOBBER) {
         redir_type = parser->current.type;
@@ -1321,6 +1322,7 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
         case SHELL_TOKEN_DGREAT: type = SHELL_REDIRECT_APPEND; break;
         case SHELL_TOKEN_DLESS:
         case SHELL_TOKEN_DLESSDASH: type = SHELL_REDIRECT_HEREDOC; break;
+        case SHELL_TOKEN_TLESS: type = SHELL_REDIRECT_HERE_STRING; break;
         case SHELL_TOKEN_LESSAND: type = SHELL_REDIRECT_DUP_INPUT; break;
         case SHELL_TOKEN_GREATAND: type = SHELL_REDIRECT_DUP_OUTPUT; break;
         case SHELL_TOKEN_LESSGREAT: type = SHELL_REDIRECT_INPUT; break;

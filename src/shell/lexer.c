@@ -845,7 +845,12 @@ ShellToken shellNextToken(ShellLexer *lexer) {
             int next = peekChar(lexer);
             if (next == '<') {
                 advanceChar(lexer);
-                if (peekChar(lexer) == '-') {
+                int third = peekChar(lexer);
+                if (third == '<') {
+                    advanceChar(lexer);
+                    return makeSimpleToken(lexer, SHELL_TOKEN_TLESS, "<<<", 3);
+                }
+                if (third == '-') {
                     advanceChar(lexer);
                     return makeSimpleToken(lexer, SHELL_TOKEN_DLESSDASH, "<<-", 3);
                 }
@@ -930,6 +935,7 @@ const char *shellTokenTypeName(ShellTokenType type) {
         case SHELL_TOKEN_DGREAT: return "DGREAT";
         case SHELL_TOKEN_DLESS: return "DLESS";
         case SHELL_TOKEN_DLESSDASH: return "DLESSDASH";
+        case SHELL_TOKEN_TLESS: return "TLESS";
         case SHELL_TOKEN_LESSGREAT: return "LESSGREAT";
         case SHELL_TOKEN_GREATAND: return "GREATAND";
         case SHELL_TOKEN_LESSAND: return "LESSAND";
