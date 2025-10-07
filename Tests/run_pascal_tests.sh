@@ -64,7 +64,7 @@ normalise_pascal_stdout() {
 normalise_pascal_stderr() {
     local path="$1"
     strip_ansi_inplace "$path"
-    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached byte code.*\n//m' "$path" > "$path.clean"
+    perl -0 -pe 's/^Compilation successful.*\n//m; s/^Loaded cached bytecode.*\n//m' "$path" > "$path.clean"
     mv "$path.clean" "$path"
     perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$path" > "$path.clean"
     mv "$path.clean" "$path"
@@ -302,7 +302,7 @@ run_pascal_fixture() {
         local disasm_status=$?
         set -e
         strip_ansi_inplace "$disasm_stderr"
-        perl -ne 'print unless /^Loaded cached byte code/' "$disasm_stderr" > "$disasm_stderr.clean"
+        perl -ne 'print unless /^Loaded cached bytecode/' "$disasm_stderr" > "$disasm_stderr.clean"
         mv "$disasm_stderr.clean" "$disasm_stderr"
         if [ $disasm_status -ne 0 ]; then
             status="FAIL"
