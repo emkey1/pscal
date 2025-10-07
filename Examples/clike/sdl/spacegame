@@ -34,6 +34,7 @@ int main() {
     int maxAlienX;
     int ShotSound;
     int ExplodeSound;
+    str assetBase;
 
     /* Arrays are 1-based to match the underlying Pascal VM. */
     int AlienX[AlienRows * AlienCols + 1];
@@ -44,9 +45,15 @@ int main() {
     ScreenHeight = 600;
     initgraph(ScreenWidth, ScreenHeight, "Space Shooter CLike(WIP)");
 
+    str installRoot;
+    installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (strlen(installRoot) == 0) {
+        installRoot = "/usr/local/pscal";
+    }
+    assetBase = installRoot + "/lib/sounds";
     initsoundsystem();
-    ShotSound = loadsound("/usr/local/pscal/lib/sounds/paddle_hit.wav");
-    ExplodeSound = loadsound("/usr/local/pscal/lib/sounds/wall_hit.wav");
+    ShotSound = loadsound(assetBase + "/paddle_hit.wav");
+    ExplodeSound = loadsound(assetBase + "/wall_hit.wav");
 
     PlayerW = 40;
     PlayerH = 20;

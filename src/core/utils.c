@@ -15,6 +15,7 @@
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
 #include <limits.h>    // For PATH_MAX
+#include "pscal_paths.h"
 
 
 const char *varTypeToString(VarType type) {
@@ -1373,7 +1374,7 @@ bool isUnitDocumented(const char *unit_name) {
 }
 
 char *findUnitFile(const char *unit_name) {
-    const char *default_install_dir = "/usr/local/pscal/pascal/lib";
+    const char *default_install_dir = PSCAL_PASCAL_LIB_DIR;
     const char *relative_fallbacks[] = {
         "./lib/pascal",
         "../lib/pascal",

@@ -1,7 +1,7 @@
 #!/usr/bin/env pascal
 program HangmanGameWithPointers;
 
-uses CRT;
+uses CRT, SysUtils;
 
 const
   MAX_WRONG = 8;  { maximum number of wrong guesses }
@@ -62,6 +62,18 @@ var
   wordListHead: PWordNode;
   wordListCount: Integer;
   { *** END ADDED *** }
+
+function ResolveInstallRoot: string;
+begin
+  ResolveInstallRoot := GetEnv('PSCAL_INSTALL_ROOT');
+  if ResolveInstallRoot = '' then
+    ResolveInstallRoot := '/usr/local/pscal';
+end;
+
+function DefaultWordListPath: string;
+begin
+  DefaultWordListPath := ResolveInstallRoot + '/etc/words';
+end;
 
 {---------------------------------------------------------------------
   Helper Functions (UpperCaseStr, SortString - unchanged)
@@ -492,7 +504,7 @@ begin
   writeln('Initializing Hangman...');
 
   // --- Load word list ONCE ---
-  wordListCount := LoadWordList(wordListHead, '/usr/local/pscal/etc/words');
+  wordListCount := LoadWordList(wordListHead, DefaultWordListPath);
   if wordListCount = 0 then
   begin
     writeln('Failed to load word list. Exiting.');

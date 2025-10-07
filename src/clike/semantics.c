@@ -4,6 +4,7 @@
 #include "clike/builtins.h"
 #include "clike/parser.h"
 #include "backend_ast/builtin.h"
+#include "pscal_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1151,7 +1152,7 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
             }
         }
         if (!f) {
-            const char *default_dir = "/usr/local/pscal/clike/lib";
+            const char *default_dir = PSCAL_CLIKE_LIB_DIR;
             size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
             allocated_path = (char *)malloc(len);
             snprintf(allocated_path, len, "%s/%s", default_dir, orig_path);

@@ -321,6 +321,12 @@ The front ends need access to various sounds and libraries.  To install them run
 sudo ./install.sh
 ```
 
+To relocate the runtime assets, configure the build with
+`-DPSCAL_INSTALL_ROOT=/path/to/pscal` and pass the same location to the
+installer, e.g. `./install.sh --prefix /usr/local --pscal-dir /path/to/pscal`.
+When a build directory is provided, `install.sh` will automatically read the
+compiled default from `build/pscal_install_root.txt`.
+
 ## Extending built-ins
 
 Additional VM builtin functions can be linked in by dropping C source files into

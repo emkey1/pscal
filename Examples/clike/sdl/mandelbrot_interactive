@@ -185,6 +185,12 @@ int main() {
     textReady = 0;
     envFontPath = getenv("PSCAL_FONT_PATH");
     if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
+    str installRoot;
+    installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (strlen(installRoot) == 0) {
+        installRoot = "/usr/local/pscal";
+    }
+    if (!textReady) textReady = tryInitFont(installRoot + "/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
     if (!textReady) textReady = tryInitFont("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
     if (!textReady) textReady = tryInitFont("/usr/local/share/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
     if (!textReady) textReady = tryInitFont("/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);

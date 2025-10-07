@@ -198,7 +198,12 @@ class SolarSystemApp {
     initgraph(WindowWidth, WindowHeight, "Rea SDL Solar System");
     myself.centerX = getmaxx() / 2;
     myself.centerY = getmaxy() / 2;
-    inittextsystem("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    str installRoot;
+    installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (length(installRoot) == 0) {
+      installRoot = "/usr/local/pscal";
+    }
+    inittextsystem(installRoot + "/fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();
