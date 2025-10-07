@@ -158,6 +158,13 @@ typedef struct {
 
 static ShellBindOption *gShellBindOptions = NULL;
 static size_t gShellBindOptionCount = 0;
+static int gShellCurrentCommandLine = 0;
+static int gShellCurrentCommandColumn = 0;
+
+static void shellRuntimeSetCurrentCommandLocation(int line, int column) {
+    gShellCurrentCommandLine = line;
+    gShellCurrentCommandColumn = column;
+}
 
 static void shellFreeParameterArray(char **values, int count) {
     if (!values) {
@@ -246,7 +253,10 @@ static char *shellRemovePatternPrefix(const char *value, const char *pattern, bo
 
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c);
 static void shellBufferAppendString(char **buffer, size_t *length, size_t *capacity, const char *str);
-static char *shellExpandParameter(const char *input, size_t *out_consumed);
+static char *shellExpandParameter(const char *input,
+                                  size_t *out_consumed,
+                                  bool *out_is_array_expansion,
+                                  size_t *out_array_count);
 
 static char *shellRemovePatternSuffix(const char *value, const char *pattern, bool longest) {
     if (!value) {
@@ -336,7 +346,10 @@ static char *shellExpandPatternText(const char *pattern, size_t len) {
         if (!in_single) {
             if (c == '$') {
                 size_t consumed = 0;
-                char *expanded = shellExpandParameter(pattern + i + 1, &consumed);
+                char *expanded = shellExpandParameter(pattern + i + 1,
+                                                       &consumed,
+                                                       NULL,
+                                                       NULL);
                 if (expanded) {
                     shellBufferAppendString(&buffer, &length, &capacity, expanded);
                     free(expanded);
@@ -394,6 +407,8 @@ typedef struct {
     int pipeline_index;
     bool is_pipeline_head;
     bool is_pipeline_tail;
+    int line;
+    int column;
 } ShellCommand;
 
 typedef struct {
@@ -2728,6 +2743,7 @@ static bool shellQuotedMapAppendRepeated(bool track,
 
 static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
                                    const bool *quoted_map, size_t quoted_len,
+                                   bool array_zero,
                                    char ***out_fields, size_t *out_field_count) {
     if (out_fields) {
         *out_fields = NULL;
@@ -2743,6 +2759,9 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
     }
 
     size_t length = strlen(expanded);
+    if (array_zero && length == 0) {
+        return true;
+    }
     if (strchr(expanded, SHELL_ARRAY_ELEMENT_SEP)) {
         ShellStringArray fields = (ShellStringArray){0};
         const char *segment = expanded;
@@ -2768,7 +2787,7 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
             } else {
                 char **sub_fields = NULL;
                 size_t sub_count = 0;
-                if (!shellSplitExpandedWord(copy, 0, NULL, 0, &sub_fields, &sub_count)) {
+                if (!shellSplitExpandedWord(copy, 0, NULL, 0, false, &sub_fields, &sub_count)) {
                     free(copy);
                     shellStringArrayFree(&fields);
                     return false;
@@ -3593,38 +3612,24 @@ static const char *shellHistoryFindByRegex(const char *pattern, size_t len, bool
     return result;
 }
 
-static char *shellJoinPositionalParameters(void) {
+static char *shellJoinArrayValuesWithSeparator(char **items, size_t count, char separator);
+
+static char *shellJoinPositionalParameters(bool array_style, size_t *out_count) {
+    if (out_count) {
+        *out_count = (gParamCount > 0) ? (size_t)gParamCount : 0;
+    }
     if (gParamCount <= 0 || !gParamValues) {
         return strdup("");
     }
-    size_t total = 0;
-    for (int i = 0; i < gParamCount; ++i) {
-        if (gParamValues[i]) {
-            total += strlen(gParamValues[i]);
-        }
-        if (i + 1 < gParamCount) {
-            total += 1; // space separator
-        }
-    }
-    char *result = (char *)malloc(total + 1);
-    if (!result) {
-        return NULL;
-    }
-    size_t pos = 0;
-    for (int i = 0; i < gParamCount; ++i) {
-        const char *value = gParamValues[i] ? gParamValues[i] : "";
-        size_t len = strlen(value);
-        memcpy(result + pos, value, len);
-        pos += len;
-        if (i + 1 < gParamCount) {
-            result[pos++] = ' ';
-        }
-    }
-    result[pos] = '\0';
-    return result;
+    char separator = array_style ? SHELL_ARRAY_ELEMENT_SEP : ' ';
+    return shellJoinArrayValuesWithSeparator(gParamValues,
+                                            (size_t)gParamCount,
+                                            separator);
 }
 
-static char *shellLookupParameterValueInternal(const char *name, size_t len, bool *out_is_set) {
+static char *shellLookupParameterValueInternal(const char *name,
+                                               size_t len,
+                                               bool *out_is_set) {
     if (out_is_set) {
         *out_is_set = false;
     }
@@ -3665,7 +3670,8 @@ static char *shellLookupParameterValueInternal(const char *name, size_t len, boo
                 if (out_is_set) {
                     *out_is_set = gParamCount > 0;
                 }
-                return shellJoinPositionalParameters();
+                size_t ignored = 0;
+                return shellJoinPositionalParameters(name[0] == '@', &ignored);
             }
             case '0': {
                 if (out_is_set) {
@@ -4579,7 +4585,15 @@ static char *shellJoinNumericIndices(size_t count, char separator) {
 static char *shellExpandArraySubscriptValue(const char *name,
                                             size_t name_len,
                                             const char *subscript,
-                                            size_t subscript_len) {
+                                            size_t subscript_len,
+                                            size_t *out_count,
+                                            bool *out_is_full_expansion) {
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (out_is_full_expansion) {
+        *out_is_full_expansion = false;
+    }
     if (!name || name_len == 0 || !subscript) {
         return strdup("");
     }
@@ -4618,7 +4632,13 @@ static char *shellExpandArraySubscriptValue(const char *name,
     if (subscript_len == 0) {
         result = strdup("");
     } else if (subscript_len == 1 && (subscript[0] == '*' || subscript[0] == '@')) {
+        if (out_count) {
+            *out_count = count;
+        }
         if (subscript[0] == '@') {
+            if (out_is_full_expansion) {
+                *out_is_full_expansion = true;
+            }
             result = shellJoinArrayValuesWithSeparator(items, count, SHELL_ARRAY_ELEMENT_SEP);
         } else {
             result = shellJoinArrayValues(items, count);
@@ -4659,6 +4679,7 @@ static char *shellExpandArraySubscriptValue(const char *name,
             free(index_text);
         }
     }
+
     if (!using_registry) {
         shellFreeArrayValues(items, count);
         if (keys) {
@@ -4676,7 +4697,8 @@ static char *shellExpandWord(const char *text,
                              const char *meta,
                              size_t meta_len,
                              bool **out_quoted_map,
-                             size_t *out_quoted_len);
+                             size_t *out_quoted_len,
+                             bool *out_array_zero);
 
 static char *shellNormalizeDollarCommandInline(const char *command, size_t len) {
     if (!command) {
@@ -4837,10 +4859,19 @@ static char *shellExpandHereDocument(const char *body, bool quoted) {
     if (quoted) {
         return body ? strdup(body) : strdup("");
     }
-    return shellExpandWord(body, SHELL_WORD_FLAG_HAS_ARITHMETIC, NULL, 0, NULL, NULL);
+    return shellExpandWord(body, SHELL_WORD_FLAG_HAS_ARITHMETIC, NULL, 0, NULL, NULL, NULL);
 }
 
-static char *shellExpandParameter(const char *input, size_t *out_consumed) {
+static char *shellExpandParameter(const char *input,
+                                  size_t *out_consumed,
+                                  bool *out_is_array_expansion,
+                                  size_t *out_array_count) {
+    if (out_is_array_expansion) {
+        *out_is_array_expansion = false;
+    }
+    if (out_array_count) {
+        *out_array_count = 0;
+    }
     if (out_consumed) {
         *out_consumed = 0;
     }
@@ -4937,7 +4968,7 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
                 return strdup(buffer);
             }
             char *element = shellExpandArraySubscriptValue(
-                name_start, name_len, subscript_start, subscript_len);
+                name_start, name_len, subscript_start, subscript_len, NULL, NULL);
             if (!element) {
                 return NULL;
             }
@@ -5097,7 +5128,7 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
                     memcpy(raw_default, default_start, default_len);
                 }
                 raw_default[default_len] = '\0';
-                char *expanded_default = shellExpandWord(raw_default, 0, NULL, 0, NULL, NULL);
+                char *expanded_default = shellExpandWord(raw_default, 0, NULL, 0, NULL, NULL, NULL);
                 free(raw_default);
                 if (!expanded_default) {
                     return NULL;
@@ -5209,7 +5240,23 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
             if (after_bracket != closing) {
                 return NULL;
             }
-            return shellExpandArraySubscriptValue(inner, name_len, subscript_start, subscript_len);
+            size_t array_count = 0;
+            bool array_expansion = false;
+            char *expanded = shellExpandArraySubscriptValue(inner,
+                                                            name_len,
+                                                            subscript_start,
+                                                            subscript_len,
+                                                            &array_count,
+                                                            &array_expansion);
+            if (expanded && array_expansion) {
+                if (out_is_array_expansion) {
+                    *out_is_array_expansion = true;
+                }
+                if (out_array_count) {
+                    *out_array_count = array_count;
+                }
+            }
+            return expanded;
         }
         if (cursor < closing && (*cursor == '%' || *cursor == '#')) {
             bool remove_suffix = (*cursor == '%');
@@ -5274,7 +5321,17 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
         if (out_consumed) {
             *out_consumed = 1;
         }
-        return shellJoinPositionalParameters();
+        size_t array_count = 0;
+        char *joined = shellJoinPositionalParameters(*input == '@', &array_count);
+        if (joined && *input == '@') {
+            if (out_is_array_expansion) {
+                *out_is_array_expansion = true;
+            }
+            if (out_array_count) {
+                *out_array_count = array_count;
+            }
+        }
+        return joined;
     }
 
     if (*input == '0') {
@@ -5385,7 +5442,10 @@ static bool shellArithmeticParsePrimary(ShellArithmeticParser *parser, long long
     if (c == '$') {
         parser->pos++;
         size_t consumed = 0;
-        char *value = shellExpandParameter(parser->input + parser->pos, &consumed);
+        char *value = shellExpandParameter(parser->input + parser->pos,
+                                           &consumed,
+                                           NULL,
+                                           NULL);
         if (!value) {
             return false;
         }
@@ -5593,12 +5653,16 @@ static char *shellExpandWord(const char *text,
                              const char *meta,
                              size_t meta_len,
                              bool **out_quoted_map,
-                             size_t *out_quoted_len) {
+                             size_t *out_quoted_len,
+                             bool *out_array_zero) {
     if (out_quoted_map) {
         *out_quoted_map = NULL;
     }
     if (out_quoted_len) {
         *out_quoted_len = 0;
+    }
+    if (out_array_zero) {
+        *out_array_zero = false;
     }
     if (!text) {
         return strdup("");
@@ -5637,6 +5701,8 @@ static char *shellExpandWord(const char *text,
     bool saw_double_marker = false;
     bool has_arithmetic = (flags & SHELL_WORD_FLAG_HAS_ARITHMETIC) != 0;
     size_t sub_index = 0;
+
+    bool saw_empty_array_expansion = false;
 
     for (size_t i = 0; i < text_len;) {
         char c = text[i];
@@ -5851,9 +5917,17 @@ static char *shellExpandWord(const char *text,
 
         if (c == '$') {
             size_t consumed = 0;
-            char *expanded = shellExpandParameter(text + i + 1, &consumed);
+            bool array_like = false;
+            size_t array_count = 0;
+            char *expanded = shellExpandParameter(text + i + 1,
+                                                 &consumed,
+                                                 &array_like,
+                                                 &array_count);
             if (expanded) {
                 size_t out_len = strlen(expanded);
+                if (array_like && array_count == 0) {
+                    saw_empty_array_expansion = true;
+                }
                 if (!shellQuotedMapAppendRepeated(track_quotes, &quoted_map, &quoted_len, &quoted_cap,
                                                   quoted_flag, out_len)) {
                     free(expanded);
@@ -5880,6 +5954,9 @@ static char *shellExpandWord(const char *text,
         *out_quoted_len = quoted_len;
     } else {
         free(quoted_map);
+    }
+    if (out_array_zero && saw_empty_array_expansion && length == 0) {
+        *out_array_zero = true;
     }
     return buffer;
 
@@ -6299,6 +6376,14 @@ const char *shellRuntimeGetArg0(void) {
     return gShellArg0;
 }
 
+int shellRuntimeCurrentCommandLine(void) {
+    return gShellCurrentCommandLine;
+}
+
+int shellRuntimeCurrentCommandColumn(void) {
+    return gShellCurrentCommandColumn;
+}
+
 void shellRuntimeInitJobControl(void) {
     shellEnsureJobControl();
 }
@@ -6609,8 +6694,9 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
                                       "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
-                                      "history", "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",
-                                      "source", "read",   "shift",   "return",  "help",    ":",       "__shell_double_bracket"};
+                                      "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
+                                      "builtin", "source", "read",    "shift",   "return",  "help",    ":",
+                                      "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
@@ -6720,11 +6806,15 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     }
     int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
     Value *args = NULL;
+    int previous_line = gShellCurrentCommandLine;
+    int previous_column = gShellCurrentCommandColumn;
+    shellRuntimeSetCurrentCommandLocation(cmd->line, cmd->column);
     if (arg_count > 0) {
         args = calloc((size_t)arg_count, sizeof(Value));
         if (!args) {
             runtimeError(vm, "shell builtin '%s': out of memory", name);
             shellUpdateStatus(1);
+            shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
             return true;
         }
         for (int i = 0; i < arg_count; ++i) {
@@ -6738,6 +6828,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         }
         free(args);
     }
+    shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
     return true;
 }
 
@@ -6989,6 +7080,10 @@ static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
                 shellParseBool(value, &cmd->is_pipeline_head);
             } else if (strcmp(key, "tail") == 0) {
                 shellParseBool(value, &cmd->is_pipeline_tail);
+            } else if (strcmp(key, "line") == 0) {
+                cmd->line = atoi(value);
+            } else if (strcmp(key, "col") == 0) {
+                cmd->column = atoi(value);
             }
         }
         if (!next) {
@@ -7012,7 +7107,14 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     }
     bool *quoted_map = NULL;
     size_t quoted_len = 0;
-    char *expanded = shellExpandWord(text, flags, meta, meta_len, &quoted_map, &quoted_len);
+    bool zero_array = false;
+    char *expanded = shellExpandWord(text,
+                                     flags,
+                                     meta,
+                                     meta_len,
+                                     &quoted_map,
+                                     &quoted_len,
+                                     &zero_array);
     if (!expanded) {
         return false;
     }
@@ -7039,7 +7141,13 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     }
     char **fields = NULL;
     size_t field_count = 0;
-    if (!shellSplitExpandedWord(expanded, flags, quoted_map, quoted_len, &fields, &field_count)) {
+    if (!shellSplitExpandedWord(expanded,
+                                flags,
+                                quoted_map,
+                                quoted_len,
+                                zero_array,
+                                &fields,
+                                &field_count)) {
         free(expanded);
         free(quoted_map);
         return false;
@@ -7253,7 +7361,13 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
             free(copy);
             return false;
         }
-        expanded_target = shellExpandWord(target_text, target_flags, target_meta, target_meta_len, NULL, NULL);
+        expanded_target = shellExpandWord(target_text,
+                                          target_flags,
+                                          target_meta,
+                                          target_meta_len,
+                                          NULL,
+                                          NULL,
+                                          NULL);
         if (!expanded_target) {
             free(word_encoded);
             free(copy);
@@ -8742,14 +8856,27 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                 }
                 bool *quoted_map = NULL;
                 size_t quoted_len = 0;
-                char *expanded = shellExpandWord(text, word_flags, word_meta, word_meta_len, &quoted_map, &quoted_len);
+                bool zero_array = false;
+                char *expanded = shellExpandWord(text,
+                                                 word_flags,
+                                                 word_meta,
+                                                 word_meta_len,
+                                                 &quoted_map,
+                                                 &quoted_len,
+                                                 &zero_array);
                 if (!expanded) {
                     ok = false;
                     break;
                 }
                 char **fields = NULL;
                 size_t field_count = 0;
-                if (!shellSplitExpandedWord(expanded, word_flags, quoted_map, quoted_len, &fields, &field_count)) {
+                if (!shellSplitExpandedWord(expanded,
+                                            word_flags,
+                                            quoted_map,
+                                            quoted_len,
+                                            zero_array,
+                                            &fields,
+                                            &field_count)) {
                     free(expanded);
                     free(quoted_map);
                     ok = false;
@@ -8974,7 +9101,13 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
         subject_text = subject_spec ? subject_spec : "";
         subject_flags = 0;
     }
-    char *expanded_subject = shellExpandWord(subject_text, subject_flags, subject_meta, subject_meta_len, NULL, NULL);
+    char *expanded_subject = shellExpandWord(subject_text,
+                                             subject_flags,
+                                             subject_meta,
+                                             subject_meta_len,
+                                             NULL,
+                                             NULL,
+                                             NULL);
     if (!expanded_subject) {
         runtimeError(vm, "shell case: out of memory");
         shellUpdateStatus(1);
@@ -9027,7 +9160,13 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
             pattern_text = pattern_spec ? pattern_spec : "";
             pattern_flags = 0;
         }
-        char *expanded_pattern = shellExpandWord(pattern_text, pattern_flags, pattern_meta, pattern_meta_len, NULL, NULL);
+        char *expanded_pattern = shellExpandWord(pattern_text,
+                                                pattern_flags,
+                                                pattern_meta,
+                                                pattern_meta_len,
+                                                NULL,
+                                                NULL,
+                                                NULL);
         if (!expanded_pattern) {
             runtimeError(vm, "shell case clause: out of memory");
             shellUpdateStatus(1);
@@ -10220,7 +10359,6 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
     int index = 0;
     bool parsing_options = true;
     bool interactive = shellRuntimeIsInteractive();
-
     while (index < arg_count && parsing_options && ok) {
         Value v = args[index];
         if (v.type != TYPE_STRING || !v.s_val) {
@@ -10308,7 +10446,21 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
         shellBindPrintOptions();
     }
 
-    int status = ok ? (interactive ? 0 : 1) : 1;
+    if (ok && !interactive) {
+        const char *script = shellRuntimeGetArg0();
+        if (!script || !*script) {
+            script = "exsh";
+        }
+        int line = shellRuntimeCurrentCommandLine();
+        if (line > 0) {
+            fprintf(stderr, "%s: line %d: bind: warning: line editing not enabled\n", script, line);
+        } else {
+            fprintf(stderr, "%s: bind: warning: line editing not enabled\n", script);
+        }
+    }
+
+    /* Preserve legacy behavior: bind should succeed regardless of interactive mode. */
+    int status = ok ? 0 : 1;
     shellUpdateStatus(status);
     return makeVoid();
 }
