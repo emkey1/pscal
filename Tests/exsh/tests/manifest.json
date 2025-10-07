@@ -201,6 +201,15 @@
             "expected_stdout": "lexer-array-assignment:ok"
         },
         {
+            "id": "lexer_array_assignment_multiline",
+            "name": "Array assignments allow embedded newlines",
+            "category": "lexer",
+            "description": "name=(...) spanning multiple lines should remain a single assignment word.",
+            "script": "Tests/exsh/tests/array_assignment_multiline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "primary=blue\nlen=2"
+        },
+        {
             "id": "array_assignment_expansion_scalar",
             "name": "Scalar assignments with parentheses stay scalars",
             "category": "builtins",

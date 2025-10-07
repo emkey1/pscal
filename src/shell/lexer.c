@@ -399,6 +399,9 @@ static ShellToken scanWord(ShellLexer *lexer) {
 
             if (!(startingArrayLiteral || (inArrayLiteral && arrayParenDepth > 0 && (c == '(' || c == ')')))) {
                 bool treat_as_operator = isOperatorDelimiter(c);
+                if (treat_as_operator && inArrayLiteral && arrayParenDepth > 0 && c == '\n') {
+                    treat_as_operator = false;
+                }
                 if (treat_as_operator && isStructuralWordCandidate(c)) {
                     if (allowStructuralLiterals && (lexer->rule_mask & SHELL_LEXER_RULE_1) == 0) {
                         treat_as_operator = false;
