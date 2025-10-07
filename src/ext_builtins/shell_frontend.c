@@ -28,6 +28,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, runtime_group, "__shell_case_clause", vmBuiltinShellCaseClause);
     registerShellBuiltin(category, runtime_group, "__shell_case_end", vmBuiltinShellCaseEnd);
     registerShellBuiltin(category, runtime_group, "__shell_define_function", vmBuiltinShellDefineFunction);
+    registerShellBuiltin(category, runtime_group, "__shell_double_bracket", vmBuiltinShellDoubleBracket);
 
     registerShellBuiltin(category, command_group, "cd", vmBuiltinShellCd);
     registerShellBuiltin(category, command_group, "pwd", vmBuiltinShellPwd);
