@@ -564,11 +564,17 @@ static bool parserExtractCStyleForSegments(ShellParser *parser, size_t start_pos
     column++;
     pos++;
 
+    if (semicolon_count < 2 || semicolons[0] == SIZE_MAX || semicolons[1] == SIZE_MAX) {
+        parserErrorAt(parser, &parser->current,
+                      "Arithmetic for clause requires two ';' separators");
+        return false;
+    }
+
     size_t init_start = start_pos;
-    size_t init_end = (semicolon_count > 0) ? semicolons[0] : expr_end;
-    size_t cond_start = (semicolon_count > 0 && semicolons[0] != SIZE_MAX) ? semicolons[0] + 1 : expr_end;
-    size_t cond_end = (semicolon_count > 1) ? semicolons[1] : expr_end;
-    size_t update_start = (semicolon_count > 1 && semicolons[1] != SIZE_MAX) ? semicolons[1] + 1 : expr_end;
+    size_t init_end = semicolons[0];
+    size_t cond_start = semicolons[0] + 1;
+    size_t cond_end = semicolons[1];
+    size_t update_start = semicolons[1] + 1;
     size_t update_end = expr_end;
 
     char *init = parserCopyTrimmedRange(src, init_start, init_end);
