@@ -30,10 +30,19 @@
 
 extern char **environ;
 
+#define SHELL_ARRAY_ELEMENT_SEP '\x1d'
+
+typedef enum {
+    SHELL_ARRAY_KIND_INDEXED,
+    SHELL_ARRAY_KIND_ASSOCIATIVE
+} ShellArrayKind;
+
 typedef struct {
     char *name;
     char **values;
+    char **keys;
     size_t count;
+    ShellArrayKind kind;
 } ShellArrayVariable;
 
 static ShellArrayVariable *gShellArrayVars = NULL;
@@ -44,7 +53,11 @@ static void shellArrayVariableClear(ShellArrayVariable *var);
 static bool shellArrayRegistryEnsureCapacity(size_t needed);
 static ShellArrayVariable *shellArrayRegistryFindMutable(const char *name);
 static const ShellArrayVariable *shellArrayRegistryFindConst(const char *name);
-static bool shellArrayRegistryStore(const char *name, char **items, size_t count);
+static bool shellArrayRegistryStore(const char *name,
+                                   char **items,
+                                   char **keys,
+                                   size_t count,
+                                   ShellArrayKind kind);
 static void shellArrayRegistryRemove(const char *name);
 static const ShellArrayVariable *shellArrayRegistryLookup(const char *name, size_t len);
 static void shellArrayRegistryAssignFromText(const char *name, const char *value);
@@ -52,6 +65,17 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
 static void shellUnsetTrackedVariable(const char *name);
 static char *shellLookupRawEnvironmentValue(const char *name, size_t len);
 static bool shellAssignmentIsArrayLiteral(const char *raw_assignment, uint8_t word_flags);
+static bool shellArrayRegistrySetElement(const char *name, const char *subscript, const char *value);
+static bool shellExtractArrayNameAndSubscript(const char *text,
+                                             char **out_name,
+                                             char **out_subscript);
+static bool shellParseArrayLiteral(const char *value,
+                                   char ***out_items,
+                                   char ***out_keys,
+                                   size_t *out_count,
+                                   ShellArrayKind *out_kind);
+static char *shellBuildArrayLiteral(const ShellArrayVariable *var);
+static bool shellArrayRegistryInitializeAssociative(const char *name);
 
 static bool shellIsValidEnvName(const char *name);
 static void shellExportPrintEnvironment(void);
@@ -456,8 +480,16 @@ static void shellArrayVariableClear(ShellArrayVariable *var) {
         }
         free(var->values);
     }
+    if (var->keys) {
+        for (size_t i = 0; i < var->count; ++i) {
+            free(var->keys[i]);
+        }
+        free(var->keys);
+    }
     var->values = NULL;
+    var->keys = NULL;
     var->count = 0;
+    var->kind = SHELL_ARRAY_KIND_INDEXED;
 }
 
 static bool shellArrayRegistryEnsureCapacity(size_t needed) {
@@ -476,7 +508,9 @@ static bool shellArrayRegistryEnsureCapacity(size_t needed) {
     for (size_t i = gShellArrayVarCapacity; i < new_capacity; ++i) {
         resized[i].name = NULL;
         resized[i].values = NULL;
+        resized[i].keys = NULL;
         resized[i].count = 0;
+        resized[i].kind = SHELL_ARRAY_KIND_INDEXED;
     }
     gShellArrayVars = resized;
     gShellArrayVarCapacity = new_capacity;
@@ -500,7 +534,11 @@ static const ShellArrayVariable *shellArrayRegistryFindConst(const char *name) {
     return shellArrayRegistryFindMutable(name);
 }
 
-static bool shellArrayRegistryStore(const char *name, char **items, size_t count) {
+static bool shellArrayRegistryStore(const char *name,
+                                   char **items,
+                                   char **keys,
+                                   size_t count,
+                                   ShellArrayKind kind) {
     if (!name) {
         return false;
     }
@@ -516,11 +554,14 @@ static bool shellArrayRegistryStore(const char *name, char **items, size_t count
             return false;
         }
         var->values = NULL;
+        var->keys = NULL;
         var->count = 0;
+        var->kind = SHELL_ARRAY_KIND_INDEXED;
     } else {
         shellArrayVariableClear(var);
     }
 
+    var->kind = kind;
     if (count == 0) {
         return true;
     }
@@ -530,12 +571,27 @@ static bool shellArrayRegistryStore(const char *name, char **items, size_t count
         shellArrayRegistryRemove(name);
         return false;
     }
+    if (kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+        var->keys = (char **)calloc(count, sizeof(char *));
+        if (!var->keys) {
+            shellArrayRegistryRemove(name);
+            return false;
+        }
+    }
     for (size_t i = 0; i < count; ++i) {
         const char *item = items[i] ? items[i] : "";
         var->values[i] = strdup(item);
         if (!var->values[i]) {
             shellArrayRegistryRemove(name);
             return false;
+        }
+        if (kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+            const char *key = (keys && keys[i]) ? keys[i] : "";
+            var->keys[i] = strdup(key);
+            if (!var->keys[i]) {
+                shellArrayRegistryRemove(name);
+                return false;
+            }
         }
     }
     var->count = count;
@@ -1530,21 +1586,10 @@ static bool shellLooksLikeAssignment(const char *text) {
     if (!text) {
         return false;
     }
-    const char *eq = strchr(text, '=');
-    if (!eq || eq == text) {
-        return false;
-    }
-    for (const char *cursor = text; cursor < eq; ++cursor) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (cursor == text) {
-            if (!isalpha(ch) && ch != '_') {
-                return false;
-            }
-        } else if (!isalnum(ch) && ch != '_') {
-            return false;
-        }
-    }
-    return true;
+    char *name = NULL;
+    bool ok = shellParseAssignment(text, &name, NULL);
+    free(name);
+    return ok;
 }
 
 static bool shellParseAssignment(const char *assignment, char **out_name, const char **out_value) {
@@ -1562,15 +1607,31 @@ static bool shellParseAssignment(const char *assignment, char **out_name, const 
         return false;
     }
     size_t name_len = (size_t)(eq - assignment);
+    bool in_brackets = false;
     for (size_t i = 0; i < name_len; ++i) {
         unsigned char ch = (unsigned char)assignment[i];
         if (i == 0) {
             if (!isalpha(ch) && ch != '_') {
                 return false;
             }
-        } else if (!isalnum(ch) && ch != '_') {
+            continue;
+        }
+        if (in_brackets) {
+            if (ch == ']') {
+                in_brackets = false;
+            }
+            continue;
+        }
+        if (ch == '[') {
+            in_brackets = true;
+            continue;
+        }
+        if (!isalnum(ch) && ch != '_') {
             return false;
         }
+    }
+    if (in_brackets) {
+        return false;
     }
     char *name = (char *)malloc(name_len + 1);
     if (!name) {
@@ -1585,6 +1646,61 @@ static bool shellParseAssignment(const char *assignment, char **out_name, const 
     }
     if (out_value) {
         *out_value = eq + 1;
+    }
+    return true;
+}
+
+static bool shellExtractArrayNameAndSubscript(const char *text,
+                                             char **out_name,
+                                             char **out_subscript) {
+    if (out_name) {
+        *out_name = NULL;
+    }
+    if (out_subscript) {
+        *out_subscript = NULL;
+    }
+    if (!text) {
+        return false;
+    }
+    const char *open = strchr(text, '[');
+    if (!open) {
+        return false;
+    }
+    const char *close = strrchr(text, ']');
+    if (!close || close < open || close[1] != '\0') {
+        return false;
+    }
+    size_t name_len = (size_t)(open - text);
+    if (name_len == 0) {
+        return false;
+    }
+    char *name_copy = (char *)malloc(name_len + 1);
+    if (!name_copy) {
+        return false;
+    }
+    memcpy(name_copy, text, name_len);
+    name_copy[name_len] = '\0';
+
+    size_t sub_len = (size_t)(close - (open + 1));
+    char *sub_copy = (char *)malloc(sub_len + 1);
+    if (!sub_copy) {
+        free(name_copy);
+        return false;
+    }
+    if (sub_len > 0) {
+        memcpy(sub_copy, open + 1, sub_len);
+    }
+    sub_copy[sub_len] = '\0';
+
+    if (out_name) {
+        *out_name = name_copy;
+    } else {
+        free(name_copy);
+    }
+    if (out_subscript) {
+        *out_subscript = sub_copy;
+    } else {
+        free(sub_copy);
     }
     return true;
 }
@@ -1616,11 +1732,25 @@ static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
             free(name);
             return false;
         }
-        if (shellHandleSpecialAssignment(name, value)) {
+        char *base_name = NULL;
+        char *subscript_text = NULL;
+        bool is_element = shellExtractArrayNameAndSubscript(name, &base_name, &subscript_text);
+        const char *effective_name = is_element ? base_name : name;
+        if (shellHandleSpecialAssignment(effective_name, value)) {
             free(name);
+            free(base_name);
+            free(subscript_text);
             continue;
         }
-        if (!shellSetTrackedVariable(name, value, entry->is_array_literal)) {
+        bool set_ok;
+        if (is_element) {
+            set_ok = shellArrayRegistrySetElement(effective_name, subscript_text, value);
+        } else {
+            set_ok = shellSetTrackedVariable(effective_name, value, entry->is_array_literal);
+        }
+        free(base_name);
+        free(subscript_text);
+        if (!set_ok) {
             if (out_failed_assignment) {
                 *out_failed_assignment = assignment;
             }
@@ -1691,16 +1821,36 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
             shellRestoreAssignments(backups, i);
             return false;
         }
-        if (shellHandleSpecialAssignment(name, value)) {
+        char *base_name = NULL;
+        char *subscript_text = NULL;
+        bool is_element = shellExtractArrayNameAndSubscript(name, &base_name, &subscript_text);
+        char *effective_name_owned = NULL;
+        if (is_element) {
+            effective_name_owned = base_name;
+            base_name = NULL;
+        } else {
+            effective_name_owned = name;
+            name = NULL;
+        }
+        const char *effective_name = effective_name_owned;
+
+        if (shellHandleSpecialAssignment(effective_name, value)) {
             free(name);
+            free(base_name);
+            free(subscript_text);
+            free(effective_name_owned);
             backups[i].name = NULL;
             backups[i].previous_value = NULL;
             backups[i].had_previous = false;
             backups[i].previous_was_array = false;
             continue;
         }
-        backups[i].name = name;
-        const char *previous = getenv(name);
+
+        backups[i].name = effective_name_owned;
+        effective_name_owned = NULL;
+        free(name);
+        free(base_name);
+        const char *previous = getenv(backups[i].name);
         if (previous) {
             backups[i].previous_value = strdup(previous);
             if (!backups[i].previous_value) {
@@ -1708,13 +1858,20 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                 return false;
             }
             backups[i].had_previous = true;
-            backups[i].previous_was_array = (shellArrayRegistryFindConst(name) != NULL);
+            backups[i].previous_was_array = (shellArrayRegistryFindConst(backups[i].name) != NULL);
         } else {
             backups[i].previous_value = NULL;
             backups[i].had_previous = false;
             backups[i].previous_was_array = false;
         }
-        if (!shellSetTrackedVariable(name, value, entry->is_array_literal)) {
+        bool set_ok;
+        if (is_element) {
+            set_ok = shellArrayRegistrySetElement(backups[i].name, subscript_text, value);
+        } else {
+            set_ok = shellSetTrackedVariable(backups[i].name, value, entry->is_array_literal);
+        }
+        free(subscript_text);
+        if (!set_ok) {
             if (out_failed_assignment) {
                 *out_failed_assignment = assignment;
             }
@@ -1852,6 +2009,58 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
     }
 
     size_t length = strlen(expanded);
+    if (strchr(expanded, SHELL_ARRAY_ELEMENT_SEP)) {
+        ShellStringArray fields = (ShellStringArray){0};
+        const char *segment = expanded;
+        bool base_quoted = (word_flags & (SHELL_WORD_FLAG_SINGLE_QUOTED | SHELL_WORD_FLAG_DOUBLE_QUOTED)) != 0;
+        while (1) {
+            const char *next = strchr(segment, SHELL_ARRAY_ELEMENT_SEP);
+            size_t seg_len = next ? (size_t)(next - segment) : strlen(segment);
+            char *copy = (char *)malloc(seg_len + 1);
+            if (!copy) {
+                shellStringArrayFree(&fields);
+                return false;
+            }
+            if (seg_len > 0) {
+                memcpy(copy, segment, seg_len);
+            }
+            copy[seg_len] = '\0';
+            if (base_quoted) {
+                if (!shellStringArrayAppend(&fields, copy)) {
+                    free(copy);
+                    shellStringArrayFree(&fields);
+                    return false;
+                }
+            } else {
+                char **sub_fields = NULL;
+                size_t sub_count = 0;
+                if (!shellSplitExpandedWord(copy, 0, NULL, 0, &sub_fields, &sub_count)) {
+                    free(copy);
+                    shellStringArrayFree(&fields);
+                    return false;
+                }
+                free(copy);
+                for (size_t i = 0; i < sub_count; ++i) {
+                    if (!shellStringArrayAppend(&fields, sub_fields[i])) {
+                        for (size_t j = i; j < sub_count; ++j) {
+                            free(sub_fields[j]);
+                        }
+                        free(sub_fields);
+                        shellStringArrayFree(&fields);
+                        return false;
+                    }
+                }
+                free(sub_fields);
+            }
+            if (!next) {
+                break;
+            }
+            segment = next + 1;
+        }
+        *out_fields = fields.items;
+        *out_field_count = fields.count;
+        return true;
+    }
     bool use_map = quoted_map && quoted_len == length;
     const char *ifs = getenv("IFS");
     if (!ifs) {
@@ -2959,6 +3168,395 @@ static bool shellParseArrayValues(const char *value, char ***out_items, size_t *
     return true;
 }
 
+static char *shellDecodeAssociativeKey(const char *text, size_t len) {
+    if (!text) {
+        return strdup("");
+    }
+    if (len == (size_t)-1) {
+        len = strlen(text);
+    }
+    if (len >= 2 && text[0] == '"' && text[len - 1] == '"') {
+        size_t inner_len = len - 2;
+        char *decoded = (char *)malloc(inner_len + 1);
+        if (!decoded) {
+            return NULL;
+        }
+        size_t out_index = 0;
+        for (size_t i = 1; i + 1 < len; ++i) {
+            char ch = text[i];
+            if (ch == '\\' && i + 1 < len - 1) {
+                decoded[out_index++] = text[++i];
+            } else {
+                decoded[out_index++] = ch;
+            }
+        }
+        decoded[out_index] = '\0';
+        return decoded;
+    }
+    if (len >= 2 && text[0] == '\'' && text[len - 1] == '\'') {
+        size_t inner_len = len - 2;
+        char *decoded = (char *)malloc(inner_len + 1);
+        if (!decoded) {
+            return NULL;
+        }
+        if (inner_len > 0) {
+            memcpy(decoded, text + 1, inner_len);
+        }
+        decoded[inner_len] = '\0';
+        return decoded;
+    }
+    char *decoded = (char *)malloc(len + 1);
+    if (!decoded) {
+        return NULL;
+    }
+    size_t out_index = 0;
+    for (size_t i = 0; i < len; ++i) {
+        char ch = text[i];
+        if (ch == '\\' && i + 1 < len) {
+            decoded[out_index++] = text[++i];
+        } else {
+            decoded[out_index++] = ch;
+        }
+    }
+    decoded[out_index] = '\0';
+    return decoded;
+}
+
+static bool shellParseAssociativeArrayLiteral(const char *value,
+                                              char ***out_keys,
+                                              char ***out_values,
+                                              size_t *out_count) {
+    if (out_keys) {
+        *out_keys = NULL;
+    }
+    if (out_values) {
+        *out_values = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!value) {
+        return true;
+    }
+    const char *start = value;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    const char *end = value + strlen(value);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (end > start && *start == '(' && end[-1] == ')') {
+        start++;
+        end--;
+        while (start < end && isspace((unsigned char)*start)) {
+            start++;
+        }
+        while (end > start && isspace((unsigned char)end[-1])) {
+            end--;
+        }
+    }
+    size_t span = (size_t)(end - start);
+    if (span == 0) {
+        return true;
+    }
+    char *copy = (char *)malloc(span + 1);
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, start, span);
+    copy[span] = '\0';
+
+    char *cursor = copy;
+    char **keys = NULL;
+    char **values = NULL;
+    size_t key_count = 0;
+    size_t value_count = 0;
+    size_t key_capacity = 0;
+    size_t value_capacity = 0;
+
+    while (*cursor) {
+        while (*cursor && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+        if (*cursor != '[') {
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        cursor++;
+        char *key_start = cursor;
+        bool in_single = false;
+        bool in_double = false;
+        while (*cursor) {
+            char ch = *cursor;
+            if (ch == '\\' && !in_single && cursor[1]) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == '\'' && !in_double) {
+                in_single = !in_single;
+                cursor++;
+                continue;
+            }
+            if (ch == '"' && !in_single) {
+                in_double = !in_double;
+                cursor++;
+                continue;
+            }
+            if (!in_single && !in_double && ch == ']') {
+                break;
+            }
+            cursor++;
+        }
+        if (*cursor != ']') {
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        char *key_end = cursor;
+        size_t raw_key_len = (size_t)(key_end - key_start);
+        char *decoded_key = shellDecodeAssociativeKey(key_start, raw_key_len);
+        if (!decoded_key) {
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        cursor++;
+        while (*cursor && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (*cursor != '=') {
+            free(decoded_key);
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        cursor++;
+        while (*cursor && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        char *value_cursor = cursor;
+        char *token = shellParseNextArrayToken(&value_cursor);
+        if (!token) {
+            free(decoded_key);
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        cursor = value_cursor;
+        if (!shellAppendArrayValue(&keys, &key_count, &key_capacity, decoded_key)) {
+            free(token);
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+        if (!shellAppendArrayValue(&values, &value_count, &value_capacity, token)) {
+            shellFreeArrayValues(keys, key_count);
+            shellFreeArrayValues(values, value_count);
+            free(copy);
+            return false;
+        }
+    }
+
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor != '\0') {
+        shellFreeArrayValues(keys, key_count);
+        shellFreeArrayValues(values, value_count);
+        free(copy);
+        return false;
+    }
+
+    free(copy);
+    if (out_keys) {
+        *out_keys = keys;
+    } else {
+        shellFreeArrayValues(keys, key_count);
+    }
+    if (out_values) {
+        *out_values = values;
+    } else {
+        shellFreeArrayValues(values, value_count);
+    }
+    if (out_count) {
+        *out_count = value_count;
+    }
+    return true;
+}
+
+static bool shellParseArrayLiteral(const char *value,
+                                   char ***out_items,
+                                   char ***out_keys,
+                                   size_t *out_count,
+                                   ShellArrayKind *out_kind) {
+    if (out_items) {
+        *out_items = NULL;
+    }
+    if (out_keys) {
+        *out_keys = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (out_kind) {
+        *out_kind = SHELL_ARRAY_KIND_INDEXED;
+    }
+    if (!value) {
+        return true;
+    }
+    bool looks_associative = false;
+    for (const char *cursor = value; *cursor; ++cursor) {
+        if (*cursor == '[') {
+            const char *closing = strchr(cursor + 1, ']');
+            if (!closing) {
+                break;
+            }
+            const char *after = closing + 1;
+            while (*after && isspace((unsigned char)*after)) {
+                after++;
+            }
+            if (*after == '=') {
+                looks_associative = true;
+                break;
+            }
+            cursor = closing;
+        }
+    }
+    if (looks_associative) {
+        char **keys = NULL;
+        char **items = NULL;
+        size_t count = 0;
+        if (!shellParseAssociativeArrayLiteral(value, &keys, &items, &count)) {
+            return false;
+        }
+        if (out_items) {
+            *out_items = items;
+        } else {
+            shellFreeArrayValues(items, count);
+        }
+        if (out_keys) {
+            *out_keys = keys;
+        } else {
+            shellFreeArrayValues(keys, count);
+        }
+        if (out_count) {
+            *out_count = count;
+        }
+        if (out_kind) {
+            *out_kind = SHELL_ARRAY_KIND_ASSOCIATIVE;
+        }
+        return true;
+    }
+
+    char **items = NULL;
+    size_t count = 0;
+    if (!shellParseArrayValues(value, &items, &count)) {
+        return false;
+    }
+    if (out_items) {
+        *out_items = items;
+    } else {
+        shellFreeArrayValues(items, count);
+    }
+    if (out_count) {
+        *out_count = count;
+    }
+    if (out_kind) {
+        *out_kind = SHELL_ARRAY_KIND_INDEXED;
+    }
+    if (out_keys) {
+        *out_keys = NULL;
+    }
+    return true;
+}
+
+static bool shellSubscriptIsNumeric(const char *text) {
+    if (!text) {
+        return false;
+    }
+    const char *cursor = text;
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return false;
+    }
+    while (*cursor) {
+        if (isspace((unsigned char)*cursor)) {
+            while (*cursor && isspace((unsigned char)*cursor)) {
+                cursor++;
+            }
+            if (*cursor == '\0') {
+                return true;
+            }
+            return false;
+        }
+        if (!isdigit((unsigned char)*cursor)) {
+            return false;
+        }
+        cursor++;
+    }
+    return true;
+}
+
+static void shellBufferAppendQuoted(char **buffer,
+                                    size_t *length,
+                                    size_t *capacity,
+                                    const char *text) {
+    shellBufferAppendChar(buffer, length, capacity, '"');
+    if (text) {
+        for (const char *cursor = text; *cursor; ++cursor) {
+            unsigned char ch = (unsigned char)*cursor;
+            if (ch == '"' || ch == '\\') {
+                shellBufferAppendChar(buffer, length, capacity, '\\');
+            }
+            shellBufferAppendChar(buffer, length, capacity, (char)ch);
+        }
+    }
+    shellBufferAppendChar(buffer, length, capacity, '"');
+}
+
+static char *shellBuildArrayLiteral(const ShellArrayVariable *var) {
+    char *buffer = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    shellBufferAppendChar(&buffer, &length, &capacity, '(');
+    if (var) {
+        for (size_t i = 0; i < var->count; ++i) {
+            if (i > 0) {
+                shellBufferAppendChar(&buffer, &length, &capacity, ' ');
+            }
+            const char *value = (var->values && var->values[i]) ? var->values[i] : "";
+            if (var->kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+                const char *key = (var->keys && var->keys[i]) ? var->keys[i] : "";
+                shellBufferAppendChar(&buffer, &length, &capacity, '[');
+                shellBufferAppendQuoted(&buffer, &length, &capacity, key);
+                shellBufferAppendChar(&buffer, &length, &capacity, ']');
+                shellBufferAppendChar(&buffer, &length, &capacity, '=');
+                shellBufferAppendQuoted(&buffer, &length, &capacity, value);
+            } else {
+                shellBufferAppendQuoted(&buffer, &length, &capacity, value);
+            }
+        }
+    }
+    shellBufferAppendChar(&buffer, &length, &capacity, ')');
+    if (!buffer) {
+        return strdup("()");
+    }
+    return buffer;
+}
+
 static void shellArrayRegistryAssignFromText(const char *name, const char *value) {
     if (!name) {
         return;
@@ -2968,15 +3566,193 @@ static void shellArrayRegistryAssignFromText(const char *name, const char *value
         return;
     }
     char **items = NULL;
+    char **keys = NULL;
     size_t count = 0;
-    if (!shellParseArrayValues(value, &items, &count)) {
+    ShellArrayKind kind = SHELL_ARRAY_KIND_INDEXED;
+    if (!shellParseArrayLiteral(value, &items, &keys, &count, &kind)) {
         shellArrayRegistryRemove(name);
         return;
     }
-    if (!shellArrayRegistryStore(name, items, count)) {
+    if (!shellArrayRegistryStore(name, items, keys, count, kind)) {
         shellArrayRegistryRemove(name);
     }
     shellFreeArrayValues(items, count);
+    if (keys) {
+        shellFreeArrayValues(keys, count);
+    }
+}
+
+static bool shellArrayRegistryInitializeAssociative(const char *name) {
+    if (!name) {
+        return false;
+    }
+    ShellArrayVariable *var = shellArrayRegistryFindMutable(name);
+    if (!var) {
+        if (!shellArrayRegistryEnsureCapacity(gShellArrayVarCount + 1)) {
+            return false;
+        }
+        var = &gShellArrayVars[gShellArrayVarCount++];
+        var->name = strdup(name);
+        if (!var->name) {
+            gShellArrayVarCount--;
+            return false;
+        }
+        var->values = NULL;
+        var->keys = NULL;
+        var->count = 0;
+    } else {
+        shellArrayVariableClear(var);
+    }
+    var->kind = SHELL_ARRAY_KIND_ASSOCIATIVE;
+    return true;
+}
+
+static bool shellArrayRegistrySetElement(const char *name,
+                                         const char *subscript,
+                                         const char *value) {
+    if (!name || !subscript) {
+        return false;
+    }
+    const char *text_value = value ? value : "";
+    const char *trim_start = subscript;
+    while (*trim_start && isspace((unsigned char)*trim_start)) {
+        trim_start++;
+    }
+    size_t sub_len = strlen(trim_start);
+    while (sub_len > 0 && isspace((unsigned char)trim_start[sub_len - 1])) {
+        sub_len--;
+    }
+    char *sub_copy = (char *)malloc(sub_len + 1);
+    if (!sub_copy) {
+        return false;
+    }
+    memcpy(sub_copy, trim_start, sub_len);
+    sub_copy[sub_len] = '\0';
+
+    ShellArrayVariable *var = shellArrayRegistryFindMutable(name);
+    ShellArrayKind target_kind;
+    if (var) {
+        target_kind = var->kind;
+    } else {
+        target_kind = shellSubscriptIsNumeric(sub_copy) ? SHELL_ARRAY_KIND_INDEXED
+                                                        : SHELL_ARRAY_KIND_ASSOCIATIVE;
+        if (!shellArrayRegistryEnsureCapacity(gShellArrayVarCount + 1)) {
+            free(sub_copy);
+            return false;
+        }
+        var = &gShellArrayVars[gShellArrayVarCount++];
+        var->name = strdup(name);
+        if (!var->name) {
+            gShellArrayVarCount--;
+            free(sub_copy);
+            return false;
+        }
+        var->values = NULL;
+        var->keys = NULL;
+        var->count = 0;
+        var->kind = target_kind;
+    }
+
+    if (var->kind == SHELL_ARRAY_KIND_ASSOCIATIVE && target_kind != SHELL_ARRAY_KIND_ASSOCIATIVE) {
+        free(sub_copy);
+        return false;
+    }
+    if (var->kind == SHELL_ARRAY_KIND_INDEXED && target_kind != SHELL_ARRAY_KIND_INDEXED) {
+        free(sub_copy);
+        return false;
+    }
+
+    bool ok = true;
+    if (var->kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+        char *decoded_key = shellDecodeAssociativeKey(sub_copy, strlen(sub_copy));
+        free(sub_copy);
+        if (!decoded_key) {
+            return false;
+        }
+        size_t index = SIZE_MAX;
+        for (size_t i = 0; i < var->count; ++i) {
+            const char *existing = (var->keys && var->keys[i]) ? var->keys[i] : "";
+            if (strcmp(existing, decoded_key) == 0) {
+                index = i;
+                break;
+            }
+        }
+        char *dup_value = strdup(text_value);
+        if (!dup_value) {
+            free(decoded_key);
+            return false;
+        }
+        if (index == SIZE_MAX) {
+            char **new_values = (char **)realloc(var->values, (var->count + 1) * sizeof(char *));
+            if (!new_values) {
+                free(decoded_key);
+                free(dup_value);
+                return false;
+            }
+            var->values = new_values;
+            char **new_keys = (char **)realloc(var->keys, (var->count + 1) * sizeof(char *));
+            if (!new_keys) {
+                free(decoded_key);
+                free(dup_value);
+                return false;
+            }
+            var->keys = new_keys;
+            var->values[var->count] = dup_value;
+            var->keys[var->count] = decoded_key;
+            var->count++;
+        } else {
+            free(var->values[index]);
+            var->values[index] = dup_value;
+            free(decoded_key);
+        }
+    } else {
+        char *endptr = NULL;
+        long parsed = strtol(sub_copy, &endptr, 10);
+        free(sub_copy);
+        if (!endptr || *endptr != '\0' || parsed < 0) {
+            return false;
+        }
+        size_t index = (size_t)parsed;
+        if (index >= var->count) {
+            size_t old_count = var->count;
+            char **resized = (char **)realloc(var->values, (index + 1) * sizeof(char *));
+            if (!resized) {
+                return false;
+            }
+            var->values = resized;
+            for (size_t i = old_count; i <= index; ++i) {
+                var->values[i] = NULL;
+            }
+            for (size_t i = old_count; i <= index; ++i) {
+                var->values[i] = strdup("");
+                if (!var->values[i]) {
+                    for (size_t j = old_count; j < i; ++j) {
+                        free(var->values[j]);
+                        var->values[j] = NULL;
+                    }
+                    var->values = (char **)realloc(var->values, old_count * sizeof(char *));
+                    var->count = old_count;
+                    return false;
+                }
+            }
+            var->count = index + 1;
+        }
+        char *dup_value = strdup(text_value);
+        if (!dup_value) {
+            return false;
+        }
+        free(var->values[index]);
+        var->values[index] = dup_value;
+    }
+
+    char *literal = shellBuildArrayLiteral(var);
+    if (literal) {
+        setenv(name, literal, 1);
+        free(literal);
+    } else {
+        setenv(name, "", 1);
+    }
+    return ok;
 }
 
 static bool shellSetTrackedVariable(const char *name, const char *value, bool is_array_literal) {
@@ -3022,8 +3798,31 @@ static char *shellLookupRawEnvironmentValue(const char *name, size_t len) {
     return strdup(env);
 }
 
+static char *shellJoinArrayValuesWithSeparator(char **items, size_t count, char separator) {
+    char *joined = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (i > 0) {
+            shellBufferAppendChar(&joined, &length, &capacity, separator);
+        }
+        shellBufferAppendString(&joined, &length, &capacity, items && items[i] ? items[i] : "");
+    }
+    if (!joined) {
+        joined = strdup("");
+    }
+    return joined;
+}
+
 static char *shellJoinArrayValues(char **items, size_t count) {
     if (!items || count == 0) {
+        return strdup("");
+    }
+    return shellJoinArrayValuesWithSeparator(items, count, ' ');
+}
+
+static char *shellJoinNumericIndices(size_t count, char separator) {
+    if (count == 0) {
         return strdup("");
     }
     char *joined = NULL;
@@ -3031,9 +3830,11 @@ static char *shellJoinArrayValues(char **items, size_t count) {
     size_t capacity = 0;
     for (size_t i = 0; i < count; ++i) {
         if (i > 0) {
-            shellBufferAppendChar(&joined, &length, &capacity, ' ');
+            shellBufferAppendChar(&joined, &length, &capacity, separator);
         }
-        shellBufferAppendString(&joined, &length, &capacity, items[i] ? items[i] : "");
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%zu", i);
+        shellBufferAppendString(&joined, &length, &capacity, buffer);
     }
     if (!joined) {
         joined = strdup("");
@@ -3057,18 +3858,22 @@ static char *shellExpandArraySubscriptValue(const char *name,
     }
     const ShellArrayVariable *array_var = shellArrayRegistryLookup(name, name_len);
     char **items = NULL;
+    char **keys = NULL;
     size_t count = 0;
     bool using_registry = false;
+    ShellArrayKind kind = SHELL_ARRAY_KIND_INDEXED;
     if (array_var) {
         items = array_var->values;
         count = array_var->count;
+        keys = array_var->keys;
+        kind = array_var->kind;
         using_registry = true;
     } else {
         char *raw = shellLookupRawEnvironmentValue(name, name_len);
         if (!raw) {
             return NULL;
         }
-        if (!shellParseArrayValues(raw, &items, &count)) {
+        if (!shellParseArrayLiteral(raw, &items, &keys, &count, &kind)) {
             free(raw);
             return NULL;
         }
@@ -3079,7 +3884,32 @@ static char *shellExpandArraySubscriptValue(const char *name,
     if (subscript_len == 0) {
         result = strdup("");
     } else if (subscript_len == 1 && (subscript[0] == '*' || subscript[0] == '@')) {
-        result = shellJoinArrayValues(items, count);
+        if (subscript[0] == '@') {
+            result = shellJoinArrayValuesWithSeparator(items, count, SHELL_ARRAY_ELEMENT_SEP);
+        } else {
+            result = shellJoinArrayValues(items, count);
+        }
+    } else if (kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+        char *key_text = (char *)malloc(subscript_len + 1);
+        if (key_text) {
+            memcpy(key_text, subscript, subscript_len);
+            key_text[subscript_len] = '\0';
+            char *decoded_key = shellDecodeAssociativeKey(key_text, subscript_len);
+            free(key_text);
+            if (decoded_key) {
+                for (size_t i = 0; i < count; ++i) {
+                    const char *stored_key = (keys && keys[i]) ? keys[i] : "";
+                    if (strcmp(stored_key, decoded_key) == 0) {
+                        result = strdup(items[i] ? items[i] : "");
+                        break;
+                    }
+                }
+                if (!result) {
+                    result = strdup("");
+                }
+                free(decoded_key);
+            }
+        }
     } else {
         char *index_text = (char *)malloc(subscript_len + 1);
         if (index_text) {
@@ -3097,6 +3927,9 @@ static char *shellExpandArraySubscriptValue(const char *name,
     }
     if (!using_registry) {
         shellFreeArrayValues(items, count);
+        if (keys) {
+            shellFreeArrayValues(keys, count);
+        }
     }
     if (!result) {
         result = strdup("");
@@ -3379,6 +4212,84 @@ static char *shellExpandParameter(const char *input, size_t *out_consumed) {
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%zu", elem_len);
             return strdup(buffer);
+        }
+
+        if (*inner == '!') {
+            const char *name_start = inner + 1;
+            if (name_start >= closing) {
+                return NULL;
+            }
+            const char *cursor = name_start;
+            while (cursor < closing && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+                cursor++;
+            }
+            if (cursor == name_start) {
+                return NULL;
+            }
+            size_t name_len = (size_t)(cursor - name_start);
+            if (cursor == closing || *cursor != '[') {
+                return NULL;
+            }
+            const char *subscript_start = cursor + 1;
+            const char *subscript_end = memchr(subscript_start, ']', (size_t)(closing - subscript_start));
+            if (!subscript_end || subscript_end > closing) {
+                return NULL;
+            }
+            size_t subscript_len = (size_t)(subscript_end - subscript_start);
+            const char *after_bracket = subscript_end + 1;
+            while (after_bracket < closing && isspace((unsigned char)*after_bracket)) {
+                after_bracket++;
+            }
+            if (after_bracket != closing) {
+                return NULL;
+            }
+            if (!(subscript_len == 1 && (subscript_start[0] == '@' || subscript_start[0] == '*'))) {
+                return NULL;
+            }
+            const ShellArrayVariable *array_var = shellArrayRegistryLookup(name_start, name_len);
+            char **items = NULL;
+            char **keys = NULL;
+            size_t count = 0;
+            ShellArrayKind kind = SHELL_ARRAY_KIND_INDEXED;
+            bool using_registry = false;
+            if (array_var) {
+                items = array_var->values;
+                keys = array_var->keys;
+                count = array_var->count;
+                kind = array_var->kind;
+                using_registry = true;
+            } else {
+                char *raw = shellLookupRawEnvironmentValue(name_start, name_len);
+                if (!raw) {
+                    return NULL;
+                }
+                if (!shellParseArrayLiteral(raw, &items, &keys, &count, &kind)) {
+                    free(raw);
+                    return NULL;
+                }
+                free(raw);
+            }
+            char *joined = NULL;
+            if (kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+                if (subscript_start[0] == '@') {
+                    joined = shellJoinArrayValuesWithSeparator(keys, count, SHELL_ARRAY_ELEMENT_SEP);
+                } else {
+                    joined = shellJoinArrayValues(keys, count);
+                }
+            } else {
+                char separator = (subscript_start[0] == '@') ? SHELL_ARRAY_ELEMENT_SEP : ' ';
+                joined = shellJoinNumericIndices(count, separator);
+            }
+            if (!using_registry) {
+                shellFreeArrayValues(items, count);
+                if (keys) {
+                    shellFreeArrayValues(keys, count);
+                }
+            }
+            if (!joined) {
+                joined = strdup("");
+            }
+            return joined;
         }
 
         const char *inner_end = inner + inner_len;
@@ -4963,7 +5874,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         return false;
     }
     static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
-                                      "unsetenv", "set",    "trap",    "local",   "break",   "continue", "alias",
+                                      "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
                                       "history", "jobs",   "fg",      "finger",  "bg",      "wait",    "builtin",
                                       "source", "read",   "shift",   "return",  "help",    ":"};
 
@@ -8150,6 +9061,103 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
+    bool associative = false;
+    int index = 0;
+    while (index < arg_count) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            break;
+        }
+        const char *token = v.s_val;
+        if (strcmp(token, "--") == 0) {
+            index++;
+            break;
+        }
+        if (token[0] != '-' || token[1] == '\0') {
+            break;
+        }
+        for (size_t i = 1; token[i] != '\0'; ++i) {
+            char opt = token[i];
+            if (opt == 'A' && token[0] == '-') {
+                associative = true;
+            } else if (opt == 'A' && token[0] == '+') {
+                associative = false;
+            } else {
+                runtimeError(vm, "declare: -%c: unsupported option", opt);
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            break;
+        }
+        index++;
+    }
+
+    for (; index < arg_count && ok; ++index) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "declare: expected string argument");
+            ok = false;
+            break;
+        }
+        const char *spec = v.s_val;
+        const char *eq = strchr(spec, '=');
+        if (!eq) {
+            if (associative) {
+                if (!shellArrayRegistryInitializeAssociative(spec)) {
+                    runtimeError(vm, "declare: unable to initialise '%s'", spec);
+                    ok = false;
+                } else {
+                    setenv(spec, "", 1);
+                }
+            } else {
+                if (!shellSetTrackedVariable(spec, "", false)) {
+                    runtimeError(vm, "declare: unable to set '%s'", spec);
+                    ok = false;
+                }
+            }
+            continue;
+        }
+        size_t name_len = (size_t)(eq - spec);
+        char *name = (char *)malloc(name_len + 1);
+        if (!name) {
+            ok = false;
+            break;
+        }
+        memcpy(name, spec, name_len);
+        name[name_len] = '\0';
+        const char *value_text = eq + 1;
+        if (associative) {
+            if (!shellArrayRegistryInitializeAssociative(name)) {
+                runtimeError(vm, "declare: unable to initialise '%s'", name);
+                free(name);
+                ok = false;
+                break;
+            }
+            if (!shellSetTrackedVariable(name, value_text, true)) {
+                runtimeError(vm, "declare: unable to set '%s'", name);
+                free(name);
+                ok = false;
+                break;
+            }
+        } else {
+            if (!shellSetTrackedVariable(name, value_text, false)) {
+                runtimeError(vm, "declare: unable to set '%s'", name);
+                free(name);
+                ok = false;
+                break;
+            }
+        }
+        free(name);
+    }
+
+    shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
 Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
     bool print_env = (arg_count == 0);
     bool parsing_options = true;
@@ -8651,6 +9659,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "continue [n]",
         "Accepts an optional positive integer count and marks the requested"
         " number of enclosing loops to continue.",
+        NULL,
+        0
+    },
+    {
+        "declare",
+        "Declare variables and arrays.",
+        "declare [-a|-A] [name[=value] ...]",
+        "Without arguments prints variables with attributes. The -a flag"
+        " initialises indexed arrays and -A initialises associative arrays.",
         NULL,
         0
     },

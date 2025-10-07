@@ -29,6 +29,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"history", "history", 14},
     {"setenv", "setenv", 15},
     {"unsetenv", "unsetenv", 16},
+    {"declare", "declare", 32},
     {"jobs", "jobs", 17},
     {"fg", "fg", 18},
     {"bg", "bg", 19},

@@ -129,6 +129,7 @@ Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnsetenv(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellDeclare(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSet(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrap(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLocal(struct VM_s* vm, int arg_count, Value* args);
