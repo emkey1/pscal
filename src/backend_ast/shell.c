@@ -9282,6 +9282,12 @@ Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
             evaluated = true;
         } else if (shellEvaluateFileUnary(first, operand, &result)) {
             evaluated = true;
+        } else if (first && first[0] == '-' && first[1] != '\0') {
+            /* Treat unrecognised unary operators as a failed test rather than
+             * falling back to string truthiness. This keeps behaviour aligned
+             * with traditional shells where unknown predicates are errors. */
+            result = false;
+            evaluated = true;
         }
         if (!evaluated) {
             result = (operand[0] != '\0');
