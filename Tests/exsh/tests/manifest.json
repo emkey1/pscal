@@ -344,6 +344,14 @@
       "script": "Tests/exsh/tests/bash_parity_functions.psh",
       "expect": "match_bash",
       "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
+    },
+    {
+      "id": "bash_parity_export_pipeline",
+      "name": "export works in pipelines",
+      "category": "parity",
+      "description": "Ensure the export builtin runs correctly when piped to another command.",
+      "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
+      "expect": "match_bash"
     }
   ]
 }

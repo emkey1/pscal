@@ -1093,7 +1093,8 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                                            const char **out_failed_assignment,
                                            bool *out_invalid_assignment);
 static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count);
-static int shellSpawnProcess(const ShellCommand *cmd,
+static int shellSpawnProcess(VM *vm,
+                             const ShellCommand *cmd,
                              int stdin_fd,
                              int stdout_fd,
                              int stderr_fd,
@@ -1269,7 +1270,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     pid_t child = -1;
-    int spawn_err = shellSpawnProcess(&cmd, -1, pipes[1], -1, &child, false);
+    int spawn_err = shellSpawnProcess(gShellCurrentVm, &cmd, -1, pipes[1], -1, &child, false);
     close(pipes[1]);
     pipes[1] = -1;
     if (spawn_err != 0) {
@@ -5714,7 +5715,8 @@ typedef struct {
     bool close_target;
 } ShellRuntimeRedirOp;
 
-static int shellSpawnProcess(const ShellCommand *cmd,
+static int shellSpawnProcess(VM *vm,
+                             const ShellCommand *cmd,
                              int stdin_fd,
                              int stdout_fd,
                              int stderr_fd,
@@ -5793,7 +5795,7 @@ static int shellSpawnProcess(const ShellCommand *cmd,
     }
 
     {
-        pid_t child = fork();
+    pid_t child = fork();
         if (child < 0) {
             prep_error = errno;
             goto spawn_cleanup;
@@ -5899,6 +5901,13 @@ static int shellSpawnProcess(const ShellCommand *cmd,
                     close(op->source_fd);
                     op->source_fd = -1;
                 }
+            }
+
+            bool builtin_ran = shellInvokeBuiltin(vm ? vm : gShellCurrentVm, (ShellCommand *)cmd);
+            if (builtin_ran) {
+                int status = gShellRuntime.last_status;
+                fflush(NULL);
+                _exit(status);
             }
 
             execvp(cmd->argv[0], cmd->argv);
@@ -6639,7 +6648,8 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
 
     pid_t child = -1;
-    int spawn_err = shellSpawnProcess(cmd,
+    int spawn_err = shellSpawnProcess(vm,
+                                      cmd,
                                       stdin_fd,
                                       stdout_fd,
                                       stderr_fd,

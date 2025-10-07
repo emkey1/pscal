@@ -1,0 +1,2 @@
+#!/usr/bin/env exsh
+export | grep '^PATH' | head -n 1
