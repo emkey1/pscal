@@ -10034,6 +10034,7 @@ static char *shellReadExtractField(char **cursor,
 
 Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     const char *prompt = NULL;
+    const char *array_name = NULL;
     const char **variables = NULL;
     size_t variable_count = 0;
     bool parsing_options = true;
@@ -10056,6 +10057,7 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
             if (token[0] == '-' && token[1] != '\0') {
                 size_t option_length = strlen(token);
                 bool pending_prompt = false;
+                bool pending_array = false;
                 for (size_t opt_index = 1; opt_index < option_length && ok; ++opt_index) {
                     char opt = token[opt_index];
                     switch (opt) {
@@ -10064,6 +10066,19 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
                             break;
                         case 'p':
                             pending_prompt = true;
+                            break;
+                        case 'a':
+                            if (array_name) {
+                                runtimeError(vm, "read: option -a specified multiple times");
+                                ok = false;
+                                break;
+                            }
+                            if (opt_index + 1 < option_length) {
+                                array_name = &token[opt_index + 1];
+                                opt_index = option_length;
+                            } else {
+                                pending_array = true;
+                            }
                             break;
                         default:
                             runtimeError(vm, "read: unsupported option '-%c'", opt);
@@ -10088,6 +10103,23 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
                     }
                     prompt = prompt_val.s_val;
                 }
+                if (!ok) {
+                    break;
+                }
+                if (pending_array) {
+                    if (i + 1 >= arg_count) {
+                        runtimeError(vm, "read: option -a requires an argument");
+                        ok = false;
+                        break;
+                    }
+                    Value array_val = args[++i];
+                    if (array_val.type != TYPE_STRING || !array_val.s_val || array_val.s_val[0] == '\0') {
+                        runtimeError(vm, "read: array name must be a non-empty string");
+                        ok = false;
+                        break;
+                    }
+                    array_name = array_val.s_val;
+                }
                 continue;
             }
             parsing_options = false;
@@ -10102,7 +10134,7 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
         variables[variable_count++] = token;
     }
 
-    if (ok && variable_count == 0) {
+    if (ok && variable_count == 0 && !array_name) {
         variables = (const char **)malloc(sizeof(const char *));
         if (!variables) {
             runtimeError(vm, "read: out of memory");
@@ -10133,8 +10165,70 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     }
 
     bool assign_ok = ok;
+    char *cursor = line;
+    if (ok && array_name) {
+        char *array_cursor = line;
+        char **array_values = NULL;
+        size_t array_count = 0;
+        size_t array_capacity = 0;
+        bool has_non_whitespace = false;
+        if (line) {
+            for (const char *scan = line; *scan; ++scan) {
+                if (!shellReadIsIFSWhitespaceDelimiter(ifs, *scan)) {
+                    has_non_whitespace = true;
+                    break;
+                }
+            }
+        }
+        if (read_result == SHELL_READ_LINE_OK && array_cursor) {
+            while (*array_cursor) {
+                char *value_copy = shellReadExtractField(&array_cursor, false, raw_mode, ifs);
+                if (!value_copy) {
+                    runtimeError(vm, "read: out of memory");
+                    assign_ok = false;
+                    break;
+                }
+                if (!has_non_whitespace && value_copy[0] == '\0') {
+                    free(value_copy);
+                    continue;
+                }
+                if (!shellAppendArrayValue(&array_values, &array_count, &array_capacity, value_copy)) {
+                    runtimeError(vm, "read: out of memory");
+                    assign_ok = false;
+                    break;
+                }
+            }
+        }
+        if (assign_ok) {
+            if (!shellArrayRegistryStore(array_name, array_values, NULL, array_count, SHELL_ARRAY_KIND_INDEXED)) {
+                runtimeError(vm, "read: out of memory");
+                assign_ok = false;
+            } else {
+                const ShellArrayVariable *stored = shellArrayRegistryFindConst(array_name);
+                char *literal = shellBuildArrayLiteral(stored);
+                if (!literal) {
+                    runtimeError(vm, "read: out of memory");
+                    shellArrayRegistryRemove(array_name);
+                    assign_ok = false;
+                } else {
+                    if (setenv(array_name, literal, 1) != 0) {
+                        int err = errno;
+                        runtimeError(vm, "read: unable to set array '%s': %s", array_name, strerror(err));
+                        shellArrayRegistryRemove(array_name);
+                        assign_ok = false;
+                    }
+                    free(literal);
+                }
+            }
+        }
+        shellFreeArrayValues(array_values, array_count);
+        array_values = NULL;
+        if (read_result == SHELL_READ_LINE_OK) {
+            cursor = array_cursor;
+        }
+    }
+
     if (ok && (read_result == SHELL_READ_LINE_OK || read_result == SHELL_READ_LINE_EOF)) {
-        char *cursor = line;
         for (size_t i = 0; i < variable_count; ++i) {
             bool last = (i + 1 == variable_count);
             char *value_copy = NULL;

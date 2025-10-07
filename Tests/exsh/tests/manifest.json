@@ -415,6 +415,15 @@
       "expected_stdout": "read_fields:alpha:beta:gamma\n"
     },
     {
+      "id": "read_array_assign",
+      "name": "read -a populates arrays",
+      "category": "builtin",
+      "description": "Ensure the read builtin assigns fields to indexed arrays like bash.",
+      "script": "Tests/exsh/tests/read_array_assign.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "count:3\nfield0:alpha\nfield1:beta\nfield2:gamma\nrest:\nblank_count:0\nstatus:0\n"
+    },
+    {
       "id": "redirection_here_string",
       "name": "Here strings feed stdin",
       "category": "redirection",
