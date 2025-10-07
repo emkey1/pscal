@@ -6492,7 +6492,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     int fd = -1;
     if (fd_text && *fd_text) {
         fd = atoi(fd_text);
-    } else if (strcmp(type_text, "<") == 0 || strcmp(type_text, "<<") == 0 || strcmp(type_text, "<&") == 0 || strcmp(type_text, "<>") == 0) {
+    } else if (strcmp(type_text, "<") == 0 || strcmp(type_text, "<<") == 0 || strcmp(type_text, "<<<") == 0 || strcmp(type_text, "<&") == 0 || strcmp(type_text, "<>") == 0) {
         fd = STDIN_FILENO;
     } else {
         fd = STDOUT_FILENO;
@@ -6597,6 +6597,29 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         redir.here_doc = expanded;
         redir.here_doc_length = expanded ? strlen(expanded) : 0;
         redir.here_doc_quoted = here_quoted;
+    } else if (strcmp(type_text, "<<<") == 0) {
+        redir.kind = SHELL_RUNTIME_REDIR_HEREDOC;
+        if (!expanded_target) {
+            free(word_encoded);
+            free(copy);
+            return false;
+        }
+        size_t len = strlen(expanded_target);
+        char *body = (char *)malloc(len + 2);
+        if (!body) {
+            free(expanded_target);
+            free(word_encoded);
+            free(copy);
+            return false;
+        }
+        memcpy(body, expanded_target, len);
+        body[len] = '\n';
+        body[len + 1] = '\0';
+        redir.here_doc = body;
+        redir.here_doc_length = len + 1;
+        redir.here_doc_quoted = false;
+        free(expanded_target);
+        expanded_target = NULL;
     } else {
         free(expanded_target);
         free(word_encoded);

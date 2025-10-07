@@ -378,6 +378,15 @@
       "script": "Tests/exsh/tests/read_ifs.psh",
       "expect": "runtime_ok",
       "expected_stdout": "read_fields:alpha:beta:gamma\n"
+    },
+    {
+      "id": "redirection_here_string",
+      "name": "Here strings feed stdin",
+      "category": "redirection",
+      "description": "The <<< operator should redirect expanded text with a trailing newline to stdin.",
+      "script": "Tests/exsh/tests/here_string.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
     }
   ]
 }
