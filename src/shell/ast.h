@@ -114,6 +114,7 @@ typedef struct ShellLoop {
     ShellWordArray for_values;
     struct ShellCommand *condition;
     struct ShellProgram *body;
+    ShellRedirectionArray redirections;
 } ShellLoop;
 
 typedef struct ShellConditional {

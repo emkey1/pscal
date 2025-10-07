@@ -333,22 +333,6 @@ typedef enum {
 } ShellLoopKind;
 
 typedef struct {
-    ShellLoopKind kind;
-    bool skip_body;
-    bool break_pending;
-    bool continue_pending;
-    char *for_variable;
-    char **for_values;
-    size_t for_count;
-    size_t for_index;
-    bool for_active;
-} ShellLoopFrame;
-
-static ShellLoopFrame *gShellLoopStack = NULL;
-static size_t gShellLoopStackSize = 0;
-static size_t gShellLoopStackCapacity = 0;
-
-typedef struct {
     char *name;
     char *previous_value;
     bool had_previous;
@@ -361,6 +345,31 @@ typedef struct {
     bool saved_valid;
     bool was_closed;
 } ShellExecRedirBackup;
+
+static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count);
+static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t count);
+static void shellFreeRedirections(ShellCommand *cmd);
+
+typedef struct {
+    ShellLoopKind kind;
+    bool skip_body;
+    bool break_pending;
+    bool continue_pending;
+    char *for_variable;
+    char **for_values;
+    size_t for_count;
+    size_t for_index;
+    bool for_active;
+    bool redirs_active;
+    ShellRedirection *applied_redirs;
+    size_t applied_redir_count;
+    ShellExecRedirBackup *redir_backups;
+    size_t redir_backup_count;
+} ShellLoopFrame;
+
+static ShellLoopFrame *gShellLoopStack = NULL;
+static size_t gShellLoopStackSize = 0;
+static size_t gShellLoopStackCapacity = 0;
 
 static ShellRuntimeState gShellRuntime = {
     .last_status = 0,
@@ -679,6 +688,24 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
     frame->for_count = 0;
     frame->for_index = 0;
     frame->for_active = false;
+    if (frame->redirs_active) {
+        shellRestoreExecRedirections(frame->redir_backups, frame->redir_backup_count);
+    }
+    if (frame->redir_backups) {
+        shellFreeExecRedirBackups(frame->redir_backups, frame->redir_backup_count);
+        frame->redir_backups = NULL;
+        frame->redir_backup_count = 0;
+    }
+    if (frame->applied_redirs) {
+        ShellCommand temp;
+        memset(&temp, 0, sizeof(temp));
+        temp.redirs = frame->applied_redirs;
+        temp.redir_count = frame->applied_redir_count;
+        shellFreeRedirections(&temp);
+        frame->applied_redirs = NULL;
+        frame->applied_redir_count = 0;
+    }
+    frame->redirs_active = false;
 }
 
 typedef enum {
@@ -772,6 +799,11 @@ static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     frame.for_count = 0;
     frame.for_index = 0;
     frame.for_active = false;
+    frame.redirs_active = false;
+    frame.applied_redirs = NULL;
+    frame.applied_redir_count = 0;
+    frame.redir_backups = NULL;
+    frame.redir_backup_count = 0;
     gShellLoopStack[gShellLoopStackSize++] = frame;
     return &gShellLoopStack[gShellLoopStackSize - 1];
 }
@@ -6922,6 +6954,7 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
 
     ShellLoopKind kind = SHELL_LOOP_KIND_WHILE;
     bool until_flag = false;
+    size_t redir_count = 0;
     if (meta && *meta) {
         char *copy = strdup(meta);
         if (copy) {
@@ -6941,6 +6974,12 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                         }
                     } else if (strcmp(key, "until") == 0) {
                         until_flag = (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
+                    } else if (strcmp(key, "redirs") == 0) {
+                        char *endptr = NULL;
+                        unsigned long parsed = strtoul(value ? value : "0", &endptr, 10);
+                        if (endptr && *endptr == '\0') {
+                            redir_count = (size_t)parsed;
+                        }
                     }
                 }
             }
@@ -6963,10 +7002,30 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     frame->break_pending = false;
     frame->continue_pending = false;
 
+    ShellCommand redir_cmd;
+    memset(&redir_cmd, 0, sizeof(redir_cmd));
+    ShellExecRedirBackup *redir_backups = NULL;
+    size_t redir_backup_count = 0;
+
     bool ok = true;
 
+    int payload_total = (arg_count > 0) ? arg_count - 1 : 0;
+    if ((size_t)payload_total < redir_count) {
+        runtimeError(vm, "shell loop: redirection metadata mismatch");
+        ok = false;
+        redir_count = (payload_total >= 0) ? (size_t)payload_total : 0;
+    }
+    int payload_without_redirs = payload_total - (int)redir_count;
+    if (payload_without_redirs < 0) {
+        payload_without_redirs = 0;
+    }
+    int redir_start_index = arg_count - (int)redir_count;
+    if (redir_start_index < 1) {
+        redir_start_index = arg_count;
+    }
+
     if (kind == SHELL_LOOP_KIND_FOR) {
-        if (arg_count < 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
+        if (payload_without_redirs < 1 || args[1].type != TYPE_STRING || !args[1].s_val) {
             runtimeError(vm, "shell loop: expected iterator name");
             ok = false;
         } else {
@@ -6984,12 +7043,15 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
             }
         }
 
-        size_t value_start = 2;
-        size_t available = (arg_count > (int)value_start) ? (size_t)(arg_count - (int)value_start) : 0;
+        size_t value_start_index = 2;
+        size_t value_count = 0;
+        if (redir_start_index > (int)value_start_index) {
+            value_count = (size_t)(redir_start_index - (int)value_start_index);
+        }
         size_t values_capacity = 0;
-        if (ok && available > 0) {
-            for (size_t i = 0; i < available; ++i) {
-                Value *val = &args[value_start + i];
+        if (ok && value_count > 0) {
+            for (size_t offset = 0; offset < value_count; ++offset) {
+                Value *val = &args[value_start_index + offset];
                 if (val->type != TYPE_STRING || !val->s_val) {
                     char *empty = strdup("");
                     if (!empty || !shellLoopFrameAppendValue(frame, &values_capacity, empty)) {
@@ -7114,10 +7176,60 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                 frame->for_active = true;
             }
         }
+    } else {
+        if (payload_without_redirs > 0) {
+            runtimeError(vm, "shell loop: unexpected arguments");
+            ok = false;
+        }
     }
 
+    if (ok && redir_count > 0) {
+        for (size_t i = 0; i < redir_count; ++i) {
+            int arg_index = redir_start_index + (int)i;
+            if (arg_index < 0 || arg_index >= arg_count) {
+                runtimeError(vm, "shell loop: missing redirection argument");
+                ok = false;
+                break;
+            }
+            Value entry = args[arg_index];
+            if (entry.type != TYPE_STRING || !entry.s_val) {
+                runtimeError(vm, "shell loop: invalid redirection argument");
+                ok = false;
+                break;
+            }
+            if (!shellAddRedirection(&redir_cmd, entry.s_val)) {
+                runtimeError(vm, "shell loop: failed to parse redirection");
+                ok = false;
+                break;
+            }
+        }
+        if (ok && redir_cmd.redir_count > 0) {
+            if (!shellApplyExecRedirections(vm ? vm : gShellCurrentVm, &redir_cmd, &redir_backups, &redir_backup_count)) {
+                ok = false;
+            } else {
+                frame->redirs_active = true;
+                frame->redir_backups = redir_backups;
+                frame->redir_backup_count = redir_backup_count;
+                frame->applied_redirs = redir_cmd.redirs;
+                frame->applied_redir_count = redir_cmd.redir_count;
+                redir_backups = NULL;
+                redir_backup_count = 0;
+                redir_cmd.redirs = NULL;
+                redir_cmd.redir_count = 0;
+            }
+        }
+    }
     if (!ok) {
         shellUpdateStatus(1);
+    }
+
+    if (redir_backups) {
+        shellRestoreExecRedirections(redir_backups, redir_backup_count);
+        shellFreeExecRedirBackups(redir_backups, redir_backup_count);
+        redir_backups = NULL;
+    }
+    if (redir_cmd.redirs) {
+        shellFreeRedirections(&redir_cmd);
     }
 
     shellResetPipeline();
@@ -7687,6 +7799,36 @@ Value vmBuiltinShellReturn(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static const char *shellReadResolveIFS(void) {
+    const char *ifs = getenv("IFS");
+    if (!ifs) {
+        return " \t\n";
+    }
+    return ifs;
+}
+
+static bool shellReadIsIFSDelimiter(const char *ifs, char ch) {
+    if (!ifs) {
+        return false;
+    }
+    for (const char *p = ifs; *p; ++p) {
+        if (*p == ch) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellReadIsIFSWhitespaceDelimiter(const char *ifs, char ch) {
+    if (!ifs || *ifs == '\0') {
+        return false;
+    }
+    if (!shellReadIsIFSDelimiter(ifs, ch)) {
+        return false;
+    }
+    return isspace((unsigned char)ch) != 0;
+}
+
 static char *shellReadCopyValue(const char *text, bool raw_mode) {
     if (!text) {
         return strdup("");
@@ -7715,7 +7857,10 @@ static char *shellReadCopyValue(const char *text, bool raw_mode) {
     return copy;
 }
 
-static char *shellReadExtractField(char **cursor, bool last_field, bool raw_mode) {
+static char *shellReadExtractField(char **cursor,
+                                   bool last_field,
+                                   bool raw_mode,
+                                   const char *ifs) {
     if (!cursor) {
         return strdup("");
     }
@@ -7724,7 +7869,7 @@ static char *shellReadExtractField(char **cursor, bool last_field, bool raw_mode
         return strdup("");
     }
 
-    while (*text && isspace((unsigned char)*text)) {
+    while (*text && shellReadIsIFSWhitespaceDelimiter(ifs, *text)) {
         text++;
     }
 
@@ -7746,7 +7891,7 @@ static char *shellReadExtractField(char **cursor, bool last_field, bool raw_mode
             scan += 2;
             continue;
         }
-        if (isspace((unsigned char)*scan)) {
+        if (shellReadIsIFSDelimiter(ifs, *scan)) {
             break;
         }
         scan++;
@@ -7756,6 +7901,14 @@ static char *shellReadExtractField(char **cursor, bool last_field, bool raw_mode
     *scan = '\0';
     char *value = shellReadCopyValue(text, raw_mode);
     *scan = saved;
+    if (saved != '\0') {
+        scan++;
+        if (shellReadIsIFSWhitespaceDelimiter(ifs, saved)) {
+            while (*scan && shellReadIsIFSWhitespaceDelimiter(ifs, *scan)) {
+                scan++;
+            }
+        }
+    }
     *cursor = scan;
     return value;
 }
@@ -7841,6 +7994,8 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
         }
     }
 
+    const char *ifs = shellReadResolveIFS();
+
     ShellReadLineResult read_result = SHELL_READ_LINE_ERROR;
     char *line = NULL;
     size_t line_length = 0;
@@ -7865,7 +8020,7 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
             bool last = (i + 1 == variable_count);
             char *value_copy = NULL;
             if (read_result == SHELL_READ_LINE_OK) {
-                value_copy = shellReadExtractField(&cursor, last, raw_mode);
+                value_copy = shellReadExtractField(&cursor, last, raw_mode, ifs);
             } else {
                 value_copy = strdup("");
             }

@@ -438,6 +438,7 @@ ShellLoop *shellCreateLoop(bool is_until, ShellCommand *condition, ShellProgram 
     shellWordArrayInit(&loop->for_values);
     loop->condition = condition;
     loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
     return loop;
 }
 
@@ -459,6 +460,7 @@ ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, Shell
     }
     loop->condition = NULL;
     loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
     return loop;
 }
 
@@ -470,6 +472,7 @@ void shellFreeLoop(ShellLoop *loop) {
     shellWordArrayFree(&loop->for_values);
     shellFreeCommand(loop->condition);
     shellFreeProgram(loop->body);
+    shellRedirectionArrayFree(&loop->redirections);
     free(loop);
 }
 
@@ -735,6 +738,8 @@ static ShellRedirectionArray *shellCommandResolveRedirections(ShellCommand *comm
             return &command->data.simple.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
+        case SHELL_COMMAND_LOOP:
+            return command->data.loop ? &command->data.loop->redirections : NULL;
         default:
             return NULL;
     }
@@ -749,6 +754,8 @@ static const ShellRedirectionArray *shellCommandResolveRedirectionsConst(const S
             return &command->data.simple.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
+        case SHELL_COMMAND_LOOP:
+            return (command->data.loop) ? &command->data.loop->redirections : NULL;
         default:
             return NULL;
     }

@@ -459,11 +459,14 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     }
 
     bool isFor = loop->is_for;
+    const ShellRedirectionArray *redirs = loop ? &loop->redirections : NULL;
+    size_t redir_count = redirs ? redirs->count : 0;
+
     char meta[128];
     if (isFor) {
-        snprintf(meta, sizeof(meta), "mode=for");
+        snprintf(meta, sizeof(meta), "mode=for;redirs=%zu", redir_count);
     } else {
-        snprintf(meta, sizeof(meta), "mode=%s", loop->is_until ? "until" : "while");
+        snprintf(meta, sizeof(meta), "mode=%s;redirs=%zu", loop->is_until ? "until" : "while", redir_count);
     }
     emitPushString(chunk, meta, line);
 
@@ -488,6 +491,32 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
             }
         }
     }
+
+    if (redirs && redir_count > 0) {
+        size_t emit_count = redir_count;
+        if ((size_t)arg_count + emit_count > 255) {
+            if (arg_count < 255) {
+                emit_count = 255 - arg_count;
+            } else {
+                emit_count = 0;
+            }
+            fprintf(stderr, "shell codegen warning: loop redirections truncated (%zu).\n", redir_count);
+        }
+        for (size_t i = 0; i < emit_count; ++i) {
+            const ShellRedirection *redir = redirs->items[i];
+            char *serialized = buildRedirectionMetadata(redir);
+            if (!serialized) {
+                emitPushString(chunk, "redir:fd=;type=;word=;dup=;here=", line);
+            } else {
+                emitPushString(chunk, serialized, line);
+                free(serialized);
+            }
+            if (arg_count < 255) {
+                arg_count++;
+            }
+        }
+    }
+
     emitBuiltinProc(chunk, "__shell_loop", arg_count, line);
 
     int conditionStart = chunk->count;

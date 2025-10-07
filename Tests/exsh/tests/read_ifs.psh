@@ -1,0 +1,11 @@
+#!/usr/bin/env exsh
+# Verify that the read builtin honours a custom IFS setting.
+
+IFS='|'
+while read -r first second third; do
+    echo "read_fields:$first:$second:$third"
+done <<'DATA'
+alpha|beta|gamma
+DATA
+
+exit 0

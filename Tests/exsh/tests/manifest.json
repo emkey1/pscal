@@ -352,6 +352,15 @@
       "description": "Ensure the export builtin runs correctly when piped to another command.",
       "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
       "expect": "match_bash"
+    },
+    {
+      "id": "read_ifs_split",
+      "name": "read honours custom IFS",
+      "category": "builtin",
+      "description": "Confirm the read builtin splits fields using the active IFS value.",
+      "script": "Tests/exsh/tests/read_ifs.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "read_fields:alpha:beta:gamma\n"
     }
   ]
 }
