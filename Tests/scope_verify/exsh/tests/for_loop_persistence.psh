@@ -1,0 +1,4 @@
+for idx in 0 1 2; do
+  printf "loop:%s\n" "$idx"
+done
+printf "after:%s\n" "$idx"

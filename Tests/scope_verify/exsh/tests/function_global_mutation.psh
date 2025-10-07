@@ -1,0 +1,7 @@
+count=0
+increment() {
+  count=$((count + 1))
+}
+increment
+increment
+printf "count=%s\n" "$count"

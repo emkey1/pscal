@@ -1,0 +1,6 @@
+value="outer"
+{
+  value="inner"
+  printf "inside:%s\n" "$value"
+}
+printf "after:%s\n" "$value"

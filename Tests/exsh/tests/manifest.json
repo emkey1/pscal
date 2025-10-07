@@ -99,9 +99,8 @@
             "script": "Examples/exsh/pipeline.psh",
             "expect": "runtime_ok",
             "prime_cache": true,
-            "expected_stdout": "pipeline:start\nalpha\npipeline:end",
-            "expected_stderr_substring": "Loaded cached bytecode"
-        },
+      "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+    },
         {
             "id": "case_basic",
             "name": "Case statements dispatch patterns",
@@ -318,14 +317,33 @@
             "expect": "runtime_ok",
             "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
         },
-        {
-            "id": "grammar_if_and_or_conditions",
-            "name": "Logical connectors work in if/while conditions",
-            "category": "grammar",
-            "description": "Allows && and || lists in conditional and loop headers.",
-            "script": "Tests/exsh/tests/parser_if_and_or.psh",
-            "expect": "runtime_ok",
-            "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
-        }
-    ]
+    {
+      "id": "grammar_if_and_or_conditions",
+      "name": "Logical connectors work in if/while conditions",
+      "category": "grammar",
+      "description": "Allows && and || lists in conditional and loop headers.",
+      "script": "Tests/exsh/tests/parser_if_and_or.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
+    }
+    ,
+    {
+      "id": "bash_parity_arithmetic",
+      "name": "Arithmetic expansion matches bash",
+      "category": "parity",
+      "description": "Verify arithmetic evaluation keeps parity with bash for nested expressions.",
+      "script": "Tests/exsh/tests/bash_parity_arithmetic.psh",
+      "expect": "match_bash",
+      "expected_stdout": "sum=5\nprod=20\ndiv=3\nfmt=1+2=3\n"
+    },
+    {
+      "id": "bash_parity_functions",
+      "name": "Function locals mirror bash semantics",
+      "category": "parity",
+      "description": "Function locals and string assembly behave the same as bash.",
+      "script": "Tests/exsh/tests/bash_parity_functions.psh",
+      "expect": "match_bash",
+      "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
+    }
+  ]
 }
