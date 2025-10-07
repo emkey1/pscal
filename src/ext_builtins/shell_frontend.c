@@ -39,6 +39,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "shift", vmBuiltinShellShift);
     registerShellBuiltin(category, command_group, "set", vmBuiltinShellSet);
     registerShellBuiltin(category, command_group, "setenv", vmBuiltinShellSetenv);
+    registerShellBuiltin(category, command_group, "declare", vmBuiltinShellDeclare);
     registerShellBuiltin(category, command_group, "export", vmBuiltinShellExport);
     registerShellBuiltin(category, command_group, "unset", vmBuiltinShellUnset);
     registerShellBuiltin(category, command_group, "unsetenv", vmBuiltinShellUnsetenv);

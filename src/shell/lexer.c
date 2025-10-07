@@ -83,14 +83,68 @@ static bool isValidNameLexeme(const char *lexeme, size_t length) {
     if (!(isalpha(first) || first == '_')) {
         return false;
     }
+    const unsigned char backslash = 92;
+    const unsigned char single_quote = 39;
+    const unsigned char double_quote = 34;
+    bool in_brackets = false;
+    bool in_single = false;
+    bool in_double = false;
     for (size_t i = 1; i < length; ++i) {
         unsigned char ch = (unsigned char)lexeme[i];
+        if (in_single) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == single_quote) {
+                in_single = false;
+            }
+            continue;
+        }
+        if (in_double) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == double_quote) {
+                in_double = false;
+            }
+            continue;
+        }
+        if (in_brackets) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == single_quote) {
+                in_single = true;
+                continue;
+            }
+            if (ch == double_quote) {
+                in_double = true;
+                continue;
+            }
+            if (ch == 93) { /* ']' */
+                in_brackets = false;
+                continue;
+            }
+            if (ch == 91) { /* '[' */
+                return false;
+            }
+            continue;
+        }
+        if (ch == 91) {
+            in_brackets = true;
+            continue;
+        }
         if (!(isalnum(ch) || ch == '_')) {
             return false;
         }
     }
-    return true;
+    return !in_brackets && !in_single && !in_double;
 }
+
+
 
 static ShellTokenType checkReservedWord(const char *lexeme);
 

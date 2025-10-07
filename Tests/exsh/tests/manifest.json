@@ -89,7 +89,7 @@
             "description": "help -l prints the builtin catalog with summaries.",
             "script": "Tests/exsh/tests/help_list.psh",
             "expect": "runtime_ok",
-            "expected_stdout": "exsh builtins. Type 'help <function>' for detailed usage.\n\nBuiltin     Summary\n------      -------\nalias       Define or display shell aliases.\nbg          Resume a stopped job in the background.\nbreak       Exit from the innermost loop(s).\nbuiltin     Invoke a PSCAL VM builtin directly.\ncd          Change the current working directory.\ncontinue    Skip to the next loop iteration.\neval        Execute words as an inline script.\nexit        Request that the shell terminate.\nexport      Set environment variables or print the environment.\nfg          Move a job to the foreground.\nfinger      Display basic account information.\nhelp        List builtins or describe a specific builtin.\nhistory     Print the interactive history list.\njobs        List active background jobs.\nlocal       Activate the shell's local scope flag.\npwd         Print the current working directory.\nread        Read a line from standard input.\nreturn      Return from the current shell function.\nset         Update shell option flags.\nsetenv      Set or print environment variables.\nshift       Rotate positional parameters to the left.\nsource (.)  Execute a file in the current shell environment.\ntrap        Toggle the shell's trap flag.\nunset       Remove variables from the environment.\nunsetenv    Alias for unset.\nwait        Wait for a job to change state.\n:           Do nothing and succeed.\n"
+            "expected_stdout": "exsh builtins. Type 'help <function>' for detailed usage.\n\nBuiltin     Summary\n------      -------\nalias       Define or display shell aliases.\nbg          Resume a stopped job in the background.\nbreak       Exit from the innermost loop(s).\nbuiltin     Invoke a PSCAL VM builtin directly.\ncd          Change the current working directory.\ncontinue    Skip to the next loop iteration.\ndeclare     Declare variables and arrays.\neval        Execute words as an inline script.\nexit        Request that the shell terminate.\nexport      Set environment variables or print the environment.\nfg          Move a job to the foreground.\nfinger      Display basic account information.\nhelp        List builtins or describe a specific builtin.\nhistory     Print the interactive history list.\njobs        List active background jobs.\nlocal       Activate the shell's local scope flag.\npwd         Print the current working directory.\nread        Read a line from standard input.\nreturn      Return from the current shell function.\nset         Update shell option flags.\nsetenv      Set or print environment variables.\nshift       Rotate positional parameters to the left.\nsource (.)  Execute a file in the current shell environment.\ntrap        Toggle the shell's trap flag.\nunset       Remove variables from the environment.\nunsetenv    Alias for unset.\nwait        Wait for a job to change state.\n:           Do nothing and succeed.\n"
         },
         {
             "id": "pipeline_cache_hit",
@@ -351,6 +351,14 @@
       "category": "parity",
       "description": "Ensure the export builtin runs correctly when piped to another command.",
       "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
+      "expect": "match_bash"
+    },
+    {
+      "id": "bash_parity_declare_assoc",
+      "name": "Associative arrays mirror bash declare",
+      "category": "parity",
+      "description": "declare -A assignments and iteration match bash semantics.",
+      "script": "Tests/exsh/tests/bash_parity_declare_assoc.psh",
       "expect": "match_bash"
     },
     {
