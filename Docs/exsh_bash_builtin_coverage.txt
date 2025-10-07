@@ -1,0 +1,95 @@
+Bash builtin coverage summary for exsh
+=====================================
+
+Bash builtins reported by `help`
+--------------------------------
+. : [ alias bg bind break builtin caller cd command compgen complete compopt continue declare dirs disown echo enable eval exec exit export false fc fg getopts hash help history jobs kill let local logout mapfile popd printf pushd pwd read readarray readonly return set shift shopt source suspend test times trap true type typeset ulimit umask unalias unset wait
+
+Builtins currently implemented in exsh
+--------------------------------------
+cd pwd echo exit exec true false set unset export read test [ shift alias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
+
+Bash builtins missing from exsh
+-------------------------------
+caller command compgen complete compopt dirs disown enable fc getopts hash kill let logout mapfile readarray popd printf pushd readonly suspend times type typeset ulimit umask unalias
+
+Plans to address missing builtins
+---------------------------------
+1) Directory stack builtins (pushd, popd, dirs):
+   - Extend ShellRuntimeState with a directory stack and initialise it at startup so sessions remember the initial working directory.
+   - Add helpers to normalise paths and keep the stack in sync with PWD, mirroring the error handling of vmBuiltinShellCd.
+   - Implement vmBuiltinShellPushd, vmBuiltinShellPopd, and vmBuiltinShellDirs, register them in kShellBuiltins, and update shellIsRuntimeBuiltin.
+   - Document the commands in kShellHelpTopics and create regression tests that compare stack behaviour with Bash.
+
+2) Programmable completion builtins (compgen, complete, compopt):
+   - Introduce a completion registry in the interactive runtime near the tab completion helpers so programmable definitions can be consulted before globbing.
+   - Implement handlers in src/backend_ast/shell.c that parse Bash style flags and mutate or query the registry using the option parsing approach from declare and shopt.
+   - Register the builtins and their help topics, wiring them into kShellBuiltins and shellIsRuntimeBuiltin.
+   - Extend the manifest driven tests with parity cases that exercise programmable completion against Bash.
+
+3) Command lookup builtins (command, type, hash, enable):
+   - Factor command resolution logic used by shellSpawnProcess into helpers that expose search path, builtin, and function metadata.
+   - Implement builtin handlers that call the helpers so command honours flags, type prints classifications, hash primes or shows caches, and enable toggles builtin availability through the dispatcher.
+   - Register each builtin with documentation and ensure disabled builtins are skipped by shellIsRuntimeBuiltin before dispatch.
+   - Add parity tests covering command -v, type, path hashing, and enabling or disabling builtins.
+
+4) Job control builtins (disown, kill, suspend):
+   - Extend the job registry to record disowned jobs and prevent later status reports or waits from touching them.
+   - Implement builtin handlers near vmBuiltinShellJobs and vmBuiltinShellFg so disown updates jobs, kill routes signals, and suspend coordinates with shellJobControlRestoreForeground.
+   - Register the new builtins and help entries, respecting job control availability, and add parity tests for signalling and disown semantics.
+
+5) getopts builtin:
+   - Track OPTIND and OPTARG in ShellRuntimeState, initialising defaults during startup.
+   - Implement vmBuiltinShellGetopts to walk gParamValues, update OPTIND and OPTARG, and report errors via shellUpdateStatus using existing parameter expansion helpers.
+   - Register the builtin, document it, and add regression tests that mirror Bash success and error flows.
+
+6) fc history builtin:
+   - Build history search and edit helpers on top of gShellHistory, matching Bash editor invocation and error handling.
+   - Implement vmBuiltinShellFc beside vmBuiltinShellHistory, re running edited commands and updating history and status accordingly.
+   - Register fc in the builtin tables and create parity tests that edit commands and verify output with Bash.
+
+7) caller builtin:
+   - Track function invocations by pushing frames that contain name and source location when shellInvokeFunction runs and pop them afterwards.
+   - Implement vmBuiltinShellCaller to read the stack, honour optional depth arguments, and print frames in Bash compatible format.
+   - Register the builtin, document it, and add regression scripts that call caller within nested functions for parity with Bash.
+
+8) let arithmetic builtin:
+   - Wrap the arithmetic parser shellEvaluateArithmetic in a new handler that evaluates expressions, updates variables through shellSetTrackedVariable, and sets exit status based on result truthiness.
+   - Register let in the builtin tables, update shellIsRuntimeBuiltin, and document it.
+   - Add parity tests covering numeric success or failure and variable assignments.
+
+9) mapfile and readarray builtins:
+   - Reuse array logic inside vmBuiltinShellRead to create a helper that reads from a stream into an array variable with Bash compatible flags such as -t, -u, and -n.
+   - Expose the helper through mapfile and its alias readarray, registering both names in the builtin table and dispatcher and documenting the shared behaviour.
+   - Add regression tests that read sample input into arrays and compare exsh output with Bash.
+
+10) readonly and typeset builtins:
+    - Extend the variable tracking layer to record read only flags when shellSetTrackedVariable mutates entries, rejecting writes to protected names.
+    - Implement vmBuiltinShellReadonly and vmBuiltinShellTypeset alongside vmBuiltinShellDeclare, sharing option parsing and mapping typeset to the same handler through aliases.
+    - Register both builtins with documentation and add parity tests for assignments, listing, and write failures.
+
+11) printf builtin:
+    - Implement a handler that parses format strings and arguments, using the VM string utilities to handle escape sequences and error reporting similar to vmBuiltinShellRead.
+    - Register printf in the builtin tables and dispatcher and document its usage in the help topics.
+    - Add parity tests covering numeric formatting, escapes, and failure cases compared to Bash.
+
+12) times builtin:
+    - Track cumulative user and system CPU times for the shell and child processes by sampling around shellSpawnProcess and storing totals in the runtime state.
+    - Implement vmBuiltinShellTimes to format and print the totals in a Bash compatible format and add documentation.
+    - Register the builtin and create tests that exercise it after running known workloads, comparing the results to Bash within tolerances.
+
+13) ulimit and umask builtins:
+    - Implement vmBuiltinShellUlimit using getrlimit and setrlimit, covering common flags and matching Bash diagnostics.
+    - Implement vmBuiltinShellUmask to read or update the process umask and synchronise tracked variables when needed.
+    - Register both builtins with documentation and add parity tests that adjust limits and masks while comparing with Bash.
+
+14) unalias builtin:
+    - Add helpers to delete entries from gShellAliases, supporting the -a flag to clear all aliases.
+    - Implement vmBuiltinShellUnalias alongside vmBuiltinShellAlias, mirroring option parsing and status handling.
+    - Register the builtin, document it, and add tests that create or remove aliases under Bash parity.
+
+15) logout builtin:
+    - Implement vmBuiltinShellLogout to reuse the exit path while verifying the shell is marked as a login shell before terminating.
+    - Register and document the builtin, ensuring history and status bookkeeping matches exit.
+    - Add tests that confirm logout succeeds in login contexts and errors otherwise when compared with Bash.
+
