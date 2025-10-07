@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scope verification harness for the exsh shell front end.
+"""Scope verification harness for the exsh front end.
 
 This script consumes a manifest that describes scoped shell snippets, executes
 them under the PSCAL exsh front end, optionally compares the observed behaviour

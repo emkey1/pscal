@@ -3,7 +3,7 @@
 Run the suite after building the project:
 
 ```sh
-python3 shell_test_harness.py
+python3 exsh_test_harness.py
 ```
 
 Use `--list` to enumerate available cases or `--only <id>` to filter by test id
