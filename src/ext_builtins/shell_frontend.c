@@ -59,4 +59,6 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "help", vmBuiltinShellHelp);
     registerShellBuiltin(category, command_group, "builtin", vmBuiltinShellBuiltin);
     registerShellBuiltin(category, command_group, ":", vmBuiltinShellColon);
+    registerShellBuiltin(category, command_group, "bind", vmBuiltinShellBind);
+    registerShellBuiltin(category, command_group, "shopt", vmBuiltinShellShopt);
 }

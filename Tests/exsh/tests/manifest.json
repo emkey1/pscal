@@ -389,6 +389,14 @@
       "expect": "match_bash"
     },
     {
+      "id": "bash_parity_bind_shopt",
+      "name": "bind and shopt mimic bash",
+      "category": "parity",
+      "description": "Verify bind accepts readline settings and shopt reports state like bash.",
+      "script": "Tests/exsh/tests/bash_parity_bind_shopt.psh",
+      "expect": "match_bash"
+    },
+    {
       "id": "read_ifs_split",
       "name": "read honours custom IFS",
       "category": "builtin",

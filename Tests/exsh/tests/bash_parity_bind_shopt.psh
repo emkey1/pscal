@@ -1,0 +1,33 @@
+#!/usr/bin/env exsh
+
+bind 'set show-all-if-ambiguous on'
+status=$?
+printf "bind1:%s\n" "$status"
+
+bind 'set skip-completed-text on'
+status=$?
+printf "bind2:%s\n" "$status"
+
+shopt -s checkwinsize
+shopt -q checkwinsize
+status=$?
+printf "checkwinsize_q:%s\n" "$status"
+
+shopt -u checkwinsize
+shopt -q checkwinsize
+status=$?
+printf "checkwinsize_q_after_unset:%s\n" "$status"
+
+shopt -s histappend
+line=$(shopt -p histappend)
+printf "histappend_line:%s\n" "$line"
+shopt -q histappend
+status=$?
+printf "histappend_q:%s\n" "$status"
+
+shopt -u histappend
+line=$(shopt -p histappend)
+printf "histappend_unset_line:%s\n" "$line"
+shopt -q histappend
+status=$?
+printf "histappend_q_after_unset:%s\n" "$status"

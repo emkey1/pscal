@@ -46,6 +46,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"return", "return", 28},
     {"finger", "finger", 29},
     {"help", "help", 30},
+    {"bind", "bind", 33},
+    {"shopt", "shopt", 34},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},

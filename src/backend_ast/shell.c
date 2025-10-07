@@ -88,6 +88,76 @@ static void shellMarkArithmeticError(void);
 
 static bool gShellPositionalOwned = false;
 
+typedef struct {
+    const char *name;
+    bool enabled;
+} ShellOptionEntry;
+
+static ShellOptionEntry gShellOptions[] = {
+    {"assoc_expand_once", false},
+    {"autocd", false},
+    {"cdable_vars", false},
+    {"cdspell", false},
+    {"checkhash", false},
+    {"checkjobs", false},
+    {"checkwinsize", false},
+    {"cmdhist", true},
+    {"compat31", false},
+    {"compat32", false},
+    {"compat40", false},
+    {"compat41", false},
+    {"compat42", false},
+    {"compat43", false},
+    {"complete_fullquote", false},
+    {"direxpand", false},
+    {"dirspell", false},
+    {"dotglob", false},
+    {"execfail", false},
+    {"expand_aliases", false},
+    {"extdebug", false},
+    {"extglob", false},
+    {"extquote", true},
+    {"failglob", false},
+    {"force_fignore", true},
+    {"globasciiranges", false},
+    {"globskipdots", false},
+    {"globstar", false},
+    {"gnu_errfmt", false},
+    {"histappend", false},
+    {"histreedit", false},
+    {"histverify", false},
+    {"hostcomplete", true},
+    {"huponexit", false},
+    {"inherit_errexit", false},
+    {"interactive_comments", true},
+    {"lastpipe", false},
+    {"lithist", false},
+    {"localvar_inherit", false},
+    {"localvar_unset", false},
+    {"login_shell", false},
+    {"mailwarn", false},
+    {"no_empty_cmd_completion", false},
+    {"nocaseglob", false},
+    {"nocasematch", false},
+    {"nullglob", false},
+    {"progcomp", true},
+    {"promptvars", true},
+    {"restricted_shell", false},
+    {"shift_verbose", false},
+    {"sourcepath", true},
+    {"xpg_echo", false}
+};
+
+static const size_t gShellOptionCount = sizeof(gShellOptions) / sizeof(gShellOptions[0]);
+
+typedef struct {
+    char *name;
+    char *value;
+} ShellBindOption;
+
+static ShellBindOption *gShellBindOptions = NULL;
+static size_t gShellBindOptionCount = 0;
+
 static void shellFreeParameterArray(char **values, int count) {
     if (!values) {
         return;
@@ -432,6 +502,15 @@ static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
+static bool gShellInteractiveMode = false;
+
+void shellRuntimeSetInteractive(bool interactive) {
+    gShellInteractiveMode = interactive;
+}
+
+bool shellRuntimeIsInteractive(void) {
+    return gShellInteractiveMode;
+}
 
 static void shellRandomEnsureSeeded(void) {
     if (gShellRandomSeedInitialized) {
@@ -10050,6 +10129,330 @@ Value vmBuiltinShellSetenv(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static ShellBindOption *shellBindFindOption(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellBindOptionCount; ++i) {
+        ShellBindOption *entry = &gShellBindOptions[i];
+        if (entry->name && strcmp(entry->name, name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static bool shellBindSetOptionOwned(char *name, char *value) {
+    if (!name) {
+        free(value);
+        return false;
+    }
+    if (!value) {
+        value = strdup("");
+        if (!value) {
+            free(name);
+            return false;
+        }
+    }
+    ShellBindOption *existing = shellBindFindOption(name);
+    if (existing) {
+        free(existing->value);
+        existing->value = value;
+        free(name);
+        return true;
+    }
+    ShellBindOption *resized = (ShellBindOption *)realloc(
+        gShellBindOptions, (gShellBindOptionCount + 1) * sizeof(ShellBindOption));
+    if (!resized) {
+        free(name);
+        free(value);
+        return false;
+    }
+    gShellBindOptions = resized;
+    gShellBindOptions[gShellBindOptionCount].name = name;
+    gShellBindOptions[gShellBindOptionCount].value = value;
+    gShellBindOptionCount++;
+    return true;
+}
+
+static void shellBindPrintOptions(void) {
+    for (size_t i = 0; i < gShellBindOptionCount; ++i) {
+        ShellBindOption *entry = &gShellBindOptions[i];
+        if (!entry->name) {
+            continue;
+        }
+        const char *value = entry->value ? entry->value : "";
+        printf("set %s %s\n", entry->name, value);
+    }
+}
+
+static ShellOptionEntry *shellShoptFindOption(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellOptionCount; ++i) {
+        ShellOptionEntry *entry = &gShellOptions[i];
+        if (entry->name && strcmp(entry->name, name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static void shellShoptPrintEntry(const ShellOptionEntry *entry) {
+    if (!entry || !entry->name) {
+        return;
+    }
+    printf("%s\t%s\n", entry->name, entry->enabled ? "on" : "off");
+}
+
+static void shellShoptPrintEntryAsCommand(const ShellOptionEntry *entry) {
+    if (!entry || !entry->name) {
+        return;
+    }
+    printf("shopt -%c %s\n", entry->enabled ? 's' : 'u', entry->name);
+}
+
+Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
+    bool print_bindings = false;
+    int index = 0;
+    bool parsing_options = true;
+    bool interactive = shellRuntimeIsInteractive();
+
+    while (index < arg_count && parsing_options && ok) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "bind: arguments must be strings");
+            ok = false;
+            break;
+        }
+        const char *token = v.s_val;
+        if (strcmp(token, "--") == 0) {
+            parsing_options = false;
+            index++;
+            break;
+        }
+        if (token[0] == '-' && token[1] != '\0') {
+            size_t len = strlen(token);
+            for (size_t i = 1; i < len && ok; ++i) {
+                char opt = token[i];
+                if (opt == 'p') {
+                    print_bindings = true;
+                } else {
+                    runtimeError(vm, "bind: unsupported option '-%c'", opt);
+                    ok = false;
+                    break;
+                }
+            }
+            index++;
+            continue;
+        }
+        parsing_options = false;
+    }
+
+    for (; ok && index < arg_count; ++index) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "bind: arguments must be strings");
+            ok = false;
+            break;
+        }
+        const char *text = v.s_val;
+        if (strncmp(text, "set", 3) == 0) {
+            const char *cursor = text + 3;
+            if (*cursor && !isspace((unsigned char)*cursor)) {
+                continue;
+            }
+            while (*cursor && isspace((unsigned char)*cursor)) {
+                cursor++;
+            }
+            if (*cursor == '\0') {
+                runtimeError(vm, "bind: expected readline option name");
+                ok = false;
+                break;
+            }
+            const char *name_start = cursor;
+            while (*cursor && !isspace((unsigned char)*cursor)) {
+                cursor++;
+            }
+            size_t name_len = (size_t)(cursor - name_start);
+            while (*cursor && isspace((unsigned char)*cursor)) {
+                cursor++;
+            }
+            const char *value_start = cursor;
+            const char *value_end = value_start + strlen(value_start);
+            while (value_end > value_start && isspace((unsigned char)value_end[-1])) {
+                value_end--;
+            }
+            size_t value_len = (size_t)(value_end - value_start);
+            char *name_copy = strndup(name_start, name_len);
+            char *value_copy = strndup(value_start, value_len);
+            if (!name_copy || !value_copy) {
+                free(name_copy);
+                free(value_copy);
+                runtimeError(vm, "bind: out of memory");
+                ok = false;
+                break;
+            }
+            if (!shellBindSetOptionOwned(name_copy, value_copy)) {
+                runtimeError(vm, "bind: out of memory");
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    if (ok && print_bindings) {
+        shellBindPrintOptions();
+    }
+
+    int status = ok ? (interactive ? 0 : 1) : 1;
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellShopt(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
+    bool quiet = false;
+    bool print_format = false;
+    bool parsing_options = true;
+    int mode = -1; // -1 query, 0 unset, 1 set
+    bool restrict_set_options = false;
+    int index = 0;
+
+    while (index < arg_count && parsing_options && ok) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "shopt: option names must be strings");
+            ok = false;
+            break;
+        }
+        const char *token = v.s_val;
+        if (strcmp(token, "--") == 0) {
+            parsing_options = false;
+            index++;
+            break;
+        }
+        if (token[0] == '-' && token[1] != '\0') {
+            size_t len = strlen(token);
+            for (size_t i = 1; i < len && ok; ++i) {
+                char opt = token[i];
+                switch (opt) {
+                    case 's':
+                        mode = 1;
+                        break;
+                    case 'u':
+                        mode = 0;
+                        break;
+                    case 'q':
+                        quiet = true;
+                        break;
+                    case 'p':
+                        print_format = true;
+                        break;
+                    case 'o':
+                        restrict_set_options = true;
+                        break;
+                    default:
+                        runtimeError(vm, "shopt: invalid option '-%c'", opt);
+                        ok = false;
+                        break;
+                }
+            }
+            index++;
+            continue;
+        }
+        parsing_options = false;
+    }
+
+    if (!ok) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (restrict_set_options) {
+        runtimeError(vm, "shopt: -o is not supported");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (index >= arg_count) {
+        if (mode == 1 || mode == 0) {
+            for (size_t i = 0; i < gShellOptionCount; ++i) {
+                ShellOptionEntry *entry = &gShellOptions[i];
+                if ((mode == 1 && entry->enabled) || (mode == 0 && !entry->enabled)) {
+                    if (print_format) {
+                        shellShoptPrintEntryAsCommand(entry);
+                    } else {
+                        shellShoptPrintEntry(entry);
+                    }
+                }
+            }
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        if (quiet) {
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        for (size_t i = 0; i < gShellOptionCount; ++i) {
+            ShellOptionEntry *entry = &gShellOptions[i];
+            if (print_format) {
+                shellShoptPrintEntryAsCommand(entry);
+            } else {
+                shellShoptPrintEntry(entry);
+            }
+        }
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool query_only = (mode == -1);
+    bool all_set = true;
+
+    for (; ok && index < arg_count; ++index) {
+        Value v = args[index];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "shopt: option names must be strings");
+            ok = false;
+            break;
+        }
+        ShellOptionEntry *entry = shellShoptFindOption(v.s_val);
+        if (!entry) {
+            runtimeError(vm, "shopt: %s: invalid shell option name", v.s_val);
+            ok = false;
+            break;
+        }
+        if (query_only) {
+            if (!entry->enabled) {
+                all_set = false;
+            }
+            if (!quiet) {
+                if (print_format) {
+                    shellShoptPrintEntryAsCommand(entry);
+                } else {
+                    shellShoptPrintEntry(entry);
+                }
+            }
+        } else {
+            entry->enabled = (mode == 1);
+        }
+    }
+
+    if (!ok) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (query_only) {
+        shellUpdateStatus(all_set ? 0 : 1);
+    } else {
+        shellUpdateStatus(0);
+    }
+    return makeVoid();
+}
+
 Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
     bool ok = true;
     bool associative = false;
@@ -10611,6 +11014,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "bind",
+        "Configure readline behaviour.",
+        "bind [-p] [spec ...]",
+        "Accepts readline \"set\" directives and remembers their most recent values."
+        " The -p flag prints the stored settings in \"set name value\" form. Other"
+        " invocations are currently accepted as no-ops.",
+        NULL,
+        0
+    },
+    {
         "bg",
         "Resume a stopped job in the background.",
         "bg [job]",
@@ -10782,6 +11195,17 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "set [--] [-e|+e] [-o errexit|+o errexit]",
         "Toggles the shell's errexit flag. Options other than -e/+e and"
         " -o/+o errexit are rejected.",
+        NULL,
+        0
+    },
+    {
+        "shopt",
+        "Toggle optional shell behaviours.",
+        "shopt [-pqsu] [name ...]",
+        "Lists available shell options, reports their state, or updates them. The"
+        " implementation recognises the standard Bash shopt flags; -p prints in"
+        " command form, -q suppresses output, and -s/-u enable or disable the"
+        " named options.",
         NULL,
         0
     },
