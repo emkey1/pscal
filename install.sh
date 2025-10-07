@@ -8,9 +8,10 @@ Usage: install.sh [--prefix DIR] [--pscal-dir DIR] [--build-dir DIR]
 Options:
   --prefix DIR      Installation prefix (default: /usr/local)
   --pscal-dir DIR   Destination for PSCAL libraries and assets.
-                    Defaults to the compiled-in install root when available,
-                    otherwise "$PREFIX/pscal". Relative paths are resolved
-                    against --prefix.
+                    Defaults to the compiled-in install root when available
+                    (unless --prefix is provided), otherwise
+                    "$PREFIX/pscal". Relative paths are resolved against
+                    --prefix.
   --build-dir DIR   Location of built binaries relative to the repository
                     root or as an absolute path (default: build/bin)
   -h, --help        Show this help message and exit
@@ -18,6 +19,7 @@ USAGE
 }
 
 PREFIX=/usr/local
+PREFIX_SET=0
 BUILD_DIR=build/bin
 PSCAL_DIR_OVERRIDE=
 
@@ -25,11 +27,13 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --prefix=*)
             PREFIX=${1#*=}
+            PREFIX_SET=1
             ;;
         --prefix)
             shift
             [ "$#" -gt 0 ] || { echo "Error: missing value for --prefix" >&2; exit 1; }
             PREFIX=$1
+            PREFIX_SET=1
             ;;
         --build-dir=*)
             BUILD_DIR=${1#*=}
@@ -102,7 +106,7 @@ if [ -z "$PS_PREFIX" ] && [ -n "${PSCAL_INSTALL_ROOT:-}" ]; then
     PS_PREFIX=$(resolve_pscal_dir "$PSCAL_INSTALL_ROOT")
 fi
 
-if [ -z "$PS_PREFIX" ] && [ -f "$BUILD_ROOT/pscal_install_root.txt" ]; then
+if [ -z "$PS_PREFIX" ] && [ "$PREFIX_SET" -eq 0 ] && [ -f "$BUILD_ROOT/pscal_install_root.txt" ]; then
     if read -r line <"$BUILD_ROOT/pscal_install_root.txt"; then
         PS_PREFIX=$(resolve_pscal_dir "$line")
     fi
