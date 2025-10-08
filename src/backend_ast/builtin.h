@@ -150,6 +150,7 @@ Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnalias(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellHistory(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellJobs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellDisown(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);

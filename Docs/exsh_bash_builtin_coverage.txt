@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt disown enable fc getopts hash kill mapfile readarray printf suspend times ulimit
+caller compgen complete compopt enable fc getopts hash kill mapfile readarray printf suspend times ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -33,9 +33,8 @@ Plans to address missing builtins
    - Remaining work: extend command to handle execution, implement hash/enable, and add parity coverage for the outstanding features.
 
 4) Job control builtins (disown, kill, suspend):
-   - Extend the job registry to record disowned jobs and prevent later status reports or waits from touching them.
-   - Implement builtin handlers near vmBuiltinShellJobs and vmBuiltinShellFg so disown updates jobs, kill routes signals, and suspend coordinates with shellJobControlRestoreForeground.
-   - Register the new builtins and help entries, respecting job control availability, and add parity tests for signalling and disown semantics.
+   - Disown: Implemented. The job registry tracks disowned entries so jobs listings, fg/bg, and wait ignore them while they continue running in the background.
+   - Remaining work: implement kill and suspend, routing signals and integrating with shellJobControlRestoreForeground. Add parity tests for signalling behaviour.
 
 5) getopts builtin:
    - Track OPTIND and OPTARG in ShellRuntimeState, initialising defaults during startup.

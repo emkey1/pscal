@@ -1950,6 +1950,7 @@ typedef struct {
     size_t pid_count;
     bool running;
     bool stopped;
+    bool disowned;
     int last_status;
     char *command;
 } ShellJob;
@@ -7433,7 +7434,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {"cd",       "pwd",      "dirs",    "pushd",   "popd",    "exit",     "logout",   "exec",     "export",   "unset",    "setenv",
                                       "unsetenv", "set",      "declare", "typeset", "readonly", "umask",   "command", "trap",     "local",    "let",      "break",   "continue",
-                                      "alias",   "bind",     "shopt",   "history", "jobs",     "fg",       "finger",   "bg",       "wait",
+                                      "alias",   "bind",     "shopt",   "history", "jobs",     "disown",   "fg",       "finger",   "bg",       "wait",
                                       "builtin", "source",   "read",    "shift",   "return",   "help",     "type",    ":",       "unalias",
                                       "__shell_double_bracket"};
 
@@ -7596,6 +7597,7 @@ static void shellFreeJob(ShellJob *job) {
     job->pgid = -1;
     job->running = false;
     job->stopped = false;
+    job->disowned = false;
     job->last_status = 0;
 }
 
@@ -7658,6 +7660,7 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     job->pid_count = pid_count;
     job->running = true;
     job->stopped = false;
+    job->disowned = false;
     job->last_status = 0;
     job->command = summary;
     return job;
@@ -7729,7 +7732,11 @@ static int shellCollectJobs(void) {
         }
 
         if (all_done) {
-            shellUpdateStatus(job->last_status);
+            int status = job->last_status;
+            bool disowned = job->disowned;
+            if (!disowned) {
+                shellUpdateStatus(status);
+            }
             shellRemoveJobAt(i);
             reaped++;
             continue;
@@ -7744,21 +7751,37 @@ static int shellCollectJobs(void) {
     return reaped;
 }
 
-static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value *args, size_t *out_index) {
-    if (gShellJobCount == 0) {
-        runtimeError(vm, "%s: no current job", name);
-        return false;
+static size_t shellJobVisibleCount(void) {
+    size_t count = 0;
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        if (!job->disowned) {
+            ++count;
+        }
     }
-    if (arg_count == 0) {
-        *out_index = gShellJobCount - 1;
-        return true;
-    }
-    if (arg_count > 1) {
-        runtimeError(vm, "%s: too many arguments", name);
-        return false;
-    }
+    return count;
+}
 
-    Value spec = args[0];
+static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
+    if (!out_index || visible_number == 0) {
+        return false;
+    }
+    size_t visible = 0;
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        if (job->disowned) {
+            continue;
+        }
+        ++visible;
+        if (visible == visible_number) {
+            *out_index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t *out_index) {
     if (spec.type == TYPE_STRING && spec.s_val) {
         const char *text = spec.s_val;
         if (text[0] == '%') {
@@ -7770,26 +7793,57 @@ static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value 
         }
         char *end = NULL;
         long index = strtol(text, &end, 10);
-        if (*end != '\0' || index <= 0 || (size_t)index > gShellJobCount) {
+        if (*end != '\0' || index <= 0) {
             runtimeError(vm, "%s: invalid job '%s'", name, spec.s_val);
             return false;
         }
-        *out_index = (size_t)index - 1;
+        if (!shellJobFindVisibleIndex((size_t)index, out_index)) {
+            runtimeError(vm, "%s: invalid job '%s'", name, spec.s_val);
+            return false;
+        }
         return true;
     }
 
     if (IS_INTLIKE(spec)) {
         long index = (long)AS_INTEGER(spec);
-        if (index <= 0 || (size_t)index > gShellJobCount) {
+        if (index <= 0) {
             runtimeError(vm, "%s: invalid job index", name);
             return false;
         }
-        *out_index = (size_t)index - 1;
+        if (!shellJobFindVisibleIndex((size_t)index, out_index)) {
+            runtimeError(vm, "%s: invalid job index", name);
+            return false;
+        }
         return true;
     }
 
     runtimeError(vm, "%s: job spec must be a string or integer", name);
     return false;
+}
+
+static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value *args, size_t *out_index) {
+    size_t visible_count = shellJobVisibleCount();
+    if (arg_count == 0) {
+        if (visible_count == 0) {
+            runtimeError(vm, "%s: no current job", name);
+            return false;
+        }
+        for (size_t i = gShellJobCount; i > 0; --i) {
+            ShellJob *job = &gShellJobs[i - 1];
+            if (!job->disowned) {
+                *out_index = i - 1;
+                return true;
+            }
+        }
+        runtimeError(vm, "%s: no current job", name);
+        return false;
+    }
+    if (arg_count > 1) {
+        runtimeError(vm, "%s: too many arguments", name);
+        return false;
+    }
+
+    return shellParseJobSpecifier(vm, name, args[0], out_index);
 }
 
 static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
@@ -13306,6 +13360,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "disown",
+        "Remove jobs from the shell's job table.",
+        "disown [job ...]",
+        "Marks the supplied jobs as disowned so future jobs, fg, bg, and wait "
+        "commands ignore them. With no arguments the most recent job is "
+        "disowned. Job specifiers may be numeric indexes or begin with '%'.",
+        NULL,
+        0
+    },
+    {
         "local",
         "Activate the shell's local scope flag.",
         "local",
@@ -13722,14 +13786,63 @@ Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
     (void)arg_count;
     (void)args;
     shellCollectJobs();
+    size_t visible_index = 0;
     for (size_t i = 0; i < gShellJobCount; ++i) {
         ShellJob *job = &gShellJobs[i];
+        if (job->disowned) {
+            continue;
+        }
+        ++visible_index;
         const char *state = job->stopped ? "Stopped" : "Running";
         const char *command = job->command ? job->command : "";
-        printf("[%zu] %s %s\n", i + 1, state, command);
+        printf("[%zu] %s %s\n", visible_index, state, command);
     }
     fflush(stdout);
     shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellDisown(VM *vm, int arg_count, Value *args) {
+    shellCollectJobs();
+    if (arg_count == 0) {
+        size_t index = 0;
+        if (!shellResolveJobIndex(vm, "disown", arg_count, args, &index)) {
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        gShellJobs[index].disowned = true;
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    size_t resolved_count = 0;
+    size_t *indices = NULL;
+    if (arg_count > 0) {
+        indices = malloc(sizeof(size_t) * (size_t)arg_count);
+        if (!indices) {
+            runtimeError(vm, "disown: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+
+    for (int i = 0; i < arg_count; ++i) {
+        size_t index = 0;
+        if (!shellParseJobSpecifier(vm, "disown", args[i], &index)) {
+            ok = false;
+            continue;
+        }
+        indices[resolved_count++] = index;
+    }
+
+    for (size_t i = 0; i < resolved_count; ++i) {
+        gShellJobs[indices[i]].disowned = true;
+    }
+
+    free(indices);
+
+    shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
 
@@ -13823,7 +13936,8 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
-    if (gShellJobCount == 0) {
+    size_t visible_count = shellJobVisibleCount();
+    if (visible_count == 0 && arg_count == 0) {
         shellUpdateStatus(0);
         return makeVoid();
     }
