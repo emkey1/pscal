@@ -1,0 +1,9 @@
+#!/usr/bin/env exsh
+
+printf 'greeting:%s:%04d:%0.1f:%c:%%\n' world 7 3.5 A
+first_status=$?
+echo "first-status:${first_status}"
+
+printf
+usage_status=$?
+echo "usage-status:${usage_status}"
