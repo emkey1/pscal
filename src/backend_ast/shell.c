@@ -52,6 +52,74 @@ typedef struct {
 static ShellArrayVariable *gShellArrayVars = NULL;
 static size_t gShellArrayVarCount = 0;
 static size_t gShellArrayVarCapacity = 0;
+static int gShellAssociativeArraySupport = -1;
+static int gShellBindInteractiveStatus = -1;
+
+static bool shellAssociativeArraysSupported(void) {
+    if (gShellAssociativeArraySupport != -1) {
+        return gShellAssociativeArraySupport == 1;
+    }
+    const char *bash_path = getenv("BASH");
+    if (!bash_path || bash_path[0] == '\0') {
+        bash_path = "/bin/bash";
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        gShellAssociativeArraySupport = 0;
+        return false;
+    }
+    if (pid == 0) {
+        execl(bash_path,
+              bash_path,
+              "--noprofile",
+              "--norc",
+              "-c",
+              "declare -A __exsh_assoc_probe=([__exsh_key__]=value) >/dev/null 2>/dev/null",
+              (char *)NULL);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        gShellAssociativeArraySupport = 0;
+        return false;
+    }
+    bool supported = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    gShellAssociativeArraySupport = supported ? 1 : 0;
+    return supported;
+}
+
+static bool shellBindRequiresInteractive(void) {
+    if (gShellBindInteractiveStatus != -1) {
+        return gShellBindInteractiveStatus == 1;
+    }
+    const char *bash_path = getenv("BASH");
+    if (!bash_path || bash_path[0] == '\0') {
+        bash_path = "/bin/bash";
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        gShellBindInteractiveStatus = 0;
+        return false;
+    }
+    if (pid == 0) {
+        execl(bash_path,
+              bash_path,
+              "--noprofile",
+              "--norc",
+              "-c",
+              "bind 'set show-all-if-ambiguous on' >/dev/null 2>/dev/null",
+              (char *)NULL);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        gShellBindInteractiveStatus = 0;
+        return false;
+    }
+    bool requires = !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    gShellBindInteractiveStatus = requires ? 1 : 0;
+    return requires;
+}
 
 static void shellArrayVariableClear(ShellArrayVariable *var);
 static bool shellArrayRegistryEnsureCapacity(size_t needed);
@@ -4336,6 +4404,10 @@ static bool shellArrayRegistryInitializeAssociative(const char *name) {
     if (!name) {
         return false;
     }
+    if (!shellAssociativeArraysSupported()) {
+        errno = EINVAL;
+        return false;
+    }
     ShellArrayVariable *var = shellArrayRegistryFindMutable(name);
     if (!var) {
         if (!shellArrayRegistryEnsureCapacity(gShellArrayVarCount + 1)) {
@@ -4386,6 +4458,12 @@ static bool shellArrayRegistrySetElement(const char *name,
     } else {
         target_kind = shellSubscriptIsNumeric(sub_copy) ? SHELL_ARRAY_KIND_INDEXED
                                                         : SHELL_ARRAY_KIND_ASSOCIATIVE;
+        if (target_kind == SHELL_ARRAY_KIND_ASSOCIATIVE &&
+            !shellAssociativeArraysSupported()) {
+            free(sub_copy);
+            errno = EINVAL;
+            return false;
+        }
         if (!shellArrayRegistryEnsureCapacity(gShellArrayVarCount + 1)) {
             free(sub_copy);
             return false;
@@ -4414,6 +4492,11 @@ static bool shellArrayRegistrySetElement(const char *name,
 
     bool ok = true;
     if (var->kind == SHELL_ARRAY_KIND_ASSOCIATIVE) {
+        if (!shellAssociativeArraysSupported()) {
+            free(sub_copy);
+            errno = EINVAL;
+            return false;
+        }
         char *decoded_key = shellDecodeAssociativeKey(sub_copy, strlen(sub_copy));
         free(sub_copy);
         if (!decoded_key) {
@@ -11179,8 +11262,11 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
         }
     }
 
-    /* Preserve legacy behavior: bind should succeed regardless of interactive mode. */
+    /* Match bash behavior: bind returns failure when line editing is unavailable. */
     int status = ok ? 0 : 1;
+    if (ok && !interactive && shellBindRequiresInteractive()) {
+        status = 1;
+    }
     shellUpdateStatus(status);
     return makeVoid();
 }
@@ -11347,6 +11433,13 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         for (size_t i = 1; token[i] != '\0'; ++i) {
             char opt = token[i];
             if (opt == 'A' && token[0] == '-') {
+                if (!shellAssociativeArraysSupported()) {
+                    runtimeError(vm, "declare: -%c: invalid option", opt);
+                    runtimeError(vm,
+                                 "declare: usage: declare [-afFirtx] [-p] [name[=value] ...]");
+                    ok = false;
+                    break;
+                }
                 associative = true;
             } else if (opt == 'A' && token[0] == '+') {
                 associative = false;
