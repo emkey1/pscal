@@ -54,6 +54,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "break", vmBuiltinShellBreak);
     registerShellBuiltin(category, command_group, "continue", vmBuiltinShellContinue);
     registerShellBuiltin(category, command_group, "alias", vmBuiltinShellAlias);
+    registerShellBuiltin(category, command_group, "unalias", vmBuiltinShellUnalias);
     registerShellBuiltin(category, command_group, "history", vmBuiltinShellHistory);
     registerShellBuiltin(category, command_group, "jobs", vmBuiltinShellJobs);
     registerShellBuiltin(category, command_group, "fg", vmBuiltinShellFg);

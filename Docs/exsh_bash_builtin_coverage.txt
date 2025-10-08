@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
 
 Bash builtins missing from exsh
 -------------------------------
-caller command compgen complete compopt disown enable fc getopts hash kill let logout mapfile readarray printf readonly suspend times type typeset ulimit umask unalias
+caller command compgen complete compopt disown enable fc getopts hash kill let logout mapfile readarray printf readonly suspend times type typeset ulimit umask
 
 Plans to address missing builtins
 ---------------------------------
@@ -83,10 +83,10 @@ Plans to address missing builtins
     - Implement vmBuiltinShellUmask to read or update the process umask and synchronise tracked variables when needed.
     - Register both builtins with documentation and add parity tests that adjust limits and masks while comparing with Bash.
 
-14) unalias builtin:
-    - Add helpers to delete entries from gShellAliases, supporting the -a flag to clear all aliases.
-    - Implement vmBuiltinShellUnalias alongside vmBuiltinShellAlias, mirroring option parsing and status handling.
-    - Register the builtin, document it, and add tests that create or remove aliases under Bash parity.
+14) unalias builtin: Completed.
+    - Added helpers that delete individual aliases or clear all entries and exposed them through vmBuiltinShellUnalias.
+    - Registered the builtin with the shell frontend, runtime dispatch table, and help catalog so it is available interactively.
+    - Added Bash parity coverage that removes specific aliases, clears every alias via -a, and validates error handling for missing names.
 
 15) logout builtin:
     - Implement vmBuiltinShellLogout to reuse the exit path while verifying the shell is marked as a login shell before terminating.

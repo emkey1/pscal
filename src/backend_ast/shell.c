@@ -19,6 +19,7 @@
 #include <regex.h>
 #include <stdbool.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6926,7 +6927,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     static const char *kBuiltins[] = {"cd",     "pwd",     "dirs",   "pushd",  "popd",   "exit",    "exec",    "export",  "unset",    "setenv",
                                       "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
                                       "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
-                                      "builtin", "source", "read",    "shift",   "return",  "help",    ":",
+                                      "builtin", "source", "read",    "shift",   "return",  "help",    ":",      "unalias",
                                       "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
@@ -11562,6 +11563,47 @@ typedef struct {
 static ShellAlias *gShellAliases = NULL;
 static size_t gShellAliasCount = 0;
 
+static void shellReportRecoverableError(VM *vm, bool with_location, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    char message[512];
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    const char *script = NULL;
+    int line = 0;
+    if (with_location) {
+        script = shellRuntimeGetArg0();
+        if (script && *script) {
+            line = shellRuntimeCurrentCommandLine();
+        } else {
+            script = NULL;
+        }
+    }
+
+    if (script && line > 0) {
+        fprintf(stderr, "%s: line %d: %s\n", script, line, message);
+    } else if (script) {
+        fprintf(stderr, "%s: %s\n", script, message);
+    } else {
+        fprintf(stderr, "%s\n", message);
+    }
+
+    if (vm) {
+        vm->abort_requested = false;
+    }
+}
+
+static void shellFreeAlias(ShellAlias *alias) {
+    if (!alias) {
+        return;
+    }
+    free(alias->name);
+    free(alias->value);
+    alias->name = NULL;
+    alias->value = NULL;
+}
+
 static ShellAlias *shellFindAlias(const char *name) {
     if (!name) {
         return NULL;
@@ -11572,6 +11614,43 @@ static ShellAlias *shellFindAlias(const char *name) {
         }
     }
     return NULL;
+}
+
+static void shellRemoveAliasAt(size_t index) {
+    if (index >= gShellAliasCount) {
+        return;
+    }
+    shellFreeAlias(&gShellAliases[index]);
+    if (index + 1 < gShellAliasCount) {
+        gShellAliases[index] = gShellAliases[gShellAliasCount - 1];
+    }
+    gShellAliasCount--;
+    if (gShellAliasCount == 0) {
+        free(gShellAliases);
+        gShellAliases = NULL;
+    }
+}
+
+static bool shellRemoveAlias(const char *name) {
+    if (!name) {
+        return false;
+    }
+    for (size_t i = 0; i < gShellAliasCount; ++i) {
+        if (strcmp(gShellAliases[i].name, name) == 0) {
+            shellRemoveAliasAt(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void shellClearAliases(void) {
+    for (size_t i = 0; i < gShellAliasCount; ++i) {
+        shellFreeAlias(&gShellAliases[i]);
+    }
+    free(gShellAliases);
+    gShellAliases = NULL;
+    gShellAliasCount = 0;
 }
 
 static bool shellSetAlias(const char *name, const char *value) {
@@ -11623,6 +11702,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "alias [name=value ...]",
         "Without arguments prints the stored alias definitions as "
         "alias name='value'. Each NAME=VALUE argument updates or creates an alias.",
+        NULL,
+        0
+    },
+    {
+        "unalias",
+        "Remove shell aliases.",
+        "unalias [-a] [name ...]",
+        "Deletes the aliases identified by NAME. With -a all aliases are removed."
+        " Providing NAME alongside -a results in an error.",
         NULL,
         0
     },
@@ -12091,6 +12179,72 @@ Value vmBuiltinShellAlias(VM *vm, int arg_count, Value *args) {
         free(name);
     }
     shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellUnalias(VM *vm, int arg_count, Value *args) {
+    bool clear_all = false;
+    int index = 0;
+
+    while (index < arg_count) {
+        if (args[index].type != TYPE_STRING || !args[index].s_val) {
+            shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        const char *arg = args[index].s_val;
+        if (strcmp(arg, "--") == 0) {
+            index++;
+            break;
+        }
+        if (arg[0] != '-' || arg[1] == '\0') {
+            break;
+        }
+        if (strcmp(arg, "-a") == 0) {
+            clear_all = true;
+            index++;
+            continue;
+        }
+        shellReportRecoverableError(vm, true, "unalias: %s: invalid option", arg);
+        shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+
+    if (clear_all) {
+        for (; index < arg_count; ++index) {
+            if (args[index].type != TYPE_STRING || !args[index].s_val || args[index].s_val[0] == '\0') {
+                shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+                shellUpdateStatus(2);
+                return makeVoid();
+            }
+        }
+        shellClearAliases();
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    if (index >= arg_count) {
+        shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    for (; index < arg_count; ++index) {
+        if (args[index].type != TYPE_STRING || !args[index].s_val || args[index].s_val[0] == '\0') {
+            shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        const char *name = args[index].s_val;
+        if (!shellRemoveAlias(name)) {
+            shellReportRecoverableError(vm, true, "unalias: %s: not found", name);
+            ok = false;
+        }
+    }
+
+    shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
 

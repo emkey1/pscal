@@ -1,0 +1,31 @@
+#!/usr/bin/env exsh
+
+unalias
+printf "no_args:%s\n" "$?"
+
+unalias -z
+printf "invalid_option:%s\n" "$?"
+
+alias foo='printf foo\n'
+alias bar='printf bar\n'
+
+unalias foo
+printf "remove_foo:%s\n" "$?"
+
+unalias foo
+printf "remove_missing:%s\n" "$?"
+
+unalias bar baz
+printf "remove_mixed:%s\n" "$?"
+
+alias fizz='printf fizz\n'
+alias buzz='printf buzz\n'
+unalias -a
+printf "clear_all:%s\n" "$?"
+
+alias fizz='printf fizz\n'
+unalias -a fizz
+printf "dash_a_with_name:%s\n" "$?"
+
+unalias fizz
+printf "after_clear:%s\n" "$?"

@@ -142,6 +142,7 @@ Value vmBuiltinShellLocal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBreak(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellContinue(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellAlias(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellUnalias(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellHistory(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellJobs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
