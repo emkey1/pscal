@@ -259,6 +259,8 @@ static ShellOptionEntry gShellOptions[] = {
 
 static const size_t gShellOptionCount = sizeof(gShellOptions) / sizeof(gShellOptions[0]);
 
+static bool shellShoptOptionEnabled(const char *name);
+
 typedef struct {
     char *name;
     char *value;
@@ -7429,7 +7431,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",       "pwd",      "dirs",    "pushd",   "popd",    "exit",     "exec",     "export",   "unset",    "setenv",
+    static const char *kBuiltins[] = {"cd",       "pwd",      "dirs",    "pushd",   "popd",    "exit",     "logout",   "exec",     "export",   "unset",    "setenv",
                                       "unsetenv", "set",      "declare", "typeset", "readonly", "umask",   "command", "trap",     "local",    "let",      "break",   "continue",
                                       "alias",   "bind",     "shopt",   "history", "jobs",     "fg",       "finger",   "bg",       "wait",
                                       "builtin", "source",   "read",    "shift",   "return",   "help",     "type",    ":",       "unalias",
@@ -10754,6 +10756,52 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellLogout(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+
+    if (!shellShoptOptionEnabled("login_shell")) {
+        fprintf(stderr, "logout: not login shell: use 'exit'\n");
+        shellUpdateStatus(1);
+        shellRestoreCurrentVm(previous_vm);
+        return makeVoid();
+    }
+
+    if (arg_count > 1) {
+        fprintf(stderr, "logout: too many arguments\n");
+        shellUpdateStatus(1);
+        shellRestoreCurrentVm(previous_vm);
+        return makeVoid();
+    }
+
+    int status = 0;
+    if (arg_count == 1) {
+        Value v = args[0];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            fprintf(stderr, "logout: status must be a numeric string\n");
+            shellUpdateStatus(1);
+            shellRestoreCurrentVm(previous_vm);
+            return makeVoid();
+        }
+        int parsed = 0;
+        if (!shellParseReturnStatus(v.s_val, &parsed)) {
+            fprintf(stderr, "logout: invalid status '%s'\n", v.s_val);
+            shellUpdateStatus(1);
+            shellRestoreCurrentVm(previous_vm);
+            return makeVoid();
+        }
+        status = parsed;
+    }
+
+    shellUpdateStatus(status);
+    gShellExitRequested = true;
+    if (vm) {
+        vm->exit_requested = true;
+        vm->current_builtin_name = "logout";
+    }
+    shellRestoreCurrentVm(previous_vm);
+    return makeVoid();
+}
+
 Value vmBuiltinShellExecCommand(VM *vm, int arg_count, Value *args) {
     ShellCommand cmd;
     memset(&cmd, 0, sizeof(cmd));
@@ -11358,6 +11406,11 @@ static ShellOptionEntry *shellShoptFindOption(const char *name) {
         }
     }
     return NULL;
+}
+
+static bool shellShoptOptionEnabled(const char *name) {
+    ShellOptionEntry *entry = shellShoptFindOption(name);
+    return entry && entry->enabled;
 }
 
 static void shellShoptPrintEntry(const ShellOptionEntry *entry) {
@@ -13258,6 +13311,17 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "local",
         "Sets the runtime flag that marks the current function scope as local-aware."
         " Accepts no arguments.",
+        NULL,
+        0
+    },
+    {
+        "logout",
+        "Exit the shell when running as a login session.",
+        "logout [status]",
+        "Terminates the shell only when the login_shell shopt option is enabled."
+        " With STATUS the supplied numeric value becomes the exit status."
+        " Outside a login shell the builtin reports an error and leaves the"
+        " session running.",
         NULL,
         0
     },

@@ -1,0 +1,11 @@
+#!/usr/bin/env exsh
+
+logout
+status=$?
+printf "logout_status:%s\n" "$status"
+if [ "$status" -ne 1 ]; then
+    printf "logout_error_status:%s\n" "$status"
+    exit 1
+fi
+
+printf "after_logout\n"
