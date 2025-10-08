@@ -431,6 +431,14 @@
       "script": "Tests/exsh/tests/here_string.psh",
       "expect": "runtime_ok",
       "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
+    },
+    {
+      "id": "bash_directory_stack",
+      "name": "Bash parity for directory stack builtins",
+      "category": "parity",
+      "description": "pushd, popd, and dirs align with Bash output.",
+      "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
+      "expect": "match_bash"
     }
   ]
 }

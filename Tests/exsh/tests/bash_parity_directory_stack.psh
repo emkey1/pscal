@@ -1,0 +1,32 @@
+#!/usr/bin/env exsh
+
+start=$(pwd)
+
+pushd Docs
+status1=$?
+printf "pushd_docs_status:%s\n" "$status1"
+printf "pwd_after_pushd_docs:%s\n" "$(pwd)"
+
+pushd ../Examples
+status2=$?
+printf "pushd_examples_status:%s\n" "$status2"
+printf "pwd_after_pushd_examples:%s\n" "$(pwd)"
+
+pushd
+status3=$?
+printf "pushd_rotate_status:%s\n" "$status3"
+printf "pwd_after_pushd_rotate:%s\n" "$(pwd)"
+
+popd
+status4=$?
+printf "popd_first_status:%s\n" "$status4"
+printf "pwd_after_popd_first:%s\n" "$(pwd)"
+
+popd
+status5=$?
+printf "popd_second_status:%s\n" "$status5"
+printf "pwd_after_popd_second:%s\n" "$(pwd)"
+
+printf "final_pwd:%s\n" "$(pwd)"
+
+cd "$start"
