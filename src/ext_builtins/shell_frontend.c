@@ -45,6 +45,9 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "set", vmBuiltinShellSet);
     registerShellBuiltin(category, command_group, "setenv", vmBuiltinShellSetenv);
     registerShellBuiltin(category, command_group, "declare", vmBuiltinShellDeclare);
+    registerShellBuiltin(category, command_group, "typeset", vmBuiltinShellDeclare);
+    registerShellBuiltin(category, command_group, "readonly", vmBuiltinShellReadonly);
+    registerShellBuiltin(category, command_group, "command", vmBuiltinShellCommand);
     registerShellBuiltin(category, command_group, "export", vmBuiltinShellExport);
     registerShellBuiltin(category, command_group, "unset", vmBuiltinShellUnset);
     registerShellBuiltin(category, command_group, "unsetenv", vmBuiltinShellUnsetenv);
@@ -62,8 +65,10 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);
     registerShellBuiltin(category, command_group, "help", vmBuiltinShellHelp);
+    registerShellBuiltin(category, command_group, "type", vmBuiltinShellType);
     registerShellBuiltin(category, command_group, "builtin", vmBuiltinShellBuiltin);
     registerShellBuiltin(category, command_group, ":", vmBuiltinShellColon);
     registerShellBuiltin(category, command_group, "bind", vmBuiltinShellBind);
     registerShellBuiltin(category, command_group, "shopt", vmBuiltinShellShopt);
+    registerShellBuiltin(category, command_group, "umask", vmBuiltinShellUmask);
 }

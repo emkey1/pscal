@@ -55,6 +55,35 @@ static size_t gShellArrayVarCapacity = 0;
 static int gShellAssociativeArraySupport = -1;
 static int gShellBindInteractiveStatus = -1;
 
+typedef struct {
+    char *name;
+} ShellReadonlyEntry;
+
+static ShellReadonlyEntry *gShellReadonlyVars = NULL;
+static size_t gShellReadonlyVarCount = 0;
+static size_t gShellReadonlyVarCapacity = 0;
+static char *gShellReadonlyErrorName = NULL;
+
+typedef struct ShellAlias {
+    char *name;
+    char *value;
+} ShellAlias;
+
+static const char *kShellCommandDefaultPath =
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+typedef enum {
+    SHELL_COMMAND_RESULT_ALIAS,
+    SHELL_COMMAND_RESULT_FUNCTION,
+    SHELL_COMMAND_RESULT_BUILTIN,
+    SHELL_COMMAND_RESULT_FILE
+} ShellCommandResultKind;
+
+typedef struct {
+    ShellCommandResultKind kind;
+    char *detail;
+} ShellCommandResult;
+
 static bool shellAssociativeArraysSupported(void) {
     if (gShellAssociativeArraySupport != -1) {
         return gShellAssociativeArraySupport == 1;
@@ -149,6 +178,15 @@ static bool shellParseArrayLiteral(const char *value,
                                    ShellArrayKind *out_kind);
 static char *shellBuildArrayLiteral(const ShellArrayVariable *var);
 static bool shellArrayRegistryInitializeAssociative(const char *name);
+static ShellAlias *shellFindAlias(const char *name);
+
+static bool shellReadonlyEnsureCapacity(size_t needed);
+static ShellReadonlyEntry *shellReadonlyFindMutable(const char *name);
+static bool shellReadonlyAdd(const char *name);
+static bool shellReadonlyContains(const char *name);
+static void shellReadonlySetErrorName(const char *name);
+static const char *shellReadonlyGetErrorName(void);
+static void shellReadonlyPrintVariables(void);
 
 static bool shellIsValidEnvName(const char *name);
 static void shellExportPrintEnvironment(void);
@@ -4429,10 +4467,136 @@ static bool shellArrayRegistryInitializeAssociative(const char *name) {
     return true;
 }
 
+static bool shellReadonlyEnsureCapacity(size_t needed) {
+    if (gShellReadonlyVarCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellReadonlyVarCapacity ? (gShellReadonlyVarCapacity * 2) : 8;
+    if (new_capacity < needed) {
+        new_capacity = needed;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(ShellReadonlyEntry)) {
+        return false;
+    }
+    ShellReadonlyEntry *resized =
+        (ShellReadonlyEntry *)realloc(gShellReadonlyVars, new_capacity * sizeof(ShellReadonlyEntry));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellReadonlyVarCapacity; i < new_capacity; ++i) {
+        resized[i].name = NULL;
+    }
+    gShellReadonlyVars = resized;
+    gShellReadonlyVarCapacity = new_capacity;
+    return true;
+}
+
+static ShellReadonlyEntry *shellReadonlyFindMutable(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellReadonlyVarCount; ++i) {
+        ShellReadonlyEntry *entry = &gShellReadonlyVars[i];
+        if (entry->name && strcmp(entry->name, name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static bool shellReadonlyContains(const char *name) {
+    return shellReadonlyFindMutable(name) != NULL;
+}
+
+static bool shellReadonlyAdd(const char *name) {
+    if (!name || *name == '\0') {
+        return false;
+    }
+    if (shellReadonlyContains(name)) {
+        return true;
+    }
+    if (!shellReadonlyEnsureCapacity(gShellReadonlyVarCount + 1)) {
+        return false;
+    }
+    ShellReadonlyEntry *entry = &gShellReadonlyVars[gShellReadonlyVarCount++];
+    entry->name = strdup(name);
+    if (!entry->name) {
+        gShellReadonlyVarCount--;
+        return false;
+    }
+    return true;
+}
+
+static void shellReadonlySetErrorName(const char *name) {
+    if (gShellReadonlyErrorName) {
+        free(gShellReadonlyErrorName);
+        gShellReadonlyErrorName = NULL;
+    }
+    if (name && *name) {
+        gShellReadonlyErrorName = strdup(name);
+    }
+}
+
+static const char *shellReadonlyGetErrorName(void) {
+    return gShellReadonlyErrorName ? gShellReadonlyErrorName : "";
+}
+
+static int shellCompareStringPointers(const void *lhs, const void *rhs) {
+    const char *const *left = (const char *const *)lhs;
+    const char *const *right = (const char *const *)rhs;
+    const char *l = (left && *left) ? *left : "";
+    const char *r = (right && *right) ? *right : "";
+    return strcmp(l, r);
+}
+
+static void shellReadonlyPrintVariables(void) {
+    if (gShellReadonlyVarCount == 0) {
+        return;
+    }
+    char **names = (char **)malloc(gShellReadonlyVarCount * sizeof(char *));
+    if (names) {
+        for (size_t i = 0; i < gShellReadonlyVarCount; ++i) {
+            names[i] = gShellReadonlyVars[i].name;
+        }
+        qsort(names, gShellReadonlyVarCount, sizeof(char *), shellCompareStringPointers);
+    }
+
+    for (size_t i = 0; i < gShellReadonlyVarCount; ++i) {
+        const char *name = names ? names[i] : gShellReadonlyVars[i].name;
+        if (!name) {
+            continue;
+        }
+        const char *value = getenv(name);
+        if (!value) {
+            printf("readonly %s\n", name);
+            continue;
+        }
+        printf("readonly %s=\"", name);
+        for (const char *cursor = value; *cursor; ++cursor) {
+            unsigned char ch = (unsigned char)*cursor;
+            if (ch == '"' || ch == '\\') {
+                putchar('\\');
+            }
+            putchar(ch);
+        }
+        printf("\"\n");
+    }
+
+    if (names) {
+        free(names);
+    }
+}
+
 static bool shellArrayRegistrySetElement(const char *name,
                                          const char *subscript,
                                          const char *value) {
     if (!name || !subscript) {
+        return false;
+    }
+    shellReadonlySetErrorName(NULL);
+    if (shellReadonlyContains(name)) {
+        errno = EPERM;
+        shellReadonlySetErrorName(name);
         return false;
     }
     const char *text_value = value ? value : "";
@@ -4592,6 +4756,12 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
     if (!name) {
         return false;
     }
+    shellReadonlySetErrorName(NULL);
+    if (shellReadonlyContains(name)) {
+        errno = EPERM;
+        shellReadonlySetErrorName(name);
+        return false;
+    }
     const char *text = value ? value : "";
     if (setenv(name, text, 1) != 0) {
         return false;
@@ -4627,7 +4797,7 @@ static void shellDirectoryStackReportErrno(VM *vm, const char *builtin) {
     shellDirectoryStackReportError(vm, builtin, strerror(errno));
 }
 
-static void shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd);
+static bool shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd);
 
 static bool shellDirectoryStackEnsureCapacity(size_t needed) {
     if (gShellRuntime.dir_stack_capacity >= needed) {
@@ -4681,7 +4851,22 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
     gShellRuntime.dir_stack[0] = copy;
     gShellRuntime.dir_stack_count = 1;
     gShellRuntime.dir_stack_initialised = true;
-    shellDirectoryStackUpdateEnvironment(NULL, gShellRuntime.dir_stack[0]);
+    if (!shellDirectoryStackUpdateEnvironment(NULL, gShellRuntime.dir_stack[0])) {
+        const char *readonly = shellReadonlyGetErrorName();
+        if (errno == EPERM && readonly && *readonly) {
+            char buffer[256];
+            snprintf(buffer, sizeof(buffer), "%s: readonly variable", readonly);
+            shellDirectoryStackReportError(vm, builtin, buffer);
+        } else {
+            shellDirectoryStackReportErrno(vm, builtin);
+        }
+        free(gShellRuntime.dir_stack[0]);
+        gShellRuntime.dir_stack[0] = NULL;
+        gShellRuntime.dir_stack_count = 0;
+        gShellRuntime.dir_stack_initialised = false;
+        shellUpdateStatus(errno ? errno : 1);
+        return false;
+    }
     return true;
 }
 
@@ -4709,13 +4894,24 @@ static bool shellDirectoryStackAssignTopOwned(char *path) {
     return true;
 }
 
-static void shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd) {
-    if (old_cwd) {
-        shellSetTrackedVariable("OLDPWD", old_cwd, false);
-    }
+static bool shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd) {
     if (new_cwd) {
-        shellSetTrackedVariable("PWD", new_cwd, false);
+        if (!shellSetTrackedVariable("PWD", new_cwd, false)) {
+            return false;
+        }
     }
+    if (old_cwd) {
+        if (!shellSetTrackedVariable("OLDPWD", old_cwd, false)) {
+            if (new_cwd) {
+                const char *current = getenv("PWD");
+                if (!current || strcmp(current, old_cwd) != 0) {
+                    (void)shellSetTrackedVariable("PWD", old_cwd, false);
+                }
+            }
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool shellDirectoryStackChdir(VM *vm,
@@ -7233,10 +7429,10 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",     "pwd",     "dirs",   "pushd",  "popd",   "exit",    "exec",    "export",  "unset",    "setenv",
-                                      "unsetenv", "set",    "declare", "trap",    "local",   "let",     "break",   "continue", "alias",
-                                      "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
-                                      "builtin", "source", "read",    "shift",   "return",  "help",    ":",      "unalias",
+    static const char *kBuiltins[] = {"cd",       "pwd",      "dirs",    "pushd",   "popd",    "exit",     "exec",     "export",   "unset",    "setenv",
+                                      "unsetenv", "set",      "declare", "typeset", "readonly", "umask",   "command", "trap",     "local",    "let",      "break",   "continue",
+                                      "alias",   "bind",     "shopt",   "history", "jobs",     "fg",       "finger",   "bg",       "wait",
+                                      "builtin", "source",   "read",    "shift",   "return",   "help",     "type",    ":",       "unalias",
                                       "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
@@ -10128,13 +10324,35 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         if (old_cwd) {
             (void)chdir(old_cwd);
             shellDirectoryStackEnsureInitialised(vm, "cd");
-            shellDirectoryStackUpdateEnvironment(NULL, old_cwd);
+            (void)shellDirectoryStackUpdateEnvironment(NULL, old_cwd);
         }
         free(old_cwd);
         return makeVoid();
     }
 
-    shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0]);
+    if (!shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0])) {
+        const char *readonly = shellReadonlyGetErrorName();
+        if (old_cwd) {
+            (void)chdir(old_cwd);
+            if (!shellDirectoryStackAssignTopOwned(old_cwd)) {
+                free(old_cwd);
+            } else {
+                old_cwd = NULL;
+            }
+        } else {
+            (void)shellDirectoryStackAssignTopOwned(NULL);
+        }
+        if (errno == EPERM && readonly && *readonly) {
+            runtimeError(vm, "cd: %s: readonly variable", readonly);
+        } else if (errno != 0) {
+            runtimeError(vm, "cd: %s", strerror(errno));
+        } else {
+            runtimeError(vm, "cd: failed to update environment");
+        }
+        shellUpdateStatus(errno ? errno : 1);
+        free(old_cwd);
+        return makeVoid();
+    }
     free(old_cwd);
     shellUpdateStatus(0);
     return makeVoid();
@@ -11416,6 +11634,7 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
     bool ok = true;
     bool associative = false;
     bool global_scope = false;
+    bool mark_readonly = false;
     int index = 0;
     while (index < arg_count) {
         Value v = args[index];
@@ -11447,6 +11666,12 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 global_scope = true;
             } else if (opt == 'g' && token[0] == '+') {
                 global_scope = false;
+            } else if (opt == 'r' && token[0] == '-') {
+                mark_readonly = true;
+            } else if (opt == 'r' && token[0] == '+') {
+                runtimeError(vm, "declare: -%c: unsupported option", opt);
+                ok = false;
+                break;
             } else {
                 runtimeError(vm, "declare: -%c: unsupported option", opt);
                 ok = false;
@@ -11474,11 +11699,27 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                     runtimeError(vm, "declare: unable to initialise '%s'", spec);
                     ok = false;
                 } else {
-                    setenv(spec, "", 1);
+                    if (setenv(spec, "", 1) != 0) {
+                        runtimeError(vm, "declare: unable to set '%s'", spec);
+                        ok = false;
+                    }
                 }
             } else {
                 if (!shellSetTrackedVariable(spec, "", false)) {
-                    runtimeError(vm, "declare: unable to set '%s'", spec);
+                    const char *readonly = shellReadonlyGetErrorName();
+                    if (errno == EPERM && readonly && *readonly) {
+                        runtimeError(vm, "declare: %s: readonly variable", readonly);
+                    } else if (errno != 0) {
+                        runtimeError(vm, "declare: unable to set '%s': %s", spec, strerror(errno));
+                    } else {
+                        runtimeError(vm, "declare: unable to set '%s'", spec);
+                    }
+                    ok = false;
+                }
+            }
+            if (ok && mark_readonly) {
+                if (!shellReadonlyAdd(spec)) {
+                    runtimeError(vm, "declare: out of memory");
                     ok = false;
                 }
             }
@@ -11501,14 +11742,36 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 break;
             }
             if (!shellSetTrackedVariable(name, value_text, true)) {
-                runtimeError(vm, "declare: unable to set '%s'", name);
+                const char *readonly = shellReadonlyGetErrorName();
+                if (errno == EPERM && readonly && *readonly) {
+                    runtimeError(vm, "declare: %s: readonly variable", readonly);
+                } else if (errno != 0) {
+                    runtimeError(vm, "declare: unable to set '%s': %s", name, strerror(errno));
+                } else {
+                    runtimeError(vm, "declare: unable to set '%s'", name);
+                }
                 free(name);
                 ok = false;
                 break;
             }
         } else {
             if (!shellSetTrackedVariable(name, value_text, false)) {
-                runtimeError(vm, "declare: unable to set '%s'", name);
+                const char *readonly = shellReadonlyGetErrorName();
+                if (errno == EPERM && readonly && *readonly) {
+                    runtimeError(vm, "declare: %s: readonly variable", readonly);
+                } else if (errno != 0) {
+                    runtimeError(vm, "declare: unable to set '%s': %s", name, strerror(errno));
+                } else {
+                    runtimeError(vm, "declare: unable to set '%s'", name);
+                }
+                free(name);
+                ok = false;
+                break;
+            }
+        }
+        if (ok && mark_readonly) {
+            if (!shellReadonlyAdd(name)) {
+                runtimeError(vm, "declare: out of memory");
                 free(name);
                 ok = false;
                 break;
@@ -11521,6 +11784,370 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
 
     shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
+}
+
+Value vmBuiltinShellReadonly(VM *vm, int arg_count, Value *args) {
+    bool print_list = (arg_count == 0);
+    bool parsing_options = true;
+    bool processed_assignment = false;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "readonly: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (strcmp(text, "-p") == 0) {
+                print_list = true;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                runtimeError(vm, "readonly: unsupported option '%s'", text);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            parsing_options = false;
+        }
+        processed_assignment = true;
+        const char *eq = strchr(text, '=');
+        if (eq) {
+            size_t name_len = (size_t)(eq - text);
+            if (name_len == 0) {
+                runtimeError(vm, "readonly: invalid assignment '%s'", text);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            char *name = strndup(text, name_len);
+            if (!name) {
+                runtimeError(vm, "readonly: out of memory");
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            if (!shellIsValidEnvName(name)) {
+                runtimeError(vm, "readonly: invalid variable name '%s'", name);
+                free(name);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            const char *value = eq + 1;
+            if (!shellSetTrackedVariable(name, value, false)) {
+                const char *readonly = shellReadonlyGetErrorName();
+                if (errno == EPERM && readonly && *readonly) {
+                    runtimeError(vm, "readonly: %s: readonly variable", readonly);
+                } else if (errno != 0) {
+                    runtimeError(vm, "readonly: unable to set '%s': %s", name, strerror(errno));
+                } else {
+                    runtimeError(vm, "readonly: unable to set '%s'", name);
+                }
+                free(name);
+                shellUpdateStatus(errno ? errno : 1);
+                return makeVoid();
+            }
+            if (!shellReadonlyAdd(name)) {
+                runtimeError(vm, "readonly: out of memory");
+                free(name);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            free(name);
+            continue;
+        }
+        if (!shellIsValidEnvName(text)) {
+            runtimeError(vm, "readonly: invalid variable name '%s'", text);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (!shellReadonlyContains(text)) {
+            const char *existing = getenv(text);
+            if (!existing) {
+                if (!shellSetTrackedVariable(text, "", false)) {
+                    const char *readonly = shellReadonlyGetErrorName();
+                    if (errno == EPERM && readonly && *readonly) {
+                        runtimeError(vm, "readonly: %s: readonly variable", readonly);
+                    } else if (errno != 0) {
+                        runtimeError(vm, "readonly: unable to set '%s': %s", text, strerror(errno));
+                    } else {
+                        runtimeError(vm, "readonly: unable to set '%s'", text);
+                    }
+                    shellUpdateStatus(errno ? errno : 1);
+                    return makeVoid();
+                }
+            }
+        }
+        if (!shellReadonlyAdd(text)) {
+            runtimeError(vm, "readonly: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+
+    if (print_list || (!processed_assignment && arg_count == 0)) {
+        shellReadonlyPrintVariables();
+    }
+
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+static void shellCommandFreeResults(ShellCommandResult *results, size_t count) {
+    if (!results) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(results[i].detail);
+        results[i].detail = NULL;
+    }
+    free(results);
+}
+
+static bool shellCommandAppendResult(ShellCommandResult **results,
+                                     size_t *count,
+                                     ShellCommandResultKind kind,
+                                     const char *detail) {
+    if (!results || !count) {
+        return false;
+    }
+    char *copy = NULL;
+    if (detail && *detail) {
+        copy = strdup(detail);
+        if (!copy) {
+            return false;
+        }
+    } else if (detail) {
+        copy = strdup("");
+        if (!copy) {
+            return false;
+        }
+    }
+    ShellCommandResult *resized =
+        (ShellCommandResult *)realloc(*results, (*count + 1) * sizeof(ShellCommandResult));
+    if (!resized) {
+        free(copy);
+        return false;
+    }
+    *results = resized;
+    ShellCommandResult *entry = &resized[*count];
+    entry->kind = kind;
+    entry->detail = copy;
+    (*count)++;
+    return true;
+}
+
+static bool shellCommandExecutableExists(const char *path) {
+    if (!path || !*path) {
+        return false;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        return false;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return false;
+    }
+    return access(path, X_OK) == 0;
+}
+
+static bool shellCommandEnumerateExecutables(const char *name,
+                                             const char *path_env,
+                                             bool find_all,
+                                             ShellCommandResult **results,
+                                             size_t *count) {
+    if (!name || !*name) {
+        return true;
+    }
+    if (strchr(name, '/')) {
+        if (shellCommandExecutableExists(name)) {
+            if (!shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, name)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    const char *env_value = path_env ? path_env : getenv("PATH");
+    if (!env_value) {
+        env_value = "";
+    }
+    char *copy = strdup(env_value);
+    if (!copy) {
+        return false;
+    }
+
+    bool ok = true;
+    char *cursor = copy;
+    while (true) {
+        char *segment = cursor;
+        char *sep = cursor ? strchr(cursor, ':') : NULL;
+        if (sep) {
+            *sep = '\0';
+        }
+        const char *dir = (segment && *segment) ? segment : ".";
+        size_t dir_len = strlen(dir);
+        size_t name_len = strlen(name);
+        bool need_sep = dir_len > 0 && dir[dir_len - 1] != '/';
+        size_t total_len = dir_len + (need_sep ? 1 : 0) + name_len;
+        char *candidate = (char *)malloc(total_len + 1);
+        if (!candidate) {
+            ok = false;
+            break;
+        }
+        size_t pos = 0;
+        if (dir_len > 0) {
+            memcpy(candidate + pos, dir, dir_len);
+            pos += dir_len;
+        }
+        if (need_sep) {
+            candidate[pos++] = '/';
+        }
+        memcpy(candidate + pos, name, name_len);
+        pos += name_len;
+        candidate[pos] = '\0';
+
+        if (shellCommandExecutableExists(candidate)) {
+            if (!shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, candidate)) {
+                ok = false;
+                free(candidate);
+                break;
+            }
+            if (!find_all) {
+                free(candidate);
+                break;
+            }
+        }
+        free(candidate);
+        if (!sep) {
+            break;
+        }
+        cursor = sep + 1;
+        if (!cursor) {
+            break;
+        }
+    }
+
+    free(copy);
+    return ok;
+}
+
+static bool shellCommandCollectInfo(const char *name,
+                                    bool collect_all_paths,
+                                    bool use_default_path,
+                                    ShellCommandResult **out_results,
+                                    size_t *out_count) {
+    if (out_results) {
+        *out_results = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!name || !*name) {
+        return true;
+    }
+
+    ShellCommandResult *results = NULL;
+    size_t count = 0;
+
+    ShellAlias *alias = shellFindAlias(name);
+    if (alias) {
+        const char *value = alias->value ? alias->value : "";
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_ALIAS, value)) {
+            goto error;
+        }
+    }
+
+    ShellFunctionEntry *function_entry = shellFindFunctionEntry(name);
+    if (function_entry && function_entry->compiled) {
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_FUNCTION, NULL)) {
+            goto error;
+        }
+    }
+
+    if (shellIsRuntimeBuiltin(name)) {
+        const char *canonical = shellBuiltinCanonicalName(name);
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, canonical)) {
+            goto error;
+        }
+    }
+
+    const char *path_env = use_default_path ? kShellCommandDefaultPath : NULL;
+    if (!shellCommandEnumerateExecutables(name,
+                                          path_env,
+                                          collect_all_paths,
+                                          &results,
+                                          &count)) {
+        goto error;
+    }
+
+    if (out_results) {
+        *out_results = results;
+    } else {
+        shellCommandFreeResults(results, count);
+    }
+    if (out_count) {
+        *out_count = count;
+    }
+    return true;
+
+error:
+    shellCommandFreeResults(results, count);
+    if (out_results) {
+        *out_results = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    return false;
+}
+
+static const char *shellCommandResultKindLabel(ShellCommandResultKind kind) {
+    switch (kind) {
+        case SHELL_COMMAND_RESULT_ALIAS:
+            return "alias";
+        case SHELL_COMMAND_RESULT_FUNCTION:
+            return "function";
+        case SHELL_COMMAND_RESULT_BUILTIN:
+            return "builtin";
+        case SHELL_COMMAND_RESULT_FILE:
+            return "file";
+    }
+    return "file";
+}
+
+static void shellCommandPrintVerbose(const char *name, const ShellCommandResult *result) {
+    if (!name || !result) {
+        return;
+    }
+    switch (result->kind) {
+        case SHELL_COMMAND_RESULT_ALIAS:
+            printf("%s is aliased to '%s'\n", name, result->detail ? result->detail : "");
+            break;
+        case SHELL_COMMAND_RESULT_FUNCTION:
+            printf("%s is a function\n", name);
+            break;
+        case SHELL_COMMAND_RESULT_BUILTIN:
+            printf("%s is a shell builtin\n", name);
+            break;
+        case SHELL_COMMAND_RESULT_FILE:
+            printf("%s is %s\n", name, result->detail ? result->detail : "");
+            break;
+    }
+}
+
+static void shellCommandPrintShort(const char *name, const ShellCommandResult *result) {
+    if (!name || !result) {
+        return;
+    }
+    if (result->kind == SHELL_COMMAND_RESULT_FILE) {
+        printf("%s\n", result->detail ? result->detail : "");
+    } else {
+        printf("%s\n", name);
+    }
 }
 
 Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
@@ -11610,16 +12237,381 @@ Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static bool shellParseUmaskValue(const char *text, mode_t *out_mask) {
+    if (!text || !*text || !out_mask) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(text, &end, 8);
+    if (errno != 0 || !end || *end != '\0' || value < 0 || value > 0777) {
+        return false;
+    }
+    *out_mask = (mode_t)value;
+    return true;
+}
+
+static void shellUmaskFormatSymbolic(mode_t mask, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    const struct {
+        mode_t read_bit;
+        mode_t write_bit;
+        mode_t exec_bit;
+        char prefix;
+    } classes[] = {
+        {S_IRUSR, S_IWUSR, S_IXUSR, 'u'},
+        {S_IRGRP, S_IWGRP, S_IXGRP, 'g'},
+        {S_IROTH, S_IWOTH, S_IXOTH, 'o'},
+    };
+
+    size_t offset = 0;
+    for (size_t i = 0; i < sizeof(classes) / sizeof(classes[0]); ++i) {
+        if (offset + 6 >= buffer_size) {
+            break;
+        }
+        buffer[offset++] = classes[i].prefix;
+        buffer[offset++] = '=';
+        buffer[offset++] = (mask & classes[i].read_bit) ? '-' : 'r';
+        buffer[offset++] = (mask & classes[i].write_bit) ? '-' : 'w';
+        buffer[offset++] = (mask & classes[i].exec_bit) ? '-' : 'x';
+        if (i + 1 < sizeof(classes) / sizeof(classes[0])) {
+            buffer[offset++] = ',';
+        }
+    }
+
+    if (offset >= buffer_size) {
+        offset = buffer_size - 1;
+    }
+    buffer[offset] = '\0';
+}
+
+Value vmBuiltinShellUmask(VM *vm, int arg_count, Value *args) {
+    bool symbolic = false;
+    bool parsing_options = true;
+    const char *mask_text = NULL;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "umask: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options && strcmp(text, "--") == 0) {
+            parsing_options = false;
+            continue;
+        }
+        if (parsing_options && strcmp(text, "-S") == 0) {
+            symbolic = true;
+            continue;
+        }
+        if (parsing_options && text[0] == '-' && text[1] != '\0') {
+            runtimeError(vm, "umask: unsupported option '%s'", text);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        parsing_options = false;
+        if (mask_text) {
+            runtimeError(vm, "umask: too many arguments");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        mask_text = text;
+    }
+
+    if (mask_text) {
+        mode_t new_mask = 0;
+        if (!shellParseUmaskValue(mask_text, &new_mask)) {
+            runtimeError(vm, "umask: invalid mode '%s'", mask_text);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        umask(new_mask);
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    mode_t current = umask(0);
+    umask(current);
+
+    if (symbolic) {
+        char formatted[32];
+        shellUmaskFormatSymbolic(current, formatted, sizeof(formatted));
+        printf("%s\n", formatted);
+    } else {
+        printf("%04o\n", (unsigned int)current);
+    }
+
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
+    bool parsing_options = true;
+    bool list_all = false;
+    bool print_short = false;
+    bool print_verbose = false;
+    bool use_default_path = false;
+    int first_name = arg_count;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "command: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                for (const char *opt = text + 1; *opt; ++opt) {
+                    switch (*opt) {
+                        case 'a':
+                            list_all = true;
+                            break;
+                        case 'p':
+                            use_default_path = true;
+                            break;
+                        case 'v':
+                            if (!print_verbose) {
+                                print_short = true;
+                            }
+                            break;
+                        case 'V':
+                            print_verbose = true;
+                            print_short = false;
+                            break;
+                        default:
+                            runtimeError(vm, "command: unsupported option '-%c'", *opt);
+                            shellUpdateStatus(1);
+                            return makeVoid();
+                    }
+                }
+                continue;
+            }
+            parsing_options = false;
+        }
+        if (parsing_options) {
+            continue;
+        }
+        if (first_name == arg_count) {
+            first_name = i;
+        }
+    }
+
+    if (!print_short && !print_verbose) {
+        runtimeError(vm, "command: execution without -v or -V is not implemented");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (first_name == arg_count) {
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool overall_ok = true;
+    bool collect_all_paths = list_all;
+
+    for (int i = first_name; i < arg_count; ++i) {
+        const char *name = args[i].s_val;
+        ShellCommandResult *results = NULL;
+        size_t count = 0;
+        if (!shellCommandCollectInfo(name, collect_all_paths, use_default_path, &results, &count)) {
+            runtimeError(vm, "command: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+
+        if (count == 0) {
+            overall_ok = false;
+            if (print_verbose) {
+                runtimeError(vm, "command: %s: not found", name);
+            }
+            shellUpdateStatus(1);
+            shellCommandFreeResults(results, count);
+            continue;
+        }
+
+        if (print_verbose) {
+            if (list_all) {
+                for (size_t j = 0; j < count; ++j) {
+                    shellCommandPrintVerbose(name, &results[j]);
+                }
+            } else {
+                shellCommandPrintVerbose(name, &results[0]);
+            }
+        } else if (print_short) {
+            if (list_all) {
+                for (size_t j = 0; j < count; ++j) {
+                    shellCommandPrintShort(name, &results[j]);
+                }
+            } else {
+                shellCommandPrintShort(name, &results[0]);
+            }
+        }
+
+        shellCommandFreeResults(results, count);
+    }
+
+    shellUpdateStatus(overall_ok ? 0 : 1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellType(VM *vm, int arg_count, Value *args) {
+    bool parsing_options = true;
+    bool list_all = false;
+    bool print_type = false;
+    bool print_path = false;
+    bool use_default_path = false;
+    int first_name = arg_count;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "type: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                for (const char *opt = text + 1; *opt; ++opt) {
+                    switch (*opt) {
+                        case 'a':
+                            list_all = true;
+                            break;
+                        case 't':
+                            print_type = true;
+                            break;
+                        case 'p':
+                            print_path = true;
+                            break;
+                        case 'P':
+                            print_path = true;
+                            use_default_path = true;
+                            break;
+                        default:
+                            runtimeError(vm, "type: unsupported option '-%c'", *opt);
+                            shellUpdateStatus(1);
+                            return makeVoid();
+                    }
+                }
+                continue;
+            }
+            parsing_options = false;
+        }
+        if (parsing_options) {
+            continue;
+        }
+        if (first_name == arg_count) {
+            first_name = i;
+        }
+    }
+
+    if (first_name == arg_count) {
+        runtimeError(vm, "type: expected name");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool descriptive = !print_type && !print_path;
+    bool overall_ok = true;
+    bool collect_all_paths = list_all || print_path;
+
+    for (int i = first_name; i < arg_count; ++i) {
+        const char *name = args[i].s_val;
+        ShellCommandResult *results = NULL;
+        size_t count = 0;
+        if (!shellCommandCollectInfo(name, collect_all_paths, use_default_path, &results, &count)) {
+            runtimeError(vm, "type: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+
+        if (count == 0) {
+            overall_ok = false;
+            if (descriptive) {
+                runtimeError(vm, "type: %s: not found", name);
+            }
+            shellUpdateStatus(1);
+            shellCommandFreeResults(results, count);
+            continue;
+        }
+
+        if (print_path) {
+            bool printed = false;
+            for (size_t j = 0; j < count; ++j) {
+                if (results[j].kind == SHELL_COMMAND_RESULT_FILE) {
+                    printf("%s\n", results[j].detail ? results[j].detail : "");
+                    printed = true;
+                    if (!list_all) {
+                        break;
+                    }
+                }
+            }
+            if (!printed) {
+                overall_ok = false;
+                shellUpdateStatus(1);
+            }
+            shellCommandFreeResults(results, count);
+            continue;
+        }
+
+        if (print_type) {
+            if (list_all) {
+                for (size_t j = 0; j < count; ++j) {
+                    printf("%s\n", shellCommandResultKindLabel(results[j].kind));
+                }
+            } else {
+                printf("%s\n", shellCommandResultKindLabel(results[0].kind));
+            }
+            shellCommandFreeResults(results, count);
+            continue;
+        }
+
+        if (list_all) {
+            for (size_t j = 0; j < count; ++j) {
+                shellCommandPrintVerbose(name, &results[j]);
+            }
+        } else {
+            shellCommandPrintVerbose(name, &results[0]);
+        }
+        shellCommandFreeResults(results, count);
+    }
+
+    shellUpdateStatus(overall_ok ? 0 : 1);
+    return makeVoid();
+}
+
 Value vmBuiltinShellUnset(VM *vm, int arg_count, Value *args) {
+    bool ok = true;
     for (int i = 0; i < arg_count; ++i) {
         if (args[i].type != TYPE_STRING || !args[i].s_val) {
             runtimeError(vm, "unset: expected variable name");
             shellUpdateStatus(1);
             return makeVoid();
         }
-        shellUnsetTrackedVariable(args[i].s_val);
+        const char *name = args[i].s_val;
+        if (shellReadonlyContains(name)) {
+            runtimeError(vm, "unset: %s: readonly variable", name);
+            ok = false;
+            continue;
+        }
+        shellUnsetTrackedVariable(name);
     }
-    shellUpdateStatus(0);
+    shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
 
@@ -11907,11 +12899,6 @@ Value vmBuiltinShellContinue(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
-typedef struct {
-    char *name;
-    char *value;
-} ShellAlias;
-
 static ShellAlias *gShellAliases = NULL;
 static size_t gShellAliasCount = 0;
 
@@ -12107,6 +13094,17 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "command",
+        "Query command resolution metadata.",
+        "command [-a] [-p] [-v|-V] [name ...]",
+        "With -v prints the first match for each NAME, favouring aliases, functions,"
+        " builtins, and executable paths. -V prints verbose descriptions. The -a"
+        " flag lists every match and -p searches using the default PATH. Execution"
+        " without -v or -V is not currently supported.",
+        NULL,
+        0
+    },
+    {
         "cd",
         "Change the current working directory.",
         "cd [dir]",
@@ -12154,9 +13152,30 @@ static const ShellHelpTopic kShellHelpTopics[] = {
     {
         "declare",
         "Declare variables and arrays.",
-        "declare [-a|-A] [name[=value] ...]",
+        "declare [-a|-A|-r] [name[=value] ...]",
         "Without arguments prints variables with attributes. The -a flag"
-        " initialises indexed arrays and -A initialises associative arrays.",
+        " initialises indexed arrays, -A initialises associative arrays, and"
+        " -r marks the supplied names as read-only.",
+        NULL,
+        0
+    },
+    {
+        "readonly",
+        "Mark variables as read-only.",
+        "readonly [-p] [name[=value] ...]",
+        "Marks each NAME as read-only. When assignments are provided the "
+        "variable is set before being protected. With no arguments or when "
+        "invoked with -p the current read-only definitions are printed.",
+        NULL,
+        0
+    },
+    {
+        "umask",
+        "Set or display the file creation mask.",
+        "umask [-S] [mode]",
+        "Without MODE prints the current mask as a zero-padded octal value. "
+        "With -S the mask is shown symbolically as u=,g=,o=. Supplying MODE "
+        "updates the mask using octal digits 0-7.",
         NULL,
         0
     },
@@ -12308,6 +13327,17 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "With no arguments prints the environment. NAME assigns an empty string"
         " and NAME VALUE assigns the provided string. Invalid names raise an"
         " error.",
+        NULL,
+        0
+    },
+    {
+        "type",
+        "Describe how the shell interprets names.",
+        "type [-a] [-p|-P] [-t] name ...",
+        "Without options prints the first match for each NAME. -t prints only the"
+        " classification (alias, function, builtin, or file). -p prints the first"
+        " executable path, -P forces the default PATH, and -a includes every"
+        " result discovered during lookup.",
         NULL,
         0
     },

@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return finger help bind shopt
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return finger help bind shopt command type
 
 Bash builtins missing from exsh
 -------------------------------
-caller command compgen complete compopt disown enable fc getopts hash kill logout mapfile readarray printf readonly suspend times type typeset ulimit umask
+caller compgen complete compopt disown enable fc getopts hash kill logout mapfile readarray printf suspend times ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -28,10 +28,9 @@ Plans to address missing builtins
    - Extend the manifest driven tests with parity cases that exercise programmable completion against Bash.
 
 3) Command lookup builtins (command, type, hash, enable):
-   - Factor command resolution logic used by shellSpawnProcess into helpers that expose search path, builtin, and function metadata.
-   - Implement builtin handlers that call the helpers so command honours flags, type prints classifications, hash primes or shows caches, and enable toggles builtin availability through the dispatcher.
-   - Register each builtin with documentation and ensure disabled builtins are skipped by shellIsRuntimeBuiltin before dispatch.
-   - Add parity tests covering command -v, type, path hashing, and enabling or disabling builtins.
+   - Added lookup helpers that expose alias, function, builtin, and PATH resolution so command -v/-V and type can report matches.
+   - Implemented command and type query modes with documentation and help topics covering -a/-p/-t/-v/-V.
+   - Remaining work: extend command to handle execution, implement hash/enable, and add parity coverage for the outstanding features.
 
 4) Job control builtins (disown, kill, suspend):
    - Extend the job registry to record disowned jobs and prevent later status reports or waits from touching them.
@@ -79,9 +78,8 @@ Plans to address missing builtins
     - Register the builtin and create tests that exercise it after running known workloads, comparing the results to Bash within tolerances.
 
 13) ulimit and umask builtins:
-    - Implement vmBuiltinShellUlimit using getrlimit and setrlimit, covering common flags and matching Bash diagnostics.
-    - Implement vmBuiltinShellUmask to read or update the process umask and synchronise tracked variables when needed.
-    - Register both builtins with documentation and add parity tests that adjust limits and masks while comparing with Bash.
+    - Implemented vmBuiltinShellUmask to parse octal modes, support -S symbolic output, register documentation, and add regression coverage for numeric and failure flows.
+    - Remaining work: implement vmBuiltinShellUlimit using getrlimit and setrlimit, covering common flags and matching Bash diagnostics.
 
 14) unalias builtin: Completed.
     - Added helpers that delete individual aliases or clear all entries and exposed them through vmBuiltinShellUnalias.
