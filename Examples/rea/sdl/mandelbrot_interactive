@@ -4,8 +4,8 @@
 // Requires SDL support in the Pscal build.
 
 class MandelbrotApp {
-  const int Width = 640;
-  const int Height = 480;
+  const int Width = 800;
+  const int Height = 600;
   const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
