@@ -1,0 +1,7 @@
+#!/usr/bin/env exsh
+
+orig=$(umask)
+umask 0002
+printf "numeric:%s\n" "$(umask)"
+printf "symbolic:%s\n" "$(umask -S)"
+umask "$orig"

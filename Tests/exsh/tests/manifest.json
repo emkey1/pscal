@@ -456,6 +456,33 @@
       "description": "pushd, popd, and dirs align with Bash output.",
       "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
       "expect": "match_bash"
+    },
+    {
+      "id": "builtin_umask_basic",
+      "name": "umask prints numeric and symbolic forms",
+      "category": "builtins",
+      "description": "Setting umask updates the process mask and reports numeric/symbolic output.",
+      "script": "Tests/exsh/tests/umask_basic.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "numeric:0002\nsymbolic:u=rwx,g=rwx,o=r-x\n"
+    },
+    {
+      "id": "builtin_umask_invalid",
+      "name": "umask rejects invalid modes",
+      "category": "builtins",
+      "description": "Invalid digits produce a runtime error without changing the mask.",
+      "script": "Tests/exsh/tests/umask_invalid.psh",
+      "expect": "runtime_error",
+      "expected_stderr_substring": "umask: invalid mode '18'"
+    },
+    {
+      "id": "builtin_umask_too_many",
+      "name": "umask rejects extra operands",
+      "category": "builtins",
+      "description": "Supplying more than one operand triggers a runtime error.",
+      "script": "Tests/exsh/tests/umask_too_many.psh",
+      "expect": "runtime_error",
+      "expected_stderr_substring": "umask: too many arguments"
     }
   ]
 }
