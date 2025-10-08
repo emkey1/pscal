@@ -110,6 +110,14 @@
             "expected_stdout": "help-builtin-present\n"
         },
         {
+            "id": "jobs_disown",
+            "name": "disown removes jobs from listings",
+            "category": "builtins",
+            "description": "disown hides jobs from jobs output and allows wait to succeed with no tracked jobs.",
+            "script": "Tests/exsh/tests/disown_job.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "let_builtin",
             "name": "let evaluates expressions and assignments",
             "category": "builtins",

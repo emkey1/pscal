@@ -59,6 +59,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"let", "let", 39},
     {"umask", "umask", 43},
     {"logout", "logout", 44},
+    {"disown", "disown", 45},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},

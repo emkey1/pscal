@@ -1,0 +1,19 @@
+echo "disown:start"
+sleep 1 &
+sleep 0.1
+before_jobs=$(jobs)
+if echo "$before_jobs" | grep -q 'sleep'; then
+    echo "before:present"
+else
+    echo "before:<none>"
+fi
+disown
+after_jobs=$(jobs)
+if echo "$after_jobs" | grep -q 'sleep'; then
+    echo "after:present"
+else
+    echo "after:<none>"
+fi
+wait
+echo "wait_status:$?"
+echo "disown:end"
