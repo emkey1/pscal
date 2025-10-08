@@ -12212,10 +12212,12 @@ Value vmBuiltinShellUnalias(VM *vm, int arg_count, Value *args) {
     }
 
     if (clear_all) {
-        if (index < arg_count) {
-            shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
-            shellUpdateStatus(2);
-            return makeVoid();
+        for (; index < arg_count; ++index) {
+            if (args[index].type != TYPE_STRING || !args[index].s_val || args[index].s_val[0] == '\0') {
+                shellReportRecoverableError(vm, false, "unalias: usage: unalias [-a] name [name ...]");
+                shellUpdateStatus(2);
+                return makeVoid();
+            }
         }
         shellClearAliases();
         shellUpdateStatus(0);
