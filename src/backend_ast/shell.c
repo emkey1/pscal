@@ -5834,6 +5834,46 @@ static bool shellArithmeticParseExpression(ShellArithmeticParser *parser, long l
     return true;
 }
 
+static char *shellLetFindAssignment(char *expr) {
+    if (!expr) {
+        return NULL;
+    }
+
+    bool in_single = false;
+    bool in_double = false;
+    for (char *p = expr; *p; ++p) {
+        if (*p == '\\' && p[1]) {
+            ++p;
+            continue;
+        }
+        if (!in_double && *p == 0x27 /* '\'' */) {
+            in_single = !in_single;
+            continue;
+        }
+        if (!in_single && *p == '"') {
+            in_double = !in_double;
+            continue;
+        }
+        if (in_single || in_double) {
+            continue;
+        }
+        if (*p != '=') {
+            continue;
+        }
+
+        char prev = (p > expr) ? p[-1] : '\0';
+        char next = p[1];
+        if (prev == '=' || prev == '!' || prev == '<' || prev == '>') {
+            continue;
+        }
+        if (next == '=') {
+            continue;
+        }
+        return p;
+    }
+    return NULL;
+}
+
 static char *shellEvaluateArithmetic(const char *expr, bool *out_error) {
     if (out_error) {
         *out_error = false;
@@ -5911,7 +5951,7 @@ static bool shellLetEvaluateExpression(VM *vm, const char *text, long long *out_
         return false;
     }
 
-    char *eq = strchr(start, '=');
+    char *eq = shellLetFindAssignment(start);
     if (!eq) {
         bool eval_error = false;
         char *result = shellEvaluateArithmetic(start, &eval_error);
@@ -5937,14 +5977,6 @@ static bool shellLetEvaluateExpression(VM *vm, const char *text, long long *out_
         free(copy);
         return true;
     }
-
-    if (eq[1] == '=' || (eq > start && eq[-1] == '=')) {
-        runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
-        shellMarkArithmeticError();
-        free(copy);
-        return false;
-    }
-
     char *rhs = eq + 1;
     while (*rhs && isspace((unsigned char)*rhs)) {
         rhs++;
