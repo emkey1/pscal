@@ -39,7 +39,7 @@ sudo apt-get install build-essential cmake libcurl4-openssl-dev \
 git clone https://github.com/emkey1/pscal.git
 cd pscal
 mkdir build && cd build
-cmake ..            # add -DSDL=ON to enable SDL support
+cmake ..            # add -DSDL=ON to enable SDL support, add -Drelease=on to enable SDL and all possible extended builtins 
 make
 ```
 
