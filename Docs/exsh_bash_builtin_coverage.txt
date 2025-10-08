@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return finger help bind shopt
 
 Bash builtins missing from exsh
 -------------------------------
-caller command compgen complete compopt disown enable fc getopts hash kill let logout mapfile readarray printf readonly suspend times type typeset ulimit umask
+caller command compgen complete compopt disown enable fc getopts hash kill logout mapfile readarray printf readonly suspend times type typeset ulimit umask
 
 Plans to address missing builtins
 ---------------------------------
@@ -53,10 +53,10 @@ Plans to address missing builtins
    - Implement vmBuiltinShellCaller to read the stack, honour optional depth arguments, and print frames in Bash compatible format.
    - Register the builtin, document it, and add regression scripts that call caller within nested functions for parity with Bash.
 
-8) let arithmetic builtin:
-   - Wrap the arithmetic parser shellEvaluateArithmetic in a new handler that evaluates expressions, updates variables through shellSetTrackedVariable, and sets exit status based on result truthiness.
-   - Register let in the builtin tables, update shellIsRuntimeBuiltin, and document it.
-   - Add parity tests covering numeric success or failure and variable assignments.
+8) let arithmetic builtin: Completed.
+   - Added vmBuiltinShellLet which evaluates each argument with shellEvaluateArithmetic, applying assignments via shellSetTrackedVariable and compound operators for +=, -=, *=, /=, and %= while tracking arithmetic errors.
+   - Registered the builtin across kShellBuiltins, shellIsRuntimeBuiltin, the frontend registry, and documented it within kShellHelpTopics.
+   - Parity tests remain to be added so Bash comparison coverage can exercise the new assignment semantics.
 
 9) mapfile and readarray builtins:
    - Reuse array logic inside vmBuiltinShellRead to create a helper that reads from a stream into an array variable with Bash compatible flags such as -t, -u, and -n.

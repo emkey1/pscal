@@ -110,6 +110,15 @@
             "expected_stdout": "help-builtin-present\n"
         },
         {
+            "id": "let_builtin",
+            "name": "let evaluates expressions and assignments",
+            "category": "builtins",
+            "description": "let updates shell variables, supports compound assignments, and reports truthiness via status.",
+            "script": "Tests/exsh/tests/let_builtin.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "let:start\nstatus:true\nstatus:false-zero\nassign:5\ncompound-add:8\ncompound-mul:16\ncompound-sub:12\ncompound-mod:2\ncompound-div:1\nmulti:5:0\nmulti-zero:0:1\nlet:end"
+        },
+        {
             "id": "pipeline_cache_hit",
             "name": "Pipeline cache reuse emits notice",
             "category": "cache",

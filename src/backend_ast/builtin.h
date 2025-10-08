@@ -125,6 +125,7 @@ Value vmBuiltinShellPushd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPopd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSource(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEval(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLet(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExecCommand(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellRead(struct VM_s* vm, int arg_count, Value* args);

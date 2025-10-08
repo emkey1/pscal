@@ -5834,6 +5834,46 @@ static bool shellArithmeticParseExpression(ShellArithmeticParser *parser, long l
     return true;
 }
 
+static char *shellLetFindAssignment(char *expr) {
+    if (!expr) {
+        return NULL;
+    }
+
+    bool in_single = false;
+    bool in_double = false;
+    for (char *p = expr; *p; ++p) {
+        if (*p == '\\' && p[1]) {
+            ++p;
+            continue;
+        }
+        if (!in_double && *p == 0x27 /* '\'' */) {
+            in_single = !in_single;
+            continue;
+        }
+        if (!in_single && *p == '"') {
+            in_double = !in_double;
+            continue;
+        }
+        if (in_single || in_double) {
+            continue;
+        }
+        if (*p != '=') {
+            continue;
+        }
+
+        char prev = (p > expr) ? p[-1] : '\0';
+        char next = p[1];
+        if (prev == '=' || prev == '!' || prev == '<' || prev == '>') {
+            continue;
+        }
+        if (next == '=') {
+            continue;
+        }
+        return p;
+    }
+    return NULL;
+}
+
 static char *shellEvaluateArithmetic(const char *expr, bool *out_error) {
     if (out_error) {
         *out_error = false;
@@ -5878,6 +5918,192 @@ static char *shellEvaluateArithmetic(const char *expr, bool *out_error) {
         return NULL;
     }
     return result;
+}
+
+static bool shellLetEvaluateExpression(VM *vm, const char *text, long long *out_value) {
+    if (!text) {
+        runtimeError(vm, "let: expected expression");
+        shellMarkArithmeticError();
+        return false;
+    }
+
+    char *copy = strdup(text);
+    if (!copy) {
+        runtimeError(vm, "let: out of memory");
+        shellMarkArithmeticError();
+        return false;
+    }
+
+    char *start = copy;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    *end = '\0';
+
+    if (*start == '\0') {
+        runtimeError(vm, "let: expected expression");
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+
+    char *eq = shellLetFindAssignment(start);
+    if (!eq) {
+        bool eval_error = false;
+        char *result = shellEvaluateArithmetic(start, &eval_error);
+        if (!result || eval_error) {
+            runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
+            shellMarkArithmeticError();
+            free(result);
+            free(copy);
+            return false;
+        }
+        long long value = 0;
+        bool ok = shellArithmeticParseValueString(result, &value);
+        free(result);
+        if (!ok) {
+            runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
+            shellMarkArithmeticError();
+            free(copy);
+            return false;
+        }
+        if (out_value) {
+            *out_value = value;
+        }
+        free(copy);
+        return true;
+    }
+    char *rhs = eq + 1;
+    while (*rhs && isspace((unsigned char)*rhs)) {
+        rhs++;
+    }
+    if (*rhs == '\0') {
+        runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+
+    bool eval_error = false;
+    char *rhs_result = shellEvaluateArithmetic(rhs, &eval_error);
+    if (!rhs_result || eval_error) {
+        runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
+        shellMarkArithmeticError();
+        free(rhs_result);
+        free(copy);
+        return false;
+    }
+    long long rhs_value = 0;
+    bool rhs_ok = shellArithmeticParseValueString(rhs_result, &rhs_value);
+    free(rhs_result);
+    if (!rhs_ok) {
+        runtimeError(vm, "let: arithmetic syntax error: \"%s\"", text);
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+
+    char *lhs_end = eq;
+    while (lhs_end > start && isspace((unsigned char)lhs_end[-1])) {
+        lhs_end--;
+    }
+
+    char op = '\0';
+    if (lhs_end > start) {
+        char candidate = lhs_end[-1];
+        if (candidate == '+' || candidate == '-' || candidate == '*' || candidate == '/' || candidate == '%') {
+            op = candidate;
+            lhs_end--;
+            while (lhs_end > start && isspace((unsigned char)lhs_end[-1])) {
+                lhs_end--;
+            }
+        }
+    }
+
+    lhs_end[0] = '\0';
+    char *name = start;
+    while (*name && isspace((unsigned char)*name)) {
+        name++;
+    }
+    if (*name == '\0') {
+        runtimeError(vm, "let: expected identifier");
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+    if (!shellIsValidEnvName(name)) {
+        runtimeError(vm, "let: %s: invalid identifier", name);
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+
+    long long new_value = rhs_value;
+    if (op != '\0') {
+        char *current_text = shellLookupParameterValue(name, strlen(name));
+        long long current_value = 0;
+        bool current_ok = shellArithmeticParseValueString(current_text, &current_value);
+        free(current_text);
+        if (!current_ok) {
+            runtimeError(vm, "let: %s: invalid numeric value", name);
+            shellMarkArithmeticError();
+            free(copy);
+            return false;
+        }
+        switch (op) {
+            case '+':
+                new_value = current_value + rhs_value;
+                break;
+            case '-':
+                new_value = current_value - rhs_value;
+                break;
+            case '*':
+                new_value = current_value * rhs_value;
+                break;
+            case '/':
+                if (rhs_value == 0) {
+                    runtimeError(vm, "let: division by zero");
+                    shellMarkArithmeticError();
+                    free(copy);
+                    return false;
+                }
+                new_value = current_value / rhs_value;
+                break;
+            case '%':
+                if (rhs_value == 0) {
+                    runtimeError(vm, "let: division by zero");
+                    shellMarkArithmeticError();
+                    free(copy);
+                    return false;
+                }
+                new_value = current_value % rhs_value;
+                break;
+            default:
+                runtimeError(vm, "let: unsupported assignment");
+                shellMarkArithmeticError();
+                free(copy);
+                return false;
+        }
+    }
+
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%lld", new_value);
+    if (!shellSetTrackedVariable(name, buffer, false)) {
+        runtimeError(vm, "let: failed to assign %s", name);
+        shellMarkArithmeticError();
+        free(copy);
+        return false;
+    }
+
+    if (out_value) {
+        *out_value = new_value;
+    }
+    free(copy);
+    return true;
 }
 
 static char *shellExpandWord(const char *text,
@@ -6925,7 +7151,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         return false;
     }
     static const char *kBuiltins[] = {"cd",     "pwd",     "dirs",   "pushd",  "popd",   "exit",    "exec",    "export",  "unset",    "setenv",
-                                      "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
+                                      "unsetenv", "set",    "declare", "trap",    "local",   "let",     "break",   "continue", "alias",
                                       "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
                                       "builtin", "source", "read",    "shift",   "return",  "help",    ":",      "unalias",
                                       "__shell_double_bracket"};
@@ -10182,6 +10408,39 @@ Value vmBuiltinShellEval(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellLet(VM *vm, int arg_count, Value *args) {
+    if (arg_count == 0) {
+        runtimeError(vm, "let: expected expression");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    long long last_value = 0;
+    for (int i = 0; i < arg_count; ++i) {
+        Value value = args[i];
+        if (value.type != TYPE_STRING || !value.s_val) {
+            runtimeError(vm, "let: arguments must be strings");
+            shellMarkArithmeticError();
+            ok = false;
+            break;
+        }
+        long long expr_value = 0;
+        if (!shellLetEvaluateExpression(vm, value.s_val, &expr_value)) {
+            ok = false;
+            break;
+        }
+        last_value = expr_value;
+    }
+
+    if (ok) {
+        shellUpdateStatus(last_value != 0 ? 0 : 1);
+    } else {
+        shellUpdateStatus(1);
+    }
+    return makeVoid();
+}
+
 Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
     int code = 0;
     if (arg_count >= 1 && IS_INTLIKE(args[0])) {
@@ -11887,6 +12146,18 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "local",
         "Sets the runtime flag that marks the current function scope as local-aware."
         " Accepts no arguments.",
+        NULL,
+        0
+    },
+    {
+        "let",
+        "Evaluate arithmetic expressions and assignments.",
+        "let arg [arg ...]",
+        "Each ARG is evaluated with the arithmetic parser. Simple expressions return"
+        " their numeric value, while assignments such as NAME=EXPR and the compound"
+        " forms NAME+=EXPR, NAME-=EXPR, NAME*=EXPR, NAME/=EXPR, and NAME%=EXPR update"
+        " shell variables. The exit status is 0 when the final value is non-zero and"
+        " 1 otherwise.",
         NULL,
         0
     },
