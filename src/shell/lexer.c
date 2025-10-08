@@ -83,14 +83,68 @@ static bool isValidNameLexeme(const char *lexeme, size_t length) {
     if (!(isalpha(first) || first == '_')) {
         return false;
     }
+    const unsigned char backslash = 92;
+    const unsigned char single_quote = 39;
+    const unsigned char double_quote = 34;
+    bool in_brackets = false;
+    bool in_single = false;
+    bool in_double = false;
     for (size_t i = 1; i < length; ++i) {
         unsigned char ch = (unsigned char)lexeme[i];
+        if (in_single) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == single_quote) {
+                in_single = false;
+            }
+            continue;
+        }
+        if (in_double) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == double_quote) {
+                in_double = false;
+            }
+            continue;
+        }
+        if (in_brackets) {
+            if (ch == backslash && i + 1 < length) {
+                ++i;
+                continue;
+            }
+            if (ch == single_quote) {
+                in_single = true;
+                continue;
+            }
+            if (ch == double_quote) {
+                in_double = true;
+                continue;
+            }
+            if (ch == 93) { /* ']' */
+                in_brackets = false;
+                continue;
+            }
+            if (ch == 91) { /* '[' */
+                return false;
+            }
+            continue;
+        }
+        if (ch == 91) {
+            in_brackets = true;
+            continue;
+        }
         if (!(isalnum(ch) || ch == '_')) {
             return false;
         }
     }
-    return true;
+    return !in_brackets && !in_single && !in_double;
 }
+
+
 
 static ShellTokenType checkReservedWord(const char *lexeme);
 
@@ -345,6 +399,9 @@ static ShellToken scanWord(ShellLexer *lexer) {
 
             if (!(startingArrayLiteral || (inArrayLiteral && arrayParenDepth > 0 && (c == '(' || c == ')')))) {
                 bool treat_as_operator = isOperatorDelimiter(c);
+                if (treat_as_operator && inArrayLiteral && arrayParenDepth > 0 && c == '\n') {
+                    treat_as_operator = false;
+                }
                 if (treat_as_operator && isStructuralWordCandidate(c)) {
                     if (allowStructuralLiterals && (lexer->rule_mask & SHELL_LEXER_RULE_1) == 0) {
                         treat_as_operator = false;
@@ -769,10 +826,18 @@ ShellToken shellNextToken(ShellLexer *lexer) {
         }
         case '(': {
             advanceChar(lexer);
+            if (peekChar(lexer) == '(') {
+                advanceChar(lexer);
+                return makeSimpleToken(lexer, SHELL_TOKEN_DLPAREN, "((", 2);
+            }
             return makeSimpleToken(lexer, SHELL_TOKEN_LPAREN, "(", 1);
         }
         case ')': {
             advanceChar(lexer);
+            if (peekChar(lexer) == ')') {
+                advanceChar(lexer);
+                return makeSimpleToken(lexer, SHELL_TOKEN_DRPAREN, "))", 2);
+            }
             return makeSimpleToken(lexer, SHELL_TOKEN_RPAREN, ")", 1);
         }
         case '{': {
@@ -788,7 +853,12 @@ ShellToken shellNextToken(ShellLexer *lexer) {
             int next = peekChar(lexer);
             if (next == '<') {
                 advanceChar(lexer);
-                if (peekChar(lexer) == '-') {
+                int third = peekChar(lexer);
+                if (third == '<') {
+                    advanceChar(lexer);
+                    return makeSimpleToken(lexer, SHELL_TOKEN_TLESS, "<<<", 3);
+                }
+                if (third == '-') {
                     advanceChar(lexer);
                     return makeSimpleToken(lexer, SHELL_TOKEN_DLESSDASH, "<<-", 3);
                 }
@@ -851,6 +921,8 @@ const char *shellTokenTypeName(ShellTokenType type) {
         case SHELL_TOKEN_OR_OR: return "OR_OR";
         case SHELL_TOKEN_LPAREN: return "LPAREN";
         case SHELL_TOKEN_RPAREN: return "RPAREN";
+        case SHELL_TOKEN_DLPAREN: return "DLPAREN";
+        case SHELL_TOKEN_DRPAREN: return "DRPAREN";
         case SHELL_TOKEN_LBRACE: return "LBRACE";
         case SHELL_TOKEN_RBRACE: return "RBRACE";
         case SHELL_TOKEN_FUNCTION: return "FUNCTION";
@@ -873,6 +945,7 @@ const char *shellTokenTypeName(ShellTokenType type) {
         case SHELL_TOKEN_DGREAT: return "DGREAT";
         case SHELL_TOKEN_DLESS: return "DLESS";
         case SHELL_TOKEN_DLESSDASH: return "DLESSDASH";
+        case SHELL_TOKEN_TLESS: return "TLESS";
         case SHELL_TOKEN_LESSGREAT: return "LESSGREAT";
         case SHELL_TOKEN_GREATAND: return "GREATAND";
         case SHELL_TOKEN_LESSAND: return "LESSAND";

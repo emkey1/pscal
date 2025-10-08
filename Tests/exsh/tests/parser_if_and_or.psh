@@ -1,0 +1,12 @@
+echo "if-andor:start"
+count=0
+if true && false; then
+    echo "if-andor:then"
+else
+    echo "if-andor:else"
+fi
+while true && [ "$count" -lt 2 ]; do
+    echo "if-andor:loop:$count"
+    count=$((count + 1))
+done
+echo "if-andor:end"

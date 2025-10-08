@@ -208,7 +208,12 @@ class SolarSystemApp {
       myself.SizeScale = 1.0;
     }
     myself.sunRadius = trunc(rawSun * myself.SizeScale);
-    inittextsystem("/usr/local/pscal//fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    str installRoot;
+    installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (length(installRoot) == 0) {
+      installRoot = "/usr/local/pscal";
+    }
+    inittextsystem(installRoot + "/fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();

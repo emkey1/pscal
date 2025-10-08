@@ -11,9 +11,9 @@ echo "Running CLike Tests"
 echo "CLike Tests End"
 echo
 echo "====================================="
-echo "Running Shell Tests"
-./run_shell_tests.sh
-echo "Shell Tests End"
+echo "Running exsh Tests"
+./run_exsh_tests.sh
+echo "exsh Tests End"
 echo
 echo "====================================="
 echo "Running Rea Tests"

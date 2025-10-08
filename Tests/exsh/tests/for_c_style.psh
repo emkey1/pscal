@@ -1,0 +1,18 @@
+echo "cfor:start"
+for ((i = 0; i < 3; i++)); do
+  echo "cfor:inc:$i"
+done
+
+echo "cfor:dec:start"
+for ((j = 5; j > 2; j -= 2)); do
+  echo "cfor:dec:$j"
+done
+
+echo "cfor:cond-missing:start"
+count=0
+for ((; count < 2; )); do
+  echo "cfor:cond:$count"
+  count=$(expr $count + 1)
+done
+
+echo "cfor:end"

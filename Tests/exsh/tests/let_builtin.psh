@@ -1,0 +1,35 @@
+echo "let:start"
+if let "1"; then
+    echo "status:true"
+else
+    echo "status:false"
+fi
+
+if let "0"; then
+    echo "status:true-zero"
+else
+    echo "status:false-zero"
+fi
+
+unset value
+let "value=5"
+echo "assign:$value"
+let "value+=3"
+echo "compound-add:$value"
+let "value*=2"
+echo "compound-mul:$value"
+let "value-=4"
+echo "compound-sub:$value"
+let "value%=5"
+echo "compound-mod:$value"
+let "value/=2"
+echo "compound-div:$value"
+
+let "chain=7" "chain-=2"
+chain_status=$?
+echo "multi:$chain:$chain_status"
+let "chain-=5"
+chain_status=$?
+echo "multi-zero:$chain:$chain_status"
+
+echo "let:end"

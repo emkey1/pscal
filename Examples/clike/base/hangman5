@@ -349,13 +349,17 @@ int main() {
     struct WordNode* words;
     int word_count;
     int playing, result, padding;
-    str input, scoreMsg, promptMsg;
+    str input, scoreMsg, promptMsg, installRoot;
 
     // Use the first command line argument as the word list if provided.
     if (paramcount() > 0) {
         words = load_words(paramstr(1), &word_count, 6, 9, 2048);
     } else {
-        words = load_words("/usr/local/pscal/etc/words", &word_count, 6, 9, 2048);
+        installRoot = getenv("PSCAL_INSTALL_ROOT");
+        if (strlen(installRoot) == 0) {
+            installRoot = "/usr/local/pscal";
+        }
+        words = load_words(installRoot + "/etc/words", &word_count, 6, 9, 2048);
     }
     if (word_count == 0) { printf("No words loaded.\n"); return 0; }
 

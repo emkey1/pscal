@@ -1,0 +1,8 @@
+#!/usr/bin/env exsh
+sum=$((2 + 3))
+prod=$((sum * 4))
+div=$((prod / 6))
+printf "sum=%s\n" "$sum"
+printf "prod=%s\n" "$prod"
+printf "div=%s\n" "$div"
+printf "fmt=%d+%d=%d\n" 1 2 $((1 + 2))

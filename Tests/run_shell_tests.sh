@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-python3 "$SCRIPT_DIR/exsh/shell_test_harness.py" "$@"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec "$SCRIPT_DIR/run_exsh_tests.sh" "$@"

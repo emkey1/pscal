@@ -214,7 +214,12 @@ class SolarSystemApp {
     int minJupiterSize = trunc(SunMinRadius * JupiterRadiusAU / SunRadiusAU);
     if (minJupiterSize < 1) minJupiterSize = 1;
     myself.AUScale = (myself.centerY - SunMinRadius - maxExtra - minJupiterSize - 10) / 5.20;
-    inittextsystem("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", 16);
+    str installRoot;
+    installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (length(installRoot) == 0) {
+      installRoot = "/usr/local/pscal";
+    }
+    inittextsystem(installRoot + "/fonts/Roboto/static/Roboto-Regular.ttf", 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();

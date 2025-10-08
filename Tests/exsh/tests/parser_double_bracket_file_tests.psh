@@ -1,0 +1,84 @@
+echo "file-tests:start"
+FILE="tmp_exsh_file_test.txt"
+OTHER="tmp_exsh_file_other.txt"
+HARD="tmp_exsh_file_hard.txt"
+DIR="tmp_exsh_file_dir"
+LINK="tmp_exsh_file_link.txt"
+rm -f "$FILE" "$OTHER" "$HARD" "$LINK"
+rm -rf "$DIR"
+if [[ -e "$FILE" ]]; then
+  echo "exists-before"
+else
+  echo "missing-before"
+fi
+
+touch "$FILE"
+if [[ -e "$FILE" ]]; then
+  echo "exists-after"
+fi
+if [[ -f "$FILE" ]]; then
+  echo "is-regular"
+else
+  echo "not-regular"
+fi
+
+mkdir "$DIR"
+if [[ -d "$DIR" ]]; then
+  echo "is-directory"
+fi
+
+ln -s "$FILE" "$LINK"
+if [[ -L "$LINK" ]]; then
+  echo "is-symlink"
+else
+  echo "not-symlink"
+fi
+
+if [[ -s "$FILE" ]]; then
+  echo "non-empty-before"
+else
+  echo "empty-before"
+fi
+printf 'data' > "$FILE"
+if [[ -s "$FILE" ]]; then
+  echo "non-empty-after"
+else
+  echo "still-empty"
+fi
+
+sleep 1
+touch "$OTHER"
+if [[ "$FILE" -nt "$OTHER" ]]; then
+  echo "newer-before"
+else
+  echo "not-newer-before"
+fi
+if [[ "$FILE" -ot "$OTHER" ]]; then
+  echo "older-before"
+else
+  echo "not-older-before"
+fi
+
+sleep 1
+touch "$FILE"
+if [[ "$FILE" -nt "$OTHER" ]]; then
+  echo "newer-after"
+else
+  echo "not-newer-after"
+fi
+if [[ "$FILE" -ot "$OTHER" ]]; then
+  echo "older-after"
+else
+  echo "not-older-after"
+fi
+
+ln "$FILE" "$HARD"
+if [[ "$FILE" -ef "$HARD" ]]; then
+  echo "same-inode"
+else
+  echo "different-inode"
+fi
+
+echo "file-tests:end"
+rm -f "$FILE" "$OTHER" "$HARD" "$LINK"
+rm -rf "$DIR"

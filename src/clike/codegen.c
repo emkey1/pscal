@@ -11,6 +11,7 @@
 #include "compiler/compiler.h"
 #include "vm/string_sentinels.h"
 #include "vm/vm.h"
+#include "pscal_paths.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -1720,7 +1721,7 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
             }
         }
         if (!f) {
-            const char *default_dir = "/usr/local/pscal/clike/lib";
+            const char *default_dir = PSCAL_CLIKE_LIB_DIR;
             size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
             allocated_path = (char*)malloc(len);
             if (allocated_path) {

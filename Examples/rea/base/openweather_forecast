@@ -149,7 +149,12 @@ str resolveApiKey() {
     }
   }
 
-  str legacyKey = tryReadApiKeyFromFile("/usr/local/pscal/lib/openweathermap.key");
+  str installRoot;
+  installRoot = getenv("PSCAL_INSTALL_ROOT");
+  if (length(installRoot) == 0) {
+    installRoot = "/usr/local/pscal";
+  }
+  str legacyKey = tryReadApiKeyFromFile(installRoot + "/lib/openweathermap.key");
   if (legacyKey != "") {
     return legacyKey;
   }

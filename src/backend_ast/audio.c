@@ -3,6 +3,7 @@
 #include "audio.h"
 #include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include "utils.h" // For EXIT_FAILURE_HANDLER
+#include "pscal_paths.h"
 #include <stdio.h>
 #include <string.h> // For strdup
 #ifdef SDL
@@ -32,8 +33,7 @@ Value vmBuiltinLoadsound(VM* vm, int arg_count, Value* args) {
     char full_path[512];
     const char* filename_to_pass = fileNameVal.s_val;
     if (filename_to_pass && filename_to_pass[0] != '.' && filename_to_pass[0] != '/') {
-        const char* default_sound_dir = "/usr/local/pscal/lib/sounds/";
-        snprintf(full_path, sizeof(full_path), "%s%s", default_sound_dir, filename_to_pass);
+        snprintf(full_path, sizeof(full_path), "%s/%s", PSCAL_SOUNDS_DIR, filename_to_pass);
         filename_to_pass = full_path;
     }
     

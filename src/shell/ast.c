@@ -427,17 +427,22 @@ void shellFreeLogicalList(ShellLogicalList *list) {
     free(list);
 }
 
-ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram *body) {
+ShellLoop *shellCreateLoop(bool is_until, ShellCommand *condition, ShellProgram *body) {
     ShellLoop *loop = (ShellLoop *)calloc(1, sizeof(ShellLoop));
     if (!loop) {
         return NULL;
     }
     loop->is_until = is_until;
     loop->is_for = false;
+    loop->is_cstyle_for = false;
     loop->for_variable = NULL;
     shellWordArrayInit(&loop->for_values);
     loop->condition = condition;
     loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = NULL;
+    loop->cstyle_condition = NULL;
+    loop->cstyle_update = NULL;
     return loop;
 }
 
@@ -448,6 +453,7 @@ ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, Shell
     }
     loop->is_until = false;
     loop->is_for = true;
+    loop->is_cstyle_for = false;
     loop->for_variable = variable;
     if (values) {
         loop->for_values = *values;
@@ -459,6 +465,40 @@ ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, Shell
     }
     loop->condition = NULL;
     loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = NULL;
+    loop->cstyle_condition = NULL;
+    loop->cstyle_update = NULL;
+    return loop;
+}
+
+ShellLoop *shellCreateCStyleForLoop(const char *initializer, const char *condition, const char *update,
+                                    ShellProgram *body) {
+    ShellLoop *loop = (ShellLoop *)calloc(1, sizeof(ShellLoop));
+    if (!loop) {
+        return NULL;
+    }
+    loop->is_until = false;
+    loop->is_for = false;
+    loop->is_cstyle_for = true;
+    loop->for_variable = NULL;
+    shellWordArrayInit(&loop->for_values);
+    loop->condition = NULL;
+    loop->body = body;
+    shellRedirectionArrayInit(&loop->redirections);
+    loop->cstyle_init = initializer ? strdup(initializer) : NULL;
+    loop->cstyle_condition = condition ? strdup(condition) : NULL;
+    loop->cstyle_update = update ? strdup(update) : NULL;
+    if ((initializer && !loop->cstyle_init) || (condition && !loop->cstyle_condition) ||
+        (update && !loop->cstyle_update)) {
+        free(loop->cstyle_init);
+        free(loop->cstyle_condition);
+        free(loop->cstyle_update);
+        shellWordArrayFree(&loop->for_values);
+        shellRedirectionArrayFree(&loop->redirections);
+        free(loop);
+        return NULL;
+    }
     return loop;
 }
 
@@ -468,12 +508,16 @@ void shellFreeLoop(ShellLoop *loop) {
         shellFreeWord(loop->for_variable);
     }
     shellWordArrayFree(&loop->for_values);
-    shellFreePipeline(loop->condition);
+    shellFreeCommand(loop->condition);
     shellFreeProgram(loop->body);
+    shellRedirectionArrayFree(&loop->redirections);
+    free(loop->cstyle_init);
+    free(loop->cstyle_condition);
+    free(loop->cstyle_update);
     free(loop);
 }
 
-ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram *then_branch,
+ShellConditional *shellCreateConditional(ShellCommand *condition, ShellProgram *then_branch,
                                          ShellProgram *else_branch) {
     ShellConditional *conditional = (ShellConditional *)calloc(1, sizeof(ShellConditional));
     if (!conditional) {
@@ -487,7 +531,7 @@ ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram 
 
 void shellFreeConditional(ShellConditional *conditional) {
     if (!conditional) return;
-    shellFreePipeline(conditional->condition);
+    shellFreeCommand(conditional->condition);
     shellFreeProgram(conditional->then_branch);
     shellFreeProgram(conditional->else_branch);
     free(conditional);
@@ -735,6 +779,8 @@ static ShellRedirectionArray *shellCommandResolveRedirections(ShellCommand *comm
             return &command->data.simple.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
+        case SHELL_COMMAND_LOOP:
+            return command->data.loop ? &command->data.loop->redirections : NULL;
         default:
             return NULL;
     }
@@ -749,6 +795,8 @@ static const ShellRedirectionArray *shellCommandResolveRedirectionsConst(const S
             return &command->data.simple.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
+        case SHELL_COMMAND_LOOP:
+            return (command->data.loop) ? &command->data.loop->redirections : NULL;
         default:
             return NULL;
     }
@@ -1078,7 +1126,11 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, "\"isUntil\": %s,\n", command->data.loop && command->data.loop->is_until ? "true" : "false");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"condition\": ");
-            shellDumpPipelineJson(out, command->data.loop ? command->data.loop->condition : NULL, indent + 4);
+            if (command->data.loop && command->data.loop->condition) {
+                shellDumpCommandJson(out, command->data.loop->condition, indent + 4);
+            } else {
+                fprintf(out, "null\n");
+            }
             fprintf(out, ",\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"body\": ");
@@ -1091,7 +1143,11 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, "{\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"condition\": ");
-            shellDumpPipelineJson(out, command->data.conditional ? command->data.conditional->condition : NULL, indent + 4);
+            if (command->data.conditional && command->data.conditional->condition) {
+                shellDumpCommandJson(out, command->data.conditional->condition, indent + 4);
+            } else {
+                fprintf(out, "null\n");
+            }
             fprintf(out, ",\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"then\": ");

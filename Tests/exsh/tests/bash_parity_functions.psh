@@ -1,0 +1,7 @@
+#!/usr/bin/env exsh
+set -- alpha beta gamma
+printf "count:%s\n" "$#"
+printf "values:%s,%s,%s\n" "$1" "$2" "$3"
+shift
+printf "after-shift:%s\n" "$#"
+printf "remaining:%s,%s\n" "$1" "$2"

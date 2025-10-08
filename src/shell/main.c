@@ -2709,6 +2709,7 @@ int main(int argc, char **argv) {
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     shellRuntimeSetArg0(options.frontend_path);
+    shellRuntimeSetInteractive(false);
 
     int dump_ext_builtins_flag = 0;
     const char *path = NULL;
@@ -2756,6 +2757,7 @@ int main(int argc, char **argv) {
     shellRuntimeInitSignals();
 
     if (path) {
+        shellRuntimeSetInteractive(false);
         char *src = shellLoadFile(path);
         if (!src) {
             return EXIT_FAILURE;
@@ -2779,6 +2781,7 @@ int main(int argc, char **argv) {
     gParamValues = NULL;
 
     if (isatty(STDIN_FILENO)) {
+        shellRuntimeSetInteractive(true);
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {
             return vmExitWithCleanup(rc_status);
@@ -2788,6 +2791,7 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(status);
     }
 
+    shellRuntimeSetInteractive(false);
     char *stdin_src = readStream(stdin);
     if (!stdin_src) {
         return EXIT_FAILURE;

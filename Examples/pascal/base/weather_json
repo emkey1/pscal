@@ -4,8 +4,19 @@ program DisplayWeatherJson;
 uses CRT, SysUtils;
 
 const
-  DEFAULT_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';
   TEMPERATURE_DECIMAL_PLACES = 1;
+
+function ResolveInstallRoot: string;
+begin
+  ResolveInstallRoot := GetEnv('PSCAL_INSTALL_ROOT');
+  if ResolveInstallRoot = '' then
+    ResolveInstallRoot := '/usr/local/pscal';
+end;
+
+function DefaultApiKeyPath: string;
+begin
+  DefaultApiKeyPath := ResolveInstallRoot + '/lib/openweathermap.key';
+end;
 
 function RoundToDecimalPlaces(value: double; decimals: integer): double;
 var
@@ -222,7 +233,7 @@ begin
   else
     keyPath := '~/.pscal/etc/openweathermap.key';
 
-  keyFromFile := TryReadApiKeyFromFile(DEFAULT_API_KEY_PATH);
+  keyFromFile := TryReadApiKeyFromFile(DefaultApiKeyPath);
   if keyFromFile <> '' then
   begin
     LoadApiKey := keyFromFile;

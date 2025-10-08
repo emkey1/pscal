@@ -1,0 +1,19 @@
+#!/usr/bin/env exsh
+# Verify that the read builtin populates array variables via -a just like bash.
+
+while read -ra fields rest; do
+    echo "count:${#fields[@]}"
+    echo "field0:${fields[0]}"
+    echo "field1:${fields[1]}"
+    echo "field2:${fields[2]}"
+    echo "rest:${rest}"
+done <<'DATA'
+alpha beta   gamma
+DATA
+
+read -ra blanks <<<"   "
+echo "blank_count:${#blanks[@]}"
+
+echo "status:$?"
+
+exit 0

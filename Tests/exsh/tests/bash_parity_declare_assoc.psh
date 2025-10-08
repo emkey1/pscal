@@ -1,0 +1,11 @@
+declare -A meta=([name]="mini" ["type"]="prompt")
+meta[state]="running"
+meta["spaced key"]="value"
+
+printf 'name=%s\n' "${meta[name]}"
+printf 'type=%s\n' "${meta[type]}"
+printf 'state=%s\n' "${meta[state]}"
+printf 'space=%s\n' "${meta["spaced key"]}"
+printf 'len=%s\n' "${#meta[@]}"
+printf 'keys:\n'
+printf 'key=%s\n' "${!meta[@]}" | LC_ALL=C sort

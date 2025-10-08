@@ -1,0 +1,7 @@
+unset last
+printf "one\ntwo\n" | while read -r line; do last=$line; done
+if [ -z "${last:-}" ]; then
+  printf "pipeline_subshell\n"
+else
+  printf "pipeline_same_shell:%s\n" "$last"
+fi

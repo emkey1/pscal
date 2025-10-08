@@ -38,6 +38,7 @@
 #include "clike/preproc.h"
 #include "vm/vm.h"
 #include "core/cache.h"
+#include "pscal_paths.h"
 #include "core/utils.h"
 #include "core/build_info.h"
 #include "symbol/symbol.h"
@@ -85,7 +86,7 @@ static char* resolveImportPath(const char* orig_path) {
             free(path);
         }
     }
-    const char *default_dir = "/usr/local/pscal/clike/lib";
+    const char *default_dir = PSCAL_CLIKE_LIB_DIR;
     size_t len = strlen(default_dir) + 1 + strlen(orig_path) + 1;
     char *path = (char*)malloc(len);
     if (!path) return NULL;
@@ -294,7 +295,7 @@ int main(int argc, char **argv) {
     if (!used_cache) {
         clikeCompile(prog, &chunk);
         saveBytecodeToCache(path, kClikeCompilerId, &chunk);
-        fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n",
+        fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {
             fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
@@ -304,7 +305,7 @@ int main(int argc, char **argv) {
             }
         }
     } else {
-        fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n",
+        fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
                 chunk.count, chunk.constants_count);
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);

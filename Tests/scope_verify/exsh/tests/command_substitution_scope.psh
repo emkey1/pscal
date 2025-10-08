@@ -1,0 +1,4 @@
+value="outer"
+result=$( value="inner"; printf "%s" "$value" )
+printf "result:%s\n" "$result"
+printf "after:%s\n" "$value"

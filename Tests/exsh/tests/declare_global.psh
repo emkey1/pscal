@@ -1,0 +1,8 @@
+#!/usr/bin/env exsh
+
+declare_config() {
+    declare -g mp_prompt_loaded="yes"
+}
+
+declare_config
+printf 'mp_prompt_loaded=%s\n' "${mp_prompt_loaded:-unset}"

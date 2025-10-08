@@ -319,7 +319,7 @@ static void shellAnalyzeConditional(ShellSemanticContext *ctx, ShellConditional 
     if (!conditional) {
         return;
     }
-    shellAnalyzePipeline(ctx, conditional->condition);
+    shellAnalyzeCommand(ctx, conditional->condition);
     shellAnalyzeProgramInternal(ctx, conditional->then_branch);
     shellAnalyzeProgramInternal(ctx, conditional->else_branch);
 }
@@ -346,7 +346,9 @@ static void shellAnalyzeLoop(ShellSemanticContext *ctx, ShellLoop *loop) {
     if (!loop) {
         return;
     }
-    shellAnalyzePipeline(ctx, loop->condition);
+    if (!loop->is_for) {
+        shellAnalyzeCommand(ctx, loop->condition);
+    }
     shellAnalyzeProgramInternal(ctx, loop->body);
 }
 

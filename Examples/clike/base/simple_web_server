@@ -367,6 +367,15 @@ void heartbeat() {
   }
 }
 
+str installRoot() {
+  str root;
+  root = getenv("PSCAL_INSTALL_ROOT");
+  if (strlen(root) == 0) {
+    root = "/usr/local/pscal";
+  }
+  return root;
+}
+
 void initFiles() {
   int pid = getpid();
   str pidStr = inttostr(pid);
@@ -374,7 +383,7 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  str source = "/usr/local/pscal/misc/htdocs";
+  str source = installRoot() + "/misc/htdocs";
   int copied = 0;
   if (isDirectory(source)) {
     copied = copyDirectory(source, RootDir);

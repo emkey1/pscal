@@ -17,6 +17,7 @@ from typing import List, Sequence, Tuple
 # Map of language key -> (subdirectory name, harness filename)
 LANGUAGE_HARNESSES = {
     "clike": ("clike", "clike_scope_test_harness.py"),
+    "exsh": ("exsh", "exsh_scope_test_harness.py"),
     "pascal": ("pascal", "pascal_scope_test_harness.py"),
     "rea": ("rea", "rea_scope_test_harness.py"),
 }

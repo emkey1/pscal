@@ -63,7 +63,7 @@ typedef struct {
 } CachedMessageScannerState;
 
 static bool bufferContainsCachedMessage(const char *buf, size_t len, CachedMessageScannerState *state) {
-    static const char cached_msg[] = "Loaded cached byte code";
+    static const char cached_msg[] = "Loaded cached bytecode";
     const size_t needle_len = sizeof(cached_msg) - 1;
 
     if (!state || needle_len == 0) {
@@ -232,7 +232,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                     finalizeBytecode(&chunk);
                     saveBytecodeToCache(programName, kPascalCompilerId, &chunk);
                     // Silence successful compilation message for cleaner test stderr.
-                    // fprintf(stderr, "Compilation successful. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    // fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                         if (!dump_bytecode_only_flag) {
@@ -243,7 +243,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
             } else {
                 // Always emit the cache message so callers can detect cache reuse;
                 // the top-level stderr capture in main() will decide whether to replay.
-                fprintf(stderr, "Loaded cached byte code. Byte code size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                     if (!dump_bytecode_only_flag) {

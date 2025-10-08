@@ -4,7 +4,6 @@ program DisplayWeather;
 uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.
 
 const
-  DEFAULT_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';   // Legacy fallback
   MAX_SUBSTR_LEN = 1024;                         // Max length for copy/pos substrings
 
 type
@@ -21,6 +20,18 @@ var
   apiKeyFromFile : string; // Variable for API Key
   tempC, tempF : real;      // Temperatures in Celsius and Fahrenheit
   valCode : integer;        // Error code for StrToReal
+
+function ResolveInstallRoot: string;
+begin
+  ResolveInstallRoot := GetEnv('PSCAL_INSTALL_ROOT');
+  if ResolveInstallRoot = '' then
+    ResolveInstallRoot := '/usr/local/pscal';
+end;
+
+function DefaultApiKeyPath: string;
+begin
+  DefaultApiKeyPath := ResolveInstallRoot + '/lib/openweathermap.key';
+end;
 
 // --- Function to read API key from file ---
 function TryReadApiKeyFromFile(filename: string): string;
@@ -82,7 +93,7 @@ begin
   else
     keyPath := '~/.pscal/etc/openweathermap.key';
 
-  keyFromFile := TryReadApiKeyFromFile(DEFAULT_API_KEY_PATH);
+  keyFromFile := TryReadApiKeyFromFile(DefaultApiKeyPath);
   if keyFromFile <> '' then
   begin
     LoadApiKey := keyFromFile;

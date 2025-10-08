@@ -29,7 +29,9 @@ The project currently ships several optional built‑in groups:
 | **OpenAI** | `src/ext_builtins/openai` | `chat` (`OpenAIChatCompletions`) |
 
 Individual categories can be enabled or disabled at configure time with
-the following CMake options (all default to `ON`):
+the following CMake options (all default to `ON`).  The 3D helpers follow the
+SDL toggle: they default to `ON` when SDL support is requested and `OFF`
+otherwise so headless builds avoid the extra surface area by default.
 
 ```
 -DENABLE_EXT_BUILTIN_MATH=ON/OFF

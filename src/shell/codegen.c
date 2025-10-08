@@ -210,6 +210,7 @@ static const char *redirTypeName(ShellRedirectionType type) {
         case SHELL_REDIRECT_OUTPUT: return ">";
         case SHELL_REDIRECT_APPEND: return ">>";
         case SHELL_REDIRECT_HEREDOC: return "<<";
+        case SHELL_REDIRECT_HERE_STRING: return "<<<";
         case SHELL_REDIRECT_DUP_INPUT: return "<&";
         case SHELL_REDIRECT_DUP_OUTPUT: return ">&";
         case SHELL_REDIRECT_CLOBBER: return ">|";
@@ -328,11 +329,13 @@ static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function,
 static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
     int line = command ? command->line : 0;
     char meta[128];
-    snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d",
+    snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d;line=%d;col=%d",
              (command && command->exec.runs_in_background) || runs_in_background ? 1 : 0,
              command ? command->exec.pipeline_index : -1,
              command && command->exec.is_pipeline_head ? 1 : 0,
-             command && command->exec.is_pipeline_tail ? 1 : 0);
+             command && command->exec.is_pipeline_tail ? 1 : 0,
+             command ? command->line : 0,
+             command ? command->column : 0);
     emitPushString(chunk, meta, line);
 
     size_t arg_count = 1; // metadata entry
@@ -459,11 +462,17 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     }
 
     bool isFor = loop->is_for;
+    bool isCStyle = loop->is_cstyle_for;
+    const ShellRedirectionArray *redirs = loop ? &loop->redirections : NULL;
+    size_t redir_count = redirs ? redirs->count : 0;
+
     char meta[128];
     if (isFor) {
-        snprintf(meta, sizeof(meta), "mode=for");
+        snprintf(meta, sizeof(meta), "mode=for;redirs=%zu", redir_count);
+    } else if (isCStyle) {
+        snprintf(meta, sizeof(meta), "mode=cfor;redirs=%zu", redir_count);
     } else {
-        snprintf(meta, sizeof(meta), "mode=%s", loop->is_until ? "until" : "while");
+        snprintf(meta, sizeof(meta), "mode=%s;redirs=%zu", loop->is_until ? "until" : "while", redir_count);
     }
     emitPushString(chunk, meta, line);
 
@@ -487,19 +496,56 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
                 arg_count++;
             }
         }
+    } else if (isCStyle) {
+        const char *init = loop->cstyle_init ? loop->cstyle_init : "";
+        const char *cond = loop->cstyle_condition ? loop->cstyle_condition : "";
+        const char *update = loop->cstyle_update ? loop->cstyle_update : "";
+        emitPushString(chunk, init, line);
+        if (arg_count < 255) arg_count++;
+        emitPushString(chunk, cond, line);
+        if (arg_count < 255) arg_count++;
+        emitPushString(chunk, update, line);
+        if (arg_count < 255) arg_count++;
     }
+
+    if (redirs && redir_count > 0) {
+        size_t emit_count = redir_count;
+        if ((size_t)arg_count + emit_count > 255) {
+            if (arg_count < 255) {
+                emit_count = 255 - arg_count;
+            } else {
+                emit_count = 0;
+            }
+            fprintf(stderr, "shell codegen warning: loop redirections truncated (%zu).\n", redir_count);
+        }
+        for (size_t i = 0; i < emit_count; ++i) {
+            const ShellRedirection *redir = redirs->items[i];
+            char *serialized = buildRedirectionMetadata(redir);
+            if (!serialized) {
+                emitPushString(chunk, "redir:fd=;type=;word=;dup=;here=", line);
+            } else {
+                emitPushString(chunk, serialized, line);
+                free(serialized);
+            }
+            if (arg_count < 255) {
+                arg_count++;
+            }
+        }
+    }
+
     emitBuiltinProc(chunk, "__shell_loop", arg_count, line);
 
     int conditionStart = chunk->count;
     int exitJump = -1;
 
-    if (isFor) {
+    bool usesLoopReady = isFor || isCStyle;
+    if (usesLoopReady) {
         emitCallHost(chunk, HOST_FN_SHELL_LOOP_IS_READY, line);
         writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
         exitJump = chunk->count;
         emitShort(chunk, 0xFFFF, line);
     } else {
-        compilePipeline(chunk, loop->condition, false);
+        compileCommand(chunk, loop->condition, false);
         emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
         emitPushInt(chunk, 0, line);
         writeBytecodeChunk(chunk, EQUAL, line);
@@ -543,7 +589,7 @@ static void compileConditional(BytecodeChunk *chunk, const ShellConditional *con
     }
     emitPushString(chunk, "branch=if", line);
     emitBuiltinProc(chunk, "__shell_if", 1, line);
-    compilePipeline(chunk, conditional->condition, false);
+    compileCommand(chunk, conditional->condition, false);
     emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
     emitPushInt(chunk, 0, line);
     writeBytecodeChunk(chunk, EQUAL, line);

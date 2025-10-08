@@ -15,6 +15,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"pwd", "pwd", 2},
     {"echo", "echo", 3},
     {"exit", "exit", 4},
+    {"exec", "exec", 31},
     {"true", "true", 5},
     {"false", "false", 6},
     {"set", "set", 7},
@@ -25,9 +26,11 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"[", "test", 11},
     {"shift", "shift", 12},
     {"alias", "alias", 13},
+    {"unalias", "unalias", 38},
     {"history", "history", 14},
     {"setenv", "setenv", 15},
     {"unsetenv", "unsetenv", 16},
+    {"declare", "declare", 32},
     {"jobs", "jobs", 17},
     {"fg", "fg", 18},
     {"bg", "bg", 19},
@@ -44,6 +47,12 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"return", "return", 28},
     {"finger", "finger", 29},
     {"help", "help", 30},
+    {"bind", "bind", 33},
+    {"shopt", "shopt", 34},
+    {"dirs", "dirs", 35},
+    {"pushd", "pushd", 36},
+    {"popd", "popd", 37},
+    {"let", "let", 39},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_and", "__shell_and", 1003},
@@ -55,7 +64,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"__shell_case_clause", "__shell_case_clause", 1009},
     {"__shell_case_end", "__shell_case_end", 1010},
     {"__shell_define_function", "__shell_define_function", 1011},
-    {"__shell_loop_end", "__shell_loop_end", 1012}
+    {"__shell_loop_end", "__shell_loop_end", 1012},
+    {"__shell_double_bracket", "__shell_double_bracket", 1013}
 };
 
 static char *shellLowercase(const char *name) {

@@ -54,6 +54,7 @@ typedef enum {
     SHELL_REDIRECT_OUTPUT,
     SHELL_REDIRECT_APPEND,
     SHELL_REDIRECT_HEREDOC,
+    SHELL_REDIRECT_HERE_STRING,
     SHELL_REDIRECT_DUP_INPUT,
     SHELL_REDIRECT_DUP_OUTPUT,
     SHELL_REDIRECT_CLOBBER
@@ -110,14 +111,19 @@ typedef struct {
 typedef struct ShellLoop {
     bool is_until;
     bool is_for;
+    bool is_cstyle_for;
     ShellWord *for_variable;
     ShellWordArray for_values;
-    ShellPipeline *condition;
+    struct ShellCommand *condition;
     struct ShellProgram *body;
+    ShellRedirectionArray redirections;
+    char *cstyle_init;
+    char *cstyle_condition;
+    char *cstyle_update;
 } ShellLoop;
 
 typedef struct ShellConditional {
-    ShellPipeline *condition;
+    struct ShellCommand *condition;
     struct ShellProgram *then_branch;
     struct ShellProgram *else_branch;
 } ShellConditional;
@@ -229,11 +235,13 @@ ShellLogicalList *shellCreateLogicalList(void);
 void shellLogicalListAdd(ShellLogicalList *list, ShellPipeline *pipeline, ShellLogicalConnector connector);
 void shellFreeLogicalList(ShellLogicalList *list);
 
-ShellLoop *shellCreateLoop(bool is_until, ShellPipeline *condition, ShellProgram *body);
+ShellLoop *shellCreateLoop(bool is_until, struct ShellCommand *condition, ShellProgram *body);
 ShellLoop *shellCreateForLoop(ShellWord *variable, ShellWordArray *values, ShellProgram *body);
+ShellLoop *shellCreateCStyleForLoop(const char *initializer, const char *condition, const char *update,
+                                    ShellProgram *body);
 void shellFreeLoop(ShellLoop *loop);
 
-ShellConditional *shellCreateConditional(ShellPipeline *condition, ShellProgram *then_branch,
+ShellConditional *shellCreateConditional(struct ShellCommand *condition, ShellProgram *then_branch,
                                          ShellProgram *else_branch);
 void shellFreeConditional(ShellConditional *conditional);
 

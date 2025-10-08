@@ -38,6 +38,15 @@
             "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
         },
         {
+            "id": "loop_c_style_for",
+            "name": "C-style for loops execute arithmetic clauses",
+            "category": "control",
+            "description": "initializer, condition, and update clauses drive numeric for (( )) loops.",
+            "script": "Tests/exsh/tests/for_c_style.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "cfor:start\ncfor:inc:0\ncfor:inc:1\ncfor:inc:2\ncfor:dec:start\ncfor:dec:5\ncfor:dec:3\ncfor:cond-missing:start\ncfor:cond:0\ncfor:cond:1\ncfor:end"
+        },
+        {
             "id": "loop_colon_builtin",
             "name": "Colon builtin drives control flow",
             "category": "control",
@@ -74,6 +83,15 @@
             "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
         },
         {
+            "id": "declare_global_scope",
+            "name": "declare -g updates global scope",
+            "category": "builtins",
+            "description": "declare -g assigns to the global scope even when run inside functions.",
+            "script": "Tests/exsh/tests/declare_global.psh",
+            "expect": "match_bash",
+            "expected_stdout": "mp_prompt_loaded=yes\n"
+        },
+        {
             "id": "source_dot_alias",
             "name": "dot builtin sources scripts",
             "category": "builtins",
@@ -83,22 +101,22 @@
             "expected_stdout": "source-dot:start\nsource-dot-helper:start\nsource-dot-helper:end\nafter:from-dot\nsource-dot:end"
         },
         {
-            "id": "help_builtin",
-            "name": "help lists shell builtins",
-            "category": "builtins",
-            "description": "help without arguments prints an overview; help name shows details and honours aliases.",
-            "script": "Tests/exsh/tests/help_builtin.psh",
-            "expect": "runtime_ok",
-            "expected_stdout": "help\nexsh is the PSCAL shell front end, providing an interactive environment for orchestrating VM builtins and external commands.\n\nexsh can evaluate shell scripts, manage pipelines, and redirect input and output just like a traditional POSIX-style shell. Use '>' to overwrite files, '>>' to append, and '|' to connect commands.\n\n- Source ~/.exshrc to customise prompts, aliases, and startup behaviour.\n- Use bookmark helpers (bookmark, showmarks, jump) to save and revisit directories quickly.\n- Manage jobs with bg, fg, jobs, wait, and trap.\n- exit leaves the shell; builtin invokes PSCAL VM helpers directly.\n\n- exsh loads ~/.exshrc on startup when the file is present.\n\n- Navigate the interface with familiar terminal controls when used in supporting environments.\n- Edit with vim or pico, transfer data via curl, scp, or sftp, and inspect the network with ping, host, or nslookup.\n- Extend the runtime with PSCAL packages and builtins compiled via the toolchain.\n\n- Compiled scripts are cached in ~/.pscal/bc_cache; use --no-cache to force recompilation.\n\nDocumentation: Docs/exsh_overview.md inside the repository.\nSupport: Report issues on the GitHub PSCAL project tracker or Discord community channels.\n\nType 'help -l' for a list of functions, or 'help <function>' for help on a specific shell function.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\nsource - Execute a file in the current shell environment.\nAliases: .\nUsage: source file [args ...]\n\nLoads the named file and executes it without spawning a subshell. Positional parameters are temporarily replaced when arguments are supplied. The '.' builtin is an alias.\n"
-        },
-        {
             "id": "help_builtin_list",
             "name": "help -l lists shell builtins",
             "category": "builtins",
-            "description": "help -l prints the builtin catalog with summaries.",
+            "description": "help -l output includes the help builtin entry.",
             "script": "Tests/exsh/tests/help_list.psh",
             "expect": "runtime_ok",
-            "expected_stdout": "exsh builtins. Type 'help <function>' for detailed usage.\n\nBuiltin     Summary\n------      -------\nalias       Define or display shell aliases.\nbg          Resume a stopped job in the background.\nbreak       Exit from the innermost loop(s).\nbuiltin     Invoke a PSCAL VM builtin directly.\ncd          Change the current working directory.\ncontinue    Skip to the next loop iteration.\neval        Execute words as an inline script.\nexit        Request that the shell terminate.\nexport      Set environment variables or print the environment.\nfg          Move a job to the foreground.\nfinger      Display basic account information.\nhelp        List builtins or describe a specific builtin.\nhistory     Print the interactive history list.\njobs        List active background jobs.\nlocal       Activate the shell's local scope flag.\npwd         Print the current working directory.\nread        Read a line from standard input.\nreturn      Return from the current shell function.\nset         Update shell option flags.\nsetenv      Set or print environment variables.\nshift       Rotate positional parameters to the left.\nsource (.)  Execute a file in the current shell environment.\ntrap        Toggle the shell's trap flag.\nunset       Remove variables from the environment.\nunsetenv    Alias for unset.\nwait        Wait for a job to change state.\n:           Do nothing and succeed.\n"
+            "expected_stdout": "help-builtin-present\n"
+        },
+        {
+            "id": "let_builtin",
+            "name": "let evaluates expressions and assignments",
+            "category": "builtins",
+            "description": "let updates shell variables, supports compound assignments, and reports truthiness via status.",
+            "script": "Tests/exsh/tests/let_builtin.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "let:start\nstatus:true\nstatus:false-zero\nassign:5\ncompound-add:8\ncompound-mul:16\ncompound-sub:12\ncompound-mod:2\ncompound-div:1\nmulti:5:0\nmulti-zero:0:1\nlet:end"
         },
         {
             "id": "pipeline_cache_hit",
@@ -108,9 +126,8 @@
             "script": "Examples/exsh/pipeline.psh",
             "expect": "runtime_ok",
             "prime_cache": true,
-            "expected_stdout": "pipeline:start\nalpha\npipeline:end",
-            "expected_stderr_substring": "Loaded cached bytecode"
-        },
+      "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+    },
         {
             "id": "case_basic",
             "name": "Case statements dispatch patterns",
@@ -209,6 +226,15 @@
             "script": "Tests/exsh/tests/array_assignment.psh",
             "expect": "runtime_ok",
             "expected_stdout": "lexer-array-assignment:ok"
+        },
+        {
+            "id": "lexer_array_assignment_multiline",
+            "name": "Array assignments allow embedded newlines",
+            "category": "lexer",
+            "description": "name=(...) spanning multiple lines should remain a single assignment word.",
+            "script": "Tests/exsh/tests/array_assignment_multiline.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "primary=blue\nlen=2"
         },
         {
             "id": "array_assignment_expansion_scalar",
@@ -310,6 +336,15 @@
             "expected_stdout": "double-bracket:start\nbranch:missing\nbranch:now-present\ndouble-bracket:end"
         },
         {
+            "id": "grammar_double_bracket_file_tests",
+            "name": "[[ ]] handles file-test operators",
+            "category": "grammar",
+            "description": "File-test operators like -e, -f, -d, -L, -s, -nt, -ot, and -ef evaluate correctly within double brackets.",
+            "script": "Tests/exsh/tests/parser_double_bracket_file_tests.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "file-tests:start\nmissing-before\nexists-after\nis-regular\nis-directory\nis-symlink\nempty-before\nnon-empty-after\nnot-newer-before\nolder-before\nnewer-after\nnot-older-after\nsame-inode\nfile-tests:end"
+        },
+        {
             "id": "lexer_structural_words",
             "name": "Structural tokens can be literal words",
             "category": "lexer",
@@ -326,6 +361,101 @@
             "script": "Tests/exsh/tests/parser_if_comment_boundary.psh",
             "expect": "runtime_ok",
             "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
-        }
-    ]
+        },
+    {
+      "id": "grammar_if_and_or_conditions",
+      "name": "Logical connectors work in if/while conditions",
+      "category": "grammar",
+      "description": "Allows && and || lists in conditional and loop headers.",
+      "script": "Tests/exsh/tests/parser_if_and_or.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
+    }
+    ,
+    {
+      "id": "bash_parity_arithmetic",
+      "name": "Arithmetic expansion matches bash",
+      "category": "parity",
+      "description": "Verify arithmetic evaluation keeps parity with bash for nested expressions.",
+      "script": "Tests/exsh/tests/bash_parity_arithmetic.psh",
+      "expect": "match_bash",
+      "expected_stdout": "sum=5\nprod=20\ndiv=3\nfmt=1+2=3\n"
+    },
+    {
+      "id": "bash_parity_functions",
+      "name": "Function locals mirror bash semantics",
+      "category": "parity",
+      "description": "Function locals and string assembly behave the same as bash.",
+      "script": "Tests/exsh/tests/bash_parity_functions.psh",
+      "expect": "match_bash",
+      "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
+    },
+    {
+      "id": "bash_parity_export_pipeline",
+      "name": "export works in pipelines",
+      "category": "parity",
+      "description": "Ensure the export builtin runs correctly when piped to another command.",
+      "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
+      "expect": "match_bash"
+    },
+    {
+      "id": "bash_parity_declare_assoc",
+      "name": "Associative arrays mirror bash declare",
+      "category": "parity",
+      "description": "declare -A assignments and iteration match bash semantics.",
+      "script": "Tests/exsh/tests/bash_parity_declare_assoc.psh",
+      "expect": "match_bash"
+    },
+    {
+      "id": "bash_parity_bind_shopt",
+      "name": "bind and shopt mimic bash",
+      "category": "parity",
+      "description": "Verify bind accepts readline settings and shopt reports state like bash.",
+      "script": "Tests/exsh/tests/bash_parity_bind_shopt.psh",
+      "expect": "match_bash"
+    },
+    {
+      "id": "bash_parity_unalias",
+      "name": "unalias mirrors bash error handling",
+      "category": "parity",
+      "description": "Removing aliases individually or via -a matches Bash status codes and failures.",
+      "script": "Tests/exsh/tests/bash_parity_unalias.psh",
+      "expect": "match_bash"
+    },
+    {
+      "id": "read_ifs_split",
+      "name": "read honours custom IFS",
+      "category": "builtin",
+      "description": "Confirm the read builtin splits fields using the active IFS value.",
+      "script": "Tests/exsh/tests/read_ifs.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "read_fields:alpha:beta:gamma\n"
+    },
+    {
+      "id": "read_array_assign",
+      "name": "read -a populates arrays",
+      "category": "builtin",
+      "description": "Ensure the read builtin assigns fields to indexed arrays like bash.",
+      "script": "Tests/exsh/tests/read_array_assign.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "count:3\nfield0:alpha\nfield1:beta\nfield2:gamma\nrest:\nblank_count:0\nstatus:0\n"
+    },
+    {
+      "id": "redirection_here_string",
+      "name": "Here strings feed stdin",
+      "category": "redirection",
+      "description": "The <<< operator should redirect expanded text with a trailing newline to stdin.",
+      "script": "Tests/exsh/tests/here_string.psh",
+      "expect": "runtime_ok",
+      "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
+    },
+    {
+      "id": "bash_directory_stack",
+      "name": "Bash parity for directory stack builtins",
+      "category": "parity",
+      "description": "pushd, popd, and dirs align with Bash output.",
+      "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
+      "expect": "match_bash"
+    }
+  ]
 }

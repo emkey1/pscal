@@ -3,7 +3,7 @@
 This folder contains sample programs for the Pscal CLike front end.
 
 Clike files can be run by running the 'clike' binary, which will compile them 
-byte code and execute the byte code in the PSCAL VM.
+bytecode and execute the bytecode in the PSCAL VM.
 
 C-like examples (`.cl`) can be executed with the native clike compiler built in
 `build/bin`:
@@ -38,4 +38,5 @@ build/bin/clike Examples/Clike/<program>
 
 The clike front end resolves imports by first checking the directory in the
 `CLIKE_LIB_DIR` environment variable and falling back to
-`/usr/local/pscal/clike/lib`.
+`${PSCAL_INSTALL_ROOT}/clike/lib` (defaulting to
+`/usr/local/pscal/clike/lib`).

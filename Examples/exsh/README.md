@@ -87,6 +87,27 @@ When a builtin returns a result the command prints it to `stdout`. Procedures
 that return `void` simply update `PSCALSHELL_LAST_STATUS` to `0` on success so
 you can chain them in conditionals.
 
+## `sierpinski_threads.psh`
+
+```sh
+#!/usr/bin/env exsh
+builtin ClrScr
+builtin HideCursor
+# ... see file for the full threaded renderer ...
+```
+
+This port of the Pascal `SierpinskiTriangleThreads` demo renders the fractal
+with three background jobs that share the VM's console helpers. The script
+queries the terminal size, hides the cursor, and then dispatches three recursive
+workers that call `GotoXY`/`Write` to fill the screen. By default it uses level
+13 detail; set `SIERPINSKI_LEVEL` (and optionally `SIERPINSKI_CHAR`) before
+invocation to tweak the recursion depth and drawing character:
+
+```sh
+SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
+    Examples/exsh/sierpinski_threads.psh
+```
+
 ## `logical.psh`
 
 ```sh

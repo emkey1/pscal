@@ -1,0 +1,49 @@
+{
+  "tests": [
+    {
+      "id": "brace_scope_shared",
+      "name": "Brace groups share the parent scope",
+      "category": "blocks",
+      "description": "Assignments inside { ... } should affect the surrounding environment.",
+      "script": "brace_scope_shared.psh",
+      "expect": "match_bash",
+      "expected_stdout": "inside:inner\nafter:inner\n"
+    },
+    {
+      "id": "command_substitution_isolated",
+      "name": "Command substitutions run in subshells",
+      "category": "subshells",
+      "description": "Variables set inside $(...) must not leak into the caller.",
+      "script": "command_substitution_scope.psh",
+      "expect": "match_bash",
+      "expected_stdout": "result:inner\nafter:outer\n"
+    },
+    {
+      "id": "pipeline_runs_in_subshell",
+      "name": "Pipelines spawn subshells",
+      "category": "pipelines",
+      "description": "Variables mutated inside a pipeline while-loop should not persist afterwards.",
+      "script": "pipeline_subshell_scope.psh",
+      "expect": "match_bash",
+      "expected_stdout": "pipeline_subshell\n"
+    },
+    {
+      "id": "function_global_mutation",
+      "name": "Functions mutate globals without local",
+      "category": "functions",
+      "description": "Without the local keyword, functions should update the surrounding scope.",
+      "script": "function_global_mutation.psh",
+      "expect": "match_bash",
+      "expected_stdout": "count=2\n"
+    },
+    {
+      "id": "for_loop_variable_persists",
+      "name": "For loop variable remains set",
+      "category": "loops",
+      "description": "Loop variables should be visible after the loop completes, mirroring bash.",
+      "script": "for_loop_persistence.psh",
+      "expect": "match_bash",
+      "expected_stdout": "loop:0\nloop:1\nloop:2\nafter:2\n"
+    }
+  ]
+}
