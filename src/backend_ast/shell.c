@@ -4708,6 +4708,31 @@ static void shellDirectoryStackWriteAll(int fd, const char *data, size_t len) {
     }
 }
 
+static void shellDirectoryStackWriteEntry(int fd, const char *entry) {
+    if (fd < 0) {
+        return;
+    }
+    if (!entry) {
+        return;
+    }
+    const char *home = getenv("HOME");
+    size_t home_len = home ? strlen(home) : 0;
+    if (home_len > 0 && strncmp(entry, home, home_len) == 0 &&
+        (entry[home_len] == '\0' || entry[home_len] == '/')) {
+        shellDirectoryStackWriteAll(fd, "~", 1);
+        const char *suffix = entry + home_len;
+        if (*suffix == '/') {
+            suffix++;
+            if (*suffix) {
+                shellDirectoryStackWriteAll(fd, "/", 1);
+                shellDirectoryStackWriteAll(fd, suffix, strlen(suffix));
+            }
+        }
+        return;
+    }
+    shellDirectoryStackWriteAll(fd, entry, strlen(entry));
+}
+
 static void shellDirectoryStackPrint(int fd) {
     if (fd < 0) {
         return;
@@ -4718,10 +4743,7 @@ static void shellDirectoryStackPrint(int fd) {
     }
     for (size_t i = 0; i < gShellRuntime.dir_stack_count; ++i) {
         const char *entry = gShellRuntime.dir_stack[i] ? gShellRuntime.dir_stack[i] : "";
-        size_t len = strlen(entry);
-        if (len > 0) {
-            shellDirectoryStackWriteAll(fd, entry, len);
-        }
+        shellDirectoryStackWriteEntry(fd, entry);
         if (i + 1 < gShellRuntime.dir_stack_count) {
             shellDirectoryStackWriteAll(fd, " ", 1);
         }

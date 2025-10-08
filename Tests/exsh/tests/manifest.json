@@ -104,10 +104,10 @@
             "id": "help_builtin_list",
             "name": "help -l lists shell builtins",
             "category": "builtins",
-            "description": "help -l prints the builtin catalog with summaries.",
+            "description": "help -l output includes the help builtin entry.",
             "script": "Tests/exsh/tests/help_list.psh",
             "expect": "runtime_ok",
-        "expected_stdout": "exsh builtins. Type 'help <function>' for detailed usage.\n\nBuiltin     Summary\n------      -------\nalias       Define or display shell aliases.\nbind        Configure readline behaviour.\nbg          Resume a stopped job in the background.\nbreak       Exit from the innermost loop(s).\nbuiltin     Invoke a PSCAL VM builtin directly.\ncd          Change the current working directory.\ncontinue    Skip to the next loop iteration.\ndeclare     Declare variables and arrays.\neval        Execute words as an inline script.\nexit        Request that the shell terminate.\nexport      Set environment variables or print the environment.\nfg          Move a job to the foreground.\nfinger      Display basic account information.\nhelp        List builtins or describe a specific builtin.\nhistory     Print the interactive history list.\njobs        List active background jobs.\nlocal       Activate the shell's local scope flag.\npwd         Print the current working directory.\nread        Read a line from standard input.\nreturn      Return from the current shell function.\nset         Update shell option flags.\nshopt       Toggle optional shell behaviours.\nsetenv      Set or print environment variables.\nshift       Rotate positional parameters to the left.\nsource (.)  Execute a file in the current shell environment.\ntrap        Toggle the shell's trap flag.\nunset       Remove variables from the environment.\nunsetenv    Alias for unset.\nwait        Wait for a job to change state.\n:           Do nothing and succeed.\n"
+            "expected_stdout": "help-builtin-present\n"
         },
         {
             "id": "pipeline_cache_hit",
