@@ -15,6 +15,7 @@
 #include <fnmatch.h>
 #include <glob.h>
 #include <limits.h>
+#include <stddef.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <signal.h>
@@ -439,6 +440,10 @@ typedef struct {
     bool continue_requested;
     int break_requested_levels;
     int continue_requested_levels;
+    char **dir_stack;
+    size_t dir_stack_count;
+    size_t dir_stack_capacity;
+    bool dir_stack_initialised;
 } ShellRuntimeState;
 
 typedef enum {
@@ -506,7 +511,11 @@ static ShellRuntimeState gShellRuntime = {
     .break_requested = false,
     .continue_requested = false,
     .break_requested_levels = 0,
-    .continue_requested_levels = 0
+    .continue_requested_levels = 0,
+    .dir_stack = NULL,
+    .dir_stack_count = 0,
+    .dir_stack_capacity = 0,
+    .dir_stack_initialised = false
 };
 
 static unsigned long gShellStatusVersion = 0;
@@ -4520,6 +4529,228 @@ static void shellUnsetTrackedVariable(const char *name) {
     shellArrayRegistryRemove(name);
 }
 
+static void shellDirectoryStackReportError(VM *vm, const char *builtin, const char *message) {
+    const char *label = (builtin && *builtin) ? builtin : "shell";
+    const char *detail = (message && *message) ? message : "unknown error";
+    if (vm) {
+        runtimeError(vm, "%s: %s", label, detail);
+    } else {
+        fprintf(stderr, "%s: %s\n", label, detail);
+    }
+}
+
+static void shellDirectoryStackReportErrno(VM *vm, const char *builtin) {
+    shellDirectoryStackReportError(vm, builtin, strerror(errno));
+}
+
+static void shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd);
+
+static bool shellDirectoryStackEnsureCapacity(size_t needed) {
+    if (gShellRuntime.dir_stack_capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellRuntime.dir_stack_capacity ? (gShellRuntime.dir_stack_capacity * 2) : 4;
+    if (new_capacity < needed) {
+        new_capacity = needed;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(char *)) {
+        return false;
+    }
+    char **resized = (char **)realloc(gShellRuntime.dir_stack, new_capacity * sizeof(char *));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellRuntime.dir_stack_capacity; i < new_capacity; ++i) {
+        resized[i] = NULL;
+    }
+    gShellRuntime.dir_stack = resized;
+    gShellRuntime.dir_stack_capacity = new_capacity;
+    return true;
+}
+
+static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
+    if (gShellRuntime.dir_stack_initialised && gShellRuntime.dir_stack_count > 0) {
+        return true;
+    }
+    if (gShellRuntime.dir_stack_count > 0) {
+        gShellRuntime.dir_stack_initialised = true;
+        return true;
+    }
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        shellDirectoryStackReportErrno(vm, builtin);
+        shellUpdateStatus(errno ? errno : 1);
+        return false;
+    }
+    char *copy = strdup(cwd);
+    if (!copy) {
+        shellDirectoryStackReportError(vm, builtin, "out of memory");
+        shellUpdateStatus(1);
+        return false;
+    }
+    if (!shellDirectoryStackEnsureCapacity(1)) {
+        free(copy);
+        shellDirectoryStackReportError(vm, builtin, "out of memory");
+        shellUpdateStatus(1);
+        return false;
+    }
+    gShellRuntime.dir_stack[0] = copy;
+    gShellRuntime.dir_stack_count = 1;
+    gShellRuntime.dir_stack_initialised = true;
+    shellDirectoryStackUpdateEnvironment(NULL, gShellRuntime.dir_stack[0]);
+    return true;
+}
+
+static bool shellDirectoryStackAssignTopOwned(char *path) {
+    if (!path) {
+        path = strdup("");
+        if (!path) {
+            return false;
+        }
+    }
+    size_t needed = (gShellRuntime.dir_stack_count > 0) ? gShellRuntime.dir_stack_count : 1;
+    if (!shellDirectoryStackEnsureCapacity(needed)) {
+        free(path);
+        return false;
+    }
+    if (gShellRuntime.dir_stack_count == 0) {
+        gShellRuntime.dir_stack[0] = path;
+        gShellRuntime.dir_stack_count = 1;
+    } else {
+        char *old = gShellRuntime.dir_stack[0];
+        gShellRuntime.dir_stack[0] = path;
+        free(old);
+    }
+    gShellRuntime.dir_stack_initialised = true;
+    return true;
+}
+
+static void shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd) {
+    if (old_cwd) {
+        shellSetTrackedVariable("OLDPWD", old_cwd, false);
+    }
+    if (new_cwd) {
+        shellSetTrackedVariable("PWD", new_cwd, false);
+    }
+}
+
+static bool shellDirectoryStackChdir(VM *vm,
+                                     const char *builtin,
+                                     const char *target,
+                                     char **out_new_cwd,
+                                     char **out_old_cwd) {
+    if (!target) {
+        shellDirectoryStackReportError(vm, builtin, "expected directory path");
+        shellUpdateStatus(1);
+        return false;
+    }
+    char old_cwd[PATH_MAX];
+    if (!getcwd(old_cwd, sizeof(old_cwd))) {
+        shellDirectoryStackReportErrno(vm, builtin);
+        shellUpdateStatus(errno ? errno : 1);
+        return false;
+    }
+    if (chdir(target) != 0) {
+        shellDirectoryStackReportErrno(vm, builtin);
+        shellUpdateStatus(errno ? errno : 1);
+        return false;
+    }
+    char new_cwd[PATH_MAX];
+    if (!getcwd(new_cwd, sizeof(new_cwd))) {
+        shellDirectoryStackReportErrno(vm, builtin);
+        shellUpdateStatus(errno ? errno : 1);
+        (void)chdir(old_cwd);
+        return false;
+    }
+    char *new_copy = strdup(new_cwd);
+    if (!new_copy) {
+        shellDirectoryStackReportError(vm, builtin, "out of memory");
+        shellUpdateStatus(1);
+        (void)chdir(old_cwd);
+        return false;
+    }
+    char *old_copy = NULL;
+    if (out_old_cwd) {
+        old_copy = strdup(old_cwd);
+        if (!old_copy) {
+            shellDirectoryStackReportError(vm, builtin, "out of memory");
+            shellUpdateStatus(1);
+            free(new_copy);
+            (void)chdir(old_cwd);
+            return false;
+        }
+    }
+    if (out_new_cwd) {
+        *out_new_cwd = new_copy;
+    } else {
+        free(new_copy);
+    }
+    if (out_old_cwd) {
+        *out_old_cwd = old_copy;
+    }
+    return true;
+}
+
+static void shellDirectoryStackWriteAll(int fd, const char *data, size_t len) {
+    while (len > 0) {
+        ssize_t wrote = write(fd, data, len);
+        if (wrote < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (wrote == 0) {
+            break;
+        }
+        data += (size_t)wrote;
+        len -= (size_t)wrote;
+    }
+}
+
+static void shellDirectoryStackWriteEntry(int fd, const char *entry) {
+    if (fd < 0) {
+        return;
+    }
+    if (!entry) {
+        return;
+    }
+    const char *home = getenv("HOME");
+    size_t home_len = home ? strlen(home) : 0;
+    if (home_len > 0 && strncmp(entry, home, home_len) == 0 &&
+        (entry[home_len] == '\0' || entry[home_len] == '/')) {
+        shellDirectoryStackWriteAll(fd, "~", 1);
+        const char *suffix = entry + home_len;
+        if (*suffix == '/') {
+            suffix++;
+            if (*suffix) {
+                shellDirectoryStackWriteAll(fd, "/", 1);
+                shellDirectoryStackWriteAll(fd, suffix, strlen(suffix));
+            }
+        }
+        return;
+    }
+    shellDirectoryStackWriteAll(fd, entry, strlen(entry));
+}
+
+static void shellDirectoryStackPrint(int fd) {
+    if (fd < 0) {
+        return;
+    }
+    if (!gShellRuntime.dir_stack || gShellRuntime.dir_stack_count == 0) {
+        shellDirectoryStackWriteAll(fd, "\n", 1);
+        return;
+    }
+    for (size_t i = 0; i < gShellRuntime.dir_stack_count; ++i) {
+        const char *entry = gShellRuntime.dir_stack[i] ? gShellRuntime.dir_stack[i] : "";
+        shellDirectoryStackWriteEntry(fd, entry);
+        if (i + 1 < gShellRuntime.dir_stack_count) {
+            shellDirectoryStackWriteAll(fd, " ", 1);
+        }
+    }
+    shellDirectoryStackWriteAll(fd, "\n", 1);
+}
+
 static char *shellLookupRawEnvironmentValue(const char *name, size_t len) {
     if (!name) {
         return strdup("");
@@ -6692,7 +6923,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    static const char *kBuiltins[] = {"cd",     "pwd",     "exit",    "exec",    "export",  "unset",    "setenv",
+    static const char *kBuiltins[] = {"cd",     "pwd",     "dirs",   "pushd",  "popd",   "exit",    "exec",    "export",  "unset",    "setenv",
                                       "unsetenv", "set",    "declare", "trap",    "local",   "break",   "continue", "alias",
                                       "bind",   "shopt",  "history", "jobs",    "fg",      "finger",  "bg",      "wait",
                                       "builtin", "source", "read",    "shift",   "return",  "help",    ":",
@@ -9571,15 +9802,30 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(1);
         return makeVoid();
     }
-    if (chdir(path) != 0) {
-        runtimeError(vm, "cd: %s", strerror(errno));
-        shellUpdateStatus(errno ? errno : 1);
+    if (!shellDirectoryStackEnsureInitialised(vm, "cd")) {
         return makeVoid();
     }
-    char cwd[PATH_MAX];
-    if (getcwd(cwd, sizeof(cwd))) {
-        shellSetTrackedVariable("PWD", cwd, false);
+
+    char *new_cwd = NULL;
+    char *old_cwd = NULL;
+    if (!shellDirectoryStackChdir(vm, "cd", path, &new_cwd, &old_cwd)) {
+        return makeVoid();
     }
+
+    if (!shellDirectoryStackAssignTopOwned(new_cwd)) {
+        shellDirectoryStackReportError(vm, "cd", "out of memory");
+        shellUpdateStatus(1);
+        if (old_cwd) {
+            (void)chdir(old_cwd);
+            shellDirectoryStackEnsureInitialised(vm, "cd");
+            shellDirectoryStackUpdateEnvironment(NULL, old_cwd);
+        }
+        free(old_cwd);
+        return makeVoid();
+    }
+
+    shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0]);
+    free(old_cwd);
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -9594,6 +9840,126 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     printf("%s\n", cwd);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellDirs(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count > 0) {
+        runtimeError(vm, "dirs: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (!shellDirectoryStackEnsureInitialised(vm, "dirs")) {
+        return makeVoid();
+    }
+    shellDirectoryStackPrint(STDOUT_FILENO);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellPushd(VM *vm, int arg_count, Value *args) {
+    if (!shellDirectoryStackEnsureInitialised(vm, "pushd")) {
+        return makeVoid();
+    }
+
+    if (arg_count > 1) {
+        runtimeError(vm, "pushd: too many arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (arg_count == 0) {
+        if (gShellRuntime.dir_stack_count < 2) {
+            runtimeError(vm, "pushd: no other directory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        char *new_cwd = NULL;
+        char *old_cwd = NULL;
+        if (!shellDirectoryStackChdir(vm, "pushd", gShellRuntime.dir_stack[1], &new_cwd, &old_cwd)) {
+            return makeVoid();
+        }
+        char *old_top = gShellRuntime.dir_stack[0];
+        char *second = gShellRuntime.dir_stack[1];
+        gShellRuntime.dir_stack[0] = new_cwd;
+        gShellRuntime.dir_stack[1] = old_top;
+        free(second);
+        gShellRuntime.dir_stack_initialised = true;
+        shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0]);
+        free(old_cwd);
+        shellDirectoryStackPrint(STDOUT_FILENO);
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "pushd: expected directory path");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    size_t needed = gShellRuntime.dir_stack_count + 1;
+    if (!shellDirectoryStackEnsureCapacity(needed)) {
+        runtimeError(vm, "pushd: out of memory");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    char *new_cwd = NULL;
+    char *old_cwd = NULL;
+    if (!shellDirectoryStackChdir(vm, "pushd", args[0].s_val, &new_cwd, &old_cwd)) {
+        return makeVoid();
+    }
+
+    size_t count = gShellRuntime.dir_stack_count;
+    memmove(&gShellRuntime.dir_stack[1], &gShellRuntime.dir_stack[0], count * sizeof(char *));
+    gShellRuntime.dir_stack[0] = new_cwd;
+    gShellRuntime.dir_stack_count = count + 1;
+    gShellRuntime.dir_stack_initialised = true;
+    shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0]);
+    free(old_cwd);
+    shellDirectoryStackPrint(STDOUT_FILENO);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellPopd(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (!shellDirectoryStackEnsureInitialised(vm, "popd")) {
+        return makeVoid();
+    }
+    if (arg_count > 0) {
+        runtimeError(vm, "popd: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (gShellRuntime.dir_stack_count <= 1) {
+        runtimeError(vm, "popd: directory stack empty");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    char *new_cwd = NULL;
+    char *old_cwd = NULL;
+    if (!shellDirectoryStackChdir(vm, "popd", gShellRuntime.dir_stack[1], &new_cwd, &old_cwd)) {
+        return makeVoid();
+    }
+
+    size_t count = gShellRuntime.dir_stack_count;
+    char *removed = gShellRuntime.dir_stack[0];
+    char *target_entry = gShellRuntime.dir_stack[1];
+    free(removed);
+    memmove(&gShellRuntime.dir_stack[0], &gShellRuntime.dir_stack[1], (count - 1) * sizeof(char *));
+    gShellRuntime.dir_stack_count = count - 1;
+    gShellRuntime.dir_stack[gShellRuntime.dir_stack_count] = NULL;
+    free(target_entry);
+    gShellRuntime.dir_stack[0] = new_cwd;
+    gShellRuntime.dir_stack_initialised = true;
+    shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0]);
+    free(old_cwd);
+    shellDirectoryStackPrint(STDOUT_FILENO);
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -11306,6 +11672,33 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "cd [dir]",
         "With no arguments cd switches to $HOME. Successful runs update the PWD"
         " environment variable.",
+        NULL,
+        0
+    },
+    {
+        "dirs",
+        "Display the directory stack.",
+        "dirs",
+        "Prints the current directory stack with the most recent entry first."
+        " Options such as -c are not yet supported.",
+        NULL,
+        0
+    },
+    {
+        "pushd",
+        "Push a directory onto the stack and change to it.",
+        "pushd [dir]",
+        "With DIR changes to the target directory and pushes the previous working"
+        " directory onto the stack. Without arguments swaps the top two entries.",
+        NULL,
+        0
+    },
+    {
+        "popd",
+        "Pop the directory stack.",
+        "popd",
+        "Removes the top stack entry and switches to the new top directory. Fails"
+        " when the stack contains only a single entry.",
         NULL,
         0
     },

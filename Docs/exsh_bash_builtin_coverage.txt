@@ -3,23 +3,23 @@ Bash builtin coverage summary for exsh
 
 Bash builtins reported by `help`
 --------------------------------
-. : [ alias bg bind break builtin caller cd command compgen complete compopt continue declare dirs disown echo enable eval exec exit export false fc fg getopts hash help history jobs kill let local logout mapfile popd printf pushd pwd read readarray readonly return set shift shopt source suspend test times trap true type typeset ulimit umask unalias unset wait
+. : [ alias bg bind break builtin caller cd command compgen complete compopt continue declare disown echo enable eval exec exit export false fc fg getopts hash help history jobs kill let local logout mapfile printf pwd read readarray readonly return set shift shopt source suspend test times trap true type typeset ulimit umask unalias unset wait
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd echo exit exec true false set unset export read test [ shift alias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias history setenv unsetenv declare jobs fg bg wait builtin source . trap local break continue : eval return finger help bind shopt
 
 Bash builtins missing from exsh
 -------------------------------
-caller command compgen complete compopt dirs disown enable fc getopts hash kill let logout mapfile readarray popd printf pushd readonly suspend times type typeset ulimit umask unalias
+caller command compgen complete compopt disown enable fc getopts hash kill let logout mapfile readarray printf readonly suspend times type typeset ulimit umask unalias
 
 Plans to address missing builtins
 ---------------------------------
-1) Directory stack builtins (pushd, popd, dirs):
-   - Extend ShellRuntimeState with a directory stack and initialise it at startup so sessions remember the initial working directory.
-   - Add helpers to normalise paths and keep the stack in sync with PWD, mirroring the error handling of vmBuiltinShellCd.
-   - Implement vmBuiltinShellPushd, vmBuiltinShellPopd, and vmBuiltinShellDirs, register them in kShellBuiltins, and update shellIsRuntimeBuiltin.
-   - Document the commands in kShellHelpTopics and create regression tests that compare stack behaviour with Bash.
+1) Directory stack builtins (pushd, popd, dirs): Completed.
+   - Implemented via ShellRuntimeState directory stack support that persists the initial working directory across the session.
+   - Helpers normalise paths, update PWD/OLDPWD, and mirror vmBuiltinShellCd error handling.
+   - vmBuiltinShellPushd, vmBuiltinShellPopd, and vmBuiltinShellDirs are registered with kShellBuiltins and recognised by shellIsRuntimeBuiltin.
+   - Documented in kShellHelpTopics with regression coverage matching Bash directory stack behaviour.
 
 2) Programmable completion builtins (compgen, complete, compopt):
    - Introduce a completion registry in the interactive runtime near the tab completion helpers so programmable definitions can be consulted before globbing.
