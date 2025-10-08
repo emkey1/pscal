@@ -144,8 +144,8 @@
             "script": "Examples/exsh/pipeline.psh",
             "expect": "runtime_ok",
             "prime_cache": true,
-      "expected_stdout": "pipeline:start\nalpha\npipeline:end"
-    },
+            "expected_stdout": "pipeline:start\nalpha\npipeline:end"
+        },
         {
             "id": "case_basic",
             "name": "Case statements dispatch patterns",
@@ -380,127 +380,136 @@
             "expect": "runtime_ok",
             "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
         },
-    {
-      "id": "grammar_if_and_or_conditions",
-      "name": "Logical connectors work in if/while conditions",
-      "category": "grammar",
-      "description": "Allows && and || lists in conditional and loop headers.",
-      "script": "Tests/exsh/tests/parser_if_and_or.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
-    }
-    ,
-    {
-      "id": "bash_parity_arithmetic",
-      "name": "Arithmetic expansion matches bash",
-      "category": "parity",
-      "description": "Verify arithmetic evaluation keeps parity with bash for nested expressions.",
-      "script": "Tests/exsh/tests/bash_parity_arithmetic.psh",
-      "expect": "match_bash",
-      "expected_stdout": "sum=5\nprod=20\ndiv=3\nfmt=1+2=3\n"
-    },
-    {
-      "id": "bash_parity_functions",
-      "name": "Function locals mirror bash semantics",
-      "category": "parity",
-      "description": "Function locals and string assembly behave the same as bash.",
-      "script": "Tests/exsh/tests/bash_parity_functions.psh",
-      "expect": "match_bash",
-      "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
-    },
-    {
-      "id": "bash_parity_export_pipeline",
-      "name": "export works in pipelines",
-      "category": "parity",
-      "description": "Ensure the export builtin runs correctly when piped to another command.",
-      "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
-      "expect": "match_bash"
-    },
-    {
-      "id": "bash_parity_declare_assoc",
-      "name": "Associative arrays mirror bash declare",
-      "category": "parity",
-      "description": "declare -A assignments and iteration match bash semantics.",
-      "script": "Tests/exsh/tests/bash_parity_declare_assoc.psh",
-      "expect": "match_bash"
-    },
-    {
-      "id": "bash_parity_bind_shopt",
-      "name": "bind and shopt mimic bash",
-      "category": "parity",
-      "description": "Verify bind accepts readline settings and shopt reports state like bash.",
-      "script": "Tests/exsh/tests/bash_parity_bind_shopt.psh",
-      "expect": "match_bash"
-    },
-    {
-      "id": "bash_parity_unalias",
-      "name": "unalias mirrors bash error handling",
-      "category": "parity",
-      "description": "Removing aliases individually or via -a matches Bash status codes and failures.",
-      "script": "Tests/exsh/tests/bash_parity_unalias.psh",
-      "expect": "match_bash"
-    },
-    {
-      "id": "read_ifs_split",
-      "name": "read honours custom IFS",
-      "category": "builtin",
-      "description": "Confirm the read builtin splits fields using the active IFS value.",
-      "script": "Tests/exsh/tests/read_ifs.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "read_fields:alpha:beta:gamma\n"
-    },
-    {
-      "id": "read_array_assign",
-      "name": "read -a populates arrays",
-      "category": "builtin",
-      "description": "Ensure the read builtin assigns fields to indexed arrays like bash.",
-      "script": "Tests/exsh/tests/read_array_assign.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "count:3\nfield0:alpha\nfield1:beta\nfield2:gamma\nrest:\nblank_count:0\nstatus:0\n"
-    },
-    {
-      "id": "redirection_here_string",
-      "name": "Here strings feed stdin",
-      "category": "redirection",
-      "description": "The <<< operator should redirect expanded text with a trailing newline to stdin.",
-      "script": "Tests/exsh/tests/here_string.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
-    },
-    {
-      "id": "bash_directory_stack",
-      "name": "Bash parity for directory stack builtins",
-      "category": "parity",
-      "description": "pushd, popd, and dirs align with Bash output.",
-      "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
-      "expect": "match_bash"
-    },
-    {
-      "id": "builtin_umask_basic",
-      "name": "umask prints numeric and symbolic forms",
-      "category": "builtins",
-      "description": "Setting umask updates the process mask and reports numeric/symbolic output.",
-      "script": "Tests/exsh/tests/umask_basic.psh",
-      "expect": "runtime_ok",
-      "expected_stdout": "numeric:0002\nsymbolic:u=rwx,g=rwx,o=r-x\n"
-    },
-    {
-      "id": "builtin_umask_invalid",
-      "name": "umask rejects invalid modes",
-      "category": "builtins",
-      "description": "Invalid digits produce a runtime error without changing the mask.",
-      "script": "Tests/exsh/tests/umask_invalid.psh",
-      "expect": "runtime_error",
-      "expected_stderr_substring": "umask: invalid mode '18'"
-    },
-    {
-      "id": "builtin_umask_too_many",
-      "name": "umask rejects extra operands",
-      "category": "builtins",
-      "description": "Supplying more than one operand triggers a runtime error.",
-      "script": "Tests/exsh/tests/umask_too_many.psh",
-      "expect": "runtime_error",
-      "expected_stderr_substring": "umask: too many arguments"
-    }
-  ]
+        {
+            "id": "grammar_if_and_or_conditions",
+            "name": "Logical connectors work in if/while conditions",
+            "category": "grammar",
+            "description": "Allows && and || lists in conditional and loop headers.",
+            "script": "Tests/exsh/tests/parser_if_and_or.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
+        },
+        {
+            "id": "bash_parity_arithmetic",
+            "name": "Arithmetic expansion matches bash",
+            "category": "parity",
+            "description": "Verify arithmetic evaluation keeps parity with bash for nested expressions.",
+            "script": "Tests/exsh/tests/bash_parity_arithmetic.psh",
+            "expect": "match_bash",
+            "expected_stdout": "sum=5\nprod=20\ndiv=3\nfmt=1+2=3\n"
+        },
+        {
+            "id": "bash_parity_functions",
+            "name": "Function locals mirror bash semantics",
+            "category": "parity",
+            "description": "Function locals and string assembly behave the same as bash.",
+            "script": "Tests/exsh/tests/bash_parity_functions.psh",
+            "expect": "match_bash",
+            "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
+        },
+        {
+            "id": "bash_parity_export_pipeline",
+            "name": "export works in pipelines",
+            "category": "parity",
+            "description": "Ensure the export builtin runs correctly when piped to another command.",
+            "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "bash_parity_declare_assoc",
+            "name": "Associative arrays mirror bash declare",
+            "category": "parity",
+            "description": "declare -A assignments and iteration match bash semantics.",
+            "script": "Tests/exsh/tests/bash_parity_declare_assoc.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "bash_parity_bind_shopt",
+            "name": "bind and shopt mimic bash",
+            "category": "parity",
+            "description": "Verify bind accepts readline settings and shopt reports state like bash.",
+            "script": "Tests/exsh/tests/bash_parity_bind_shopt.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "bash_parity_unalias",
+            "name": "unalias mirrors bash error handling",
+            "category": "parity",
+            "description": "Removing aliases individually or via -a matches Bash status codes and failures.",
+            "script": "Tests/exsh/tests/bash_parity_unalias.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "read_ifs_split",
+            "name": "read honours custom IFS",
+            "category": "builtin",
+            "description": "Confirm the read builtin splits fields using the active IFS value.",
+            "script": "Tests/exsh/tests/read_ifs.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "read_fields:alpha:beta:gamma\n"
+        },
+        {
+            "id": "read_array_assign",
+            "name": "read -a populates arrays",
+            "category": "builtin",
+            "description": "Ensure the read builtin assigns fields to indexed arrays like bash.",
+            "script": "Tests/exsh/tests/read_array_assign.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "count:3\nfield0:alpha\nfield1:beta\nfield2:gamma\nrest:\nblank_count:0\nstatus:0\n"
+        },
+        {
+            "id": "redirection_here_string",
+            "name": "Here strings feed stdin",
+            "category": "redirection",
+            "description": "The <<< operator should redirect expanded text with a trailing newline to stdin.",
+            "script": "Tests/exsh/tests/here_string.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
+        },
+        {
+            "id": "bash_directory_stack",
+            "name": "Bash parity for directory stack builtins",
+            "category": "parity",
+            "description": "pushd, popd, and dirs align with Bash output.",
+            "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "builtin_umask_basic",
+            "name": "umask prints numeric and symbolic forms",
+            "category": "builtins",
+            "description": "Setting umask updates the process mask and reports numeric/symbolic output.",
+            "script": "Tests/exsh/tests/umask_basic.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "numeric:0002\nsymbolic:u=rwx,g=rwx,o=r-x\n"
+        },
+        {
+            "id": "builtin_umask_invalid",
+            "name": "umask rejects invalid modes",
+            "category": "builtins",
+            "description": "Invalid digits produce a runtime error without changing the mask.",
+            "script": "Tests/exsh/tests/umask_invalid.psh",
+            "expect": "runtime_error",
+            "expected_stderr_substring": "umask: invalid mode '18'"
+        },
+        {
+            "id": "builtin_umask_too_many",
+            "name": "umask rejects extra operands",
+            "category": "builtins",
+            "description": "Supplying more than one operand triggers a runtime error.",
+            "script": "Tests/exsh/tests/umask_too_many.psh",
+            "expect": "runtime_error",
+            "expected_stderr_substring": "umask: too many arguments"
+        },
+        {
+            "id": "printf_builtin",
+            "name": "printf formats strings and numbers",
+            "category": "builtins",
+            "description": "printf renders formatted output and reports usage errors when invoked without a format string.",
+            "script": "Tests/exsh/tests/printf_builtin.psh",
+            "expect": "match_bash",
+            "expected_stdout": "greeting:world:0007:3.5:A:%\nfirst-status:0\nusage-status:2",
+            "expected_stderr_substring": "printf: usage"
+        }
+    ]
 }

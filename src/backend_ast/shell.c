@@ -16,6 +16,7 @@
 #include <glob.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <signal.h>
@@ -179,6 +180,7 @@ static bool shellParseArrayLiteral(const char *value,
 static char *shellBuildArrayLiteral(const ShellArrayVariable *var);
 static bool shellArrayRegistryInitializeAssociative(const char *name);
 static ShellAlias *shellFindAlias(const char *name);
+static void shellReportRecoverableError(VM *vm, bool with_location, const char *fmt, ...);
 
 static bool shellReadonlyEnsureCapacity(size_t needed);
 static ShellReadonlyEntry *shellReadonlyFindMutable(const char *name);
@@ -7435,7 +7437,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     static const char *kBuiltins[] = {"cd",       "pwd",      "dirs",    "pushd",   "popd",    "exit",     "logout",   "exec",     "export",   "unset",    "setenv",
                                       "unsetenv", "set",      "declare", "typeset", "readonly", "umask",   "command", "trap",     "local",    "let",      "break",   "continue",
                                       "alias",   "bind",     "shopt",   "history", "jobs",     "disown",   "fg",       "finger",   "bg",       "wait",
-                                      "builtin", "source",   "read",    "shift",   "return",   "help",     "type",    ":",       "unalias",
+                                      "builtin", "source",   "read",    "printf",  "shift",   "return",   "help",     "type",    ":",       "unalias",
                                       "__shell_double_bracket"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
@@ -10069,6 +10071,60 @@ static bool shellParseLong(const char *text, long *out_value) {
     return true;
 }
 
+static bool shellParseSignedLongLong(const char *text, long long *out_value) {
+    if (!out_value) {
+        return false;
+    }
+    if (!text || *text == '\0') {
+        *out_value = 0;
+        return true;
+    }
+    errno = 0;
+    char *end = NULL;
+    long long value = strtoll(text, &end, 0);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellParseUnsignedLongLong(const char *text, unsigned long long *out_value) {
+    if (!out_value) {
+        return false;
+    }
+    if (!text || *text == '\0') {
+        *out_value = 0;
+        return true;
+    }
+    errno = 0;
+    char *end = NULL;
+    unsigned long long value = strtoull(text, &end, 0);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellParseDouble(const char *text, double *out_value) {
+    if (!out_value) {
+        return false;
+    }
+    if (!text || *text == '\0') {
+        *out_value = 0.0;
+        return true;
+    }
+    errno = 0;
+    char *end = NULL;
+    double value = strtod(text, &end);
+    if (errno != 0 || !end || *end != '\0') {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
 static bool shellEvaluateNumericComparison(const char *left,
                                           const char *op,
                                           const char *right,
@@ -11059,6 +11115,320 @@ static char *shellReadExtractField(char **cursor,
     }
     *cursor = scan;
     return value;
+}
+
+Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
+    if (arg_count < 1) {
+        shellReportRecoverableError(vm, false, "printf: usage: printf [-v var] format [arguments]");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+        shellReportRecoverableError(vm, true, "printf: format string required");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+
+    const char *fmt = args[0].s_val;
+    int arg_index = 1;
+    bool ok = true;
+
+    for (size_t i = 0; fmt && fmt[i] != '\0'; ++i) {
+        char c = fmt[i];
+        if (c == '\\' && fmt[i + 1] != '\0') {
+            char esc = fmt[++i];
+            switch (esc) {
+                case 'n':
+                    fputc('\n', stdout);
+                    break;
+                case 'r':
+                    fputc('\r', stdout);
+                    break;
+                case 't':
+                    fputc('\t', stdout);
+                    break;
+                case '\\':
+                    fputc('\\', stdout);
+                    break;
+                case '"':
+                    fputc('"', stdout);
+                    break;
+                case 'a':
+                    fputc('\a', stdout);
+                    break;
+                case 'b':
+                    fputc('\b', stdout);
+                    break;
+                case 'f':
+                    fputc('\f', stdout);
+                    break;
+                case 'v':
+                    fputc('\v', stdout);
+                    break;
+                default:
+                    fputc(esc, stdout);
+                    break;
+            }
+            continue;
+        }
+        if (c == '%' && fmt[i + 1] != '\0') {
+            if (fmt[i + 1] == '%') {
+                fputc('%', stdout);
+                i++;
+                continue;
+            }
+
+            size_t j = i + 1;
+            char flags[8];
+            size_t flag_len = 0;
+            const char *flag_chars = "-+ #0'";
+            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                if (flag_len + 1 < sizeof(flags)) {
+                    flags[flag_len++] = fmt[j];
+                }
+                j++;
+            }
+            flags[flag_len] = '\0';
+
+            bool width_specified = false;
+            int width = 0;
+            while (isdigit((unsigned char)fmt[j])) {
+                width_specified = true;
+                width = width * 10 + (fmt[j] - '0');
+                j++;
+            }
+
+            int precision = -1;
+            if (fmt[j] == '.') {
+                j++;
+                precision = 0;
+                while (isdigit((unsigned char)fmt[j])) {
+                    precision = precision * 10 + (fmt[j] - '0');
+                    j++;
+                }
+            }
+
+            bool mod_h = false;
+            bool mod_hh = false;
+            char length_mod[3] = {0};
+            size_t length_len = 0;
+            if (fmt[j] == 'h') {
+                mod_h = true;
+                length_mod[length_len++] = 'h';
+                j++;
+                if (fmt[j] == 'h') {
+                    mod_hh = true;
+                    mod_h = false;
+                    length_mod[length_len++] = 'h';
+                    j++;
+                }
+            } else if (fmt[j] == 'l') {
+                length_mod[length_len++] = 'l';
+                j++;
+                if (fmt[j] == 'l') {
+                    length_mod[length_len++] = 'l';
+                    j++;
+                }
+            } else {
+                const char *length_mods = "Ljzt";
+                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                    if (length_len + 1 < sizeof(length_mod)) {
+                        length_mod[length_len++] = fmt[j];
+                    }
+                    j++;
+                }
+            }
+
+            char spec = fmt[j];
+            if (spec == '\0') {
+                shellReportRecoverableError(vm, true, "printf: incomplete format specifier");
+                ok = false;
+                break;
+            }
+
+            char fmtbuf[32];
+            char buf[256];
+            size_t pos = 0;
+            fmtbuf[pos++] = '%';
+            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], flags, flag_len);
+                pos += flag_len;
+            }
+            if (width_specified) {
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (precision >= 0 && pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = '.';
+                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                if (written > 0) {
+                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                        pos = sizeof(fmtbuf) - 1;
+                    } else {
+                        pos += (size_t)written;
+                    }
+                }
+            }
+            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                memcpy(&fmtbuf[pos], length_mod, length_len);
+                pos += length_len;
+            }
+            if (pos < sizeof(fmtbuf)) {
+                fmtbuf[pos++] = spec;
+            }
+            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+
+            const char *arg_text = "";
+            if (arg_index < arg_count) {
+                Value value = args[arg_index];
+                if (value.type == TYPE_STRING && value.s_val) {
+                    arg_text = value.s_val;
+                } else if (value.type == TYPE_STRING && !value.s_val) {
+                    arg_text = "";
+                }
+                arg_index++;
+            }
+
+            bool has_wide_char_length = false;
+            for (size_t n = 0; n < length_len; ++n) {
+                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                    has_wide_char_length = true;
+                    break;
+                }
+            }
+
+            switch (spec) {
+                case 'd':
+                case 'i': {
+                    long long iv = 0;
+                    if (!shellParseSignedLongLong(arg_text, &iv)) {
+                        shellReportRecoverableError(vm, false, "printf: %s: invalid number", arg_text);
+                        iv = 0;
+                        ok = false;
+                    }
+                    if (mod_hh) {
+                        iv = (signed char)iv;
+                    } else if (mod_h) {
+                        iv = (short)iv;
+                    }
+                    snprintf(buf, sizeof(buf), fmtbuf, iv);
+                    fputs(buf, stdout);
+                    break;
+                }
+                case 'u':
+                case 'o':
+                case 'x':
+                case 'X': {
+                    unsigned long long uv = 0;
+                    if (!shellParseUnsignedLongLong(arg_text, &uv)) {
+                        shellReportRecoverableError(vm, false, "printf: %s: invalid number", arg_text);
+                        uv = 0;
+                        ok = false;
+                    }
+                    if (mod_hh) {
+                        uv = (unsigned char)uv;
+                    } else if (mod_h) {
+                        uv = (unsigned short)uv;
+                    }
+                    snprintf(buf, sizeof(buf), fmtbuf, uv);
+                    fputs(buf, stdout);
+                    break;
+                }
+                case 'f':
+                case 'F':
+                case 'e':
+                case 'E':
+                case 'g':
+                case 'G':
+                case 'a':
+                case 'A': {
+                    double dv = 0.0;
+                    if (!shellParseDouble(arg_text, &dv)) {
+                        shellReportRecoverableError(vm, false, "printf: %s: invalid number", arg_text);
+                        dv = 0.0;
+                        ok = false;
+                    }
+                    snprintf(buf, sizeof(buf), fmtbuf, dv);
+                    fputs(buf, stdout);
+                    break;
+                }
+                case 'c': {
+                    char ch = '\0';
+                    long long iv = 0;
+                    if (shellParseSignedLongLong(arg_text, &iv)) {
+                        ch = (char)iv;
+                    } else if (arg_text && *arg_text) {
+                        ch = arg_text[0];
+                    }
+                    const char *format = fmtbuf;
+                    char safe_fmt[sizeof(fmtbuf)];
+                    if (has_wide_char_length) {
+                        strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                        safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                        char *mod_pos = strstr(safe_fmt, length_mod);
+                        if (mod_pos) {
+                            size_t remove_len = strlen(length_mod);
+                            memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                            format = safe_fmt;
+                        }
+                    }
+                    snprintf(buf, sizeof(buf), format, ch);
+                    fputs(buf, stdout);
+                    break;
+                }
+                case 's': {
+                    const char *sv = arg_text ? arg_text : "";
+                    const char *format = fmtbuf;
+                    char safe_fmt[sizeof(fmtbuf)];
+                    if (has_wide_char_length) {
+                        strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                        safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                        char *mod_pos = strstr(safe_fmt, length_mod);
+                        if (mod_pos) {
+                            size_t remove_len = strlen(length_mod);
+                            memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                            format = safe_fmt;
+                        }
+                    }
+                    snprintf(buf, sizeof(buf), format, sv);
+                    fputs(buf, stdout);
+                    break;
+                }
+                case 'p': {
+                    unsigned long long pv = 0;
+                    if (!shellParseUnsignedLongLong(arg_text, &pv)) {
+                        shellReportRecoverableError(vm, false, "printf: %s: invalid number", arg_text);
+                        pv = 0;
+                        ok = false;
+                    }
+                    snprintf(buf, sizeof(buf), fmtbuf, (void *)(uintptr_t)pv);
+                    fputs(buf, stdout);
+                    break;
+                }
+                default: {
+                    const char *sv = arg_text ? arg_text : "";
+                    snprintf(buf, sizeof(buf), fmtbuf, sv);
+                    fputs(buf, stdout);
+                    break;
+                }
+            }
+
+            i = j;
+            continue;
+        }
+
+        fputc(c, stdout);
+    }
+
+    fflush(stdout);
+    shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
 }
 
 Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
@@ -13244,6 +13614,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "popd",
         "Removes the top stack entry and switches to the new top directory. Fails"
         " when the stack contains only a single entry.",
+        NULL,
+        0
+    },
+    {
+        "printf",
+        "Format and print data to standard output.",
+        "printf format [arguments]",
+        "Applies the FORMAT string to each argument using printf-style conversions."
+        " Missing arguments expand to empty strings while numeric conversions honour width and precision modifiers.",
         NULL,
         0
     },

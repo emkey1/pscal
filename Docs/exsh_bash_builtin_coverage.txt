@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
+cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt enable fc getopts hash kill mapfile readarray printf suspend times ulimit
+caller compgen complete compopt enable fc getopts hash kill mapfile readarray suspend times ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -66,10 +66,10 @@ Plans to address missing builtins
     - Implement vmBuiltinShellReadonly and vmBuiltinShellTypeset alongside vmBuiltinShellDeclare, sharing option parsing and mapping typeset to the same handler through aliases.
     - Register both builtins with documentation and add parity tests for assignments, listing, and write failures.
 
-11) printf builtin:
-    - Implement a handler that parses format strings and arguments, using the VM string utilities to handle escape sequences and error reporting similar to vmBuiltinShellRead.
-    - Register printf in the builtin tables and dispatcher and document its usage in the help topics.
-    - Add parity tests covering numeric formatting, escapes, and failure cases compared to Bash.
+11) printf builtin: Completed.
+    - Added vmBuiltinShellPrintf with string parsing that honours width, precision, and numeric conversions while reporting errors without aborting the shell.
+    - Registered printf across the runtime, frontend registry, builtin catalogue, and help topics so scripts and interactive sessions can invoke it.
+    - Introduced regression coverage that exercises numeric, string, escape handling, and usage errors alongside Bash for parity.
 
 12) times builtin:
     - Track cumulative user and system CPU times for the shell and child processes by sampling around shellSpawnProcess and storing totals in the runtime state.

@@ -37,6 +37,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "popd", vmBuiltinShellPopd);
     registerShellBuiltin(category, command_group, "source", vmBuiltinShellSource);
     registerShellBuiltin(category, command_group, "read", vmBuiltinShellRead);
+    registerShellBuiltin(category, command_group, "printf", vmBuiltinShellPrintf);
     registerShellBuiltin(category, command_group, "eval", vmBuiltinShellEval);
     registerShellBuiltin(category, command_group, "let", vmBuiltinShellLet);
     registerShellBuiltin(category, command_group, "exit", vmBuiltinShellExit);

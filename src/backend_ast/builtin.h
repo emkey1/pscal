@@ -130,6 +130,7 @@ Value vmBuiltinShellExit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLogout(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExecCommand(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellRead(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPrintf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBind(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellShift(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
