@@ -13816,14 +13816,31 @@ Value vmBuiltinShellDisown(VM *vm, int arg_count, Value *args) {
     }
 
     bool ok = true;
+    size_t resolved_count = 0;
+    size_t *indices = NULL;
+    if (arg_count > 0) {
+        indices = malloc(sizeof(size_t) * (size_t)arg_count);
+        if (!indices) {
+            runtimeError(vm, "disown: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+
     for (int i = 0; i < arg_count; ++i) {
         size_t index = 0;
         if (!shellParseJobSpecifier(vm, "disown", args[i], &index)) {
             ok = false;
             continue;
         }
-        gShellJobs[index].disowned = true;
+        indices[resolved_count++] = index;
     }
+
+    for (size_t i = 0; i < resolved_count; ++i) {
+        gShellJobs[indices[i]].disowned = true;
+    }
+
+    free(indices);
 
     shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
