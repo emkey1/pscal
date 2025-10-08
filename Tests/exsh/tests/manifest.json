@@ -406,6 +406,14 @@
       "expect": "match_bash"
     },
     {
+      "id": "bash_parity_unalias",
+      "name": "unalias mirrors bash error handling",
+      "category": "parity",
+      "description": "Removing aliases individually or via -a matches Bash status codes and failures.",
+      "script": "Tests/exsh/tests/bash_parity_unalias.psh",
+      "expect": "match_bash"
+    },
+    {
       "id": "read_ifs_split",
       "name": "read honours custom IFS",
       "category": "builtin",
