@@ -7563,7 +7563,22 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             args[i] = makeString(cmd->argv[i + 1]);
         }
     }
+    ShellExecRedirBackup *redir_backups = NULL;
+    size_t redir_backup_count = 0;
+    if (!shellApplyExecRedirections(vm, cmd, &redir_backups, &redir_backup_count)) {
+        if (args) {
+            for (int i = 0; i < arg_count; ++i) {
+                freeValue(&args[i]);
+            }
+            free(args);
+        }
+        shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
+        return true;
+    }
+
     handler(vm, arg_count, args);
+    shellRestoreExecRedirections(redir_backups, redir_backup_count);
+    shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {
         for (int i = 0; i < arg_count; ++i) {
             freeValue(&args[i]);
@@ -11133,175 +11148,262 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
     int arg_index = 1;
     bool ok = true;
 
-    for (size_t i = 0; fmt && fmt[i] != '\0'; ++i) {
-        char c = fmt[i];
-        if (c == '\\' && fmt[i + 1] != '\0') {
-            char esc = fmt[++i];
-            switch (esc) {
-                case 'n':
-                    fputc('\n', stdout);
-                    break;
-                case 'r':
-                    fputc('\r', stdout);
-                    break;
-                case 't':
-                    fputc('\t', stdout);
-                    break;
-                case '\\':
-                    fputc('\\', stdout);
-                    break;
-                case '"':
-                    fputc('"', stdout);
-                    break;
-                case 'a':
-                    fputc('\a', stdout);
-                    break;
-                case 'b':
-                    fputc('\b', stdout);
-                    break;
-                case 'f':
-                    fputc('\f', stdout);
-                    break;
-                case 'v':
-                    fputc('\v', stdout);
-                    break;
-                default:
-                    fputc(esc, stdout);
-                    break;
-            }
-            continue;
-        }
-        if (c == '%' && fmt[i + 1] != '\0') {
-            if (fmt[i + 1] == '%') {
-                fputc('%', stdout);
-                i++;
+    bool repeat = false;
+    do {
+        bool consumed_conversion = false;
+        for (size_t i = 0; fmt && fmt[i] != '\0'; ++i) {
+            char c = fmt[i];
+            if (c == '\\' && fmt[i + 1] != '\0') {
+                char esc = fmt[++i];
+                switch (esc) {
+                    case 'n':
+                        fputc('\n', stdout);
+                        break;
+                    case 'r':
+                        fputc('\r', stdout);
+                        break;
+                    case 't':
+                        fputc('\t', stdout);
+                        break;
+                    case '\\':
+                        fputc('\\', stdout);
+                        break;
+                    case '"':
+                        fputc('"', stdout);
+                        break;
+                    case 'a':
+                        fputc('\a', stdout);
+                        break;
+                    case 'b':
+                        fputc('\b', stdout);
+                        break;
+                    case 'f':
+                        fputc('\f', stdout);
+                        break;
+                    case 'v':
+                        fputc('\v', stdout);
+                        break;
+                    default:
+                        fputc(esc, stdout);
+                        break;
+                }
                 continue;
             }
-
-            size_t j = i + 1;
-            char flags[8];
-            size_t flag_len = 0;
-            const char *flag_chars = "-+ #0'";
-            while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
-                if (flag_len + 1 < sizeof(flags)) {
-                    flags[flag_len++] = fmt[j];
+            if (c == '%' && fmt[i + 1] != '\0') {
+                if (fmt[i + 1] == '%') {
+                    fputc('%', stdout);
+                    i++;
+                    continue;
                 }
-                j++;
-            }
-            flags[flag_len] = '\0';
 
-            bool width_specified = false;
-            int width = 0;
-            while (isdigit((unsigned char)fmt[j])) {
-                width_specified = true;
-                width = width * 10 + (fmt[j] - '0');
-                j++;
-            }
-
-            int precision = -1;
-            if (fmt[j] == '.') {
-                j++;
-                precision = 0;
-                while (isdigit((unsigned char)fmt[j])) {
-                    precision = precision * 10 + (fmt[j] - '0');
+                size_t j = i + 1;
+                char flags[8];
+                size_t flag_len = 0;
+                const char *flag_chars = "-+ #0'";
+                while (fmt[j] && strchr(flag_chars, fmt[j]) != NULL) {
+                    if (flag_len + 1 < sizeof(flags)) {
+                        flags[flag_len++] = fmt[j];
+                    }
                     j++;
                 }
-            }
+                flags[flag_len] = '\0';
 
-            bool mod_h = false;
-            bool mod_hh = false;
-            char length_mod[3] = {0};
-            size_t length_len = 0;
-            if (fmt[j] == 'h') {
-                mod_h = true;
-                length_mod[length_len++] = 'h';
-                j++;
+                bool width_specified = false;
+                bool width_from_arg = false;
+                int width = 0;
+                if (fmt[j] == '*') {
+                    width_specified = true;
+                    width_from_arg = true;
+                    j++;
+                } else {
+                    while (isdigit((unsigned char)fmt[j])) {
+                        width_specified = true;
+                        width = width * 10 + (fmt[j] - '0');
+                        j++;
+                    }
+                }
+
+                bool precision_specified = false;
+                bool precision_from_arg = false;
+                int precision = 0;
+                if (fmt[j] == '.') {
+                    j++;
+                    precision_specified = true;
+                    if (fmt[j] == '*') {
+                        precision_from_arg = true;
+                        j++;
+                    } else {
+                        precision = 0;
+                        while (isdigit((unsigned char)fmt[j])) {
+                            precision = precision * 10 + (fmt[j] - '0');
+                            j++;
+                        }
+                    }
+                }
+
+                bool mod_h = false;
+                bool mod_hh = false;
+                char length_mod[3] = {0};
+                size_t length_len = 0;
                 if (fmt[j] == 'h') {
-                    mod_hh = true;
-                    mod_h = false;
+                    mod_h = true;
                     length_mod[length_len++] = 'h';
                     j++;
-                }
-            } else if (fmt[j] == 'l') {
-                length_mod[length_len++] = 'l';
-                j++;
-                if (fmt[j] == 'l') {
+                    if (fmt[j] == 'h') {
+                        mod_hh = true;
+                        mod_h = false;
+                        length_mod[length_len++] = 'h';
+                        j++;
+                    }
+                } else if (fmt[j] == 'l') {
                     length_mod[length_len++] = 'l';
                     j++;
-                }
-            } else {
-                const char *length_mods = "Ljzt";
-                while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
-                    if (length_len + 1 < sizeof(length_mod)) {
-                        length_mod[length_len++] = fmt[j];
+                    if (fmt[j] == 'l') {
+                        length_mod[length_len++] = 'l';
+                        j++;
                     }
-                    j++;
-                }
-            }
-
-            char spec = fmt[j];
-            if (spec == '\0') {
-                shellReportRecoverableError(vm, true, "printf: incomplete format specifier");
-                ok = false;
-                break;
-            }
-
-            char fmtbuf[32];
-            char buf[256];
-            size_t pos = 0;
-            fmtbuf[pos++] = '%';
-            if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
-                memcpy(&fmtbuf[pos], flags, flag_len);
-                pos += flag_len;
-            }
-            if (width_specified) {
-                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
-                if (written > 0) {
-                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
-                        pos = sizeof(fmtbuf) - 1;
-                    } else {
-                        pos += (size_t)written;
+                } else {
+                    const char *length_mods = "Ljzt";
+                    while (fmt[j] && strchr(length_mods, fmt[j]) != NULL) {
+                        if (length_len + 1 < sizeof(length_mod)) {
+                            length_mod[length_len++] = fmt[j];
+                        }
+                        j++;
                     }
                 }
-            }
-            if (precision >= 0 && pos < sizeof(fmtbuf)) {
-                fmtbuf[pos++] = '.';
-                int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
-                if (written > 0) {
-                    if ((size_t)written >= sizeof(fmtbuf) - pos) {
-                        pos = sizeof(fmtbuf) - 1;
-                    } else {
-                        pos += (size_t)written;
-                    }
-                }
-            }
-            if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
-                memcpy(&fmtbuf[pos], length_mod, length_len);
-                pos += length_len;
-            }
-            if (pos < sizeof(fmtbuf)) {
-                fmtbuf[pos++] = spec;
-            }
-            fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
 
-            const char *arg_text = "";
-            if (arg_index < arg_count) {
-                Value value = args[arg_index];
-                if (value.type == TYPE_STRING && value.s_val) {
-                    arg_text = value.s_val;
-                } else if (value.type == TYPE_STRING && !value.s_val) {
-                    arg_text = "";
-                }
-                arg_index++;
-            }
-
-            bool has_wide_char_length = false;
-            for (size_t n = 0; n < length_len; ++n) {
-                if (length_mod[n] == 'l' || length_mod[n] == 'L') {
-                    has_wide_char_length = true;
+                char spec = fmt[j];
+                if (spec == '\0') {
+                    shellReportRecoverableError(vm, true, "printf: incomplete format specifier");
+                    ok = false;
                     break;
                 }
-            }
+
+                char fmtbuf[32];
+                char buf[256];
+                size_t pos = 0;
+                fmtbuf[pos++] = '%';
+                consumed_conversion = true;
+                if (flag_len > 0 && pos + flag_len < sizeof(fmtbuf)) {
+                    memcpy(&fmtbuf[pos], flags, flag_len);
+                    pos += flag_len;
+                }
+                if (width_specified) {
+                    if (width_from_arg) {
+                        if (pos < sizeof(fmtbuf)) {
+                            fmtbuf[pos++] = '*';
+                        }
+                    } else {
+                        int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", width);
+                        if (written > 0) {
+                            if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                                pos = sizeof(fmtbuf) - 1;
+                            } else {
+                                pos += (size_t)written;
+                            }
+                        }
+                    }
+                }
+                if (precision_specified && pos < sizeof(fmtbuf)) {
+                    fmtbuf[pos++] = '.';
+                    if (precision_from_arg) {
+                        if (pos < sizeof(fmtbuf)) {
+                            fmtbuf[pos++] = '*';
+                        }
+                    } else {
+                        int written = snprintf(&fmtbuf[pos], sizeof(fmtbuf) - pos, "%d", precision);
+                        if (written > 0) {
+                            if ((size_t)written >= sizeof(fmtbuf) - pos) {
+                                pos = sizeof(fmtbuf) - 1;
+                            } else {
+                                pos += (size_t)written;
+                            }
+                        }
+                    }
+                }
+                if (length_len > 0 && pos + length_len < sizeof(fmtbuf)) {
+                    memcpy(&fmtbuf[pos], length_mod, length_len);
+                    pos += length_len;
+                }
+                if (pos < sizeof(fmtbuf)) {
+                    fmtbuf[pos++] = spec;
+                }
+                fmtbuf[pos < sizeof(fmtbuf) ? pos : (sizeof(fmtbuf) - 1)] = '\0';
+
+                int width_value = width;
+                if (width_from_arg && arg_index < arg_count) {
+                    Value value = args[arg_index];
+                    const char *width_text = "";
+                    if (value.type == TYPE_STRING && value.s_val) {
+                        width_text = value.s_val;
+                    }
+                    if (width_text[0] == '\0') {
+                        width_value = 0;
+                    } else {
+                        long long parsed_width = 0;
+                        if (!shellParseSignedLongLong(width_text, &parsed_width)) {
+                            shellReportRecoverableError(vm, false, "printf: %s: invalid number", width_text);
+                            ok = false;
+                            parsed_width = 0;
+                        }
+                        if (parsed_width > INT_MAX) {
+                            parsed_width = INT_MAX;
+                        } else if (parsed_width < INT_MIN) {
+                            parsed_width = INT_MIN;
+                        }
+                        width_value = (int)parsed_width;
+                    }
+                    arg_index++;
+                } else if (width_from_arg) {
+                    width_value = 0;
+                }
+
+                int precision_value = precision;
+                if (precision_from_arg && arg_index < arg_count) {
+                    Value value = args[arg_index];
+                    const char *precision_text = "";
+                    if (value.type == TYPE_STRING && value.s_val) {
+                        precision_text = value.s_val;
+                    }
+                    if (precision_text[0] == '\0') {
+                        precision_value = 0;
+                    } else {
+                        long long parsed_precision = 0;
+                        if (!shellParseSignedLongLong(precision_text, &parsed_precision)) {
+                            shellReportRecoverableError(vm, false, "printf: %s: invalid number", precision_text);
+                            ok = false;
+                            parsed_precision = 0;
+                        }
+                        if (parsed_precision > INT_MAX) {
+                            parsed_precision = INT_MAX;
+                        } else if (parsed_precision < INT_MIN) {
+                            parsed_precision = INT_MIN;
+                        }
+                        precision_value = (int)parsed_precision;
+                    }
+                    arg_index++;
+                } else if (precision_from_arg) {
+                    precision_value = 0;
+                }
+
+                const char *arg_text = "";
+                if (arg_index < arg_count) {
+                    Value value = args[arg_index];
+                    if (value.type == TYPE_STRING && value.s_val) {
+                        arg_text = value.s_val;
+                    } else if (value.type == TYPE_STRING && !value.s_val) {
+                        arg_text = "";
+                    }
+                    arg_index++;
+                }
+
+                bool has_wide_char_length = false;
+                for (size_t n = 0; n < length_len; ++n) {
+                    if (length_mod[n] == 'l' || length_mod[n] == 'L') {
+                        has_wide_char_length = true;
+                        break;
+                    }
+                }
 
             switch (spec) {
                 case 'd':
@@ -11317,7 +11419,15 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                     } else if (mod_h) {
                         iv = (short)iv;
                     }
-                    snprintf(buf, sizeof(buf), fmtbuf, iv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, precision_value, iv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, iv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, precision_value, iv);
+                    } else {
+                        snprintf(buf, sizeof(buf), fmtbuf, iv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11336,7 +11446,15 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                     } else if (mod_h) {
                         uv = (unsigned short)uv;
                     }
-                    snprintf(buf, sizeof(buf), fmtbuf, uv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, precision_value, uv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, uv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, precision_value, uv);
+                    } else {
+                        snprintf(buf, sizeof(buf), fmtbuf, uv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11354,7 +11472,15 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                         dv = 0.0;
                         ok = false;
                     }
-                    snprintf(buf, sizeof(buf), fmtbuf, dv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, precision_value, dv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, dv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, precision_value, dv);
+                    } else {
+                        snprintf(buf, sizeof(buf), fmtbuf, dv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11378,7 +11504,15 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                             format = safe_fmt;
                         }
                     }
-                    snprintf(buf, sizeof(buf), format, ch);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), format, width_value, precision_value, ch);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), format, width_value, ch);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), format, precision_value, ch);
+                    } else {
+                        snprintf(buf, sizeof(buf), format, ch);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11396,7 +11530,15 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                             format = safe_fmt;
                         }
                     }
-                    snprintf(buf, sizeof(buf), format, sv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), format, width_value, precision_value, sv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), format, width_value, sv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), format, precision_value, sv);
+                    } else {
+                        snprintf(buf, sizeof(buf), format, sv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11407,13 +11549,29 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
                         pv = 0;
                         ok = false;
                     }
-                    snprintf(buf, sizeof(buf), fmtbuf, (void *)(uintptr_t)pv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, precision_value, (void *)(uintptr_t)pv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, (void *)(uintptr_t)pv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, precision_value, (void *)(uintptr_t)pv);
+                    } else {
+                        snprintf(buf, sizeof(buf), fmtbuf, (void *)(uintptr_t)pv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
                 default: {
                     const char *sv = arg_text ? arg_text : "";
-                    snprintf(buf, sizeof(buf), fmtbuf, sv);
+                    if (width_from_arg && precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, precision_value, sv);
+                    } else if (width_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, width_value, sv);
+                    } else if (precision_from_arg) {
+                        snprintf(buf, sizeof(buf), fmtbuf, precision_value, sv);
+                    } else {
+                        snprintf(buf, sizeof(buf), fmtbuf, sv);
+                    }
                     fputs(buf, stdout);
                     break;
                 }
@@ -11425,6 +11583,13 @@ Value vmBuiltinShellPrintf(VM *vm, int arg_count, Value *args) {
 
         fputc(c, stdout);
     }
+
+        if (!ok) {
+            repeat = false;
+        } else {
+            repeat = fmt && arg_index < arg_count && consumed_conversion;
+        }
+    } while (repeat);
 
     fflush(stdout);
     shellUpdateStatus(ok ? 0 : 1);
