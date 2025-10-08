@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return finger help bind shopt command type
+cd pwd dirs pushd popd echo exit exec true false set unset export read test [ shift alias unalias history setenv unsetenv declare jobs fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt disown enable fc getopts hash kill logout mapfile readarray printf suspend times ulimit
+caller compgen complete compopt disown enable fc getopts hash kill mapfile readarray printf suspend times ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -86,8 +86,8 @@ Plans to address missing builtins
     - Registered the builtin with the shell frontend, runtime dispatch table, and help catalog so it is available interactively.
     - Added Bash parity coverage that removes specific aliases, clears every alias via -a, and validates error handling for missing names.
 
-15) logout builtin:
-    - Implement vmBuiltinShellLogout to reuse the exit path while verifying the shell is marked as a login shell before terminating.
-    - Register and document the builtin, ensuring history and status bookkeeping matches exit.
-    - Add tests that confirm logout succeeds in login contexts and errors otherwise when compared with Bash.
+15) logout builtin: Completed.
+    - Added vmBuiltinShellLogout which checks the login_shell shopt flag before exiting and reports errors otherwise.
+    - Registered the builtin in the frontend and help catalog so it is available interactively.
+    - Added regression coverage that exercises the non-login shell error handling alongside Bash for parity.
 

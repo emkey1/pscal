@@ -52,6 +52,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "unset", vmBuiltinShellUnset);
     registerShellBuiltin(category, command_group, "unsetenv", vmBuiltinShellUnsetenv);
     registerShellBuiltin(category, command_group, "return", vmBuiltinShellReturn);
+    registerShellBuiltin(category, command_group, "logout", vmBuiltinShellLogout);
     registerShellBuiltin(category, command_group, "finger", vmBuiltinShellFinger);
     registerShellBuiltin(category, command_group, "trap", vmBuiltinShellTrap);
     registerShellBuiltin(category, command_group, "local", vmBuiltinShellLocal);

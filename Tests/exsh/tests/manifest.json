@@ -119,6 +119,16 @@
             "expected_stdout": "let:start\nstatus:true\nstatus:false-zero\nassign:5\ncompound-add:8\ncompound-mul:16\ncompound-sub:12\ncompound-mod:2\ncompound-div:1\nmulti:5:0\nmulti-zero:0:1\nlet:end"
         },
         {
+            "id": "logout_non_login",
+            "name": "logout reports non-login error",
+            "category": "builtins",
+            "description": "logout matches Bash by failing when invoked outside a login shell.",
+            "script": "Tests/exsh/tests/logout_not_login.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "logout_status:1\nafter_logout",
+            "expected_stderr_substring": "not login shell"
+        },
+        {
             "id": "pipeline_cache_hit",
             "name": "Pipeline cache reuse emits notice",
             "category": "cache",
