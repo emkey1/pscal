@@ -65,7 +65,16 @@ option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
 option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
-option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" OFF)
+
+# Default the 3D extended builtins to ON whenever SDL support is enabled so
+# the bundled 3D demos (which rely on the physics helpers) continue to work
+# out of the box.  Respect explicit cache values when users override the
+# toggle on the command line.
+set(_ENABLE_EXT_BUILTIN_3D_DEFAULT OFF)
+if(SDL)
+    set(_ENABLE_EXT_BUILTIN_3D_DEFAULT ON)
+endif()
+option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ${_ENABLE_EXT_BUILTIN_3D_DEFAULT})
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
 option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
 
