@@ -770,11 +770,9 @@ void shellRuntimeSetPosixMode(bool enabled) {
     bool previously_enabled = gShellRuntime.posix_mode;
     gShellRuntime.posix_mode = enabled;
     if (enabled) {
-        if (!previously_enabled) {
-            const char *current = getenv("POSIXLY_CORRECT");
-            if (!current) {
-                setenv("POSIXLY_CORRECT", "y", 1);
-            }
+        const char *current = getenv("POSIXLY_CORRECT");
+        if (!current) {
+            setenv("POSIXLY_CORRECT", "y", 1);
         }
     } else {
         unsetenv("POSIXLY_CORRECT");
