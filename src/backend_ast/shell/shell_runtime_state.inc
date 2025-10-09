@@ -654,6 +654,8 @@ typedef struct {
     size_t dir_stack_count;
     size_t dir_stack_capacity;
     bool dir_stack_initialised;
+    int getopts_index;
+    int getopts_offset;
 } ShellRuntimeState;
 
 typedef enum {
@@ -725,7 +727,9 @@ static ShellRuntimeState gShellRuntime = {
     .dir_stack = NULL,
     .dir_stack_count = 0,
     .dir_stack_capacity = 0,
-    .dir_stack_initialised = false
+    .dir_stack_initialised = false,
+    .getopts_index = 1,
+    .getopts_offset = 0
 };
 
 static unsigned long gShellStatusVersion = 0;

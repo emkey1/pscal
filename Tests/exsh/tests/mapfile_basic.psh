@@ -1,0 +1,10 @@
+echo "mapfile:start"
+printf "one\ntwo\n" | mapfile values
+echo "count:${#values[@]}"
+echo "value0:${values[0]}"
+echo "value1:${values[1]}"
+printf "three\nfour\n" | mapfile -t stripped
+echo "stripped_count:${#stripped[@]}"
+echo "stripped0:${stripped[0]}"
+echo "stripped1:${stripped[1]}"
+echo "mapfile:end"

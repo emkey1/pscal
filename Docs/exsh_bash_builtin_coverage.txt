@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type
+cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type getopts mapfile readarray
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt enable fc getopts hash kill mapfile readarray suspend ulimit
+caller compgen complete compopt enable fc hash kill suspend ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -36,10 +36,10 @@ Plans to address missing builtins
    - Disown: Implemented. The job registry tracks disowned entries so jobs listings, fg/bg, and wait ignore them while they continue running in the background.
    - Remaining work: implement kill and suspend, routing signals and integrating with shellJobControlRestoreForeground. Add parity tests for signalling behaviour.
 
-5) getopts builtin:
-   - Track OPTIND and OPTARG in ShellRuntimeState, initialising defaults during startup.
-   - Implement vmBuiltinShellGetopts to walk gParamValues, update OPTIND and OPTARG, and report errors via shellUpdateStatus using existing parameter expansion helpers.
-   - Register the builtin, document it, and add regression tests that mirror Bash success and error flows.
+5) getopts builtin: Completed.
+   - Added vmBuiltinShellGetopts which keeps OPTIND/OPTARG in sync with gShellRuntime, supports clustered short options, consumes arguments that require parameters, and mirrors Bash error reporting for missing operands.
+   - The builtin is registered with both the frontend and runtime tables so compiled scripts and the interactive shell share behaviour.
+   - Regression coverage (`getopts_basic`) exercises option parsing alongside Bash to confirm parity for OPTARG and OPTIND updates.
 
 6) fc history builtin:
    - Build history search and edit helpers on top of gShellHistory, matching Bash editor invocation and error handling.
@@ -56,10 +56,10 @@ Plans to address missing builtins
    - Registered the builtin across kShellBuiltins, shellIsRuntimeBuiltin, the frontend registry, and documented it within kShellHelpTopics.
    - Parity tests remain to be added so Bash comparison coverage can exercise the new assignment semantics.
 
-9) mapfile and readarray builtins:
-   - Reuse array logic inside vmBuiltinShellRead to create a helper that reads from a stream into an array variable with Bash compatible flags such as -t, -u, and -n.
-   - Expose the helper through mapfile and its alias readarray, registering both names in the builtin table and dispatcher and documenting the shared behaviour.
-   - Add regression tests that read sample input into arrays and compare exsh output with Bash.
+9) mapfile and readarray builtins: Completed.
+   - Implemented vmBuiltinShellMapfile to slurp standard input into indexed arrays while honouring the `-t` flag for trimming trailing newlines and keeping results in the array registry/environment.
+   - Registered both mapfile and its readarray alias with the frontend so scripts and interactive sessions can load data without launching external processes.
+   - Added parity coverage (`mapfile_basic`) that validates array population against Bash for default and `-t` modes.
 
 10) readonly and typeset builtins:
     - Extend the variable tracking layer to record read only flags when shellSetTrackedVariable mutates entries, rejecting writes to protected names.

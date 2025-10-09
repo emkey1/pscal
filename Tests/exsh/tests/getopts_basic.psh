@@ -1,0 +1,10 @@
+echo "getopts:start"
+set -- -a -b value -- tail
+while getopts "ab:" opt; do
+    echo "opt:$opt"
+    if [ "$opt" = "b" ]; then
+        echo "optarg:$OPTARG"
+    fi
+done
+echo "optind:$OPTIND"
+echo "getopts:end"

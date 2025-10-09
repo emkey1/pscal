@@ -723,6 +723,25 @@ static bool shellParseUnsignedLongLong(const char *text, unsigned long long *out
     return true;
 }
 
+static void shellGetoptsUpdateOptind(int value) {
+    if (value < 1) {
+        value = 1;
+    }
+    gShellRuntime.getopts_index = value;
+    gShellRuntime.getopts_offset = 1;
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    shellSetTrackedVariable("OPTIND", buffer, false);
+}
+
+static void shellGetoptsSetOptarg(const char *value) {
+    if (value && *value) {
+        shellSetTrackedVariable("OPTARG", value, false);
+    } else {
+        shellUnsetTrackedVariable("OPTARG");
+    }
+}
+
 static bool shellParseDouble(const char *text, double *out_value) {
     if (!out_value) {
         return false;
@@ -2425,6 +2444,306 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     } else {
         shellUpdateStatus(0);
     }
+    return makeVoid();
+}
+
+static void shellGetoptsSyncIndex(void) {
+    char *text = shellLookupParameterValue("OPTIND", strlen("OPTIND"));
+    if (text) {
+        char *end = NULL;
+        long parsed = strtol(text, &end, 10);
+        if (end && *end == '\0' && parsed >= 1 && parsed <= INT_MAX) {
+            gShellRuntime.getopts_index = (int)parsed;
+            gShellRuntime.getopts_offset = 1;
+        }
+        free(text);
+    } else if (gShellRuntime.getopts_index < 1) {
+        shellGetoptsUpdateOptind(1);
+    }
+}
+
+Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
+    if (arg_count < 2) {
+        runtimeError(vm, "getopts: expected OPTSTRING NAME [ARGS...]");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "getopts: option string must be provided");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+    if (args[1].type != TYPE_STRING || !args[1].s_val || args[1].s_val[0] == '\0') {
+        runtimeError(vm, "getopts: variable name must be a non-empty string");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+
+    const char *optstring = args[0].s_val;
+    bool silent_errors = false;
+    if (optstring[0] == ':') {
+        silent_errors = true;
+        optstring++;
+    }
+    const char *name = args[1].s_val;
+
+    char **argv_list = NULL;
+    int argc_list = 0;
+    char **override_args = NULL;
+    if (arg_count > 2) {
+        argc_list = arg_count - 2;
+        override_args = (char **)calloc((size_t)argc_list, sizeof(char *));
+        if (!override_args) {
+            runtimeError(vm, "getopts: out of memory");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        bool valid = true;
+        for (int i = 0; i < argc_list; ++i) {
+            Value val = args[i + 2];
+            if (val.type != TYPE_STRING || !val.s_val) {
+                valid = false;
+                break;
+            }
+            override_args[i] = val.s_val;
+        }
+        if (!valid) {
+            free(override_args);
+            runtimeError(vm, "getopts: arguments must be strings");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        argv_list = override_args;
+    } else {
+        argv_list = gParamValues;
+        argc_list = gParamCount;
+    }
+
+    if (!argv_list || argc_list <= 0) {
+        shellGetoptsUpdateOptind(1);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    shellGetoptsSyncIndex();
+    int optind = gShellRuntime.getopts_index;
+    if (optind < 1) {
+        optind = 1;
+    }
+
+    while (optind <= argc_list) {
+        const char *current = argv_list[optind - 1];
+        if (!current) {
+            optind++;
+            gShellRuntime.getopts_offset = 1;
+            continue;
+        }
+        if (strcmp(current, "--") == 0) {
+            optind++;
+            shellGetoptsSetOptarg(NULL);
+            shellGetoptsUpdateOptind(optind);
+            shellUpdateStatus(1);
+            free(override_args);
+            return makeVoid();
+        }
+        if (current[0] != '-' || current[1] == '\0') {
+            shellGetoptsSetOptarg(NULL);
+            shellGetoptsUpdateOptind(optind);
+            shellUpdateStatus(1);
+            free(override_args);
+            return makeVoid();
+        }
+
+        int offset = gShellRuntime.getopts_offset;
+        if (offset < 1) {
+            offset = 1;
+        }
+        char option = current[offset];
+        if (option == '\0') {
+            optind++;
+            gShellRuntime.getopts_offset = 1;
+            continue;
+        }
+        const char *rest = current + offset + 1;
+        bool has_more = *rest != '\0';
+        const char *match = strchr(optstring, option);
+        if (!match || option == ':') {
+            char optbuf[2] = {option ? option : '?', '\0'};
+            shellSetTrackedVariable(name, "?", false);
+            shellGetoptsSetOptarg(optbuf);
+            if (!silent_errors && option) {
+                fprintf(stderr, "getopts: illegal option -- %c\n", option);
+            }
+            if (has_more) {
+                gShellRuntime.getopts_offset = offset + 1;
+            } else {
+                optind++;
+                gShellRuntime.getopts_offset = 1;
+            }
+            shellGetoptsUpdateOptind(optind);
+            shellUpdateStatus(0);
+            free(override_args);
+            return makeVoid();
+        }
+
+        bool expects_arg = (match[1] == ':');
+        char *optarg_value = NULL;
+        if (expects_arg) {
+            if (has_more) {
+                optarg_value = strdup(rest);
+                optind++;
+                gShellRuntime.getopts_offset = 1;
+            } else if (optind < argc_list) {
+                const char *next = argv_list[optind];
+                optarg_value = strdup(next ? next : "");
+                optind += 2;
+                gShellRuntime.getopts_offset = 1;
+            } else {
+                char optbuf[2] = {option, '\0'};
+                if (silent_errors) {
+                    shellSetTrackedVariable(name, ":", false);
+                } else {
+                    shellSetTrackedVariable(name, "?", false);
+                    fprintf(stderr, "getopts: option requires an argument -- %c\n", option);
+                }
+                shellGetoptsSetOptarg(optbuf);
+                optind++;
+                shellGetoptsUpdateOptind(optind);
+                shellUpdateStatus(0);
+                free(override_args);
+                return makeVoid();
+            }
+        } else {
+            if (has_more) {
+                gShellRuntime.getopts_offset = offset + 1;
+            } else {
+                optind++;
+                gShellRuntime.getopts_offset = 1;
+            }
+        }
+
+        char optchar[2] = {option, '\0'};
+        shellSetTrackedVariable(name, optchar, false);
+        if (optarg_value) {
+            shellGetoptsSetOptarg(optarg_value);
+            free(optarg_value);
+        } else {
+            shellGetoptsSetOptarg(NULL);
+        }
+        shellGetoptsUpdateOptind(optind);
+        shellUpdateStatus(0);
+        free(override_args);
+        return makeVoid();
+    }
+
+    shellGetoptsSetOptarg(NULL);
+    shellGetoptsUpdateOptind(optind);
+    shellUpdateStatus(1);
+    free(override_args);
+    return makeVoid();
+}
+
+
+static bool shellMapfileStoreArray(const char *name, char **values, size_t count) {
+    if (!name) {
+        name = "MAPFILE";
+    }
+    if (!shellArrayRegistryStore(name, values, NULL, count, SHELL_ARRAY_KIND_INDEXED)) {
+        return false;
+    }
+    const ShellArrayVariable *stored = shellArrayRegistryFindConst(name);
+    if (!stored) {
+        return false;
+    }
+    char *literal = shellBuildArrayLiteral(stored);
+    if (!literal) {
+        shellArrayRegistryRemove(name);
+        return false;
+    }
+    if (setenv(name, literal, 1) != 0) {
+        shellArrayRegistryRemove(name);
+        free(literal);
+        return false;
+    }
+    free(literal);
+    return true;
+}
+
+Value vmBuiltinShellMapfile(VM *vm, int arg_count, Value *args) {
+    bool strip_newline = false;
+    const char *array_name = "MAPFILE";
+    int index = 0;
+
+    while (index < arg_count) {
+        Value arg = args[index];
+        if (arg.type != TYPE_STRING || !arg.s_val) {
+            runtimeError(vm, "mapfile: invalid argument");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        if (strcmp(arg.s_val, "-t") == 0) {
+            strip_newline = true;
+            index++;
+            continue;
+        }
+        if (arg.s_val[0] == '-') {
+            runtimeError(vm, "mapfile: unsupported option '%s'", arg.s_val);
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        array_name = arg.s_val;
+        index++;
+        break;
+    }
+
+    if (index < arg_count) {
+        runtimeError(vm, "mapfile: unexpected argument '%s'", args[index].s_val);
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+
+    char **values = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    bool ok = true;
+
+    for (;;) {
+        char *line = NULL;
+        size_t line_length = 0;
+        ShellReadLineResult result = shellReadLineFromStream(stdin, &line, &line_length);
+        if (result == SHELL_READ_LINE_ERROR) {
+            runtimeError(vm, "mapfile: failed to read input");
+            ok = false;
+            free(line);
+            break;
+        }
+        if (result == SHELL_READ_LINE_EOF) {
+            free(line);
+            break;
+        }
+        if (strip_newline) {
+            while (line_length > 0 &&
+                   (line[line_length - 1] == '\n' || line[line_length - 1] == '\r')) {
+                line[--line_length] = '\0';
+            }
+        }
+        if (!shellAppendArrayValue(&values, &count, &capacity, line)) {
+            runtimeError(vm, "mapfile: out of memory");
+            free(line);
+            ok = false;
+            break;
+        }
+    }
+
+    if (ok) {
+        if (!shellMapfileStoreArray(array_name, values, count)) {
+            runtimeError(vm, "mapfile: unable to store results");
+            ok = false;
+        }
+    }
+
+    shellFreeArrayValues(values, count);
+    shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
 

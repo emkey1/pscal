@@ -137,6 +137,22 @@
             "expected_stderr_substring": "not login shell"
         },
         {
+            "id": "getopts_basic",
+            "name": "getopts parses short options",
+            "category": "builtins",
+            "description": "getopts walks short options, exposes OPTARG, and advances OPTIND.",
+            "script": "Tests/exsh/tests/getopts_basic.psh",
+            "expect": "match_bash"
+        },
+        {
+            "id": "mapfile_basic",
+            "name": "mapfile loads array from stdin",
+            "category": "builtins",
+            "description": "mapfile and its -t flag populate arrays using data read from standard input.",
+            "script": "Tests/exsh/tests/mapfile_basic.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "pipeline_cache_hit",
             "name": "Pipeline cache reuse emits notice",
             "category": "cache",
