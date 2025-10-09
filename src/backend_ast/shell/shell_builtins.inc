@@ -3877,9 +3877,6 @@ static bool shellHashAddName(const char *name) {
     if (hashed) {
         return true;
     }
-    if (count > 0) {
-        return true;
-    }
     return false;
 }
 
