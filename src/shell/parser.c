@@ -1268,6 +1268,10 @@ static ShellCommand *parseCaseClause(ShellParser *parser) {
             return NULL;
         }
         parserScheduleRuleMask(parser, RULE_MASK_CASE_PATTERN);
+        if (parser->current.type == SHELL_TOKEN_LPAREN) {
+            shellParserAdvance(parser);
+            parserScheduleRuleMask(parser, RULE_MASK_CASE_PATTERN);
+        }
         while (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_NAME ||
                parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD || parser->current.type == SHELL_TOKEN_PARAMETER) {
             ShellWord *pattern = parseWordToken(parser, "Expected pattern");
