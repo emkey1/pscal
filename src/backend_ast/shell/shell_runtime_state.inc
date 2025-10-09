@@ -692,6 +692,301 @@ typedef struct {
 } ShellAssignmentBackup;
 
 typedef struct {
+    char *name;
+    char *value;
+    bool is_array_literal;
+} ShellLocalVariable;
+
+typedef struct {
+    ShellLocalVariable *variables;
+    size_t count;
+    size_t capacity;
+} ShellLocalScopeFrame;
+
+static ShellLocalScopeFrame *gShellLocalScopeStack = NULL;
+static size_t gShellLocalScopeDepth = 0;
+static size_t gShellLocalScopeCapacity = 0;
+
+static void shellLocalVariableDispose(ShellLocalVariable *var) {
+    if (!var) {
+        return;
+    }
+    free(var->name);
+    free(var->value);
+    var->name = NULL;
+    var->value = NULL;
+    var->is_array_literal = false;
+}
+
+static void shellLocalScopeFrameReset(ShellLocalScopeFrame *frame) {
+    if (!frame) {
+        return;
+    }
+    for (size_t i = 0; i < frame->count; ++i) {
+        shellLocalVariableDispose(&frame->variables[i]);
+    }
+    free(frame->variables);
+    frame->variables = NULL;
+    frame->count = 0;
+    frame->capacity = 0;
+}
+
+static bool shellLocalScopeEnsureCapacity(ShellLocalScopeFrame *frame, size_t needed) {
+    if (!frame) {
+        return false;
+    }
+    if (frame->capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = frame->capacity ? frame->capacity * 2 : 4;
+    if (new_capacity < needed) {
+        new_capacity = needed;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(ShellLocalVariable)) {
+        return false;
+    }
+    ShellLocalVariable *resized =
+        (ShellLocalVariable *)realloc(frame->variables, new_capacity * sizeof(ShellLocalVariable));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = frame->capacity; i < new_capacity; ++i) {
+        resized[i].name = NULL;
+        resized[i].value = NULL;
+        resized[i].is_array_literal = false;
+    }
+    frame->variables = resized;
+    frame->capacity = new_capacity;
+    return true;
+}
+
+static ShellLocalVariable *shellLocalScopeFrameFind(ShellLocalScopeFrame *frame, const char *name) {
+    if (!frame || !name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < frame->count; ++i) {
+        ShellLocalVariable *var = &frame->variables[i];
+        if (var->name && strcmp(var->name, name) == 0) {
+            return var;
+        }
+    }
+    return NULL;
+}
+
+static ShellLocalVariable *shellLocalScopeFind(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t depth = gShellLocalScopeDepth; depth > 0; --depth) {
+        ShellLocalScopeFrame *frame = &gShellLocalScopeStack[depth - 1];
+        ShellLocalVariable *found = shellLocalScopeFrameFind(frame, name);
+        if (found) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static ShellLocalVariable *shellLocalScopeFindInOtherFrames(const char *name,
+                                                           const ShellLocalScopeFrame *exclude) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t depth = gShellLocalScopeDepth; depth > 0; --depth) {
+        ShellLocalScopeFrame *frame = &gShellLocalScopeStack[depth - 1];
+        if (frame == exclude) {
+            continue;
+        }
+        ShellLocalVariable *found = shellLocalScopeFrameFind(frame, name);
+        if (found) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static void shellArrayRegistryRestoreVisibleValue(const char *name,
+                                                  const ShellLocalScopeFrame *excluded_frame) {
+    if (!name) {
+        return;
+    }
+    ShellLocalVariable *shadow = excluded_frame ? shellLocalScopeFindInOtherFrames(name, excluded_frame)
+                                                : shellLocalScopeFind(name);
+    if (shadow && shadow->is_array_literal) {
+        const char *text = shadow->value ? shadow->value : "";
+        shellArrayRegistryAssignFromText(name, text);
+        return;
+    }
+    const char *env_text = getenv(name);
+    if (env_text) {
+        shellArrayRegistryAssignFromText(name, env_text);
+    } else {
+        shellArrayRegistryRemove(name);
+    }
+}
+
+static bool shellLocalScopePush(void) {
+    if (gShellLocalScopeDepth == gShellLocalScopeCapacity) {
+        size_t new_capacity = gShellLocalScopeCapacity ? gShellLocalScopeCapacity * 2 : 4;
+        if (new_capacity > SIZE_MAX / sizeof(ShellLocalScopeFrame)) {
+            return false;
+        }
+        ShellLocalScopeFrame *resized =
+            (ShellLocalScopeFrame *)realloc(gShellLocalScopeStack, new_capacity * sizeof(ShellLocalScopeFrame));
+        if (!resized) {
+            return false;
+        }
+        for (size_t i = gShellLocalScopeCapacity; i < new_capacity; ++i) {
+            resized[i].variables = NULL;
+            resized[i].count = 0;
+            resized[i].capacity = 0;
+        }
+        gShellLocalScopeStack = resized;
+        gShellLocalScopeCapacity = new_capacity;
+    }
+    ShellLocalScopeFrame *frame = &gShellLocalScopeStack[gShellLocalScopeDepth];
+    frame->variables = NULL;
+    frame->count = 0;
+    frame->capacity = 0;
+    gShellLocalScopeDepth++;
+    return true;
+}
+
+static void shellLocalScopePop(void) {
+    if (gShellLocalScopeDepth == 0) {
+        return;
+    }
+    ShellLocalScopeFrame *frame = &gShellLocalScopeStack[gShellLocalScopeDepth - 1];
+    for (size_t i = 0; i < frame->count; ++i) {
+        ShellLocalVariable *var = &frame->variables[i];
+        if (var->name && var->is_array_literal) {
+            shellArrayRegistryRemove(var->name);
+            shellArrayRegistryRestoreVisibleValue(var->name, frame);
+        }
+    }
+    shellLocalScopeFrameReset(frame);
+    gShellLocalScopeDepth--;
+}
+
+static size_t shellLocalScopeDepth(void) {
+    return gShellLocalScopeDepth;
+}
+
+static bool shellLocalScopeSetOnCurrentFrame(const char *name, const char *value, bool is_array_literal) {
+    if (!name || gShellLocalScopeDepth == 0) {
+        return false;
+    }
+    ShellLocalScopeFrame *frame = &gShellLocalScopeStack[gShellLocalScopeDepth - 1];
+    ShellLocalVariable *existing = shellLocalScopeFrameFind(frame, name);
+    bool created_new = false;
+    if (!existing) {
+        if (!shellLocalScopeEnsureCapacity(frame, frame->count + 1)) {
+            return false;
+        }
+        existing = &frame->variables[frame->count++];
+        existing->name = strdup(name);
+        if (!existing->name) {
+            frame->count--;
+            return false;
+        }
+        existing->value = NULL;
+        existing->is_array_literal = false;
+        created_new = true;
+    }
+    char *copy = strdup(value ? value : "");
+    if (!copy) {
+        if (created_new) {
+            free(existing->name);
+            existing->name = NULL;
+            frame->count--;
+        }
+        return false;
+    }
+    free(existing->value);
+    existing->value = copy;
+    existing->is_array_literal = is_array_literal;
+    if (is_array_literal) {
+        const char *text = existing->value ? existing->value : "";
+        shellArrayRegistryAssignFromText(existing->name, text);
+    } else {
+        shellArrayRegistryRemove(existing->name);
+    }
+    return true;
+}
+
+static bool shellLocalScopeAssignExisting(const char *name, const char *value, bool is_array_literal) {
+    ShellLocalVariable *existing = shellLocalScopeFind(name);
+    if (!existing) {
+        return false;
+    }
+    char *copy = strdup(value ? value : "");
+    if (!copy) {
+        return false;
+    }
+    free(existing->value);
+    existing->value = copy;
+    existing->is_array_literal = is_array_literal;
+    return true;
+}
+
+static bool shellLocalScopeGetCopy(const char *name, char **out_value, bool *out_is_array) {
+    if (out_value) {
+        *out_value = NULL;
+    }
+    if (out_is_array) {
+        *out_is_array = false;
+    }
+    ShellLocalVariable *existing = shellLocalScopeFind(name);
+    if (!existing) {
+        return false;
+    }
+    if (out_value) {
+        *out_value = strdup(existing->value ? existing->value : "");
+        if (!*out_value) {
+            return false;
+        }
+    }
+    if (out_is_array) {
+        *out_is_array = existing->is_array_literal;
+    }
+    return true;
+}
+
+static bool shellLocalScopeUnset(const char *name) {
+    if (!name) {
+        return false;
+    }
+    for (size_t depth = gShellLocalScopeDepth; depth > 0; --depth) {
+        ShellLocalScopeFrame *frame = &gShellLocalScopeStack[depth - 1];
+        for (size_t i = 0; i < frame->count; ++i) {
+            ShellLocalVariable *var = &frame->variables[i];
+            if (var->name && strcmp(var->name, name) == 0) {
+                bool was_array = var->is_array_literal;
+                if (was_array) {
+                    shellArrayRegistryRemove(var->name);
+                }
+                shellLocalVariableDispose(var);
+                if (i + 1 < frame->count) {
+                    memmove(&frame->variables[i], &frame->variables[i + 1],
+                            (frame->count - i - 1) * sizeof(ShellLocalVariable));
+                }
+                frame->count--;
+                if (frame->count < frame->capacity) {
+                    frame->variables[frame->count].name = NULL;
+                    frame->variables[frame->count].value = NULL;
+                    frame->variables[frame->count].is_array_literal = false;
+                }
+                if (was_array) {
+                    shellArrayRegistryRestoreVisibleValue(name, NULL);
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+typedef struct {
     int target_fd;
     int saved_fd;
     bool saved_valid;

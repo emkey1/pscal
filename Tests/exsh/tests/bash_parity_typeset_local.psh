@@ -1,0 +1,16 @@
+typeset_with_value() {
+    typeset scoped_value="inner"
+    printf 'value-inside:%s\n' "${scoped_value-undefined}"
+}
+
+typeset_with_value
+printf 'value-outside:%s\n' "${scoped_value-undefined}"
+
+typeset_assign_after() {
+    typeset delayed
+    delayed="later"
+    printf 'delayed-inside:%s\n' "${delayed-undefined}"
+}
+
+typeset_assign_after
+printf 'delayed-outside:%s\n' "${delayed-undefined}"

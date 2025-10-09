@@ -560,6 +560,14 @@
             "expect": "match_bash"
         },
         {
+            "id": "bash_typeset_function_scope",
+            "name": "typeset locals stay within functions",
+            "category": "parity",
+            "description": "typeset inside functions keeps variables scoped and hidden from the global environment.",
+            "script": "Tests/exsh/tests/bash_parity_typeset_local.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "printf_builtin",
             "name": "printf formats strings and numbers",
             "category": "builtins",

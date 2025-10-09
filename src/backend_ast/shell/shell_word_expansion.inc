@@ -2327,6 +2327,21 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         gParamCount = 0;
         gShellPositionalOwned = false;
     }
+    bool scope_pushed = shellLocalScopePush();
+    if (!scope_pushed) {
+        runtimeError(vm, "%s: out of memory", name);
+        shellUpdateStatus(1);
+        if (gShellPositionalOwned) {
+            shellFreeOwnedPositionalParameters();
+        } else {
+            gParamValues = NULL;
+            gParamCount = 0;
+        }
+        gParamValues = saved_params;
+        gParamCount = saved_count;
+        gShellPositionalOwned = saved_owned;
+        return true;
+    }
     VM function_vm;
     initVM(&function_vm);
     InterpretResult result = interpretBytecode(&function_vm, &entry->compiled->chunk,
@@ -2337,6 +2352,9 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         shellUpdateStatus(shellRuntimeLastStatus());
     }
     freeVM(&function_vm);
+    if (scope_pushed) {
+        shellLocalScopePop();
+    }
     if (gShellPositionalOwned) {
         shellFreeOwnedPositionalParameters();
     } else {

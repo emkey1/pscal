@@ -771,19 +771,29 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
         effective_name_owned = NULL;
         free(name);
         free(base_name);
-        const char *previous = getenv(backups[i].name);
-        if (previous) {
-            backups[i].previous_value = strdup(previous);
-            if (!backups[i].previous_value) {
+        ShellLocalVariable *local_entry = shellLocalScopeFind(backups[i].name);
+        if (local_entry) {
+            if (!shellLocalScopeGetCopy(backups[i].name, &backups[i].previous_value,
+                                        &backups[i].previous_was_array)) {
                 shellRestoreAssignments(backups, i + 1);
                 return false;
             }
             backups[i].had_previous = true;
-            backups[i].previous_was_array = (shellArrayRegistryFindConst(backups[i].name) != NULL);
         } else {
-            backups[i].previous_value = NULL;
-            backups[i].had_previous = false;
-            backups[i].previous_was_array = false;
+            const char *previous = getenv(backups[i].name);
+            if (previous) {
+                backups[i].previous_value = strdup(previous);
+                if (!backups[i].previous_value) {
+                    shellRestoreAssignments(backups, i + 1);
+                    return false;
+                }
+                backups[i].had_previous = true;
+                backups[i].previous_was_array = (shellArrayRegistryFindConst(backups[i].name) != NULL);
+            } else {
+                backups[i].previous_value = NULL;
+                backups[i].had_previous = false;
+                backups[i].previous_was_array = false;
+            }
         }
         bool set_ok;
         if (is_element) {
@@ -1907,6 +1917,15 @@ static char *shellLookupParameterValueInternal(const char *name,
         free(key);
         return result;
     }
+    char *local_value = NULL;
+    bool local_is_array = false;
+    if (shellLocalScopeGetCopy(key, &local_value, &local_is_array)) {
+        if (out_is_set) {
+            *out_is_set = true;
+        }
+        free(key);
+        return local_value ? local_value : strdup("");
+    }
     const char *env = getenv(key);
     if (out_is_set) {
         *out_is_set = (env != NULL);
@@ -2818,6 +2837,20 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
         shellReadonlySetErrorName(name);
         return false;
     }
+    ShellLocalVariable *local_entry = shellLocalScopeFind(name);
+    if (local_entry) {
+        if (shellLocalScopeAssignExisting(name, value ? value : "", is_array_literal)) {
+            if (is_array_literal) {
+                const char *local_text = local_entry->value ? local_entry->value : "";
+                shellArrayRegistryAssignFromText(name, local_text);
+            } else {
+                shellArrayRegistryRemove(name);
+            }
+            return true;
+        }
+        errno = ENOMEM;
+        return false;
+    }
     const char *text = value ? value : "";
     if (setenv(name, text, 1) != 0) {
         return false;
@@ -2833,6 +2866,9 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
 
 static void shellUnsetTrackedVariable(const char *name) {
     if (!name) {
+        return;
+    }
+    if (shellLocalScopeUnset(name)) {
         return;
     }
     unsetenv(name);
@@ -3097,6 +3133,14 @@ static char *shellLookupRawEnvironmentValue(const char *name, size_t len) {
     }
     memcpy(key, name, len);
     key[len] = '\0';
+    char *local_value = NULL;
+    if (shellLocalScopeGetCopy(key, &local_value, NULL)) {
+        free(key);
+        if (!local_value) {
+            return strdup("");
+        }
+        return local_value;
+    }
     const char *env = getenv(key);
     free(key);
     if (!env) {

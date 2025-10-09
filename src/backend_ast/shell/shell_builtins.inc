@@ -3305,6 +3305,11 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
     bool global_scope = false;
     bool mark_readonly = false;
     bool integer_attribute = false;
+    bool in_function_scope = shellLocalScopeDepth() > 0;
+    bool request_local_scope = gShellRuntime.local_scope_active;
+    if (builtin_name && strcmp(builtin_name, "typeset") == 0 && in_function_scope) {
+        request_local_scope = true;
+    }
     int exit_status = 0;
     int index = 0;
     while (index < arg_count) {
@@ -3363,6 +3368,14 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         index++;
     }
 
+    bool use_local_scope = false;
+    if (request_local_scope && !in_function_scope) {
+        runtimeError(vm, "%s: can only be used in functions", builtin_name);
+        ok = false;
+    } else if (request_local_scope && in_function_scope && !global_scope) {
+        use_local_scope = true;
+    }
+
     for (; index < arg_count && ok; ++index) {
         Value v = args[index];
         if (v.type != TYPE_STRING || !v.s_val) {
@@ -3374,26 +3387,36 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         const char *eq = strchr(spec, '=');
         if (!eq) {
             if (associative) {
-                if (!shellArrayRegistryInitializeAssociative(spec)) {
-                    runtimeError(vm, "declare: unable to initialise '%s'", spec);
+                if (use_local_scope) {
+                    runtimeError(vm, "%s: local associative arrays are not supported", builtin_name);
                     ok = false;
                 } else {
-                    if (setenv(spec, "", 1) != 0) {
+                    if (!shellArrayRegistryInitializeAssociative(spec)) {
+                        runtimeError(vm, "declare: unable to initialise '%s'", spec);
+                        ok = false;
+                    } else if (setenv(spec, "", 1) != 0) {
                         runtimeError(vm, "declare: unable to set '%s'", spec);
                         ok = false;
                     }
                 }
             } else {
-                if (!shellSetTrackedVariable(spec, "", false)) {
-                    const char *readonly = shellReadonlyGetErrorName();
-                    if (errno == EPERM && readonly && *readonly) {
-                        runtimeError(vm, "declare: %s: readonly variable", readonly);
-                    } else if (errno != 0) {
-                        runtimeError(vm, "declare: unable to set '%s': %s", spec, strerror(errno));
-                    } else {
-                        runtimeError(vm, "declare: unable to set '%s'", spec);
+                if (use_local_scope) {
+                    if (!shellLocalScopeSetOnCurrentFrame(spec, "", false)) {
+                        runtimeError(vm, "declare: out of memory");
+                        ok = false;
                     }
-                    ok = false;
+                } else {
+                    if (!shellSetTrackedVariable(spec, "", false)) {
+                        const char *readonly = shellReadonlyGetErrorName();
+                        if (errno == EPERM && readonly && *readonly) {
+                            runtimeError(vm, "declare: %s: readonly variable", readonly);
+                        } else if (errno != 0) {
+                            runtimeError(vm, "declare: unable to set '%s': %s", spec, strerror(errno));
+                        } else {
+                            runtimeError(vm, "declare: unable to set '%s'", spec);
+                        }
+                        ok = false;
+                    }
                 }
             }
             if (ok && mark_readonly) {
@@ -3469,6 +3492,13 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
             }
         }
         if (associative) {
+            if (use_local_scope) {
+                runtimeError(vm, "%s: local associative arrays are not supported", builtin_name);
+                free(coerced_value);
+                free(name);
+                ok = false;
+                break;
+            }
             if (!shellArrayRegistryInitializeAssociative(name)) {
                 runtimeError(vm, "declare: unable to initialise '%s'", name);
                 free(coerced_value);
@@ -3491,7 +3521,15 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 break;
             }
         } else {
-            if (!shellSetTrackedVariable(name, value_to_store, false)) {
+            if (use_local_scope) {
+                if (!shellLocalScopeSetOnCurrentFrame(name, value_to_store, false)) {
+                    runtimeError(vm, "declare: out of memory");
+                    free(coerced_value);
+                    free(name);
+                    ok = false;
+                    break;
+                }
+            } else if (!shellSetTrackedVariable(name, value_to_store, false)) {
                 const char *readonly = shellReadonlyGetErrorName();
                 if (errno == EPERM && readonly && *readonly) {
                     runtimeError(vm, "declare: %s: readonly variable", readonly);
@@ -3521,7 +3559,7 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         }
     }
 
-    (void)global_scope;
+    gShellRuntime.local_scope_active = false;
 
     if (!ok && exit_status == 0) {
         exit_status = 1;
