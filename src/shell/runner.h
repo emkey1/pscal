@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "Pascal/globals.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +21,22 @@ typedef struct ShellRunOptions {
     bool suppress_warnings;
     const char *frontend_path;
 } ShellRunOptions;
+
+typedef struct ShellSymbolTableScope {
+    HashTable *saved_global;
+    HashTable *saved_const_global;
+    HashTable *saved_procedure_table;
+    HashTable *saved_current_procedure_table;
+    HashTable *new_global;
+    HashTable *new_const_global;
+    HashTable *new_procedure_table;
+    bool active;
+} ShellSymbolTableScope;
+
+void shellSymbolTableScopeInit(ShellSymbolTableScope *scope);
+bool shellSymbolTableScopePush(ShellSymbolTableScope *scope);
+void shellSymbolTableScopePop(ShellSymbolTableScope *scope);
+bool shellSymbolTableScopeIsActive(void);
 
 char *shellLoadFile(const char *path);
 int shellRunSource(const char *source,

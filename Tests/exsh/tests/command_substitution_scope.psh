@@ -1,0 +1,9 @@
+echo "cmdsub-retain:start"
+outer_var="outer"
+outer_func() { printf "func:%s" "$outer_var"; }
+cmdsub_result=$(outer_func; printf " inside:%s" "$outer_var"; outer_var="inner"; printf " after:%s" "$outer_var")
+printf "cmdsub:%s\n" "$cmdsub_result"
+outer_func
+printf "\n"
+echo "after-var:$outer_var"
+echo "cmdsub-retain:end"

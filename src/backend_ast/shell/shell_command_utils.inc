@@ -1,4 +1,5 @@
 /* Auto-generated include: command assembly helpers and metadata parsing. Included from shell.c. */
+#include "shell/runner.h"
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);
@@ -181,6 +182,8 @@ static char *shellRunCommandSubstitution(const char *command) {
     char *output = NULL;
     size_t length = 0;
     size_t capacity = 0;
+    ShellSymbolTableScope table_scope;
+    bool scope_pushed = false;
 
     if (pipe(pipes) != 0) {
         return strdup("");
@@ -214,7 +217,28 @@ static char *shellRunCommandSubstitution(const char *command) {
 
     const char *source = command ? command : "";
     bool exit_requested = false;
-    int status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
+    int status = EXIT_FAILURE;
+
+    shellSymbolTableScopeInit(&table_scope);
+    if (!shellSymbolTableScopeIsActive()) {
+        if (!shellSymbolTableScopePush(&table_scope)) {
+            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+        } else {
+            scope_pushed = true;
+        }
+    }
+
+    if (!scope_pushed && !shellSymbolTableScopeIsActive()) {
+        /* Allocation failed and no active scope exists. */
+        exit_requested = false;
+    } else {
+        status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
+    }
+
+    if (scope_pushed) {
+        shellSymbolTableScopePop(&table_scope);
+    }
+
     fflush(stdout);
 
     if (dup2(saved_stdout, STDOUT_FILENO) < 0) {

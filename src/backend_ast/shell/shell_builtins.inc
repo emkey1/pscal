@@ -1,4 +1,5 @@
 /* Auto-generated include: shell builtins exposed to the VM. Included from shell.c. */
+#include "shell/runner.h"
 Value vmBuiltinShellExec(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
@@ -1457,9 +1458,35 @@ Value vmBuiltinShellEval(VM *vm, int arg_count, Value *args) {
     opts.frontend_path = frontend_path ? frontend_path : "exsh";
     opts.exit_on_signal = shellRuntimeExitOnSignal();
 
+    ShellSymbolTableScope table_scope;
+    shellSymbolTableScopeInit(&table_scope);
+    bool scope_pushed = false;
+    bool can_run = true;
+    if (!shellSymbolTableScopeIsActive()) {
+        if (!shellSymbolTableScopePush(&table_scope)) {
+            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+            can_run = false;
+        } else {
+            scope_pushed = true;
+        }
+    }
+
     bool exit_requested = false;
-    int status = shellRunSource(script, "<eval>", &opts, &exit_requested);
+    int status = EXIT_FAILURE;
+    if (can_run || shellSymbolTableScopeIsActive()) {
+        status = shellRunSource(script, "<eval>", &opts, &exit_requested);
+    }
+
+    if (scope_pushed) {
+        shellSymbolTableScopePop(&table_scope);
+    }
+
     free(script);
+
+    if (!can_run && !shellSymbolTableScopeIsActive()) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
 
     if (exit_requested) {
         shellRuntimeRequestExit();

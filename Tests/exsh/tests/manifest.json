@@ -127,6 +127,15 @@
             "expected_stdout": "let:start\nstatus:true\nstatus:false-zero\nassign:5\ncompound-add:8\ncompound-mul:16\ncompound-sub:12\ncompound-mod:2\ncompound-div:1\nmulti:5:0\nmulti-zero:0:1\nlet:end"
         },
         {
+            "id": "eval_scope_retention",
+            "name": "eval keeps existing definitions",
+            "category": "builtins",
+            "description": "eval executes within the caller environment so earlier functions and variables remain available.",
+            "script": "Tests/exsh/tests/eval_scope_retention.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "eval-retain:start\neval-first:outer\ngreet:outer\neval-second:inner\ngreet:inner\ngreet:inner\nafter-greeting:inner\nnewvar:from-eval\neval-retain:end"
+        },
+        {
             "id": "logout_non_login",
             "name": "logout reports non-login error",
             "category": "builtins",
@@ -179,6 +188,15 @@
             "script": "Tests/exsh/tests/command_substitution.psh",
             "expect": "runtime_ok",
             "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
+        },
+        {
+            "id": "command_substitution_scope",
+            "name": "Command substitution retains caller context",
+            "category": "expansion",
+            "description": "$(func) can access existing functions and leaves outer variables intact.",
+            "script": "Tests/exsh/tests/command_substitution_scope.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:inner\nafter-var:inner\ncmdsub-retain:end"
         },
         {
             "id": "backtick_substitution",
