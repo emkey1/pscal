@@ -510,6 +510,15 @@
             "expect": "match_bash",
             "expected_stdout": "greeting:world:0007:3.5:A:%\nfirst-status:0\nusage-status:2",
             "expected_stderr_substring": "printf: usage"
+        },
+        {
+            "id": "times_builtin",
+            "name": "times reports CPU usage lines",
+            "category": "builtins",
+            "description": "Verify the times builtin prints two timing lines and succeeds without arguments.",
+            "script": "Tests/exsh/tests/times_builtin.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "status:0\nline_count:2\nfirst_format:ok\nsecond_format:ok\n"
         }
     ]
 }

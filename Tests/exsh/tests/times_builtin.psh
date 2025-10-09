@@ -1,0 +1,36 @@
+#!/usr/bin/env exsh
+
+output=$(times)
+status=$?
+echo "status:${status}"
+
+line_count=0
+first_line=""
+second_line=""
+while IFS= read -r line; do
+    line_count=$((line_count + 1))
+    if [ $line_count -eq 1 ]; then
+        first_line="$line"
+    elif [ $line_count -eq 2 ]; then
+        second_line="$line"
+    fi
+done <<< "$output"
+echo "line_count:${line_count}"
+
+case "$first_line" in
+    [0-9]*m[0-9]*.[0-9][0-9][0-9]s\ [0-9]*m[0-9]*.[0-9][0-9][0-9]s)
+        echo "first_format:ok"
+        ;;
+    *)
+        echo "first_format:bad:${first_line}"
+        ;;
+esac
+
+case "$second_line" in
+    [0-9]*m[0-9]*.[0-9][0-9][0-9]s\ [0-9]*m[0-9]*.[0-9][0-9][0-9]s)
+        echo "second_format:ok"
+        ;;
+    *)
+        echo "second_format:bad:${second_line}"
+        ;;
+esac

@@ -136,6 +136,7 @@ Value vmBuiltinShellShift(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUmask(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellTimes(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCommand(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnsetenv(struct VM_s* vm, int arg_count, Value* args);
