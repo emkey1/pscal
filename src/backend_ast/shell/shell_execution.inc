@@ -1,4 +1,5 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
+static void shellHashRecordExecution(const char *name);
 static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *out_cmd) {
     if (!out_cmd) {
         return false;
@@ -989,6 +990,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
 
     pid_t child = -1;
+    if (cmd->argv && cmd->argv[0] && cmd->argv[0][0] != '\0') {
+        shellHashRecordExecution(cmd->argv[0]);
+    }
     int spawn_err = shellSpawnProcess(vm,
                                       cmd,
                                       stdin_fd,

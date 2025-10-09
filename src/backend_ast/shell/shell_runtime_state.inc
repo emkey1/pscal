@@ -73,6 +73,12 @@ typedef struct ShellAlias {
     char *value;
 } ShellAlias;
 
+typedef struct {
+    char *name;
+    char *path;
+    unsigned long hits;
+} ShellHashEntry;
+
 static const char *kShellCommandDefaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -654,6 +660,9 @@ typedef struct {
     size_t dir_stack_count;
     size_t dir_stack_capacity;
     bool dir_stack_initialised;
+    ShellHashEntry *hash_entries;
+    size_t hash_count;
+    size_t hash_capacity;
     int getopts_index;
     int getopts_offset;
 } ShellRuntimeState;
@@ -728,6 +737,9 @@ static ShellRuntimeState gShellRuntime = {
     .dir_stack_count = 0,
     .dir_stack_capacity = 0,
     .dir_stack_initialised = false,
+    .hash_entries = NULL,
+    .hash_count = 0,
+    .hash_capacity = 0,
     .getopts_index = 1,
     .getopts_offset = 0
 };

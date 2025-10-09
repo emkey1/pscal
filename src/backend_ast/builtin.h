@@ -138,6 +138,7 @@ Value vmBuiltinShellExport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUmask(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTimes(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCommand(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellHash(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnset(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellUnsetenv(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellDeclare(struct VM_s* vm, int arg_count, Value* args);
