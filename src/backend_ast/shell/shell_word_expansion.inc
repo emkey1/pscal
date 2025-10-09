@@ -1720,8 +1720,9 @@ static void shellUpdateStatus(int status) {
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%d", status);
     shellSetTrackedVariable("PSCALSHELL_LAST_STATUS", buffer, false);
+    bool suppress_errexit = shellRuntimeEvaluatingCondition();
     if (status != 0) {
-        if (gShellRuntime.errexit_enabled) {
+        if (gShellRuntime.errexit_enabled && !suppress_errexit) {
             gShellRuntime.errexit_pending = true;
             gShellExitRequested = true;
             if (gShellCurrentVm) {
@@ -1744,44 +1745,78 @@ static void shellUpdateStatus(int status) {
  * interpreter loop so the runtime can unwind cleanly before honouring traps.
  */
 static void shellHandlePendingSignal(int signo) {
-    if (signo != SIGINT && signo != SIGQUIT && signo != SIGTSTP) {
+    if (signo <= 0 || signo >= NSIG) {
         return;
     }
 
-    shellUpdateStatus(128 + signo);
-
-    if (gShellCurrentVm) {
-        gShellCurrentVm->exit_requested = true;
-        gShellCurrentVm->current_builtin_name = "signal";
+    ShellTrapAction trap_action = shellRuntimeGetSignalTrapAction(signo);
+    if (trap_action == SHELL_TRAP_ACTION_IGNORE) {
+        return;
     }
 
-    if (!gShellRuntime.job_control_enabled) {
-        gShellExitRequested = true;
+    bool command_trap = (trap_action == SHELL_TRAP_ACTION_COMMAND);
+
+    if (!command_trap) {
+        shellUpdateStatus(128 + signo);
     }
 
-    if (gShellLoopStackSize > 0) {
-        gShellRuntime.break_requested = true;
-        gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
-        shellLoopRequestBreakLevels((int)gShellLoopStackSize);
-    }
+    if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = true;
+            gShellCurrentVm->current_builtin_name = "signal";
+        }
 
-    bool propagate_default =
-        (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
-         !gShellRuntime.trap_enabled);
+        if (!gShellRuntime.job_control_enabled) {
+            gShellExitRequested = true;
+        }
 
-    if (propagate_default) {
-        struct sigaction action;
-        memset(&action, 0, sizeof(action));
-        sigemptyset(&action.sa_mask);
-        action.sa_handler = SIG_DFL;
-        sigaction(signo, &action, NULL);
-        raise(signo);
-        if (signo == SIGTSTP) {
+        if (gShellLoopStackSize > 0) {
+            gShellRuntime.break_requested = true;
+            gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+            shellLoopRequestBreakLevels((int)gShellLoopStackSize);
+        }
+
+        bool propagate_default =
+            (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
+             !gShellRuntime.trap_enabled && !command_trap);
+
+        if (propagate_default) {
+            struct sigaction action;
             memset(&action, 0, sizeof(action));
             sigemptyset(&action.sa_mask);
-            action.sa_handler = shellSignalHandler;
-            action.sa_flags |= SA_RESTART;
+            action.sa_handler = SIG_DFL;
             sigaction(signo, &action, NULL);
+            raise(signo);
+            if (signo == SIGTSTP) {
+                memset(&action, 0, sizeof(action));
+                sigemptyset(&action.sa_mask);
+                action.sa_handler = shellSignalHandler;
+                action.sa_flags |= SA_RESTART;
+                sigaction(signo, &action, NULL);
+            }
+        }
+
+        if (command_trap) {
+            shellRuntimeRunSignalTrap(signo);
+            bool exit_now = gShellExitRequested ||
+                             (gShellCurrentVm && gShellCurrentVm->exit_requested);
+            if (exit_now && gShellLoopStackSize > 0) {
+                gShellRuntime.break_requested = true;
+                gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+                shellLoopRequestBreakLevels((int)gShellLoopStackSize);
+            }
+        }
+        return;
+    }
+
+    if (command_trap) {
+        shellRuntimeRunSignalTrap(signo);
+        bool exit_now = gShellExitRequested ||
+                         (gShellCurrentVm && gShellCurrentVm->exit_requested);
+        if (exit_now && gShellLoopStackSize > 0) {
+            gShellRuntime.break_requested = true;
+            gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+            shellLoopRequestBreakLevels((int)gShellLoopStackSize);
         }
     }
 }

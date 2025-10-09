@@ -766,6 +766,337 @@ static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
 static bool gShellInteractiveMode = false;
 
+typedef struct {
+    ShellTrapAction action;
+    char *command;
+} ShellTrapEntry;
+
+static ShellTrapEntry gShellSignalTraps[NSIG];
+static ShellTrapEntry gShellExitTrap = {SHELL_TRAP_ACTION_DEFAULT, NULL};
+static bool gShellTrapExecuting = false;
+static int gShellScriptDepth = 0;
+static int gShellConditionDepth = 0;
+
+static void shellUpdateStatus(int status);
+static void shellSignalHandler(int signo);
+
+static void shellTrapClearEntry(ShellTrapEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    if (entry->command) {
+        free(entry->command);
+        entry->command = NULL;
+    }
+    entry->action = SHELL_TRAP_ACTION_DEFAULT;
+}
+
+static bool shellTrapSetCommand(ShellTrapEntry *entry, const char *command) {
+    if (!entry) {
+        return false;
+    }
+    shellTrapClearEntry(entry);
+    if (!command) {
+        entry->action = SHELL_TRAP_ACTION_COMMAND;
+        entry->command = strdup("");
+        return entry->command != NULL;
+    }
+    char *copy = strdup(command);
+    if (!copy) {
+        return false;
+    }
+    entry->action = SHELL_TRAP_ACTION_COMMAND;
+    entry->command = copy;
+    return true;
+}
+
+void shellRuntimePushScript(void) {
+    gShellScriptDepth++;
+}
+
+void shellRuntimePopScript(void) {
+    if (gShellScriptDepth > 0) {
+        gShellScriptDepth--;
+    }
+}
+
+bool shellRuntimeIsOutermostScript(void) {
+    return gShellScriptDepth == 1;
+}
+
+void shellRuntimeEnterCondition(void) {
+    gShellConditionDepth++;
+}
+
+void shellRuntimeLeaveCondition(void) {
+    if (gShellConditionDepth > 0) {
+        gShellConditionDepth--;
+    }
+}
+
+bool shellRuntimeEvaluatingCondition(void) {
+    return gShellConditionDepth > 0;
+}
+
+void shellRuntimeRefreshTrapEnabled(void) {
+    gShellRuntime.trap_enabled = false;
+#ifdef SIGINT
+    if (gShellSignalTraps[SIGINT].action == SHELL_TRAP_ACTION_COMMAND) {
+        gShellRuntime.trap_enabled = true;
+        return;
+    }
+#endif
+#ifdef SIGQUIT
+    if (gShellSignalTraps[SIGQUIT].action == SHELL_TRAP_ACTION_COMMAND) {
+        gShellRuntime.trap_enabled = true;
+        return;
+    }
+#endif
+#ifdef SIGTSTP
+    if (gShellSignalTraps[SIGTSTP].action == SHELL_TRAP_ACTION_COMMAND) {
+        gShellRuntime.trap_enabled = true;
+        return;
+    }
+#endif
+}
+
+static void shellRuntimeExecuteTrap(const char *command, const char *label) {
+    if (!command || gShellTrapExecuting) {
+        return;
+    }
+    gShellTrapExecuting = true;
+
+    ShellRunOptions opts = {0};
+    opts.no_cache = 1;
+    opts.quiet = true;
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
+    opts.suppress_warnings = true;
+    const char *frontend = shellRuntimeGetArg0();
+    opts.frontend_path = frontend ? frontend : "exsh";
+
+    bool exit_requested = false;
+    int status = shellRunSource(command, label ? label : "<trap>", &opts, &exit_requested);
+    if (exit_requested) {
+        gShellExitRequested = true;
+    }
+    shellUpdateStatus(status);
+
+    gShellTrapExecuting = false;
+}
+
+ShellTrapAction shellRuntimeGetSignalTrapAction(int signo) {
+    if (signo <= 0 || signo >= NSIG) {
+        return SHELL_TRAP_ACTION_DEFAULT;
+    }
+    return gShellSignalTraps[signo].action;
+}
+
+void shellRuntimeRunSignalTrap(int signo) {
+    if (signo <= 0 || signo >= NSIG) {
+        return;
+    }
+    ShellTrapEntry *entry = &gShellSignalTraps[signo];
+    if (entry->action != SHELL_TRAP_ACTION_COMMAND || !entry->command) {
+        return;
+    }
+    char label[32];
+    snprintf(label, sizeof(label), "<trap-%d>", signo);
+    shellRuntimeExecuteTrap(entry->command, label);
+}
+
+void shellRuntimeRunExitTrap(void) {
+    if (gShellExitTrap.action != SHELL_TRAP_ACTION_COMMAND || !gShellExitTrap.command) {
+        return;
+    }
+    shellRuntimeExecuteTrap(gShellExitTrap.command, "<exit-trap>");
+}
+
+bool shellRuntimeSetExitTrap(ShellTrapAction action, const char *command) {
+    shellTrapClearEntry(&gShellExitTrap);
+    if (action == SHELL_TRAP_ACTION_COMMAND) {
+        if (!shellTrapSetCommand(&gShellExitTrap, command)) {
+            return false;
+        }
+    } else if (action == SHELL_TRAP_ACTION_IGNORE) {
+        gShellExitTrap.action = SHELL_TRAP_ACTION_IGNORE;
+    }
+    return true;
+}
+
+static bool shellRuntimeIsDigitString(const char *text) {
+    if (!text || !*text) {
+        return false;
+    }
+    const unsigned char *p = (const unsigned char *)text;
+    if (*p == '+' || *p == '-') {
+        ++p;
+    }
+    if (!*p) {
+        return false;
+    }
+    while (*p) {
+        if (!isdigit(*p)) {
+            return false;
+        }
+        ++p;
+    }
+    return true;
+}
+
+bool shellRuntimeParseSignal(const char *text, int *out_signo) {
+    if (!text || !out_signo) {
+        return false;
+    }
+    if (strcasecmp(text, "EXIT") == 0 || strcmp(text, "0") == 0) {
+        *out_signo = 0;
+        return true;
+    }
+    if (shellRuntimeIsDigitString(text)) {
+        long value = strtol(text, NULL, 10);
+        if (value >= 0 && value < NSIG) {
+            *out_signo = (int)value;
+            return true;
+        }
+        return false;
+    }
+    const char *name = text;
+    if (strncasecmp(name, "SIG", 3) == 0 && name[3] != '\0') {
+        name += 3;
+    }
+    static const struct {
+        const char *name;
+        int signo;
+    } kSignalNames[] = {
+#ifdef SIGHUP
+        {"HUP", SIGHUP},
+#endif
+#ifdef SIGINT
+        {"INT", SIGINT},
+#endif
+#ifdef SIGQUIT
+        {"QUIT", SIGQUIT},
+#endif
+#ifdef SIGILL
+        {"ILL", SIGILL},
+#endif
+#ifdef SIGTRAP
+        {"TRAP", SIGTRAP},
+#endif
+#ifdef SIGABRT
+        {"ABRT", SIGABRT},
+#endif
+#ifdef SIGBUS
+        {"BUS", SIGBUS},
+#endif
+#ifdef SIGFPE
+        {"FPE", SIGFPE},
+#endif
+#ifdef SIGKILL
+        {"KILL", SIGKILL},
+#endif
+#ifdef SIGUSR1
+        {"USR1", SIGUSR1},
+#endif
+#ifdef SIGSEGV
+        {"SEGV", SIGSEGV},
+#endif
+#ifdef SIGUSR2
+        {"USR2", SIGUSR2},
+#endif
+#ifdef SIGPIPE
+        {"PIPE", SIGPIPE},
+#endif
+#ifdef SIGALRM
+        {"ALRM", SIGALRM},
+#endif
+#ifdef SIGTERM
+        {"TERM", SIGTERM},
+#endif
+#ifdef SIGCHLD
+        {"CHLD", SIGCHLD},
+#endif
+#ifdef SIGCONT
+        {"CONT", SIGCONT},
+#endif
+#ifdef SIGSTOP
+        {"STOP", SIGSTOP},
+#endif
+#ifdef SIGTSTP
+        {"TSTP", SIGTSTP},
+#endif
+#ifdef SIGTTIN
+        {"TTIN", SIGTTIN},
+#endif
+#ifdef SIGTTOU
+        {"TTOU", SIGTTOU},
+#endif
+#ifdef SIGWINCH
+        {"WINCH", SIGWINCH},
+#endif
+    };
+    for (size_t i = 0; i < sizeof(kSignalNames) / sizeof(kSignalNames[0]); ++i) {
+        if (strcasecmp(name, kSignalNames[i].name) == 0) {
+            *out_signo = kSignalNames[i].signo;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool shellRuntimeSetSignalTrap(int signo, ShellTrapAction action, const char *command) {
+    if (signo <= 0 || signo >= NSIG) {
+        return false;
+    }
+
+    char *command_copy = NULL;
+    if (action == SHELL_TRAP_ACTION_COMMAND) {
+        const char *text = command ? command : "";
+        command_copy = strdup(text);
+        if (!command_copy) {
+            return false;
+        }
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+
+    if (action == SHELL_TRAP_ACTION_COMMAND) {
+        sa.sa_handler = shellSignalHandler;
+        sa.sa_flags |= SA_RESTART;
+    } else if (action == SHELL_TRAP_ACTION_IGNORE) {
+        sa.sa_handler = SIG_IGN;
+    } else {
+        if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
+            sa.sa_handler = shellSignalHandler;
+            sa.sa_flags |= SA_RESTART;
+        } else {
+            sa.sa_handler = SIG_DFL;
+        }
+    }
+
+    if (sigaction(signo, &sa, NULL) != 0) {
+        if (command_copy) {
+            free(command_copy);
+        }
+        return false;
+    }
+
+    shellTrapClearEntry(&gShellSignalTraps[signo]);
+    if (action == SHELL_TRAP_ACTION_COMMAND) {
+        gShellSignalTraps[signo].action = SHELL_TRAP_ACTION_COMMAND;
+        gShellSignalTraps[signo].command = command_copy;
+    } else {
+        gShellSignalTraps[signo].action = action;
+        if (command_copy) {
+            free(command_copy);
+        }
+    }
+
+    shellRuntimeRefreshTrapEnabled();
+    return true;
+}
+
 static void shellRuntimeInitialisePosixMode(void) __attribute__((constructor));
 
 static void shellRuntimeInitialisePosixMode(void) {
@@ -1758,11 +2089,30 @@ static bool shellLoopEvaluateConditionText(const char *expr, bool *out_ready) {
         if (out_ready) {
             *out_ready = true;
         }
+        shellUpdateStatus(0);
         return true;
     }
     const char *start = expr;
     const char *end = expr + strlen(expr);
-    return shellLoopEvaluateConditionRange(start, end, out_ready);
+    shellRuntimeEnterCondition();
+    bool ready = true;
+    if (!shellLoopEvaluateConditionRange(start, end, &ready)) {
+        shellRuntimeLeaveCondition();
+        return false;
+    }
+    if (out_ready) {
+        *out_ready = ready;
+    }
+    shellUpdateStatus(0);
+    gShellRuntime.errexit_pending = false;
+    gShellExitRequested = false;
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = false;
+        gShellCurrentVm->abort_requested = false;
+        gShellCurrentVm->current_builtin_name = NULL;
+    }
+    shellRuntimeLeaveCondition();
+    return true;
 }
 
 static bool shellLoopEvaluateCForCondition(ShellLoopFrame *frame, bool *out_ready) {

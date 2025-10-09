@@ -23,6 +23,8 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, runtime_group, "__shell_subshell", vmBuiltinShellSubshell);
     registerShellBuiltin(category, runtime_group, "__shell_loop", vmBuiltinShellLoop);
     registerShellBuiltin(category, runtime_group, "__shell_loop_end", vmBuiltinShellLoopEnd);
+    registerShellBuiltin(category, runtime_group, "__shell_enter_condition", vmBuiltinShellEnterCondition);
+    registerShellBuiltin(category, runtime_group, "__shell_leave_condition", vmBuiltinShellLeaveCondition);
     registerShellBuiltin(category, runtime_group, "__shell_if", vmBuiltinShellIf);
     registerShellBuiltin(category, runtime_group, "__shell_case", vmBuiltinShellCase);
     registerShellBuiltin(category, runtime_group, "__shell_case_clause", vmBuiltinShellCaseClause);

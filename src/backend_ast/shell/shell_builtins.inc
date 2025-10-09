@@ -486,6 +486,23 @@ Value vmBuiltinShellLoopEnd(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellEnterCondition(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellRuntimeEnterCondition();
+    return makeVoid();
+}
+
+Value vmBuiltinShellLeaveCondition(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellRuntimeLeaveCondition();
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
@@ -4886,21 +4903,91 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellTrap(VM *vm, int arg_count, Value *args) {
-    bool ok = true;
     if (arg_count == 0) {
-        gShellRuntime.trap_enabled = false;
-    } else {
-        for (int i = 0; i < arg_count; ++i) {
-            if (args[i].type != TYPE_STRING || !args[i].s_val) {
-                runtimeError(vm, "trap: expected string arguments");
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    int signal_start = 0;
+    const char *handler = NULL;
+    ShellTrapAction action = SHELL_TRAP_ACTION_COMMAND;
+
+    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "trap: expected string arguments");
+        ok = false;
+    }
+
+    if (ok) {
+        handler = args[0].s_val;
+        signal_start = 1;
+
+        if (strcmp(handler, "--") == 0) {
+            if (arg_count < 2 || args[1].type != TYPE_STRING || !args[1].s_val) {
+                shellUpdateStatus(0);
+                return makeVoid();
+            }
+            handler = args[1].s_val;
+            signal_start = 2;
+        }
+
+        if (strcmp(handler, "-l") == 0 || strcmp(handler, "-p") == 0) {
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+
+        if (strcmp(handler, "-") == 0) {
+            action = SHELL_TRAP_ACTION_DEFAULT;
+            handler = NULL;
+        } else if (*handler == '\0') {
+            action = SHELL_TRAP_ACTION_IGNORE;
+            handler = NULL;
+        } else {
+            action = SHELL_TRAP_ACTION_COMMAND;
+        }
+    }
+
+    if (!ok) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (signal_start >= arg_count) {
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    for (int i = signal_start; i < arg_count && ok; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val) {
+            runtimeError(vm, "trap: expected signal name");
+            ok = false;
+            break;
+        }
+        int signo = 0;
+        if (!shellRuntimeParseSignal(args[i].s_val, &signo)) {
+            runtimeError(vm, "trap: invalid signal '%s'", args[i].s_val);
+            ok = false;
+            break;
+        }
+        if (signo == 0) {
+            if (!shellRuntimeSetExitTrap(action, handler)) {
+                runtimeError(vm, "trap: failed to install EXIT handler");
+                ok = false;
+                break;
+            }
+        } else {
+            if (!shellRuntimeSetSignalTrap(signo, action, handler)) {
+                runtimeError(vm, "trap: failed to install handler for %s", args[i].s_val);
                 ok = false;
                 break;
             }
         }
-        if (ok) {
-            gShellRuntime.trap_enabled = true;
-        }
     }
+
+    if (ok) {
+        shellRuntimeRefreshTrapEnabled();
+    }
+
     shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
@@ -6107,6 +6194,9 @@ Value vmHostShellLoopAdvance(VM *vm) {
 
     frame->skip_body = false;
     shellResetPipeline();
+    if (!should_continue) {
+        shellUpdateStatus(0);
+    }
     return makeBoolean(should_continue);
 }
 

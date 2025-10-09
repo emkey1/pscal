@@ -16,6 +16,7 @@ typedef struct ShellRunOptions {
     bool quiet;
     bool verbose_errors;
     bool exit_on_signal;
+    bool suppress_warnings;
     const char *frontend_path;
 } ShellRunOptions;
 

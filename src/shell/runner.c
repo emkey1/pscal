@@ -65,6 +65,11 @@ int shellRunSource(const char *source,
         return EXIT_FAILURE;
     }
 
+    bool previous_suppress = shellSemanticsWarningsSuppressed();
+    shellSemanticsSetWarningSuppressed(options->suppress_warnings);
+
+    shellRuntimePushScript();
+
     vmSetVerboseErrors(options->verbose_errors);
 
     const char *defines[1];
@@ -85,6 +90,7 @@ int shellRunSource(const char *source,
         if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
         if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
         if (pre_src) free(pre_src);
+        shellRuntimePopScript();
         return EXIT_FAILURE;
     }
     current_procedure_table = procedure_table;
@@ -99,6 +105,7 @@ int shellRunSource(const char *source,
     VM vm;
     bool vm_initialized = false;
     bool exit_flag = false;
+    bool should_run_exit_trap = false;
 
     ShellParser parser;
     program = shellParseString(pre_src ? pre_src : source, &parser);
@@ -117,7 +124,7 @@ int shellRunSource(const char *source,
     shellInitSemanticContext(&sem_ctx);
     sem_ctx_initialized = true;
     ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
-    if (sem_result.warning_count > 0) {
+    if (sem_result.warning_count > 0 && !options->suppress_warnings) {
         fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
     }
     if (sem_result.error_count > 0) {
@@ -177,9 +184,16 @@ int shellRunSource(const char *source,
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     int last_status = shellRuntimeLastStatus();
     exit_flag = shellRuntimeConsumeExitRequested();
+    should_run_exit_trap = shellRuntimeIsOutermostScript() &&
+                           (!shellRuntimeIsInteractive() || exit_flag);
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
 
 cleanup:
+    if (should_run_exit_trap) {
+        shellRuntimeRunExitTrap();
+    }
+    shellSemanticsSetWarningSuppressed(previous_suppress);
+    shellRuntimePopScript();
     shellRuntimeSetExitOnSignal(previous_exit_on_signal);
     if (out_exit_requested) {
         *out_exit_requested = exit_flag;

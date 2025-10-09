@@ -6,6 +6,16 @@
 #include <string.h>
 #include <unistd.h>
 
+static bool gShellSemanticsSuppressWarnings = false;
+
+void shellSemanticsSetWarningSuppressed(bool suppressed) {
+    gShellSemanticsSuppressWarnings = suppressed;
+}
+
+bool shellSemanticsWarningsSuppressed(void) {
+    return gShellSemanticsSuppressWarnings;
+}
+
 static char *shellDuplicateName(const char *name) {
     if (!name) {
         return NULL;
@@ -136,8 +146,10 @@ static void shellReportUndefinedBuiltin(ShellSemanticContext *ctx, const ShellWo
         return;
     }
     ctx->warning_count++;
-    fprintf(stderr, "shell semantic warning (%d:%d): unknown command '%s'\n",
-            word->line, word->column, word->text);
+    if (!gShellSemanticsSuppressWarnings) {
+        fprintf(stderr, "shell semantic warning (%d:%d): unknown command '%s'\n",
+                word->line, word->column, word->text);
+    }
 }
 
 static bool shellWordIsDynamicCommand(const ShellWord *word) {
@@ -335,8 +347,10 @@ static void shellAnalyzeCase(ShellSemanticContext *ctx, ShellCase *case_stmt) {
         }
         if (clause->patterns.count == 0) {
             ctx->warning_count++;
-            fprintf(stderr, "shell semantic warning (%d:%d): case clause has no patterns\n",
-                    clause->line, clause->column);
+            if (!gShellSemanticsSuppressWarnings) {
+                fprintf(stderr, "shell semantic warning (%d:%d): case clause has no patterns\n",
+                        clause->line, clause->column);
+            }
         }
         shellAnalyzeProgramInternal(ctx, clause->body);
     }
