@@ -884,7 +884,33 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     opts.frontend_path = frontend ? frontend : "exsh";
 
     bool exit_requested = false;
-    int status = shellRunSource(command, label ? label : "<trap>", &opts, &exit_requested);
+    int status = EXIT_FAILURE;
+
+    ShellSymbolTableScope table_scope;
+    shellSymbolTableScopeInit(&table_scope);
+    bool scope_pushed = false;
+    bool can_run = true;
+    if (!shellSymbolTableScopeIsActive()) {
+        if (!shellSymbolTableScopePush(&table_scope)) {
+            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+            can_run = false;
+        } else {
+            scope_pushed = true;
+        }
+    }
+
+    if (can_run || shellSymbolTableScopeIsActive()) {
+        status = shellRunSource(command, label ? label : "<trap>", &opts, &exit_requested);
+    }
+
+    if (scope_pushed) {
+        shellSymbolTableScopePop(&table_scope);
+    }
+
+    if (!can_run && !shellSymbolTableScopeIsActive()) {
+        status = EXIT_FAILURE;
+    }
+
     if (exit_requested) {
         shellRuntimeRequestExit();
     }

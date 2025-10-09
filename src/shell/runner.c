@@ -20,6 +20,88 @@
 
 static const char *const kShellCompilerId = "shell";
 
+static int gShellSymbolTableDepth = 0;
+
+void shellSymbolTableScopeInit(ShellSymbolTableScope *scope) {
+    if (!scope) {
+        return;
+    }
+    memset(scope, 0, sizeof(*scope));
+}
+
+bool shellSymbolTableScopePush(ShellSymbolTableScope *scope) {
+    if (!scope) {
+        return false;
+    }
+
+    HashTable *new_global = createHashTable();
+    HashTable *new_const = createHashTable();
+    HashTable *new_procedure = createHashTable();
+    if (!new_global || !new_const || !new_procedure) {
+        if (new_global) {
+            freeHashTable(new_global);
+        }
+        if (new_const) {
+            freeHashTable(new_const);
+        }
+        if (new_procedure) {
+            freeHashTable(new_procedure);
+        }
+        return false;
+    }
+
+    scope->saved_global = globalSymbols;
+    scope->saved_const_global = constGlobalSymbols;
+    scope->saved_procedure_table = procedure_table;
+    scope->saved_current_procedure_table = current_procedure_table;
+
+    scope->new_global = new_global;
+    scope->new_const_global = new_const;
+    scope->new_procedure_table = new_procedure;
+    scope->active = true;
+
+    globalSymbols = new_global;
+    constGlobalSymbols = new_const;
+    procedure_table = new_procedure;
+    current_procedure_table = procedure_table;
+    gShellSymbolTableDepth++;
+    return true;
+}
+
+void shellSymbolTableScopePop(ShellSymbolTableScope *scope) {
+    if (!scope || !scope->active) {
+        return;
+    }
+
+    if (gShellSymbolTableDepth > 0) {
+        gShellSymbolTableDepth--;
+    }
+
+    if (globalSymbols == scope->new_global) {
+        freeHashTable(globalSymbols);
+    }
+    if (constGlobalSymbols == scope->new_const_global) {
+        freeHashTable(constGlobalSymbols);
+    }
+    if (procedure_table == scope->new_procedure_table) {
+        freeHashTable(procedure_table);
+    }
+
+    globalSymbols = scope->saved_global;
+    constGlobalSymbols = scope->saved_const_global;
+    procedure_table = scope->saved_procedure_table;
+    current_procedure_table = scope->saved_current_procedure_table;
+
+    scope->new_global = NULL;
+    scope->new_const_global = NULL;
+    scope->new_procedure_table = NULL;
+    scope->active = false;
+}
+
+bool shellSymbolTableScopeIsActive(void) {
+    return gShellSymbolTableDepth > 0;
+}
+
 char *shellLoadFile(const char *path) {
     if (!path) {
         return NULL;
@@ -81,19 +163,24 @@ int shellRunSource(const char *source,
         shellRuntimeSetExitOnSignal(true);
     }
 
-    globalSymbols = createHashTable();
-    constGlobalSymbols = createHashTable();
-    procedure_table = createHashTable();
-    if (!globalSymbols || !constGlobalSymbols || !procedure_table) {
-        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-        if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-        if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-        if (pre_src) free(pre_src);
-        shellRuntimePopScript();
-        return EXIT_FAILURE;
+    ShellSymbolTableScope table_scope;
+    shellSymbolTableScopeInit(&table_scope);
+    bool table_scope_owned = false;
+    if (!shellSymbolTableScopeIsActive()) {
+        if (!shellSymbolTableScopePush(&table_scope)) {
+            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+            if (pre_src) {
+                free(pre_src);
+            }
+            shellRuntimePopScript();
+            shellRuntimeSetExitOnSignal(previous_exit_on_signal);
+            shellSemanticsSetWarningSuppressed(previous_suppress);
+            return EXIT_FAILURE;
+        }
+        table_scope_owned = true;
+    } else {
+        current_procedure_table = procedure_table;
     }
-    current_procedure_table = procedure_table;
     registerAllBuiltins();
 
     int exit_code = EXIT_FAILURE;
@@ -212,10 +299,9 @@ cleanup:
     if (program) {
         shellFreeProgram(program);
     }
-    if (globalSymbols) { freeHashTable(globalSymbols); globalSymbols = NULL; }
-    if (constGlobalSymbols) { freeHashTable(constGlobalSymbols); constGlobalSymbols = NULL; }
-    if (procedure_table) { freeHashTable(procedure_table); procedure_table = NULL; }
-    current_procedure_table = NULL;
+    if (table_scope_owned) {
+        shellSymbolTableScopePop(&table_scope);
+    }
     if (pre_src) {
         free(pre_src);
     }
