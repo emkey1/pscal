@@ -728,7 +728,6 @@ static void shellGetoptsUpdateOptind(int value) {
         value = 1;
     }
     gShellRuntime.getopts_index = value;
-    gShellRuntime.getopts_offset = 1;
     char buffer[32];
     snprintf(buffer, sizeof(buffer), "%d", value);
     shellSetTrackedVariable("OPTIND", buffer, false);
@@ -2453,11 +2452,15 @@ static void shellGetoptsSyncIndex(void) {
         char *end = NULL;
         long parsed = strtol(text, &end, 10);
         if (end && *end == '\0' && parsed >= 1 && parsed <= INT_MAX) {
+            int previous = gShellRuntime.getopts_index;
             gShellRuntime.getopts_index = (int)parsed;
-            gShellRuntime.getopts_offset = 1;
+            if (gShellRuntime.getopts_index != previous || gShellRuntime.getopts_offset < 1) {
+                gShellRuntime.getopts_offset = 1;
+            }
         }
         free(text);
     } else if (gShellRuntime.getopts_index < 1) {
+        gShellRuntime.getopts_offset = 1;
         shellGetoptsUpdateOptind(1);
     }
 }
@@ -2520,6 +2523,7 @@ Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
     }
 
     if (!argv_list || argc_list <= 0) {
+        gShellRuntime.getopts_offset = 1;
         shellGetoptsUpdateOptind(1);
         shellUpdateStatus(1);
         return makeVoid();
@@ -2541,6 +2545,7 @@ Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
         if (strcmp(current, "--") == 0) {
             optind++;
             shellGetoptsSetOptarg(NULL);
+            gShellRuntime.getopts_offset = 1;
             shellGetoptsUpdateOptind(optind);
             shellUpdateStatus(1);
             free(override_args);
@@ -2548,6 +2553,7 @@ Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
         }
         if (current[0] != '-' || current[1] == '\0') {
             shellGetoptsSetOptarg(NULL);
+            gShellRuntime.getopts_offset = 1;
             shellGetoptsUpdateOptind(optind);
             shellUpdateStatus(1);
             free(override_args);
@@ -2608,6 +2614,7 @@ Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
                 }
                 shellGetoptsSetOptarg(optbuf);
                 optind++;
+                gShellRuntime.getopts_offset = 1;
                 shellGetoptsUpdateOptind(optind);
                 shellUpdateStatus(0);
                 free(override_args);
@@ -2637,6 +2644,7 @@ Value vmBuiltinShellGetopts(VM *vm, int arg_count, Value *args) {
     }
 
     shellGetoptsSetOptarg(NULL);
+    gShellRuntime.getopts_offset = 1;
     shellGetoptsUpdateOptind(optind);
     shellUpdateStatus(1);
     free(override_args);
