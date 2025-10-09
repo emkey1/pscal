@@ -464,6 +464,14 @@
             "expect": "match_bash"
         },
         {
+            "id": "bash_parity_set_posix",
+            "name": "set -o posix mirrors POSIXLY_CORRECT",
+            "category": "parity",
+            "description": "Ensure set -o posix and set +o posix update POSIXLY_CORRECT like Bash.",
+            "script": "Tests/exsh/tests/bash_parity_set_posix.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "read_ifs_split",
             "name": "read honours custom IFS",
             "category": "builtin",

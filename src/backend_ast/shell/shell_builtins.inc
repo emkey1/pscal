@@ -4698,6 +4698,8 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
                 if (!enable) {
                     gShellRuntime.errexit_pending = false;
                 }
+            } else if (strcasecmp(name_val.s_val, "posix") == 0) {
+                shellRuntimeSetPosixMode(enable);
             }
         } else if (token[0] == '-' || token[0] == '+') {
             // Unsupported option, ignore for now to match previous behaviour.

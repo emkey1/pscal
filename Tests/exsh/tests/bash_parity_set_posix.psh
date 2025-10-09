@@ -1,0 +1,16 @@
+#!/usr/bin/env exsh
+
+printf "initial:%s\n" "${POSIXLY_CORRECT:-unset}"
+
+set -o posix
+printf "after_enable:%s\n" "${POSIXLY_CORRECT:-unset}"
+
+POSIXLY_CORRECT=custom
+export POSIXLY_CORRECT
+printf "custom:%s\n" "${POSIXLY_CORRECT:-unset}"
+
+set -o posix
+printf "after_reenable:%s\n" "${POSIXLY_CORRECT:-unset}"
+
+set +o posix
+printf "after_disable:%s\n" "${POSIXLY_CORRECT:-unset}"

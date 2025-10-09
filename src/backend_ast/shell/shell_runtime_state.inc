@@ -651,6 +651,7 @@ typedef struct {
     bool errexit_enabled;
     bool errexit_pending;
     bool trap_enabled;
+    bool posix_mode;
     bool local_scope_active;
     bool break_requested;
     bool continue_requested;
@@ -728,6 +729,7 @@ static ShellRuntimeState gShellRuntime = {
     .errexit_enabled = false,
     .errexit_pending = false,
     .trap_enabled = false,
+    .posix_mode = false,
     .local_scope_active = false,
     .break_requested = false,
     .continue_requested = false,
@@ -754,6 +756,34 @@ static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
 static bool gShellInteractiveMode = false;
+
+static void shellRuntimeInitialisePosixMode(void) __attribute__((constructor));
+
+static void shellRuntimeInitialisePosixMode(void) {
+    const char *posix_env = getenv("POSIXLY_CORRECT");
+    if (posix_env) {
+        gShellRuntime.posix_mode = true;
+    }
+}
+
+void shellRuntimeSetPosixMode(bool enabled) {
+    bool previously_enabled = gShellRuntime.posix_mode;
+    gShellRuntime.posix_mode = enabled;
+    if (enabled) {
+        if (!previously_enabled) {
+            const char *current = getenv("POSIXLY_CORRECT");
+            if (!current) {
+                setenv("POSIXLY_CORRECT", "y", 1);
+            }
+        }
+    } else {
+        unsetenv("POSIXLY_CORRECT");
+    }
+}
+
+bool shellRuntimePosixMode(void) {
+    return gShellRuntime.posix_mode;
+}
 
 void shellRuntimeSetInteractive(bool interactive) {
     gShellInteractiveMode = interactive;
