@@ -1,0 +1,14 @@
+#!/usr/bin/env exsh
+
+hash -r
+hash
+printf "status_reset:%s\n" "$?"
+
+hash ls
+printf "status_hash_ls:%s\n" "$?"
+
+hash
+ls >/dev/null
+hash
+hash -t ls
+printf "status_hash_t:%s\n" "$?"

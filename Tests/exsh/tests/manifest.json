@@ -456,6 +456,14 @@
             "expect": "match_bash"
         },
         {
+            "id": "bash_parity_hash",
+            "name": "hash builtin caches external commands",
+            "category": "builtins",
+            "description": "hash caches resolved executables and reports hits like Bash.",
+            "script": "Tests/exsh/tests/bash_parity_hash.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "read_ifs_split",
             "name": "read honours custom IFS",
             "category": "builtin",

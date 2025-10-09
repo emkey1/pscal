@@ -3726,6 +3726,217 @@ static void shellCommandPrintShort(const char *name, const ShellCommandResult *r
     }
 }
 
+static ShellHashEntry *shellHashFindEntry(const char *name) {
+    if (!name || !*name || !gShellRuntime.hash_entries) {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellRuntime.hash_count; ++i) {
+        ShellHashEntry *entry = &gShellRuntime.hash_entries[i];
+        if (entry->name && strcmp(entry->name, name) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static bool shellHashEnsureCapacity(size_t min_capacity) {
+    if (gShellRuntime.hash_capacity >= min_capacity) {
+        return true;
+    }
+    size_t new_capacity = gShellRuntime.hash_capacity ? gShellRuntime.hash_capacity * 2 : 4;
+    while (new_capacity < min_capacity) {
+        size_t doubled = new_capacity * 2;
+        if (doubled <= new_capacity) {
+            new_capacity = min_capacity;
+            break;
+        }
+        new_capacity = doubled;
+    }
+    ShellHashEntry *resized =
+        (ShellHashEntry *)realloc(gShellRuntime.hash_entries, new_capacity * sizeof(ShellHashEntry));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellRuntime.hash_capacity; i < new_capacity; ++i) {
+        resized[i].name = NULL;
+        resized[i].path = NULL;
+        resized[i].hits = 0;
+    }
+    gShellRuntime.hash_entries = resized;
+    gShellRuntime.hash_capacity = new_capacity;
+    return true;
+}
+
+static void shellHashClear(void) {
+    if (!gShellRuntime.hash_entries) {
+        gShellRuntime.hash_count = 0;
+        return;
+    }
+    for (size_t i = 0; i < gShellRuntime.hash_count; ++i) {
+        ShellHashEntry *entry = &gShellRuntime.hash_entries[i];
+        free(entry->name);
+        free(entry->path);
+        entry->name = NULL;
+        entry->path = NULL;
+        entry->hits = 0;
+    }
+    gShellRuntime.hash_count = 0;
+}
+
+static bool shellHashResolveExecutable(const char *name, char **out_path) {
+    if (out_path) {
+        *out_path = NULL;
+    }
+    if (!name || !*name || strchr(name, '/')) {
+        return false;
+    }
+    ShellCommandResult *results = NULL;
+    size_t count = 0;
+    if (!shellCommandCollectInfo(name, false, false, &results, &count)) {
+        return false;
+    }
+    bool success = false;
+    char *path_copy = NULL;
+    for (size_t i = 0; i < count; ++i) {
+        ShellCommandResult *res = &results[i];
+        if (res->kind == SHELL_COMMAND_RESULT_FILE && res->detail && *res->detail) {
+            path_copy = strdup(res->detail);
+            if (path_copy) {
+                success = true;
+            }
+            break;
+        }
+    }
+    shellCommandFreeResults(results, count);
+    if (!success) {
+        free(path_copy);
+        return false;
+    }
+    if (out_path) {
+        *out_path = path_copy;
+    } else {
+        free(path_copy);
+    }
+    return true;
+}
+
+static bool shellHashAddName(const char *name) {
+    if (!name || !*name) {
+        return true;
+    }
+    if (strchr(name, '/')) {
+        return true;
+    }
+    ShellCommandResult *results = NULL;
+    size_t count = 0;
+    if (!shellCommandCollectInfo(name, false, false, &results, &count)) {
+        return false;
+    }
+    bool hashed = false;
+    bool success = true;
+    for (size_t i = 0; i < count; ++i) {
+        ShellCommandResult *res = &results[i];
+        if (res->kind == SHELL_COMMAND_RESULT_FILE && res->detail && *res->detail) {
+            ShellHashEntry *entry = shellHashFindEntry(name);
+            bool new_entry = (entry == NULL);
+            char *path_copy = strdup(res->detail);
+            if (!path_copy) {
+                success = false;
+                break;
+            }
+            if (new_entry) {
+                if (!shellHashEnsureCapacity(gShellRuntime.hash_count + 1)) {
+                    free(path_copy);
+                    success = false;
+                    break;
+                }
+                entry = &gShellRuntime.hash_entries[gShellRuntime.hash_count];
+                char *name_copy = strdup(name);
+                if (!name_copy) {
+                    free(path_copy);
+                    success = false;
+                    break;
+                }
+                entry->name = name_copy;
+                entry->path = path_copy;
+                entry->hits = 0;
+                gShellRuntime.hash_count++;
+            } else {
+                free(entry->path);
+                entry->path = path_copy;
+                entry->hits = 0;
+            }
+            hashed = true;
+            break;
+        }
+    }
+    shellCommandFreeResults(results, count);
+    if (!success) {
+        return false;
+    }
+    if (hashed) {
+        return true;
+    }
+    return false;
+}
+
+static void shellHashPrintTable(void) {
+    if (gShellRuntime.hash_count == 0) {
+        printf("hash: hash table empty\n");
+        return;
+    }
+    printf("hits\tcommand\n");
+    for (size_t i = 0; i < gShellRuntime.hash_count; ++i) {
+        ShellHashEntry *entry = &gShellRuntime.hash_entries[i];
+        const char *path = entry->path ? entry->path : "";
+        printf("%4lu\t%s\n", entry->hits, path);
+    }
+}
+
+static void shellHashRecordExecution(const char *name) {
+    if (!name || !*name) {
+        return;
+    }
+    if (strchr(name, '/')) {
+        return;
+    }
+    ShellHashEntry *entry = shellHashFindEntry(name);
+    if (entry) {
+        if (entry->path && access(entry->path, X_OK) == 0) {
+            if (entry->hits < ULONG_MAX) {
+                entry->hits += 1;
+            }
+            return;
+        }
+        char *resolved = NULL;
+        if (!shellHashResolveExecutable(name, &resolved)) {
+            return;
+        }
+        free(entry->path);
+        entry->path = resolved;
+        entry->hits = 1;
+        return;
+    }
+    char *resolved = NULL;
+    if (!shellHashResolveExecutable(name, &resolved)) {
+        return;
+    }
+    if (!shellHashEnsureCapacity(gShellRuntime.hash_count + 1)) {
+        free(resolved);
+        return;
+    }
+    ShellHashEntry *slot = &gShellRuntime.hash_entries[gShellRuntime.hash_count];
+    char *name_copy = strdup(name);
+    if (!name_copy) {
+        free(resolved);
+        return;
+    }
+    slot->name = name_copy;
+    slot->path = resolved;
+    slot->hits = 1;
+    gShellRuntime.hash_count++;
+}
+
 Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
     bool print_env = (arg_count == 0);
     bool parsing_options = true;
@@ -4085,6 +4296,92 @@ Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
         }
 
         shellCommandFreeResults(results, count);
+    }
+
+    shellUpdateStatus(overall_ok ? 0 : 1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellHash(VM *vm, int arg_count, Value *args) {
+    bool parsing_options = true;
+    bool reset_table = false;
+    bool print_paths = false;
+    int first_name = arg_count;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "hash: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                for (const char *opt = text + 1; *opt; ++opt) {
+                    switch (*opt) {
+                        case 'r':
+                            reset_table = true;
+                            break;
+                        case 't':
+                            print_paths = true;
+                            break;
+                        default:
+                            runtimeError(vm, "hash: invalid option -- '%c'", *opt);
+                            shellUpdateStatus(1);
+                            return makeVoid();
+                    }
+                }
+                continue;
+            }
+            parsing_options = false;
+        }
+        if (parsing_options) {
+            continue;
+        }
+        if (first_name == arg_count) {
+            first_name = i;
+        }
+    }
+
+    if (reset_table) {
+        shellHashClear();
+    }
+
+    if (first_name == arg_count) {
+        if (print_paths) {
+            runtimeError(vm, "hash: -t: option requires an argument");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (!reset_table) {
+            shellHashPrintTable();
+        }
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool overall_ok = true;
+    for (int i = first_name; i < arg_count; ++i) {
+        const char *name = args[i].s_val ? args[i].s_val : "";
+        if (print_paths) {
+            ShellHashEntry *entry = shellHashFindEntry(name);
+            if (!entry || !entry->path || !*entry->path) {
+                runtimeError(vm, "hash: %s: not found", name);
+                overall_ok = false;
+                continue;
+            }
+            printf("%s\n", entry->path);
+            continue;
+        }
+        if (!shellHashAddName(name)) {
+            runtimeError(vm, "hash: %s: not found", name);
+            overall_ok = false;
+        }
     }
 
     shellUpdateStatus(overall_ok ? 0 : 1);
@@ -4727,6 +5024,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         " builtins, and executable paths. -V prints verbose descriptions. The -a"
         " flag lists every match and -p searches using the default PATH. Execution"
         " without -v or -V is not currently supported.",
+        NULL,
+        0
+    },
+    {
+        "hash",
+        "Display or reset cached command lookups.",
+        "hash [-r] [-t] [name ...]",
+        "Without arguments prints the cached command table including hit counts. "
+        "With -r the table is cleared. Each NAME hashes the executable located via PATH "
+        "while -t prints the cached path for each NAME instead of updating the table.",
         NULL,
         0
     },
