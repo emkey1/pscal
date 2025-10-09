@@ -534,6 +534,14 @@
             "expected_stderr_substring": "umask: too many arguments"
         },
         {
+            "id": "typeset_integer_attribute",
+            "name": "typeset -i coerces arithmetic expressions",
+            "category": "parity",
+            "description": "typeset -i evaluates arithmetic expressions and matches Bash diagnostics for invalid input.",
+            "script": "Tests/exsh/tests/typeset_integer.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "printf_builtin",
             "name": "printf formats strings and numbers",
             "category": "builtins",

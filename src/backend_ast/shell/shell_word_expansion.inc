@@ -2370,7 +2370,10 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         return true;
     }
 
+    const char *previous_name = shellRuntimeCurrentCommandName();
+    shellRuntimeSetCurrentCommandName(name);
     handler(vm, arg_count, args);
+    shellRuntimeSetCurrentCommandName(previous_name);
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
     shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {
