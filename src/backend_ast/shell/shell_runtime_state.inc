@@ -377,10 +377,19 @@ static ShellBindOption *gShellBindOptions = NULL;
 static size_t gShellBindOptionCount = 0;
 static int gShellCurrentCommandLine = 0;
 static int gShellCurrentCommandColumn = 0;
+static const char *gShellCurrentCommandName = NULL;
 
 static void shellRuntimeSetCurrentCommandLocation(int line, int column) {
     gShellCurrentCommandLine = line;
     gShellCurrentCommandColumn = column;
+}
+
+static void shellRuntimeSetCurrentCommandName(const char *name) {
+    gShellCurrentCommandName = name;
+}
+
+static const char *shellRuntimeCurrentCommandName(void) {
+    return gShellCurrentCommandName;
 }
 
 static void shellFreeParameterArray(char **values, int count) {

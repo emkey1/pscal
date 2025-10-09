@@ -1,0 +1,12 @@
+echo "typeset:start"
+typeset -i sum=2+3*4
+echo "sum:$sum"
+typeset -i ref=$sum+1
+echo "ref:$ref"
+unset MISSING
+typeset -i derived=MISSING
+echo "derived:$derived"
+typeset -i error=1+
+echo "status:$?"
+echo "error:$error"
+echo "typeset:end"

@@ -3198,11 +3198,68 @@ Value vmBuiltinShellShopt(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static void shellDeclareExtractErrorToken(const char *start,
+                                          const char *end,
+                                          char *buffer,
+                                          size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    buffer[0] = '\0';
+    if (!start || !end || end <= start) {
+        return;
+    }
+    const char *cursor = end;
+    while (cursor > start) {
+        cursor--;
+        unsigned char ch = (unsigned char)*cursor;
+        if (isspace(ch)) {
+            continue;
+        }
+        const char *token_start = cursor;
+        if (isalnum(ch) || ch == '_') {
+            while (token_start > start) {
+                unsigned char prev = (unsigned char)token_start[-1];
+                if (!isalnum(prev) && prev != '_') {
+                    break;
+                }
+                token_start--;
+            }
+        } else {
+            bool two_char_op = false;
+            if (token_start > start) {
+                unsigned char prev = (unsigned char)token_start[-1];
+                if ((ch == '=' && (prev == '!' || prev == '=' || prev == '<' || prev == '>')) ||
+                    (ch == '&' && prev == '&') || (ch == '|' && prev == '|') ||
+                    (ch == '+' && prev == '+') || (ch == '-' && prev == '-')) {
+                    token_start--;
+                    two_char_op = true;
+                }
+            }
+            if (!two_char_op && (ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%')) {
+                token_start = cursor;
+            }
+        }
+        size_t token_len = (size_t)((cursor + 1) - token_start);
+        if (token_len >= buffer_size) {
+            token_len = buffer_size - 1;
+        }
+        memcpy(buffer, token_start, token_len);
+        buffer[token_len] = '\0';
+        return;
+    }
+}
+
 Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
+    const char *builtin_name = shellRuntimeCurrentCommandName();
+    if (!builtin_name || !*builtin_name) {
+        builtin_name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "declare";
+    }
     bool ok = true;
     bool associative = false;
     bool global_scope = false;
     bool mark_readonly = false;
+    bool integer_attribute = false;
     int exit_status = 0;
     int index = 0;
     while (index < arg_count) {
@@ -3245,6 +3302,10 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 runtimeError(vm, "declare: -%c: unsupported option", opt);
                 ok = false;
                 break;
+            } else if (opt == 'i' && token[0] == '-') {
+                integer_attribute = true;
+            } else if (opt == 'i' && token[0] == '+') {
+                integer_attribute = false;
             } else {
                 runtimeError(vm, "declare: -%c: unsupported option", opt);
                 ok = false;
@@ -3307,14 +3368,70 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         memcpy(name, spec, name_len);
         name[name_len] = '\0';
         const char *value_text = eq + 1;
+        char *coerced_value = NULL;
+        const char *value_to_store = value_text;
+        if (integer_attribute) {
+            const char *trim_start = value_text;
+            while (trim_start && *trim_start && isspace((unsigned char)*trim_start)) {
+                trim_start++;
+            }
+            const char *trim_end = value_text + strlen(value_text);
+            while (trim_end > trim_start && isspace((unsigned char)trim_end[-1])) {
+                trim_end--;
+            }
+            size_t trimmed_len = (size_t)(trim_end - trim_start);
+            if (trimmed_len == 0) {
+                coerced_value = strdup("0");
+                if (!coerced_value) {
+                    runtimeError(vm, "declare: out of memory");
+                    free(name);
+                    ok = false;
+                    break;
+                }
+                value_to_store = coerced_value;
+            } else {
+                bool eval_error = false;
+                char *result = shellEvaluateArithmetic(value_text, &eval_error);
+                if (!result || eval_error) {
+                    char expr_buffer[256];
+                    if (trimmed_len >= sizeof(expr_buffer)) {
+                        trimmed_len = sizeof(expr_buffer) - 1;
+                    }
+                    memcpy(expr_buffer, trim_start, trimmed_len);
+                    expr_buffer[trimmed_len] = '\0';
+
+                    char token_buffer[256];
+                    shellDeclareExtractErrorToken(trim_start, trim_end, token_buffer, sizeof(token_buffer));
+                    const char *error_fragment = (token_buffer[0] != '\0') ? token_buffer : expr_buffer;
+
+                    shellReportRecoverableError(vm,
+                                                true,
+                                                "%s: %s: syntax error: operand expected (error token is \"%s\")",
+                                                builtin_name,
+                                                expr_buffer,
+                                                error_fragment);
+                    shellMarkArithmeticError();
+                    if (exit_status == 0) {
+                        exit_status = 1;
+                    }
+                    free(result);
+                    free(name);
+                    ok = false;
+                    break;
+                }
+                coerced_value = result;
+                value_to_store = coerced_value;
+            }
+        }
         if (associative) {
             if (!shellArrayRegistryInitializeAssociative(name)) {
                 runtimeError(vm, "declare: unable to initialise '%s'", name);
+                free(coerced_value);
                 free(name);
                 ok = false;
                 break;
             }
-            if (!shellSetTrackedVariable(name, value_text, true)) {
+            if (!shellSetTrackedVariable(name, value_to_store, true)) {
                 const char *readonly = shellReadonlyGetErrorName();
                 if (errno == EPERM && readonly && *readonly) {
                     runtimeError(vm, "declare: %s: readonly variable", readonly);
@@ -3323,12 +3440,13 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 } else {
                     runtimeError(vm, "declare: unable to set '%s'", name);
                 }
+                free(coerced_value);
                 free(name);
                 ok = false;
                 break;
             }
         } else {
-            if (!shellSetTrackedVariable(name, value_text, false)) {
+            if (!shellSetTrackedVariable(name, value_to_store, false)) {
                 const char *readonly = shellReadonlyGetErrorName();
                 if (errno == EPERM && readonly && *readonly) {
                     runtimeError(vm, "declare: %s: readonly variable", readonly);
@@ -3337,6 +3455,7 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                 } else {
                     runtimeError(vm, "declare: unable to set '%s'", name);
                 }
+                free(coerced_value);
                 free(name);
                 ok = false;
                 break;
@@ -3345,12 +3464,16 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
         if (ok && mark_readonly) {
             if (!shellReadonlyAdd(name)) {
                 runtimeError(vm, "declare: out of memory");
+                free(coerced_value);
                 free(name);
                 ok = false;
                 break;
             }
         }
         free(name);
+        if (coerced_value) {
+            free(coerced_value);
+        }
     }
 
     (void)global_scope;
