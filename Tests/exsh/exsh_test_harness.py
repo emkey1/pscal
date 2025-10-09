@@ -94,10 +94,22 @@ def ensure_bash(command_override: Optional[str]) -> Path:
         if candidate.exists():
             return candidate
         raise FileNotFoundError(f"bash override not found: {candidate}")
-    bash_path = Path(os.environ.get("BASH", "/bin/bash"))
-    if not bash_path.exists():
-        raise FileNotFoundError(f"bash executable not found at {bash_path}")
-    return bash_path
+    candidates: List[Path] = []
+    env_bash = os.environ.get("BASH")
+    if env_bash:
+        candidates.append(Path(env_bash))
+    candidates.extend(
+        [
+            Path("/opt/homebrew/bin/bash"),
+            Path("/usr/local/bin/bash"),
+            Path("/bin/bash"),
+        ]
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            os.environ["BASH"] = str(candidate)
+            return candidate
+    raise FileNotFoundError("Unable to locate a bash executable")
 
 
 def run_exsh(executable: Path, case: TestCase, extra_args: Optional[List[str]] = None) -> subprocess.CompletedProcess[str]:

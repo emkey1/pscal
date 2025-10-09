@@ -2710,7 +2710,9 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
         shellBindPrintOptions();
     }
 
-    if (ok && !interactive) {
+    bool requires_interactive = shellBindRequiresInteractive();
+
+    if (ok && !interactive && requires_interactive) {
         const char *script = shellRuntimeGetArg0();
         if (!script || !*script) {
             script = "exsh";
@@ -2723,11 +2725,7 @@ Value vmBuiltinShellBind(VM *vm, int arg_count, Value *args) {
         }
     }
 
-    /* Match bash behavior: bind returns failure when line editing is unavailable. */
     int status = ok ? 0 : 1;
-    if (ok && !interactive && shellBindRequiresInteractive()) {
-        status = 1;
-    }
     shellUpdateStatus(status);
     return makeVoid();
 }
@@ -2878,6 +2876,7 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
     bool associative = false;
     bool global_scope = false;
     bool mark_readonly = false;
+    int exit_status = 0;
     int index = 0;
     while (index < arg_count) {
         Value v = args[index];
@@ -2896,11 +2895,15 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
             char opt = token[i];
             if (opt == 'A' && token[0] == '-') {
                 if (!shellAssociativeArraysSupported()) {
-                    runtimeError(vm, "declare: -%c: invalid option", opt);
-                    runtimeError(vm,
-                                 "declare: usage: declare [-afFirtx] [-p] [name[=value] ...]");
-                    ok = false;
-                    break;
+                    shellReportRecoverableError(vm, true, "declare: -%c: invalid option", opt);
+                    shellReportRecoverableError(
+                        vm,
+                        true,
+                        "declare: usage: declare [-afFirtx] [-p] [name[=value] ...]");
+                    if (exit_status == 0) {
+                        exit_status = 2;
+                    }
+                    continue;
                 }
                 associative = true;
             } else if (opt == 'A' && token[0] == '+') {
@@ -3025,7 +3028,10 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
 
     (void)global_scope;
 
-    shellUpdateStatus(ok ? 0 : 1);
+    if (!ok && exit_status == 0) {
+        exit_status = 1;
+    }
+    shellUpdateStatus(exit_status);
     return makeVoid();
 }
 

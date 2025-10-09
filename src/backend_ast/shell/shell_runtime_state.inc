@@ -86,14 +86,72 @@ typedef struct {
     char *detail;
 } ShellCommandResult;
 
+static int shellParseEnvBool(const char *value) {
+    if (!value) {
+        return -1;
+    }
+    while (*value && isspace((unsigned char)*value)) {
+        value++;
+    }
+    if (*value == '\0') {
+        return -1;
+    }
+    if (strcasecmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+        strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+        return 1;
+    }
+    if (strcasecmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+        strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+        return 0;
+    }
+    return -1;
+}
+
+static const char *shellResolveBashPath(void) {
+    static char resolved[PATH_MAX];
+    static bool initialised = false;
+    if (initialised) {
+        return resolved[0] ? resolved : "/bin/bash";
+    }
+    const char *env_bash = getenv("BASH");
+    const char *candidates[] = {
+        env_bash,
+        "/opt/homebrew/bin/bash",
+        "/usr/local/bin/bash",
+        "/bin/bash",
+    };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        const char *candidate = candidates[i];
+        if (!candidate || *candidate == '\0') {
+            continue;
+        }
+        if (access(candidate, X_OK) == 0) {
+            strncpy(resolved, candidate, sizeof(resolved) - 1);
+            resolved[sizeof(resolved) - 1] = '\0';
+            setenv("BASH", resolved, 1);
+            break;
+        }
+    }
+    if (resolved[0] == '\0') {
+        strncpy(resolved, "/bin/bash", sizeof(resolved) - 1);
+        resolved[sizeof(resolved) - 1] = '\0';
+    }
+    initialised = true;
+    return resolved;
+}
+
 static bool shellAssociativeArraysSupported(void) {
     if (gShellAssociativeArraySupport != -1) {
         return gShellAssociativeArraySupport == 1;
     }
-    const char *bash_path = getenv("BASH");
-    if (!bash_path || bash_path[0] == '\0') {
-        bash_path = "/bin/bash";
+
+    int override_value = shellParseEnvBool(getenv("PSCALSHELL_ASSOC_ARRAYS"));
+    if (override_value == 0 || override_value == 1) {
+        gShellAssociativeArraySupport = override_value ? 1 : 0;
+        return gShellAssociativeArraySupport == 1;
     }
+
+    const char *bash_path = shellResolveBashPath();
     pid_t pid = fork();
     if (pid < 0) {
         gShellAssociativeArraySupport = 0;
@@ -123,31 +181,69 @@ static bool shellBindRequiresInteractive(void) {
     if (gShellBindInteractiveStatus != -1) {
         return gShellBindInteractiveStatus == 1;
     }
-    const char *bash_path = getenv("BASH");
-    if (!bash_path || bash_path[0] == '\0') {
-        bash_path = "/bin/bash";
+
+    int override_value = shellParseEnvBool(getenv("PSCALSHELL_BIND_INTERACTIVE"));
+    if (override_value == 0 || override_value == 1) {
+        gShellBindInteractiveStatus = override_value ? 1 : 0;
+        return gShellBindInteractiveStatus == 1;
+    }
+
+    bool requires = false;
+    const char *bash_path = shellResolveBashPath();
+    int pipe_fds[2];
+    if (pipe(pipe_fds) != 0) {
+        gShellBindInteractiveStatus = 0;
+        return false;
     }
     pid_t pid = fork();
     if (pid < 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
         gShellBindInteractiveStatus = 0;
         return false;
     }
     if (pid == 0) {
+        close(pipe_fds[0]);
+        if (dup2(pipe_fds[1], STDERR_FILENO) < 0) {
+            _exit(127);
+        }
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDOUT_FILENO);
+            close(devnull);
+        }
         execl(bash_path,
               bash_path,
               "--noprofile",
               "--norc",
               "-c",
-              "bind 'set show-all-if-ambiguous on' >/dev/null 2>/dev/null",
+              "bind 'set show-all-if-ambiguous on'",
               (char *)NULL);
         _exit(127);
     }
-    int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
-        gShellBindInteractiveStatus = 0;
-        return false;
+    close(pipe_fds[1]);
+    char buffer[256];
+    while (true) {
+        ssize_t n = read(pipe_fds[0], buffer, sizeof(buffer));
+        if (n > 0) {
+            requires = true;
+            continue;
+        }
+        if (n == 0) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        break;
     }
-    bool requires = !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    close(pipe_fds[0]);
+    int status = 0;
+    if (waitpid(pid, &status, 0) >= 0) {
+        if (!requires) {
+            requires = !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        }
+    }
     gShellBindInteractiveStatus = requires ? 1 : 0;
     return requires;
 }
@@ -1989,4 +2085,3 @@ typedef struct {
     size_t span_length;
     char *command;
 } ShellMetaSubstitution;
-

@@ -12,6 +12,7 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
                                            size_t *out_count,
                                            const char **out_failed_assignment,
                                            bool *out_invalid_assignment);
+static bool shellSubscriptIsNumeric(const char *text);
 static void shellRestoreAssignments(ShellAssignmentBackup *backups, size_t count);
 static int shellSpawnProcess(VM *vm,
                              const ShellCommand *cmd,
@@ -615,6 +616,14 @@ static bool shellApplyAssignmentsPermanently(const ShellCommand *cmd,
         char *base_name = NULL;
         char *subscript_text = NULL;
         bool is_element = shellExtractArrayNameAndSubscript(name, &base_name, &subscript_text);
+        if (is_element && (!subscript_text || !shellSubscriptIsNumeric(subscript_text)) &&
+            !shellAssociativeArraysSupported()) {
+            free(base_name);
+            base_name = NULL;
+            free(subscript_text);
+            subscript_text = NULL;
+            is_element = false;
+        }
         const char *effective_name = is_element ? base_name : name;
         if (shellHandleSpecialAssignment(effective_name, value)) {
             free(name);
@@ -704,6 +713,14 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
         char *base_name = NULL;
         char *subscript_text = NULL;
         bool is_element = shellExtractArrayNameAndSubscript(name, &base_name, &subscript_text);
+        if (is_element && (!subscript_text || !shellSubscriptIsNumeric(subscript_text)) &&
+            !shellAssociativeArraysSupported()) {
+            free(base_name);
+            base_name = NULL;
+            free(subscript_text);
+            subscript_text = NULL;
+            is_element = false;
+        }
         char *effective_name_owned = NULL;
         if (is_element) {
             effective_name_owned = base_name;
@@ -3217,4 +3234,3 @@ static char *shellExpandArraySubscriptValue(const char *name,
     }
     return result;
 }
-
