@@ -1,1 +1,0 @@
-int global_shared = 7;
