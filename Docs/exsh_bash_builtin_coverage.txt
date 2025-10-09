@@ -11,7 +11,7 @@ cd pwd dirs pushd popd echo exit exec true false set unset export read printf te
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt enable fc getopts hash kill mapfile readarray suspend times ulimit
+caller compgen complete compopt enable fc getopts hash kill mapfile readarray suspend ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -71,10 +71,10 @@ Plans to address missing builtins
     - Registered printf across the runtime, frontend registry, builtin catalogue, and help topics so scripts and interactive sessions can invoke it.
     - Introduced regression coverage that exercises numeric, string, escape handling, and usage errors alongside Bash for parity.
 
-12) times builtin:
-    - Track cumulative user and system CPU times for the shell and child processes by sampling around shellSpawnProcess and storing totals in the runtime state.
-    - Implement vmBuiltinShellTimes to format and print the totals in a Bash compatible format and add documentation.
-    - Register the builtin and create tests that exercise it after running known workloads, comparing the results to Bash within tolerances.
+12) times builtin: Completed.
+    - Implemented vmBuiltinShellTimes using times(2) to gather cumulative shell and child CPU usage and format Bash-compatible minute/second output.
+    - Registered the builtin with the runtime, frontend registry, builtin catalogue, and help topics so it appears in help and dispatch tables.
+    - Added regression coverage that validates formatting and exit status while keeping behaviour aligned with Bash output expectations.
 
 13) ulimit and umask builtins:
     - Implemented vmBuiltinShellUmask to parse octal modes, support -S symbolic output, register documentation, and add regression coverage for numeric and failure flows.

@@ -3598,6 +3598,56 @@ Value vmBuiltinShellUmask(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static void shellTimesFormatValue(char *buffer, size_t buffer_size, clock_t ticks, long ticks_per_second) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    if (ticks_per_second <= 0) {
+        ticks_per_second = 100;
+    }
+    double total_seconds = (double)ticks / (double)ticks_per_second;
+    if (total_seconds < 0.0) {
+        total_seconds = 0.0;
+    }
+    long minutes = (long)(total_seconds / 60.0);
+    double seconds = total_seconds - (double)minutes * 60.0;
+    if (seconds < 0.0) {
+        seconds = 0.0;
+    }
+    double rounded = floor(seconds * 1000.0 + 0.5) / 1000.0;
+    if (rounded >= 60.0) {
+        minutes += 1;
+        rounded = 0.0;
+    }
+    snprintf(buffer, buffer_size, "%ldm%0.3fs", minutes, rounded);
+    buffer[buffer_size - 1] = '\0';
+}
+
+Value vmBuiltinShellTimes(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    (void)arg_count;
+    struct tms time_info;
+    clock_t result = times(&time_info);
+    if (result == (clock_t)-1) {
+        runtimeError(vm, "times: %s", strerror(errno));
+        shellUpdateStatus(errno ? errno : 1);
+        return makeVoid();
+    }
+    long ticks_per_second = sysconf(_SC_CLK_TCK);
+    char shell_user[32];
+    char shell_system[32];
+    char child_user[32];
+    char child_system[32];
+    shellTimesFormatValue(shell_user, sizeof(shell_user), time_info.tms_utime, ticks_per_second);
+    shellTimesFormatValue(shell_system, sizeof(shell_system), time_info.tms_stime, ticks_per_second);
+    shellTimesFormatValue(child_user, sizeof(child_user), time_info.tms_cutime, ticks_per_second);
+    shellTimesFormatValue(child_system, sizeof(child_system), time_info.tms_cstime, ticks_per_second);
+    printf("%s %s\n", shell_user, shell_system);
+    printf("%s %s\n", child_user, child_system);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
     bool parsing_options = true;
     bool list_all = false;
@@ -4647,6 +4697,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "Calling trap with arguments enables the runtime trap flag; running it"
         " with no arguments clears the flag. Trap handlers are not yet"
         " parameterised per signal.",
+        NULL,
+        0
+    },
+    {
+        "times",
+        "Display accumulated CPU usage statistics.",
+        "times",
+        "Prints two lines of timing data: the shell's user and system time"
+        " followed by the cumulative user and system time of terminated child"
+        " processes. Values are reported as minutes and fractional seconds.",
         NULL,
         0
     },

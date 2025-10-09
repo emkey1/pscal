@@ -16,6 +16,7 @@
 #include <fnmatch.h>
 #include <glob.h>
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <regex.h>
@@ -29,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/times.h>
 #include <termios.h>
 #include <unistd.h>
 #include <pwd.h>

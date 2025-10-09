@@ -2229,7 +2229,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
                                       "unsetenv", "set",      "declare", "typeset", "readonly", "umask",   "command", "trap",     "local",    "let",      "break",   "continue",
                                       "alias",   "bind",     "shopt",   "history", "jobs",     "disown",   "fg",       "finger",   "bg",       "wait",
                                       "builtin", "source",   "read",    "printf",  "shift",   "return",   "help",     "type",    ":",       "unalias",
-                                      "__shell_double_bracket"};
+                                     "__shell_double_bracket", "times"};
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
     const char *canonical = shellBuiltinCanonicalName(name);
