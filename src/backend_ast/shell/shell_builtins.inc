@@ -1403,7 +1403,7 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     }
 
     if (exit_requested) {
-        gShellExitRequested = true;
+        shellRuntimeRequestExit();
         if (vm) {
             vm->exit_requested = true;
         }
@@ -1462,7 +1462,7 @@ Value vmBuiltinShellEval(VM *vm, int arg_count, Value *args) {
     free(script);
 
     if (exit_requested) {
-        gShellExitRequested = true;
+        shellRuntimeRequestExit();
         if (vm) {
             vm->exit_requested = true;
         }
@@ -1511,7 +1511,7 @@ Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
         code = (int)AS_INTEGER(args[0]);
     }
     shellUpdateStatus(code);
-    gShellExitRequested = true;
+    shellRuntimeRequestExit();
     vm->exit_requested = true;
     vm->current_builtin_name = "exit";
     return makeVoid();
@@ -1554,7 +1554,7 @@ Value vmBuiltinShellLogout(VM *vm, int arg_count, Value *args) {
     }
 
     shellUpdateStatus(status);
-    gShellExitRequested = true;
+    shellRuntimeRequestExit();
     if (vm) {
         vm->exit_requested = true;
         vm->current_builtin_name = "logout";
@@ -1646,6 +1646,7 @@ Value vmBuiltinShellReturn(VM *vm, int arg_count, Value *args) {
     }
 
     shellUpdateStatus(status);
+    shellRuntimeAbandonConditionEvaluation();
     if (vm) {
         vm->exit_requested = true;
         vm->current_builtin_name = "return";

@@ -838,6 +838,15 @@ bool shellRuntimeEvaluatingCondition(void) {
     return gShellConditionDepth > 0;
 }
 
+void shellRuntimeAbandonConditionEvaluation(void) {
+    gShellConditionDepth = 0;
+}
+
+void shellRuntimeRequestExit(void) {
+    shellRuntimeAbandonConditionEvaluation();
+    gShellExitRequested = true;
+}
+
 void shellRuntimeRefreshTrapEnabled(void) {
     gShellRuntime.trap_enabled = false;
 #ifdef SIGINT
@@ -877,7 +886,7 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     bool exit_requested = false;
     int status = shellRunSource(command, label ? label : "<trap>", &opts, &exit_requested);
     if (exit_requested) {
-        gShellExitRequested = true;
+        shellRuntimeRequestExit();
     }
     shellUpdateStatus(status);
 
@@ -2239,7 +2248,7 @@ static void shellLoopRequestBreakLevels(int levels) {
         levels--;
     }
     if (levels > 0) {
-        gShellExitRequested = true;
+        shellRuntimeRequestExit();
     }
 }
 

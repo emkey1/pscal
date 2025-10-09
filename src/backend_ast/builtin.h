@@ -194,6 +194,8 @@ void shellRuntimeRunSignalTrap(int signo);
 void shellRuntimeEnterCondition(void);
 void shellRuntimeLeaveCondition(void);
 bool shellRuntimeEvaluatingCondition(void);
+void shellRuntimeAbandonConditionEvaluation(void);
+void shellRuntimeRequestExit(void);
 void shellRuntimePushScript(void);
 void shellRuntimePopScript(void);
 bool shellRuntimeIsOutermostScript(void);

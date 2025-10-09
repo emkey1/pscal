@@ -1724,7 +1724,7 @@ static void shellUpdateStatus(int status) {
     if (status != 0) {
         if (gShellRuntime.errexit_enabled && !suppress_errexit) {
             gShellRuntime.errexit_pending = true;
-            gShellExitRequested = true;
+            shellRuntimeRequestExit();
             if (gShellCurrentVm) {
                 gShellCurrentVm->abort_requested = true;
                 gShellCurrentVm->exit_requested = true;
@@ -1767,7 +1767,7 @@ static void shellHandlePendingSignal(int signo) {
         }
 
         if (!gShellRuntime.job_control_enabled) {
-            gShellExitRequested = true;
+            shellRuntimeRequestExit();
         }
 
         if (gShellLoopStackSize > 0) {
