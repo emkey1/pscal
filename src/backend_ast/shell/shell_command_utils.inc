@@ -2840,6 +2840,12 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
     ShellLocalVariable *local_entry = shellLocalScopeFind(name);
     if (local_entry) {
         if (shellLocalScopeAssignExisting(name, value ? value : "", is_array_literal)) {
+            if (is_array_literal) {
+                const char *local_text = local_entry->value ? local_entry->value : "";
+                shellArrayRegistryAssignFromText(name, local_text);
+            } else {
+                shellArrayRegistryRemove(name);
+            }
             return true;
         }
         errno = ENOMEM;

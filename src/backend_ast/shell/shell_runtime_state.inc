@@ -787,6 +787,44 @@ static ShellLocalVariable *shellLocalScopeFind(const char *name) {
     return NULL;
 }
 
+static ShellLocalVariable *shellLocalScopeFindInOtherFrames(const char *name,
+                                                           const ShellLocalScopeFrame *exclude) {
+    if (!name) {
+        return NULL;
+    }
+    for (size_t depth = gShellLocalScopeDepth; depth > 0; --depth) {
+        ShellLocalScopeFrame *frame = &gShellLocalScopeStack[depth - 1];
+        if (frame == exclude) {
+            continue;
+        }
+        ShellLocalVariable *found = shellLocalScopeFrameFind(frame, name);
+        if (found) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static void shellArrayRegistryRestoreVisibleValue(const char *name,
+                                                  const ShellLocalScopeFrame *excluded_frame) {
+    if (!name) {
+        return;
+    }
+    ShellLocalVariable *shadow = excluded_frame ? shellLocalScopeFindInOtherFrames(name, excluded_frame)
+                                                : shellLocalScopeFind(name);
+    if (shadow && shadow->is_array_literal) {
+        const char *text = shadow->value ? shadow->value : "";
+        shellArrayRegistryAssignFromText(name, text);
+        return;
+    }
+    const char *env_text = getenv(name);
+    if (env_text) {
+        shellArrayRegistryAssignFromText(name, env_text);
+    } else {
+        shellArrayRegistryRemove(name);
+    }
+}
+
 static bool shellLocalScopePush(void) {
     if (gShellLocalScopeDepth == gShellLocalScopeCapacity) {
         size_t new_capacity = gShellLocalScopeCapacity ? gShellLocalScopeCapacity * 2 : 4;
@@ -819,6 +857,13 @@ static void shellLocalScopePop(void) {
         return;
     }
     ShellLocalScopeFrame *frame = &gShellLocalScopeStack[gShellLocalScopeDepth - 1];
+    for (size_t i = 0; i < frame->count; ++i) {
+        ShellLocalVariable *var = &frame->variables[i];
+        if (var->name && var->is_array_literal) {
+            shellArrayRegistryRemove(var->name);
+            shellArrayRegistryRestoreVisibleValue(var->name, frame);
+        }
+    }
     shellLocalScopeFrameReset(frame);
     gShellLocalScopeDepth--;
 }
@@ -860,6 +905,12 @@ static bool shellLocalScopeSetOnCurrentFrame(const char *name, const char *value
     free(existing->value);
     existing->value = copy;
     existing->is_array_literal = is_array_literal;
+    if (is_array_literal) {
+        const char *text = existing->value ? existing->value : "";
+        shellArrayRegistryAssignFromText(existing->name, text);
+    } else {
+        shellArrayRegistryRemove(existing->name);
+    }
     return true;
 }
 
@@ -910,6 +961,10 @@ static bool shellLocalScopeUnset(const char *name) {
         for (size_t i = 0; i < frame->count; ++i) {
             ShellLocalVariable *var = &frame->variables[i];
             if (var->name && strcmp(var->name, name) == 0) {
+                bool was_array = var->is_array_literal;
+                if (was_array) {
+                    shellArrayRegistryRemove(var->name);
+                }
                 shellLocalVariableDispose(var);
                 if (i + 1 < frame->count) {
                     memmove(&frame->variables[i], &frame->variables[i + 1],
@@ -920,6 +975,9 @@ static bool shellLocalScopeUnset(const char *name) {
                     frame->variables[frame->count].name = NULL;
                     frame->variables[frame->count].value = NULL;
                     frame->variables[frame->count].is_array_literal = false;
+                }
+                if (was_array) {
+                    shellArrayRegistryRestoreVisibleValue(name, NULL);
                 }
                 return true;
             }
