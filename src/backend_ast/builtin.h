@@ -112,6 +112,8 @@ Value vmBuiltinShellOr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSubshell(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLoop(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLoopEnd(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellEnterCondition(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLeaveCondition(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCaseClause(struct VM_s* vm, int arg_count, Value* args);
@@ -169,6 +171,11 @@ Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellLoopAdvance(struct VM_s* vm);
 Value vmHostShellLoopIsReady(struct VM_s* vm);
 Value vmHostShellPollJobs(struct VM_s* vm);
+typedef enum {
+    SHELL_TRAP_ACTION_DEFAULT,
+    SHELL_TRAP_ACTION_IGNORE,
+    SHELL_TRAP_ACTION_COMMAND
+} ShellTrapAction;
 bool shellRuntimeConsumeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
@@ -177,6 +184,21 @@ const char *shellRuntimeGetArg0(void);
 void shellRuntimeInitJobControl(void);
 void shellRuntimeInitSignals(void);
 void shellRuntimeProcessPendingSignals(void);
+bool shellRuntimeParseSignal(const char *text, int *out_signo);
+bool shellRuntimeSetSignalTrap(int signo, ShellTrapAction action, const char *command);
+bool shellRuntimeSetExitTrap(ShellTrapAction action, const char *command);
+void shellRuntimeRefreshTrapEnabled(void);
+void shellRuntimeRunExitTrap(void);
+ShellTrapAction shellRuntimeGetSignalTrapAction(int signo);
+void shellRuntimeRunSignalTrap(int signo);
+void shellRuntimeEnterCondition(void);
+void shellRuntimeLeaveCondition(void);
+bool shellRuntimeEvaluatingCondition(void);
+void shellRuntimeAbandonConditionEvaluation(void);
+void shellRuntimeRequestExit(void);
+void shellRuntimePushScript(void);
+void shellRuntimePopScript(void);
+bool shellRuntimeIsOutermostScript(void);
 void shellRuntimeSetInteractive(bool interactive);
 bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);

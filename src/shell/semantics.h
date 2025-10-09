@@ -25,6 +25,8 @@ typedef struct {
 void shellInitSemanticContext(ShellSemanticContext *ctx);
 void shellFreeSemanticContext(ShellSemanticContext *ctx);
 ShellSemanticResult shellAnalyzeProgram(ShellSemanticContext *ctx, ShellProgram *program);
+void shellSemanticsSetWarningSuppressed(bool suppressed);
+bool shellSemanticsWarningsSuppressed(void);
 
 #ifdef __cplusplus
 }
