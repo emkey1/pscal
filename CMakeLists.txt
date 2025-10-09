@@ -490,6 +490,9 @@ set(SHELL_SOURCES
     src/shell/stubs.c
     src/backend_ast/builtin.c
     src/backend_ast/shell.c
+    src/backend_ast/shell_alias.c
+    src/backend_ast/shell_help.c
+    src/backend_ast/shell_history.c
     src/backend_ast/builtin_network_api.c
     src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
