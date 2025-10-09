@@ -1,0 +1,13 @@
+echo "case-leading-paren:start"
+
+case foo in
+( foo | bar )
+  echo "case-leading-paren:match"
+  ;;
+(*)
+  echo "case-leading-paren:default"
+  ;;
+esac
+
+echo "case-leading-paren:end"
+

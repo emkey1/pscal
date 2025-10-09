@@ -181,6 +181,15 @@
             "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
         },
         {
+            "id": "case_leading_paren",
+            "name": "Case clauses accept leading parentheses",
+            "category": "control",
+            "description": "case pattern lists accept an optional leading '(' and still honour alternation with |.",
+            "script": "Tests/exsh/tests/parser_case_leading_paren.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "case-leading-paren:start\ncase-leading-paren:match\ncase-leading-paren:end\n"
+        },
+        {
             "id": "command_substitution",
             "name": "Command substitution captures stdout",
             "category": "expansion",
