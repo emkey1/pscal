@@ -65,6 +65,7 @@ typedef struct {
     char *io_number;
     ShellWord *target;
     char *here_document;
+    char *here_string_literal;
     char *dup_target;
     bool here_document_quoted;
     int line;
@@ -223,6 +224,8 @@ void shellFreeRedirection(ShellRedirection *redir);
 void shellRedirectionSetHereDocument(ShellRedirection *redir, const char *payload, bool quoted);
 const char *shellRedirectionGetHereDocument(const ShellRedirection *redir);
 bool shellRedirectionHereDocumentIsQuoted(const ShellRedirection *redir);
+void shellRedirectionSetHereStringLiteral(ShellRedirection *redir, const char *literal);
+const char *shellRedirectionGetHereStringLiteral(const ShellRedirection *redir);
 void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target);
 const char *shellRedirectionGetDupTarget(const ShellRedirection *redir);
 ShellWord *shellRedirectionGetWordTarget(const ShellRedirection *redir);

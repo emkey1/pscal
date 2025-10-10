@@ -259,6 +259,7 @@ ShellRedirection *shellCreateRedirection(ShellRedirectionType type, const char *
     redir->io_number = io_number ? strdup(io_number) : NULL;
     redir->target = target;
     redir->here_document = NULL;
+    redir->here_string_literal = NULL;
     redir->here_document_quoted = false;
     redir->dup_target = NULL;
     redir->line = line;
@@ -271,6 +272,7 @@ void shellFreeRedirection(ShellRedirection *redir) {
     free(redir->io_number);
     shellFreeWord(redir->target);
     free(redir->here_document);
+    free(redir->here_string_literal);
     free(redir->dup_target);
     free(redir);
 }
@@ -290,6 +292,18 @@ const char *shellRedirectionGetHereDocument(const ShellRedirection *redir) {
 
 bool shellRedirectionHereDocumentIsQuoted(const ShellRedirection *redir) {
     return redir ? redir->here_document_quoted : false;
+}
+
+void shellRedirectionSetHereStringLiteral(ShellRedirection *redir, const char *literal) {
+    if (!redir) {
+        return;
+    }
+    free(redir->here_string_literal);
+    redir->here_string_literal = literal ? strdup(literal) : NULL;
+}
+
+const char *shellRedirectionGetHereStringLiteral(const ShellRedirection *redir) {
+    return redir ? redir->here_string_literal : NULL;
 }
 
 void shellRedirectionSetDupTarget(ShellRedirection *redir, const char *target) {
@@ -977,6 +991,9 @@ static void shellDumpRedirectionJson(FILE *out, const ShellRedirection *redir, i
     shellPrintIndent(out, indent + 2);
     fprintf(out, "\"hereDocumentPayload\": \"%s\",\n",
             (redir && redir->here_document) ? redir->here_document : "");
+    shellPrintIndent(out, indent + 2);
+    fprintf(out, "\"hereStringLiteral\": \"%s\",\n",
+            (redir && redir->here_string_literal) ? redir->here_string_literal : "");
     shellPrintIndent(out, indent + 2);
     fprintf(out, "\"dupTarget\": \"%s\"\n", (redir && redir->dup_target) ? redir->dup_target : "");
     shellPrintIndent(out, indent);

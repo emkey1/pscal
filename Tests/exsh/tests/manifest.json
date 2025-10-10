@@ -241,7 +241,7 @@
             "description": "Exercises unquoted, single-quoted, and multi-line here documents.",
             "script": "Tests/exsh/tests/here_documents.psh",
             "expect": "runtime_ok",
-            "expected_stdout": "heredoc:start\nplain:xyz\nliteral:$VALUE\nmultiline\ncontent\nheredoc:end"
+            "expected_stdout": "heredoc:start\nplain:xyz\nliteral:$VALUE\nmultiline\ncontent\ninline\nheredoc:end"
         },
         {
             "id": "arithmetic_expansion",
