@@ -234,7 +234,13 @@ static void collectUsesClauses(AST* node, List* out) {
         collectUnitListPaths(node->unit_list, out);
     }
     if (node->type == AST_IMPORT && node->token && node->token->value) {
-        listAppend(out, node->token->value);
+        char *resolved = reaResolveImportPath(node->token->value);
+        if (resolved) {
+            listAppend(out, resolved);
+            free(resolved);
+        } else {
+            listAppend(out, node->token->value);
+        }
     }
     if (node->left) collectUsesClauses(node->left, out);
     if (node->right) collectUsesClauses(node->right, out);
@@ -396,6 +402,7 @@ int main(int argc, char **argv) {
     bool used_cache = 0;
     if (!no_cache) used_cache = loadBytecodeFromCache(path, kReaCompilerId, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);
+    freeList(dep_files);
     if (used_cache) {
 #if defined(__APPLE__)
 #define PSCAL_STAT_SEC(st) ((st).st_mtimespec.tv_sec)

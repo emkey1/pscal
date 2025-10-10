@@ -13,5 +13,6 @@ int reaGetLoadedModuleCount(void);
 AST *reaGetModuleAST(int index);
 const char *reaGetModulePath(int index);
 const char *reaGetModuleName(int index);
+char *reaResolveImportPath(const char *path);
 
 #endif /* REA_SEMANTIC_H */
