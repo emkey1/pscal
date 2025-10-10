@@ -111,6 +111,9 @@ static void shellAnalyzeProgramInternal(ShellSemanticContext *ctx, ShellProgram 
 static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command);
 static void shellAnalyzeCase(ShellSemanticContext *ctx, ShellCase *case_stmt);
 
+static void shellPreRegisterProgram(ShellSemanticContext *ctx, ShellProgram *program);
+static void shellPreRegisterCommand(ShellSemanticContext *ctx, ShellCommand *command);
+
 void shellInitSemanticContext(ShellSemanticContext *ctx) {
     if (!ctx) {
         return;
@@ -308,6 +311,101 @@ static void shellAnalyzeSimpleCommand(ShellSemanticContext *ctx, ShellCommand *c
     }
 }
 
+static void shellPreRegisterPipeline(ShellSemanticContext *ctx, ShellPipeline *pipeline) {
+    if (!pipeline) {
+        return;
+    }
+    for (size_t i = 0; i < pipeline->command_count; ++i) {
+        shellPreRegisterCommand(ctx, pipeline->commands[i]);
+    }
+}
+
+static void shellPreRegisterLogical(ShellSemanticContext *ctx, ShellLogicalList *logical) {
+    if (!logical) {
+        return;
+    }
+    for (size_t i = 0; i < logical->count; ++i) {
+        shellPreRegisterPipeline(ctx, logical->pipelines[i]);
+    }
+}
+
+static void shellPreRegisterCase(ShellSemanticContext *ctx, ShellCase *case_stmt) {
+    if (!case_stmt) {
+        return;
+    }
+    for (size_t i = 0; i < case_stmt->clauses.count; ++i) {
+        ShellCaseClause *clause = case_stmt->clauses.items[i];
+        if (clause) {
+            shellPreRegisterProgram(ctx, clause->body);
+        }
+    }
+}
+
+static void shellPreRegisterLoop(ShellSemanticContext *ctx, ShellLoop *loop) {
+    if (!loop) {
+        return;
+    }
+    if (!loop->is_for) {
+        shellPreRegisterCommand(ctx, loop->condition);
+    }
+    shellPreRegisterProgram(ctx, loop->body);
+}
+
+static void shellPreRegisterCommand(ShellSemanticContext *ctx, ShellCommand *command) {
+    if (!ctx || !command) {
+        return;
+    }
+    switch (command->type) {
+        case SHELL_COMMAND_PIPELINE:
+            shellPreRegisterPipeline(ctx, command->data.pipeline);
+            break;
+        case SHELL_COMMAND_LOGICAL:
+            shellPreRegisterLogical(ctx, command->data.logical);
+            break;
+        case SHELL_COMMAND_SUBSHELL:
+            shellPreRegisterProgram(ctx, command->data.subshell.body);
+            break;
+        case SHELL_COMMAND_BRACE_GROUP:
+            shellPreRegisterProgram(ctx, command->data.brace_group.body);
+            break;
+        case SHELL_COMMAND_LOOP:
+            shellPreRegisterLoop(ctx, command->data.loop);
+            break;
+        case SHELL_COMMAND_CONDITIONAL: {
+            ShellConditional *conditional = command->data.conditional;
+            if (conditional) {
+                shellPreRegisterCommand(ctx, conditional->condition);
+                shellPreRegisterProgram(ctx, conditional->then_branch);
+                shellPreRegisterProgram(ctx, conditional->else_branch);
+            }
+            break;
+        }
+        case SHELL_COMMAND_CASE:
+            shellPreRegisterCase(ctx, command->data.case_stmt);
+            break;
+        case SHELL_COMMAND_FUNCTION: {
+            ShellFunction *function = command->data.function;
+            if (function) {
+                shellRegisterFunctionSymbol(ctx, function->name);
+                shellPreRegisterProgram(ctx, function->body);
+            }
+            break;
+        }
+        case SHELL_COMMAND_SIMPLE:
+        case SHELL_COMMAND_ARITHMETIC:
+            break;
+    }
+}
+
+static void shellPreRegisterProgram(ShellSemanticContext *ctx, ShellProgram *program) {
+    if (!program) {
+        return;
+    }
+    for (size_t i = 0; i < program->commands.count; ++i) {
+        shellPreRegisterCommand(ctx, program->commands.items[i]);
+    }
+}
+
 static void shellAnalyzePipeline(ShellSemanticContext *ctx, ShellPipeline *pipeline) {
     if (!pipeline) {
         return;
@@ -416,6 +514,7 @@ static void shellAnalyzeProgramInternal(ShellSemanticContext *ctx, ShellProgram 
     if (!program) {
         return;
     }
+    shellPreRegisterProgram(ctx, program);
     for (size_t i = 0; i < program->commands.count; ++i) {
         shellAnalyzeCommand(ctx, program->commands.items[i]);
     }
