@@ -14,4 +14,6 @@ multiline
 content
 EOF
 
+cat <<<"inline"
+
 echo "heredoc:end"

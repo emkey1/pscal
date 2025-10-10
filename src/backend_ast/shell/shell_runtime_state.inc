@@ -601,7 +601,8 @@ static char *shellExpandPatternText(const char *pattern, size_t len) {
 typedef enum {
     SHELL_RUNTIME_REDIR_OPEN,
     SHELL_RUNTIME_REDIR_DUP,
-    SHELL_RUNTIME_REDIR_HEREDOC
+    SHELL_RUNTIME_REDIR_HEREDOC,
+    SHELL_RUNTIME_REDIR_HERE_STRING
 } ShellRuntimeRedirectionKind;
 
 typedef struct {
@@ -615,6 +616,9 @@ typedef struct {
     char *here_doc;
     size_t here_doc_length;
     bool here_doc_quoted;
+    char *here_string_literal;
+    char *here_string;
+    size_t here_string_length;
 } ShellRedirection;
 
 typedef struct {

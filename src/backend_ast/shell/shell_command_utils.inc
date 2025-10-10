@@ -453,6 +453,10 @@ static void shellRewriteDoubleBracketTest(ShellCommand *cmd) {
 
             free(redir->here_doc);
             redir->here_doc = NULL;
+            free(redir->here_string_literal);
+            redir->here_string_literal = NULL;
+            free(redir->here_string);
+            redir->here_string = NULL;
         }
 
         free(cmd->redirs);

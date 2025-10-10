@@ -1677,6 +1677,11 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
         }
         free(dup_copy);
     }
+    if (redir && type == SHELL_REDIRECT_HERE_STRING) {
+        char *literal = parserCopyWordWithoutMarkers(target);
+        shellRedirectionSetHereStringLiteral(redir, literal ? literal : "");
+        free(literal);
+    }
     return redir;
 }
 

@@ -44,7 +44,8 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
 typedef enum {
     SHELL_REDIR_OP_OPEN,
     SHELL_REDIR_OP_DUP,
-    SHELL_REDIR_OP_HEREDOC
+    SHELL_REDIR_OP_HEREDOC,
+    SHELL_REDIR_OP_HERE_STRING
 } ShellRuntimeRedirOpType;
 
 typedef struct {
@@ -55,6 +56,7 @@ typedef struct {
     const char *here_body;
     size_t here_length;
     bool close_target;
+    bool append_newline;
 } ShellRuntimeRedirOp;
 
 static int shellSpawnProcess(VM *vm,
@@ -127,6 +129,26 @@ static int shellSpawnProcess(VM *vm,
                 op.write_fd = pipefd[1];
                 op.here_body = redir->here_doc ? redir->here_doc : "";
                 op.here_length = redir->here_doc_length;
+                op.append_newline = false;
+                break;
+            }
+            case SHELL_RUNTIME_REDIR_HERE_STRING: {
+                int pipefd[2];
+                if (pipe(pipefd) != 0) {
+                    prep_error = errno;
+                    goto spawn_cleanup;
+                }
+                op.type = SHELL_REDIR_OP_HERE_STRING;
+                op.source_fd = pipefd[0];
+                op.write_fd = pipefd[1];
+                const char *body = redir->here_string ? redir->here_string
+                                                      : (redir->here_string_literal ? redir->here_string_literal : "");
+                op.here_body = body;
+                op.here_length = redir->here_string_length;
+                if (op.here_length == 0 && body) {
+                    op.here_length = strlen(body);
+                }
+                op.append_newline = true;
                 break;
             }
             default:
@@ -197,7 +219,8 @@ static int shellSpawnProcess(VM *vm,
 
             for (size_t i = 0; i < op_count; ++i) {
                 ShellRuntimeRedirOp *op = &ops[i];
-                if (op->type == SHELL_REDIR_OP_HEREDOC && op->write_fd >= 0) {
+                if ((op->type == SHELL_REDIR_OP_HEREDOC || op->type == SHELL_REDIR_OP_HERE_STRING) &&
+                    op->write_fd >= 0) {
                     close(op->write_fd);
                     op->write_fd = -1;
                 }
@@ -208,6 +231,7 @@ static int shellSpawnProcess(VM *vm,
                 switch (op->type) {
                     case SHELL_REDIR_OP_OPEN:
                     case SHELL_REDIR_OP_HEREDOC:
+                    case SHELL_REDIR_OP_HERE_STRING:
                         if (dup2(op->source_fd, op->target_fd) < 0) {
                             int err = errno;
                             fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
@@ -238,7 +262,8 @@ static int shellSpawnProcess(VM *vm,
 
             for (size_t i = 0; i < op_count; ++i) {
                 ShellRuntimeRedirOp *op = &ops[i];
-                if ((op->type == SHELL_REDIR_OP_OPEN || op->type == SHELL_REDIR_OP_HEREDOC) &&
+                if ((op->type == SHELL_REDIR_OP_OPEN || op->type == SHELL_REDIR_OP_HEREDOC ||
+                     op->type == SHELL_REDIR_OP_HERE_STRING) &&
                     op->source_fd >= 0 && op->source_fd != op->target_fd) {
                     close(op->source_fd);
                     op->source_fd = -1;
@@ -264,7 +289,7 @@ static int shellSpawnProcess(VM *vm,
                     close(op->source_fd);
                     op->source_fd = -1;
                 }
-            } else if (op->type == SHELL_REDIR_OP_HEREDOC) {
+            } else if (op->type == SHELL_REDIR_OP_HEREDOC || op->type == SHELL_REDIR_OP_HERE_STRING) {
                 if (op->source_fd >= 0) {
                     close(op->source_fd);
                     op->source_fd = -1;
@@ -272,6 +297,9 @@ static int shellSpawnProcess(VM *vm,
                 if (op->write_fd >= 0) {
                     const char *body = op->here_body ? op->here_body : "";
                     size_t remaining = op->here_length;
+                    if (remaining == 0 && body) {
+                        remaining = strlen(body);
+                    }
                     const char *cursor = body;
                     while (remaining > 0) {
                         ssize_t written = write(op->write_fd, cursor, remaining);
@@ -283,6 +311,19 @@ static int shellSpawnProcess(VM *vm,
                         }
                         cursor += written;
                         remaining -= (size_t)written;
+                    }
+                    if (op->append_newline) {
+                        const char newline = '\n';
+                        while (true) {
+                            ssize_t written = write(op->write_fd, &newline, 1);
+                            if (written < 0) {
+                                if (errno == EINTR) {
+                                    continue;
+                                }
+                                break;
+                            }
+                            break;
+                        }
                     }
                     close(op->write_fd);
                     op->write_fd = -1;
@@ -298,13 +339,15 @@ static int shellSpawnProcess(VM *vm,
 
 spawn_cleanup:
     for (size_t j = 0; j < op_count; ++j) {
-        if (ops[j].type == SHELL_REDIR_OP_OPEN || ops[j].type == SHELL_REDIR_OP_HEREDOC) {
+        if (ops[j].type == SHELL_REDIR_OP_OPEN || ops[j].type == SHELL_REDIR_OP_HEREDOC ||
+            ops[j].type == SHELL_REDIR_OP_HERE_STRING) {
             if (ops[j].source_fd >= 0) {
                 close(ops[j].source_fd);
                 ops[j].source_fd = -1;
             }
         }
-        if (ops[j].type == SHELL_REDIR_OP_HEREDOC && ops[j].write_fd >= 0) {
+        if ((ops[j].type == SHELL_REDIR_OP_HEREDOC || ops[j].type == SHELL_REDIR_OP_HERE_STRING) &&
+            ops[j].write_fd >= 0) {
             close(ops[j].write_fd);
             ops[j].write_fd = -1;
         }
@@ -728,6 +771,63 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                 if (dup2(pipefd[0], target_fd) < 0) {
                     int err = errno;
                     runtimeError(vm, "exec: failed to apply heredoc: %s", strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    close(pipefd[0]);
+                    goto redir_error;
+                }
+                close(pipefd[0]);
+                break;
+            }
+            case SHELL_RUNTIME_REDIR_HERE_STRING: {
+                int pipefd[2];
+                if (pipe(pipefd) != 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: failed to create here-string pipe: %s", strerror(err));
+                    shellUpdateStatus(err ? err : 1);
+                    goto redir_error;
+                }
+                const char *body = redir->here_string ? redir->here_string
+                                                       : (redir->here_string_literal ? redir->here_string_literal : "");
+                size_t remaining = redir->here_string_length;
+                if (remaining == 0 && body) {
+                    remaining = strlen(body);
+                }
+                const char *cursor = body;
+                while (remaining > 0) {
+                    ssize_t written = write(pipefd[1], cursor, remaining);
+                    if (written < 0) {
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        int err = errno;
+                        runtimeError(vm, "exec: failed to write here-string: %s", strerror(err));
+                        shellUpdateStatus(err ? err : 1);
+                        close(pipefd[0]);
+                        close(pipefd[1]);
+                        goto redir_error;
+                    }
+                    cursor += written;
+                    remaining -= (size_t)written;
+                }
+                while (true) {
+                    ssize_t written = write(pipefd[1], "\n", 1);
+                    if (written < 0) {
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        int err = errno;
+                        runtimeError(vm, "exec: failed to terminate here-string: %s", strerror(err));
+                        shellUpdateStatus(err ? err : 1);
+                        close(pipefd[0]);
+                        close(pipefd[1]);
+                        goto redir_error;
+                    }
+                    break;
+                }
+                close(pipefd[1]);
+                if (dup2(pipefd[0], target_fd) < 0) {
+                    int err = errno;
+                    runtimeError(vm, "exec: failed to apply here-string: %s", strerror(err));
                     shellUpdateStatus(err ? err : 1);
                     close(pipefd[0]);
                     goto redir_error;

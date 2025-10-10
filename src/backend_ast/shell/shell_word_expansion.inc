@@ -1507,6 +1507,8 @@ static void shellFreeRedirections(ShellCommand *cmd) {
     for (size_t i = 0; i < cmd->redir_count; ++i) {
         free(cmd->redirs[i].path);
         free(cmd->redirs[i].here_doc);
+        free(cmd->redirs[i].here_string_literal);
+        free(cmd->redirs[i].here_string);
     }
     free(cmd->redirs);
     cmd->redirs = NULL;
@@ -2954,6 +2956,7 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     const char *type_text = "";
     const char *word_hex = "";
     const char *here_hex = "";
+    const char *here_string_hex = "";
     bool here_quoted = false;
 
     char *cursor = copy;
@@ -2979,6 +2982,8 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
             here_hex = value;
         } else if (strcmp(key, "hereq") == 0) {
             shellParseBool(value, &here_quoted);
+        } else if (strcmp(key, "hstr") == 0) {
+            here_string_hex = value;
         }
         if (!next) {
             break;
@@ -3106,27 +3111,22 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         redir.here_doc_length = expanded ? strlen(expanded) : 0;
         redir.here_doc_quoted = here_quoted;
     } else if (strcmp(type_text, "<<<") == 0) {
-        redir.kind = SHELL_RUNTIME_REDIR_HEREDOC;
+        redir.kind = SHELL_RUNTIME_REDIR_HERE_STRING;
         if (!expanded_target) {
             free(word_encoded);
             free(copy);
             return false;
         }
-        size_t len = strlen(expanded_target);
-        char *body = (char *)malloc(len + 2);
-        if (!body) {
+        char *literal = decodeHexString(here_string_hex ? here_string_hex : "", NULL);
+        if (!literal) {
             free(expanded_target);
             free(word_encoded);
             free(copy);
             return false;
         }
-        memcpy(body, expanded_target, len);
-        body[len] = '\n';
-        body[len + 1] = '\0';
-        redir.here_doc = body;
-        redir.here_doc_length = len + 1;
-        redir.here_doc_quoted = false;
-        free(expanded_target);
+        redir.here_string_literal = literal;
+        redir.here_string = expanded_target;
+        redir.here_string_length = expanded_target ? strlen(expanded_target) : 0;
         expanded_target = NULL;
     } else {
         free(expanded_target);
@@ -3140,6 +3140,8 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         free(expanded_target);
         free(redir.path);
         free(redir.here_doc);
+        free(redir.here_string_literal);
+        free(redir.here_string);
         free(word_encoded);
         free(copy);
         return false;
