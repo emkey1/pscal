@@ -1008,7 +1008,7 @@ Value vmBuiltinShellCase(VM *vm, int arg_count, Value *args) {
         goto cleanup;
     }
     free(expanded_subject);
-    shellUpdateStatus(1);
+    shellUpdateStatus(0);
 
 cleanup:
     shellRestoreCurrentVm(previous_vm);
@@ -1018,6 +1018,7 @@ cleanup:
 Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
+    shellRuntimeEnterCondition();
     if (arg_count < 1 || args[0].type != TYPE_STRING) {
         runtimeError(vm, "shell case clause: expected metadata");
         shellUpdateStatus(1);
@@ -1083,6 +1084,7 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
     }
 
 cleanup:
+    shellRuntimeLeaveCondition();
     shellRestoreCurrentVm(previous_vm);
     return result;
 }
@@ -1101,7 +1103,7 @@ Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
     bool matched = ctx->matched;
     shellCaseStackPop();
     if (!matched) {
-        shellUpdateStatus(1);
+        shellUpdateStatus(0);
     }
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
