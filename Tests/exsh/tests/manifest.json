@@ -74,6 +74,15 @@
             "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
         },
         {
+            "id": "shell_function_vm_reuse",
+            "name": "Shell functions reuse cached VM state",
+            "category": "functions",
+            "description": "Repeatedly invoking a compiled shell function preserves positional parameters and status.",
+            "script": "Tests/exsh/tests/function_vm_reuse.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "call:0:arg:2\nstatus:0\ncall:1:arg:2\nstatus:1\ncall:2:arg:2\nstatus:2\ncall:3:arg:2\nstatus:3\ncall:4:arg:2\nstatus:4\ncall:5:arg:2\nstatus:5\ncall:6:arg:2\nstatus:6\ncall:7:arg:2\nstatus:7\ncall:8:arg:2\nstatus:8\ncall:9:arg:2\nstatus:9\npost:2:global1:global2\n"
+        },
+        {
             "id": "builtin_setenv",
             "name": "setenv/unsetenv mirror POSIX behaviour",
             "category": "builtins",

@@ -1,0 +1,11 @@
+#!/usr/bin/env exsh
+set -- global1 global2
+function loop_test() {
+    printf "call:%s:%s:%s\n" "$1" "$2" "$#"
+    return "$1"
+}
+for idx in 0 1 2 3 4 5 6 7 8 9; do
+    loop_test "$idx" arg
+    printf "status:%s\n" "$?"
+done
+printf "post:%s:%s:%s\n" "$#" "$1" "$2"

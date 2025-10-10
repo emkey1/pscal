@@ -1380,6 +1380,79 @@ bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
 }
 
 // --- VM Initialization and Cleanup ---
+void vmResetExecutionState(VM* vm) {
+    if (!vm) return;
+
+    // Free any lingering values on the operand stack before clearing it.
+    for (Value* slot = vm->stack; slot < vm->stackTop; ++slot) {
+        freeValue(slot);
+    }
+    resetStack(vm);
+
+    // Release resources held by call frames from prior executions.
+    for (int i = 0; i < vm->frameCount; ++i) {
+        CallFrame* frame = &vm->frames[i];
+        if (frame->upvalues) {
+            free(frame->upvalues);
+            frame->upvalues = NULL;
+        }
+        frame->return_address = NULL;
+        frame->slots = NULL;
+        frame->function_symbol = NULL;
+        frame->slotCount = 0;
+        frame->locals_count = 0;
+        frame->upvalue_count = 0;
+        frame->discard_result_on_return = false;
+        frame->vtable = NULL;
+    }
+    vm->frameCount = 0;
+
+    vm->chunk = NULL;
+    vm->ip = NULL;
+    vm->lastInstruction = NULL;
+    vm->vmGlobalSymbols = NULL;
+    vm->vmConstGlobalSymbols = NULL;
+    vm->procedureTable = NULL;
+
+    vm->exit_requested = false;
+    vm->abort_requested = false;
+    vm->current_builtin_name = NULL;
+    vm->trace_executed = 0;
+
+    // Ensure any worker threads spawned during previous executions are reclaimed.
+    for (int i = 1; i < VM_MAX_THREADS; ++i) {
+        Thread* thread = &vm->threads[i];
+        if (thread->active) {
+            pthread_join(thread->handle, NULL);
+            thread->active = false;
+        }
+        if (thread->vm) {
+            freeVM(thread->vm);
+            free(thread->vm);
+            thread->vm = NULL;
+        }
+    }
+    vm->threadCount = 1;
+    vm->threads[0].active = false;
+    vm->threads[0].vm = NULL;
+
+    // Reset mutex registry state so a reused VM behaves like a fresh instance.
+    if (vm->mutexOwner == vm) {
+        pthread_mutex_lock(&vm->mutexRegistryLock);
+        for (int i = 0; i < vm->mutexCount; ++i) {
+            if (vm->mutexes[i].active) {
+                pthread_mutex_destroy(&vm->mutexes[i].handle);
+                vm->mutexes[i].active = false;
+            }
+        }
+        vm->mutexCount = 0;
+        pthread_mutex_unlock(&vm->mutexRegistryLock);
+    } else {
+        vm->mutexCount = 0;
+    }
+    vm->mutexOwner = vm;
+}
+
 void initVM(VM* vm) { // As in all.txt, with frameCount
     if (!vm) return;
     resetStack(vm);
