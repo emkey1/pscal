@@ -2266,7 +2266,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         "umask",   "command","hash",  "trap",   "local",  "let",    "break",   "continue","alias",
         "bind",    "shopt",  "history","jobs",   "disown", "fg",      "finger",  "bg",
         "wait",    "builtin","source", "read",   "printf", "shift",   "return",  "help",
-        "type",    ":",      "unalias","getopts","mapfile","__shell_double_bracket", "times"
+        "type",    ":",      "unalias","getopts","mapfile","__shell_double_bracket", "__shell_arithmetic", "times"
     };
 
     size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
