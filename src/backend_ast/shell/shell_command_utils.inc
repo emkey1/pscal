@@ -176,118 +176,144 @@ static bool shellParseCommandMetadata(const char *meta, size_t meta_len,
     return true;
 }
 
-static char *shellRunCommandSubstitution(const char *command) {
-    int pipes[2] = {-1, -1};
-    char *output = NULL;
-    size_t length = 0;
-    size_t capacity = 0;
+typedef struct {
+    int fd;
+    char *buffer;
+    size_t length;
+    size_t capacity;
+    int error;
+} ShellCommandSubReadContext;
 
-    if (pipe(pipes) != 0) {
-        return strdup("");
+static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
+    if (!ctx || ctx->fd < 0) {
+        return;
     }
-
-    pid_t child = fork();
-    if (child < 0) {
-        int err = errno;
-        close(pipes[0]);
-        close(pipes[1]);
-        fprintf(stderr, "exsh: command substitution: failed to fork: %s\n", strerror(err));
-        return strdup("");
-    }
-
-    if (child == 0) {
-        if (dup2(pipes[1], STDOUT_FILENO) < 0) {
-            int err = errno;
-            fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
-            _exit(1);
-        }
-        close(pipes[0]);
-        close(pipes[1]);
-
-        ShellRunOptions opts;
-        memset(&opts, 0, sizeof(opts));
-        opts.no_cache = 1;
-        opts.quiet = true;
-        opts.exit_on_signal = shellRuntimeExitOnSignal();
-        const char *frontend_path = shellRuntimeGetArg0();
-        opts.frontend_path = frontend_path ? frontend_path : "exsh";
-
-        const char *source = command ? command : "";
-        bool exit_requested = false;
-        int status = EXIT_FAILURE;
-
-        ShellSymbolTableScope table_scope;
-        shellSymbolTableScopeInit(&table_scope);
-        bool scope_pushed = false;
-        if (!shellSymbolTableScopeIsActive()) {
-            if (!shellSymbolTableScopePush(&table_scope)) {
-                fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-            } else {
-                scope_pushed = true;
-            }
-        }
-
-        if (scope_pushed || shellSymbolTableScopeIsActive()) {
-            status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
-        }
-
-        if (scope_pushed) {
-            shellSymbolTableScopePop(&table_scope);
-        }
-
-        fflush(NULL);
-
-        int exit_code = shellRuntimeLastStatus();
-        if (!exit_requested && status != EXIT_SUCCESS) {
-            exit_code = status;
-        }
-        _exit(exit_code);
-    }
-
-    close(pipes[1]);
-
     char buffer[256];
     while (true) {
-        ssize_t n = read(pipes[0], buffer, sizeof(buffer));
+        ssize_t n = read(ctx->fd, buffer, sizeof(buffer));
         if (n > 0) {
-            if (!shellBufferEnsure(&output, &length, &capacity, (size_t)n)) {
-                free(output);
-                output = NULL;
+            if (!shellBufferEnsure(&ctx->buffer, &ctx->length, &ctx->capacity, (size_t)n)) {
+                ctx->error = ENOMEM;
+                free(ctx->buffer);
+                ctx->buffer = NULL;
+                ctx->length = 0;
+                ctx->capacity = 0;
                 break;
             }
-            memcpy(output + length, buffer, (size_t)n);
-            length += (size_t)n;
-            output[length] = '\0';
+            memcpy(ctx->buffer + ctx->length, buffer, (size_t)n);
+            ctx->length += (size_t)n;
+            ctx->buffer[ctx->length] = '\0';
         } else if (n == 0) {
             break;
         } else if (errno == EINTR) {
             continue;
         } else {
-            free(output);
-            output = NULL;
+            ctx->error = errno ? errno : EIO;
+            free(ctx->buffer);
+            ctx->buffer = NULL;
+            ctx->length = 0;
+            ctx->capacity = 0;
             break;
         }
     }
-    close(pipes[0]);
+    close(ctx->fd);
+    ctx->fd = -1;
+}
 
-    int status = 0;
-    while (waitpid(child, &status, 0) < 0) {
-        if (errno != EINTR) {
-            status = 1;
-            break;
+static void *shellCommandSubstitutionReader(void *arg) {
+    ShellCommandSubReadContext *ctx = (ShellCommandSubReadContext *)arg;
+    shellCommandSubstitutionDrain(ctx);
+    return NULL;
+}
+
+static char *shellRunCommandSubstitution(const char *command) {
+    int pipes[2] = {-1, -1};
+    if (pipe(pipes) != 0) {
+        return strdup("");
+    }
+
+    int saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout < 0) {
+        close(pipes[0]);
+        close(pipes[1]);
+        return strdup("");
+    }
+
+    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+        int err = errno;
+        close(pipes[0]);
+        close(pipes[1]);
+        close(saved_stdout);
+        fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
+        return strdup("");
+    }
+    close(pipes[1]);
+
+    ShellCommandSubReadContext reader;
+    reader.fd = pipes[0];
+    reader.buffer = NULL;
+    reader.length = 0;
+    reader.capacity = 0;
+    reader.error = 0;
+
+    pthread_t reader_thread;
+    bool reader_started = (pthread_create(&reader_thread, NULL, shellCommandSubstitutionReader, &reader) == 0);
+    if (!reader_started) {
+        /* Fallback to synchronous draining if thread creation fails. */
+    }
+
+    ShellRunOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.no_cache = 1;
+    opts.quiet = true;
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
+    const char *frontend_path = shellRuntimeGetArg0();
+    opts.frontend_path = frontend_path ? frontend_path : "exsh";
+
+    const char *source = command ? command : "";
+    bool exit_requested = false;
+    int status = EXIT_FAILURE;
+
+    ShellSymbolTableScope table_scope;
+    shellSymbolTableScopeInit(&table_scope);
+    bool scope_pushed = false;
+    if (!shellSymbolTableScopeIsActive()) {
+        if (!shellSymbolTableScopePush(&table_scope)) {
+            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+        } else {
+            scope_pushed = true;
         }
     }
 
-    int exit_status = 0;
-    if (WIFEXITED(status)) {
-        exit_status = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-        exit_status = 128 + WTERMSIG(status);
+    if (scope_pushed || shellSymbolTableScopeIsActive()) {
+        status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
+    }
+
+    if (scope_pushed) {
+        shellSymbolTableScopePop(&table_scope);
+    }
+
+    fflush(NULL);
+
+    if (dup2(saved_stdout, STDOUT_FILENO) < 0) {
+        /* best effort restore */
+    }
+    close(saved_stdout);
+
+    if (reader_started) {
+        pthread_join(reader_thread, NULL);
     } else {
-        exit_status = status;
+        shellCommandSubstitutionDrain(&reader);
     }
-    shellUpdateStatus(exit_status);
 
+    int final_status = shellRuntimeLastStatus();
+    if (!exit_requested && status != EXIT_SUCCESS) {
+        final_status = status;
+    }
+    shellUpdateStatus(final_status);
+
+    char *output = reader.buffer;
+    size_t length = reader.length;
     if (!output) {
         return strdup("");
     }
