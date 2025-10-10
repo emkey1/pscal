@@ -118,6 +118,15 @@
             "expect": "match_bash"
         },
         {
+            "id": "arithmetic_command",
+            "name": "(( expr )) updates status and variables",
+            "category": "builtins",
+            "description": "Arithmetic command evaluates expressions in place, updates variables, and reports exit status.",
+            "script": "Tests/exsh/tests/arithmetic_command.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "after1:1:1\nafter2:2:0\nzero:1\nnonzero:0\nerror:1\n"
+        },
+        {
             "id": "let_builtin",
             "name": "let evaluates expressions and assignments",
             "category": "builtins",

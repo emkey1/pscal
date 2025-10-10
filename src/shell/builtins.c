@@ -68,6 +68,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"hash", "hash", 50},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
+    {"__shell_arithmetic", "__shell_arithmetic", 1016},
     {"__shell_and", "__shell_and", 1003},
     {"__shell_or", "__shell_or", 1004},
     {"__shell_subshell", "__shell_subshell", 1005},

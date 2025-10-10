@@ -107,6 +107,7 @@ Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
 /* Shell builtins */
 Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPipeline(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellArithmetic(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellAnd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellOr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellSubshell(struct VM_s* vm, int arg_count, Value* args);

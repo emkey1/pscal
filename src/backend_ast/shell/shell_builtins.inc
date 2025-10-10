@@ -1,5 +1,9 @@
 /* Auto-generated include: shell builtins exposed to the VM. Included from shell.c. */
 #include "shell/runner.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 Value vmBuiltinShellExec(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
@@ -101,6 +105,461 @@ Value vmBuiltinShellPipeline(VM *vm, int arg_count, Value *args) {
 
     free(merge_pattern);
     merge_pattern = NULL;
+
+cleanup:
+    shellRestoreCurrentVm(previous_vm);
+    return result;
+}
+
+static void shellArithmeticCommandTrim(const char **start, const char **end) {
+    if (!start || !end) {
+        return;
+    }
+    const char *s = *start;
+    const char *e = *end;
+    while (s < e && isspace((unsigned char)*s)) {
+        s++;
+    }
+    while (e > s && isspace((unsigned char)e[-1])) {
+        e--;
+    }
+    *start = s;
+    *end = e;
+}
+
+static const char *shellArithmeticCommandParseName(const char *start, const char *end, char **out_name) {
+    if (!start || !end || start >= end) {
+        return NULL;
+    }
+    const char *cursor = start;
+    while (cursor < end && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (cursor >= end || (!isalpha((unsigned char)*cursor) && *cursor != '_')) {
+        return NULL;
+    }
+    const char *name_start = cursor;
+    cursor++;
+    while (cursor < end && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    size_t len = (size_t)(cursor - name_start);
+    char *name = (char *)malloc(len + 1);
+    if (!name) {
+        return NULL;
+    }
+    memcpy(name, name_start, len);
+    name[len] = '\0';
+    while (cursor < end && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (out_name) {
+        *out_name = name;
+    } else {
+        free(name);
+    }
+    return cursor;
+}
+
+static bool shellArithmeticCommandGetValue(const char *name, long long *out_value) {
+    if (!name || !out_value) {
+        return false;
+    }
+    char *raw = shellLookupParameterValue(name, strlen(name));
+    long long value = 0;
+    bool ok = shellArithmeticParseValueString(raw ? raw : "0", &value);
+    free(raw);
+    if (!ok) {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
+static bool shellArithmeticCommandSetValue(const char *name, long long value) {
+    if (!name) {
+        return false;
+    }
+    char buffer[64];
+    int written = snprintf(buffer, sizeof(buffer), "%lld", value);
+    if (written < 0 || written >= (int)sizeof(buffer)) {
+        return false;
+    }
+    return shellSetTrackedVariable(name, buffer, false);
+}
+
+static bool shellArithmeticCommandEvalSimple(const char *start, const char *end, long long *out_value) {
+    if (!start || !end || start >= end) {
+        return false;
+    }
+    size_t len = (size_t)(end - start);
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    bool eval_error = false;
+    char *result = shellEvaluateArithmetic(copy, &eval_error);
+    free(copy);
+    if (!result || eval_error) {
+        free(result);
+        return false;
+    }
+    long long value = 0;
+    bool ok = shellArithmeticParseValueString(result, &value);
+    free(result);
+    if (!ok) {
+        return false;
+    }
+    if (out_value) {
+        *out_value = value;
+    }
+    return true;
+}
+
+static bool shellArithmeticCommandEvaluateExpression(const char *expr, long long *out_value) {
+    if (!expr) {
+        return false;
+    }
+    const char *start = expr;
+    const char *end = expr + strlen(expr);
+    shellArithmeticCommandTrim(&start, &end);
+    if (start >= end) {
+        return false;
+    }
+
+    if (end - start >= 2 && start[0] == '+' && start[1] == '+') {
+        const char *cursor = start + 2;
+        while (cursor < end && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        char *name = NULL;
+        const char *rest = shellArithmeticCommandParseName(cursor, end, &name);
+        if (!rest || !name) {
+            free(name);
+            return false;
+        }
+        const char *after = rest;
+        while (after < end && isspace((unsigned char)*after)) {
+            after++;
+        }
+        if (after != end) {
+            free(name);
+            goto fallback;
+        }
+        if (!shellIsValidEnvName(name)) {
+            free(name);
+            return false;
+        }
+        long long value = 0;
+        if (!shellArithmeticCommandGetValue(name, &value)) {
+            free(name);
+            return false;
+        }
+        value += 1;
+        if (!shellArithmeticCommandSetValue(name, value)) {
+            free(name);
+            return false;
+        }
+        if (out_value) {
+            *out_value = value;
+        }
+        free(name);
+        return true;
+    }
+    if (end - start >= 2 && start[0] == '-' && start[1] == '-') {
+        const char *cursor = start + 2;
+        while (cursor < end && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        char *name = NULL;
+        const char *rest = shellArithmeticCommandParseName(cursor, end, &name);
+        if (!rest || !name) {
+            free(name);
+            return false;
+        }
+        const char *after = rest;
+        while (after < end && isspace((unsigned char)*after)) {
+            after++;
+        }
+        if (after != end) {
+            free(name);
+            goto fallback;
+        }
+        if (!shellIsValidEnvName(name)) {
+            free(name);
+            return false;
+        }
+        long long value = 0;
+        if (!shellArithmeticCommandGetValue(name, &value)) {
+            free(name);
+            return false;
+        }
+        value -= 1;
+        if (!shellArithmeticCommandSetValue(name, value)) {
+            free(name);
+            return false;
+        }
+        if (out_value) {
+            *out_value = value;
+        }
+        free(name);
+        return true;
+    }
+
+    char *name = NULL;
+    const char *rest = shellArithmeticCommandParseName(start, end, &name);
+    if (rest && name) {
+        if (!shellIsValidEnvName(name)) {
+            free(name);
+            return false;
+        }
+        const char *cursor = rest;
+        while (cursor < end && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (end - cursor >= 2 && cursor[0] == '+' && cursor[1] == '+') {
+            const char *after_op = cursor + 2;
+            while (after_op < end && isspace((unsigned char)*after_op)) {
+                after_op++;
+            }
+            if (after_op != end) {
+                free(name);
+                goto fallback;
+            }
+            long long value = 0;
+            if (!shellArithmeticCommandGetValue(name, &value)) {
+                free(name);
+                return false;
+            }
+            long long original = value;
+            value += 1;
+            if (!shellArithmeticCommandSetValue(name, value)) {
+                free(name);
+                return false;
+            }
+            if (out_value) {
+                *out_value = original;
+            }
+            free(name);
+            return true;
+        }
+        if (end - cursor >= 2 && cursor[0] == '-' && cursor[1] == '-') {
+            const char *after_op = cursor + 2;
+            while (after_op < end && isspace((unsigned char)*after_op)) {
+                after_op++;
+            }
+            if (after_op != end) {
+                free(name);
+                goto fallback;
+            }
+            long long value = 0;
+            if (!shellArithmeticCommandGetValue(name, &value)) {
+                free(name);
+                return false;
+            }
+            long long original = value;
+            value -= 1;
+            if (!shellArithmeticCommandSetValue(name, value)) {
+                free(name);
+                return false;
+            }
+            if (out_value) {
+                *out_value = original;
+            }
+            free(name);
+            return true;
+        }
+
+        char assign_op = '\0';
+        if (cursor < end) {
+            if (cursor + 1 < end && (cursor[0] == '+' || cursor[0] == '-' || cursor[0] == '*' || cursor[0] == '/' || cursor[0] == '%') &&
+                cursor[1] == '=') {
+                assign_op = cursor[0];
+                cursor += 2;
+            } else if (*cursor == '=') {
+                assign_op = '=';
+                cursor++;
+            }
+        }
+
+        if (assign_op != '\0') {
+            const char *rhs_start = cursor;
+            const char *rhs_end = end;
+            shellArithmeticCommandTrim(&rhs_start, &rhs_end);
+            if (rhs_start >= rhs_end) {
+                free(name);
+                return false;
+            }
+            if ((assign_op == '/' || assign_op == '%') && rhs_end > rhs_start) {
+                // avoid division by zero by checking after evaluation
+            }
+            long long rhs_value = 0;
+            if (!shellArithmeticCommandEvalSimple(rhs_start, rhs_end, &rhs_value)) {
+                free(name);
+                return false;
+            }
+            if ((assign_op == '/' || assign_op == '%') && rhs_value == 0) {
+                free(name);
+                return false;
+            }
+            long long result = rhs_value;
+            if (assign_op != '=') {
+                long long current = 0;
+                if (!shellArithmeticCommandGetValue(name, &current)) {
+                    free(name);
+                    return false;
+                }
+                switch (assign_op) {
+                    case '+': result = current + rhs_value; break;
+                    case '-': result = current - rhs_value; break;
+                    case '*': result = current * rhs_value; break;
+                    case '/': result = current / rhs_value; break;
+                    case '%': result = current % rhs_value; break;
+                    default:
+                        free(name);
+                        return false;
+                }
+            }
+            if (!shellArithmeticCommandSetValue(name, result)) {
+                free(name);
+                return false;
+            }
+            if (out_value) {
+                *out_value = result;
+            }
+            free(name);
+            return true;
+        }
+
+        if (cursor == end) {
+            long long value = 0;
+            if (!shellArithmeticCommandGetValue(name, &value)) {
+                free(name);
+                return false;
+            }
+            if (out_value) {
+                *out_value = value;
+            }
+            free(name);
+            return true;
+        }
+
+        free(name);
+    } else if (name) {
+        free(name);
+    }
+
+fallback:
+    long long value = 0;
+    if (!shellArithmeticCommandEvalSimple(start, end, &value)) {
+        return false;
+    }
+    if (out_value) {
+        *out_value = value;
+    }
+    return true;
+}
+
+Value vmBuiltinShellArithmetic(VM *vm, int arg_count, Value *args) {
+    VM *previous_vm = shellSwapCurrentVm(vm);
+    Value result = makeVoid();
+
+    bool dispatch_mode = (arg_count >= 2 && args[0].type == TYPE_STRING);
+
+    if (dispatch_mode) {
+        shellCollectJobs();
+        ShellCommand cmd;
+        memset(&cmd, 0, sizeof(cmd));
+
+        const char *meta = args[0].s_val;
+        if (!meta) {
+            runtimeError(vm, "((: expected metadata");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        shellParseMetadata(meta, &cmd);
+
+        if (args[1].type != TYPE_STRING) {
+            runtimeError(vm, "((: expected expression");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        const char *expression = args[1].s_val ? args[1].s_val : "";
+
+        char *name_copy = strdup("__shell_arithmetic");
+        if (!name_copy) {
+            runtimeError(vm, "((: out of memory");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+        if (!shellCommandAppendArgOwned(&cmd, name_copy)) {
+            runtimeError(vm, "((: unable to build command");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        char *expr_copy = strdup(expression);
+        if (!expr_copy) {
+            runtimeError(vm, "((: out of memory");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+        if (!shellCommandAppendArgOwned(&cmd, expr_copy)) {
+            runtimeError(vm, "((: unable to build command");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        for (int i = 2; i < arg_count; ++i) {
+            Value entry = args[i];
+            if (entry.type != TYPE_STRING || !entry.s_val) {
+                runtimeError(vm, "((: invalid redirection");
+                shellUpdateStatus(1);
+                goto dispatch_cleanup;
+            }
+            if (!shellAddRedirection(&cmd, entry.s_val)) {
+                runtimeError(vm, "((: invalid redirection");
+                shellUpdateStatus(1);
+                goto dispatch_cleanup;
+            }
+        }
+
+        result = shellExecuteCommand(vm, &cmd);
+        goto cleanup;
+
+dispatch_cleanup:
+        shellFreeCommand(&cmd);
+        goto cleanup;
+    }
+
+    if (arg_count < 1) {
+        runtimeError(vm, "((: expected expression");
+        shellUpdateStatus(1);
+        goto cleanup;
+    }
+
+    if (args[0].type != TYPE_STRING) {
+        runtimeError(vm, "((: expected expression");
+        shellUpdateStatus(1);
+        goto cleanup;
+    }
+
+    const char *expression = args[0].s_val ? args[0].s_val : "";
+
+    long long expr_value = 0;
+    if (!shellArithmeticCommandEvaluateExpression(expression, &expr_value)) {
+        fprintf(stderr, "((: %s: arithmetic syntax error\n",
+                (expression && *expression) ? expression : "");
+        shellMarkArithmeticError();
+        shellUpdateStatus(1);
+        goto cleanup;
+    }
+
+    shellUpdateStatus(expr_value != 0 ? 0 : 1);
 
 cleanup:
     shellRestoreCurrentVm(previous_vm);

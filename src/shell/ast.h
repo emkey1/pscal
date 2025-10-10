@@ -159,6 +159,7 @@ typedef struct ShellFunction {
 
 typedef enum {
     SHELL_COMMAND_SIMPLE,
+    SHELL_COMMAND_ARITHMETIC,
     SHELL_COMMAND_PIPELINE,
     SHELL_COMMAND_LOGICAL,
     SHELL_COMMAND_SUBSHELL,
@@ -187,6 +188,10 @@ typedef struct ShellCommand {
             ShellWordArray words;
             ShellRedirectionArray redirections;
         } simple;
+        struct {
+            char *expression;
+            ShellRedirectionArray redirections;
+        } arithmetic;
         ShellPipeline *pipeline;
         ShellLogicalList *logical;
         struct {
@@ -254,6 +259,7 @@ void shellFreeCaseClause(ShellCaseClause *clause);
 void shellFreeCase(ShellCase *case_stmt);
 
 ShellCommand *shellCreateSimpleCommand(void);
+ShellCommand *shellCreateArithmeticCommand(char *expression);
 ShellCommand *shellCreatePipelineCommand(ShellPipeline *pipeline);
 ShellCommand *shellCreateLogicalCommand(ShellLogicalList *logical);
 ShellCommand *shellCreateSubshellCommand(ShellProgram *body);

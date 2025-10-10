@@ -325,6 +325,7 @@ static void compileProgram(BytecodeChunk *chunk, const ShellProgram *program);
 static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline, bool runs_in_background);
 static void compileCase(BytecodeChunk *chunk, const ShellCase *case_stmt, int line);
 static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function, int line);
+static void compileArithmetic(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background);
 
 static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
     int line = command ? command->line : 0;
@@ -365,6 +366,46 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, boo
         arg_count = 255;
     }
     emitBuiltinProc(chunk, "__shell_exec", (uint8_t)arg_count, line);
+}
+
+static void compileArithmetic(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
+    int line = command ? command->line : 0;
+    char meta[128];
+    snprintf(meta, sizeof(meta), "bg=%d;pipe=%d;head=%d;tail=%d;line=%d;col=%d",
+             (command && command->exec.runs_in_background) || runs_in_background ? 1 : 0,
+             command ? command->exec.pipeline_index : -1,
+             command && command->exec.is_pipeline_head ? 1 : 0,
+             command && command->exec.is_pipeline_tail ? 1 : 0,
+             command ? command->line : 0,
+             command ? command->column : 0);
+    emitPushString(chunk, meta, line);
+
+    size_t arg_count = 1;
+    const char *expr = (command && command->data.arithmetic.expression)
+                           ? command->data.arithmetic.expression
+                           : "";
+    emitPushString(chunk, expr, line);
+    arg_count++;
+
+    const ShellRedirectionArray *redirs = command ? shellCommandGetRedirections(command) : NULL;
+    size_t redir_count = redirs ? redirs->count : 0;
+    for (size_t i = 0; i < redir_count; ++i) {
+        const ShellRedirection *redir = redirs->items[i];
+        char *serialized = buildRedirectionMetadata(redir);
+        if (!serialized) {
+            emitPushString(chunk, "redir:fd=;type=;word=;dup=;here=", line);
+        } else {
+            emitPushString(chunk, serialized, line);
+            free(serialized);
+        }
+        arg_count++;
+    }
+
+    if (arg_count > 255) {
+        fprintf(stderr, "shell codegen warning: arithmetic command args truncated (%zu).\n", arg_count);
+        arg_count = 255;
+    }
+    emitBuiltinProc(chunk, "__shell_arithmetic", (uint8_t)arg_count, line);
 }
 
 static void compilePipeline(BytecodeChunk *chunk, const ShellPipeline *pipeline, bool runs_in_background) {
@@ -715,6 +756,9 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bo
     switch (command->type) {
         case SHELL_COMMAND_SIMPLE:
             compileSimple(chunk, command, runs_in_background);
+            break;
+        case SHELL_COMMAND_ARITHMETIC:
+            compileArithmetic(chunk, command, runs_in_background);
             break;
         case SHELL_COMMAND_PIPELINE:
             compilePipeline(chunk, command->data.pipeline, command->exec.runs_in_background || runs_in_background);

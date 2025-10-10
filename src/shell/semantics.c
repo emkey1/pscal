@@ -382,6 +382,9 @@ static void shellAnalyzeCommand(ShellSemanticContext *ctx, ShellCommand *command
         case SHELL_COMMAND_SIMPLE:
             shellAnalyzeSimpleCommand(ctx, command);
             break;
+        case SHELL_COMMAND_ARITHMETIC:
+            /* Arithmetic commands do not introduce new symbols but may carry redirections. */
+            break;
         case SHELL_COMMAND_PIPELINE:
             shellAnalyzePipeline(ctx, command->data.pipeline);
             break;
