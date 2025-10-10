@@ -2264,11 +2264,12 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     }
     static const char *kBuiltins[] = {
         "cd",      "pwd",    "dirs",   "pushd",  "popd",   "exit",    "logout",  "exec",
-        "export",  "unset",  "setenv", "unsetenv","set",    "declare", "typeset", "readonly",
-        "umask",   "command","hash",  "trap",   "local",  "let",    "break",   "continue","alias",
-        "bind",    "shopt",  "history","jobs",   "disown", "fg",      "finger",  "bg",
-        "wait",    "builtin","source", "read",   "printf", "shift",   "return",  "help",
-        "type",    "test",   "[",      ":",      "unalias","getopts","mapfile","__shell_double_bracket",
+        "eval",    "export", "unset",  "setenv", "unsetenv","set",    "declare", "typeset",
+        "readonly","umask",  "command","hash",   "trap",   "local",   "let",     "break",
+        "continue","alias", "bind",   "shopt",  "history","jobs",   "disown",  "fg",
+        "finger", "bg",     "wait",   "builtin","source", "read",   "printf",  "shift",
+        "return", "help",   "type",   "test",   "[",      ":",      "unalias","getopts",
+        "mapfile","__shell_double_bracket",
         "__shell_arithmetic", "times"
     };
 
