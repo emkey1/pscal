@@ -389,12 +389,12 @@
         },
         {
             "id": "grammar_function_missing_parens",
-            "name": "function keyword requires parentheses before body",
+            "name": "function keyword accepts omitted parentheses",
             "category": "grammar",
-            "description": "Missing parentheses before the function body triggers a parse error.",
+            "description": "function name { ... } form registers and executes a shell function.",
             "script": "Tests/exsh/tests/parser_function_missing_parens.psh",
-            "expect": "parse_error",
-            "expected_stderr_substring": "Expected '(' after function name"
+            "expect": "runtime_ok",
+            "expected_stdout": "parser-function-missing-parens:start\nparser-function-missing-parens:body\nparser-function-missing-parens:end"
         },
         {
             "id": "grammar_double_bracket_negation",
