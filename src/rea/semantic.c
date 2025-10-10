@@ -3753,3 +3753,16 @@ const char *reaGetModuleName(int index) {
     ReaModuleInfo *info = gLoadedModules[index];
     return info ? info->name : NULL;
 }
+
+char *reaResolveImportPath(const char *path) {
+    bool exists = false;
+    char *resolved = resolveModulePath(path, &exists);
+    if (!resolved) {
+        return NULL;
+    }
+    if (!exists) {
+        free(resolved);
+        return NULL;
+    }
+    return resolved;
+}
