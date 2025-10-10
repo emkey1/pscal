@@ -4217,17 +4217,9 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                         ok = false;
                     }
                 } else {
-                    if (!shellSetTrackedVariable(spec, "", false)) {
-                        const char *readonly = shellReadonlyGetErrorName();
-                        if (errno == EPERM && readonly && *readonly) {
-                            runtimeError(vm, "declare: %s: readonly variable", readonly);
-                        } else if (errno != 0) {
-                            runtimeError(vm, "declare: unable to set '%s': %s", spec, strerror(errno));
-                        } else {
-                            runtimeError(vm, "declare: unable to set '%s'", spec);
-                        }
-                        ok = false;
-                    }
+                    // Without an assignment, bash preserves the current value of global
+                    // variables when applying attributes. Leave the value untouched so
+                    // constructs like `typeset -i var` do not reset an existing binding.
                 }
             }
             if (ok && mark_readonly) {
