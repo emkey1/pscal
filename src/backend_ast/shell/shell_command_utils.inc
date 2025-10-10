@@ -178,80 +178,73 @@ static bool shellParseCommandMetadata(const char *meta, size_t meta_len,
 
 static char *shellRunCommandSubstitution(const char *command) {
     int pipes[2] = {-1, -1};
-    int saved_stdout = -1;
     char *output = NULL;
     size_t length = 0;
     size_t capacity = 0;
-    ShellSymbolTableScope table_scope;
-    bool scope_pushed = false;
 
     if (pipe(pipes) != 0) {
         return strdup("");
     }
 
-    saved_stdout = dup(STDOUT_FILENO);
-    if (saved_stdout < 0) {
-        close(pipes[0]);
-        close(pipes[1]);
-        return strdup("");
-    }
-
-    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+    pid_t child = fork();
+    if (child < 0) {
         int err = errno;
         close(pipes[0]);
         close(pipes[1]);
-        dup2(saved_stdout, STDOUT_FILENO);
-        close(saved_stdout);
-        fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
+        fprintf(stderr, "exsh: command substitution: failed to fork: %s\n", strerror(err));
         return strdup("");
     }
-    close(pipes[1]);
 
-    ShellRunOptions opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.no_cache = 1;
-    opts.quiet = true;
-    opts.exit_on_signal = shellRuntimeExitOnSignal();
-    const char *frontend_path = shellRuntimeGetArg0();
-    opts.frontend_path = frontend_path ? frontend_path : "exsh";
-
-    const char *source = command ? command : "";
-    bool exit_requested = false;
-    int status = EXIT_FAILURE;
-
-    shellSymbolTableScopeInit(&table_scope);
-    if (!shellSymbolTableScopeIsActive()) {
-        if (!shellSymbolTableScopePush(&table_scope)) {
-            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        } else {
-            scope_pushed = true;
+    if (child == 0) {
+        if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+            int err = errno;
+            fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
+            _exit(1);
         }
+        close(pipes[0]);
+        close(pipes[1]);
+
+        ShellRunOptions opts;
+        memset(&opts, 0, sizeof(opts));
+        opts.no_cache = 1;
+        opts.quiet = true;
+        opts.exit_on_signal = shellRuntimeExitOnSignal();
+        const char *frontend_path = shellRuntimeGetArg0();
+        opts.frontend_path = frontend_path ? frontend_path : "exsh";
+
+        const char *source = command ? command : "";
+        bool exit_requested = false;
+        int status = EXIT_FAILURE;
+
+        ShellSymbolTableScope table_scope;
+        shellSymbolTableScopeInit(&table_scope);
+        bool scope_pushed = false;
+        if (!shellSymbolTableScopeIsActive()) {
+            if (!shellSymbolTableScopePush(&table_scope)) {
+                fprintf(stderr, "shell: failed to allocate symbol tables.\n");
+            } else {
+                scope_pushed = true;
+            }
+        }
+
+        if (scope_pushed || shellSymbolTableScopeIsActive()) {
+            status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
+        }
+
+        if (scope_pushed) {
+            shellSymbolTableScopePop(&table_scope);
+        }
+
+        fflush(NULL);
+
+        int exit_code = shellRuntimeLastStatus();
+        if (!exit_requested && status != EXIT_SUCCESS) {
+            exit_code = status;
+        }
+        _exit(exit_code);
     }
 
-    if (!scope_pushed && !shellSymbolTableScopeIsActive()) {
-        /* Allocation failed and no active scope exists. */
-        exit_requested = false;
-    } else {
-        status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
-    }
-
-    if (scope_pushed) {
-        shellSymbolTableScopePop(&table_scope);
-    }
-
-    fflush(stdout);
-
-    if (dup2(saved_stdout, STDOUT_FILENO) < 0) {
-        /* best effort; continue */
-    }
-    close(saved_stdout);
-
-    if (exit_requested || status == EXIT_SUCCESS) {
-        status = gShellRuntime.last_status;
-    } else {
-        status = gShellRuntime.last_status;
-    }
-    shellUpdateStatus(status);
+    close(pipes[1]);
 
     char buffer[256];
     while (true) {
@@ -276,6 +269,24 @@ static char *shellRunCommandSubstitution(const char *command) {
         }
     }
     close(pipes[0]);
+
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno != EINTR) {
+            status = 1;
+            break;
+        }
+    }
+
+    int exit_status = 0;
+    if (WIFEXITED(status)) {
+        exit_status = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        exit_status = 128 + WTERMSIG(status);
+    } else {
+        exit_status = status;
+    }
+    shellUpdateStatus(exit_status);
 
     if (!output) {
         return strdup("");
