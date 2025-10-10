@@ -1411,20 +1411,10 @@ bool shellRuntimeSetSignalTrap(int signo, ShellTrapAction action, const char *co
 
     if (action == SHELL_TRAP_ACTION_COMMAND) {
         sa.sa_handler = shellSignalHandler;
-        bool restartable = false;
-#ifdef SIGINT
-        if (signo == SIGINT) {
-            restartable = true;
-        }
-#endif
-#ifdef SIGQUIT
-        if (signo == SIGQUIT) {
-            restartable = true;
-        }
-#endif
-#ifdef SIGTSTP
-        if (signo == SIGTSTP) {
-            restartable = true;
+        bool restartable = true;
+#ifdef SIGTERM
+        if (signo == SIGTERM) {
+            restartable = false;
         }
 #endif
         if (restartable) {
