@@ -465,7 +465,7 @@ class tinyCompiler:
 # Serialization
 # ---------------------------------------------------------------------------
 
-CACHE_MAGIC = 0x50534243  # 'PSBC'
+CACHE_MAGIC = 0x50534332  # 'PSC2'
 
 
 def load_vm_version(root: Path) -> int:
