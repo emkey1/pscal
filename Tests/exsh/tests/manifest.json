@@ -217,6 +217,15 @@
             "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:inner\nafter-var:inner\ncmdsub-retain:end"
         },
         {
+            "id": "repeated_command_execution",
+            "name": "Command substitution loops reuse builtins",
+            "category": "expansion",
+            "description": "Repeated $(...) invocations reuse the builtin registry without duplicate work.",
+            "script": "Tests/exsh/tests/repeated_command_execution.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "multi-exec:start\nloop:1:1\nloop:2:2\nloop:3:3\nmulti-exec:end"
+        },
+        {
             "id": "backtick_substitution",
             "name": "Legacy backtick substitution is supported",
             "category": "expansion",
