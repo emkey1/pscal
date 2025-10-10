@@ -56,6 +56,15 @@
             "expected_stdout": "tick"
         },
         {
+            "id": "builtin_echo_true_false",
+            "name": "echo/true/false execute as builtins",
+            "category": "builtins",
+            "description": "Ensure echo, true, and false run without spawning processes and mirror Bash-style options.",
+            "script": "Tests/exsh/tests/builtin_echo_true_false.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "echo is a shell builtin\ntrue is a shell builtin\nfalse is a shell builtin\necho:plain:start\nalpha beta\necho:plain:end\necho:-e:start\nline1\nline2\necho:-e:end\necho:-E:start\nline1\\nline2\necho:-E:end\nno-newline:sentinel\nprefix:sentinel\ntrue-status:0\nfalse-status:1"
+        },
+        {
             "id": "builtin_functions",
             "name": "Builtins update environment and status",
             "category": "builtins",

@@ -1,0 +1,31 @@
+#!/usr/bin/env exsh
+
+for cmd in echo true false; do
+    command -V "$cmd"
+done
+
+echo "echo:plain:start"
+echo alpha beta
+echo "echo:plain:end"
+
+echo "echo:-e:start"
+echo -e 'line1\nline2'
+echo "echo:-e:end"
+
+echo "echo:-E:start"
+echo -E 'line1\nline2'
+echo "echo:-E:end"
+
+echo -n 'no-newline'
+printf ':sentinel\n'
+
+echo -e 'prefix\csuffix'
+printf ':sentinel\n'
+
+true
+true_status=$?
+echo "true-status:${true_status}"
+
+false
+false_status=$?
+echo "false-status:${false_status}"
