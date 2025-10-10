@@ -513,7 +513,7 @@ EOF
     shift_mtime "$src_dir/CacheTest.rea" -5
 
     set +e
-    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
+    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" --verbose CacheTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
     local status1=$?
     set -e
 
@@ -524,7 +524,7 @@ EOF
         issues+=("Initial compile missing expected stdout")
     else
         set +e
-        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
+        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" --verbose CacheTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
         local status2=$?
         set -e
         if [ $status2 -ne 0 ]; then
@@ -554,7 +554,7 @@ EOF
     shift_mtime "$src_dir/BinaryTest.rea" -5
 
     set +e
-    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
+    (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" --verbose BinaryTest.rea > "$tmp_home/out1" 2> "$tmp_home/err1")
     local status1=$?
     set -e
 
@@ -566,7 +566,7 @@ EOF
     else
         shift_mtime "$REA_BIN" 5
         set +e
-        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
+        (cd "$src_dir" && HOME="$tmp_home" "$REA_BIN" --verbose BinaryTest.rea > "$tmp_home/out2" 2> "$tmp_home/err2")
         local status2=$?
         set -e
         if [ $status2 -ne 0 ]; then
