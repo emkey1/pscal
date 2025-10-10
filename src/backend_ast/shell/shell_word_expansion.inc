@@ -2348,21 +2348,38 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     }
     static VM function_vm;
     static bool function_vm_initialized = false;
-    if (!function_vm_initialized) {
-        initVM(&function_vm);
-        function_vm_initialized = true;
+    static bool function_vm_in_use = false;
+    VM *invoke_vm = NULL;
+    VM nested_vm;
+    bool using_cached_vm = false;
+    if (!function_vm_in_use) {
+        if (!function_vm_initialized) {
+            initVM(&function_vm);
+            function_vm_initialized = true;
+        } else {
+            vmResetExecutionState(&function_vm);
+        }
+        function_vm_in_use = true;
+        using_cached_vm = true;
+        invoke_vm = &function_vm;
     } else {
-        vmResetExecutionState(&function_vm);
+        initVM(&nested_vm);
+        invoke_vm = &nested_vm;
     }
 
-    InterpretResult result = interpretBytecode(&function_vm, &entry->compiled->chunk,
+    InterpretResult result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
                                                globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result != INTERPRET_OK) {
         shellUpdateStatus(1);
     } else {
         shellUpdateStatus(shellRuntimeLastStatus());
     }
-    vmResetExecutionState(&function_vm);
+    if (using_cached_vm) {
+        vmResetExecutionState(&function_vm);
+        function_vm_in_use = false;
+    } else {
+        freeVM(&nested_vm);
+    }
     if (scope_pushed) {
         shellLocalScopePop();
     }
