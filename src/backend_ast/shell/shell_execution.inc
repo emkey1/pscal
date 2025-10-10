@@ -365,9 +365,20 @@ static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_s
     int status = 0;
     int options = allow_stop ? WUNTRACED : 0;
     pid_t waited;
-    do {
+    while (true) {
         waited = waitpid(pid, &status, options);
-    } while (waited < 0 && errno == EINTR);
+        if (waited < 0 && errno == EINTR) {
+            shellRuntimeProcessPendingSignals();
+            bool exit_requested = shellRuntimeExitRequested() ||
+                                  (gShellCurrentVm && gShellCurrentVm->exit_requested);
+            if (exit_requested) {
+                shellRuntimeRunExitTrap();
+                _exit(gShellRuntime.last_status);
+            }
+            continue;
+        }
+        break;
+    }
     if (waited < 0) {
         return errno;
     }
@@ -522,6 +533,11 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             int status = 0;
             int err = shellWaitPid(pid, &status, job_control, &stopped);
             if (err != 0) {
+                if (err == EINTR) {
+                    shellAbortPipeline();
+                    shellRuntimeProcessPendingSignals();
+                    return gShellRuntime.last_status;
+                }
                 continue;
             }
             if (stopped) {
@@ -1160,9 +1176,20 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (job_control) {
                 shellJobControlSetForeground(child);
             }
-            shellWaitPid(child, &status, job_control, &stopped);
+            int wait_err = shellWaitPid(child, &status, job_control, &stopped);
             if (job_control) {
                 shellJobControlRestoreForeground();
+            }
+            if (wait_err == EINTR) {
+                kill(child, SIGTERM);
+                shellRuntimeProcessPendingSignals();
+                shellFreeCommand(cmd);
+                return makeVoid();
+            } else if (wait_err != 0) {
+                shellRuntimeProcessPendingSignals();
+                shellFreeCommand(cmd);
+                shellUpdateStatus(wait_err);
+                return makeVoid();
             }
             if (!cmd->background && status >= 128 && status < 128 + NSIG) {
                 shellHandlePendingSignal(status - 128);

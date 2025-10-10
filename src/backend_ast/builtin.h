@@ -182,6 +182,7 @@ typedef enum {
     SHELL_TRAP_ACTION_COMMAND
 } ShellTrapAction;
 bool shellRuntimeConsumeExitRequested(void);
+bool shellRuntimeExitRequested(void);
 int shellRuntimeLastStatus(void);
 void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);

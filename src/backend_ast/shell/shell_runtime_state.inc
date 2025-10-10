@@ -1062,6 +1062,7 @@ static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
+static void shellLoopRequestBreakLevels(int levels);
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
 static bool gShellInteractiveMode = false;
@@ -1213,6 +1214,18 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
 
     if (exit_requested) {
         shellRuntimeRequestExit();
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = true;
+            gShellCurrentVm->abort_requested = true;
+            if (!gShellCurrentVm->current_builtin_name) {
+                gShellCurrentVm->current_builtin_name = "trap";
+            }
+        }
+        if (gShellLoopStackSize > 0) {
+            gShellRuntime.break_requested = true;
+            gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+            shellLoopRequestBreakLevels((int)gShellLoopStackSize);
+        }
     }
     shellUpdateStatus(status);
 
@@ -1398,7 +1411,25 @@ bool shellRuntimeSetSignalTrap(int signo, ShellTrapAction action, const char *co
 
     if (action == SHELL_TRAP_ACTION_COMMAND) {
         sa.sa_handler = shellSignalHandler;
-        sa.sa_flags |= SA_RESTART;
+        bool restartable = false;
+#ifdef SIGINT
+        if (signo == SIGINT) {
+            restartable = true;
+        }
+#endif
+#ifdef SIGQUIT
+        if (signo == SIGQUIT) {
+            restartable = true;
+        }
+#endif
+#ifdef SIGTSTP
+        if (signo == SIGTSTP) {
+            restartable = true;
+        }
+#endif
+        if (restartable) {
+            sa.sa_flags |= SA_RESTART;
+        }
     } else if (action == SHELL_TRAP_ACTION_IGNORE) {
         sa.sa_handler = SIG_IGN;
     } else {
@@ -1456,6 +1487,10 @@ void shellRuntimeSetPosixMode(bool enabled) {
 
 bool shellRuntimePosixMode(void) {
     return gShellRuntime.posix_mode;
+}
+
+bool shellRuntimeExitRequested(void) {
+    return gShellExitRequested;
 }
 
 void shellRuntimeSetInteractive(bool interactive) {

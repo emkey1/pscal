@@ -289,6 +289,17 @@ static char *shellRunCommandSubstitution(const char *command) {
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
 
+    if (exit_requested) {
+        shellRuntimeRequestExit();
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = true;
+            gShellCurrentVm->abort_requested = true;
+            if (!gShellCurrentVm->current_builtin_name) {
+                gShellCurrentVm->current_builtin_name = "command_substitution";
+            }
+        }
+    }
+
     if (scope_pushed) {
         shellSymbolTableScopePop(&table_scope);
     }
