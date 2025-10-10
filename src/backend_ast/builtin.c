@@ -4237,33 +4237,49 @@ typedef struct {
 static RegisteredBuiltin* builtin_registry = NULL;
 static int builtin_registry_count = 0;
 static int builtin_registry_capacity = 0;
+static pthread_once_t builtin_registration_once = PTHREAD_ONCE_INIT;
 
-void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
+static void registerBuiltinFunctionUnlocked(const char *name,
+        ASTNodeType declType,
+        const char* unit_context_name_param_for_addproc) {
     (void)unit_context_name_param_for_addproc;
-    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
-    pthread_mutex_lock(&builtin_registry_mutex);
+    if (!name) {
+        return;
+    }
+
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
-            builtin_registry[i].type = (declType == AST_FUNCTION_DECL) ?
-                BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
-            pthread_mutex_unlock(&builtin_registry_mutex);
+            builtin_registry[i].type = (declType == AST_FUNCTION_DECL)
+                ? BUILTIN_TYPE_FUNCTION
+                : BUILTIN_TYPE_PROCEDURE;
             return;
         }
     }
+
     if (builtin_registry_count >= builtin_registry_capacity) {
         int new_capacity = builtin_registry_capacity < 64 ? 64 : builtin_registry_capacity * 2;
         RegisteredBuiltin* new_registry = realloc(builtin_registry, sizeof(RegisteredBuiltin) * new_capacity);
         if (!new_registry) {
-            pthread_mutex_unlock(&builtin_registry_mutex);
             return;
         }
         builtin_registry = new_registry;
         builtin_registry_capacity = new_capacity;
     }
+
     builtin_registry[builtin_registry_count].name = strdup(name);
-    builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL) ?
-        BUILTIN_TYPE_FUNCTION : BUILTIN_TYPE_PROCEDURE;
+    if (!builtin_registry[builtin_registry_count].name) {
+        return;
+    }
+    builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL)
+        ? BUILTIN_TYPE_FUNCTION
+        : BUILTIN_TYPE_PROCEDURE;
     builtin_registry_count++;
+}
+
+void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    registerBuiltinFunctionUnlocked(name, declType, unit_context_name_param_for_addproc);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
@@ -4285,7 +4301,7 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     return BUILTIN_TYPE_NONE;
 }
 
-void registerAllBuiltins(void) {
+static void populateBuiltinRegistry(void) {
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
     /*
@@ -4298,206 +4314,206 @@ void registerAllBuiltins(void) {
      * same canonical metadata and the compiler can always resolve their
      * routine types.
      */
-    registerBuiltinFunction("int",    AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("float",  AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("char",   AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("bool",   AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("byte",   AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("toint",    AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("todouble", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("tofloat",  AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("tochar",   AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("tobool",   AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("tobyte",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("int",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("double", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("float",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("char",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("bool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("byte",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("toint",    AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("todouble", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("tofloat",  AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("tochar",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("tobool",   AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("tobyte",   AST_FUNCTION_DECL, NULL);
 
     /* General built-in functions and procedures */
     // Rea/CLike: object allocation helper
-    registerBuiltinFunction("newobj", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Abs", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("apiReceive", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("apiSend", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpSession", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpClose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("HttpSetHeader", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("HttpClearHeaders", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("HttpSetOption", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("HttpRequest", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpRequestToFile", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpRequestAsync", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpRequestAsyncToFile", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpIsDone", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpTryAwait", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpCancel", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpGetAsyncProgress", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpGetAsyncTotal", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpAwait", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpLastError", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpGetLastHeaders", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpErrorCode", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HttpGetHeader", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("DnsLookup", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketAccept", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketBind", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketBindAddr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketClose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("SocketConnect", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketCreate", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketLastError", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketListen", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketPoll", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketReceive", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketSend", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Append", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ArcCos", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ArcSin", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ArcTan", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Assign", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Beep", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Byte", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Ceil", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Chr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Close", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ClrEol", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Copy", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Cos", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Cosh", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Cotan", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("CursorOff", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("CursorOn", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Dec", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Delay", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DelLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Dispose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dosExec", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosFindfirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosFindnext", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosGetenv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosGetfattr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosMkdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosRmdir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("dosGetdate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("dosGettime", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("EOF", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("exec", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Exit", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Exp", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("findFirst", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("findNext", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Floor", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("getDate", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("getEnv", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("getEnvInt", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("getFAttr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("getTime", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Halt", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("HideCursor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("High", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("HighVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Inc", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("InsLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IntToStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("InvertColors", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("IOResult", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("KeyPressed", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Length", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SetLength", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Ln", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Log10", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Low", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Max", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Min", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("mkDir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MStreamCreate", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("MStreamFree", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("MStreamBuffer", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("New", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("NormalColors", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Ord", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ParamCount", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ParamStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("PopScreen", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Pos", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Power", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("PushScreen", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("QuitRequested", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Random", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Randomize", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ReadKey", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Real", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("FormatFloat", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("RealToStr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Rename", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Erase", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Reset", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("RestoreCursor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Rewrite", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("rmDir", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Round", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("SaveCursor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ScreenCols", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ScreenRows", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ShowCursor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Sin", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sinh", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sqr", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Sqrt", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Str", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Succ", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Tan", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Tanh", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("GotoXY", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BoldText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIBoldText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BlinkText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIBlinkText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("UnderlineText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIUnderlineText", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("LowVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BILowVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("NormVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BINormVideo", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ClrScr", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("BIClrScr", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TermBackground", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextBackground", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextColor", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("TextColorE", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Trunc", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("UpCase", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("BytecodeVersion", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Val", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ValReal", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("VMVersion", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Window", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Write", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("WhereX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("BIWhereX", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("WhereY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("BIWhereY", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("printf", AST_FUNCTION_DECL, NULL); // special-case handled by compiler
-    registerBuiltinFunction("CreateThread", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("WaitForThread", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("mutex", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("rcmutex", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("lock", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("unlock", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("destroy", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("newobj", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Abs", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("apiReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("apiSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpSession", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpSetHeader", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpClearHeaders", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpSetOption", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpRequest", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpRequestToFile", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpRequestAsync", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpRequestAsyncToFile", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpIsDone", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpTryAwait", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpCancel", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpGetAsyncProgress", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpGetAsyncTotal", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpAwait", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpLastError", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpGetLastHeaders", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpErrorCode", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HttpGetHeader", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("DnsLookup", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketAccept", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketBind", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketBindAddr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketClose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketConnect", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketCreate", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketLastError", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketListen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketPoll", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketReceive", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketSend", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Append", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ArcCos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ArcSin", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ArcTan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Assign", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Beep", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Byte", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Ceil", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Chr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Close", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ClrEol", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Copy", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Cos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Cosh", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Cotan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("CursorOff", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("CursorOn", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Dec", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Delay", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("DelLine", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Dispose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosExec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosFindfirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosFindnext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosGetenv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosGetfattr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosMkdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosRmdir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosGetdate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("dosGettime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("EOF", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("exec", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Exit", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Exp", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("findFirst", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("findNext", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Floor", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("getDate", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("getEnv", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("getEnvInt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("getFAttr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("getTime", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Halt", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HideCursor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("High", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("HighVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Inc", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("InsLine", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("IntToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("InvertColors", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("IOResult", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("KeyPressed", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Length", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SetLength", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Ln", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Log10", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Low", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Max", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Min", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("mkDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamCreate", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamFree", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamBuffer", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("New", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("NormalColors", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Ord", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ParamCount", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ParamStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("PopScreen", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Pos", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Power", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("PushScreen", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("QuitRequested", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Random", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Randomize", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ReadKey", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Real", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("FormatFloat", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("RealToStr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Rename", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Erase", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Reset", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("RestoreCursor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Rewrite", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("rmDir", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Round", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SaveCursor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ScreenCols", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ScreenRows", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ShowCursor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Sin", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Sinh", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Sqr", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Sqrt", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Str", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Succ", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Tan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Tanh", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("GotoXY", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BoldText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIBoldText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlinkText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIBlinkText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("UnderlineText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIUnderlineText", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("LowVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BILowVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("NormVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BINormVideo", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ClrScr", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIClrScr", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("TermBackground", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("TextBackground", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("TextBackgroundE", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("TextColor", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("TextColorE", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Trunc", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("UpCase", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BytecodeVersion", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Val", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ValReal", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("VMVersion", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Window", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Write", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("WhereX", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIWhereX", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("WhereY", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BIWhereY", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("printf", AST_FUNCTION_DECL, NULL); // special-case handled by compiler
+    registerBuiltinFunctionUnlocked("CreateThread", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("WaitForThread", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("unlock", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("destroy", AST_PROCEDURE_DECL, NULL);
 
     // Additional registrations to ensure CLike builtins are classified correctly
-    registerBuiltinFunction("Fopen", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Fclose", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("Fprintf", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("Read", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("ReadLn", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("DeLine", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunction("JsonGet", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("ToUpper", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunction("toupper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Fopen", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Fclose", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Fprintf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Read", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ReadLn", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("DeLine", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("JsonGet", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ToUpper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("toupper", AST_FUNCTION_DECL, NULL);
 
     /* Allow externally linked modules to add more builtins. */
     registerExtendedBuiltins();
@@ -4510,3 +4526,7 @@ void registerAllBuiltins(void) {
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
+void registerAllBuiltins(void) {
+    pthread_once(&builtin_registration_once, populateBuiltinRegistry);
+}
+
