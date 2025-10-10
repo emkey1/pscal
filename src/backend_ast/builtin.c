@@ -663,6 +663,13 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler,
             return;
         }
     }
+    for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
+        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
+            extra_vm_builtins[i].handler = handler;
+            pthread_mutex_unlock(&builtin_registry_mutex);
+            return;
+        }
+    }
 
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
         sizeof(VmBuiltinMapping) * (num_extra_vm_builtins + 1));
