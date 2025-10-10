@@ -1493,10 +1493,14 @@ static ShellCommand *parseFunctionDefinitionFromName(ShellParser *parser) {
     parserReclassifyCurrentToken(parser, RULE_MASK_FUNCTION_NAME);
     shellParserAdvance(parser);
 
-    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
-    shellParserConsume(parser, SHELL_TOKEN_LPAREN, "Expected '(' after function name");
-    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
-    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+    if (parser->current.type == SHELL_TOKEN_LPAREN) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+    } else {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    }
     parseLinebreak(parser);
 
     ShellCommand *body_command = parseCompoundCommand(parser);
@@ -1538,10 +1542,14 @@ static ShellCommand *parseFunctionDefinition(ShellParser *parser) {
         return NULL;
     }
 
-    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
-    shellParserConsume(parser, SHELL_TOKEN_LPAREN, "Expected '(' after function name");
-    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
-    shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+    if (parser->current.type == SHELL_TOKEN_LPAREN) {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserAdvance(parser);
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+        shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' after function name");
+    } else {
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    }
     parseLinebreak(parser);
 
     if (parser->had_error) {
