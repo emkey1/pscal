@@ -1107,6 +1107,356 @@ Value vmBuiltinShellCaseEnd(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static bool shellEvaluateNumericComparison(const char *left,
+                                           const char *op,
+                                           const char *right,
+                                           bool *out_result);
+static bool shellEvaluateFileUnary(const char *op,
+                                   const char *operand,
+                                   bool *out_result);
+static bool shellEvaluateFileBinary(const char *left,
+                                    const char *op,
+                                    const char *right,
+                                    bool *out_result);
+
+static bool shellTestIsUnaryOperator(const char *token) {
+    if (!token || token[0] == '\0') {
+        return false;
+    }
+    static const char *const kUnaryOps[] = {
+        "-b", "-c", "-d", "-e", "-f", "-g", "-h", "-k", "-p", "-r", "-s", "-t",
+        "-u", "-w", "-x", "-L", "-S", "-O", "-G", "-N", "-n", "-z"
+    };
+    for (size_t i = 0; i < sizeof(kUnaryOps) / sizeof(kUnaryOps[0]); ++i) {
+        if (strcmp(token, kUnaryOps[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellTestHasPatternChars(const char *pattern) {
+    if (!pattern) {
+        return false;
+    }
+    for (const char *p = pattern; *p; ++p) {
+        if (*p == '*' || *p == '?' || *p == '[') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellTestApplyUnary(const char *op, const char *operand, bool *out_result) {
+    if (!op || !out_result) {
+        return false;
+    }
+    const char *value = operand ? operand : "";
+    if (strcmp(op, "-n") == 0) {
+        *out_result = (value[0] != '\0');
+        return true;
+    }
+    if (strcmp(op, "-z") == 0) {
+        *out_result = (value[0] == '\0');
+        return true;
+    }
+    bool result = false;
+    if (shellEvaluateFileUnary(op, value, &result)) {
+        *out_result = result;
+        return true;
+    }
+    return false;
+}
+
+static bool shellTestApplyBinary(const char *left,
+                                 const char *op,
+                                 const char *right,
+                                 bool *out_result) {
+    if (!left || !op || !right || !out_result) {
+        return false;
+    }
+    if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
+        if (shellTestHasPatternChars(right)) {
+            *out_result = (fnmatch(right, left, 0) == 0);
+        } else {
+            *out_result = (strcmp(left, right) == 0);
+        }
+        return true;
+    }
+    if (strcmp(op, "!=") == 0) {
+        if (shellTestHasPatternChars(right)) {
+            *out_result = (fnmatch(right, left, 0) != 0);
+        } else {
+            *out_result = (strcmp(left, right) != 0);
+        }
+        return true;
+    }
+    if (strcmp(op, "<") == 0) {
+        *out_result = (strcmp(left, right) < 0);
+        return true;
+    }
+    if (strcmp(op, ">") == 0) {
+        *out_result = (strcmp(left, right) > 0);
+        return true;
+    }
+    bool result = false;
+    if (shellEvaluateNumericComparison(left, op, right, &result)) {
+        *out_result = result;
+        return true;
+    }
+    if (shellEvaluateFileBinary(left, op, right, &result)) {
+        *out_result = result;
+        return true;
+    }
+    return false;
+}
+
+static bool shellTestIsBinaryOperator(const char *token) {
+    if (!token || token[0] == '\0') {
+        return false;
+    }
+    static const char *const kBinaryOps[] = {
+        "=", "==", "!=", "<", ">", "-eq", "-ne", "-gt", "-ge", "-lt", "-le",
+        "-nt", "-ot", "-ef"
+    };
+    for (size_t i = 0; i < sizeof(kBinaryOps) / sizeof(kBinaryOps[0]); ++i) {
+        if (strcmp(token, kBinaryOps[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef struct {
+    VM *vm;
+    const char *command_name;
+    const char **argv;
+    int argc;
+    int pos;
+    bool is_bracket;
+    bool error_reported;
+} ShellTestParser;
+
+static void shellTestReportError(ShellTestParser *parser, const char *message) {
+    if (!parser || parser->error_reported) {
+        return;
+    }
+    const char *name = parser->command_name;
+    if (parser->is_bracket) {
+        name = "[";
+    }
+    if (!name || !*name) {
+        name = "test";
+    }
+    runtimeError(parser->vm, "%s: %s", name, message);
+    parser->error_reported = true;
+}
+
+static bool shellTestParseExpression(ShellTestParser *parser, bool *out_result);
+
+static bool shellTestParsePrimary(ShellTestParser *parser, bool *out_result) {
+    if (!parser || !out_result) {
+        return false;
+    }
+    if (parser->pos >= parser->argc) {
+        shellTestReportError(parser, "missing argument");
+        return false;
+    }
+    const char *token = parser->argv[parser->pos];
+    if (strcmp(token, ")") == 0) {
+        shellTestReportError(parser, "syntax error: unexpected ')'");
+        return false;
+    }
+    if (strcmp(token, "(") == 0) {
+        parser->pos++;
+        bool inner = false;
+        if (!shellTestParseExpression(parser, &inner)) {
+            return false;
+        }
+        if (parser->pos >= parser->argc || strcmp(parser->argv[parser->pos], ")") != 0) {
+            shellTestReportError(parser, "missing ')'");
+            return false;
+        }
+        parser->pos++;
+        *out_result = inner;
+        return true;
+    }
+    if (strcmp(token, "-a") == 0 || strcmp(token, "-o") == 0) {
+        shellTestReportError(parser, "unary operator expected");
+        return false;
+    }
+    if (shellTestIsUnaryOperator(token)) {
+        if (parser->pos + 1 >= parser->argc) {
+            shellTestReportError(parser, "unary operator expected");
+            return false;
+        }
+        const char *operand = parser->argv[parser->pos + 1];
+        bool value = false;
+        if (!shellTestApplyUnary(token, operand, &value)) {
+            shellTestReportError(parser, "invalid unary operator");
+            return false;
+        }
+        parser->pos += 2;
+        *out_result = value;
+        return true;
+    }
+    if (parser->pos + 2 < parser->argc) {
+        const char *op = parser->argv[parser->pos + 1];
+        if (shellTestIsBinaryOperator(op)) {
+            const char *left = token;
+            const char *right = parser->argv[parser->pos + 2];
+            bool value = false;
+            if (!shellTestApplyBinary(left, op, right, &value)) {
+                shellTestReportError(parser, "invalid binary operator");
+                return false;
+            }
+            parser->pos += 3;
+            *out_result = value;
+            return true;
+        }
+    }
+    parser->pos++;
+    *out_result = (token && token[0] != '\0');
+    return true;
+}
+
+static bool shellTestParseNot(ShellTestParser *parser, bool *out_result) {
+    if (!parser || !out_result) {
+        return false;
+    }
+    bool negate = false;
+    while (parser->pos < parser->argc && strcmp(parser->argv[parser->pos], "!") == 0) {
+        negate = !negate;
+        parser->pos++;
+    }
+    bool value = false;
+    if (!shellTestParsePrimary(parser, &value)) {
+        return false;
+    }
+    if (negate) {
+        value = !value;
+    }
+    *out_result = value;
+    return true;
+}
+
+static bool shellTestParseAnd(ShellTestParser *parser, bool *out_result) {
+    if (!parser || !out_result) {
+        return false;
+    }
+    bool value = false;
+    if (!shellTestParseNot(parser, &value)) {
+        return false;
+    }
+    while (parser->pos < parser->argc && strcmp(parser->argv[parser->pos], "-a") == 0) {
+        parser->pos++;
+        bool rhs = false;
+        if (!shellTestParseNot(parser, &rhs)) {
+            return false;
+        }
+        value = value && rhs;
+    }
+    *out_result = value;
+    return true;
+}
+
+static bool shellTestParseExpression(ShellTestParser *parser, bool *out_result) {
+    if (!parser || !out_result) {
+        return false;
+    }
+    bool value = false;
+    if (!shellTestParseAnd(parser, &value)) {
+        return false;
+    }
+    while (parser->pos < parser->argc && strcmp(parser->argv[parser->pos], "-o") == 0) {
+        parser->pos++;
+        bool rhs = false;
+        if (!shellTestParseAnd(parser, &rhs)) {
+            return false;
+        }
+        value = value || rhs;
+    }
+    *out_result = value;
+    return true;
+}
+
+Value vmBuiltinShellTest(VM *vm, int arg_count, Value *args) {
+    const char *name = shellRuntimeCurrentCommandName();
+    if (!name || !*name) {
+        name = (vm && vm->current_builtin_name) ? vm->current_builtin_name : "test";
+    }
+    bool is_bracket = (name && strcmp(name, "[") == 0);
+
+    const char **argv = NULL;
+    if (arg_count > 0) {
+        argv = (const char **)malloc(sizeof(const char *) * (size_t)arg_count);
+        if (!argv) {
+            const char *prefix = is_bracket ? "[" : name;
+            if (!prefix || !*prefix) {
+                prefix = "test";
+            }
+            runtimeError(vm, "%s: out of memory", prefix);
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        for (int i = 0; i < arg_count; ++i) {
+            if (args[i].type == TYPE_STRING && args[i].s_val) {
+                argv[i] = args[i].s_val;
+            } else {
+                argv[i] = "";
+            }
+        }
+    }
+
+    int argc = arg_count;
+    if (is_bracket) {
+        if (argc == 0 || strcmp(argv[argc - 1], "]") != 0) {
+            runtimeError(vm, "[: missing ']'");
+            free(argv);
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        argc--;
+        if (argc == 0) {
+            free(argv);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+
+    if (argc == 0) {
+        free(argv);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    ShellTestParser parser = {
+        .vm = vm,
+        .command_name = name,
+        .argv = argv,
+        .argc = argc,
+        .pos = 0,
+        .is_bracket = is_bracket,
+        .error_reported = false
+    };
+
+    bool result = false;
+    bool ok = shellTestParseExpression(&parser, &result);
+    if (ok && parser.pos < parser.argc) {
+        shellTestReportError(&parser, "too many arguments");
+        ok = false;
+    }
+
+    if (!ok) {
+        shellUpdateStatus(2);
+    } else {
+        shellUpdateStatus(result ? 0 : 1);
+    }
+
+    free(argv);
+    return makeVoid();
+}
+
 Value vmBuiltinShellDefineFunction(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();

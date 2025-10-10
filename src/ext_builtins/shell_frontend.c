@@ -33,6 +33,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, runtime_group, "__shell_define_function", vmBuiltinShellDefineFunction);
     registerShellBuiltin(category, runtime_group, "__shell_double_bracket", vmBuiltinShellDoubleBracket);
 
+    registerShellBuiltin(category, command_group, "test", vmBuiltinShellTest);
     registerShellBuiltin(category, command_group, "cd", vmBuiltinShellCd);
     registerShellBuiltin(category, command_group, "pwd", vmBuiltinShellPwd);
     registerShellBuiltin(category, command_group, "dirs", vmBuiltinShellDirs);
