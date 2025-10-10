@@ -123,6 +123,7 @@ typedef struct VM_s {
 // --- Public VM Interface ---
 void initVM(VM* vm);    // Initialize a new VM instance
 void freeVM(VM* vm);    // Free resources associated with a VM instance
+void vmResetExecutionState(VM* vm); // Reset stack/frames so a VM can be reused
 
 // Main function to interpret a chunk of bytecode
 // Takes a BytecodeChunk that was successfully compiled.

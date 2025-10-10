@@ -2346,8 +2346,15 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         gShellPositionalOwned = saved_owned;
         return true;
     }
-    VM function_vm;
-    initVM(&function_vm);
+    static VM function_vm;
+    static bool function_vm_initialized = false;
+    if (!function_vm_initialized) {
+        initVM(&function_vm);
+        function_vm_initialized = true;
+    } else {
+        vmResetExecutionState(&function_vm);
+    }
+
     InterpretResult result = interpretBytecode(&function_vm, &entry->compiled->chunk,
                                                globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result != INTERPRET_OK) {
@@ -2355,7 +2362,7 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     } else {
         shellUpdateStatus(shellRuntimeLastStatus());
     }
-    freeVM(&function_vm);
+    vmResetExecutionState(&function_vm);
     if (scope_pushed) {
         shellLocalScopePop();
     }
