@@ -68,6 +68,7 @@ static const char *REA_USAGE =
     "     --no-run               Compile but skip VM execution.\n"
     "     --dump-ext-builtins    List extended builtin inventory and exit.\n"
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
+    "     --verbose              Print compilation/cache status messages.\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
 
@@ -256,6 +257,7 @@ int main(int argc, char **argv) {
     int dump_ext_builtins = 0;
     int vm_trace_head = 0;
     int no_cache = 0;
+    int verbose_flag = 0;
     int strict_mode = 0;
     int argi = 1;
     while (argc > argi && argv[argi][0] == '-') {
@@ -279,6 +281,8 @@ int main(int argc, char **argv) {
             dump_ext_builtins = 1;
         } else if (strcmp(argv[argi], "--no-cache") == 0) {
             no_cache = 1;
+        } else if (strcmp(argv[argi], "--verbose") == 0) {
+            verbose_flag = 1;
         } else if (strcmp(argv[argi], "--strict") == 0) {
             strict_mode = 1;
         } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
@@ -441,8 +445,10 @@ int main(int argc, char **argv) {
         if (compilation_ok) {
             finalizeBytecode(&chunk);
             saveBytecodeToCache(path, kReaCompilerId, &chunk);
-        fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
-                    chunk.count, chunk.constants_count);
+            if (verbose_flag) {
+                fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
+                        chunk.count, chunk.constants_count);
+            }
             if (dump_bytecode_flag) {
                 fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
                 disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
@@ -456,8 +462,10 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Compilation failed with errors.\n");
         }
     } else {
-        fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
-                chunk.count, chunk.constants_count);
+        if (verbose_flag) {
+            fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+        }
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
             if (dump_bytecode_only_flag) {

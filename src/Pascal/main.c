@@ -103,6 +103,7 @@ const char *PASCAL_USAGE =
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
     "     --dump-ext-builtins         List extended builtin inventory and exit.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
+    "     --verbose                 Print compilation/cache status messages.\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by '{trace on}' in source).\n"
     "   or: pascal (with no arguments to display version and usage)";
 
@@ -146,7 +147,7 @@ void initSymbolSystem(void) {
 
 int runProgram(const char *source, const char *programName, const char *frontend_path,
                int dump_ast_json_flag, int dump_bytecode_flag, int dump_bytecode_only_flag,
-               int no_cache_flag) {
+               int no_cache_flag, int verbose_flag) {
     if (globalSymbols == NULL) {
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL at the start of runProgram.\n");
         EXIT_FAILURE_HANDLER();
@@ -231,8 +232,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 if (compilation_ok_for_vm) {
                     finalizeBytecode(&chunk);
                     saveBytecodeToCache(programName, kPascalCompilerId, &chunk);
-                    // Silence successful compilation message for cleaner test stderr.
-                    // fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                    if (verbose_flag) {
+                        fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
+                                chunk.count, chunk.constants_count);
+                    }
                     if (dump_bytecode_flag) {
                         disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                         if (!dump_bytecode_only_flag) {
@@ -241,9 +244,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
                     }
                 }
             } else {
-                // Always emit the cache message so callers can detect cache reuse;
-                // the top-level stderr capture in main() will decide whether to replay.
-                fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n", chunk.count, chunk.constants_count);
+                if (verbose_flag) {
+                    fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
+                            chunk.count, chunk.constants_count);
+                }
                 if (dump_bytecode_flag) {
                     disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
                     if (!dump_bytecode_only_flag) {
@@ -366,6 +370,7 @@ int main(int argc, char *argv[]) {
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int dump_ext_builtins_flag = 0;
+    int verbose_flag = 0;
     int no_cache_flag = 0;
     const char *sourceFile = NULL;
     const char *programName = argv[0]; // Default program name to executable name
@@ -399,6 +404,8 @@ int main(int argc, char *argv[]) {
             dump_ext_builtins_flag = 1;
         } else if (strcmp(argv[i], "--no-cache") == 0) {
             no_cache_flag = 1;
+        } else if (strcmp(argv[i], "--verbose") == 0) {
+            verbose_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             s_vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
@@ -510,7 +517,7 @@ int main(int argc, char *argv[]) {
 
     // Call runProgram
     int result = runProgram(effective_source, programName, argv[0], dump_ast_json_flag,
-                            dump_bytecode_flag, dump_bytecode_only_flag, no_cache_flag);
+                            dump_bytecode_flag, dump_bytecode_only_flag, no_cache_flag, verbose_flag);
 
     // Restore stderr and conditionally replay
     if (capture_stderr) {
