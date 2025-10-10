@@ -1,0 +1,19 @@
+#!/usr/bin/env exsh
+i=0
+((i++))
+status1=$?
+value1=$i
+((i++))
+status2=$?
+value2=$i
+((5 - 5))
+status_zero=$?
+((5 - 3))
+status_nonzero=$?
+((1/0))
+status_error=$?
+printf "after1:%s:%s\n" "$value1" "$status1"
+printf "after2:%s:%s\n" "$value2" "$status2"
+printf "zero:%s\n" "$status_zero"
+printf "nonzero:%s\n" "$status_nonzero"
+printf "error:%s\n" "$status_error"

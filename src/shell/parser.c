@@ -52,6 +52,7 @@ static char *parserCopyWordWithoutMarkers(const ShellWord *word);
 static char *parserCopyTrimmedRange(const char *src, size_t start, size_t end);
 static bool parserExtractCStyleForSegments(ShellParser *parser, size_t start_pos, char **init_out, char **cond_out,
                                           char **update_out);
+static bool parserExtractArithmeticCommandExpression(ShellParser *parser, size_t start_pos, char **expr_out);
 
 static bool parseCompleteCommands(ShellParser *parser, ShellProgram *program);
 static bool parseCompleteCommand(ShellParser *parser, ShellProgram *program);
@@ -61,6 +62,7 @@ static ShellPipeline *parsePipeline(ShellParser *parser);
 static ShellCommand *parsePipelineCommand(ShellParser *parser);
 static ShellCommand *parseCommand(ShellParser *parser);
 static ShellCommand *parseSimpleCommand(ShellParser *parser);
+static ShellCommand *parseArithmeticCommand(ShellParser *parser);
 static ShellCommand *parseCompoundCommand(ShellParser *parser);
 static ShellCommand *parseBraceGroup(ShellParser *parser);
 static ShellCommand *parseSubshell(ShellParser *parser);
@@ -512,6 +514,77 @@ static char *parserCopyTrimmedRange(const char *src, size_t start, size_t end) {
     return out;
 }
 
+static bool parserExtractArithmeticCommandExpression(ShellParser *parser, size_t start_pos, char **expr_out) {
+    if (!parser || !parser->lexer.src) {
+        return false;
+    }
+    ShellLexer *lexer = &parser->lexer;
+    const char *src = lexer->src;
+    size_t length = lexer->length;
+    size_t pos = start_pos;
+    int depth = 1;
+    size_t expr_end = SIZE_MAX;
+    int line = lexer->line;
+    int column = lexer->column;
+
+    while (pos < length) {
+        char ch = src[pos];
+        if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+            if (depth == 0) {
+                expr_end = pos;
+                pos++;
+                column++;
+                break;
+            }
+        }
+        if (ch == '\n') {
+            line++;
+            column = 1;
+        } else {
+            column++;
+        }
+        pos++;
+    }
+
+    if (expr_end == SIZE_MAX) {
+        parserErrorAt(parser, &parser->current, "Expected '))' to close arithmetic command");
+        return false;
+    }
+    if (pos >= length || src[pos] != ')') {
+        parserErrorAt(parser, &parser->current, "Expected '))' to close arithmetic command");
+        return false;
+    }
+
+    column++;
+    pos++;
+
+    char *expr = parserCopyTrimmedRange(src, start_pos, expr_end);
+    if (!expr) {
+        parserErrorAt(parser, &parser->current, "Out of memory parsing arithmetic command");
+        return false;
+    }
+
+    if (expr_out) {
+        *expr_out = expr;
+    } else {
+        free(expr);
+    }
+
+    lexer->pos = pos;
+    lexer->line = line;
+    lexer->column = column;
+    lexer->at_line_start = (column == 1);
+
+    shellLexerSetRuleMask(lexer, parser->next_rule_mask);
+    shellFreeToken(&parser->current);
+    parser->current = shellNextToken(lexer);
+    applyLexicalRules(&parser->current);
+    return true;
+}
+
 static bool parserExtractCStyleForSegments(ShellParser *parser, size_t start_pos, char **init_out, char **cond_out,
                                           char **update_out) {
     if (!parser || !parser->lexer.src) {
@@ -872,9 +945,72 @@ static ShellCommand *parseCommand(ShellParser *parser) {
     }
 }
 
+static ShellCommand *parseArithmeticCommand(ShellParser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+
+    int line = parser->current.line;
+    int column = parser->current.column;
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
+    shellParserAdvance(parser);
+
+    size_t start_pos = parser->lexer.pos;
+    if (parser->current.length <= parser->lexer.pos) {
+        start_pos = parser->lexer.pos - parser->current.length;
+    }
+
+    char *expression = NULL;
+    if (!parserExtractArithmeticCommandExpression(parser, start_pos, &expression)) {
+        free(expression);
+        return NULL;
+    }
+
+    ShellCommand *command = shellCreateArithmeticCommand(expression);
+    if (!command) {
+        return NULL;
+    }
+    command->line = line;
+    command->column = column;
+
+    parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+
+    while (!parser->had_error) {
+        bool strip_tabs = false;
+        ShellRedirection *redir = parseRedirection(parser, &strip_tabs);
+        if (!redir) {
+            break;
+        }
+        shellCommandAddRedirection(command, redir);
+        if (redir->type == SHELL_REDIRECT_HEREDOC && parser->pending_here_docs) {
+            ShellWord *target = shellRedirectionGetWordTarget(redir);
+            char *delimiter = parserCopyWordWithoutMarkers(target);
+            if (!delimiter) {
+                delimiter = strdup("");
+            }
+            bool quoted = target && (target->single_quoted || target->double_quoted);
+            pendingHereDocArrayPush(parser->pending_here_docs, redir, delimiter ? delimiter : "",
+                                    strip_tabs, quoted);
+            free(delimiter);
+        }
+        parserScheduleRuleMask(parser, RULE_MASK_COMMAND_CONTINUATION);
+    }
+
+    if (parser->had_error) {
+        shellFreeCommand(command);
+        return NULL;
+    }
+
+    return command;
+}
+
 static ShellCommand *parseSimpleCommand(ShellParser *parser) {
     if (!parser) {
         return NULL;
+    }
+    if (parser->current.type == SHELL_TOKEN_DLPAREN) {
+        return parseArithmeticCommand(parser);
     }
     ShellCommand *command = shellCreateSimpleCommand();
     if (!command) {

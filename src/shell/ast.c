@@ -604,6 +604,9 @@ static ShellCommand *shellCreateCommandInternal(ShellCommandType type) {
     if (type == SHELL_COMMAND_SIMPLE) {
         shellWordArrayInit(&command->data.simple.words);
         shellRedirectionArrayInit(&command->data.simple.redirections);
+    } else if (type == SHELL_COMMAND_ARITHMETIC) {
+        command->data.arithmetic.expression = NULL;
+        shellRedirectionArrayInit(&command->data.arithmetic.redirections);
     } else if (type == SHELL_COMMAND_BRACE_GROUP) {
         command->data.brace_group.body = NULL;
         shellRedirectionArrayInit(&command->data.brace_group.redirections);
@@ -613,6 +616,16 @@ static ShellCommand *shellCreateCommandInternal(ShellCommandType type) {
 
 ShellCommand *shellCreateSimpleCommand(void) {
     return shellCreateCommandInternal(SHELL_COMMAND_SIMPLE);
+}
+
+ShellCommand *shellCreateArithmeticCommand(char *expression) {
+    ShellCommand *cmd = shellCreateCommandInternal(SHELL_COMMAND_ARITHMETIC);
+    if (cmd) {
+        cmd->data.arithmetic.expression = expression;
+    } else {
+        free(expression);
+    }
+    return cmd;
 }
 
 ShellCommand *shellCreatePipelineCommand(ShellPipeline *pipeline) {
@@ -777,6 +790,8 @@ static ShellRedirectionArray *shellCommandResolveRedirections(ShellCommand *comm
     switch (command->type) {
         case SHELL_COMMAND_SIMPLE:
             return &command->data.simple.redirections;
+        case SHELL_COMMAND_ARITHMETIC:
+            return &command->data.arithmetic.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
         case SHELL_COMMAND_LOOP:
@@ -793,6 +808,8 @@ static const ShellRedirectionArray *shellCommandResolveRedirectionsConst(const S
     switch (command->type) {
         case SHELL_COMMAND_SIMPLE:
             return &command->data.simple.redirections;
+        case SHELL_COMMAND_ARITHMETIC:
+            return &command->data.arithmetic.redirections;
         case SHELL_COMMAND_BRACE_GROUP:
             return &command->data.brace_group.redirections;
         case SHELL_COMMAND_LOOP:
@@ -828,6 +845,10 @@ void shellFreeCommand(ShellCommand *command) {
         case SHELL_COMMAND_SIMPLE:
             shellWordArrayFree(&command->data.simple.words);
             shellRedirectionArrayFree(&command->data.simple.redirections);
+            break;
+        case SHELL_COMMAND_ARITHMETIC:
+            free(command->data.arithmetic.expression);
+            shellRedirectionArrayFree(&command->data.arithmetic.redirections);
             break;
         case SHELL_COMMAND_PIPELINE:
             shellFreePipeline(command->data.pipeline);
@@ -1074,6 +1095,28 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             for (size_t i = 0; i < command->data.simple.redirections.count; ++i) {
                 shellDumpRedirectionJson(out, command->data.simple.redirections.items[i], indent + 6);
                 if (i + 1 < command->data.simple.redirections.count) {
+                    fprintf(out, ",\n");
+                } else {
+                    fprintf(out, "\n");
+                }
+            }
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "]\n");
+            shellPrintIndent(out, indent + 2);
+            fprintf(out, "}\n");
+            break;
+        case SHELL_COMMAND_ARITHMETIC:
+            fprintf(out, "{\n");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"expression\": \"%s\",\n",
+                    command->data.arithmetic.expression ? command->data.arithmetic.expression : "");
+            shellPrintIndent(out, indent + 4);
+            fprintf(out, "\"redirections\": [\n");
+            const ShellRedirectionArray *arith_redirs = shellCommandGetRedirections(command);
+            size_t arith_count = arith_redirs ? arith_redirs->count : 0;
+            for (size_t i = 0; i < arith_count; ++i) {
+                shellDumpRedirectionJson(out, arith_redirs->items[i], indent + 6);
+                if (i + 1 < arith_count) {
                     fprintf(out, ",\n");
                 } else {
                     fprintf(out, "\n");

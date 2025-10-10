@@ -18,6 +18,7 @@ void registerShellFrontendBuiltins(void) {
 
     registerShellBuiltin(category, runtime_group, "__shell_exec", vmBuiltinShellExec);
     registerShellBuiltin(category, runtime_group, "__shell_pipeline", vmBuiltinShellPipeline);
+    registerShellBuiltin(category, runtime_group, "__shell_arithmetic", vmBuiltinShellArithmetic);
     registerShellBuiltin(category, runtime_group, "__shell_and", vmBuiltinShellAnd);
     registerShellBuiltin(category, runtime_group, "__shell_or", vmBuiltinShellOr);
     registerShellBuiltin(category, runtime_group, "__shell_subshell", vmBuiltinShellSubshell);
