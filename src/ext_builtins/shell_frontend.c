@@ -83,4 +83,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "shopt", vmBuiltinShellShopt);
     registerShellBuiltin(category, command_group, "umask", vmBuiltinShellUmask);
     registerShellBuiltin(category, command_group, "times", vmBuiltinShellTimes);
+    registerShellBuiltin(category, command_group, "echo", vmBuiltinShellEcho);
+    registerShellBuiltin(category, command_group, "true", vmBuiltinShellTrue);
+    registerShellBuiltin(category, command_group, "false", vmBuiltinShellFalse);
 }

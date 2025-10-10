@@ -2139,6 +2139,197 @@ Value vmBuiltinShellColon(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static int shellEchoHexDigit(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
+static void shellEchoWriteString(const char *text,
+                                 bool interpret,
+                                 bool *stop_output,
+                                 bool *emit_newline) {
+    if (!text || !stop_output || !emit_newline) {
+        return;
+    }
+    const char *cursor = text;
+    while (!*stop_output && cursor && *cursor) {
+        char ch = *cursor++;
+        if (interpret && ch == '\\') {
+            char esc = *cursor;
+            if (esc == '\0') {
+                fputc('\\', stdout);
+                break;
+            }
+            cursor++;
+            switch (esc) {
+                case 'a':
+                    fputc('\a', stdout);
+                    break;
+                case 'b':
+                    fputc('\b', stdout);
+                    break;
+                case 'c':
+                    *emit_newline = false;
+                    *stop_output = true;
+                    return;
+                case 'e':
+                case 'E':
+                    fputc(27, stdout);
+                    break;
+                case 'f':
+                    fputc('\f', stdout);
+                    break;
+                case 'n':
+                    fputc('\n', stdout);
+                    break;
+                case 'r':
+                    fputc('\r', stdout);
+                    break;
+                case 't':
+                    fputc('\t', stdout);
+                    break;
+                case 'v':
+                    fputc('\v', stdout);
+                    break;
+                case '\\':
+                    fputc('\\', stdout);
+                    break;
+                case '0': {
+                    unsigned char value = 0;
+                    int digits = 0;
+                    while (digits < 3 && *cursor >= '0' && *cursor <= '7') {
+                        value = (unsigned char)((value << 3) | (*cursor - '0'));
+                        cursor++;
+                        digits++;
+                    }
+                    fputc((char)value, stdout);
+                    break;
+                }
+                case 'x': {
+                    unsigned char value = 0;
+                    int digits = 0;
+                    while (digits < 2) {
+                        int hex = shellEchoHexDigit(*cursor);
+                        if (hex < 0) {
+                            break;
+                        }
+                        value = (unsigned char)((value << 4) | (unsigned char)hex);
+                        cursor++;
+                        digits++;
+                    }
+                    if (digits == 0) {
+                        fputc('x', stdout);
+                    } else {
+                        fputc((char)value, stdout);
+                    }
+                    break;
+                }
+                default:
+                    fputc(esc, stdout);
+                    break;
+            }
+        } else {
+            fputc(ch, stdout);
+        }
+    }
+}
+
+Value vmBuiltinShellEcho(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    bool emit_newline = true;
+    bool interpret_escapes = false;
+    bool parsing_options = true;
+    int first_arg = 0;
+
+    for (int i = 0; i < arg_count; ++i) {
+        if (!parsing_options) {
+            first_arg = i;
+            break;
+        }
+        Value val = args[i];
+        const char *token = (val.type == TYPE_STRING && val.s_val) ? val.s_val : "";
+        if (!token) {
+            token = "";
+        }
+        if (strcmp(token, "--") == 0) {
+            parsing_options = false;
+            first_arg = i + 1;
+            continue;
+        }
+        if (token[0] == '-' && token[1] != '\0') {
+            bool valid = true;
+            bool next_emit_newline = emit_newline;
+            bool next_interpret = interpret_escapes;
+            for (size_t j = 1; token[j] != '\0'; ++j) {
+                char opt = token[j];
+                if (opt == 'n') {
+                    next_emit_newline = false;
+                } else if (opt == 'e') {
+                    next_interpret = true;
+                } else if (opt == 'E') {
+                    next_interpret = false;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                emit_newline = next_emit_newline;
+                interpret_escapes = next_interpret;
+                first_arg = i + 1;
+                continue;
+            }
+        }
+        parsing_options = false;
+        first_arg = i;
+        break;
+    }
+    if (parsing_options) {
+        first_arg = arg_count;
+    }
+
+    bool stop_output = false;
+    for (int i = first_arg; i < arg_count && !stop_output; ++i) {
+        Value val = args[i];
+        if (i > first_arg) {
+            fputc(' ', stdout);
+        }
+        const char *text = (val.type == TYPE_STRING && val.s_val) ? val.s_val : "";
+        shellEchoWriteString(text, interpret_escapes, &stop_output, &emit_newline);
+    }
+
+    if (emit_newline && !stop_output) {
+        fputc('\n', stdout);
+    }
+
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellTrue(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellFalse(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellUpdateStatus(1);
+    return makeVoid();
+}
+
 Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
     if (arg_count < 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
         runtimeError(vm, "source: expected path to script");

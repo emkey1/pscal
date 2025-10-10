@@ -1,4 +1,5 @@
 #include "shell/builtins.h"
+#include "backend_ast/builtin.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -101,6 +102,13 @@ static char *shellLowercase(const char *name) {
 }
 
 void shellRegisterBuiltins(HashTable *table) {
+    static bool handlers_registered = false;
+    if (!handlers_registered) {
+        registerVmBuiltin("echo", vmBuiltinShellEcho, BUILTIN_TYPE_PROCEDURE, NULL);
+        registerVmBuiltin("true", vmBuiltinShellTrue, BUILTIN_TYPE_PROCEDURE, NULL);
+        registerVmBuiltin("false", vmBuiltinShellFalse, BUILTIN_TYPE_PROCEDURE, NULL);
+        handlers_registered = true;
+    }
     if (!table) {
         return;
     }
