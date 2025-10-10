@@ -4217,16 +4217,34 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                         ok = false;
                     }
                 } else {
-                    if (!shellSetTrackedVariable(spec, "", false)) {
-                        const char *readonly = shellReadonlyGetErrorName();
-                        if (errno == EPERM && readonly && *readonly) {
-                            runtimeError(vm, "declare: %s: readonly variable", readonly);
-                        } else if (errno != 0) {
-                            runtimeError(vm, "declare: unable to set '%s': %s", spec, strerror(errno));
-                        } else {
-                            runtimeError(vm, "declare: unable to set '%s'", spec);
-                        }
+                    // Without an assignment, bash preserves the current value of global
+                    // variables when applying attributes. Leave the value untouched so
+                    // constructs like `typeset -i var` do not reset an existing binding.
+                    if (shellReadonlyContains(spec)) {
+                        runtimeError(vm, "declare: %s: readonly variable", spec);
                         ok = false;
+                    } else {
+                        const ShellArrayVariable *array_var = shellArrayRegistryFindConst(spec);
+                        bool exists = (array_var != NULL);
+                        if (!exists) {
+                            const char *existing = getenv(spec);
+                            exists = (existing != NULL);
+                        }
+                        if (!exists) {
+                            const char *initial = integer_attribute ? "0" : "";
+                            errno = 0;
+                            if (!shellSetTrackedVariable(spec, initial, false)) {
+                                if (errno != 0) {
+                                    runtimeError(vm,
+                                                "declare: unable to set '%s': %s",
+                                                spec,
+                                                strerror(errno));
+                                } else {
+                                    runtimeError(vm, "declare: unable to set '%s'", spec);
+                                }
+                                ok = false;
+                            }
+                        }
                     }
                 }
             }
