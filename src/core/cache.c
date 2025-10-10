@@ -7,28 +7,223 @@
 #include "ast/ast.h"
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #define CACHE_ROOT ".pscal"
 #define CACHE_DIR "bc_cache"
-#define CACHE_MAGIC 0x50534243 /* 'PSBC' */
+#define CACHE_MAGIC 0x50534232 /* 'PSB2' */
+
+#define FNV1A64_OFFSET 1469598103934665603ULL
+#define FNV1A64_PRIME 1099511628211ULL
 
 
-static unsigned long hashPath(const char* path) {
-    char* abs_path = realpath(path, NULL);
-    const unsigned char* p = (const unsigned char*)(abs_path ? abs_path : path);
-    uint32_t hash = 2166136261u;
-    for (; *p; ++p) {
-        hash ^= *p;
-        hash *= 16777619u;
+typedef struct {
+    char* path;
+    time_t mtime;
+} CacheCandidate;
+
+static void fnv1aUpdate(uint64_t* hash, const void* data, size_t len) {
+    if (!hash || !data) return;
+    const unsigned char* bytes = (const unsigned char*)data;
+    for (size_t i = 0; i < len; ++i) {
+        *hash ^= bytes[i];
+        *hash *= FNV1A64_PRIME;
     }
-    if (abs_path) free(abs_path);
-    return (unsigned long)hash;
+}
+
+static void fnv1aUpdateUInt32(uint64_t* hash, uint32_t value) {
+    fnv1aUpdate(hash, &value, sizeof(value));
+}
+
+static void fnv1aUpdateInt(uint64_t* hash, int value) {
+    fnv1aUpdate(hash, &value, sizeof(value));
+}
+
+static void fnv1aUpdateUInt64(uint64_t* hash, uint64_t value) {
+    fnv1aUpdate(hash, &value, sizeof(value));
+}
+
+static const char* basenameForPath(const char* path) {
+    if (!path) return "";
+    const char* last_slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char* last_backslash = strrchr(path, '\\');
+    if (!last_slash || (last_backslash && last_backslash > last_slash)) {
+        last_slash = last_backslash;
+    }
+#endif
+    return last_slash ? last_slash + 1 : path;
+}
+
+static char* sanitizeFileComponent(const char* name) {
+    if (!name) return strdup("");
+    size_t len = strlen(name);
+    char* sanitized = (char*)malloc(len + 1);
+    if (!sanitized) return NULL;
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char ch = (unsigned char)name[i];
+        if (isalnum(ch) || ch == '.' || ch == '-' || ch == '_') {
+            sanitized[i] = (char)ch;
+        } else {
+            sanitized[i] = '_';
+        }
+    }
+    sanitized[len] = '\0';
+    return sanitized;
+}
+
+static bool computeSourceHash(const char* source_path, bool require_file, uint64_t* out_hash) {
+    if (!out_hash) return false;
+    if (!source_path || source_path[0] == '\0') {
+        if (require_file) return false;
+        uint64_t fallback = FNV1A64_OFFSET;
+        fnv1aUpdate(&fallback, "<none>", 6);
+        *out_hash = fallback;
+        return true;
+    }
+    FILE* f = fopen(source_path, "rb");
+    if (!f) {
+        if (!require_file) {
+            uint64_t fallback = FNV1A64_OFFSET;
+            fnv1aUpdate(&fallback, source_path, strlen(source_path));
+            *out_hash = fallback;
+            return true;
+        }
+        return false;
+    }
+    uint64_t hash = FNV1A64_OFFSET;
+    unsigned char buffer[4096];
+    size_t read_bytes = 0;
+    while ((read_bytes = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+        fnv1aUpdate(&hash, buffer, read_bytes);
+    }
+    if (ferror(f)) {
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+    *out_hash = hash;
+    return true;
+}
+
+static void hashValue(uint64_t* hash, const Value* v);
+
+static uint64_t computeChunkHash(const BytecodeChunk* chunk) {
+    uint64_t hash = FNV1A64_OFFSET;
+    if (!chunk) return hash;
+    fnv1aUpdateUInt32(&hash, chunk->version);
+    fnv1aUpdateInt(&hash, chunk->count);
+    fnv1aUpdateInt(&hash, chunk->capacity);
+    if (chunk->code && chunk->count > 0) {
+        fnv1aUpdate(&hash, chunk->code, (size_t)chunk->count);
+    }
+    fnv1aUpdateInt(&hash, chunk->constants_count);
+    fnv1aUpdateInt(&hash, chunk->constants_capacity);
+    if (chunk->lines && chunk->count > 0) {
+        fnv1aUpdate(&hash, chunk->lines, sizeof(int) * (size_t)chunk->count);
+    }
+    if (chunk->constants && chunk->constants_count > 0) {
+        for (int i = 0; i < chunk->constants_count; ++i) {
+            hashValue(&hash, &chunk->constants[i]);
+        }
+    }
+    return hash;
+}
+
+static uint64_t computeCombinedHash(uint64_t source_hash, const BytecodeChunk* chunk) {
+    uint64_t combined = FNV1A64_OFFSET;
+    fnv1aUpdateUInt64(&combined, source_hash);
+    uint64_t chunk_hash = computeChunkHash(chunk);
+    fnv1aUpdateUInt64(&combined, chunk_hash);
+    return combined;
+}
+
+static CacheCandidate* gatherCacheCandidates(const char* dir, const char* prefix, size_t* out_count) {
+    if (out_count) *out_count = 0;
+    if (!dir || !prefix) return NULL;
+    DIR* cache_dir = opendir(dir);
+    if (!cache_dir) return NULL;
+
+    CacheCandidate* candidates = NULL;
+    size_t candidate_count = 0;
+    size_t candidate_capacity = 0;
+    struct dirent* entry;
+    size_t prefix_length = strlen(prefix);
+    while ((entry = readdir(cache_dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        if (strncmp(entry->d_name, prefix, prefix_length) != 0) continue;
+        size_t name_len = strlen(entry->d_name);
+        if (name_len < 3 || strcmp(entry->d_name + name_len - 3, ".bc") != 0) continue;
+
+        size_t path_len = strlen(dir) + 1 + name_len + 1;
+        char* full_path = (char*)malloc(path_len);
+        if (!full_path) continue;
+        snprintf(full_path, path_len, "%s/%s", dir, entry->d_name);
+
+        struct stat st;
+        if (stat(full_path, &st) != 0) {
+            free(full_path);
+            continue;
+        }
+
+        if (candidate_count == candidate_capacity) {
+            size_t new_cap = candidate_capacity ? candidate_capacity * 2 : 4;
+            CacheCandidate* new_arr = (CacheCandidate*)realloc(candidates, new_cap * sizeof(CacheCandidate));
+            if (!new_arr) {
+                free(full_path);
+                continue;
+            }
+            candidates = new_arr;
+            candidate_capacity = new_cap;
+        }
+        candidates[candidate_count].path = full_path;
+        candidates[candidate_count].mtime = st.st_mtime;
+        candidate_count++;
+    }
+    closedir(cache_dir);
+
+    if (candidate_count > 1) {
+        for (size_t i = 0; i < candidate_count - 1; ++i) {
+            for (size_t j = i + 1; j < candidate_count; ++j) {
+                if (candidates[j].mtime > candidates[i].mtime) {
+                    CacheCandidate tmp = candidates[i];
+                    candidates[i] = candidates[j];
+                    candidates[j] = tmp;
+                }
+            }
+        }
+    }
+
+    if (out_count) *out_count = candidate_count;
+    return candidates;
+}
+
+static void freeCandidates(CacheCandidate* candidates, size_t count) {
+    if (!candidates) return;
+    for (size_t i = 0; i < count; ++i) {
+        free(candidates[i].path);
+    }
+    free(candidates);
+}
+
+static void resetChunk(BytecodeChunk* chunk, int read_consts) {
+    if (!chunk) return;
+    if (chunk->constants) {
+        for (int i = 0; i < read_consts; ++i) {
+            freeValue(&chunk->constants[i]);
+        }
+    }
+    free(chunk->code);
+    free(chunk->lines);
+    free(chunk->constants);
+    initBytecodeChunk(chunk);
 }
 
 static void sanitizeCompilerId(const char* compiler_id, char* buffer, size_t buffer_size) {
@@ -59,7 +254,7 @@ static void sanitizeCompilerId(const char* compiler_id, char* buffer, size_t buf
     buffer[out_idx] = '\0';
 }
 
-char* buildCachePath(const char* source_path, const char* compiler_id) {
+static char* ensureCacheDirectory(const char* compiler_id, char* out_safe_id, size_t safe_id_size) {
     const char* home = getenv("HOME");
     if (!home) return NULL;
     size_t root_len = strlen(home) + 1 + strlen(CACHE_ROOT) + 1;
@@ -90,15 +285,57 @@ char* buildCachePath(const char* source_path, const char* compiler_id) {
     }
     free(root);
 
+    if (out_safe_id && safe_id_size > 0) {
+        sanitizeCompilerId(compiler_id, out_safe_id, safe_id_size);
+    }
+
+    return dir;
+}
+
+char* buildCachePath(const char* source_path, const char* compiler_id) {
     char safe_id[32];
-    sanitizeCompilerId(compiler_id, safe_id, sizeof(safe_id));
-    unsigned long h = hashPath(source_path);
-    size_t path_len = dir_len + strlen(safe_id) + 32;
-    char* full = (char*)malloc(path_len);
-    if (!full) { free(dir); return NULL; }
-    snprintf(full, path_len, "%s/%s-%lu.bc", dir, safe_id, h);
+    char* dir = ensureCacheDirectory(compiler_id, safe_id, sizeof(safe_id));
+    if (!dir) return NULL;
+
+    const char* base_name = basenameForPath(source_path);
+    char* sanitized_base = sanitizeFileComponent(base_name);
+    if (!sanitized_base) {
+        free(dir);
+        return NULL;
+    }
+
+    uint64_t source_hash = 0;
+    if (!computeSourceHash(source_path, true, &source_hash)) {
+        free(dir);
+        free(sanitized_base);
+        return NULL;
+    }
+
+    char source_hex[17];
+    snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
+
+    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    char* prefix = (char*)malloc(prefix_len);
+    if (!prefix) {
+        free(dir);
+        free(sanitized_base);
+        return NULL;
+    }
+    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+
+    size_t candidate_count = 0;
+    CacheCandidate* candidates = gatherCacheCandidates(dir, prefix, &candidate_count);
+
+    char* result = NULL;
+    if (candidate_count > 0 && candidates) {
+        result = strdup(candidates[0].path);
+    }
+
+    freeCandidates(candidates, candidate_count);
+    free(prefix);
+    free(sanitized_base);
     free(dir);
-    return full;
+    return result;
 }
 
 static char* resolveExecutablePath(const char* executable) {
@@ -385,6 +622,109 @@ static bool writeValue(FILE* f, const Value* v) {
             return false;
     }
     return true;
+}
+
+static void hashValue(uint64_t* hash, const Value* v) {
+    if (!hash) return;
+    if (!v) {
+        int marker = -1;
+        fnv1aUpdateInt(hash, marker);
+        return;
+    }
+    fnv1aUpdateInt(hash, v->type);
+    switch (v->type) {
+        case TYPE_INTEGER:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            fnv1aUpdate(&(*hash), &v->i_val, sizeof(v->i_val));
+            break;
+        case TYPE_FLOAT:
+            fnv1aUpdate(hash, &v->real.f32_val, sizeof(v->real.f32_val));
+            break;
+        case TYPE_REAL:
+            fnv1aUpdate(hash, &v->real.d_val, sizeof(v->real.d_val));
+            break;
+        case TYPE_LONG_DOUBLE:
+            fnv1aUpdate(hash, &v->real.r_val, sizeof(v->real.r_val));
+            break;
+        case TYPE_CHAR:
+            fnv1aUpdate(hash, &v->c_val, sizeof(v->c_val));
+            break;
+        case TYPE_STRING: {
+            int len = v->s_val ? (int)strlen(v->s_val) : -1;
+            fnv1aUpdateInt(hash, len);
+            if (len > 0) {
+                fnv1aUpdate(hash, v->s_val, (size_t)len);
+            }
+            fnv1aUpdateInt(hash, v->max_length);
+            break;
+        }
+        case TYPE_ENUM: {
+            int len = v->enum_val.enum_name ? (int)strlen(v->enum_val.enum_name) : 0;
+            fnv1aUpdateInt(hash, len);
+            if (len > 0) {
+                fnv1aUpdate(hash, v->enum_val.enum_name, (size_t)len);
+            }
+            fnv1aUpdateInt(hash, v->enum_val.ordinal);
+            break;
+        }
+        case TYPE_SET: {
+            int sz = v->set_val.set_size;
+            fnv1aUpdateInt(hash, sz);
+            if (sz > 0 && v->set_val.set_values) {
+                fnv1aUpdate(hash, v->set_val.set_values, sizeof(long long) * (size_t)sz);
+            }
+            break;
+        }
+        case TYPE_ARRAY: {
+            int dims = v->dimensions;
+            fnv1aUpdateInt(hash, dims);
+            fnv1aUpdateInt(hash, v->element_type);
+            for (int i = 0; i < dims; ++i) {
+                int lb = v->lower_bounds ? v->lower_bounds[i] : 0;
+                int ub = v->upper_bounds ? v->upper_bounds[i] : -1;
+                fnv1aUpdateInt(hash, lb);
+                fnv1aUpdateInt(hash, ub);
+            }
+            int total = 0;
+            if (dims > 0 && v->lower_bounds && v->upper_bounds) {
+                total = 1;
+                for (int i = 0; i < dims; ++i) {
+                    int span = v->upper_bounds[i] - v->lower_bounds[i] + 1;
+                    if (span <= 0) { total = 0; break; }
+                    total *= span;
+                }
+            }
+            if (total > 0 && v->array_val) {
+                for (int i = 0; i < total; ++i) {
+                    hashValue(hash, &v->array_val[i]);
+                }
+            }
+            break;
+        }
+        case TYPE_POINTER:
+        case TYPE_FILE:
+        case TYPE_MEMORYSTREAM:
+        case TYPE_THREAD:
+            fnv1aUpdateUInt64(hash, (uint64_t)(uintptr_t)v->ptr_val);
+            break;
+        case TYPE_NIL:
+        case TYPE_VOID:
+        case TYPE_UNKNOWN:
+        case TYPE_RECORD:
+            break;
+        default:
+            fnv1aUpdate(&(*hash), &v->i_val, sizeof(v->i_val));
+            break;
+    }
 }
 
 static bool readValue(FILE* f, Value* out) {
@@ -837,12 +1177,38 @@ bool loadBytecodeFromCache(const char* source_path,
                            const char** dependencies,
                            int dep_count,
                            BytecodeChunk* chunk) {
-    char* cache_path = buildCachePath(source_path, compiler_id);
-    if (!cache_path) return false;
-    if (chunk && chunk->count > 0) {
-        free(cache_path);
+    if (!chunk || chunk->count > 0) {
         return false;
     }
+
+    char safe_id[32];
+    char* dir = ensureCacheDirectory(compiler_id, safe_id, sizeof(safe_id));
+    if (!dir) return false;
+
+    char* sanitized_base = sanitizeFileComponent(basenameForPath(source_path));
+    if (!sanitized_base) {
+        free(dir);
+        return false;
+    }
+
+    uint64_t source_hash = 0;
+    if (!computeSourceHash(source_path, true, &source_hash)) {
+        free(dir);
+        free(sanitized_base);
+        return false;
+    }
+
+    char source_hex[17];
+    snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
+    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    char* prefix = (char*)malloc(prefix_len);
+    if (!prefix) {
+        free(dir);
+        free(sanitized_base);
+        return false;
+    }
+    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+
     char* resolved_frontend = NULL;
     const char* frontend_for_cache = NULL;
     if (frontend_path && frontend_path[0]) {
@@ -856,136 +1222,274 @@ bool loadBytecodeFromCache(const char* source_path,
             }
         }
     }
-#define CLEANUP_AND_RETURN_FALSE() \
-    do { \
-        if (resolved_frontend) { free(resolved_frontend); resolved_frontend = NULL; } \
-        free(cache_path); \
-        return false; \
-    } while (0)
+
+    size_t candidate_count = 0;
+    CacheCandidate* candidates = gatherCacheCandidates(dir, prefix, &candidate_count);
+
     bool ok = false;
+    bool abort_all = false;
     int const_count = 0;
     int read_consts = 0;
+    const char* strict_env = getenv("PSCAL_STRICT_VM");
+    bool strict = strict_env && strict_env[0] != '\0';
+    uint32_t vm_ver = pscal_vm_version();
 
-    if (!isCacheFresh(cache_path, source_path) ||
-        (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache))) {
-        unlink(cache_path);
-        CLEANUP_AND_RETURN_FALSE();
-    }
-    for (int i = 0; dependencies && i < dep_count; ++i) {
-        if (!isCacheFresh(cache_path, dependencies[i])) {
+    for (size_t idx = 0; idx < candidate_count && !ok; ++idx) {
+        const char* cache_path = candidates[idx].path;
+
+        if (!isCacheFresh(cache_path, source_path) ||
+            (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache))) {
             unlink(cache_path);
-            CLEANUP_AND_RETURN_FALSE();
+            continue;
         }
+
+        bool deps_ok = true;
+        for (int dep_idx = 0; dependencies && dep_idx < dep_count; ++dep_idx) {
+            if (!isCacheFresh(cache_path, dependencies[dep_idx])) {
+                deps_ok = false;
+                break;
+            }
+        }
+        if (!deps_ok) {
+            unlink(cache_path);
+            continue;
+        }
+
+        FILE* f = fopen(cache_path, "rb");
+        if (!f) {
+            continue;
+        }
+
+        uint32_t magic = 0, ver = 0;
+        uint64_t stored_source_hash = 0, stored_combined_hash = 0;
+        if (fread(&magic, sizeof(magic), 1, f) != 1 ||
+            fread(&ver, sizeof(ver), 1, f) != 1 ||
+            fread(&stored_source_hash, sizeof(stored_source_hash), 1, f) != 1 ||
+            fread(&stored_combined_hash, sizeof(stored_combined_hash), 1, f) != 1 ||
+            magic != CACHE_MAGIC) {
+            fclose(f);
+            unlink(cache_path);
+            continue;
+        }
+
+        if (ver > vm_ver) {
+            if (strict) {
+                fprintf(stderr,
+                        "Cached bytecode requires VM version %u but current VM version is %u\n",
+                        ver, vm_ver);
+                fclose(f);
+                abort_all = true;
+                break;
+            } else {
+                fprintf(stderr,
+                        "Warning: cached bytecode targets VM version %u but running version is %u\n",
+                        ver, vm_ver);
+            }
+        }
+
+        if (stored_source_hash != source_hash) {
+            fclose(f);
+            unlink(cache_path);
+            continue;
+        }
+
+        chunk->version = ver;
+        if (!verifySourcePath(f, source_path)) {
+            fclose(f);
+            unlink(cache_path);
+            continue;
+        }
+
+        int count = 0;
+        if (fread(&count, sizeof(count), 1, f) != 1 ||
+            fread(&const_count, sizeof(const_count), 1, f) != 1) {
+            fclose(f);
+            unlink(cache_path);
+            continue;
+        }
+
+        chunk->code = (uint8_t*)malloc(count);
+        chunk->lines = (int*)malloc(sizeof(int) * count);
+        chunk->constants = (Value*)calloc(const_count, sizeof(Value));
+        if (!chunk->code || !chunk->lines || !chunk->constants) {
+            fclose(f);
+            resetChunk(chunk, 0);
+            unlink(cache_path);
+            continue;
+        }
+
+        chunk->count = count;
+        chunk->capacity = count;
+        chunk->constants_count = const_count;
+        chunk->constants_capacity = const_count;
+
+        if (fread(chunk->code, 1, count, f) != (size_t)count ||
+            fread(chunk->lines, sizeof(int), count, f) != (size_t)count) {
+            fclose(f);
+            resetChunk(chunk, 0);
+            unlink(cache_path);
+            continue;
+        }
+
+        bool candidate_ok = true;
+        read_consts = 0;
+        for (; read_consts < const_count; ++read_consts) {
+            if (!readValue(f, &chunk->constants[read_consts])) {
+                candidate_ok = false;
+                break;
+            }
+        }
+
+        if (!candidate_ok) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        uint64_t computed_combined = computeCombinedHash(source_hash, chunk);
+        if (computed_combined != stored_combined_hash) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        int stored_proc_count = 0;
+        if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) != 1) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        if (stored_proc_count < 0) {
+            int proc_count = -stored_proc_count - 1;
+            if (!loadProceduresFromStream(f, proc_count, ver)) {
+                fclose(f);
+                resetChunk(chunk, read_consts);
+                unlink(cache_path);
+                continue;
+            }
+        } else {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        int const_sym_count = 0;
+        if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) != 1) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+        for (int i = 0; i < const_sym_count; ++i) {
+            int name_len = 0;
+            if (fread(&name_len, sizeof(name_len), 1, f) != 1) {
+                candidate_ok = false;
+                break;
+            }
+            char* name = (char*)malloc((size_t)name_len + 1);
+            if (!name) {
+                candidate_ok = false;
+                break;
+            }
+            if (fread(name, 1, (size_t)name_len, f) != (size_t)name_len) {
+                free(name);
+                candidate_ok = false;
+                break;
+            }
+            name[name_len] = '\0';
+            VarType type;
+            if (fread(&type, sizeof(type), 1, f) != 1) {
+                free(name);
+                candidate_ok = false;
+                break;
+            }
+
+            Value val = {0};
+            if (!readValue(f, &val)) {
+                free(name);
+                candidate_ok = false;
+                break;
+            }
+            insertGlobalSymbol(name, type, NULL);
+            Symbol* sym = lookupGlobalSymbol(name);
+            if (sym && sym->value) {
+                freeValue(sym->value);
+                *(sym->value) = val;
+                sym->is_const = true;
+            } else {
+                freeValue(&val);
+            }
+            free(name);
+        }
+
+        if (!candidate_ok) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        int type_count = 0;
+        if (fread(&type_count, sizeof(type_count), 1, f) != 1) {
+            fclose(f);
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+        for (int i = 0; i < type_count; ++i) {
+            int name_len = 0;
+            if (fread(&name_len, sizeof(name_len), 1, f) != 1) {
+                candidate_ok = false;
+                break;
+            }
+            char* name = (char*)malloc((size_t)name_len + 1);
+            if (!name) {
+                candidate_ok = false;
+                break;
+            }
+            if (fread(name, 1, (size_t)name_len, f) != (size_t)name_len) {
+                free(name);
+                candidate_ok = false;
+                break;
+            }
+            name[name_len] = '\0';
+            AST* type_ast = readAst(f);
+            if (!type_ast) {
+                free(name);
+                candidate_ok = false;
+                break;
+            }
+            insertType(name, type_ast);
+            freeAST(type_ast);
+            free(name);
+        }
+
+        fclose(f);
+        if (!candidate_ok) {
+            resetChunk(chunk, read_consts);
+            unlink(cache_path);
+            continue;
+        }
+
+        ok = true;
     }
 
-    FILE* f = fopen(cache_path, "rb");
-    if (f) {
-            uint32_t magic = 0, ver = 0;
-            if (fread(&magic, sizeof(magic), 1, f) == 1 &&
-                fread(&ver, sizeof(ver), 1, f) == 1 &&
-                magic == CACHE_MAGIC) {
-                const char* strict_env = getenv("PSCAL_STRICT_VM");
-                bool strict = strict_env && strict_env[0] != '\0';
-                uint32_t vm_ver = pscal_vm_version();
-                if (ver > vm_ver) {
-                    if (strict) {
-                        fprintf(stderr,
-                                "Cached bytecode requires VM version %u but current VM version is %u\\n",
-                                ver, vm_ver);
-                        fclose(f);
-                        CLEANUP_AND_RETURN_FALSE();
-                    } else {
-                        fprintf(stderr,
-                                "Warning: cached bytecode targets VM version %u but running version is %u\\n",
-                                ver, vm_ver);
-                    }
-                }
-                chunk->version = ver;
-                if (!verifySourcePath(f, source_path)) {
-                    fclose(f);
-                    CLEANUP_AND_RETURN_FALSE();
-                }
-                int count = 0;
-                if (fread(&count, sizeof(count), 1, f) == 1 &&
-                    fread(&const_count, sizeof(const_count), 1, f) == 1) {
-                    chunk->code = (uint8_t*)malloc(count);
-                    chunk->lines = (int*)malloc(sizeof(int) * count);
-                    chunk->constants = (Value*)calloc(const_count, sizeof(Value));
-                    if (chunk->code && chunk->lines && chunk->constants) {
-                        chunk->count = count; chunk->capacity = count;
-                        chunk->constants_count = const_count; chunk->constants_capacity = const_count;
-                        if (fread(chunk->code, 1, count, f) == (size_t)count &&
-                            fread(chunk->lines, sizeof(int), count, f) == (size_t)count) {
-                            ok = true;
-                            for (read_consts = 0; read_consts < const_count; ++read_consts) {
-                                if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
-                            }
-                            if (ok) {
-                                int stored_proc_count = 0;
-                                if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
-                                    if (stored_proc_count < 0) {
-                                        int proc_count = -stored_proc_count - 1;
-                                        if (!loadProceduresFromStream(f, proc_count, ver)) {
-                                            ok = false;
-                                        }
-                                    } else {
-                                        ok = false;
-                                        unlink(cache_path);
-                                    }
-                                } else {
-                                    ok = false;
-                                }
-                            }
-
-                            if (ok) {
-                                int const_sym_count = 0;
-                                if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) == 1) {
-                                    for (int i = 0; i < const_sym_count; ++i) {
-                                        int name_len = 0;
-                                        if (fread(&name_len, sizeof(name_len), 1, f) != 1) { ok = false; break; }
-                                        char* name = (char*)malloc(name_len + 1);
-                                        if (!name) { ok = false; break; }
-                                        if (fread(name, 1, name_len, f) != (size_t)name_len) {
-                                            free(name); ok = false; break; }
-                                        name[name_len] = '\0';
-                                        VarType type;
-                                        if (fread(&type, sizeof(type), 1, f) != 1) { free(name); ok = false; break; }
-
-                                        Value val = {0};
-
-                                        if (!readValue(f, &val)) { free(name); ok = false; break; }
-                                        insertGlobalSymbol(name, type, NULL);
-                                        Symbol* sym = lookupGlobalSymbol(name);
-                                        if (sym && sym->value) {
-                                            freeValue(sym->value);
-                                            *(sym->value) = val;
-                                            sym->is_const = true;
-                                        } else {
-                                            freeValue(&val);
-                                        }
-                                        free(name);
-                                    }
-                                } else {
-                                    ok = false;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            fclose(f);
-        }
     if (resolved_frontend) free(resolved_frontend);
-    free(cache_path);
-#undef CLEANUP_AND_RETURN_FALSE
-    if (!ok) {
-        for (int i = 0; i < read_consts; ++i) {
-            freeValue(&chunk->constants[i]);
-        }
-        free(chunk->code);
-        free(chunk->lines);
-        free(chunk->constants);
-        initBytecodeChunk(chunk);
+    freeCandidates(candidates, candidate_count);
+    free(prefix);
+    free(sanitized_base);
+    free(dir);
+
+    if (!ok || abort_all) {
+        resetChunk(chunk, read_consts);
+    }
+    if (abort_all) {
+        return false;
     }
     return ok;
 }
@@ -998,8 +1502,11 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
     FILE* f = fopen(file_path, "rb");
     if (f) {
         uint32_t magic = 0, ver = 0;
+        uint64_t source_hash = 0, combined_hash = 0;
         if (fread(&magic, sizeof(magic), 1, f) == 1 &&
             fread(&ver, sizeof(ver), 1, f) == 1 &&
+            fread(&source_hash, sizeof(source_hash), 1, f) == 1 &&
+            fread(&combined_hash, sizeof(combined_hash), 1, f) == 1 &&
             magic == CACHE_MAGIC) {
             const char* strict_env = getenv("PSCAL_STRICT_VM");
             bool strict = strict_env && strict_env[0] != '\0';
@@ -1121,11 +1628,17 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
     return ok;
 }
 
-static bool serializeBytecodeChunk(FILE* f, const char* source_path, const BytecodeChunk* chunk) {
+static bool serializeBytecodeChunk(FILE* f,
+                                   const char* source_path,
+                                   const BytecodeChunk* chunk,
+                                   uint64_t source_hash,
+                                   uint64_t combined_hash) {
     if (!f) return false;
     uint32_t magic = CACHE_MAGIC, ver = chunk->version;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
+    fwrite(&source_hash, sizeof(source_hash), 1, f);
+    fwrite(&combined_hash, sizeof(combined_hash), 1, f);
     if (!writeSourcePath(f, source_path)) {
         return false;
     }
@@ -1185,19 +1698,92 @@ static bool serializeBytecodeChunk(FILE* f, const char* source_path, const Bytec
 }
 
 void saveBytecodeToCache(const char* source_path, const char* compiler_id, const BytecodeChunk* chunk) {
-    char* cache_path = buildCachePath(source_path, compiler_id);
-    if (!cache_path) return;
+    if (!chunk) return;
+
+    uint64_t source_hash = 0, combined_hash = 0;
+    if (!computeSourceHash(source_path, true, &source_hash)) {
+        return;
+    }
+    combined_hash = computeCombinedHash(source_hash, chunk);
+
+    char safe_id[32];
+    char* dir = ensureCacheDirectory(compiler_id, safe_id, sizeof(safe_id));
+    if (!dir) return;
+
+    char* sanitized_base = sanitizeFileComponent(basenameForPath(source_path));
+    if (!sanitized_base) {
+        free(dir);
+        return;
+    }
+
+    char source_hex[17];
+    char combined_hex[17];
+    snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
+    snprintf(combined_hex, sizeof(combined_hex), "%016llx", (unsigned long long)combined_hash);
+
+    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    char* prefix = (char*)malloc(prefix_len);
+    if (!prefix) {
+        free(sanitized_base);
+        free(dir);
+        return;
+    }
+    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+
+    size_t path_len = strlen(dir) + 1 + strlen(prefix) + strlen(combined_hex) + 3;
+    char* cache_path = (char*)malloc(path_len);
+    if (!cache_path) {
+        free(prefix);
+        free(sanitized_base);
+        free(dir);
+        return;
+    }
+    snprintf(cache_path, path_len, "%s/%s%s.bc", dir, prefix, combined_hex);
+
+    size_t candidate_count = 0;
+    CacheCandidate* candidates = gatherCacheCandidates(dir, prefix, &candidate_count);
+    if (candidates) {
+        for (size_t i = 0; i < candidate_count; ++i) {
+            if (strcmp(candidates[i].path, cache_path) != 0) {
+                unlink(candidates[i].path);
+            }
+        }
+    }
+    freeCandidates(candidates, candidate_count);
+
     FILE* f = fopen(cache_path, "wb");
-    if (!f) { free(cache_path); return; }
-    serializeBytecodeChunk(f, source_path, chunk);
+    if (!f) {
+        free(cache_path);
+        free(prefix);
+        free(sanitized_base);
+        free(dir);
+        return;
+    }
+    if (!serializeBytecodeChunk(f, source_path, chunk, source_hash, combined_hash)) {
+        fclose(f);
+        unlink(cache_path);
+        free(cache_path);
+        free(prefix);
+        free(sanitized_base);
+        free(dir);
+        return;
+    }
     fclose(f);
     free(cache_path);
+    free(prefix);
+    free(sanitized_base);
+    free(dir);
 }
 
 bool saveBytecodeToFile(const char* file_path, const char* source_path, const BytecodeChunk* chunk) {
+    if (!chunk) return false;
+    uint64_t source_hash = 0, combined_hash = 0;
+    computeSourceHash(source_path, false, &source_hash);
+    combined_hash = computeCombinedHash(source_hash, chunk);
+
     FILE* f = fopen(file_path, "wb");
     if (!f) return false;
-    bool ok = serializeBytecodeChunk(f, source_path, chunk);
+    bool ok = serializeBytecodeChunk(f, source_path, chunk, source_hash, combined_hash);
     fclose(f);
     return ok;
 }
