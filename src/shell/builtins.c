@@ -102,13 +102,7 @@ static char *shellLowercase(const char *name) {
 }
 
 void shellRegisterBuiltins(HashTable *table) {
-    static bool handlers_registered = false;
-    if (!handlers_registered) {
-        registerVmBuiltin("echo", vmBuiltinShellEcho, BUILTIN_TYPE_PROCEDURE, NULL);
-        registerVmBuiltin("true", vmBuiltinShellTrue, BUILTIN_TYPE_PROCEDURE, NULL);
-        registerVmBuiltin("false", vmBuiltinShellFalse, BUILTIN_TYPE_PROCEDURE, NULL);
-        handlers_registered = true;
-    }
+    registerExtendedBuiltins();
     if (!table) {
         return;
     }
@@ -125,7 +119,11 @@ void shellRegisterBuiltins(HashTable *table) {
         symbol->is_alias = false;
         symbol->is_const = true;
         symbol->is_defined = true;
-        symbol->bytecode_address = entry->id;
+        int builtin_id = getBuiltinIDForCompiler(entry->canonical);
+        if (builtin_id < 0) {
+            builtin_id = entry->id;
+        }
+        symbol->bytecode_address = builtin_id;
         symbol->value = NULL;
         symbol->type_def = NULL;
         hashTableInsert(table, symbol);
@@ -133,6 +131,7 @@ void shellRegisterBuiltins(HashTable *table) {
 }
 
 int shellGetBuiltinId(const char *name) {
+    registerExtendedBuiltins();
     if (!name) {
         return -1;
     }
@@ -140,6 +139,10 @@ int shellGetBuiltinId(const char *name) {
     for (size_t i = 0; i < builtin_count; ++i) {
         if (strcasecmp(kShellBuiltins[i].name, name) == 0 ||
             strcasecmp(kShellBuiltins[i].canonical, name) == 0) {
+            int builtin_id = getBuiltinIDForCompiler(kShellBuiltins[i].canonical);
+            if (builtin_id >= 0) {
+                return builtin_id;
+            }
             return kShellBuiltins[i].id;
         }
     }

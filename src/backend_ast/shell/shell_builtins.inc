@@ -2310,6 +2310,8 @@ Value vmBuiltinShellEcho(VM *vm, int arg_count, Value *args) {
         fputc('\n', stdout);
     }
 
+    fflush(stdout);
+
     shellUpdateStatus(0);
     return makeVoid();
 }
