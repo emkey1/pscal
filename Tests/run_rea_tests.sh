@@ -222,7 +222,7 @@ rea_cli_no_run() {
     tmp_err=$(mktemp)
 
     set +e
-    "$REA_BIN" --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
+    "$REA_BIN" --verbose --no-cache --no-run "$fixture" >"$tmp_out" 2>"$tmp_err"
     local status=$?
     set -e
 

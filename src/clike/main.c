@@ -68,6 +68,7 @@ static const char *CLIKE_USAGE =
     "     --dump-bytecode-only        Dump compiled bytecode and exit (no execution).\n"
     "     --dump-ext-builtins         List extended builtin inventory and exit.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
+    "     --verbose                 Print compilation/cache status messages.\n"
     "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n";
 
 static const char *const kClikeCompilerId = "clike";
@@ -105,6 +106,7 @@ int main(int argc, char **argv) {
     int dump_ext_builtins_flag = 0;
     int vm_trace_head = 0;
     int no_cache_flag = 0;
+    int verbose_flag = 0;
     const char *path = NULL;
     int clike_params_start = 0;
 
@@ -132,6 +134,8 @@ int main(int argc, char **argv) {
             dump_ext_builtins_flag = 1;
         } else if (strcmp(argv[i], "--no-cache") == 0) {
             no_cache_flag = 1;
+        } else if (strcmp(argv[i], "--verbose") == 0) {
+            verbose_flag = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
@@ -295,8 +299,10 @@ int main(int argc, char **argv) {
     if (!used_cache) {
         clikeCompile(prog, &chunk);
         saveBytecodeToCache(path, kClikeCompilerId, &chunk);
-        fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
-                chunk.count, chunk.constants_count);
+        if (verbose_flag) {
+            fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+        }
         if (dump_bytecode_flag) {
             fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
@@ -305,8 +311,10 @@ int main(int argc, char **argv) {
             }
         }
     } else {
-        fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
-                chunk.count, chunk.constants_count);
+        if (verbose_flag) {
+            fprintf(stderr, "Loaded cached bytecode. Bytecode size: %d bytes, Constants: %d\n",
+                    chunk.count, chunk.constants_count);
+        }
         if (dump_bytecode_flag) {
             disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
             if (!dump_bytecode_only_flag) {

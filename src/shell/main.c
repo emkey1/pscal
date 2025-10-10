@@ -245,6 +245,7 @@ static const char *SHELL_USAGE =
     "     --dump-ext-builtins         List builtin commands.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --vm-trace-head=N           Trace first N VM instructions.\n"
+    "     --verbose                 Print compilation/cache status messages.\n"
     "     -d                          Enable verbose VM error diagnostics.\n";
 
 static char *readStream(FILE *stream) {
@@ -391,7 +392,7 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
         rc_options.frontend_path = base_options->frontend_path;
     }
     rc_options.no_cache = 1;
-    rc_options.quiet = true;
+    rc_options.quiet = base_options ? base_options->quiet : true;
 
     const char *restore_path = (base_options && base_options->frontend_path)
                                    ? base_options->frontend_path
@@ -2610,7 +2611,7 @@ static char *readInteractiveLine(const char *prompt,
 static int runInteractiveSession(const ShellRunOptions *options) {
     ShellRunOptions exec_opts = *options;
     exec_opts.no_cache = 1;
-    exec_opts.quiet = true;
+    exec_opts.quiet = options->quiet;
     exec_opts.exit_on_signal = false;
 
     int last_status = shellRuntimeLastStatus();
@@ -2710,6 +2711,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 int main(int argc, char **argv) {
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
+    options.quiet = true;
     shellRuntimeSetArg0(options.frontend_path);
     shellRuntimeSetInteractive(false);
 
@@ -2741,6 +2743,8 @@ int main(int argc, char **argv) {
             options.no_cache = 1;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             options.vm_trace_head = atoi(argv[i] + 16);
+        } else if (strcmp(argv[i], "--verbose") == 0) {
+            options.quiet = false;
         } else if (strcmp(argv[i], "-d") == 0) {
             options.verbose_errors = true;
         } else if (strcmp(argv[i], "-c") == 0) {
@@ -2812,7 +2816,6 @@ int main(int argc, char **argv) {
         shellRuntimeSetInteractive(false);
         ShellRunOptions command_options = options;
         command_options.no_cache = 1;
-        command_options.quiet = true;
         command_options.exit_on_signal = true;
         bool exit_requested = false;
         int status = shellRunSource(command_string, "<command>", &command_options, &exit_requested);
@@ -2843,7 +2846,6 @@ int main(int argc, char **argv) {
 
     ShellRunOptions stdin_opts = options;
     stdin_opts.no_cache = 1;
-    stdin_opts.quiet = true;
     stdin_opts.exit_on_signal = true;
     bool exit_requested = false;
     int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
