@@ -120,12 +120,10 @@ static uint64_t computeChunkHash(const BytecodeChunk* chunk) {
     if (!chunk) return hash;
     fnv1aUpdateUInt32(&hash, chunk->version);
     fnv1aUpdateInt(&hash, chunk->count);
-    fnv1aUpdateInt(&hash, chunk->capacity);
     if (chunk->code && chunk->count > 0) {
         fnv1aUpdate(&hash, chunk->code, (size_t)chunk->count);
     }
     fnv1aUpdateInt(&hash, chunk->constants_count);
-    fnv1aUpdateInt(&hash, chunk->constants_capacity);
     if (chunk->lines && chunk->count > 0) {
         fnv1aUpdate(&hash, chunk->lines, sizeof(int) * (size_t)chunk->count);
     }
@@ -314,7 +312,7 @@ char* buildCachePath(const char* source_path, const char* compiler_id) {
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
 
-    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(dir);
@@ -664,7 +662,6 @@ static void hashValue(uint64_t* hash, const Value* v) {
             if (len > 0) {
                 fnv1aUpdate(hash, v->s_val, (size_t)len);
             }
-            fnv1aUpdateInt(hash, v->max_length);
             break;
         }
         case TYPE_ENUM: {
@@ -1200,7 +1197,7 @@ bool loadBytecodeFromCache(const char* source_path,
 
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
-    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(dir);
@@ -1721,7 +1718,7 @@ void saveBytecodeToCache(const char* source_path, const char* compiler_id, const
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
     snprintf(combined_hex, sizeof(combined_hex), "%016llx", (unsigned long long)combined_hash);
 
-    size_t prefix_len = strlen(safe_id) + 1 + strlen(sanitized_base) + 1 + strlen(source_hex) + 1;
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(sanitized_base);
@@ -1730,7 +1727,7 @@ void saveBytecodeToCache(const char* source_path, const char* compiler_id, const
     }
     snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
 
-    size_t path_len = strlen(dir) + 1 + strlen(prefix) + strlen(combined_hex) + 3;
+    size_t path_len = strlen(dir) + strlen(prefix) + strlen(combined_hex) + 5;
     char* cache_path = (char*)malloc(path_len);
     if (!cache_path) {
         free(prefix);
