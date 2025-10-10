@@ -34,6 +34,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <pthread.h>
 #include <time.h>
 
 extern char **environ;
