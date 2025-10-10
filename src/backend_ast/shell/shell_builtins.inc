@@ -465,50 +465,90 @@ fallback:
 Value vmBuiltinShellArithmetic(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
-    ShellCommand cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    ShellExecRedirBackup *redir_backups = NULL;
-    size_t redir_backup_count = 0;
-    bool redirs_applied = false;
 
-    if (arg_count < 2) {
-        runtimeError(vm, "((: internal error: missing arguments");
-        shellUpdateStatus(1);
+    bool dispatch_mode = (arg_count >= 2 && args[0].type == TYPE_STRING);
+
+    if (dispatch_mode) {
+        shellCollectJobs();
+        ShellCommand cmd;
+        memset(&cmd, 0, sizeof(cmd));
+
+        const char *meta = args[0].s_val;
+        if (!meta) {
+            runtimeError(vm, "((: expected metadata");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        shellParseMetadata(meta, &cmd);
+
+        if (args[1].type != TYPE_STRING) {
+            runtimeError(vm, "((: expected expression");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        const char *expression = args[1].s_val ? args[1].s_val : "";
+
+        char *name_copy = strdup("__shell_arithmetic");
+        if (!name_copy) {
+            runtimeError(vm, "((: out of memory");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+        if (!shellCommandAppendArgOwned(&cmd, name_copy)) {
+            runtimeError(vm, "((: unable to build command");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        char *expr_copy = strdup(expression);
+        if (!expr_copy) {
+            runtimeError(vm, "((: out of memory");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+        if (!shellCommandAppendArgOwned(&cmd, expr_copy)) {
+            runtimeError(vm, "((: unable to build command");
+            shellUpdateStatus(1);
+            goto dispatch_cleanup;
+        }
+
+        for (int i = 2; i < arg_count; ++i) {
+            Value entry = args[i];
+            if (entry.type != TYPE_STRING || !entry.s_val) {
+                runtimeError(vm, "((: invalid redirection");
+                shellUpdateStatus(1);
+                goto dispatch_cleanup;
+            }
+            if (!shellAddRedirection(&cmd, entry.s_val)) {
+                runtimeError(vm, "((: invalid redirection");
+                shellUpdateStatus(1);
+                goto dispatch_cleanup;
+            }
+        }
+
+        result = shellExecuteCommand(vm, &cmd);
+        goto cleanup;
+
+dispatch_cleanup:
+        shellFreeCommand(&cmd);
         goto cleanup;
     }
-    if (args[0].type != TYPE_STRING || !args[0].s_val) {
-        runtimeError(vm, "((: invalid metadata");
-        shellUpdateStatus(1);
-        goto cleanup;
-    }
 
-    shellParseMetadata(args[0].s_val, &cmd);
-
-    if (args[1].type != TYPE_STRING) {
+    if (arg_count < 1) {
         runtimeError(vm, "((: expected expression");
         shellUpdateStatus(1);
         goto cleanup;
     }
-    const char *expression = args[1].s_val ? args[1].s_val : "";
 
-    for (int i = 2; i < arg_count; ++i) {
-        Value entry = args[i];
-        if (entry.type != TYPE_STRING || !entry.s_val) {
-            runtimeError(vm, "((: invalid redirection");
-            shellUpdateStatus(1);
-            goto cleanup;
-        }
-        if (!shellAddRedirection(&cmd, entry.s_val)) {
-            runtimeError(vm, "((: invalid redirection");
-            shellUpdateStatus(1);
-            goto cleanup;
-        }
-    }
-
-    if (!shellApplyExecRedirections(vm ? vm : gShellCurrentVm, &cmd, &redir_backups, &redir_backup_count)) {
+    if (args[0].type != TYPE_STRING) {
+        runtimeError(vm, "((: expected expression");
+        shellUpdateStatus(1);
         goto cleanup;
     }
-    redirs_applied = true;
+
+    const char *expression = args[0].s_val ? args[0].s_val : "";
 
     long long expr_value = 0;
     if (!shellArithmeticCommandEvaluateExpression(expression, &expr_value)) {
@@ -522,11 +562,6 @@ Value vmBuiltinShellArithmetic(VM *vm, int arg_count, Value *args) {
     shellUpdateStatus(expr_value != 0 ? 0 : 1);
 
 cleanup:
-    if (redirs_applied) {
-        shellRestoreExecRedirections(redir_backups, redir_backup_count);
-    }
-    shellFreeExecRedirBackups(redir_backups, redir_backup_count);
-    shellFreeCommand(&cmd);
     shellRestoreCurrentVm(previous_vm);
     return result;
 }
