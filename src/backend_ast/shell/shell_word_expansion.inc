@@ -2262,10 +2262,13 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
     }
+    if (shellRuntimeBuiltinDisabled(name)) {
+        return false;
+    }
     static const char *kBuiltins[] = {
         "cd",      "pwd",    "dirs",   "pushd",  "popd",   "exit",    "logout",  "exec",
         "eval",    "export", "unset",  "setenv", "unsetenv","set",    "declare", "typeset",
-        "readonly","umask",  "command","hash",   "trap",   "local",   "let",     "break",
+        "readonly","umask",  "command","hash",   "enable", "trap",   "local",   "let",     "break",
         "continue","alias", "caller", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
         "fg",     "finger", "bg",     "wait",   "builtin","source", "read",   "printf",
         "shift",  "return", "help",   "type",   "test",   "[",      ":",      "unalias",

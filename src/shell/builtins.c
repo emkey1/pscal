@@ -69,6 +69,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"disown", "disown", 45},
     {"kill", "kill", 51},
     {"hash", "hash", 50},
+    {"enable", "enable", 53},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},
     {"__shell_arithmetic", "__shell_arithmetic", 1016},
@@ -167,6 +168,18 @@ const char *shellBuiltinCanonicalName(const char *name) {
 
 bool shellIsBuiltinName(const char *name) {
     return shellGetBuiltinId(name) >= 0;
+}
+
+void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context) {
+    registerExtendedBuiltins();
+    if (!visitor) {
+        return;
+    }
+    size_t builtin_count = sizeof(kShellBuiltins) / sizeof(kShellBuiltins[0]);
+    for (size_t i = 0; i < builtin_count; ++i) {
+        const ShellBuiltinEntry *entry = &kShellBuiltins[i];
+        visitor(entry->name, entry->canonical, entry->id, context);
+    }
 }
 
 void shellDumpBuiltins(FILE *out) {

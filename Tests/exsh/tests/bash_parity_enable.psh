@@ -1,0 +1,15 @@
+#!/usr/bin/env exsh
+
+export LC_ALL=C
+
+enable -n hash
+printf "disable_status:%s\n" "$?"
+
+enable -n | sort
+printf "list_disabled_status:%s\n" "$?"
+
+enable hash
+printf "enable_status:%s\n" "$?"
+
+enable -n | sort
+printf "list_after_enable_status:%s\n" "$?"

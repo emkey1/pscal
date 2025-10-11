@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown kill fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command caller type getopts mapfile readarray
+cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown kill fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command hash enable caller type getopts mapfile readarray
 
 Bash builtins missing from exsh
 -------------------------------
-compgen complete compopt enable fc hash suspend ulimit
+compgen complete compopt fc suspend ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -30,7 +30,9 @@ Plans to address missing builtins
 3) Command lookup builtins (command, type, hash, enable):
    - Added lookup helpers that expose alias, function, builtin, and PATH resolution so command -v/-V and type can report matches.
    - Implemented command and type query modes with documentation and help topics covering -a/-p/-t/-v/-V.
-   - Remaining work: extend command to handle execution, implement hash/enable, and add parity coverage for the outstanding features.
+   - Hash: implemented caching, reset, and path lookup support with parity coverage in `bash_parity_hash`.
+   - Enable: implemented builtin enable/disable tracking with listing, documentation, and parity coverage (`bash_parity_enable`).
+   - Remaining work: extend command to handle execution and add parity coverage for the outstanding features.
 
 4) Job control builtins (disown, kill, suspend):
    - Disown: Implemented. The job registry tracks disowned entries so jobs listings, fg/bg, and wait ignore them while they continue running in the background.
