@@ -28,7 +28,7 @@ const char CornerBR = '╝';
 const char LineH = '═';
 const char LineV = '║';
 
-str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+str ConfiguredWordsPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/etc/words";
 
 bool contains(str s, char c) {
   int i = 1;
@@ -56,132 +56,6 @@ str sortString(str s) {
   return s;
 }
 
-str trimTrailingSlashes(str path) {
-  int len = length(path);
-  while (len > 1 && path[len] == '/') {
-    path = copy(path, 1, len - 1);
-    len = len - 1;
-  }
-  if (len == 0) return "";
-  return path;
-}
-
-str stripLeadingCurrent(str path) {
-  while (length(path) >= 2 && copy(path, 1, 2) == "./") {
-    if (length(path) == 2) {
-      return "";
-    }
-    path = copy(path, 3, length(path) - 2);
-  }
-  return path;
-}
-
-str normalizePath(str path) {
-  if (length(path) == 0) return "";
-  if (path[1] == '/') return trimTrailingSlashes(path);
-  str cleaned = stripLeadingCurrent(path);
-  str pwd = getenv("PWD");
-  if (length(pwd) == 0) {
-    return trimTrailingSlashes(cleaned);
-  }
-  str base = trimTrailingSlashes(pwd);
-  if (length(cleaned) == 0) {
-    return base;
-  }
-  if (length(base) == 0) {
-    return trimTrailingSlashes(cleaned);
-  }
-  if (length(base) == 1 && base[1] == '/') {
-    return trimTrailingSlashes(base + cleaned);
-  }
-  return trimTrailingSlashes(base + '/' + cleaned);
-}
-
-str pathDirname(str path) {
-  if (length(path) == 0) return "";
-  str cleaned = trimTrailingSlashes(path);
-  int len = length(cleaned);
-  if (len == 0) return "";
-  if (len == 1 && cleaned[1] == '/') return "/";
-  int i = len;
-  while (i > 0 && cleaned[i] != '/') i = i - 1;
-  if (i <= 0) return "";
-  if (i == 1) return "/";
-  return trimTrailingSlashes(copy(cleaned, 1, i - 1));
-}
-
-str pathJoin(str base, str rel) {
-  if (length(rel) == 0) return trimTrailingSlashes(base);
-  if (length(base) == 0) return rel;
-  str normalizedBase = trimTrailingSlashes(base);
-  if (rel[1] == '/') {
-    if (length(normalizedBase) == 1 && normalizedBase[1] == '/') {
-      return rel;
-    }
-    return normalizedBase + rel;
-  }
-  if (length(normalizedBase) == 1 && normalizedBase[1] == '/') {
-    return normalizedBase + rel;
-  }
-  return normalizedBase + '/' + rel;
-}
-
-bool pathExists(str path) {
-  if (length(path) == 0) return false;
-  if (fileexists(path)) return true;
-  return false;
-}
-
-str defaultInstallRoot() {
-  str scriptPath = normalizePath(paramstr(0));
-  if (length(scriptPath) == 0) return "";
-  str dir = pathDirname(scriptPath);
-  if (length(dir) == 0) return "";
-  dir = pathDirname(dir);
-  if (length(dir) == 0) return "";
-  dir = pathDirname(dir);
-  if (length(dir) == 0) return "";
-  dir = pathDirname(dir);
-  return dir;
-}
-
-str resolveInstallRoot(str resourcePath) {
-  str override = normalizePath(getenv("PSCAL_INSTALL_ROOT"));
-  if (length(override) > 0) {
-    if (length(resourcePath) == 0 || pathExists(pathJoin(override, resourcePath))) {
-      return override;
-    }
-  }
-
-  if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != '@') {
-    str configured = normalizePath(ConfiguredInstallRoot);
-    if (length(configured) > 0) {
-      if (length(resourcePath) == 0 || pathExists(pathJoin(configured, resourcePath))) {
-        return configured;
-      }
-    }
-  }
-
-  str candidate = defaultInstallRoot();
-  if (length(candidate) > 0) {
-    if (length(resourcePath) == 0 || pathExists(pathJoin(candidate, resourcePath))) {
-      return candidate;
-    }
-  }
-
-  str fallback = normalizePath("/opt/pscal");
-  if (length(resourcePath) == 0 || pathExists(pathJoin(fallback, resourcePath))) {
-    return fallback;
-  }
-  fallback = normalizePath("/usr/local/pscal");
-  if (length(resourcePath) == 0 || pathExists(pathJoin(fallback, resourcePath))) {
-    return fallback;
-  }
-
-  if (length(candidate) > 0) return candidate;
-  if (length(override) > 0) return override;
-  return fallback;
-}
 
 // --- Word repository ---
 class WordRepository {
@@ -197,9 +71,7 @@ class WordRepository {
       ok = my.load(paramstr(1));
     }
     if (!ok) {
-      str installRoot;
-      installRoot = resolveInstallRoot("/etc/words");
-      ok = my.load(pathJoin(installRoot, "/etc/words"));
+      ok = my.load(ConfiguredWordsPath);
     }
     if (!ok) {
       ok = my.load("etc/words");
