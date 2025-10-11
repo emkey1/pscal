@@ -12,7 +12,7 @@ str RootDir;
 str IndexPath;
 str Body;
 text GFile;
-str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+str ConfiguredAssetRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@/misc/htdocs";
 
 // Worker pool + simple ring queue for accepted connections
 int MaxThreads = 8;                   // configurable via CLI
@@ -458,44 +458,6 @@ str fsDefaultInstallRoot() {
   return dir;
 }
 
-str resolveInstallRoot(str resourceRel) {
-  str override = fsNormalizePath(getenv("PSCAL_INSTALL_ROOT"));
-  if (strlen(override) > 0) {
-    if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(override, resourceRel))) {
-      return override;
-    }
-  }
-
-  if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != "@") {
-    str configured = fsNormalizePath(ConfiguredInstallRoot);
-    if (strlen(configured) > 0) {
-      if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(configured, resourceRel))) {
-        return configured;
-      }
-    }
-  }
-
-  str candidate = fsDefaultInstallRoot();
-  if (strlen(candidate) > 0) {
-    if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(candidate, resourceRel))) {
-      return candidate;
-    }
-  }
-
-  str fallback = fsNormalizePath("/opt/pscal");
-  if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(fallback, resourceRel))) {
-    return fallback;
-  }
-  fallback = fsNormalizePath("/usr/local/pscal");
-  if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(fallback, resourceRel))) {
-    return fallback;
-  }
-
-  if (strlen(candidate) > 0) return candidate;
-  if (strlen(override) > 0) return override;
-  return fallback;
-}
-
 void initFiles() {
   int pid = getpid();
   str pidStr = inttostr(pid);
@@ -503,8 +465,7 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  str assetRoot = resolveInstallRoot("/misc/htdocs");
-  str source = fsPathJoin(assetRoot, "/misc/htdocs");
+  str source = ConfiguredAssetRoot;
   int copied = 0;
   if (isDirectory(source)) {
     copied = copyDirectory(source, RootDir);
