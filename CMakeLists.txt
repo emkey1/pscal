@@ -880,7 +880,8 @@ install(DIRECTORY Examples/
         DESTINATION "${_pscal_runtime_root}/Examples"
         USE_SOURCE_PERMISSIONS)
 foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
-    get_filename_component(example_dir "${example}" DIRECTORY)
+    string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+    get_filename_component(example_dir "${example_relative}" DIRECTORY)
     install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
             DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
