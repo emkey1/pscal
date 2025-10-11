@@ -842,6 +842,9 @@ install(DIRECTORY fonts/
 install(DIRECTORY etc/
         DESTINATION "${_pscal_runtime_root}/etc"
         USE_SOURCE_PERMISSIONS)
+install(DIRECTORY Examples/
+        DESTINATION "${_pscal_runtime_root}/Examples"
+        USE_SOURCE_PERMISSIONS)
 install(DIRECTORY Docs/
         DESTINATION "${_pscal_runtime_root}/docs")
 install(DIRECTORY Tests/libs/
