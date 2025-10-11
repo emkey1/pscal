@@ -801,6 +801,40 @@ endif()
 # ---- Examples ----
 add_subdirectory(Examples)
 
+set(PSCAL_CONFIGURED_EXAMPLES
+    Examples/pascal/base/hangman
+    Examples/pascal/base/hangman2
+    Examples/pascal/base/hangman3
+    Examples/pascal/base/hangman4
+    Examples/pascal/base/hangman5
+    Examples/pascal/base/weather
+    Examples/pascal/base/weather_json
+    Examples/pascal/sdl/mando
+    Examples/pascal/sdl/mando_Linux
+    Examples/pascal/sdl/SoundSimplePong
+    Examples/pascal/sdl/FireWorks
+    Examples/clike/base/hangman5
+    Examples/clike/base/simple_web_server
+    Examples/clike/sdl/mandelbrot_interactive
+    Examples/clike/sdl/spacegame
+    Examples/rea/base/hangman5
+    Examples/rea/base/openweather_forecast
+    Examples/rea/sdl/planets
+    Examples/rea/sdl/planets_inner
+    Examples/rea/sdl/planets_earth
+    Examples/rea/sdl/block_game
+    Examples/rea/sdl/mandelbrot_interactive
+    Examples/rea/sdl/mandelbrot_interactive_ext)
+list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
+set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
+foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
+    set(src "${CMAKE_SOURCE_DIR}/${example}")
+    set(dst "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}")
+    get_filename_component(dst_dir "${dst}" DIRECTORY)
+    file(MAKE_DIRECTORY "${dst_dir}")
+    configure_file("${src}" "${dst}" @ONLY)
+endforeach()
+
 # ---- optional install ----
 include(GNUInstallDirs)
 set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
@@ -845,6 +879,14 @@ install(DIRECTORY etc/
 install(DIRECTORY Examples/
         DESTINATION "${_pscal_runtime_root}/Examples"
         USE_SOURCE_PERMISSIONS)
+foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
+    get_filename_component(example_dir "${example}" DIRECTORY)
+    install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
+            DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                       GROUP_READ GROUP_EXECUTE
+                       WORLD_READ WORLD_EXECUTE)
+endforeach()
 install(DIRECTORY Docs/
         DESTINATION "${_pscal_runtime_root}/docs")
 install(DIRECTORY Tests/libs/

@@ -1,12 +1,19 @@
 #!/usr/bin/env pascal
 program HangmanGame;
 
-uses CRT;
+uses CRT, SysUtils;
 
 const
   MAX_WRONG = 8;  { maximum number of wrong guesses }
   MIN_LENGTH = 4;
   MAX_LENGTH = 7;
+  CONFIGURED_WORDS_PATH = '@PSCAL_INSTALL_ROOT_RESOLVED@/etc/words';
+  DEFAULT_WORDS_PATH = '/etc/words';
+  REPO_WORDS_FALLBACKS: array[0..2] of string = (
+    '../../etc/words',
+    '../etc/words',
+    'etc/words'
+  );
   // Constants for screen layout
   HEADER_ROW = 1;
   SUBTITLE_ROW = 2;
@@ -55,6 +62,42 @@ begin
       end;
 end;
 
+function ResolveWordsPath: string;
+var
+  baseDir, candidate: string;
+  i: integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', CONFIGURED_WORDS_PATH) = 0 then
+  begin
+    if FileExists(CONFIGURED_WORDS_PATH) then
+    begin
+      ResolveWordsPath := CONFIGURED_WORDS_PATH;
+      exit;
+    end;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(REPO_WORDS_FALLBACKS) to High(REPO_WORDS_FALLBACKS) do
+  begin
+    candidate := ExpandFileName(baseDir + REPO_WORDS_FALLBACKS[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveWordsPath := candidate;
+      exit;
+    end;
+  end;
+
+  if FileExists(DEFAULT_WORDS_PATH) then
+    ResolveWordsPath := DEFAULT_WORDS_PATH
+  else
+    ResolveWordsPath := CONFIGURED_WORDS_PATH;
+end;
+
 function ChooseRandomWord: string;
 var
   f: Text;
@@ -63,7 +106,7 @@ var
   validCount, target: integer;
 begin
   // *** IMPORTANT: Update this path to your actual 'words' file location ***
-  filename := '/usr/local/Pscal/etc/words';  { Adjust path as needed }
+  filename := ResolveWordsPath;  { Prefer installed prefix; fall back to repo/system locations }
   ChooseRandomWord := '';
   assign(f, filename);
   {$I-} reset(f); {$I+} // Disable IO checking for reset

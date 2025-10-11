@@ -6,6 +6,8 @@ uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.
 const
   MAX_SUBSTR_LEN = 1024;                         // Max length for copy/pos substrings
   INSTALL_FALLBACKS: array[0..1] of string = ('/opt/pscal', '/usr/local/pscal');
+  INSTALL_FALLBACKS_COUNT = 2;
+  CONFIGURED_INSTALL_ROOT = '@PSCAL_INSTALL_ROOT_RESOLVED@';
 
 type
   // mstream type assumed to be available implicitly or via SysUtils/other unit
@@ -86,13 +88,21 @@ end;
 
 function ResolveInstallRoot: string;
 var
-  override, candidate: string;
+  override, candidate, configured: string;
   i: Integer;
 begin
   override := NormalizePath(GetEnv('PSCAL_INSTALL_ROOT'));
   if (override <> '') and DirectoryExists(override) then
   begin
     ResolveInstallRoot := override;
+    exit;
+  end;
+
+  configured := NormalizePath(CONFIGURED_INSTALL_ROOT);
+  if (configured <> '') and (Pos('PSCAL_INSTALL_ROOT', CONFIGURED_INSTALL_ROOT) = 0) and
+     DirectoryExists(configured) then
+  begin
+    ResolveInstallRoot := configured;
     exit;
   end;
 
@@ -103,7 +113,7 @@ begin
     exit;
   end;
 
-  for i := Low(INSTALL_FALLBACKS) to High(INSTALL_FALLBACKS) do
+  for i := 0 to INSTALL_FALLBACKS_COUNT - 1 do
     if DirectoryExists(INSTALL_FALLBACKS[i]) then
     begin
       ResolveInstallRoot := INSTALL_FALLBACKS[i];
@@ -138,7 +148,7 @@ begin
     exit;
   end;
 
-  for i := Low(INSTALL_FALLBACKS) to High(INSTALL_FALLBACKS) do
+  for i := 0 to INSTALL_FALLBACKS_COUNT - 1 do
   begin
     candidate := JoinPaths(INSTALL_FALLBACKS[i], relativePath);
     if FileExists(candidate) or DirectoryExists(candidate) then

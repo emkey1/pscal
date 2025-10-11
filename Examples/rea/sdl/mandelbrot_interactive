@@ -50,11 +50,14 @@ class MandelbrotApp {
     double aspect = double(myself.Height) / double(myself.Width);
     myself.maxIm = myself.minIm + widthSpan * aspect;
     initgraph(myself.Width, myself.Height, "Rea Mandelbrot");
-    string systemFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    string configuredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
+    string legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
     string repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
     string repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
-    if (fileexists(systemFontPath)) {
-      inittextsystem(systemFontPath, 18);
+    if (length(configuredFontPath) > 0 && configuredFontPath[1] != '@' && fileexists(configuredFontPath)) {
+      inittextsystem(configuredFontPath, 18);
+    } else if (fileexists(legacyFontPath)) {
+      inittextsystem(legacyFontPath, 18);
     } else if (fileexists(repoFontPath1)) {
       inittextsystem(repoFontPath1, 18);
     } else {

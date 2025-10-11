@@ -19,6 +19,9 @@ const int KEY_RIGHT = 1073741903;
 const int KEY_UP = 1073741906;
 const int KEY_DOWN = 1073741905;
 
+str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+str ConfiguredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
+
 byte pixelData[Width * Height * BytesPerPixel];
 int rowDone[Height];
 int threadStart[ThreadCount];
@@ -141,6 +144,15 @@ str resolveInstallRoot(str resourceRel) {
     if (strlen(override) > 0) {
         if (strlen(resourceRel) == 0 || pathExists(pathJoin(override, resourceRel))) {
             return override;
+        }
+    }
+
+    if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != "@") {
+        str configured = normalizePath(ConfiguredInstallRoot);
+        if (strlen(configured) > 0) {
+            if (strlen(resourceRel) == 0 || pathExists(pathJoin(configured, resourceRel))) {
+                return configured;
+            }
         }
     }
 
@@ -311,6 +323,9 @@ int main() {
     if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
     str installRoot;
     installRoot = resolveInstallRoot("/fonts/Roboto/static/Roboto-Regular.ttf");
+    if (!textReady && length(ConfiguredFontPath) > 0 && copy(ConfiguredFontPath, 1, 1) != "@") {
+        textReady = tryInitFont(ConfiguredFontPath, fontSize);
+    }
     if (!textReady) textReady = tryInitFont(pathJoin(installRoot, "/fonts/Roboto/static/Roboto-Regular.ttf"), fontSize);
     if (!textReady) textReady = tryInitFont("/opt/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);
     if (!textReady) textReady = tryInitFont("/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf", fontSize);

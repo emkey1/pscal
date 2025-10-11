@@ -12,6 +12,7 @@ str RootDir;
 str IndexPath;
 str Body;
 text GFile;
+str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
 
 // Worker pool + simple ring queue for accepted connections
 int MaxThreads = 8;                   // configurable via CLI
@@ -462,6 +463,15 @@ str resolveInstallRoot(str resourceRel) {
   if (strlen(override) > 0) {
     if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(override, resourceRel))) {
       return override;
+    }
+  }
+
+  if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != "@") {
+    str configured = fsNormalizePath(ConfiguredInstallRoot);
+    if (strlen(configured) > 0) {
+      if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(configured, resourceRel))) {
+        return configured;
+      }
     }
   }
 

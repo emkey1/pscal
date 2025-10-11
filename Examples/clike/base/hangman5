@@ -21,6 +21,7 @@ int centerCol, hangmanStartCol, effectiveWidth;
 
 int wins = 0;
 int losses = 0;
+str configuredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
 
 str trimTrailingSlashes(str path) {
     int len = length(path);
@@ -122,6 +123,15 @@ str resolveInstallRoot(str resourceRel) {
     if (strlen(override) > 0) {
         if (strlen(resourceRel) == 0 || pathExists(pathJoin(override, resourceRel))) {
             return override;
+        }
+    }
+
+    if (length(configuredInstallRoot) > 0 && copy(configuredInstallRoot, 1, 1) != "@") {
+        str configured = normalizePath(configuredInstallRoot);
+        if (strlen(configured) > 0) {
+            if (strlen(resourceRel) == 0 || pathExists(pathJoin(configured, resourceRel))) {
+                return configured;
+            }
         }
     }
 

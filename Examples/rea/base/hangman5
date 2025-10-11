@@ -28,6 +28,8 @@ const char CornerBR = '╝';
 const char LineH = '═';
 const char LineV = '║';
 
+str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+
 bool contains(str s, char c) {
   int i = 1;
   while (i <= length(s)) {
@@ -148,6 +150,15 @@ str resolveInstallRoot(str resourcePath) {
   if (length(override) > 0) {
     if (length(resourcePath) == 0 || pathExists(pathJoin(override, resourcePath))) {
       return override;
+    }
+  }
+
+  if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != '@') {
+    str configured = normalizePath(ConfiguredInstallRoot);
+    if (length(configured) > 0) {
+      if (length(resourcePath) == 0 || pathExists(pathJoin(configured, resourcePath))) {
+        return configured;
+      }
     }
   }
 
