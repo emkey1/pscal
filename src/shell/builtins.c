@@ -66,6 +66,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"times", "times", 47},
     {"logout", "logout", 44},
     {"disown", "disown", 45},
+    {"kill", "kill", 51},
     {"hash", "hash", 50},
     {"__shell_exec", "__shell_exec", 1001},
     {"__shell_pipeline", "__shell_pipeline", 1002},

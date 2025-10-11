@@ -71,6 +71,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "history", vmBuiltinShellHistory);
     registerShellBuiltin(category, command_group, "jobs", vmBuiltinShellJobs);
     registerShellBuiltin(category, command_group, "disown", vmBuiltinShellDisown);
+    registerShellBuiltin(category, command_group, "kill", vmBuiltinShellKill);
     registerShellBuiltin(category, command_group, "fg", vmBuiltinShellFg);
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);

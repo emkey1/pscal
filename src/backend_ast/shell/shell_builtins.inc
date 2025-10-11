@@ -1,6 +1,7 @@
 /* Auto-generated include: shell builtins exposed to the VM. Included from shell.c. */
 #include "shell/runner.h"
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6505,6 +6506,18 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "kill",
+        "Send signals to processes or jobs.",
+        "kill [-s signal|-n signum|-SIGNAL] pid|job ... | kill -l [name|number ...]",
+        "Delivers SIGNAL (default TERM) to each PID or job specifier. Numeric targets"
+        " follow POSIX kill semantics so negative values address process groups and"
+        " zero targets the current process group. With -l and no operands the builtin"
+        " lists known signals; when arguments follow -l numeric values print their"
+        " signal names and textual names print their corresponding signal numbers.",
+        NULL,
+        0
+    },
+    {
         "local",
         "Activate the shell's local scope flag.",
         "local",
@@ -6988,6 +7001,277 @@ Value vmBuiltinShellDisown(VM *vm, int arg_count, Value *args) {
     free(indices);
 
     shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
+static bool shellKillParseLong(Value value, long *out_value) {
+    if (!out_value) {
+        return false;
+    }
+    if (IS_INTLIKE(value)) {
+        *out_value = (long)AS_INTEGER(value);
+        return true;
+    }
+    if (value.type == TYPE_STRING && value.s_val) {
+        errno = 0;
+        char *endptr = NULL;
+        long parsed = strtol(value.s_val, &endptr, 10);
+        if (errno != 0 || !endptr || *endptr != '\0') {
+            return false;
+        }
+        *out_value = parsed;
+        return true;
+    }
+    return false;
+}
+
+static bool shellKillParseSignal(Value value, bool numeric_only, int *out_signo) {
+    if (!out_signo) {
+        return false;
+    }
+    if (numeric_only) {
+        long parsed = 0;
+        if (!shellKillParseLong(value, &parsed)) {
+            return false;
+        }
+        if (parsed < 0 || parsed >= NSIG) {
+            return false;
+        }
+        *out_signo = (int)parsed;
+        return true;
+    }
+    if (value.type == TYPE_STRING && value.s_val) {
+        return shellRuntimeParseSignal(value.s_val, out_signo);
+    }
+    if (IS_INTLIKE(value)) {
+        long parsed = (long)AS_INTEGER(value);
+        if (parsed < 0 || parsed >= NSIG) {
+            return false;
+        }
+        *out_signo = (int)parsed;
+        return true;
+    }
+    if (value.type == TYPE_STRING && value.s_val) {
+        return shellRuntimeParseSignal(value.s_val, out_signo);
+    }
+    return false;
+}
+
+static void shellKillPrintSignalTable(void) {
+    int column = 0;
+    char name[32];
+    for (int signo = 1; signo < NSIG; ++signo) {
+        if (!shellRuntimeSignalName(signo, true, name, sizeof(name))) {
+            continue;
+        }
+        printf("%2d) %-12s", signo, name);
+        column++;
+        if (column == 5) {
+            printf("\n");
+            column = 0;
+        } else {
+            printf(" ");
+        }
+    }
+    if (column != 0) {
+        printf("\n");
+    }
+}
+
+static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int signo) {
+    if (index >= gShellJobCount) {
+        runtimeError(vm, "kill: invalid job index");
+        return false;
+    }
+    ShellJob *job = &gShellJobs[index];
+    if (job->pgid > 0) {
+        if (kill(-job->pgid, signo) != 0) {
+            runtimeError(vm, "kill: %s: %s",
+                         spec_text ? spec_text : "job",
+                         strerror(errno));
+            return false;
+        }
+        return true;
+    }
+    bool sent = false;
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid <= 0) {
+            continue;
+        }
+        sent = true;
+        if (kill(pid, signo) != 0) {
+            runtimeError(vm, "kill: %s: %s",
+                         spec_text ? spec_text : "job",
+                         strerror(errno));
+            return false;
+        }
+    }
+    if (!sent) {
+        runtimeError(vm, "kill: %s: no associated processes",
+                     spec_text ? spec_text : "job");
+        return false;
+    }
+    return true;
+}
+
+Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
+    shellCollectJobs();
+
+    bool parsing_options = true;
+    bool expect_signal_value = false;
+    char pending_option = '\0';
+    bool list_mode = false;
+    int list_start = arg_count;
+    int operand_start = arg_count;
+    int signal_number = SIGTERM;
+
+    for (int i = 0; i < arg_count;) {
+        Value value = args[i];
+        const char *text = (value.type == TYPE_STRING) ? value.s_val : NULL;
+
+        if (expect_signal_value) {
+            bool numeric_only = (pending_option == 'n');
+            int signo = 0;
+            if (!shellKillParseSignal(value, numeric_only, &signo)) {
+                runtimeError(vm, "kill: invalid signal");
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            signal_number = signo;
+            expect_signal_value = false;
+            pending_option = '\0';
+            parsing_options = true;
+            ++i;
+            continue;
+        }
+
+        if (list_mode) {
+            break;
+        }
+
+        if (parsing_options && text) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                operand_start = i + 1;
+                ++i;
+                break;
+            }
+            if (strcmp(text, "-l") == 0) {
+                list_mode = true;
+                list_start = i + 1;
+                ++i;
+                break;
+            }
+            if (strcmp(text, "-s") == 0 || strcmp(text, "-n") == 0) {
+                pending_option = text[1];
+                expect_signal_value = true;
+                ++i;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                int signo = 0;
+                if (shellRuntimeParseSignal(text + 1, &signo)) {
+                    signal_number = signo;
+                    parsing_options = false;
+                    operand_start = i + 1;
+                    ++i;
+                    break;
+                }
+            }
+            parsing_options = false;
+            operand_start = i;
+            break;
+        } else if (parsing_options) {
+            parsing_options = false;
+            operand_start = i;
+            break;
+        } else {
+            operand_start = i;
+            break;
+        }
+    }
+
+    if (expect_signal_value) {
+        runtimeError(vm, "kill: option requires an argument");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (list_mode) {
+        bool ok = true;
+        if (list_start >= arg_count) {
+            shellKillPrintSignalTable();
+        } else {
+            for (int i = list_start; i < arg_count; ++i) {
+                Value value = args[i];
+                long numeric = 0;
+                if (shellKillParseLong(value, &numeric)) {
+                    char name[32];
+                    if (!shellRuntimeSignalName((int)numeric, false, name, sizeof(name))) {
+                        runtimeError(vm, "kill: %ld: unknown signal", numeric);
+                        ok = false;
+                        continue;
+                    }
+                    printf("%s\n", name);
+                    continue;
+                }
+                if (value.type != TYPE_STRING || !value.s_val) {
+                    runtimeError(vm, "kill: invalid signal");
+                    ok = false;
+                    continue;
+                }
+                int signo = 0;
+                if (!shellRuntimeParseSignal(value.s_val, &signo)) {
+                    runtimeError(vm, "kill: invalid signal '%s'", value.s_val);
+                    ok = false;
+                    continue;
+                }
+                printf("%d\n", signo);
+            }
+        }
+        shellUpdateStatus(ok ? 0 : 1);
+        return makeVoid();
+    }
+
+    if (operand_start >= arg_count) {
+        runtimeError(vm, "kill: missing operand");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool overall_ok = true;
+    for (int i = operand_start; i < arg_count; ++i) {
+        Value target = args[i];
+        if (target.type == TYPE_STRING && target.s_val && target.s_val[0] == '%' && target.s_val[1] != '\0') {
+            size_t index = 0;
+            if (!shellParseJobSpecifier(vm, "kill", target, &index)) {
+                overall_ok = false;
+                continue;
+            }
+            if (!shellKillSignalJob(vm, target.s_val, index, signal_number)) {
+                overall_ok = false;
+            }
+            continue;
+        }
+        long pid_value = 0;
+        if (!shellKillParseLong(target, &pid_value)) {
+            if (target.type == TYPE_STRING && target.s_val) {
+                runtimeError(vm, "kill: invalid pid '%s'", target.s_val);
+            } else {
+                runtimeError(vm, "kill: invalid pid");
+            }
+            overall_ok = false;
+            continue;
+        }
+        if (kill((pid_t)pid_value, signal_number) != 0) {
+            runtimeError(vm, "kill: (%ld) %s", pid_value, strerror(errno));
+            overall_ok = false;
+        }
+    }
+
+    shellCollectJobs();
+    shellUpdateStatus(overall_ok ? 0 : 1);
     return makeVoid();
 }
 
