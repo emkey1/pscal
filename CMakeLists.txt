@@ -68,6 +68,31 @@ configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_pa
 include_directories("${CMAKE_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
+# Resolve the final runtime destination so install rules can write directly to
+# either an absolute override or the default path under the chosen prefix.
+set(PSCAL_INSTALL_ROOT_RESOLVED "${PSCAL_INSTALL_ROOT}")
+if(NOT IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_RESOLVED}")
+    set(PSCAL_INSTALL_ROOT_RESOLVED "${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_RESOLVED}")
+endif()
+string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT_RESOLVED "${PSCAL_INSTALL_ROOT_RESOLVED}")
+
+set(_pscal_runtime_dest "${PSCAL_INSTALL_ROOT}")
+if(IS_ABSOLUTE "${_pscal_runtime_dest}")
+    file(RELATIVE_PATH _pscal_install_root_relative "${CMAKE_INSTALL_PREFIX}" "${PSCAL_INSTALL_ROOT_RESOLVED}")
+    string(SUBSTRING "${_pscal_install_root_relative}" 0 2 _pscal_relative_prefix)
+    if(_pscal_install_root_relative STREQUAL "")
+        set(_pscal_runtime_dest ".")
+    elseif(_pscal_relative_prefix STREQUAL "..")
+        set(_pscal_runtime_dest "${PSCAL_INSTALL_ROOT_RESOLVED}")
+    else()
+        set(_pscal_runtime_dest "${_pscal_install_root_relative}")
+    endif()
+elseif(_pscal_runtime_dest STREQUAL "")
+    set(_pscal_runtime_dest ".")
+endif()
+
+set(PSCAL_INSTALL_ROOT_DESTINATION "${_pscal_runtime_dest}")
+
 # Optionally build additional binaries
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
@@ -778,7 +803,9 @@ add_subdirectory(Examples)
 
 # ---- optional install ----
 include(GNUInstallDirs)
-install(TARGETS pascal pscalvm
+set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
+
+install(TARGETS pascal pscalvm clike clike-repl rea
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 if(BUILD_DASCAL)
     install(TARGETS dascal
@@ -788,6 +815,92 @@ if(BUILD_PSCALD)
     install(TARGETS pscald
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# Ensure we can replace a running exsh binary (for example when users have it as
+# their login shell) by renaming the existing executable before installing the
+# new build. The backup is overwritten on subsequent installs.
+install(CODE [[
+    set(exsh_path "$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/exsh")
+    if(EXISTS "${exsh_path}" OR IS_SYMLINK "${exsh_path}")
+        set(exsh_backup "${exsh_path}.previous")
+        if(EXISTS "${exsh_backup}" OR IS_SYMLINK "${exsh_backup}")
+            file(REMOVE "${exsh_backup}")
+        endif()
+        message(STATUS "Backing up existing exsh to ${exsh_backup}")
+        file(RENAME "${exsh_path}" "${exsh_backup}")
+    endif()
+]])
+install(TARGETS exsh
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+install(DIRECTORY lib/
+        DESTINATION "${_pscal_runtime_root}/lib"
+        USE_SOURCE_PERMISSIONS)
+install(DIRECTORY fonts/
+        DESTINATION "${_pscal_runtime_root}/fonts"
+        USE_SOURCE_PERMISSIONS)
+install(DIRECTORY etc/
+        DESTINATION "${_pscal_runtime_root}/etc"
+        USE_SOURCE_PERMISSIONS)
+install(DIRECTORY Docs/
+        DESTINATION "${_pscal_runtime_root}/docs")
+install(DIRECTORY Tests/libs/
+        DESTINATION "${_pscal_runtime_root}/etc/tests"
+        USE_SOURCE_PERMISSIONS)
+install(DIRECTORY lib/rea/
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/rea"
+        USE_SOURCE_PERMISSIONS)
+
+install(CODE [[
+    set(ps_root "")
+    if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL ".")
+        set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+    elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
+        set(ps_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
+    else()
+        if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
+            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+        else()
+            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
+        endif()
+    endif()
+    if(ps_root STREQUAL "")
+        return()
+    endif()
+
+    set(compat_targets
+        "${ps_root}/lib/pascal"
+        "${ps_root}/lib/clike"
+        "${ps_root}/lib/rea"
+        "${ps_root}/lib/misc")
+    set(compat_links
+        "${ps_root}/pascal/lib"
+        "${ps_root}/clike/lib"
+        "${ps_root}/rea/lib"
+        "${ps_root}/misc")
+
+    list(LENGTH compat_targets compat_count)
+    if(compat_count EQUAL 0)
+        return()
+    endif()
+
+    math(EXPR compat_last "${compat_count} - 1")
+    foreach(idx RANGE 0 ${compat_last})
+        list(GET compat_targets ${idx} compat_target)
+        list(GET compat_links ${idx} compat_link)
+
+        if(NOT EXISTS "${compat_target}" AND NOT IS_SYMLINK "${compat_target}")
+            continue()
+        endif()
+        if(EXISTS "${compat_link}" OR IS_SYMLINK "${compat_link}")
+            continue()
+        endif()
+
+        get_filename_component(compat_parent "${compat_link}" DIRECTORY)
+        file(MAKE_DIRECTORY "${compat_parent}")
+        file(CREATE_LINK "${compat_target}" "${compat_link}" SYMBOLIC)
+    endforeach()
+]])
 
 add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
 add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)

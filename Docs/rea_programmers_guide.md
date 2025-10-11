@@ -36,7 +36,7 @@ cmake -S . -B build -DSDL=ON         # add -DBUILD_DASCAL=ON if you also need th
 cmake --build build --target rea     # builds build/bin/rea
 ```
 
-The compiler reuses the shared VM and installer. To install the toolchain globally, run `./install.sh` after building (use `sudo` when writing to system locations). Reconfigure with `-DSDL=OFF` for headless environments.
+The compiler reuses the shared VM and installer. To install the toolchain globally, run `cmake --install build` after building (use `sudo` when writing to system locations). Reconfigure with `-DSDL=OFF` for headless environments.
 
 ### 1.4 Running Rea Programs
 
@@ -378,7 +378,7 @@ The scope harness (Section 4.4) provides deeper coverage for modules, closures, 
 
 ### 9.1 Hello World and CLI Utilities
 
-`Examples/rea/base/hello` is the canonical hello-world script. Each example includes a shebang so it can be executed directly after `install.sh` installs the interpreter shim.
+`Examples/rea/base/hello` is the canonical hello-world script. Each example includes a shebang so it can be executed directly after `cmake --install` publishes the interpreter shim.
 
 ### 9.2 Object-Oriented Patterns
 

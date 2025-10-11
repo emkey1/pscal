@@ -24,10 +24,9 @@ physics, projection, and lighting hints.
 
 ## Install the PSCAL suite
 
-The helper script installs the virtual machine and tools so the new front end can
-run:
+CMake installs the virtual machine and tools so the new front end can run:
 ```sh
-sudo ./install.sh
+sudo cmake --install build
 ```
 
 ## Run the sample

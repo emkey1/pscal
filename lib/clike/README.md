@@ -27,4 +27,4 @@ following modules are available:
 
 Each module is self-contained and relies only on core VM built-ins, so they can
 be copied into standalone projects or accessed through `CLIKE_LIB_DIR` once
-installed with `install.sh`.
+installed with `cmake --install`.
