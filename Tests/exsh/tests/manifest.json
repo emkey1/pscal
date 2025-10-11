@@ -487,6 +487,14 @@
             "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
         },
         {
+            "id": "bash_parity_caller",
+            "name": "caller mirrors Bash call stack output",
+            "category": "builtins",
+            "description": "caller reports call frames with optional depth in parity with Bash.",
+            "script": "Tests/exsh/tests/bash_parity_caller.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "bash_parity_export_pipeline",
             "name": "export works in pipelines",
             "category": "parity",

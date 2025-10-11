@@ -6480,6 +6480,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "caller",
+        "Report information about active call frames.",
+        "caller [depth]",
+        "Prints the line number and caller context for the current function by "
+        "default. Providing DEPTH selects a deeper stack frame, mirroring Bash's "
+        "caller builtin output.",
+        NULL,
+        0
+    },
+    {
         "history",
         "Print the interactive history list.",
         "history",
@@ -6925,6 +6935,69 @@ Value vmBuiltinShellUnalias(VM *vm, int arg_count, Value *args) {
     }
 
     shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
+Value vmBuiltinShellCaller(VM *vm, int arg_count, Value *args) {
+    long depth = 0;
+    if (arg_count > 1) {
+        runtimeError(vm, "caller: too many arguments");
+        shellUpdateStatus(2);
+        return makeVoid();
+    }
+    if (arg_count == 1) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val) {
+            runtimeError(vm, "caller: expected numeric depth");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        char *end = NULL;
+        depth = strtol(args[0].s_val, &end, 10);
+        if (!end || *end != '\0') {
+            runtimeError(vm, "caller: %s: numeric argument required", args[0].s_val);
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+        if (depth < 0) {
+            runtimeError(vm, "caller: negative depth not allowed");
+            shellUpdateStatus(2);
+            return makeVoid();
+        }
+    }
+
+    size_t stack_depth = shellRuntimeCallStackDepth();
+    if (stack_depth == 0 || (size_t)depth >= stack_depth) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    const ShellCallFrame *frame = shellRuntimeCallFrameAtDepth((size_t)depth);
+    if (!frame) {
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    int line = frame->line >= 0 ? frame->line : 0;
+    const char *function = (frame->caller_function && *frame->caller_function)
+                               ? frame->caller_function
+                               : "NULL";
+    const char *source = (frame->source && *frame->source) ? frame->source : NULL;
+
+    if (depth == 0) {
+        if (source) {
+            printf("%d %s\n", line, source);
+        } else {
+            printf("%d %s\n", line, function);
+        }
+    } else {
+        if (source) {
+            printf("%d %s %s\n", line, function, source);
+        } else {
+            printf("%d %s\n", line, function);
+        }
+    }
+
+    shellUpdateStatus(0);
     return makeVoid();
 }
 
