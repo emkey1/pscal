@@ -244,6 +244,7 @@ static const char *SHELL_USAGE =
     "     --dump-bytecode-only        Disassemble bytecode and exit.\n"
     "     --dump-ext-builtins         List builtin commands.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
+    "     --semantic-warnings         Emit semantic analysis warnings.\n"
     "     --vm-trace-head=N           Trace first N VM instructions.\n"
     "     --verbose                 Print compilation/cache status messages.\n"
     "     -d                          Enable verbose VM error diagnostics.\n";
@@ -390,6 +391,9 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (base_options) {
         rc_options.verbose_errors = base_options->verbose_errors;
         rc_options.frontend_path = base_options->frontend_path;
+        rc_options.suppress_warnings = base_options->suppress_warnings;
+    } else {
+        rc_options.suppress_warnings = true;
     }
     rc_options.no_cache = 1;
     rc_options.quiet = base_options ? base_options->quiet : true;
@@ -2712,6 +2716,7 @@ int main(int argc, char **argv) {
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     options.quiet = true;
+    options.suppress_warnings = true;
     shellRuntimeSetArg0(options.frontend_path);
     shellRuntimeSetInteractive(false);
 
@@ -2741,6 +2746,8 @@ int main(int argc, char **argv) {
             dump_ext_builtins_flag = 1;
         } else if (strcmp(argv[i], "--no-cache") == 0) {
             options.no_cache = 1;
+        } else if (strcmp(argv[i], "--semantic-warnings") == 0) {
+            options.suppress_warnings = false;
         } else if (strncmp(argv[i], "--vm-trace-head=", 16) == 0) {
             options.vm_trace_head = atoi(argv[i] + 16);
         } else if (strcmp(argv[i], "--verbose") == 0) {

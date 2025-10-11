@@ -24,6 +24,7 @@ ends:
 - `--dump-bytecode-only` disassembles and exits without running the VM.
 - `--dump-ext-builtins` lists available shell builtins.
 - `--no-cache` forces recompilation even if a cached bytecode artefact exists.
+- `--semantic-warnings` enables semantic analysis diagnostics prior to execution.
 - `--vm-trace-head=<N>` traces the first `N` VM instructions (the same toggle as
   the Pascal and CLike front ends).
 
