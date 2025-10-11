@@ -66,7 +66,7 @@ Developer experience
 - Build: macOS SDK auto‑detect; opt‑in `-DPSCAL_USE_BREW_CURL=ON` to prefer Homebrew curl; clean `-Wall` builds.
 
 Fixed
-- Installer: ensure `/usr/local/pscal/misc` exists before copying misc assets.
+- Installer: ensure `${PSCAL_INSTALL_ROOT}/misc` exists before copying misc assets.
 
 All notable changes to this project will be documented in this file.
 

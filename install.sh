@@ -6,7 +6,8 @@ usage() {
 Usage: install.sh [--prefix DIR] [--pscal-dir DIR] [--build-dir DIR]
 
 Options:
-  --prefix DIR      Installation prefix (default: /usr/local)
+  --prefix DIR      Installation prefix (default: value from the build cache
+                    or /usr/local)
   --pscal-dir DIR   Destination for PSCAL libraries and assets.
                     Defaults to the compiled-in install root when available
                     (unless --prefix is provided), otherwise
@@ -80,6 +81,16 @@ case $BUILD_DIR in
 esac
 
 BUILD_ROOT=$(dirname "$BIN_SRC")
+
+if [ "$PREFIX_SET" -eq 0 ]; then
+    CACHE_FILE=$BUILD_ROOT/CMakeCache.txt
+    if [ -f "$CACHE_FILE" ]; then
+        CACHE_PREFIX=$(sed -n 's/^CMAKE_INSTALL_PREFIX:PATH=//p' "$CACHE_FILE" | tail -n 1)
+        if [ -n "$CACHE_PREFIX" ]; then
+            PREFIX=$CACHE_PREFIX
+        fi
+    fi
+fi
 
 resolve_pscal_dir() {
     candidate=$1

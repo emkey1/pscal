@@ -44,7 +44,7 @@ Date: 2025-09-18
   - Updated README and guides for procedure/function pointers, thread APIs, AST JSON pipeline, and HTTP security.
 - Build
   - macOS: SDK auto-detection; opt-in `-DPSCAL_USE_BREW_CURL=ON` to prefer Homebrew curl.
-  - Installer: misc library copy fixed (ensures `/usr/local/pscal/misc` exists).
+  - Installer: misc library copy fixed (ensures `${PSCAL_INSTALL_ROOT}/misc` exists).
 
 ## Fixed
 - Pointer metadata propagation for locals/globals enabling reliable `new(p)` and `p^` dereference behavior.
