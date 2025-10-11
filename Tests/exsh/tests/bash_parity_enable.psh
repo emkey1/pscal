@@ -3,13 +3,39 @@
 export LC_ALL=C
 
 enable -n hash
-printf "disable_status:%s\n" "$?"
+printf "disable_hash_status:%s\n" "$?"
 
 enable -n | sort
 printf "list_disabled_status:%s\n" "$?"
 
 enable hash
-printf "enable_status:%s\n" "$?"
+printf "enable_hash_status:%s\n" "$?"
 
 enable -n | sort
 printf "list_after_enable_status:%s\n" "$?"
+
+enable echo
+printf "initial_type:%s\n" "$(type -t echo)"
+
+enable -n echo
+printf "after_disable_type:%s\n" "$(type -t echo)"
+
+disabled_snapshot="$(enable -n | sort | tr '\n' ',' )"
+disabled_snapshot="${disabled_snapshot%,}"
+if [ -z "$disabled_snapshot" ]; then
+    disabled_snapshot="<none>"
+fi
+printf "disabled_snapshot:%s\n" "$disabled_snapshot"
+
+builtin echo builtin-call >/dev/null 2>&1
+printf "builtin_status:%s\n" "$?"
+
+enable echo
+printf "after_enable_type:%s\n" "$(type -t echo)"
+
+post_disable_snapshot="$(enable -n | sort | tr '\n' ',' )"
+post_disable_snapshot="${post_disable_snapshot%,}"
+if [ -z "$post_disable_snapshot" ]; then
+    post_disable_snapshot="<none>"
+fi
+printf "disabled_after_enable:%s\n" "$post_disable_snapshot"

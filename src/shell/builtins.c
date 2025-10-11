@@ -36,6 +36,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"typeset", "declare", 32},
     {"readonly", "readonly", 40},
     {"command", "command", 41},
+    {"enable", "enable", 53},
     {"printf", "printf", 46},
     {"getopts", "getopts", 48},
     {"mapfile", "mapfile", 49},

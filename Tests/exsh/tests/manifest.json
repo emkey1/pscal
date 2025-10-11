@@ -543,6 +543,14 @@
             "expect": "match_bash"
         },
         {
+            "id": "bash_parity_enable",
+            "name": "enable toggles builtins like bash",
+            "category": "parity",
+            "description": "Disabling and re-enabling builtins mirrors Bash behaviour and reporting.",
+            "script": "Tests/exsh/tests/bash_parity_enable.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "bash_parity_kill",
             "name": "kill builtin matches bash",
             "category": "builtins",

@@ -7645,6 +7645,11 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
     }
 
     const char *name = args[0].s_val;
+    if (shellRuntimeBuiltinDisabled(name)) {
+        runtimeError(vm, "builtin: %s: not a shell builtin", name);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
     VmBuiltinFn handler = getVmBuiltinHandler(name);
     if (!handler) {
         runtimeError(vm, "builtin: unknown VM builtin '%s'", name);
