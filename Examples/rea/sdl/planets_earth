@@ -10,6 +10,8 @@ bool quit = false;
 int posMutex = mutex();
 float earthMonths = 0.0;
 
+str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+
 str trimTrailingSlashes(str path) {
   int len = length(path);
   while (len > 1 && path[len] == '/') {
@@ -104,6 +106,15 @@ str resolveInstallRoot(str resourceRel) {
   if (length(override) > 0) {
     if (length(resourceRel) == 0 || pathExists(pathJoin(override, resourceRel))) {
       return override;
+    }
+  }
+
+  if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != '@') {
+    str configured = normalizePath(ConfiguredInstallRoot);
+    if (length(configured) > 0) {
+      if (length(resourceRel) == 0 || pathExists(pathJoin(configured, resourceRel))) {
+        return configured;
+      }
     }
   }
 

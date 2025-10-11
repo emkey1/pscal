@@ -13,7 +13,8 @@ CONST
   ScreenUpdateInterval = 4;  // Refresh SDL window periodically to reduce event overhead
   MandelBytesPerPixel = 4;
   RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
-  SystemFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  ConfiguredFontPath = '@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf';
   DefaultFontSize = 18;
 
 TYPE
@@ -72,8 +73,10 @@ BEGIN
 
   InitGraph(WindowWidth, WindowHeight, WindowTitle);
 
-  IF FileExists(SystemFontPath) THEN
-    SelectedFontPath := SystemFontPath
+  IF (Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0) AND FileExists(ConfiguredFontPath) THEN
+    SelectedFontPath := ConfiguredFontPath
+  ELSE IF FileExists(LegacyFontPath) THEN
+    SelectedFontPath := LegacyFontPath
   ELSE IF FileExists(RepoFontPath) THEN
     SelectedFontPath := RepoFontPath;
 

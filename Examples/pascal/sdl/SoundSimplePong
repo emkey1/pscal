@@ -1,6 +1,8 @@
 #!/usr/bin/env pascal
 program SimplePong;
 
+uses SysUtils;
+
 { This program demonstrates basic SDL graphics,
   input handling, paddle collision, score keeping, and a score limit.
   The computer AI is now limited by a maximum paddle speed and has imperfect targeting.
@@ -13,6 +15,54 @@ program SimplePong;
 // are globally available or imported via a unit.
 // Assuming a global boolean flag (e.g., break_requested) is set by GraphLoop
 // when the window is closed or 'q' is pressed.
+
+const
+  ConfiguredFontPath = '@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontFallbacks: array[0..2] of string = (
+    'fonts/Roboto/static/Roboto-Regular.ttf',
+    '../fonts/Roboto/static/Roboto-Regular.ttf',
+    '../../fonts/Roboto/static/Roboto-Regular.ttf'
+  );
+
+function ResolveFontPath: string;
+var
+  baseDir, candidate: string;
+  i: Integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0 then
+  begin
+    if FileExists(ConfiguredFontPath) then
+    begin
+      ResolveFontPath := ConfiguredFontPath;
+      exit;
+    end;
+  end;
+
+  if FileExists(LegacyFontPath) then
+  begin
+    ResolveFontPath := LegacyFontPath;
+    exit;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(RepoFontFallbacks) to High(RepoFontFallbacks) do
+  begin
+    candidate := ExpandFileName(baseDir + RepoFontFallbacks[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveFontPath := candidate;
+      exit;
+    end;
+  end;
+
+  ResolveFontPath := ConfiguredFontPath;
+end;
 
 var
   WindowWidth, WindowHeight : Integer;
@@ -82,7 +132,7 @@ begin
 
   // --- Text System Initialization ---
   // NOTE: Adjust the font file path if needed for your system
-  FontFileName := '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // The default font
+  FontFileName := ResolveFontPath; // Prefer installed prefix; fall back to repo/system locations
   FontSize := 24;
   InitTextSystem(FontFileName, FontSize);
 

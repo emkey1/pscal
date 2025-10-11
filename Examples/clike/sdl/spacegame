@@ -85,6 +85,8 @@ int pathExists(str path) {
     return 0;
 }
 
+str ConfiguredInstallRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+
 str defaultInstallRoot() {
     str scriptPath = normalizePath(paramstr(0));
     if (strlen(scriptPath) == 0) return "";
@@ -103,6 +105,15 @@ str resolveInstallRoot(str resourceRel) {
     if (strlen(override) > 0) {
         if (strlen(resourceRel) == 0 || pathExists(pathJoin(override, resourceRel))) {
             return override;
+        }
+    }
+
+    if (length(ConfiguredInstallRoot) > 0 && copy(ConfiguredInstallRoot, 1, 1) != "@") {
+        str configured = normalizePath(ConfiguredInstallRoot);
+        if (strlen(configured) > 0) {
+            if (strlen(resourceRel) == 0 || pathExists(pathJoin(configured, resourceRel))) {
+                return configured;
+            }
         }
     }
 

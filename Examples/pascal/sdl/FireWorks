@@ -1,10 +1,19 @@
 #!/usr/bin/env pascal
 program FireworksDemo;
 
+uses SysUtils;
+
 const
   MAX_PARTICLES = 400;
   GRAV = 0.15;
   PI = 3.14159;
+  ConfiguredFontPath = '@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontFallbacks: array[0..2] of string = (
+    'fonts/Roboto/static/Roboto-Regular.ttf',
+    '../fonts/Roboto/static/Roboto-Regular.ttf',
+    '../../fonts/Roboto/static/Roboto-Regular.ttf'
+  );
 
 type
   Particle = record
@@ -13,6 +22,45 @@ type
     life   : Integer;
     r, g, b: Integer;
   end;
+
+function ResolveFontPath: string;
+var
+  baseDir, candidate: string;
+  i: Integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0 then
+  begin
+    if FileExists(ConfiguredFontPath) then
+    begin
+      ResolveFontPath := ConfiguredFontPath;
+      exit;
+    end;
+  end;
+
+  if FileExists(LegacyFontPath) then
+  begin
+    ResolveFontPath := LegacyFontPath;
+    exit;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(RepoFontFallbacks) to High(RepoFontFallbacks) do
+  begin
+    candidate := ExpandFileName(baseDir + RepoFontFallbacks[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveFontPath := candidate;
+      exit;
+    end;
+  end;
+
+  ResolveFontPath := ConfiguredFontPath;
+end;
 
 var
   Particles: array[0..MAX_PARTICLES-1] of Particle;
@@ -45,7 +93,7 @@ begin
   InitGraph(800, 600, 'Fireworks!');
   InitSoundSystem();
   boom := LoadSound('explosion.wav');
-  FontFileName := '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf'; // The default font
+  FontFileName := ResolveFontPath; // Prefer installed prefix; fall back to repo/system locations
   FontSize := 24;
   InitTextSystem(FontFileName, FontSize);
 
