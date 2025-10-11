@@ -15,7 +15,7 @@ This generates `build/bin/clike`.
 
 ## Install PSCAL Suite
 ```sh
-sudo ./install.sh
+sudo cmake --install build
 ```
 
 ## Run a program

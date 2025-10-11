@@ -315,18 +315,24 @@ executes it immediately. For details see
 
 ## Runtime library
 
-The front ends need access to various sounds and libraries.  To install them run...
+The front ends ship with fonts, configuration templates, documentation, and
+standard libraries. Install everything with CMake once the build completes:
 
 ```sh
-sudo ./install.sh
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/opt/pscal
+cmake --build build
+sudo cmake --install build
 ```
 
-The runtime install root defaults to `${CMAKE_INSTALL_PREFIX}/pscal`. To relocate
-the assets, configure the build with `-DPSCAL_INSTALL_ROOT=/path/to/pscal` (or
-adjust `-DCMAKE_INSTALL_PREFIX`) and re-run CMake. The installer automatically
-reads both the prefix and the compiled default root from the build tree
-(`CMakeCache.txt` and `pscal_install_root.txt`), but you can still override them
-explicitly via `--prefix`/`--pscal-dir`.
+`cmake --install` places executables in `${CMAKE_INSTALL_PREFIX}/bin` and copies
+runtime assets to `${PSCAL_INSTALL_ROOT}` (which defaults to
+`${CMAKE_INSTALL_PREFIX}/pscal`). Override the runtime location with
+`-DPSCAL_INSTALL_ROOT=/path/to/runtime` when configuring if you want the assets
+outside the prefix. The install step also publishes the Rea import library to
+`${CMAKE_INSTALL_PREFIX}/lib/rea` for compatibility with existing scripts. When
+`exsh` is active as a login shell, the installer backs up the running binary to
+`exsh.previous` before writing the new executable so upgrades succeed without
+dropping sessions.
 
 ## Extending built-ins
 
