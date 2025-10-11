@@ -150,7 +150,18 @@ int shellRunSource(const char *source,
     bool previous_suppress = shellSemanticsWarningsSuppressed();
     shellSemanticsSetWarningSuppressed(options->suppress_warnings);
 
+    bool previous_exit_on_signal = shellRuntimeExitOnSignal();
+
     shellRuntimePushScript();
+
+    bool source_pushed = false;
+    if (!shellRuntimeTrackSourcePush(path ? path : "")) {
+        shellRuntimePopScript();
+        shellRuntimeSetExitOnSignal(previous_exit_on_signal);
+        shellSemanticsSetWarningSuppressed(previous_suppress);
+        return EXIT_FAILURE;
+    }
+    source_pushed = true;
 
     vmSetVerboseErrors(options->verbose_errors);
 
@@ -158,7 +169,6 @@ int shellRunSource(const char *source,
     int define_count = 0;
     char *pre_src = preprocessConditionals(source, defines, define_count);
 
-    bool previous_exit_on_signal = shellRuntimeExitOnSignal();
     if (options->exit_on_signal) {
         shellRuntimeSetExitOnSignal(true);
     }
@@ -171,6 +181,10 @@ int shellRunSource(const char *source,
             fprintf(stderr, "shell: failed to allocate symbol tables.\n");
             if (pre_src) {
                 free(pre_src);
+            }
+            if (source_pushed) {
+                shellRuntimeTrackSourcePop();
+                source_pushed = false;
             }
             shellRuntimePopScript();
             shellRuntimeSetExitOnSignal(previous_exit_on_signal);
@@ -278,6 +292,10 @@ int shellRunSource(const char *source,
 cleanup:
     if (should_run_exit_trap) {
         shellRuntimeRunExitTrap();
+    }
+    if (source_pushed) {
+        shellRuntimeTrackSourcePop();
+        source_pushed = false;
     }
     shellSemanticsSetWarningSuppressed(previous_suppress);
     shellRuntimePopScript();

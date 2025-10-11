@@ -95,6 +95,40 @@ typedef struct {
     char *detail;
 } ShellCommandResult;
 
+typedef struct {
+    char **entries;
+    size_t count;
+    size_t capacity;
+} ShellHistory;
+
+static ShellHistory gShellHistory = {NULL, 0, 0};
+static char *gShellArg0 = NULL;
+
+typedef struct {
+    char *function;
+    char *caller_function;
+    char *source;
+    int line;
+    int column;
+} ShellCallFrame;
+
+static ShellCallFrame *gShellCallStack = NULL;
+static size_t gShellCallStackCount = 0;
+static size_t gShellCallStackCapacity = 0;
+
+static char **gShellSourceStack = NULL;
+static size_t gShellSourceDepth = 0;
+static size_t gShellSourceCapacity = 0;
+
+typedef struct {
+    char *name;
+    char *parameter_metadata;
+    ShellCompiledFunction *compiled;
+} ShellFunctionEntry;
+
+static ShellFunctionEntry *gShellFunctions = NULL;
+static size_t gShellFunctionCount = 0;
+
 static int shellParseEnvBool(const char *value) {
     if (!value) {
         return -1;
@@ -114,6 +148,186 @@ static int shellParseEnvBool(const char *value) {
         return 0;
     }
     return -1;
+}
+
+static void shellRuntimeFreeCallFrame(ShellCallFrame *frame) {
+    if (!frame) {
+        return;
+    }
+    free(frame->function);
+    free(frame->caller_function);
+    free(frame->source);
+    frame->function = NULL;
+    frame->caller_function = NULL;
+    frame->source = NULL;
+    frame->line = 0;
+    frame->column = 0;
+}
+
+static bool shellRuntimeEnsureCallStackCapacity(size_t needed) {
+    if (gShellCallStackCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellCallStackCapacity ? (gShellCallStackCapacity * 2) : 4;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    ShellCallFrame *resized = (ShellCallFrame *)realloc(gShellCallStack,
+                                                        new_capacity * sizeof(ShellCallFrame));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellCallStackCapacity; i < new_capacity; ++i) {
+        resized[i].function = NULL;
+        resized[i].caller_function = NULL;
+        resized[i].source = NULL;
+        resized[i].line = 0;
+        resized[i].column = 0;
+    }
+    gShellCallStack = resized;
+    gShellCallStackCapacity = new_capacity;
+    return true;
+}
+
+static bool shellRuntimeEnsureSourceCapacity(size_t needed) {
+    if (gShellSourceCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellSourceCapacity ? (gShellSourceCapacity * 2) : 4;
+    while (new_capacity < needed) {
+        new_capacity *= 2;
+    }
+    char **resized = (char **)realloc(gShellSourceStack, new_capacity * sizeof(char *));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellSourceCapacity; i < new_capacity; ++i) {
+        resized[i] = NULL;
+    }
+    gShellSourceStack = resized;
+    gShellSourceCapacity = new_capacity;
+    return true;
+}
+
+static bool shellRuntimePushSourcePath(const char *path) {
+    const char *label = (path && *path) ? path : "";
+    if (!shellRuntimeEnsureSourceCapacity(gShellSourceDepth + 1)) {
+        return false;
+    }
+    char *copy = strdup(label);
+    if (!copy) {
+        return false;
+    }
+    gShellSourceStack[gShellSourceDepth++] = copy;
+    return true;
+}
+
+static void shellRuntimePopSourcePath(void) {
+    if (gShellSourceDepth == 0) {
+        return;
+    }
+    size_t index = gShellSourceDepth - 1;
+    free(gShellSourceStack[index]);
+    gShellSourceStack[index] = NULL;
+    gShellSourceDepth--;
+    if (gShellSourceDepth == 0 && gShellSourceStack) {
+        free(gShellSourceStack);
+        gShellSourceStack = NULL;
+        gShellSourceCapacity = 0;
+    }
+}
+
+static const char *shellRuntimeCurrentSourcePath(void) {
+    if (gShellSourceDepth == 0) {
+        return NULL;
+    }
+    return gShellSourceStack[gShellSourceDepth - 1];
+}
+
+bool shellRuntimeTrackSourcePush(const char *path) {
+    return shellRuntimePushSourcePath(path);
+}
+
+void shellRuntimeTrackSourcePop(void) {
+    shellRuntimePopSourcePath();
+}
+
+static bool shellRuntimePushCallFrame(const char *function_name,
+                                      int call_line,
+                                      int call_column) {
+    if (!shellRuntimeEnsureCallStackCapacity(gShellCallStackCount + 1)) {
+        return false;
+    }
+    ShellCallFrame *frame = &gShellCallStack[gShellCallStackCount];
+    frame->function = NULL;
+    frame->caller_function = NULL;
+    frame->source = NULL;
+    frame->line = (call_line >= 0) ? call_line : 0;
+    frame->column = (call_column >= 0) ? call_column : 0;
+
+    if (function_name && *function_name) {
+        frame->function = strdup(function_name);
+        if (!frame->function) {
+            return false;
+        }
+    }
+
+    const ShellCallFrame *previous =
+        (gShellCallStackCount > 0) ? &gShellCallStack[gShellCallStackCount - 1] : NULL;
+    const char *caller_name = NULL;
+    if (previous && previous->function && *previous->function) {
+        caller_name = previous->function;
+    } else if (!previous) {
+        caller_name = "main";
+    }
+    if (caller_name) {
+        frame->caller_function = strdup(caller_name);
+        if (!frame->caller_function) {
+            free(frame->function);
+            frame->function = NULL;
+            return false;
+        }
+    }
+
+    const char *source = shellRuntimeCurrentSourcePath();
+    if (source && *source) {
+        frame->source = strdup(source);
+        if (!frame->source) {
+            free(frame->function);
+            free(frame->caller_function);
+            frame->function = NULL;
+            frame->caller_function = NULL;
+            return false;
+        }
+    }
+
+    gShellCallStackCount++;
+    return true;
+}
+
+static void shellRuntimePopCallFrame(void) {
+    if (gShellCallStackCount == 0) {
+        return;
+    }
+    ShellCallFrame *frame = &gShellCallStack[gShellCallStackCount - 1];
+    shellRuntimeFreeCallFrame(frame);
+    gShellCallStackCount--;
+    if (gShellCallStackCount == 0 && gShellCallStack) {
+        free(gShellCallStack);
+        gShellCallStack = NULL;
+        gShellCallStackCapacity = 0;
+    }
+}
+
+static size_t shellRuntimeCallStackDepth(void) {
+    return gShellCallStackCount;
+}
+
+static const ShellCallFrame *shellRuntimeCallFrameAtDepth(size_t depth) {
+    if (depth >= gShellCallStackCount) {
+        return NULL;
+    }
+    return &gShellCallStack[gShellCallStackCount - 1 - depth];
 }
 
 static const char *shellResolveBashPath(void) {
@@ -2889,24 +3103,6 @@ typedef struct {
 
 static ShellJob *gShellJobs = NULL;
 static size_t gShellJobCount = 0;
-
-typedef struct {
-    char **entries;
-    size_t count;
-    size_t capacity;
-} ShellHistory;
-
-static ShellHistory gShellHistory = {NULL, 0, 0};
-static char *gShellArg0 = NULL;
-
-typedef struct {
-    char *name;
-    char *parameter_metadata;
-    ShellCompiledFunction *compiled;
-} ShellFunctionEntry;
-
-static ShellFunctionEntry *gShellFunctions = NULL;
-static size_t gShellFunctionCount = 0;
 
 typedef enum {
     SHELL_META_SUBSTITUTION_DOLLAR,

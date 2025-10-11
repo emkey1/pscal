@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown kill fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type getopts mapfile readarray
+cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown kill fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command caller type getopts mapfile readarray
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt enable fc hash suspend ulimit
+compgen complete compopt enable fc hash suspend ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -47,10 +47,10 @@ Plans to address missing builtins
    - Implement vmBuiltinShellFc beside vmBuiltinShellHistory, re running edited commands and updating history and status accordingly.
    - Register fc in the builtin tables and create parity tests that edit commands and verify output with Bash.
 
-7) caller builtin:
-   - Track function invocations by pushing frames that contain name and source location when shellInvokeFunction runs and pop them afterwards.
-   - Implement vmBuiltinShellCaller to read the stack, honour optional depth arguments, and print frames in Bash compatible format.
-   - Register the builtin, document it, and add regression scripts that call caller within nested functions for parity with Bash.
+7) caller builtin: Completed.
+   - Tracks function invocations by pushing frames that contain the name and source location when shellInvokeFunction runs and pops them afterwards.
+   - Implements vmBuiltinShellCaller to read the stack, honour optional depth arguments, and print frames in a Bash compatible format.
+   - Registered the builtin, documented it, and added regression parity coverage that exercises caller within nested functions alongside Bash.
 
 8) let arithmetic builtin: Completed.
    - Added vmBuiltinShellLet which evaluates each argument with shellEvaluateArithmetic, applying assignments via shellSetTrackedVariable and compound operators for +=, -=, *=, /=, and %= while tracking arithmetic errors.

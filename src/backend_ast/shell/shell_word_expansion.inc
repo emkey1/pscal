@@ -2266,7 +2266,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         "cd",      "pwd",    "dirs",   "pushd",  "popd",   "exit",    "logout",  "exec",
         "eval",    "export", "unset",  "setenv", "unsetenv","set",    "declare", "typeset",
         "readonly","umask",  "command","hash",   "trap",   "local",   "let",     "break",
-        "continue","alias", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
+        "continue","alias", "caller", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
         "fg",     "finger", "bg",     "wait",   "builtin","source", "read",   "printf",
         "shift",  "return", "help",   "type",   "test",   "[",      ":",      "unalias",
         "getopts",
@@ -2353,6 +2353,8 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     VM *invoke_vm = NULL;
     VM nested_vm;
     bool using_cached_vm = false;
+    bool nested_vm_initialized = false;
+    bool frame_pushed = false;
     if (!function_vm_in_use) {
         if (!function_vm_initialized) {
             initVM(&function_vm);
@@ -2366,7 +2368,15 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     } else {
         initVM(&nested_vm);
         invoke_vm = &nested_vm;
+        nested_vm_initialized = true;
     }
+
+    if (!shellRuntimePushCallFrame(name, cmd->line, cmd->column)) {
+        runtimeError(vm, "%s: out of memory", name);
+        shellUpdateStatus(1);
+        goto invoke_cleanup;
+    }
+    frame_pushed = true;
 
     InterpretResult result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
                                                globalSymbols, constGlobalSymbols, procedure_table, 0);
@@ -2375,11 +2385,16 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     } else {
         shellUpdateStatus(shellRuntimeLastStatus());
     }
+
+invoke_cleanup:
     if (using_cached_vm) {
         vmResetExecutionState(&function_vm);
         function_vm_in_use = false;
-    } else {
+    } else if (nested_vm_initialized) {
         freeVM(&nested_vm);
+    }
+    if (frame_pushed) {
+        shellRuntimePopCallFrame();
     }
     if (scope_pushed) {
         shellLocalScopePop();

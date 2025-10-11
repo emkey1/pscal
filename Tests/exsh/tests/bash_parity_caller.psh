@@ -1,0 +1,20 @@
+#!/usr/bin/env exsh
+
+foo() {
+    caller
+    caller 1
+    caller 2
+    caller 3
+    printf 'caller_depth3_status:%s\n' "$?"
+}
+
+bar() {
+    foo
+}
+
+baz() {
+    bar
+}
+
+baz
+printf 'caller_status:%s\n' "$?"

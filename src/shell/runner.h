@@ -38,6 +38,9 @@ bool shellSymbolTableScopePush(ShellSymbolTableScope *scope);
 void shellSymbolTableScopePop(ShellSymbolTableScope *scope);
 bool shellSymbolTableScopeIsActive(void);
 
+bool shellRuntimeTrackSourcePush(const char *path);
+void shellRuntimeTrackSourcePop(void);
+
 char *shellLoadFile(const char *path);
 int shellRunSource(const char *source,
                    const char *path,
