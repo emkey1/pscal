@@ -367,13 +367,123 @@ void heartbeat() {
   }
 }
 
-str installRoot() {
-  str root;
-  root = getenv("PSCAL_INSTALL_ROOT");
-  if (strlen(root) == 0) {
-    root = "/usr/local/pscal";
+str fsTrimTrailingSlashes(str path) {
+  int len = length(path);
+  while (len > 1 && copy(path, len, 1) == "/") {
+    path = copy(path, 1, len - 1);
+    len = len - 1;
   }
-  return root;
+  if (len == 0) return "";
+  return path;
+}
+
+str fsStripLeadingCurrent(str path) {
+  while (length(path) >= 2 && copy(path, 1, 2) == "./") {
+    if (length(path) == 2) {
+      return "";
+    }
+    path = copy(path, 3, length(path) - 2);
+  }
+  return path;
+}
+
+str fsNormalizePath(str path) {
+  if (strlen(path) == 0) return "";
+  if (copy(path, 1, 1) == "/") return fsTrimTrailingSlashes(path);
+  str cleaned = fsStripLeadingCurrent(path);
+  str pwd = getenv("PWD");
+  if (strlen(pwd) == 0) {
+    return fsTrimTrailingSlashes(cleaned);
+  }
+  str base = fsTrimTrailingSlashes(pwd);
+  if (strlen(cleaned) == 0) {
+    return base;
+  }
+  if (strlen(base) == 0) {
+    return fsTrimTrailingSlashes(cleaned);
+  }
+  if (strlen(base) == 1 && copy(base, 1, 1) == "/") {
+    return fsTrimTrailingSlashes(base + cleaned);
+  }
+  return fsTrimTrailingSlashes(base + "/" + cleaned);
+}
+
+str fsPathDirname(str path) {
+  if (strlen(path) == 0) return "";
+  str cleaned = fsTrimTrailingSlashes(path);
+  int len = length(cleaned);
+  if (len == 0) return "";
+  if (len == 1 && copy(cleaned, 1, 1) == "/") return "/";
+  int i = len;
+  while (i > 0 && copy(cleaned, i, 1) != "/") i = i - 1;
+  if (i <= 0) return "";
+  if (i == 1) return "/";
+  return fsTrimTrailingSlashes(copy(cleaned, 1, i - 1));
+}
+
+str fsPathJoin(str base, str rel) {
+  if (strlen(rel) == 0) return fsTrimTrailingSlashes(base);
+  if (strlen(base) == 0) return rel;
+  str normalizedBase = fsTrimTrailingSlashes(base);
+  if (copy(rel, 1, 1) == "/") {
+    if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+      return rel;
+    }
+    return normalizedBase + rel;
+  }
+  if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+    return normalizedBase + rel;
+  }
+  return normalizedBase + "/" + rel;
+}
+
+int fsPathExists(str path) {
+  if (strlen(path) == 0) return 0;
+  if (fileexists(path)) return 1;
+  if (isDirectory(path)) return 1;
+  return 0;
+}
+
+str fsDefaultInstallRoot() {
+  str scriptPath = fsNormalizePath(paramstr(0));
+  if (strlen(scriptPath) == 0) return "";
+  str dir = fsPathDirname(scriptPath);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  return dir;
+}
+
+str resolveInstallRoot(str resourceRel) {
+  str override = fsNormalizePath(getenv("PSCAL_INSTALL_ROOT"));
+  if (strlen(override) > 0) {
+    if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(override, resourceRel))) {
+      return override;
+    }
+  }
+
+  str candidate = fsDefaultInstallRoot();
+  if (strlen(candidate) > 0) {
+    if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(candidate, resourceRel))) {
+      return candidate;
+    }
+  }
+
+  str fallback = fsNormalizePath("/opt/pscal");
+  if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(fallback, resourceRel))) {
+    return fallback;
+  }
+  fallback = fsNormalizePath("/usr/local/pscal");
+  if (strlen(resourceRel) == 0 || fsPathExists(fsPathJoin(fallback, resourceRel))) {
+    return fallback;
+  }
+
+  if (strlen(candidate) > 0) return candidate;
+  if (strlen(override) > 0) return override;
+  return fallback;
 }
 
 void initFiles() {
@@ -383,7 +493,8 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  str source = installRoot() + "/misc/htdocs";
+  str assetRoot = resolveInstallRoot("/misc/htdocs");
+  str source = fsPathJoin(assetRoot, "/misc/htdocs");
   int copied = 0;
   if (isDirectory(source)) {
     copied = copyDirectory(source, RootDir);

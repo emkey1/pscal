@@ -22,6 +22,125 @@ int centerCol, hangmanStartCol, effectiveWidth;
 int wins = 0;
 int losses = 0;
 
+str trimTrailingSlashes(str path) {
+    int len = length(path);
+    while (len > 1 && copy(path, len, 1) == "/") {
+        path = copy(path, 1, len - 1);
+        len = len - 1;
+    }
+    if (len == 0) return "";
+    return path;
+}
+
+str stripLeadingCurrent(str path) {
+    while (length(path) >= 2 && copy(path, 1, 2) == "./") {
+        if (length(path) == 2) {
+            return "";
+        }
+        path = copy(path, 3, length(path) - 2);
+    }
+    return path;
+}
+
+str normalizePath(str path) {
+    if (strlen(path) == 0) return "";
+    if (copy(path, 1, 1) == "/") return trimTrailingSlashes(path);
+    str cleaned = stripLeadingCurrent(path);
+    str pwd = getenv("PWD");
+    if (strlen(pwd) == 0) {
+        return trimTrailingSlashes(cleaned);
+    }
+    str base = trimTrailingSlashes(pwd);
+    if (strlen(cleaned) == 0) {
+        return base;
+    }
+    if (strlen(base) == 0) {
+        return trimTrailingSlashes(cleaned);
+    }
+    if (strlen(base) == 1 && copy(base, 1, 1) == "/") {
+        return trimTrailingSlashes(base + cleaned);
+    }
+    return trimTrailingSlashes(base + "/" + cleaned);
+}
+
+str pathDirname(str path) {
+    if (strlen(path) == 0) return "";
+    str cleaned = trimTrailingSlashes(path);
+    int len = length(cleaned);
+    if (len == 0) return "";
+    if (len == 1 && copy(cleaned, 1, 1) == "/") return "/";
+    int i = len;
+    while (i > 0 && copy(cleaned, i, 1) != "/") i = i - 1;
+    if (i <= 0) return "";
+    if (i == 1) return "/";
+    return trimTrailingSlashes(copy(cleaned, 1, i - 1));
+}
+
+str pathJoin(str base, str rel) {
+    if (strlen(rel) == 0) return trimTrailingSlashes(base);
+    if (strlen(base) == 0) return rel;
+    str normalizedBase = trimTrailingSlashes(base);
+    if (copy(rel, 1, 1) == "/") {
+        if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+            return rel;
+        }
+        return normalizedBase + rel;
+    }
+    if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+        return normalizedBase + rel;
+    }
+    return normalizedBase + "/" + rel;
+}
+
+int pathExists(str path) {
+    if (strlen(path) == 0) return 0;
+    if (fileexists(path)) return 1;
+    if (isDirectory(path)) return 1;
+    return 0;
+}
+
+str defaultInstallRoot() {
+    str scriptPath = normalizePath(paramstr(0));
+    if (strlen(scriptPath) == 0) return "";
+    str dir = pathDirname(scriptPath);
+    if (strlen(dir) == 0) return "";
+    dir = pathDirname(dir);
+    if (strlen(dir) == 0) return "";
+    dir = pathDirname(dir);
+    if (strlen(dir) == 0) return "";
+    dir = pathDirname(dir);
+    return dir;
+}
+
+str resolveInstallRoot(str resourceRel) {
+    str override = normalizePath(getenv("PSCAL_INSTALL_ROOT"));
+    if (strlen(override) > 0) {
+        if (strlen(resourceRel) == 0 || pathExists(pathJoin(override, resourceRel))) {
+            return override;
+        }
+    }
+
+    str candidate = defaultInstallRoot();
+    if (strlen(candidate) > 0) {
+        if (strlen(resourceRel) == 0 || pathExists(pathJoin(candidate, resourceRel))) {
+            return candidate;
+        }
+    }
+
+    str fallback = normalizePath("/opt/pscal");
+    if (strlen(resourceRel) == 0 || pathExists(pathJoin(fallback, resourceRel))) {
+        return fallback;
+    }
+    fallback = normalizePath("/usr/local/pscal");
+    if (strlen(resourceRel) == 0 || pathExists(pathJoin(fallback, resourceRel))) {
+        return fallback;
+    }
+
+    if (strlen(candidate) > 0) return candidate;
+    if (strlen(override) > 0) return override;
+    return fallback;
+}
+
 int center_padding(str s) {
     int pad;
     pad = (effectiveWidth - strlen(s)) / 2;
@@ -355,11 +474,8 @@ int main() {
     if (paramcount() > 0) {
         words = load_words(paramstr(1), &word_count, 6, 9, 2048);
     } else {
-        installRoot = getenv("PSCAL_INSTALL_ROOT");
-        if (strlen(installRoot) == 0) {
-            installRoot = "/usr/local/pscal";
-        }
-        words = load_words(installRoot + "/etc/words", &word_count, 6, 9, 2048);
+        installRoot = resolveInstallRoot("/etc/words");
+        words = load_words(pathJoin(installRoot, "/etc/words"), &word_count, 6, 9, 2048);
     }
     if (word_count == 0) { printf("No words loaded.\n"); return 0; }
 

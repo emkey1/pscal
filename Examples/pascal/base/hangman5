@@ -26,6 +26,7 @@ const
   // For DrawBorder()
   CornerTL = '╔'; CornerTR = '╗'; CornerBL = '╚'; CornerBR = '╝';
   LineH = '═'; LineV = '║';
+  INSTALL_FALLBACKS: array[0..1] of string = ('/opt/pscal', '/usr/local/pscal');
 
 type
   PWordNode = ^TWordNode;
@@ -63,16 +64,138 @@ var
   wordListCount: Integer;
   { *** END ADDED *** }
 
-function ResolveInstallRoot: string;
+function NormalizePath(const path: string): string;
+var
+  expanded: string;
 begin
-  ResolveInstallRoot := GetEnv('PSCAL_INSTALL_ROOT');
-  if ResolveInstallRoot = '' then
-    ResolveInstallRoot := '/usr/local/pscal';
+  if path = '' then
+  begin
+    NormalizePath := '';
+    exit;
+  end;
+  expanded := ExpandFileName(path);
+  NormalizePath := ExcludeTrailingPathDelimiter(expanded);
+end;
+
+function JoinPaths(const base, relative: string): string;
+var
+  normalizedBase: string;
+begin
+  if relative = '' then
+  begin
+    JoinPaths := base;
+    exit;
+  end;
+  if base = '' then
+  begin
+    JoinPaths := relative;
+    exit;
+  end;
+  normalizedBase := ExcludeTrailingPathDelimiter(base);
+  if (Length(relative) > 0) and (relative[1] = '/') then
+  begin
+    if normalizedBase = '/' then
+      JoinPaths := relative
+    else
+      JoinPaths := normalizedBase + relative;
+  end
+  else if normalizedBase = '/' then
+    JoinPaths := normalizedBase + relative
+  else
+    JoinPaths := IncludeTrailingPathDelimiter(normalizedBase) + relative;
+end;
+
+function DefaultInstallRoot: string;
+var
+  scriptPath, scriptDir: string;
+begin
+  scriptPath := ParamStr(0);
+  if scriptPath = '' then
+  begin
+    DefaultInstallRoot := '';
+    exit;
+  end;
+  scriptPath := ExpandFileName(scriptPath);
+  scriptDir := ExtractFilePath(scriptPath);
+  if scriptDir = '' then
+  begin
+    DefaultInstallRoot := '';
+    exit;
+  end;
+  DefaultInstallRoot := ExcludeTrailingPathDelimiter(
+    ExpandFileName(scriptDir + '../../..'));
+end;
+
+function ResolveInstallRoot: string;
+var
+  override, candidate: string;
+  i: Integer;
+begin
+  override := NormalizePath(GetEnv('PSCAL_INSTALL_ROOT'));
+  if (override <> '') and DirectoryExists(override) then
+  begin
+    ResolveInstallRoot := override;
+    exit;
+  end;
+
+  candidate := DefaultInstallRoot;
+  if (candidate <> '') and DirectoryExists(candidate) then
+  begin
+    ResolveInstallRoot := candidate;
+    exit;
+  end;
+
+  for i := Low(INSTALL_FALLBACKS) to High(INSTALL_FALLBACKS) do
+    if DirectoryExists(INSTALL_FALLBACKS[i]) then
+    begin
+      ResolveInstallRoot := INSTALL_FALLBACKS[i];
+      exit;
+    end;
+
+  if candidate <> '' then
+  begin
+    ResolveInstallRoot := candidate;
+    exit;
+  end;
+
+  if override <> '' then
+  begin
+    ResolveInstallRoot := override;
+    exit;
+  end;
+
+  ResolveInstallRoot := ExcludeTrailingPathDelimiter(GetCurrentDir);
+end;
+
+function ResolveResourcePath(relativePath: string): string;
+var
+  root, candidate: string;
+  i: Integer;
+begin
+  root := ResolveInstallRoot;
+  candidate := JoinPaths(root, relativePath);
+  if FileExists(candidate) or DirectoryExists(candidate) then
+  begin
+    ResolveResourcePath := candidate;
+    exit;
+  end;
+
+  for i := Low(INSTALL_FALLBACKS) to High(INSTALL_FALLBACKS) do
+  begin
+    candidate := JoinPaths(INSTALL_FALLBACKS[i], relativePath);
+    if FileExists(candidate) or DirectoryExists(candidate) then
+    begin
+      ResolveResourcePath := candidate;
+      exit;
+    end;
+  end;
+
+  ResolveResourcePath := JoinPaths(root, relativePath);
 end;
 
 function DefaultWordListPath: string;
 begin
-  DefaultWordListPath := ResolveInstallRoot + '/etc/words';
+  DefaultWordListPath := ResolveResourcePath('/etc/words');
 end;
 
 {---------------------------------------------------------------------
