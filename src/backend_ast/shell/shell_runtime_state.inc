@@ -1258,6 +1258,116 @@ bool shellRuntimeSetExitTrap(ShellTrapAction action, const char *command) {
     return true;
 }
 
+typedef struct {
+    const char *name;
+    int signo;
+} ShellSignalNameEntry;
+
+static const ShellSignalNameEntry kShellSignalNames[] = {
+#ifdef SIGHUP
+    {"HUP", SIGHUP},
+#endif
+#ifdef SIGINT
+    {"INT", SIGINT},
+#endif
+#ifdef SIGQUIT
+    {"QUIT", SIGQUIT},
+#endif
+#ifdef SIGILL
+    {"ILL", SIGILL},
+#endif
+#ifdef SIGTRAP
+    {"TRAP", SIGTRAP},
+#endif
+#ifdef SIGABRT
+    {"ABRT", SIGABRT},
+#endif
+#ifdef SIGIOT
+    {"IOT", SIGIOT},
+#endif
+#ifdef SIGBUS
+    {"BUS", SIGBUS},
+#endif
+#ifdef SIGFPE
+    {"FPE", SIGFPE},
+#endif
+#ifdef SIGKILL
+    {"KILL", SIGKILL},
+#endif
+#ifdef SIGUSR1
+    {"USR1", SIGUSR1},
+#endif
+#ifdef SIGSEGV
+    {"SEGV", SIGSEGV},
+#endif
+#ifdef SIGUSR2
+    {"USR2", SIGUSR2},
+#endif
+#ifdef SIGPIPE
+    {"PIPE", SIGPIPE},
+#endif
+#ifdef SIGALRM
+    {"ALRM", SIGALRM},
+#endif
+#ifdef SIGTERM
+    {"TERM", SIGTERM},
+#endif
+#ifdef SIGSTKFLT
+    {"STKFLT", SIGSTKFLT},
+#endif
+#ifdef SIGCHLD
+    {"CHLD", SIGCHLD},
+#endif
+#ifdef SIGCLD
+    {"CLD", SIGCLD},
+#endif
+#ifdef SIGCONT
+    {"CONT", SIGCONT},
+#endif
+#ifdef SIGSTOP
+    {"STOP", SIGSTOP},
+#endif
+#ifdef SIGTSTP
+    {"TSTP", SIGTSTP},
+#endif
+#ifdef SIGTTIN
+    {"TTIN", SIGTTIN},
+#endif
+#ifdef SIGTTOU
+    {"TTOU", SIGTTOU},
+#endif
+#ifdef SIGURG
+    {"URG", SIGURG},
+#endif
+#ifdef SIGXCPU
+    {"XCPU", SIGXCPU},
+#endif
+#ifdef SIGXFSZ
+    {"XFSZ", SIGXFSZ},
+#endif
+#ifdef SIGVTALRM
+    {"VTALRM", SIGVTALRM},
+#endif
+#ifdef SIGPROF
+    {"PROF", SIGPROF},
+#endif
+#ifdef SIGWINCH
+    {"WINCH", SIGWINCH},
+#endif
+#ifdef SIGIO
+    {"IO", SIGIO},
+#endif
+#ifdef SIGPOLL
+    {"POLL", SIGPOLL},
+#endif
+#ifdef SIGPWR
+    {"PWR", SIGPWR},
+#endif
+#ifdef SIGSYS
+    {"SYS", SIGSYS},
+#endif
+};
+
 static bool shellRuntimeIsDigitString(const char *text) {
     if (!text || !*text) {
         return false;
@@ -1298,83 +1408,66 @@ bool shellRuntimeParseSignal(const char *text, int *out_signo) {
     if (strncasecmp(name, "SIG", 3) == 0 && name[3] != '\0') {
         name += 3;
     }
-    static const struct {
-        const char *name;
-        int signo;
-    } kSignalNames[] = {
-#ifdef SIGHUP
-        {"HUP", SIGHUP},
-#endif
-#ifdef SIGINT
-        {"INT", SIGINT},
-#endif
-#ifdef SIGQUIT
-        {"QUIT", SIGQUIT},
-#endif
-#ifdef SIGILL
-        {"ILL", SIGILL},
-#endif
-#ifdef SIGTRAP
-        {"TRAP", SIGTRAP},
-#endif
-#ifdef SIGABRT
-        {"ABRT", SIGABRT},
-#endif
-#ifdef SIGBUS
-        {"BUS", SIGBUS},
-#endif
-#ifdef SIGFPE
-        {"FPE", SIGFPE},
-#endif
-#ifdef SIGKILL
-        {"KILL", SIGKILL},
-#endif
-#ifdef SIGUSR1
-        {"USR1", SIGUSR1},
-#endif
-#ifdef SIGSEGV
-        {"SEGV", SIGSEGV},
-#endif
-#ifdef SIGUSR2
-        {"USR2", SIGUSR2},
-#endif
-#ifdef SIGPIPE
-        {"PIPE", SIGPIPE},
-#endif
-#ifdef SIGALRM
-        {"ALRM", SIGALRM},
-#endif
-#ifdef SIGTERM
-        {"TERM", SIGTERM},
-#endif
-#ifdef SIGCHLD
-        {"CHLD", SIGCHLD},
-#endif
-#ifdef SIGCONT
-        {"CONT", SIGCONT},
-#endif
-#ifdef SIGSTOP
-        {"STOP", SIGSTOP},
-#endif
-#ifdef SIGTSTP
-        {"TSTP", SIGTSTP},
-#endif
-#ifdef SIGTTIN
-        {"TTIN", SIGTTIN},
-#endif
-#ifdef SIGTTOU
-        {"TTOU", SIGTTOU},
-#endif
-#ifdef SIGWINCH
-        {"WINCH", SIGWINCH},
-#endif
-    };
-    for (size_t i = 0; i < sizeof(kSignalNames) / sizeof(kSignalNames[0]); ++i) {
-        if (strcasecmp(name, kSignalNames[i].name) == 0) {
-            *out_signo = kSignalNames[i].signo;
+    for (size_t i = 0; i < sizeof(kShellSignalNames) / sizeof(kShellSignalNames[0]); ++i) {
+        if (strcasecmp(name, kShellSignalNames[i].name) == 0) {
+            *out_signo = kShellSignalNames[i].signo;
             return true;
         }
     }
+    return false;
+}
+
+bool shellRuntimeSignalName(int signo, bool include_prefix, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len == 0) {
+        return false;
+    }
+    if (signo == 0) {
+        snprintf(buffer, buffer_len, "EXIT");
+        return true;
+    }
+    if (signo < 0 || signo >= NSIG) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(kShellSignalNames) / sizeof(kShellSignalNames[0]); ++i) {
+        if (kShellSignalNames[i].signo == signo) {
+            if (include_prefix) {
+                snprintf(buffer, buffer_len, "SIG%s", kShellSignalNames[i].name);
+            } else {
+                snprintf(buffer, buffer_len, "%s", kShellSignalNames[i].name);
+            }
+            return true;
+        }
+    }
+#if defined(SIGRTMIN) && defined(SIGRTMAX)
+    int rtmin = SIGRTMIN;
+    int rtmax = SIGRTMAX;
+    if (signo >= rtmin && signo <= rtmax) {
+        if (signo == rtmin) {
+            snprintf(buffer, buffer_len, include_prefix ? "SIGRTMIN" : "RTMIN");
+            return true;
+        }
+        if (signo == rtmax) {
+            snprintf(buffer, buffer_len, include_prefix ? "SIGRTMAX" : "RTMAX");
+            return true;
+        }
+        int offset_from_min = signo - rtmin;
+        int offset_from_max = rtmax - signo;
+        if (offset_from_min <= offset_from_max) {
+            if (include_prefix) {
+                snprintf(buffer, buffer_len, "SIGRTMIN+%d", offset_from_min);
+            } else {
+                snprintf(buffer, buffer_len, "RTMIN+%d", offset_from_min);
+            }
+        } else {
+            if (include_prefix) {
+                snprintf(buffer, buffer_len, "SIGRTMAX-%d", offset_from_max);
+            } else {
+                snprintf(buffer, buffer_len, "RTMAX-%d", offset_from_max);
+            }
+        }
+        return true;
+    }
+#endif
     return false;
 }
 

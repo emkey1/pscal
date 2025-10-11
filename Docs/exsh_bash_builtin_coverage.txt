@@ -7,11 +7,11 @@ Bash builtins reported by `help`
 
 Builtins currently implemented in exsh
 --------------------------------------
-cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type getopts mapfile readarray
+cd pwd dirs pushd popd echo exit exec true false set unset export read printf test [ shift alias unalias history setenv unsetenv declare jobs disown kill fg bg wait builtin source . trap local let break continue : eval return logout finger help bind shopt command type getopts mapfile readarray
 
 Bash builtins missing from exsh
 -------------------------------
-caller compgen complete compopt enable fc hash kill suspend ulimit
+caller compgen complete compopt enable fc hash suspend ulimit
 
 Plans to address missing builtins
 ---------------------------------
@@ -34,7 +34,8 @@ Plans to address missing builtins
 
 4) Job control builtins (disown, kill, suspend):
    - Disown: Implemented. The job registry tracks disowned entries so jobs listings, fg/bg, and wait ignore them while they continue running in the background.
-   - Remaining work: implement kill and suspend, routing signals and integrating with shellJobControlRestoreForeground. Add parity tests for signalling behaviour.
+   - Kill: Implemented. Supports signalling jobs via %% notation or raw PIDs, includes -s/-n/-SIGNAL parsing, and mirrors Bash's kill -l translation helpers with regression coverage.
+   - Remaining work: implement suspend, routing signals and integrating with shellJobControlRestoreForeground. Add parity tests for signalling behaviour.
 
 5) getopts builtin: Completed.
    - Added vmBuiltinShellGetopts which keeps OPTIND/OPTARG in sync with gShellRuntime, supports clustered short options, consumes arguments that require parameters, and mirrors Bash error reporting for missing operands.

@@ -2266,9 +2266,10 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         "cd",      "pwd",    "dirs",   "pushd",  "popd",   "exit",    "logout",  "exec",
         "eval",    "export", "unset",  "setenv", "unsetenv","set",    "declare", "typeset",
         "readonly","umask",  "command","hash",   "trap",   "local",   "let",     "break",
-        "continue","alias", "bind",   "shopt",  "history","jobs",   "disown",  "fg",
-        "finger", "bg",     "wait",   "builtin","source", "read",   "printf",  "shift",
-        "return", "help",   "type",   "test",   "[",      ":",      "unalias","getopts",
+        "continue","alias", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
+        "fg",     "finger", "bg",     "wait",   "builtin","source", "read",   "printf",
+        "shift",  "return", "help",   "type",   "test",   "[",      ":",      "unalias",
+        "getopts",
         "mapfile","__shell_double_bracket",
         "__shell_arithmetic", "times",  "echo",   "true",   "false"
     };

@@ -1,0 +1,16 @@
+#!/usr/bin/env exsh
+
+sleep 60 &
+kill %1
+wait %1
+status_first=$?
+printf "wait_first:%s\n" "$status_first"
+
+sleep 60 &
+kill -s TERM %1
+wait %1
+status_second=$?
+printf "wait_second:%s\n" "$status_second"
+
+printf "kill_l_numeric:%s\n" "$(kill -l 9)"
+printf "kill_l_name:%s\n" "$(kill -l SIGTERM)"
