@@ -18,6 +18,14 @@ static char *shellNormalizeDollarCommandInline(const char *command, size_t len) 
     size_t j = 0;
     for (size_t i = 0; i < len; ++i) {
         char c = command[i];
+        if (c == SHELL_QUOTE_MARK_SINGLE) {
+            out[j++] = '\'';
+            continue;
+        }
+        if (c == SHELL_QUOTE_MARK_DOUBLE) {
+            out[j++] = '"';
+            continue;
+        }
         if (c == '\\' && i + 1 < len && command[i + 1] == '\n') {
             i++;
             continue;
@@ -40,6 +48,14 @@ static char *shellNormalizeBacktickCommandInline(const char *command, size_t len
     size_t j = 0;
     for (size_t i = 0; i < len; ++i) {
         char c = command[i];
+        if (c == SHELL_QUOTE_MARK_SINGLE) {
+            out[j++] = '\'';
+            continue;
+        }
+        if (c == SHELL_QUOTE_MARK_DOUBLE) {
+            out[j++] = '"';
+            continue;
+        }
         if (c == '\\' && i + 1 < len) {
             char next = command[i + 1];
             if (next == '\n') {
