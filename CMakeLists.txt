@@ -48,7 +48,20 @@ add_compile_definitions(
     PSCAL_GIT_TAG="${PSCAL_GIT_TAG}"
 )
 
-set(PSCAL_INSTALL_ROOT "/usr/local/pscal" CACHE PATH "Default PSCAL runtime asset directory")
+# Derive the default install root from the selected CMake install prefix so a
+# customised `-DCMAKE_INSTALL_PREFIX` keeps runtime assets colocated with the
+# binaries unless users explicitly override `-DPSCAL_INSTALL_ROOT`.
+set(_pscal_install_prefix "${CMAKE_INSTALL_PREFIX}")
+if(NOT _pscal_install_prefix)
+    set(_pscal_install_prefix "/usr/local")
+endif()
+string(REGEX REPLACE "/$" "" _pscal_install_prefix "${_pscal_install_prefix}")
+if(_pscal_install_prefix MATCHES "/pscal$")
+    set(_pscal_install_root_default "${_pscal_install_prefix}")
+else()
+    set(_pscal_install_root_default "${_pscal_install_prefix}/pscal")
+endif()
+set(PSCAL_INSTALL_ROOT "${_pscal_install_root_default}" CACHE PATH "Default PSCAL runtime asset directory")
 string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)

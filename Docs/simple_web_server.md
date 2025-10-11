@@ -2,7 +2,7 @@
 
 ## Overview
 - Purpose: Minimal HTTP 1.1 server implemented in CLike for demos and local testing.
-- Default root: Populates `/tmp/htdocs.<PID>` by copying `${PSCAL_INSTALL_ROOT}/misc/htdocs` (default `/usr/local/pscal/misc/htdocs`); falls back to a minimal `index.html` if the copy fails.
+- Default root: Populates `/tmp/htdocs.<PID>` by copying `${PSCAL_INSTALL_ROOT}/misc/htdocs` (defaults to `${CMAKE_INSTALL_PREFIX}/pscal/misc/htdocs` unless overridden); falls back to a minimal `index.html` if the copy fails.
 - Design: Single listener socket, multi-threaded worker pool, bounded in-memory queue, simple static file serving.
 
 ## Features

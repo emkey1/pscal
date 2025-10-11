@@ -38,5 +38,6 @@ build/bin/clike Examples/Clike/<program>
 
 The clike front end resolves imports by first checking the directory in the
 `CLIKE_LIB_DIR` environment variable and falling back to
-`${PSCAL_INSTALL_ROOT}/clike/lib` (defaulting to
-`/usr/local/pscal/clike/lib`).
+`${PSCAL_INSTALL_ROOT}/clike/lib` (which defaults to
+`${CMAKE_INSTALL_PREFIX}/pscal/clike/lib` unless overridden at configure
+time).
