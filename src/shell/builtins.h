@@ -13,6 +13,8 @@ void shellRegisterBuiltins(HashTable *table);
 int shellGetBuiltinId(const char *name);
 const char *shellBuiltinCanonicalName(const char *name);
 bool shellIsBuiltinName(const char *name);
+typedef void (*ShellBuiltinVisitor)(const char *name, const char *canonical, int id, void *context);
+void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context);
 void shellDumpBuiltins(FILE *out);
 
 #ifdef __cplusplus

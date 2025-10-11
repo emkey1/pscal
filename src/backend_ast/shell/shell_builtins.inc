@@ -5617,6 +5617,160 @@ Value vmBuiltinShellHash(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static bool shellBuiltinIsInternal(const char *name) {
+    return name && name[0] == '_' && name[1] == '_';
+}
+
+typedef struct {
+    bool print_pretty;
+    bool list_all;
+    bool list_disabled_only;
+    bool disabled_prefix;
+} ShellEnableListContext;
+
+static void shellEnableListVisitor(const char *name,
+                                   const char *canonical,
+                                   int id,
+                                   void *ctx_void) {
+    (void)id;
+    ShellEnableListContext *ctx = (ShellEnableListContext *)ctx_void;
+    if (!ctx) {
+        return;
+    }
+    if (!canonical || !*canonical) {
+        canonical = name;
+    }
+    if (!name) {
+        name = canonical;
+    }
+    if (!canonical || !*canonical) {
+        return;
+    }
+    if (shellBuiltinIsInternal(canonical)) {
+        return;
+    }
+    if (strcasecmp(name, canonical) != 0) {
+        return;
+    }
+    bool disabled = shellRuntimeBuiltinDisabled(canonical);
+    if (!ctx->list_all) {
+        if (ctx->list_disabled_only) {
+            if (!disabled) {
+                return;
+            }
+        } else if (disabled) {
+            return;
+        }
+    }
+    if (ctx->print_pretty) {
+        if (disabled) {
+            printf("enable -n %s\n", canonical);
+        } else {
+            printf("enable %s\n", canonical);
+        }
+    } else if (ctx->disabled_prefix && disabled) {
+        printf("enable -n %s\n", canonical);
+    } else {
+        printf("%s\n", canonical);
+    }
+}
+
+Value vmBuiltinShellEnable(VM *vm, int arg_count, Value *args) {
+    bool parsing_options = true;
+    bool disable_mode = false;
+    bool print_pretty = false;
+    bool list_all = false;
+    int operand_start = arg_count;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "enable: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                operand_start = i + 1;
+                break;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                for (const char *opt = text + 1; *opt; ++opt) {
+                    switch (*opt) {
+                        case 'a':
+                            list_all = true;
+                            break;
+                        case 'n':
+                            disable_mode = true;
+                            break;
+                        case 'p':
+                            print_pretty = true;
+                            break;
+                        default:
+                            runtimeError(vm, "enable: invalid option -- '%c'", *opt);
+                            shellUpdateStatus(1);
+                            return makeVoid();
+                    }
+                }
+                continue;
+            }
+            parsing_options = false;
+        }
+        if (operand_start == arg_count) {
+            operand_start = i;
+        }
+    }
+
+    if (operand_start >= arg_count) {
+        ShellEnableListContext ctx = {
+            .print_pretty = print_pretty,
+            .list_all = list_all,
+            .list_disabled_only = disable_mode && !list_all,
+            .disabled_prefix = disable_mode && !list_all,
+        };
+        shellVisitBuiltins(shellEnableListVisitor, &ctx);
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    for (int i = operand_start; i < arg_count; ++i) {
+        Value v = args[i];
+        const char *name = (v.type == TYPE_STRING) ? v.s_val : NULL;
+        if (!name || !*name) {
+            runtimeError(vm, "enable: : not a shell builtin");
+            ok = false;
+            continue;
+        }
+        if (!shellIsBuiltinName(name)) {
+            runtimeError(vm, "enable: %s: not a shell builtin", name);
+            ok = false;
+            continue;
+        }
+        if (shellBuiltinIsInternal(name)) {
+            runtimeError(vm, "enable: %s: not a shell builtin", name);
+            ok = false;
+            continue;
+        }
+        bool success = false;
+        if (disable_mode) {
+            success = shellRuntimeDisableBuiltin(name);
+        } else {
+            success = shellRuntimeEnableBuiltin(name);
+        }
+        if (!success) {
+            runtimeError(vm, "enable: out of memory");
+            ok = false;
+            break;
+        }
+    }
+
+    shellUpdateStatus(ok ? 0 : 1);
+    return makeVoid();
+}
+
 Value vmBuiltinShellType(VM *vm, int arg_count, Value *args) {
     bool parsing_options = true;
     bool list_all = false;
@@ -6325,6 +6479,18 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         " builtins, and executable paths. -V prints verbose descriptions. The -a"
         " flag lists every match and -p searches using the default PATH. Execution"
         " without -v or -V is not currently supported.",
+        NULL,
+        0
+    },
+    {
+        "enable",
+        "Enable or disable shell builtins.",
+        "enable [-a] [-n] [-p] [name ...]",
+        "Without NAME arguments lists builtins that are currently enabled. With"
+        " -n and no names the disabled builtins are printed instead, -a lists every"
+        " builtin regardless of status, and -p formats output as enable commands."
+        " Supplying NAME arguments toggles those builtins on by default or off"
+        " when used with -n.",
         NULL,
         0
     },

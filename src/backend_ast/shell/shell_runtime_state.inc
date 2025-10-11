@@ -892,6 +892,9 @@ typedef struct {
     ShellHashEntry *hash_entries;
     size_t hash_count;
     size_t hash_capacity;
+    char **disabled_builtins;
+    size_t disabled_builtin_count;
+    size_t disabled_builtin_capacity;
     int getopts_index;
     int getopts_offset;
 } ShellRuntimeState;
@@ -1265,6 +1268,9 @@ static ShellRuntimeState gShellRuntime = {
     .hash_entries = NULL,
     .hash_count = 0,
     .hash_capacity = 0,
+    .disabled_builtins = NULL,
+    .disabled_builtin_count = 0,
+    .disabled_builtin_capacity = 0,
     .getopts_index = 1,
     .getopts_offset = 0
 };
@@ -1279,6 +1285,96 @@ static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
 static bool gShellInteractiveMode = false;
+
+static bool shellRuntimeEnsureDisabledCapacity(size_t needed) {
+    if (gShellRuntime.disabled_builtin_capacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellRuntime.disabled_builtin_capacity ?
+                              gShellRuntime.disabled_builtin_capacity * 2 :
+                              4;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    char **entries = realloc(gShellRuntime.disabled_builtins,
+                             new_capacity * sizeof(char *));
+    if (!entries) {
+        return false;
+    }
+    gShellRuntime.disabled_builtins = entries;
+    gShellRuntime.disabled_builtin_capacity = new_capacity;
+    return true;
+}
+
+static bool shellRuntimeDisableBuiltin(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    const char *canonical = shellBuiltinCanonicalName(name);
+    const char *target = canonical ? canonical : name;
+    if (!shellIsBuiltinName(target)) {
+        return false;
+    }
+    for (size_t i = 0; i < gShellRuntime.disabled_builtin_count; ++i) {
+        char *entry = gShellRuntime.disabled_builtins[i];
+        if (entry && strcasecmp(entry, target) == 0) {
+            return true;
+        }
+    }
+    if (!shellRuntimeEnsureDisabledCapacity(gShellRuntime.disabled_builtin_count + 1)) {
+        return false;
+    }
+    char *copy = strdup(target);
+    if (!copy) {
+        return false;
+    }
+    gShellRuntime.disabled_builtins[gShellRuntime.disabled_builtin_count++] = copy;
+    return true;
+}
+
+static bool shellRuntimeEnableBuiltin(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    const char *canonical = shellBuiltinCanonicalName(name);
+    const char *target = canonical ? canonical : name;
+    if (!shellIsBuiltinName(target)) {
+        return false;
+    }
+    for (size_t i = 0; i < gShellRuntime.disabled_builtin_count; ++i) {
+        char *entry = gShellRuntime.disabled_builtins[i];
+        if (entry && strcasecmp(entry, target) == 0) {
+            free(entry);
+            if (i + 1 < gShellRuntime.disabled_builtin_count) {
+                memmove(&gShellRuntime.disabled_builtins[i],
+                        &gShellRuntime.disabled_builtins[i + 1],
+                        (gShellRuntime.disabled_builtin_count - i - 1) * sizeof(char *));
+            }
+            gShellRuntime.disabled_builtin_count--;
+            return true;
+        }
+    }
+    return true;
+}
+
+static bool shellRuntimeBuiltinDisabled(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    const char *canonical = shellBuiltinCanonicalName(name);
+    const char *target = canonical ? canonical : name;
+    for (size_t i = 0; i < gShellRuntime.disabled_builtin_count; ++i) {
+        char *entry = gShellRuntime.disabled_builtins[i];
+        if (entry && strcasecmp(entry, target) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 typedef struct {
     ShellTrapAction action;

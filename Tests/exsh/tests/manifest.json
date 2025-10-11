@@ -527,6 +527,14 @@
             "expect": "match_bash"
         },
         {
+            "id": "bash_parity_enable",
+            "name": "enable builtin toggles runtime builtins",
+            "category": "builtins",
+            "description": "Enable and disable builtins while matching Bash output for listings.",
+            "script": "Tests/exsh/tests/bash_parity_enable.psh",
+            "expect": "match_bash"
+        },
+        {
             "id": "bash_parity_hash",
             "name": "hash builtin caches external commands",
             "category": "builtins",
