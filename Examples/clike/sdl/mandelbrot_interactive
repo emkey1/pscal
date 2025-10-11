@@ -111,6 +111,11 @@ str pathJoin(str base, str rel) {
     return normalizedBase + "/" + rel;
 }
 
+int isDirectory(str path) {
+    int attr = getfattr(path);
+    return (attr & 16) != 0 ? 1 : 0;
+}
+
 int pathExists(str path) {
     if (strlen(path) == 0) return 0;
     if (fileexists(path)) return 1;

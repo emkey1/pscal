@@ -127,7 +127,6 @@ str pathJoin(str base, str rel) {
 bool pathExists(str path) {
   if (length(path) == 0) return false;
   if (fileexists(path)) return true;
-  if (isDirectory(path)) return true;
   return false;
 }
 
