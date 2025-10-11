@@ -361,6 +361,8 @@ static ShellToken scanWord(ShellLexer *lexer) {
     bool sawUnquotedSegment = false;
     bool hasParam = false;
     bool hasCommand = false;
+
+    bool inBacktick = false;
     bool hasArithmetic = false;
 
     bool allowStructuralLiterals = lexerAllowsStructuralWordLiterals(lexer);
@@ -381,7 +383,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
             break;
         }
         bool startingArrayLiteral = false;
-        if (!singleQuoted && !doubleQuoted) {
+        if (!singleQuoted && !doubleQuoted && !inBacktick) {
             if (!inArrayLiteral && firstUnquotedEq != (size_t)-1 && eqSuppressDepth == 0 && c == '(' &&
                 bufLen == firstUnquotedEq + 1) {
                 startingArrayLiteral = true;
@@ -413,7 +415,8 @@ static ShellToken scanWord(ShellLexer *lexer) {
             }
         }
         advanceChar(lexer);
-        if (!singleQuoted && !doubleQuoted && eqSuppressDepth == 0 && firstUnquotedEq != (size_t)-1) {
+        bool escapedChar = false;
+        if (!singleQuoted && !doubleQuoted && !inBacktick && eqSuppressDepth == 0 && firstUnquotedEq != (size_t)-1) {
             if (startingArrayLiteral) {
                 inArrayLiteral = true;
                 arrayParenDepth = 1;
@@ -441,6 +444,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 }
                 advanceChar(lexer);
                 c = next;
+                escapedChar = true;
             } else {
                 if (next == '\n') {
                     advanceChar(lexer);
@@ -449,6 +453,7 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 if (next == '\\' || next == '"' || next == '$' || next == '`') {
                     advanceChar(lexer);
                     c = next;
+                    escapedChar = true;
                 } else {
                     c = '\\';
                 }
@@ -600,8 +605,13 @@ static ShellToken scanWord(ShellLexer *lexer) {
                 continue;
             }
         }
-        if (c == '`' && !singleQuoted) {
-            hasCommand = true;
+        if (c == '`' && !singleQuoted && !escapedChar) {
+            if (!inBacktick) {
+                hasCommand = true;
+                inBacktick = true;
+            } else {
+                inBacktick = false;
+            }
         }
 
         if (bufLen + 1 >= bufCap) {
@@ -614,7 +624,8 @@ static ShellToken scanWord(ShellLexer *lexer) {
             buffer = tmp;
         }
         buffer[bufLen++] = (char)c;
-        if (firstUnquotedEq == (size_t)-1 && c == '=' && !singleQuoted && !doubleQuoted && eqSuppressDepth == 0) {
+        if (firstUnquotedEq == (size_t)-1 && c == '=' && !singleQuoted && !doubleQuoted && !inBacktick &&
+            eqSuppressDepth == 0) {
             firstUnquotedEq = bufLen - 1;
         }
         if (singleQuoted) {

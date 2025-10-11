@@ -3,4 +3,7 @@ echo "name:`printf one; echo`"
 echo "legacy:`printf 'X'\\
 'Y'`"
 echo "combo:z`printf 1; echo; printf 2`z"
+assign=`printf 'alpha beta'`
+printf "assign:%s\n" "$assign"
+echo plain:`printf foo`
 echo "backtick:end"

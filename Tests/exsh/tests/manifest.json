@@ -250,7 +250,7 @@
             "description": "Backtick command substitution trims trailing newlines and honors escapes.",
             "script": "Tests/exsh/tests/backtick_substitution.psh",
             "expect": "runtime_ok",
-            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nbacktick:end"
+            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nassign:alpha beta\nplain:foo\nbacktick:end"
         },
         {
             "id": "parameter_default",
