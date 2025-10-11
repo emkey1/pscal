@@ -2440,6 +2440,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     }
     ShellExecRedirBackup *redir_backups = NULL;
     size_t redir_backup_count = 0;
+    fflush(NULL);
     if (!shellApplyExecRedirections(vm, cmd, &redir_backups, &redir_backup_count)) {
         if (args) {
             for (int i = 0; i < arg_count; ++i) {
@@ -2455,6 +2456,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     shellRuntimeSetCurrentCommandName(name);
     handler(vm, arg_count, args);
     shellRuntimeSetCurrentCommandName(previous_name);
+    fflush(NULL);
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
     shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {
