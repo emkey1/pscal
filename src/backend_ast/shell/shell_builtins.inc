@@ -5617,6 +5617,10 @@ Value vmBuiltinShellHash(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static bool shellBuiltinIsInternal(const char *name) {
+    return name && name[0] == '_' && name[1] == '_';
+}
+
 typedef struct {
     bool print_pretty;
     bool list_all;
@@ -5640,6 +5644,9 @@ static void shellEnableListVisitor(const char *name,
         name = canonical;
     }
     if (!canonical || !*canonical) {
+        return;
+    }
+    if (shellBuiltinIsInternal(canonical)) {
         return;
     }
     if (strcasecmp(name, canonical) != 0) {
@@ -5738,6 +5745,11 @@ Value vmBuiltinShellEnable(VM *vm, int arg_count, Value *args) {
             continue;
         }
         if (!shellIsBuiltinName(name)) {
+            runtimeError(vm, "enable: %s: not a shell builtin", name);
+            ok = false;
+            continue;
+        }
+        if (shellBuiltinIsInternal(name)) {
             runtimeError(vm, "enable: %s: not a shell builtin", name);
             ok = false;
             continue;
