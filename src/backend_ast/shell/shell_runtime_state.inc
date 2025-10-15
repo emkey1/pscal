@@ -3088,6 +3088,11 @@ static void shellInitJobControlState(void) {
 }
 
 static void shellEnsureJobControl(void) {
+    if (!shellRuntimeIsInteractive()) {
+        gShellRuntime.job_control_enabled = false;
+        return;
+    }
+
     shellInitJobControlState();
 
     if (gShellRuntime.tty_fd < 0) {

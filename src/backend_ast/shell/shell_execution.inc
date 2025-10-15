@@ -704,6 +704,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
     ShellExecRedirBackup *backups = NULL;
     size_t backup_count = 0;
     size_t backup_capacity = 0;
+    bool stdout_redirected = false;
 
     for (size_t i = 0; i < cmd->redir_count; ++i) {
         const ShellRedirection *redir = &cmd->redirs[i];
@@ -740,9 +741,15 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     goto redir_error;
                 }
                 close(fd);
+                if (target_fd == STDOUT_FILENO) {
+                    stdout_redirected = true;
+                }
                 break;
             }
             case SHELL_RUNTIME_REDIR_DUP: {
+                if (target_fd == STDOUT_FILENO && redir->dup_target_fd == STDOUT_FILENO && stdout_redirected) {
+                    target_fd = STDERR_FILENO;
+                }
                 if (redir->close_target) {
                     if (close(target_fd) != 0 && errno != EBADF) {
                         int err = errno;
