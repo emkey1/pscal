@@ -1001,7 +1001,7 @@ static void populateProcedureCacheFromTable(VM* vm, HashTable* table) {
     for (int i = 0; i < HASHTABLE_SIZE; ++i) {
         for (Symbol* entry = table->buckets[i]; entry; entry = entry->next) {
             Symbol* resolved = resolveProcedureAlias(entry);
-            if (resolved && resolved->bytecode_address >= 0) {
+            if (resolved && resolved->is_defined && resolved->bytecode_address >= 0) {
                 size_t address = (size_t)resolved->bytecode_address;
                 if (address < vm->procedureByAddressSize) {
                     vm->procedureByAddress[address] = resolved;
