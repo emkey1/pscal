@@ -1477,22 +1477,96 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     Value* new_elements = NULL;
+    int* copy_lower = NULL;
+    int* copy_upper = NULL;
+    int* copy_indices = NULL;
     if (new_total > 0) {
         new_elements = (Value*)malloc(sizeof(Value) * new_total);
         if (!new_elements) {
             runtimeError(vm, "SetLength: memory allocation failed for array contents.");
-            free(new_lower);
-            free(new_upper);
-            return false;
+            goto setlength_cleanup_failure;
         }
 
-        size_t copy_count = old_total < new_total ? old_total : new_total;
-        for (size_t i = 0; i < copy_count; ++i) {
-            new_elements[i] = makeCopyOfValue(&array_value->array_val[i]);
-        }
-        for (size_t i = copy_count; i < new_total; ++i) {
+        for (size_t i = 0; i < new_total; ++i) {
             new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
         }
+
+        if (old_total > 0 && array_value->array_val && array_value->lower_bounds &&
+            array_value->upper_bounds && array_value->dimensions == dimension_count) {
+            copy_lower = (int*)malloc(sizeof(int) * dimension_count);
+            copy_upper = (int*)malloc(sizeof(int) * dimension_count);
+            if (!copy_lower || !copy_upper) {
+                runtimeError(vm, "SetLength: memory allocation failed while preserving array contents.");
+                goto setlength_cleanup_failure;
+            }
+
+            bool has_overlap = true;
+            for (int i = 0; i < dimension_count; ++i) {
+                int overlap_low = array_value->lower_bounds[i] > new_lower[i] ?
+                                  array_value->lower_bounds[i] : new_lower[i];
+                int overlap_high = array_value->upper_bounds[i] < new_upper[i] ?
+                                   array_value->upper_bounds[i] : new_upper[i];
+                if (overlap_high < overlap_low) {
+                    has_overlap = false;
+                    break;
+                }
+                copy_lower[i] = overlap_low;
+                copy_upper[i] = overlap_high;
+            }
+
+            if (has_overlap) {
+                copy_indices = (int*)malloc(sizeof(int) * dimension_count);
+                if (!copy_indices) {
+                    runtimeError(vm, "SetLength: memory allocation failed while preserving array contents.");
+                    goto setlength_cleanup_failure;
+                }
+
+                Value old_array_stub = *array_value;
+                Value new_array_stub;
+                memset(&new_array_stub, 0, sizeof(Value));
+                new_array_stub.type = TYPE_ARRAY;
+                new_array_stub.dimensions = dimension_count;
+                new_array_stub.lower_bounds = new_lower;
+                new_array_stub.upper_bounds = new_upper;
+
+                for (int i = 0; i < dimension_count; ++i) {
+                    copy_indices[i] = copy_lower[i];
+                }
+
+                while (true) {
+                    int old_offset = computeFlatOffset(&old_array_stub, copy_indices);
+                    int new_offset = computeFlatOffset(&new_array_stub, copy_indices);
+                    freeValue(&new_elements[new_offset]);
+                    new_elements[new_offset] = makeCopyOfValue(&array_value->array_val[old_offset]);
+
+                    int dim = dimension_count - 1;
+                    while (dim >= 0) {
+                        if (copy_indices[dim] < copy_upper[dim]) {
+                            copy_indices[dim]++;
+                            break;
+                        }
+                        copy_indices[dim] = copy_lower[dim];
+                        --dim;
+                    }
+                    if (dim < 0) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (copy_indices) {
+        free(copy_indices);
+        copy_indices = NULL;
+    }
+    if (copy_lower) {
+        free(copy_lower);
+        copy_lower = NULL;
+    }
+    if (copy_upper) {
+        free(copy_upper);
+        copy_upper = NULL;
     }
 
     if (array_value->array_val) {
@@ -1518,6 +1592,26 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     return true;
+
+setlength_cleanup_failure:
+    if (copy_indices) {
+        free(copy_indices);
+    }
+    if (copy_lower) {
+        free(copy_lower);
+    }
+    if (copy_upper) {
+        free(copy_upper);
+    }
+    if (new_elements) {
+        for (size_t i = 0; i < new_total; ++i) {
+            freeValue(&new_elements[i]);
+        }
+        free(new_elements);
+    }
+    free(new_lower);
+    free(new_upper);
+    return false;
 }
 
 Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
