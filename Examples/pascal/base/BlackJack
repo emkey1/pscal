@@ -4,6 +4,9 @@ program BlackjackGame;
 uses
   SysUtils; // For Randomize (compatible with Free Pascal/Turbo Pascal)
 
+label
+  EndGame;
+
 type
   THand = array of Integer; // Stores card ranks (2-14: 11=Jack, 12=Queen, 13=King, 14=Ace)
 
@@ -85,11 +88,7 @@ begin
   Randomize; // Seed random number generator (critical for fairness)
 
   repeat
-    // Reset hands for new game
-    SetLength(humanHand, 0);
-    SetLength(dealerHand, 0);
-
-    // Initialize hands with explicit length (Fixed: Portable for all Pascals)
+    // Reset hands for new game by reinitialising to two cards immediately.
     SetLength(humanHand, 2);
     humanHand[0] := DealCard;
     humanHand[1] := DealCard;
@@ -119,7 +118,8 @@ begin
     end;
 
     // ===== NORMAL GAME FLOW =====
-    Writeln(#13#10'===== Initial Deal ====='); // Fixed: CR+LF for all OS
+      Writeln;
+      Writeln('===== Initial Deal =====');
     DisplayHand(humanHand, False, True); // Show your full hand
     DisplayHand(dealerHand, True, False); // Show dealer's up card only
 
@@ -143,7 +143,8 @@ begin
           humanHand[High(humanHand)] := DealCard;
 
           // Show new hand and check for bust
-          Writeln(#13#10'You hit:');
+            Writeln;
+            Writeln('You hit:');
           DisplayHand(humanHand, False, True);
           humanVal := CalculateHandValue(humanHand);
 
@@ -160,7 +161,8 @@ begin
     end;
 
     // ===== DEALER'S TURN: Play by rules (hit until ≥17) =====
-    Writeln(#13#10'===== Dealer is Playing =====');
+    Writeln;
+    Writeln('===== Dealer is Playing =====');
     while CalculateHandValue(dealerHand) < 17 do
     begin
       // Deal another card to dealer
@@ -177,7 +179,8 @@ begin
     end;
 
     // ===== COMPARE HANDS =====
-    Writeln(#13#10'===== Final Results =====');
+    Writeln;
+    Writeln('===== Final Results =====');
     DisplayHand(humanHand, False, True);
     DisplayHand(dealerHand, True, True);
 
@@ -190,10 +193,12 @@ begin
 
 EndGame:
     // Ask to play again (fixed: no buffer leaks now)
-    Write(#13#10'Play again? (y/n): ');
+    Writeln;
+    Write('Play again? (y/n): ');
     ReadLn(playAgain);
     playAgain := LowerCase(playAgain);
   until playAgain <> 'y';
 
-  Writeln(#13#10'Thanks for playing Blackjack!');
+  Writeln;
+  Writeln('Thanks for playing Blackjack!');
 end.

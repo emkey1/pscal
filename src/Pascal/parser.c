@@ -56,6 +56,8 @@ AST *parseWriteArgument(Parser *parser);
 static AST *parseStrArgumentList(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
+static AST *labelDeclarationBlock(Parser *parser);
+static bool tokenTerminatesStatement(TokenType type);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -74,6 +76,63 @@ static void appendDependencyPath(Parser *parser, const char *path) {
 
     listAppend(parser->dependency_paths, to_store);
     if (canonical) free(canonical);
+}
+
+static AST *labelDeclarationBlock(Parser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+
+    eat(parser, TOKEN_LABEL);
+
+    AST *list = newASTNode(AST_COMPOUND, NULL);
+    if (!list) {
+        return NULL;
+    }
+
+    bool saw_label = false;
+    while (parser->current_token &&
+           (parser->current_token->type == TOKEN_IDENTIFIER ||
+            parser->current_token->type == TOKEN_INTEGER_CONST)) {
+        Token *label_copy = copyToken(parser->current_token);
+        if (!label_copy && parser->current_token) {
+            freeAST(list);
+            EXIT_FAILURE_HANDLER();
+        }
+
+        TokenType label_type = parser->current_token->type;
+        eat(parser, label_type);
+
+        AST *decl = newLabelDeclaration(label_copy);
+        freeToken(label_copy);
+        if (!decl) {
+            freeAST(list);
+            return NULL;
+        }
+        addChild(list, decl);
+        saw_label = true;
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    }
+
+    if (!saw_label) {
+        errorParser(parser, "Expected one or more labels after LABEL");
+        freeAST(list);
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        errorParser(parser, "Expected ';' after label declaration");
+        freeAST(list);
+        return NULL;
+    }
+
+    eat(parser, TOKEN_SEMICOLON);
+    return list;
 }
 
 AST *declarations(Parser *parser, bool in_interface) {
@@ -99,7 +158,14 @@ AST *declarations(Parser *parser, bool in_interface) {
             break; // Exit the while(1) loop
         }
 
-        if (parser->current_token->type == TOKEN_CONST) {
+        if (parser->current_token->type == TOKEN_LABEL) {
+            AST *labels = labelDeclarationBlock(parser);
+            if (labels && labels->type != AST_NOOP) {
+                addChild(node, labels);
+            } else if (labels) {
+                freeAST(labels);
+            }
+        } else if (parser->current_token->type == TOKEN_CONST) {
             eat(parser, TOKEN_CONST);
             // Loop for multiple constant declarations within a single CONST block
             while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
@@ -1068,6 +1134,20 @@ AST *block(Parser *parser) {
     addChild(node, comp_stmt);
     // node->is_global_scope is set by the caller (buildProgramAST or proc/func declaration)
     return node;
+}
+
+static bool tokenTerminatesStatement(TokenType type) {
+    switch (type) {
+        case TOKEN_SEMICOLON:
+        case TOKEN_END:
+        case TOKEN_ELSE:
+        case TOKEN_UNTIL:
+        case TOKEN_EOF:
+        case TOKEN_PERIOD:
+            return true;
+        default:
+            return false;
+    }
 }
 
 AST *procedureDeclaration(Parser *parser, bool in_interface) {
@@ -2064,6 +2144,40 @@ AST* compoundStatement(Parser *parser) {
 }
 
 AST *statement(Parser *parser) {
+    if (!parser || !parser->current_token) {
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    if (parser->current_token->type == TOKEN_IDENTIFIER ||
+        parser->current_token->type == TOKEN_INTEGER_CONST) {
+        Token *lookahead = peekToken(parser);
+        bool is_label = (lookahead && lookahead->type == TOKEN_COLON);
+        if (lookahead) {
+            freeToken(lookahead);
+        }
+        if (is_label) {
+            Token *label_copy = copyToken(parser->current_token);
+            if (!label_copy && parser->current_token) {
+                EXIT_FAILURE_HANDLER();
+            }
+            TokenType label_type = parser->current_token->type;
+            eat(parser, label_type);
+            eat(parser, TOKEN_COLON);
+
+            AST *inner_stmt = NULL;
+            if (parser->current_token &&
+                !tokenTerminatesStatement(parser->current_token->type)) {
+                inner_stmt = statement(parser);
+            } else {
+                inner_stmt = newASTNode(AST_NOOP, NULL);
+            }
+
+            AST *label_node = newLabelStatement(label_copy, inner_stmt);
+            freeToken(label_copy);
+            return label_node;
+        }
+    }
+
     AST *node = NULL; // Initialize node
 
     switch (parser->current_token->type) {
@@ -2272,6 +2386,24 @@ AST *statement(Parser *parser) {
         case TOKEN_JOIN:
             node = joinStatement(parser);
             break;
+        case TOKEN_GOTO: {
+            eat(parser, TOKEN_GOTO);
+            if (!parser->current_token ||
+                (parser->current_token->type != TOKEN_IDENTIFIER &&
+                 parser->current_token->type != TOKEN_INTEGER_CONST)) {
+                errorParser(parser, "Expected label after GOTO");
+                return newASTNode(AST_NOOP, NULL);
+            }
+            Token *target_copy = copyToken(parser->current_token);
+            if (!target_copy && parser->current_token) {
+                EXIT_FAILURE_HANDLER();
+            }
+            TokenType target_type = parser->current_token->type;
+            eat(parser, target_type);
+            node = newGotoStatement(target_copy);
+            freeToken(target_copy);
+            break;
+        }
         case TOKEN_BREAK:
             eat(parser, TOKEN_BREAK); // Consume BREAK keyword
             node = newASTNode(AST_BREAK, NULL);
