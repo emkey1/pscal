@@ -2,6 +2,7 @@
 program BlackjackGame;
 
 uses
+  CRT;
   SysUtils; // For Randomize (compatible with Free Pascal/Turbo Pascal)
 
 label
@@ -119,6 +120,7 @@ begin
 
     // ===== NORMAL GAME FLOW =====
       Writeln;
+      ClrScr;
       Writeln('===== Initial Deal =====');
     DisplayHand(humanHand, False, True); // Show your full hand
     DisplayHand(dealerHand, True, False); // Show dealer's up card only
