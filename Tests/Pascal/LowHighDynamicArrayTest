@@ -1,0 +1,50 @@
+program LowHighDynamicArrayTest;
+
+type
+  TIntArray = array of Integer;
+
+procedure AssertEqualInt(expected, actual: integer; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then
+    writeln('PASS')
+  else
+    writeln('FAIL (expected ', expected, ', got ', actual, ')');
+end;
+
+procedure CheckBounds(const labelPrefix: string; const arr: TIntArray);
+begin
+  AssertEqualInt(0, Low(arr), labelPrefix + ' Low');
+  AssertEqualInt(Length(arr) - 1, High(arr), labelPrefix + ' High');
+end;
+
+procedure AppendValue(var arr: TIntArray; value: integer; const labelPrefix: string);
+begin
+  SetLength(arr, Length(arr) + 1);
+  arr[High(arr)] := value;
+  CheckBounds(labelPrefix + ' Append', arr);
+end;
+
+var
+  cards, aliasArr: TIntArray;
+  i: integer;
+begin
+  SetLength(cards, 3);
+  for i := 0 to High(cards) do
+    cards[i] := i * 10;
+  CheckBounds('cards initial', cards);
+
+  aliasArr := cards;
+  CheckBounds('alias initial', aliasArr);
+
+  AppendValue(cards, 30, 'cards');
+  AppendValue(aliasArr, 40, 'alias');
+
+  SetLength(cards, 1);
+  CheckBounds('cards shrink', cards);
+  AppendValue(cards, 50, 'cards after shrink');
+
+  SetLength(aliasArr, 0);
+  AssertEqualInt(0, Low(aliasArr), 'alias cleared Low');
+  AssertEqualInt(-1, High(aliasArr), 'alias cleared High');
+end.

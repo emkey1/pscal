@@ -3007,9 +3007,60 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
     return makeVoid(); // procedure
 }
 
+typedef struct {
+    bool hasBounds;
+    bool hitNilPointer;
+    int lower;
+    int upper;
+} ArrayBoundsResult;
+
+static ArrayBoundsResult resolveFirstDimBounds(Value* arg) {
+    ArrayBoundsResult result;
+    result.hasBounds = false;
+    result.hitNilPointer = false;
+    result.lower = 0;
+    result.upper = -1;
+
+    Value* current = arg;
+    for (int depth = 0; depth < 8 && current; ++depth) {
+        if (current->type == TYPE_ARRAY) {
+            int lower = 0;
+            int upper = -1;
+            if (current->dimensions > 0 && current->lower_bounds && current->upper_bounds) {
+                lower = current->lower_bounds[0];
+                upper = current->upper_bounds[0];
+            } else {
+                lower = current->lower_bound;
+                upper = current->upper_bound;
+            }
+            result.hasBounds = true;
+            result.lower = lower;
+            result.upper = upper;
+            return result;
+        }
+
+        if (current->type != TYPE_POINTER) {
+            break;
+        }
+
+        if (!current->ptr_val) {
+            result.hitNilPointer = true;
+            return result;
+        }
+
+        Value* next = (Value*)current->ptr_val;
+        if (next == current) {
+            break;
+        }
+        current = next;
+    }
+
+    return result;
+}
+
 Value vmBuiltinLow(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        runtimeError(vm, "Low() expects a single type identifier.");
+        runtimeError(vm, "Low() expects a single array or type identifier argument.");
         return makeInt(0);
     }
 
@@ -3017,6 +3068,15 @@ Value vmBuiltinLow(VM* vm, int arg_count, Value* args) {
     const char* typeName = NULL;
     AST* typeDef = NULL;
     VarType t = TYPE_UNKNOWN;
+
+    ArrayBoundsResult bounds = resolveFirstDimBounds(&arg);
+    if (bounds.hasBounds) {
+        return makeInt(bounds.lower);
+    }
+    if (bounds.hitNilPointer) {
+        runtimeError(vm, "Low() cannot dereference a nil array reference.");
+        return makeInt(0);
+    }
 
     // Extract type name or type information from the argument
     if (arg.type == TYPE_STRING) {
@@ -3068,7 +3128,7 @@ Value vmBuiltinLow(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinHigh(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
-        runtimeError(vm, "High() expects a single type identifier.");
+        runtimeError(vm, "High() expects a single array or type identifier argument.");
         return makeInt(0);
     }
 
@@ -3076,6 +3136,15 @@ Value vmBuiltinHigh(VM* vm, int arg_count, Value* args) {
     const char* typeName = NULL;
     AST* typeDef = NULL;
     VarType t = TYPE_UNKNOWN;
+
+    ArrayBoundsResult bounds = resolveFirstDimBounds(&arg);
+    if (bounds.hasBounds) {
+        return makeInt(bounds.upper);
+    }
+    if (bounds.hitNilPointer) {
+        runtimeError(vm, "High() cannot dereference a nil array reference.");
+        return makeInt(0);
+    }
 
     if (arg.type == TYPE_STRING) {
         typeName = AS_STRING(arg);
@@ -4395,22 +4464,38 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
         return makeInt(0);
     }
 
-    if (args[0].type == TYPE_STRING) {
-        return makeInt(args[0].s_val ? (long long)strlen(args[0].s_val) : 0);
+    Value arg = args[0];
+
+    if (arg.type == TYPE_POINTER) {
+        if (!arg.ptr_val) {
+            runtimeError(vm, "Length() cannot dereference a nil pointer argument.");
+            return makeInt(0);
+        }
+        Value* pointed = (Value*)arg.ptr_val;
+        if (pointed->type == TYPE_STRING) {
+            return makeInt(pointed->s_val ? (long long)strlen(pointed->s_val) : 0);
+        }
     }
 
-    if (args[0].type == TYPE_CHAR) {
+    if (arg.type == TYPE_STRING) {
+        return makeInt(arg.s_val ? (long long)strlen(arg.s_val) : 0);
+    }
+
+    if (arg.type == TYPE_CHAR) {
         return makeInt(1);
     }
 
-    if (args[0].type == TYPE_ARRAY) {
-        long long len = 0;
-        if (args[0].dimensions > 0 && args[0].upper_bounds && args[0].lower_bounds) {
-            len = args[0].upper_bounds[0] - args[0].lower_bounds[0] + 1;
-        } else {
-            len = args[0].upper_bound - args[0].lower_bound + 1;
+    ArrayBoundsResult bounds = resolveFirstDimBounds(&arg);
+    if (bounds.hasBounds) {
+        long long len = (long long)bounds.upper - (long long)bounds.lower + 1;
+        if (len < 0) {
+            len = 0;
         }
         return makeInt(len);
+    }
+    if (bounds.hitNilPointer) {
+        runtimeError(vm, "Length() cannot dereference a nil array reference.");
+        return makeInt(0);
     }
 
     runtimeError(vm, "Length expects a string or array argument.");

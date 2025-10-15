@@ -39,6 +39,18 @@ typedef struct {
     int element_index;
 } AddressConstantEntry;
 
+static VarType resolveOrdinalBuiltinTypeName(const char *name) {
+    if (!name) return TYPE_UNKNOWN;
+
+    if (strcasecmp(name, "integer") == 0) return TYPE_INT32;
+    if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
+    if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
+    if (strcasecmp(name, "word") == 0) return TYPE_WORD;
+
+    return TYPE_UNKNOWN;
+}
+
 static AddressConstantEntry* address_constant_entries = NULL;
 static int address_constant_count = 0;
 static int address_constant_capacity = 0;
@@ -1705,6 +1717,40 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     // full type definition in `type_def`, which may itself be a type alias.
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
     VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
+
+    if (arg_node->type == AST_PROCEDURE_CALL && arg_node->token && arg_node->token->value) {
+        const char* callee = arg_node->token->value;
+        if (strcasecmp(callee, "low") == 0 || strcasecmp(callee, "high") == 0) {
+            AST* value_node = (arg_node->child_count > 0) ? arg_node->children[0] : NULL;
+            AST* value_type = value_node ? resolveTypeAlias(value_node->type_def) : NULL;
+            VarType source_vt = value_type ? value_type->var_type
+                                           : (value_node ? value_node->var_type : TYPE_UNKNOWN);
+
+            if (source_vt == TYPE_POINTER && value_type && value_type->right) {
+                AST* pointed = resolveTypeAlias(value_type->right);
+                if (pointed && pointed->var_type == TYPE_ARRAY) {
+                    source_vt = TYPE_ARRAY;
+                }
+            }
+
+            if (source_vt == TYPE_ENUM) {
+                if (value_type) {
+                    arg_actual = value_type;
+                }
+                arg_vt = TYPE_ENUM;
+            } else if (source_vt == TYPE_ARRAY || source_vt == TYPE_STRING ||
+                       source_vt == TYPE_UNKNOWN || source_vt == TYPE_VOID) {
+                arg_vt = TYPE_INTEGER;
+            } else {
+                arg_vt = source_vt;
+            }
+
+            if (arg_node->var_type == TYPE_UNKNOWN || arg_node->var_type == TYPE_ARRAY ||
+                arg_node->var_type == TYPE_VOID) {
+                arg_node->var_type = arg_vt;
+            }
+        }
+    }
 
     // If the argument still has no concrete type (VOID), attempt to resolve it
     // via a static declaration lookup rooted at the current program AST. This
@@ -6679,76 +6725,99 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (!func_symbol && isBuiltin(functionName) && (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0)) {
-                // Accept either a type identifier (AST_VARIABLE), a type reference,
-                // or an expression whose static var_type is known. Push the type name
-                // as a string for the VM builtin to resolve.
-                if (node->child_count == 1) {
-                    AST* arg0 = node->children[0];
-                    DBG_PRINTF("[dbg low/high] arg0 type=%s token=%s vtype=%s\n",
-                               astTypeToString(arg0->type),
-                               (arg0->token && arg0->token->value) ? arg0->token->value : "<null>",
-                               varTypeToString(arg0->var_type));
-                    const char* tname = NULL;
-                    char buf[32];
-                    if (arg0->type == AST_VARIABLE && arg0->token && arg0->token->value) {
-                        // Prefer resolving through the type table so we can pass a typed Value
-                        AST* td = lookupType(arg0->token->value);
-                        if (td) {
-                            VarType tv = td->var_type;
-                            if (tv == TYPE_INTEGER) tv = TYPE_INT32; // normalize
-                            if (tv == TYPE_REAL) tv = TYPE_DOUBLE;
-                            if (tv == TYPE_INT32 || tv == TYPE_DOUBLE || tv == TYPE_FLOAT ||
-                                tv == TYPE_CHAR  || tv == TYPE_BOOLEAN || tv == TYPE_BYTE || tv == TYPE_WORD) {
-                                Value av; memset(&av, 0, sizeof(Value)); av.type = tv;
-                                int cidx = addConstantToChunk(chunk, &av);
-                                emitConstant(chunk, cidx, line);
-                                tname = NULL; // Already emitted typed argument
-                            } else {
-                                tname = arg0->token->value;
-                            }
+            bool emittedLowHighArg = false;
+            bool isLowHighBuiltin = (!func_symbol && isBuiltin(functionName) &&
+                                     (strcasecmp(functionName, "low") == 0 || strcasecmp(functionName, "high") == 0));
+
+            if (isLowHighBuiltin && node->child_count == 1) {
+                AST* arg0 = node->children[0];
+                DBG_PRINTF("[dbg low/high] arg0 type=%s token=%s vtype=%s\n",
+                           astTypeToString(arg0->type),
+                           (arg0->token && arg0->token->value) ? arg0->token->value : "<null>",
+                           varTypeToString(arg0->var_type));
+
+                const char* tname = NULL;
+                bool emittedValue = false;
+                char buf[32];
+
+                if (arg0->type == AST_VARIABLE && arg0->token && arg0->token->value) {
+                    AST* td = lookupType(arg0->token->value);
+                    if (td) {
+                        VarType tv = td->var_type;
+                        if (tv == TYPE_INTEGER) tv = TYPE_INT32;
+                        if (tv == TYPE_REAL) tv = TYPE_DOUBLE;
+                        if (tv == TYPE_INT32 || tv == TYPE_DOUBLE || tv == TYPE_FLOAT ||
+                            tv == TYPE_CHAR  || tv == TYPE_BOOLEAN || tv == TYPE_BYTE || tv == TYPE_WORD) {
+                            Value av;
+                            memset(&av, 0, sizeof(Value));
+                            av.type = tv;
+                            int cidx = addConstantToChunk(chunk, &av);
+                            emitConstant(chunk, cidx, line);
+                            emittedValue = true;
                         } else {
                             tname = arg0->token->value;
                         }
-                    } else if ((arg0->type == AST_TYPE_REFERENCE || arg0->type == AST_PROCEDURE_CALL) && arg0->token && arg0->token->value) {
-                        tname = arg0->token->value;
-                    } else if (arg0->var_type != TYPE_UNKNOWN && arg0->var_type != TYPE_VOID) {
-                        // Map known VarType to Pascal type name expected by VM builtin
-                        switch (arg0->var_type) {
-                            case TYPE_INT32:
-                                tname = "integer"; break;
-                            case TYPE_DOUBLE:
-                                tname = "real"; break;
-                            case TYPE_FLOAT:
-                                tname = "float"; break;
-                            case TYPE_CHAR:
-                                tname = "char"; break;
-                            case TYPE_BOOLEAN:
-                                tname = "boolean"; break;
-                            case TYPE_BYTE:
-                                tname = "byte"; break;
-                            case TYPE_WORD:
-                                tname = "word"; break;
-                            default:
-                                // Fallback to varTypeToString; VM builtin may not recognize it.
-                                snprintf(buf, sizeof(buf), "%s", varTypeToString(arg0->var_type));
-                                tname = buf;
-                                break;
+                    } else {
+                        VarType basic = resolveOrdinalBuiltinTypeName(arg0->token->value);
+                        if (basic != TYPE_UNKNOWN) {
+                            Value av;
+                            memset(&av, 0, sizeof(Value));
+                            av.type = basic;
+                            int cidx = addConstantToChunk(chunk, &av);
+                            emitConstant(chunk, cidx, line);
+                            emittedValue = true;
                         }
                     }
-                    if (tname) {
-                        int typeNameIndex = addStringConstant(chunk, tname);
-                        emitConstant(chunk, typeNameIndex, line);
-                    } else {
-                        // Fallback to integer if we cannot determine the type identifier
-                        int typeNameIndex = addStringConstant(chunk, "integer");
-                        emitConstant(chunk, typeNameIndex, line);
-                    }
-                } else {
-                    int typeNameIndex = addStringConstant(chunk, "integer");
-                    emitConstant(chunk, typeNameIndex, line);
                 }
-            } else {
+
+                if (!emittedValue && !tname &&
+                    (arg0->type == AST_TYPE_REFERENCE || arg0->type == AST_PROCEDURE_CALL) &&
+                    arg0->token && arg0->token->value) {
+                    tname = arg0->token->value;
+                }
+
+                if (!emittedValue && !tname &&
+                    arg0->var_type != TYPE_UNKNOWN && arg0->var_type != TYPE_VOID &&
+                    arg0->var_type != TYPE_ARRAY) {
+                    switch (arg0->var_type) {
+                        case TYPE_INT32:
+                            tname = "integer";
+                            break;
+                        case TYPE_DOUBLE:
+                            tname = "real";
+                            break;
+                        case TYPE_FLOAT:
+                            tname = "float";
+                            break;
+                        case TYPE_CHAR:
+                            tname = "char";
+                            break;
+                        case TYPE_BOOLEAN:
+                            tname = "boolean";
+                            break;
+                        case TYPE_BYTE:
+                            tname = "byte";
+                            break;
+                        case TYPE_WORD:
+                            tname = "word";
+                            break;
+                        default:
+                            snprintf(buf, sizeof(buf), "%s", varTypeToString(arg0->var_type));
+                            tname = buf;
+                            break;
+                    }
+                }
+
+                if (!emittedValue && tname) {
+                    int typeNameIndex = addStringConstant(chunk, tname);
+                    emitConstant(chunk, typeNameIndex, line);
+                    emittedValue = true;
+                }
+
+                emittedLowHighArg = emittedValue;
+            }
+
+            if (!isLowHighBuiltin || !emittedLowHighArg) {
                 for (int i = receiver_offset; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     if (!arg_node) continue;

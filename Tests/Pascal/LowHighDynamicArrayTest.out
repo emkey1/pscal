@@ -1,0 +1,14 @@
+START: cards initial Low: PASS
+START: cards initial High: PASS
+START: alias initial Low: PASS
+START: alias initial High: PASS
+START: cards Append Low: PASS
+START: cards Append High: PASS
+START: alias Append Low: PASS
+START: alias Append High: PASS
+START: cards shrink Low: PASS
+START: cards shrink High: PASS
+START: cards after shrink Append Low: PASS
+START: cards after shrink Append High: PASS
+START: alias cleared Low: PASS
+START: alias cleared High: PASS
