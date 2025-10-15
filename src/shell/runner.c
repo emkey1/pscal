@@ -285,6 +285,9 @@ int shellRunSource(const char *source,
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     int last_status = shellRuntimeLastStatus();
     exit_flag = shellRuntimeConsumeExitRequested();
+    if (result == INTERPRET_RUNTIME_ERROR && exit_flag) {
+        result = INTERPRET_OK;
+    }
     should_run_exit_trap = shellRuntimeIsOutermostScript() &&
                            (!shellRuntimeIsInteractive() || exit_flag);
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;

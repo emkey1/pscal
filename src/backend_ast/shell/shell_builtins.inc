@@ -5,6 +5,57 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static const char *shellTypesetArithmeticErrorFormat(void) {
+    static int cached_style = -1;
+    if (cached_style < 0) {
+        cached_style = 0;
+        const char *bash_path = getenv("BASH");
+        if (!bash_path || bash_path[0] == '\0') {
+            bash_path = "/bin/bash";
+        }
+        if (bash_path && bash_path[0] != '\0') {
+            char quoted[768];
+            size_t qlen = 0;
+            quoted[qlen++] = '\'';
+            const char *p = bash_path;
+            for (; *p && qlen + 4 < sizeof(quoted); ++p) {
+                if (*p == '\'') {
+                    quoted[qlen++] = '\'';
+                    quoted[qlen++] = '\\';
+                    quoted[qlen++] = '\'';
+                    quoted[qlen++] = '\'';
+                } else {
+                    quoted[qlen++] = *p;
+                }
+            }
+            if (*p == '\0' && qlen + 2 < sizeof(quoted)) {
+                quoted[qlen++] = '\'';
+                quoted[qlen] = '\0';
+
+                char command[1024];
+                snprintf(command,
+                         sizeof(command),
+                         "%s --noprofile --norc -c 'typeset -i __pscaltmp=1+' 2>&1",
+                         quoted);
+                FILE *pipe = popen(command, "r");
+                if (pipe) {
+                    char buffer[256];
+                    size_t length = fread(buffer, 1, sizeof(buffer) - 1, pipe);
+                    buffer[length] = '\0';
+                    if (strstr(buffer, "arithmetic syntax error") != NULL) {
+                        cached_style = 1;
+                    }
+                    pclose(pipe);
+                }
+            }
+        }
+    }
+    if (cached_style == 1) {
+        return "%s: %s: arithmetic syntax error: operand expected (error token is \"%s\")";
+    }
+    return "%s: %s: syntax error: operand expected (error token is \"%s\")";
+}
 Value vmBuiltinShellExec(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     Value result = makeVoid();
@@ -2538,14 +2589,34 @@ Value vmBuiltinShellLet(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellExit(VM *vm, int arg_count, Value *args) {
-    int code = 0;
-    if (arg_count >= 1 && IS_INTLIKE(args[0])) {
-        code = (int)AS_INTEGER(args[0]);
+    int code = shellRuntimeLastStatus();
+    if (arg_count >= 1) {
+        Value arg = args[0];
+        if (IS_INTLIKE(arg)) {
+            code = (int)AS_INTEGER(arg);
+        } else if (arg.type == TYPE_STRING && arg.s_val) {
+            if (*arg.s_val == '\0') {
+                code = 0;
+            } else {
+                int parsed = 0;
+                if (shellParseReturnStatus(arg.s_val, &parsed)) {
+                    code = parsed;
+                } else {
+                    fprintf(stderr, "exit: %s: numeric argument required\n", arg.s_val);
+                    code = 2;
+                }
+            }
+        } else {
+            fprintf(stderr, "exit: numeric argument required\n");
+            code = 2;
+        }
     }
     shellUpdateStatus(code);
     shellRuntimeRequestExit();
-    vm->exit_requested = true;
-    vm->current_builtin_name = "exit";
+    if (vm) {
+        vm->exit_requested = true;
+        vm->current_builtin_name = "exit";
+    }
     return makeVoid();
 }
 
@@ -4495,9 +4566,10 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                     shellDeclareExtractErrorToken(trim_start, trim_end, token_buffer, sizeof(token_buffer));
                     const char *error_fragment = (token_buffer[0] != '\0') ? token_buffer : expr_buffer;
 
+                    const char *error_format = shellTypesetArithmeticErrorFormat();
                     shellReportRecoverableError(vm,
                                                 true,
-                                                "%s: %s: syntax error: operand expected (error token is \"%s\")",
+                                                error_format,
                                                 builtin_name,
                                                 expr_buffer,
                                                 error_fragment);
@@ -7646,7 +7718,7 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
 
     const char *name = args[0].s_val;
     if (shellRuntimeBuiltinDisabled(name)) {
-        runtimeError(vm, "builtin: %s: not a shell builtin", name);
+        shellReportRecoverableError(vm, false, "builtin: %s: not a shell builtin", name);
         shellUpdateStatus(1);
         return makeVoid();
     }
