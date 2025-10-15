@@ -150,6 +150,7 @@ var
   playerWins, dealerWins, pushes: Integer;
   roundNumber: Integer;
   roundOutcome: TRoundOutcome;
+  promptRow: Integer;
 
 begin
   Randomize; // Seed random number generator (critical for fairness)
@@ -317,6 +318,7 @@ begin
     end;
 
 EndGame:
+    promptRow := WhereY;
     case roundOutcome of
       roPlayerWin: Inc(playerWins);
       roDealerWin: Inc(dealerWins);
@@ -324,9 +326,13 @@ EndGame:
     end;
     UpdateScoreboard(roundNumber, playerWins, dealerWins, pushes);
 
-    // Ask to play again (fixed: no buffer leaks now)
-    Writeln;
-    GotoXY(1,WhereY + 1);
+    // Ask to play again (fixed: prompt always follows the last message)
+    if promptRow > 25 then
+      promptRow := 25;
+    if promptRow < 7 then
+      promptRow := 7;
+    GotoXY(1, promptRow);
+    ClrEol;
     Write('Play Again? (y/n): ');
     ReadLn(playAgain);
     if(playAgain = '') then // Default to yes
