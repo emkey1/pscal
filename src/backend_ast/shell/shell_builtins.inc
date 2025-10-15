@@ -7727,6 +7727,22 @@ Value vmHostShellLoopIsReady(VM *vm) {
     (void)vm;
     shellRuntimeProcessPendingSignals();
     ShellLoopFrame *frame = shellLoopTop();
+    if ((gShellExitRequested || gShellRuntime.break_requested) && frame) {
+        FILE *log_ready = fopen("/tmp/exsh_loop_is_ready.log", "a");
+        if (log_ready) {
+            fprintf(log_ready, "is_ready: exit=%d break=%d frame=%p\n",
+                    gShellExitRequested ? 1 : 0,
+                    gShellRuntime.break_requested ? 1 : 0,
+                    (void *)frame);
+            fclose(log_ready);
+        }
+        frame->break_pending = true;
+        frame->continue_pending = false;
+        frame->skip_body = true;
+        gShellRuntime.break_requested = true;
+        gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+        return makeBoolean(false);
+    }
     bool ready = false;
     if (frame) {
         if (frame->break_pending) {
@@ -7756,6 +7772,26 @@ Value vmHostShellLoopAdvance(VM *vm) {
     ShellLoopFrame *frame = shellLoopTop();
     if (!frame) {
         return makeBoolean(false);
+    }
+
+    if (gShellExitRequested || gShellRuntime.break_requested) {
+        FILE *log_adv = fopen("/tmp/exsh_loop.log", "a");
+        if (log_adv) {
+            fprintf(log_adv, "advance: exit=%d break=%d frame=%p\n",
+                    gShellExitRequested ? 1 : 0,
+                    gShellRuntime.break_requested ? 1 : 0,
+                    (void *)frame);
+            fclose(log_adv);
+        }
+        FILE *log = fopen("/tmp/exsh_loop.log", "a");
+        if (log) {
+            fprintf(log, "advance: exit=%d break=%d frame=%p\n",
+                    gShellExitRequested ? 1 : 0,
+                    gShellRuntime.break_requested ? 1 : 0,
+                    (void*)frame);
+            fclose(log);
+        }
+        frame->break_pending = true;
     }
 
     if (frame->break_pending) {

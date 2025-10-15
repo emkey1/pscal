@@ -1218,6 +1218,8 @@ typedef struct {
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count);
 static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t count);
 static void shellFreeRedirections(ShellCommand *cmd);
+static void shellForceBreakAllLoops(void);
+static void shellAbortPipeline(void);
 
 typedef struct {
     ShellLoopKind kind;
@@ -1455,6 +1457,20 @@ void shellRuntimeAbandonConditionEvaluation(void) {
 void shellRuntimeRequestExit(void) {
     shellRuntimeAbandonConditionEvaluation();
     gShellExitRequested = true;
+    FILE *exit_log = fopen("/tmp/exsh_exit.log", "a");
+    if (exit_log) {
+        fprintf(exit_log, "shellRuntimeRequestExit invoked (vm=%p)\n", (void*)gShellCurrentVm);
+        fclose(exit_log);
+    }
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = true;
+        gShellCurrentVm->abort_requested = true;
+        if (!gShellCurrentVm->current_builtin_name) {
+            gShellCurrentVm->current_builtin_name = "exit";
+        }
+    }
+    shellForceBreakAllLoops();
+    shellAbortPipeline();
 }
 
 void shellRuntimeRefreshTrapEnabled(void) {
@@ -2842,12 +2858,13 @@ static bool shellLoopEvaluateConditionText(const char *expr, bool *out_ready) {
         *out_ready = ready;
     }
     shellUpdateStatus(0);
-    gShellRuntime.errexit_pending = false;
-    gShellExitRequested = false;
-    if (gShellCurrentVm) {
-        gShellCurrentVm->exit_requested = false;
-        gShellCurrentVm->abort_requested = false;
-        gShellCurrentVm->current_builtin_name = NULL;
+    if (!gShellExitRequested) {
+        gShellRuntime.errexit_pending = false;
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = false;
+            gShellCurrentVm->abort_requested = false;
+            gShellCurrentVm->current_builtin_name = NULL;
+        }
     }
     shellRuntimeLeaveCondition();
     return true;
@@ -3004,6 +3021,22 @@ static void shellLoopRequestContinueLevels(int levels) {
         target->continue_pending = true;
         target->break_pending = false;
     }
+}
+
+static void shellForceBreakAllLoops(void) {
+    if (gShellLoopStackSize == 0) {
+        return;
+    }
+    for (size_t idx = gShellLoopStackSize; idx > 0; --idx) {
+        ShellLoopFrame *frame = &gShellLoopStack[idx - 1];
+        frame->skip_body = true;
+        frame->break_pending = true;
+        frame->continue_pending = false;
+    }
+    gShellRuntime.break_requested = true;
+    gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
+    gShellRuntime.continue_requested = false;
+    gShellRuntime.continue_requested_levels = 0;
 }
 
 static VM *shellSwapCurrentVm(VM *vm) {

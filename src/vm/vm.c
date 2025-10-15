@@ -2119,6 +2119,19 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+        if (vm->exit_requested || vm->abort_requested) {
+            bool halted = false;
+            InterpretResult res = returnFromCall(vm, &halted);
+            vm->exit_requested = false;
+            vm->abort_requested = false;
+            if (res != INTERPRET_OK) {
+                return res;
+            }
+            if (halted) {
+                return INTERPRET_OK;
+            }
+            continue;
+        }
         vm->lastInstruction = vm->ip;
 /* #ifdef DEBUG
         if (dumpExec) {
