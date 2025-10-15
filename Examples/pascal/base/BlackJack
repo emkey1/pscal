@@ -221,6 +221,11 @@ begin
     begin
       Write('Hit (h) or Stand (s)? ');
       ReadLn(input); // Read entire line (avoids buffer leaks)
+      if(input = '') then
+      begin
+        input := 's';
+      end;
+
       input := Trim(UpCase(input)); // Clean input: trim whitespace + uppercase
 
       if Length(input) = 0 then
@@ -321,8 +326,14 @@ EndGame:
 
     // Ask to play again (fixed: no buffer leaks now)
     Writeln;
-    Write('Play again? (y/n): ');
+    GotoXY(1,WhereY + 1);
+    Write('Play Again? (y/n): ');
     ReadLn(playAgain);
+    if(playAgain = '') then // Default to yes
+    begin
+      playAgain := 'y';
+    end;
+
     playAgain := LowerCase(playAgain);
   until playAgain <> 'y';
 
