@@ -21,6 +21,7 @@
 #include <dirent.h>  // For directory traversal
 #include <sys/stat.h> // For file attributes
 #include <stdlib.h>  // For system(), getenv, malloc
+#include <limits.h>
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <stdio.h>   // For printf, fprintf
@@ -1390,9 +1391,138 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     return result;
 }
 
+static bool resizeDynamicArrayValue(VM* vm,
+                                    Value* array_value,
+                                    int dimension_count,
+                                    const long long* lengths) {
+    if (!array_value || array_value->type != TYPE_ARRAY) {
+        runtimeError(vm, "SetLength target is not an array.");
+        return false;
+    }
+    if (dimension_count <= 0) {
+        runtimeError(vm, "SetLength requires at least one dimension for arrays.");
+        return false;
+    }
+
+    if (array_value->dimensions > 0 && array_value->dimensions != dimension_count) {
+        runtimeError(vm, "SetLength dimension count (%d) does not match existing array (%d).",
+                     dimension_count,
+                     array_value->dimensions);
+        return false;
+    }
+
+    VarType element_type = array_value->element_type;
+    AST* element_type_def = array_value->element_type_def;
+
+    int* new_lower = (int*)malloc(sizeof(int) * dimension_count);
+    int* new_upper = (int*)malloc(sizeof(int) * dimension_count);
+    if (!new_lower || !new_upper) {
+        if (new_lower) free(new_lower);
+        if (new_upper) free(new_upper);
+        runtimeError(vm, "SetLength: memory allocation failed for array bounds.");
+        return false;
+    }
+
+    size_t new_total = 1;
+    bool saw_zero = false;
+    for (int i = 0; i < dimension_count; ++i) {
+        long long len = lengths[i];
+        if (len < 0) {
+            runtimeError(vm, "SetLength: array length must be non-negative.");
+            free(new_lower);
+            free(new_upper);
+            return false;
+        }
+        if (len == 0) {
+            new_lower[i] = 0;
+            new_upper[i] = -1;
+            saw_zero = true;
+        } else {
+            if (len > INT_MAX) {
+                runtimeError(vm, "SetLength: array length exceeds supported range.");
+                free(new_lower);
+                free(new_upper);
+                return false;
+            }
+            new_lower[i] = 0;
+            new_upper[i] = (int)len - 1;
+            if (!saw_zero) {
+                if (new_total > SIZE_MAX / (size_t)len) {
+                    runtimeError(vm, "SetLength: requested array size is too large.");
+                    free(new_lower);
+                    free(new_upper);
+                    return false;
+                }
+                new_total *= (size_t)len;
+            }
+        }
+    }
+
+    if (saw_zero) {
+        new_total = 0;
+    }
+
+    size_t old_total = 0;
+    if (array_value->array_val && array_value->dimensions > 0 &&
+        array_value->lower_bounds && array_value->upper_bounds) {
+        old_total = 1;
+        for (int i = 0; i < array_value->dimensions; ++i) {
+            int span = array_value->upper_bounds[i] - array_value->lower_bounds[i] + 1;
+            if (span <= 0) {
+                old_total = 0;
+                break;
+            }
+            old_total *= (size_t)span;
+        }
+    }
+
+    Value* new_elements = NULL;
+    if (new_total > 0) {
+        new_elements = (Value*)malloc(sizeof(Value) * new_total);
+        if (!new_elements) {
+            runtimeError(vm, "SetLength: memory allocation failed for array contents.");
+            free(new_lower);
+            free(new_upper);
+            return false;
+        }
+
+        size_t copy_count = old_total < new_total ? old_total : new_total;
+        for (size_t i = 0; i < copy_count; ++i) {
+            new_elements[i] = makeCopyOfValue(&array_value->array_val[i]);
+        }
+        for (size_t i = copy_count; i < new_total; ++i) {
+            new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
+        }
+    }
+
+    if (array_value->array_val) {
+        for (size_t i = 0; i < old_total; ++i) {
+            freeValue(&array_value->array_val[i]);
+        }
+        free(array_value->array_val);
+    }
+    free(array_value->lower_bounds);
+    free(array_value->upper_bounds);
+
+    array_value->lower_bounds = new_lower;
+    array_value->upper_bounds = new_upper;
+    array_value->array_val = new_elements;
+    array_value->dimensions = dimension_count;
+    array_value->lower_bound = (dimension_count >= 1) ? new_lower[0] : 0;
+    array_value->upper_bound = (dimension_count >= 1) ? new_upper[0] : -1;
+    array_value->element_type = element_type;
+    array_value->element_type_def = element_type_def;
+
+    if (new_total == 0) {
+        array_value->array_val = NULL;
+    }
+
+    return true;
+}
+
 Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_POINTER || !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "SetLength expects (var string, integer).");
+    if (arg_count < 2 || args[0].type != TYPE_POINTER) {
+        runtimeError(vm, "SetLength expects a pointer target followed by length arguments.");
         return makeVoid();
     }
 
@@ -1402,39 +1532,68 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    long long new_len = AS_INTEGER(args[1]);
-    if (new_len < 0) new_len = 0;
+    if (target->type != TYPE_ARRAY) {
+        if (arg_count != 2 || !IS_INTLIKE(args[1])) {
+            runtimeError(vm, "SetLength expects (var string, integer).");
+            return makeVoid();
+        }
 
-    if (target->type != TYPE_STRING) {
-        freeValue(target);
-        target->type = TYPE_STRING;
-        target->s_val = NULL;
+        long long new_len = AS_INTEGER(args[1]);
+        if (new_len < 0) new_len = 0;
+
+        if (target->type != TYPE_STRING) {
+            freeValue(target);
+            target->type = TYPE_STRING;
+            target->s_val = NULL;
+            target->max_length = -1;
+        }
+
+        char* new_buf = (char*)malloc((size_t)new_len + 1);
+        if (!new_buf) {
+            runtimeError(vm, "SetLength: memory allocation failed.");
+            return makeVoid();
+        }
+
+        size_t copy_len = 0;
+        if (target->s_val) {
+            copy_len = strlen(target->s_val);
+            if (copy_len > (size_t)new_len) copy_len = (size_t)new_len;
+            memcpy(new_buf, target->s_val, copy_len);
+            free(target->s_val);
+        }
+
+        if ((size_t)new_len > copy_len) {
+            memset(new_buf + copy_len, ' ', (size_t)new_len - copy_len);
+        }
+        new_buf[new_len] = '\0';
+
+        target->s_val = new_buf;
         target->max_length = -1;
+        return makeVoid();
     }
 
-    char* new_buf = (char*)malloc((size_t)new_len + 1);
-    if (!new_buf) {
+    int dimension_count = arg_count - 1;
+    long long* lengths = (long long*)malloc(sizeof(long long) * (size_t)dimension_count);
+    if (!lengths) {
         runtimeError(vm, "SetLength: memory allocation failed.");
         return makeVoid();
     }
 
-    size_t copy_len = 0;
-    if (target->s_val) {
-        copy_len = strlen(target->s_val);
-        if (copy_len > (size_t)new_len) copy_len = (size_t)new_len;
-        memcpy(new_buf, target->s_val, copy_len);
-        free(target->s_val);
+    for (int i = 0; i < dimension_count; ++i) {
+        if (!IS_INTLIKE(args[i + 1])) {
+            free(lengths);
+            runtimeError(vm, "SetLength dimension arguments must be integers.");
+            return makeVoid();
+        }
+        lengths[i] = AS_INTEGER(args[i + 1]);
     }
 
-    if ((size_t)new_len > copy_len) {
-        /* Fill remaining space with spaces so that strlen reflects the new length.
-           Using '\0' would terminate the string early and lead to length 0. */
-        memset(new_buf + copy_len, ' ', (size_t)new_len - copy_len);
+    if (!resizeDynamicArrayValue(vm, target, dimension_count, lengths)) {
+        free(lengths);
+        return makeVoid();
     }
-    new_buf[new_len] = '\0';
 
-    target->s_val = new_buf;
-    target->max_length = -1;
+    free(lengths);
     return makeVoid();
 }
 
