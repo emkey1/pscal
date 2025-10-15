@@ -119,8 +119,8 @@ begin
     end;
 
     // ===== NORMAL GAME FLOW =====
-      Writeln;
       ClrScr;
+      Writeln;
       Writeln('===== Initial Deal =====');
     DisplayHand(humanHand, False, True); // Show your full hand
     DisplayHand(dealerHand, True, False); // Show dealer's up card only
