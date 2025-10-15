@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stddef.h>
 
 // --- VM Configuration ---
 #define VM_STACK_MAX 8192       // Maximum number of Values on the operand stack
@@ -94,6 +95,8 @@ typedef struct VM_s {
     HashTable* vmGlobalSymbols;      // VM's own symbol table for runtime global variable storage
     HashTable* vmConstGlobalSymbols; // Separate table for constant globals (read-only, no mutex)
     HashTable* procedureTable;      // store procedure table for disassembly
+    Symbol** procedureByAddress;    // Cache mapping bytecode offsets to procedure symbols
+    size_t procedureByAddressSize;  // Number of cached entries
     
     HostFn host_functions[MAX_HOST_FUNCTIONS];
 

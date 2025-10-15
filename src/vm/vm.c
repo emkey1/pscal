@@ -309,6 +309,8 @@ typedef struct {
 // Forward declarations for helpers used by threadStart.
 static void push(VM* vm, Value value);
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address);
+static void vmPopulateProcedureAddressCache(VM* vm);
+static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address);
 
 static void* threadStart(void* arg) {
     ThreadStartArgs* args = (ThreadStartArgs*)arg;
@@ -320,8 +322,7 @@ static void* threadStart(void* arg) {
     for (int i = 0; i < argc && i < 8; i++) local_args[i] = args->args[i];
     free(args);
 
-    Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, entry);
-    if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+    Symbol* proc_symbol = vmGetProcedureByAddress(vm, entry);
 
     CallFrame* frame = &vm->frames[vm->frameCount++];
     frame->return_address = NULL;
@@ -992,6 +993,81 @@ static Symbol* resolveProcedureAlias(Symbol* symbol) {
     return symbol;
 }
 
+static void populateProcedureCacheFromTable(VM* vm, HashTable* table) {
+    if (!vm || !table || !vm->procedureByAddress) {
+        return;
+    }
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (Symbol* entry = table->buckets[i]; entry; entry = entry->next) {
+            Symbol* resolved = resolveProcedureAlias(entry);
+            if (resolved && resolved->is_defined && resolved->bytecode_address >= 0) {
+                size_t address = (size_t)resolved->bytecode_address;
+                if (address < vm->procedureByAddressSize) {
+                    vm->procedureByAddress[address] = resolved;
+                }
+            }
+            if (entry->type_def && entry->type_def->symbol_table) {
+                populateProcedureCacheFromTable(vm, (HashTable*)entry->type_def->symbol_table);
+            }
+        }
+    }
+}
+
+static void vmPopulateProcedureAddressCache(VM* vm) {
+    if (!vm) return;
+
+    if (!vm->chunk || !vm->procedureTable) {
+        if (vm->procedureByAddress && vm->procedureByAddressSize > 0) {
+            memset(vm->procedureByAddress, 0, vm->procedureByAddressSize * sizeof(Symbol*));
+        }
+        return;
+    }
+
+    size_t requiredSize = (size_t)vm->chunk->count;
+    if (requiredSize == 0) {
+        if (vm->procedureByAddress && vm->procedureByAddressSize > 0) {
+            memset(vm->procedureByAddress, 0, vm->procedureByAddressSize * sizeof(Symbol*));
+        }
+        return;
+    }
+
+    if (vm->procedureByAddressSize < requiredSize) {
+        Symbol** newCache = calloc(requiredSize, sizeof(Symbol*));
+        if (!newCache) {
+            return;
+        }
+        if (vm->procedureByAddress) {
+            free(vm->procedureByAddress);
+        }
+        vm->procedureByAddress = newCache;
+        vm->procedureByAddressSize = requiredSize;
+    } else {
+        memset(vm->procedureByAddress, 0, vm->procedureByAddressSize * sizeof(Symbol*));
+    }
+
+    populateProcedureCacheFromTable(vm, vm->procedureTable);
+}
+
+static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address) {
+    if (!vm) return NULL;
+
+    Symbol* symbol = NULL;
+    if (vm->procedureByAddress && (size_t)address < vm->procedureByAddressSize) {
+        symbol = vm->procedureByAddress[address];
+    }
+
+    if (!symbol) {
+        symbol = findProcedureByAddress(vm->procedureTable, address);
+    }
+
+    Symbol* resolved = resolveProcedureAlias(symbol);
+    if (resolved && vm->procedureByAddress && (size_t)address < vm->procedureByAddressSize) {
+        vm->procedureByAddress[address] = resolved;
+    }
+    return resolved;
+}
+
 static bool procedureVisibleFromFrames(VM* vm, Symbol* symbol) {
     if (!symbol) return false;
     if (!symbol->enclosing) return true;
@@ -1413,6 +1489,11 @@ void vmResetExecutionState(VM* vm) {
     vm->vmGlobalSymbols = NULL;
     vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
+    if (vm->procedureByAddress) {
+        free(vm->procedureByAddress);
+        vm->procedureByAddress = NULL;
+    }
+    vm->procedureByAddressSize = 0;
 
     vm->exit_requested = false;
     vm->abort_requested = false;
@@ -1462,6 +1543,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->vmGlobalSymbols = NULL;              // Will be set by interpretBytecode
     vm->vmConstGlobalSymbols = NULL;
     vm->procedureTable = NULL;
+    vm->procedureByAddress = NULL;
+    vm->procedureByAddressSize = 0;
 
     vm->frameCount = 0; // <--- INITIALIZE frameCount
 
@@ -1514,6 +1597,12 @@ void freeVM(VM* vm) {
     if (vm->vmConstGlobalSymbols) {
         vm->vmConstGlobalSymbols = NULL;
     }
+
+    if (vm->procedureByAddress) {
+        free(vm->procedureByAddress);
+        vm->procedureByAddress = NULL;
+    }
+    vm->procedureByAddressSize = 0;
 
     for (int i = 1; i < vm->threadCount; i++) {
         if (vm->threads[i].active) {
@@ -1878,6 +1967,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
     vm->procedureTable = procedures; // <--- STORED procedureTable
+    vmPopulateProcedureAddressCache(vm);
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
@@ -4805,8 +4895,7 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
-                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: Could not retrieve procedure symbol for called address %04d.", target_address);
                     vm->frameCount--;
@@ -4898,8 +4987,7 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
-                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
@@ -5019,7 +5107,7 @@ comparison_error_label:
                     method_symbol = vmFindClassMethod(vm, className, method_index);
                 }
                 if (!method_symbol) {
-                    method_symbol = findProcedureByAddress(vm->procedureTable, target_address);
+                    method_symbol = vmGetProcedureByAddress(vm, target_address);
                 }
                 if (!method_symbol) {
                     runtimeError(vm, "VM Error: Method not found for index %d.", method_index);
@@ -5109,8 +5197,7 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = findProcedureByAddress(vm->procedureTable, target_address);
-                if (proc_symbol && proc_symbol->is_alias) proc_symbol = proc_symbol->real_symbol;
+                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
