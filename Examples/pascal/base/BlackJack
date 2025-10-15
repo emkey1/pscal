@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program BlackjackGame;
 
 uses
