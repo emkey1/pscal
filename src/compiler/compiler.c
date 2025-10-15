@@ -39,6 +39,18 @@ typedef struct {
     int element_index;
 } AddressConstantEntry;
 
+static VarType resolveOrdinalBuiltinTypeName(const char *name) {
+    if (!name) return TYPE_UNKNOWN;
+
+    if (strcasecmp(name, "integer") == 0) return TYPE_INT32;
+    if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
+    if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
+    if (strcasecmp(name, "word") == 0) return TYPE_WORD;
+
+    return TYPE_UNKNOWN;
+}
+
 static AddressConstantEntry* address_constant_entries = NULL;
 static int address_constant_count = 0;
 static int address_constant_capacity = 0;
@@ -6744,6 +6756,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                             emittedValue = true;
                         } else {
                             tname = arg0->token->value;
+                        }
+                    } else {
+                        VarType basic = resolveOrdinalBuiltinTypeName(arg0->token->value);
+                        if (basic != TYPE_UNKNOWN) {
+                            Value av;
+                            memset(&av, 0, sizeof(Value));
+                            av.type = basic;
+                            int cidx = addConstantToChunk(chunk, &av);
+                            emitConstant(chunk, cidx, line);
+                            emittedValue = true;
                         }
                     }
                 }
