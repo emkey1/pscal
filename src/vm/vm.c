@@ -1660,37 +1660,37 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
 
     if (declaredType == TYPE_ARRAY) {
         uint8_t dimension_count = READ_BYTE();
-        if (dimension_count == 0) {
-            runtimeError(vm, "VM Error: Array defined with zero dimensions for '%s'.", varNameVal.s_val);
-            return INTERPRET_RUNTIME_ERROR;
-        }
+        int* lower_bounds = NULL;
+        int* upper_bounds = NULL;
 
-        int* lower_bounds = malloc(sizeof(int) * dimension_count);
-        int* upper_bounds = malloc(sizeof(int) * dimension_count);
-        if (!lower_bounds || !upper_bounds) {
-            runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-            if (lower_bounds) free(lower_bounds);
-            if (upper_bounds) free(upper_bounds);
-            return INTERPRET_RUNTIME_ERROR;
-        }
-
-        for (int i = 0; i < dimension_count; i++) {
-            uint16_t lower_idx = READ_SHORT(vm);
-            uint16_t upper_idx = READ_SHORT(vm);
-            if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
-                runtimeError(vm, "VM Error: Array bound constant index out of range for '%s'.", varNameVal.s_val);
-                free(lower_bounds); free(upper_bounds);
+        if (dimension_count > 0) {
+            lower_bounds = malloc(sizeof(int) * dimension_count);
+            upper_bounds = malloc(sizeof(int) * dimension_count);
+            if (!lower_bounds || !upper_bounds) {
+                runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                if (lower_bounds) free(lower_bounds);
+                if (upper_bounds) free(upper_bounds);
                 return INTERPRET_RUNTIME_ERROR;
             }
-            Value lower_val = vm->chunk->constants[lower_idx];
-            Value upper_val = vm->chunk->constants[upper_idx];
-            if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
-                runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
-                free(lower_bounds); free(upper_bounds);
-                return INTERPRET_RUNTIME_ERROR;
+
+            for (int i = 0; i < dimension_count; i++) {
+                uint16_t lower_idx = READ_SHORT(vm);
+                uint16_t upper_idx = READ_SHORT(vm);
+                if (lower_idx >= vm->chunk->constants_count || upper_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Array bound constant index out of range for '%s'.", varNameVal.s_val);
+                    free(lower_bounds); free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value lower_val = vm->chunk->constants[lower_idx];
+                Value upper_val = vm->chunk->constants[upper_idx];
+                if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
+                    runtimeError(vm, "VM Error: Invalid constant types for array bounds of '%s'.", varNameVal.s_val);
+                    free(lower_bounds); free(upper_bounds);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                lower_bounds[i] = (int)lower_val.i_val;
+                upper_bounds[i] = (int)upper_val.i_val;
             }
-            lower_bounds[i] = (int)lower_val.i_val;
-            upper_bounds[i] = (int)upper_val.i_val;
         }
 
         VarType elem_var_type = (VarType)READ_BYTE();
@@ -1701,10 +1701,15 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             elem_type_def = lookupType(elem_name_val.s_val);
         }
 
-        Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds,
-                                      elem_var_type, elem_type_def);
-        free(lower_bounds);
-        free(upper_bounds);
+        Value array_val;
+        if (dimension_count > 0) {
+            array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds,
+                                    elem_var_type, elem_type_def);
+        } else {
+            array_val = makeEmptyArray(elem_var_type, elem_type_def);
+        }
+        if (lower_bounds) free(lower_bounds);
+        if (upper_bounds) free(upper_bounds);
 
         Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
         if (sym == NULL) {
@@ -4157,23 +4162,22 @@ comparison_error_label:
             case INIT_LOCAL_ARRAY: {
                 uint8_t slot = READ_BYTE();
                 uint8_t dimension_count = READ_BYTE();
-                if (dimension_count == 0) {
-                    runtimeError(vm, "VM Error: Array defined with zero dimensions for local variable.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                uint16_t *lower_idx = NULL;
+                uint16_t *upper_idx = NULL;
+                if (dimension_count > 0) {
+                    lower_idx = malloc(sizeof(uint16_t) * dimension_count);
+                    upper_idx = malloc(sizeof(uint16_t) * dimension_count);
+                    if (!lower_idx || !upper_idx) {
+                        runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
+                        if (lower_idx) free(lower_idx);
+                        if (upper_idx) free(upper_idx);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
 
-                uint16_t *lower_idx = malloc(sizeof(uint16_t) * dimension_count);
-                uint16_t *upper_idx = malloc(sizeof(uint16_t) * dimension_count);
-                if (!lower_idx || !upper_idx) {
-                    runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
-                    if (lower_idx) free(lower_idx);
-                    if (upper_idx) free(upper_idx);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = 0; i < dimension_count; i++) {
-                    lower_idx[i] = READ_SHORT(vm);
-                    upper_idx[i] = READ_SHORT(vm);
+                    for (int i = 0; i < dimension_count; i++) {
+                        lower_idx[i] = READ_SHORT(vm);
+                        upper_idx[i] = READ_SHORT(vm);
+                    }
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
@@ -4184,55 +4188,60 @@ comparison_error_label:
                     elem_type_def = lookupType(elem_name_val.s_val);
                 }
 
-                int* lower_bounds = malloc(sizeof(int) * dimension_count);
-                int* upper_bounds = malloc(sizeof(int) * dimension_count);
-                if (!lower_bounds || !upper_bounds) {
-                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-                    free(lower_idx); free(upper_idx);
-                    if (lower_bounds) free(lower_bounds);
-                    if (upper_bounds) free(upper_bounds);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = dimension_count - 1; i >= 0; i--) {
-                    if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
-                        Value size_val = pop(vm);
-                        if (!isIntlikeType(size_val.type)) {
-                            runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        lower_bounds[i] = 0;
-                        upper_bounds[i] = (int)size_val.i_val - 1;
-                        freeValue(&size_val);
-                    } else {
-                        if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
-                            runtimeError(vm, "VM Error: Array bound constant index out of range.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        Value lower_val = vm->chunk->constants[lower_idx[i]];
-                        Value upper_val = vm->chunk->constants[upper_idx[i]];
-                        if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
-                            runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        lower_bounds[i] = (int)lower_val.i_val;
-                        upper_bounds[i] = (int)upper_val.i_val;
+                Value array_val;
+                if (dimension_count > 0) {
+                    int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                    int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                    if (!lower_bounds || !upper_bounds) {
+                        runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                        if (lower_bounds) free(lower_bounds);
+                        if (upper_bounds) free(upper_bounds);
+                        free(lower_idx);
+                        free(upper_idx);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
+
+                    for (int i = dimension_count - 1; i >= 0; i--) {
+                        if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
+                            Value size_val = pop(vm);
+                            if (!isIntlikeType(size_val.type)) {
+                                runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            lower_bounds[i] = 0;
+                            upper_bounds[i] = (int)size_val.i_val - 1;
+                            freeValue(&size_val);
+                        } else {
+                            if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
+                                runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            Value lower_val = vm->chunk->constants[lower_idx[i]];
+                            Value upper_val = vm->chunk->constants[upper_idx[i]];
+                            if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
+                                runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            lower_bounds[i] = (int)lower_val.i_val;
+                            upper_bounds[i] = (int)upper_val.i_val;
+                        }
+                    }
+
+                    array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+                    free(lower_bounds);
+                    free(upper_bounds);
+                } else {
+                    array_val = makeEmptyArray(elem_var_type, elem_type_def);
                 }
 
                 free(lower_idx);
                 free(upper_idx);
-
-                Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
-
-                free(lower_bounds);
-                free(upper_bounds);
 
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 Value* target_slot = &frame->slots[slot];
@@ -4243,23 +4252,22 @@ comparison_error_label:
             case INIT_FIELD_ARRAY: {
                 uint8_t field_index = READ_BYTE();
                 uint8_t dimension_count = READ_BYTE();
-                if (dimension_count == 0) {
-                    runtimeError(vm, "VM Error: Array defined with zero dimensions for object field.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                uint16_t *lower_idx = NULL;
+                uint16_t *upper_idx = NULL;
+                if (dimension_count > 0) {
+                    lower_idx = malloc(sizeof(uint16_t) * dimension_count);
+                    upper_idx = malloc(sizeof(uint16_t) * dimension_count);
+                    if (!lower_idx || !upper_idx) {
+                        runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
+                        if (lower_idx) free(lower_idx);
+                        if (upper_idx) free(upper_idx);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
 
-                uint16_t *lower_idx = malloc(sizeof(uint16_t) * dimension_count);
-                uint16_t *upper_idx = malloc(sizeof(uint16_t) * dimension_count);
-                if (!lower_idx || !upper_idx) {
-                    runtimeError(vm, "VM Error: Malloc failed for array bound indices.");
-                    if (lower_idx) free(lower_idx);
-                    if (upper_idx) free(upper_idx);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = 0; i < dimension_count; i++) {
-                    lower_idx[i] = READ_SHORT(vm);
-                    upper_idx[i] = READ_SHORT(vm);
+                    for (int i = 0; i < dimension_count; i++) {
+                        lower_idx[i] = READ_SHORT(vm);
+                        upper_idx[i] = READ_SHORT(vm);
+                    }
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
@@ -4270,55 +4278,60 @@ comparison_error_label:
                     elem_type_def = lookupType(elem_name_val.s_val);
                 }
 
-                int* lower_bounds = malloc(sizeof(int) * dimension_count);
-                int* upper_bounds = malloc(sizeof(int) * dimension_count);
-                if (!lower_bounds || !upper_bounds) {
-                    runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
-                    free(lower_idx); free(upper_idx);
-                    if (lower_bounds) free(lower_bounds);
-                    if (upper_bounds) free(upper_bounds);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-
-                for (int i = dimension_count - 1; i >= 0; i--) {
-                    if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
-                        Value size_val = pop(vm);
-                        if (!isIntlikeType(size_val.type)) {
-                            runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        lower_bounds[i] = 0;
-                        upper_bounds[i] = (int)size_val.i_val - 1;
-                        freeValue(&size_val);
-                    } else {
-                        if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
-                            runtimeError(vm, "VM Error: Array bound constant index out of range.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        Value lower_val = vm->chunk->constants[lower_idx[i]];
-                        Value upper_val = vm->chunk->constants[upper_idx[i]];
-                        if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
-                            runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
-                            free(lower_bounds); free(upper_bounds);
-                            free(lower_idx); free(upper_idx);
-                            return INTERPRET_RUNTIME_ERROR;
-                        }
-                        lower_bounds[i] = (int)lower_val.i_val;
-                        upper_bounds[i] = (int)upper_val.i_val;
+                Value array_val;
+                if (dimension_count > 0) {
+                    int* lower_bounds = malloc(sizeof(int) * dimension_count);
+                    int* upper_bounds = malloc(sizeof(int) * dimension_count);
+                    if (!lower_bounds || !upper_bounds) {
+                        runtimeError(vm, "VM Error: Malloc failed for array bounds construction.");
+                        if (lower_bounds) free(lower_bounds);
+                        if (upper_bounds) free(upper_bounds);
+                        free(lower_idx);
+                        free(upper_idx);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
+
+                    for (int i = dimension_count - 1; i >= 0; i--) {
+                        if (lower_idx[i] == 0xFFFF && upper_idx[i] == 0xFFFF) {
+                            Value size_val = pop(vm);
+                            if (!isIntlikeType(size_val.type)) {
+                                runtimeError(vm, "VM Error: Array size expression did not evaluate to an integer.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            lower_bounds[i] = 0;
+                            upper_bounds[i] = (int)size_val.i_val - 1;
+                            freeValue(&size_val);
+                        } else {
+                            if (lower_idx[i] >= vm->chunk->constants_count || upper_idx[i] >= vm->chunk->constants_count) {
+                                runtimeError(vm, "VM Error: Array bound constant index out of range.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            Value lower_val = vm->chunk->constants[lower_idx[i]];
+                            Value upper_val = vm->chunk->constants[upper_idx[i]];
+                            if (!isIntlikeType(lower_val.type) || !isIntlikeType(upper_val.type)) {
+                                runtimeError(vm, "VM Error: Invalid constant types for array bounds.");
+                                free(lower_bounds); free(upper_bounds);
+                                free(lower_idx); free(upper_idx);
+                                return INTERPRET_RUNTIME_ERROR;
+                            }
+                            lower_bounds[i] = (int)lower_val.i_val;
+                            upper_bounds[i] = (int)upper_val.i_val;
+                        }
+                    }
+
+                    array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
+                    free(lower_bounds);
+                    free(upper_bounds);
+                } else {
+                    array_val = makeEmptyArray(elem_var_type, elem_type_def);
                 }
 
                 free(lower_idx);
                 free(upper_idx);
-
-                Value array_val = makeArrayND(dimension_count, lower_bounds, upper_bounds, elem_var_type, elem_type_def);
-
-                free(lower_bounds);
-                free(upper_bounds);
 
                 Value* base_val_ptr = vm->stackTop - 1;
                 bool invalid_type = false;

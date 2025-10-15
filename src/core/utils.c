@@ -637,6 +637,21 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     return v;
 }
 
+Value makeEmptyArray(VarType element_type, AST *type_def) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_ARRAY;
+    v.element_type = element_type;
+    v.element_type_def = type_def;
+    v.dimensions = 0;
+    v.lower_bounds = NULL;
+    v.upper_bounds = NULL;
+    v.array_val = NULL;
+    v.lower_bound = 0;
+    v.upper_bound = -1;
+    return v;
+}
+
 // Value constructor for the 'nil' literal.
 // Creates a Value of type TYPE_NIL with a NULL pointer value.
 Value makeNil(void) {

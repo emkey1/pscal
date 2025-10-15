@@ -1,0 +1,51 @@
+program DynamicArraySetLength;
+
+type
+  TIntArray = array of Integer;
+
+var
+  arr: TIntArray;
+  i: Integer;
+  ok: Boolean;
+
+procedure Expect(cond: Boolean; const message: String);
+begin
+  if not cond then
+  begin
+    ok := False;
+    Writeln('FAIL: ', message);
+  end;
+end;
+
+begin
+  ok := True;
+
+  Expect(Length(arr) = 0, 'Initial length should be 0');
+
+  SetLength(arr, 3);
+  Expect(Length(arr) = 3, 'Length after SetLength(arr, 3)');
+  for i := 0 to Length(arr) - 1 do
+    arr[i] := i * 10;
+
+  SetLength(arr, 5);
+  Expect(Length(arr) = 5, 'Length after SetLength(arr, 5)');
+  Expect(arr[0] = 0, 'Element 0 preserved after growth');
+  Expect(arr[1] = 10, 'Element 1 preserved after growth');
+  Expect(arr[2] = 20, 'Element 2 preserved after growth');
+  for i := 3 to Length(arr) - 1 do
+    if arr[i] <> 0 then
+    begin
+      ok := False;
+      Writeln('FAIL: New element ', i, ' not initialised to 0');
+    end;
+
+  SetLength(arr, 2);
+  Expect(Length(arr) = 2, 'Length after shrinking to 2');
+  Expect(arr[0] = 0, 'Element 0 preserved after shrink');
+  Expect(arr[1] = 10, 'Element 1 preserved after shrink');
+
+  if ok then
+    Writeln('PASS: Dynamic array SetLength preserves contents and defaults')
+  else
+    Writeln('FAIL: Dynamic array SetLength regression');
+end.

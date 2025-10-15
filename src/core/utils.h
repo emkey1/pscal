@@ -260,6 +260,7 @@ void setCurrentTextAttrFromByte(uint8_t attr);
 
 // Arrays
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def);
+Value makeEmptyArray(VarType element_type, AST *type_def);
 int computeFlatOffset(Value *array, int *indices);
 Value makeCopyOfValue(const Value *src);
 
