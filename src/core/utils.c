@@ -94,6 +94,8 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_COMMA:         return "COMMA";
         case TOKEN_PERIOD:        return "PERIOD";
         case TOKEN_ASSIGN:        return "ASSIGN";
+        case TOKEN_PLUS_EQUAL:    return "PLUS_EQUAL";
+        case TOKEN_MINUS_EQUAL:   return "MINUS_EQUAL";
         case TOKEN_PLUS:          return "PLUS";
         case TOKEN_MINUS:         return "MINUS";
         case TOKEN_MUL:           return "MUL";

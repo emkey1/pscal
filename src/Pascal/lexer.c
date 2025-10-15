@@ -750,8 +750,22 @@ Token *getNextToken(Lexer *lexer) {
         fprintf(stderr, "LEXER_DEBUG: getNextToken(Math Section)\n"); fflush(stderr);
 #endif
         // Simple operators: +, -, *, /
-        if (lexer->current_char == '+') { advance(lexer); return newToken(TOKEN_PLUS, "+", start_line, start_column); }
-        if (lexer->current_char == '-') { advance(lexer); return newToken(TOKEN_MINUS, "-", start_line, start_column); }
+        if (lexer->current_char == '+') {
+            advance(lexer);
+            if (lexer->current_char == '=') {
+                advance(lexer);
+                return newToken(TOKEN_PLUS_EQUAL, "+=", start_line, start_column);
+            }
+            return newToken(TOKEN_PLUS, "+", start_line, start_column);
+        }
+        if (lexer->current_char == '-') {
+            advance(lexer);
+            if (lexer->current_char == '=') {
+                advance(lexer);
+                return newToken(TOKEN_MINUS_EQUAL, "-=", start_line, start_column);
+            }
+            return newToken(TOKEN_MINUS, "-", start_line, start_column);
+        }
         if (lexer->current_char == '*') { advance(lexer); return newToken(TOKEN_MUL, "*", start_line, start_column); }
         if (lexer->current_char == '/') { advance(lexer); return newToken(TOKEN_SLASH, "/", start_line, start_column); }
 

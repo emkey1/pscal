@@ -2085,7 +2085,9 @@ AST *statement(Parser *parser) {
             }
 
             // Check for assignment first
-            if (parser->current_token->type == TOKEN_ASSIGN) {
+            if (parser->current_token->type == TOKEN_ASSIGN ||
+                parser->current_token->type == TOKEN_PLUS_EQUAL ||
+                parser->current_token->type == TOKEN_MINUS_EQUAL) {
                 // --- Assignment Statement ---
                 node = assignmentStatement(parser, lval_or_proc_id); // assignmentStatement handles := and RHS
                                                                      // It will use lval_or_proc_id as is (e.g. AST_VARIABLE or AST_FIELD_ACCESS for LHS)
@@ -2297,11 +2299,60 @@ AST *statement(Parser *parser) {
 // Parameter renamed to parsedLValue
 // assignmentStatement: Calls expression
 AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
-    if(!parser->current_token || parser->current_token->type!=TOKEN_ASSIGN){errorParser(parser,"Expected :="); return newASTNode(AST_NOOP,NULL);} eat(parser,TOKEN_ASSIGN);
-    AST* r=expression(parser); // <<< Use expression()
-    if(!r || r->type == AST_NOOP){errorParser(parser,"Expected expression after :="); return newASTNode(AST_NOOP,NULL);}
-    AST* n=newASTNode(AST_ASSIGN,NULL); setLeft(n,parsedLValue); setRight(n,r);
-    return n;
+    if (!parser || !parsedLValue) {
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    if (!parser->current_token) {
+        errorParser(parser, "Expected assignment operator");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    TokenType opType = parser->current_token->type;
+    if (opType != TOKEN_ASSIGN && opType != TOKEN_PLUS_EQUAL && opType != TOKEN_MINUS_EQUAL) {
+        errorParser(parser, "Expected assignment operator");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    int opLine = parser->current_token->line;
+    int opColumn = parser->current_token->column;
+
+    eat(parser, opType);
+
+    AST *rhs = expression(parser);
+    if (!rhs || rhs->type == AST_NOOP) {
+        errorParser(parser, "Expected expression after assignment");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    AST *assignNode = newASTNode(AST_ASSIGN, NULL);
+    setLeft(assignNode, parsedLValue);
+
+    if (opType == TOKEN_ASSIGN) {
+        setRight(assignNode, rhs);
+        return assignNode;
+    }
+
+    AST *lhsCopy = copyAST(parsedLValue);
+    if (!lhsCopy) {
+        errorParser(parser, "Failed to duplicate assignment target");
+        freeAST(rhs);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    Token opToken;
+    opToken.type = (opType == TOKEN_PLUS_EQUAL) ? TOKEN_PLUS : TOKEN_MINUS;
+    opToken.value = (opType == TOKEN_PLUS_EQUAL) ? "+" : "-";
+    opToken.length = 1;
+    opToken.line = opLine;
+    opToken.column = opColumn;
+
+    AST *binaryNode = newASTNode(AST_BINARY_OP, &opToken);
+    setLeft(binaryNode, lhsCopy);
+    setRight(binaryNode, rhs);
+    setRight(assignNode, binaryNode);
+
+    return assignNode;
 }
 
 // procedureCall: Calls exprList (which calls expression)

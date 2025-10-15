@@ -1,0 +1,35 @@
+program CompoundAssignmentTest;
+
+var
+  total, aces: integer;
+
+function NextValue(base: integer): integer;
+begin
+  NextValue := base + 2;
+end;
+
+begin
+  total := 5;
+  total += 10;
+  total -= 4;
+
+  aces := 2;
+  aces -= 1;
+
+  writeln('After first round:');
+  writeln('total=', total);
+  writeln('aces=', aces);
+
+  total += NextValue(3);
+  aces += total - 12;
+
+  writeln('After expression round:');
+  writeln('total=', total);
+  writeln('aces=', aces);
+
+  total -= aces;
+
+  writeln('After final subtraction:');
+  writeln('total=', total);
+  writeln('aces=', aces);
+end.
