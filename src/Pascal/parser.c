@@ -633,14 +633,29 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
         eat(parser_for_this_unit, TOKEN_USES);
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list_for_this_unit = createList();
-        while (tokenIsIdentifierLike(parser_for_this_unit->current_token)) {
+        while (parser_for_this_unit->current_token &&
+               parser_for_this_unit->current_token->type == TOKEN_IDENTIFIER) {
             // ... (logic to parse unit names into list) ...
             char* temp_unit_name = strdup(parser_for_this_unit->current_token->value);
             listAppend(unit_list_for_this_unit, temp_unit_name);
             free(temp_unit_name);
             eat(parser_for_this_unit, TOKEN_IDENTIFIER);
-            if (parser_for_this_unit->current_token && parser_for_this_unit->current_token->type == TOKEN_COMMA) {
+            if (parser_for_this_unit->current_token &&
+                parser_for_this_unit->current_token->type == TOKEN_COMMA) {
                 eat(parser_for_this_unit, TOKEN_COMMA);
+            } else if (parser_for_this_unit->current_token &&
+                       parser_for_this_unit->current_token->type == TOKEN_SEMICOLON) {
+                Token *lookahead = peekToken(parser_for_this_unit);
+                bool continue_after_semicolon = lookahead &&
+                                                lookahead->type == TOKEN_IDENTIFIER;
+                if (lookahead) {
+                    freeToken(lookahead);
+                }
+                if (continue_after_semicolon) {
+                    eat(parser_for_this_unit, TOKEN_SEMICOLON);
+                    continue;
+                }
+                break;
             } else {
                 break;
             }
@@ -1033,7 +1048,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list = createList();
 
-        while (currentTokenIsIdentifierLike(main_parser)) {
+        while (main_parser->current_token &&
+               main_parser->current_token->type == TOKEN_IDENTIFIER) {
             char* temp_unit_name_original_case = strdup(main_parser->current_token->value);
             if (!temp_unit_name_original_case) { /* Malloc error */ }
 
@@ -1041,8 +1057,22 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
             free(temp_unit_name_original_case);
 
             eat(main_parser, TOKEN_IDENTIFIER);
-            if (main_parser->current_token && main_parser->current_token->type == TOKEN_COMMA) {
+            if (main_parser->current_token &&
+                main_parser->current_token->type == TOKEN_COMMA) {
                 eat(main_parser, TOKEN_COMMA);
+            } else if (main_parser->current_token &&
+                       main_parser->current_token->type == TOKEN_SEMICOLON) {
+                Token *lookahead = peekToken(main_parser);
+                bool continue_after_semicolon = lookahead &&
+                                                lookahead->type == TOKEN_IDENTIFIER;
+                if (lookahead) {
+                    freeToken(lookahead);
+                }
+                if (continue_after_semicolon) {
+                    eat(main_parser, TOKEN_SEMICOLON);
+                    continue;
+                }
+                break;
             } else {
                 break;
             }
