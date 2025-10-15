@@ -2340,14 +2340,13 @@ AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
         return newASTNode(AST_NOOP, NULL);
     }
 
-    Token opToken;
-    opToken.type = (opType == TOKEN_PLUS_EQUAL) ? TOKEN_PLUS : TOKEN_MINUS;
-    opToken.value = (opType == TOKEN_PLUS_EQUAL) ? "+" : "-";
-    opToken.length = 1;
-    opToken.line = opLine;
-    opToken.column = opColumn;
-
-    AST *binaryNode = newASTNode(AST_BINARY_OP, &opToken);
+    Token *opToken = newToken(
+        (opType == TOKEN_PLUS_EQUAL) ? TOKEN_PLUS : TOKEN_MINUS,
+        (opType == TOKEN_PLUS_EQUAL) ? "+" : "-",
+        opLine,
+        opColumn);
+    AST *binaryNode = newASTNode(AST_BINARY_OP, opToken);
+    freeToken(opToken);
     setLeft(binaryNode, lhsCopy);
     setRight(binaryNode, rhs);
     setRight(assignNode, binaryNode);
