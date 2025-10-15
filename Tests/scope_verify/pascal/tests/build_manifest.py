@@ -348,6 +348,109 @@ add({
 })
 
 # ---------------------------------------------------------------------------
+# Control flow tests
+# ---------------------------------------------------------------------------
+
+add({
+    "id": "control_flow_goto_skips_body",
+    "name": "Goto skips inner statements",
+    "category": "control_flow",
+    "description": "A goto should jump over statements and continue execution at the label.",
+    "expect": "runtime_ok",
+    "code": """
+        program GotoSkip;
+        label
+          Done;
+        var
+          value: Integer;
+        begin
+          value := 0;
+          goto Done;
+          value := 42;
+        Done:
+          if value = 0 then
+            writeln('skip');
+        end.
+    """,
+    "expected_stdout": "skip",
+})
+
+add({
+    "id": "control_flow_goto_undefined_label_error",
+    "name": "Goto rejects missing label",
+    "category": "control_flow",
+    "description": "A goto targeting an undeclared label should raise a compile-time error.",
+    "expect": "compile_error",
+    "code": """
+        program BadGoto;
+        label
+          Declared;
+        begin
+          goto Missing;
+        Declared:
+          writeln('should not run');
+        end.
+    """,
+    # Pascal identifiers are case-insensitive and normalised to lowercase by the
+    # front end, so diagnostics reference the label using that casing.
+    "expected_stderr_substring": "goto target 'missing'",
+})
+
+add({
+    "id": "control_flow_duplicate_label_error",
+    "name": "Duplicate label declaration is rejected",
+    "category": "control_flow",
+    "description": "Label blocks must not repeat the same label name.",
+    "expect": "compile_error",
+    "code": """
+        program DuplicateLabel;
+        label
+          Here, Here;
+        begin
+          writeln('never runs');
+        end.
+    """,
+    # Diagnostics report identifiers in their normalised (lowercase) form.
+    "expected_stderr_substring": "label 'here' is declared more than once",
+})
+
+add({
+    "id": "integration_blackjack_compiles",
+    "name": "Goto integrates across routines",
+    "category": "control_flow",
+    "description": "A larger routine tree with labels and gotos across nested scopes should compile.",
+    "expect": "compile_ok",
+    "code": """
+        program GotoIntegration;
+        label
+          Finish;
+        var
+          value: Integer;
+
+        procedure RunGame;
+        label
+          Restart;
+        var
+          local: Integer;
+        begin
+          local := 0;
+        Restart:
+          local := local + 1;
+          if local < 2 then
+            goto Restart;
+          value := local;
+        end;
+
+        begin
+          value := 0;
+          RunGame;
+        Finish:
+          writeln('value=', value);
+        end.
+    """,
+})
+
+# ---------------------------------------------------------------------------
 # Constant scope tests
 # ---------------------------------------------------------------------------
 

@@ -78,6 +78,24 @@ AST *newThreadJoin(AST *expr) {
     return node;
 }
 
+AST *newLabelDeclaration(Token *labelToken) {
+    return newASTNode(AST_LABEL_DECL, labelToken);
+}
+
+AST *newLabelStatement(Token *labelToken, AST *statement) {
+    AST *node = newASTNode(AST_LABEL, labelToken);
+    if (statement && statement->type != AST_NOOP) {
+        setLeft(node, statement);
+    } else if (statement) {
+        freeAST(statement);
+    }
+    return node;
+}
+
+AST *newGotoStatement(Token *labelToken) {
+    return newASTNode(AST_GOTO, labelToken);
+}
+
 #ifdef DEBUG
 #define MAX_DEBUG_DEPTH 50
 void debugAST(AST *node, int indent) {

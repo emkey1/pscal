@@ -383,6 +383,37 @@ static int global_init_new_depth = 0;
 static bool compiler_defined_myself_global = false;
 static int compiler_myself_global_name_idx = -1;
 
+typedef struct {
+    int offset;
+    int line;
+} LabelPatch;
+
+typedef struct {
+    char* name;
+    int declared_line;
+    int defined_line;
+    int bytecode_offset;
+    LabelPatch* patches;
+    int patch_count;
+    int patch_capacity;
+} LabelInfo;
+
+typedef struct LabelTableState {
+    LabelInfo* labels;
+    int label_count;
+    int label_capacity;
+    struct LabelTableState* enclosing;
+} LabelTableState;
+
+static LabelTableState* current_label_table = NULL;
+
+static void initLabelTable(LabelTableState* table);
+static void finalizeLabelTable(LabelTableState* table, const char* context_name);
+static void registerLabelDeclarations(AST* node);
+static void declareLabel(Token* token);
+static void defineLabel(Token* token, BytecodeChunk* chunk, int line);
+static void compileGotoStatement(AST* node, BytecodeChunk* chunk, int line);
+
 static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     Value val = makeString(str);
     int index = addConstantToChunk(chunk, &val);
@@ -494,6 +525,254 @@ static bool isGlobalScopeNode(AST* node) {
     // to avoid misclassifying routine locals as globals.
     return false;
 
+}
+
+static LabelInfo* findLabelInfo(LabelTableState* table, const char* name) {
+    if (!table || !name) return NULL;
+    for (int i = 0; i < table->label_count; i++) {
+        LabelInfo* info = &table->labels[i];
+        if (info->name && strcasecmp(info->name, name) == 0) {
+            return info;
+        }
+    }
+    return NULL;
+}
+
+static bool ensureLabelTableCapacity(LabelTableState* table, int needed) {
+    if (!table) return false;
+    if (needed <= table->label_capacity) return true;
+
+    int new_capacity = table->label_capacity < 8 ? 8 : table->label_capacity * 2;
+    while (new_capacity < needed) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+
+    LabelInfo* resized = realloc(table->labels, (size_t)new_capacity * sizeof(LabelInfo));
+    if (!resized) {
+        fprintf(stderr, "Compiler error: Out of memory expanding label table.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    for (int i = table->label_capacity; i < new_capacity; i++) {
+        resized[i].name = NULL;
+        resized[i].declared_line = -1;
+        resized[i].defined_line = -1;
+        resized[i].bytecode_offset = -1;
+        resized[i].patches = NULL;
+        resized[i].patch_count = 0;
+        resized[i].patch_capacity = 0;
+    }
+
+    table->labels = resized;
+    table->label_capacity = new_capacity;
+    return true;
+}
+
+static bool ensurePatchCapacity(LabelInfo* info, int needed) {
+    if (!info) return false;
+    if (needed <= info->patch_capacity) return true;
+
+    int new_capacity = info->patch_capacity < 4 ? 4 : info->patch_capacity * 2;
+    while (new_capacity < needed) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+
+    LabelPatch* resized = realloc(info->patches, (size_t)new_capacity * sizeof(LabelPatch));
+    if (!resized) {
+        fprintf(stderr, "Compiler error: Out of memory expanding goto patch list.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    info->patches = resized;
+    info->patch_capacity = new_capacity;
+    return true;
+}
+
+static void initLabelTable(LabelTableState* table) {
+    if (!table) return;
+    table->labels = NULL;
+    table->label_count = 0;
+    table->label_capacity = 0;
+    table->enclosing = current_label_table;
+    current_label_table = table;
+}
+
+static void finalizeLabelTable(LabelTableState* table, const char* context_name) {
+    if (!table) return;
+    const char* ctx = context_name ? context_name : "this routine";
+
+    for (int i = 0; i < table->label_count; i++) {
+        LabelInfo* info = &table->labels[i];
+        if (info->name && info->bytecode_offset < 0) {
+            fprintf(stderr,
+                    "Compiler Error: label '%s' declared on line %d in %s was never defined.\n",
+                    info->name,
+                    info->declared_line,
+                    ctx);
+            compiler_had_error = true;
+        }
+        if (info->patch_count > 0 && info->bytecode_offset < 0) {
+            int report_line = info->patches[0].line > 0 ? info->patches[0].line : info->declared_line;
+            fprintf(stderr,
+                    "L%d: Compiler Error: goto target '%s' is not defined in %s.\n",
+                    report_line,
+                    info->name ? info->name : "label",
+                    ctx);
+            compiler_had_error = true;
+        }
+        if (info->patches) {
+            free(info->patches);
+        }
+        if (info->name) {
+            free(info->name);
+        }
+    }
+
+    free(table->labels);
+    table->labels = NULL;
+    table->label_count = 0;
+    table->label_capacity = 0;
+    current_label_table = table->enclosing;
+    table->enclosing = NULL;
+}
+
+static void declareLabel(Token* token) {
+    if (!current_label_table || !token || !token->value) return;
+
+    LabelInfo* existing = findLabelInfo(current_label_table, token->value);
+    if (existing) {
+        fprintf(stderr,
+                "L%d: Compiler Error: label '%s' is declared more than once (first declared at line %d).\n",
+                token->line,
+                existing->name ? existing->name : token->value,
+                existing->declared_line);
+        compiler_had_error = true;
+        return;
+    }
+
+    if (!ensureLabelTableCapacity(current_label_table, current_label_table->label_count + 1)) {
+        return;
+    }
+
+    LabelInfo* info = &current_label_table->labels[current_label_table->label_count++];
+    info->name = strdup(token->value);
+    if (!info->name) {
+        fprintf(stderr, "Compiler error: Out of memory storing label name.\n");
+        compiler_had_error = true;
+        current_label_table->label_count--;
+        return;
+    }
+    info->declared_line = token->line;
+    info->defined_line = -1;
+    info->bytecode_offset = -1;
+    info->patches = NULL;
+    info->patch_count = 0;
+    info->patch_capacity = 0;
+}
+
+static void registerLabelDeclarations(AST* node) {
+    if (!current_label_table || !node) return;
+    if (node->type == AST_LABEL_DECL) {
+        if (node->token) {
+            declareLabel(node->token);
+        }
+        return;
+    }
+    if (node->type == AST_PROCEDURE_DECL || node->type == AST_FUNCTION_DECL) {
+        return;
+    }
+    if (node->children) {
+        for (int i = 0; i < node->child_count; i++) {
+            registerLabelDeclarations(node->children[i]);
+        }
+    }
+}
+
+static void defineLabel(Token* token, BytecodeChunk* chunk, int line) {
+    if (!current_label_table || !token || !token->value) return;
+
+    int report_line = token->line > 0 ? token->line : line;
+    LabelInfo* info = findLabelInfo(current_label_table, token->value);
+    if (!info) {
+        fprintf(stderr,
+                "L%d: Compiler Error: label '%s' is not declared in this routine.\n",
+                report_line,
+                token->value);
+        compiler_had_error = true;
+        return;
+    }
+    if (info->bytecode_offset >= 0) {
+        fprintf(stderr,
+                "L%d: Compiler Error: label '%s' is defined more than once (previous definition at line %d).\n",
+                report_line,
+                token->value,
+                info->defined_line);
+        compiler_had_error = true;
+        return;
+    }
+
+    info->bytecode_offset = chunk->count;
+    info->defined_line = report_line;
+
+    for (int i = 0; i < info->patch_count; i++) {
+        int operand_index = info->patches[i].offset;
+        int distance = info->bytecode_offset - (operand_index + 2);
+        patchShort(chunk, operand_index, (uint16_t)distance);
+    }
+    if (info->patches) {
+        free(info->patches);
+        info->patches = NULL;
+    }
+    info->patch_count = 0;
+    info->patch_capacity = 0;
+}
+
+static void compileGotoStatement(AST* node, BytecodeChunk* chunk, int line) {
+    if (!node || !node->token || !node->token->value) return;
+    if (!current_label_table) {
+        fprintf(stderr,
+                "L%d: Compiler Error: goto statements are not permitted in this context.\n",
+                line);
+        compiler_had_error = true;
+        return;
+    }
+
+    LabelInfo* info = findLabelInfo(current_label_table, node->token->value);
+    int report_line = node->token->line > 0 ? node->token->line : line;
+    if (!info) {
+        fprintf(stderr,
+                "L%d: Compiler Error: goto target '%s' is not declared in this routine.\n",
+                report_line,
+                node->token->value);
+        compiler_had_error = true;
+        return;
+    }
+
+    writeBytecodeChunk(chunk, JUMP, line);
+    int operand_index = chunk->count;
+    emitShort(chunk, 0xFFFF, line);
+
+    if (info->bytecode_offset >= 0) {
+        int distance = info->bytecode_offset - (operand_index + 2);
+        patchShort(chunk, operand_index, (uint16_t)distance);
+    } else {
+        if (!ensurePatchCapacity(info, info->patch_count + 1)) {
+            return;
+        }
+        info->patches[info->patch_count].offset = operand_index;
+        info->patches[info->patch_count].line = report_line;
+        info->patch_count++;
+    }
 }
 
 typedef struct {
@@ -3365,6 +3644,9 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
 
     current_procedure_table = procedure_table;
 
+    LabelTableState program_labels;
+    initLabelTable(&program_labels);
+
     if (rootNode->type == AST_PROGRAM) {
         if (rootNode->right && rootNode->right->type == AST_BLOCK) {
             compileNode(rootNode->right, outputChunk, getLine(rootNode));
@@ -3377,6 +3659,9 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
                 astTypeToString(rootNode->type));
         compiler_had_error = true;
     }
+
+    finalizeLabelTable(&program_labels, "program");
+
     if (!compiler_had_error) {
         writeBytecodeChunk(outputChunk, HALT, rootNode ? getLine(rootNode) : 0);
         applyPeepholeOptimizations(outputChunk);
@@ -3420,6 +3705,9 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
 
     current_procedure_table = procedure_table;
 
+    LabelTableState module_labels;
+    initLabelTable(&module_labels);
+
     const char *moduleName = NULL;
     if (rootNode->type == AST_PROGRAM && rootNode->right && rootNode->right->type == AST_BLOCK &&
         rootNode->right->child_count > 0) {
@@ -3452,6 +3740,9 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     compilerSetCurrentUnitName(NULL);
     compiler_defined_myself_global = saved_myself_flag;
     compiler_myself_global_name_idx = saved_myself_idx;
+
+    finalizeLabelTable(&module_labels, moduleName ? moduleName : "module");
+
     if (vtable_state_pushed) {
         popVTableTrackerState();
     }
@@ -3469,6 +3760,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             AST* declarations = (node->child_count > 0) ? node->children[0] : NULL;
             AST* statements = (node->child_count > 1) ? node->children[1] : NULL;
             bool at_program_level = node->parent && node->parent->type == AST_PROGRAM;
+
+            registerLabelDeclarations(declarations);
 
             if (declarations && declarations->type == AST_COMPOUND) {
                 bool saved_postpone = postpone_global_initializers;
@@ -4134,6 +4427,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
 
     // Step 4: Compile the function body.
+    LabelTableState routine_labels;
+    initLabelTable(&routine_labels);
+
     HashTable *saved_table = current_procedure_table;
     if (func_decl_node->symbol_table) {
         current_procedure_table = (HashTable*)func_decl_node->symbol_table;
@@ -4142,6 +4438,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         compileNode(blockNode, chunk, getLine(blockNode));
     }
     current_procedure_table = saved_table;
+
+    finalizeLabelTable(&routine_labels, func_name ? func_name : "routine");
 
     updateMaxSlotFromBytecode(&fc, chunk, func_bytecode_start_address, chunk->count);
 
@@ -4296,12 +4594,17 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         result_slot = current_function_compiler->local_count - 1;
     }
 
+    LabelTableState inline_labels;
+    initLabelTable(&inline_labels);
+
     HashTable* saved_table = current_procedure_table;
     if (decl->symbol_table) {
         current_procedure_table = (HashTable*)decl->symbol_table;
     }
     compileNode(blockNode, chunk, getLine(blockNode));
     current_procedure_table = saved_table;
+
+    finalizeLabelTable(&inline_labels, proc_symbol->name ? proc_symbol->name : "inline routine");
 
     if (push_result && decl->type == AST_FUNCTION_DECL) {
         if (result_slot != -1) {
@@ -4404,11 +4707,26 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     if (line <= 0) line = current_line_approx;
 
     switch (node->type) {
+        case AST_NOOP:
+            break;
         case AST_RETURN: {
             if (node->left) {
                 compileRValue(node->left, chunk, getLine(node->left));
             }
             writeBytecodeChunk(chunk, RETURN, line);
+            break;
+        }
+        case AST_LABEL: {
+            if (node->token) {
+                defineLabel(node->token, chunk, line);
+            }
+            if (node->left) {
+                compileStatement(node->left, chunk, getLine(node->left));
+            }
+            break;
+        }
+        case AST_GOTO: {
+            compileGotoStatement(node, chunk, line);
             break;
         }
         case AST_CONTINUE: {

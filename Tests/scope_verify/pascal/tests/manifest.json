@@ -98,6 +98,41 @@
       "failure_reason": "Locals belong to their routine activation; sibling procedures must not see each other's locals."
     },
     {
+      "id": "control_flow_goto_skips_body",
+      "name": "Goto skips inner statements",
+      "category": "control_flow",
+      "description": "A goto should jump over statements and continue execution at the label.",
+      "expect": "runtime_ok",
+      "code": "program GotoSkip;\nlabel\n  Done;\nvar\n  value: Integer;\nbegin\n  value := 0;\n  goto Done;\n  value := 42;\nDone:\n  if value = 0 then\n    writeln('skip');\nend.",
+      "expected_stdout": "skip"
+    },
+    {
+      "id": "control_flow_goto_undefined_label_error",
+      "name": "Goto rejects missing label",
+      "category": "control_flow",
+      "description": "A goto targeting an undeclared label should raise a compile-time error.",
+      "expect": "compile_error",
+      "code": "program BadGoto;\nlabel\n  Declared;\nbegin\n  goto Missing;\nDeclared:\n  writeln('should not run');\nend.",
+      "expected_stderr_substring": "goto target 'missing'"
+    },
+    {
+      "id": "control_flow_duplicate_label_error",
+      "name": "Duplicate label declaration is rejected",
+      "category": "control_flow",
+      "description": "Label blocks must not repeat the same label name.",
+      "expect": "compile_error",
+      "code": "program DuplicateLabel;\nlabel\n  Here, Here;\nbegin\n  writeln('never runs');\nend.",
+      "expected_stderr_substring": "label 'here' is declared more than once"
+    },
+    {
+      "id": "integration_blackjack_compiles",
+      "name": "Goto integrates across routines",
+      "category": "control_flow",
+      "description": "A larger routine tree with labels and gotos across nested scopes should compile.",
+      "expect": "compile_ok",
+      "code": "program GotoIntegration;\nlabel\n  Finish;\nvar\n  value: Integer;\n\nprocedure RunGame;\nlabel\n  Restart;\nvar\n  local: Integer;\nbegin\n  local := 0;\nRestart:\n  local := local + 1;\n  if local < 2 then\n    goto Restart;\n  value := local;\nend;\n\nbegin\n  value := 0;\n  RunGame;\nFinish:\n  writeln('value=', value);\nend."
+    },
+    {
       "id": "const_shadow_local_overrides_global",
       "name": "Inner constant redefinition persists globally",
       "category": "const_scope",

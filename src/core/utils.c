@@ -135,6 +135,8 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_SPAWN:        return "SPAWN";
         case TOKEN_JOIN:         return "JOIN";
         case TOKEN_AT:           return "AT";
+        case TOKEN_LABEL:        return "LABEL";
+        case TOKEN_GOTO:         return "GOTO";
         default:
             // Create a small buffer to handle potentially large unknown enum values
             // Although, this function should ideally cover all defined TokenType values.
@@ -212,6 +214,9 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_TRY:            return "TRY";
         case AST_CATCH:          return "CATCH";
         case AST_THROW:          return "THROW";
+        case AST_LABEL_DECL:     return "LABEL_DECL";
+        case AST_LABEL:          return "LABEL";
+        case AST_GOTO:           return "GOTO";
         default:                 return "UNKNOWN_AST_TYPE";
     }
 }

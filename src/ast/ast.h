@@ -51,4 +51,7 @@ void dumpASTJSON(AST *node, FILE *outFile);
 // Threading helpers
 AST *newThreadSpawn(AST *call);
 AST *newThreadJoin(AST *expr);
+AST *newLabelDeclaration(Token *labelToken);
+AST *newLabelStatement(Token *labelToken, AST *statement);
+AST *newGotoStatement(Token *labelToken);
 #endif // AST_H

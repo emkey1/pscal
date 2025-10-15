@@ -1,5 +1,5 @@
 ---
-Support goto? (no)
+Support goto? (done)
 
 ---
 Plan to add CreateThread/WaitForThread and @ procedure pointers (Done)

@@ -56,6 +56,11 @@ AST *parseWriteArgument(Parser *parser);
 static AST *parseStrArgumentList(Parser *parser);
 AST *spawnStatement(Parser *parser);
 AST *joinStatement(Parser *parser);
+static AST *labelDeclarationBlock(Parser *parser);
+static bool tokenTerminatesStatement(TokenType type);
+static bool tokenTypeIsIdentifierLike(TokenType type);
+static bool tokenIsIdentifierLike(const Token *token);
+static bool currentTokenIsIdentifierLike(Parser *parser);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -74,6 +79,75 @@ static void appendDependencyPath(Parser *parser, const char *path) {
 
     listAppend(parser->dependency_paths, to_store);
     if (canonical) free(canonical);
+}
+
+static bool tokenTypeIsIdentifierLike(TokenType type) {
+    return type == TOKEN_IDENTIFIER || type == TOKEN_LABEL;
+}
+
+static bool tokenIsIdentifierLike(const Token *token) {
+    return token && tokenTypeIsIdentifierLike(token->type);
+}
+
+static bool currentTokenIsIdentifierLike(Parser *parser) {
+    return parser && tokenIsIdentifierLike(parser->current_token);
+}
+
+static AST *labelDeclarationBlock(Parser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+
+    eat(parser, TOKEN_LABEL);
+
+    AST *list = newASTNode(AST_COMPOUND, NULL);
+    if (!list) {
+        return NULL;
+    }
+
+    bool saw_label = false;
+    while (parser->current_token &&
+           (tokenIsIdentifierLike(parser->current_token) ||
+            parser->current_token->type == TOKEN_INTEGER_CONST)) {
+        Token *label_copy = copyToken(parser->current_token);
+        if (!label_copy && parser->current_token) {
+            freeAST(list);
+            EXIT_FAILURE_HANDLER();
+        }
+
+        TokenType label_type = parser->current_token->type;
+        eat(parser, label_type);
+
+        AST *decl = newLabelDeclaration(label_copy);
+        freeToken(label_copy);
+        if (!decl) {
+            freeAST(list);
+            return NULL;
+        }
+        addChild(list, decl);
+        saw_label = true;
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    }
+
+    if (!saw_label) {
+        errorParser(parser, "Expected one or more labels after LABEL");
+        freeAST(list);
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        errorParser(parser, "Expected ';' after label declaration");
+        freeAST(list);
+        return NULL;
+    }
+
+    eat(parser, TOKEN_SEMICOLON);
+    return list;
 }
 
 AST *declarations(Parser *parser, bool in_interface) {
@@ -99,10 +173,17 @@ AST *declarations(Parser *parser, bool in_interface) {
             break; // Exit the while(1) loop
         }
 
-        if (parser->current_token->type == TOKEN_CONST) {
+        if (parser->current_token->type == TOKEN_LABEL) {
+            AST *labels = labelDeclarationBlock(parser);
+            if (labels && labels->type != AST_NOOP) {
+                addChild(node, labels);
+            } else if (labels) {
+                freeAST(labels);
+            }
+        } else if (parser->current_token->type == TOKEN_CONST) {
             eat(parser, TOKEN_CONST);
             // Loop for multiple constant declarations within a single CONST block
-            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+            while (currentTokenIsIdentifierLike(parser)) {
                 AST *constDecl = constDeclaration(parser); // Parses "identifier = value;"
                 if (!constDecl || constDecl->type == AST_NOOP) {
                     // constDeclaration should call errorParser if there's a syntax error.
@@ -124,7 +205,7 @@ AST *declarations(Parser *parser, bool in_interface) {
             fflush(stderr);
 #endif
             // Loop for multiple type alias lines within a single TYPE block
-            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+            while (currentTokenIsIdentifierLike(parser)) {
                 AST *typeDecl = typeDeclaration(parser); // Parses "TypeName = TypeSpecifier;"
                 if (!typeDecl || typeDecl->type == AST_NOOP) {
                     // typeDeclaration should call errorParser on syntax error.
@@ -137,7 +218,7 @@ AST *declarations(Parser *parser, bool in_interface) {
             eat(parser, TOKEN_VAR);
             // Loop for multiple variable declaration lines within a single VAR block
             // e.g., VAR a,b: integer; c: char;
-            while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+            while (currentTokenIsIdentifierLike(parser)) {
                 AST *vdecl_result = varDeclaration(parser, parser->current_unit_name_context == NULL);
                 if (!vdecl_result || vdecl_result->type == AST_NOOP) {
                     // varDeclaration should call errorParser on syntax error.
@@ -170,7 +251,7 @@ AST *declarations(Parser *parser, bool in_interface) {
                 } else {
                     // If it's not a semicolon, and the next line *does* start with an identifier,
                     // it implies a missing semicolon between var declaration lines.
-                    if (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+                    if (currentTokenIsIdentifierLike(parser)) {
                          errorParser(parser, "Expected semicolon to separate variable declarations within VAR block");
                     }
                     // If not a semicolon and not another identifier, this VAR section is ending.
@@ -225,7 +306,8 @@ void eatInternal(Parser *parser, TokenType type) {
         EXIT_FAILURE_HANDLER(); // This is a critical internal error
     }
 
-    if (parser->current_token->type == type) {
+    if (parser->current_token->type == type ||
+        (type == TOKEN_IDENTIFIER && parser->current_token->type == TOKEN_LABEL)) {
         Token *tokenToFree = parser->current_token;
         // Get the next token BEFORE freeing the current one
         parser->current_token = getNextToken(parser->lexer);
@@ -272,7 +354,7 @@ AST *parseWriteArguments(Parser *parser) {
 AST *lvalue(Parser *parser) {
     Token *ident_token_snapshot = parser->current_token; // Snapshot the first token
 
-    if (!ident_token_snapshot || ident_token_snapshot->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(ident_token_snapshot)) {
         errorParser(parser, "Expected identifier at start of lvalue");
         return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
     }
@@ -280,7 +362,7 @@ AST *lvalue(Parser *parser) {
     // Create the base variable node.
     // newASTNode should make its own copy of the token if it needs to persist it.
     AST *node = newASTNode(AST_VARIABLE, ident_token_snapshot);
-    eat(parser, TOKEN_IDENTIFIER); // Consume the first identifier
+    eat(parser, ident_token_snapshot->type); // Consume the first identifier-like token
 
     // Loop for subsequent field access '.', array '[]', or pointer '^'
     while (parser->current_token &&
@@ -291,14 +373,14 @@ AST *lvalue(Parser *parser) {
         if (parser->current_token->type == TOKEN_PERIOD) {
             eat(parser, TOKEN_PERIOD); // Consume '.'
             Token *field_token_snapshot = parser->current_token;
-            if (!field_token_snapshot || field_token_snapshot->type != TOKEN_IDENTIFIER) {
+            if (!tokenIsIdentifierLike(field_token_snapshot)) {
                 errorParser(parser, "Expected field name after '.'");
                 // 'node' is the AST built so far (the record variable); return it.
                 return node;
             }
             // For AST_FIELD_ACCESS, the node's token is the field name itself.
             AST *fa_node = newASTNode(AST_FIELD_ACCESS, field_token_snapshot);
-            eat(parser, TOKEN_IDENTIFIER); // Consume the field identifier
+            eat(parser, field_token_snapshot->type); // Consume the field identifier-like token
 
             setLeft(fa_node, node); // The current 'node' (e.g., record variable) becomes the left child
             node = fa_node;         // The new field_access_node becomes the current 'node'
@@ -531,7 +613,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
     eat(parser_for_this_unit, TOKEN_UNIT);
     
     Token *unit_name_token_original = parser_for_this_unit->current_token;
-    if (!unit_name_token_original || unit_name_token_original->type != TOKEN_IDENTIFIER) { /* error */ }
+    if (!tokenIsIdentifierLike(unit_name_token_original)) { /* error */ }
     
     Token *unit_name_token_copy_for_ast = copyToken(unit_name_token_original);
     AST *unit_node = newASTNode(AST_UNIT, unit_name_token_copy_for_ast);
@@ -551,7 +633,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
         eat(parser_for_this_unit, TOKEN_USES);
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list_for_this_unit = createList();
-        while (parser_for_this_unit->current_token && parser_for_this_unit->current_token->type == TOKEN_IDENTIFIER) {
+        while (tokenIsIdentifierLike(parser_for_this_unit->current_token)) {
             // ... (logic to parse unit names into list) ...
             char* temp_unit_name = strdup(parser_for_this_unit->current_token->value);
             listAppend(unit_list_for_this_unit, temp_unit_name);
@@ -917,7 +999,7 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
         eat(main_parser, TOKEN_LPAREN);
 
-        while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
+        while (currentTokenIsIdentifierLike(main_parser)) {
             DEBUG_PRINT("buildProgramAST: About to eat IDENTIFIER in program file list. Current: %s ('%s')\n",
                         main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE",
                         main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
@@ -951,7 +1033,7 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
         uses_clause = newASTNode(AST_USES_CLAUSE, NULL);
         unit_list = createList();
 
-        while (main_parser->current_token && main_parser->current_token->type == TOKEN_IDENTIFIER) {
+        while (currentTokenIsIdentifierLike(main_parser)) {
             char* temp_unit_name_original_case = strdup(main_parser->current_token->value);
             if (!temp_unit_name_original_case) { /* Malloc error */ }
 
@@ -1070,11 +1152,29 @@ AST *block(Parser *parser) {
     return node;
 }
 
+static bool tokenTerminatesStatement(TokenType type) {
+    switch (type) {
+        case TOKEN_SEMICOLON:
+        case TOKEN_END:
+        case TOKEN_ELSE:
+        case TOKEN_UNTIL:
+        case TOKEN_EOF:
+        case TOKEN_PERIOD:
+            return true;
+        default:
+            return false;
+    }
+}
+
 AST *procedureDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_PROCEDURE);
     Token *originalProcNameToken = parser->current_token;
+    if (!tokenIsIdentifierLike(originalProcNameToken)) {
+        errorParser(parser, "Expected procedure name after PROCEDURE");
+        return newASTNode(AST_NOOP, NULL);
+    }
     Token *copiedProcNameToken = copyToken(originalProcNameToken);
-    eat(parser, TOKEN_IDENTIFIER); // Consumes procedure name
+    eat(parser, originalProcNameToken->type); // Consumes procedure name
     AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken);
     // freeToken(copiedProcNameToken); // Already handled if newASTNode copies
 
@@ -1350,9 +1450,9 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         eat(parser, TOKEN_RECORD); // Consume the RECORD keyword itself
 
         // (Rest of existing RECORD parsing logic - it calls typeSpecifier recursively)
-        while (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+        while (currentTokenIsIdentifierLike(parser)) {
             AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
-            while (1) { /* Parse field identifiers */ if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser,"Expected field identifier"); freeAST(fieldDecl); return node; } AST *varNode = newASTNode(AST_VARIABLE, parser->current_token); eat(parser, TOKEN_IDENTIFIER); addChild(fieldDecl, varNode); if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break; }
+            while (1) { /* Parse field identifiers */ if (!currentTokenIsIdentifierLike(parser)) { errorParser(parser,"Expected field identifier"); freeAST(fieldDecl); return node; } AST *varNode = newASTNode(AST_VARIABLE, parser->current_token); eat(parser, parser->current_token->type); addChild(fieldDecl, varNode); if (parser->current_token && parser->current_token->type == TOKEN_COMMA) eat(parser, TOKEN_COMMA); else break; }
             if (!parser->current_token || parser->current_token->type != TOKEN_COLON) { errorParser(parser,"Expected :"); freeAST(fieldDecl); return node; } eat(parser, TOKEN_COLON);
             AST *fieldType = typeSpecifier(parser, 1); if (!fieldType || fieldType->type == AST_NOOP) { errorParser(parser,"Bad field type"); freeAST(fieldDecl); return node; }
             setTypeAST(fieldDecl, fieldType->var_type);
@@ -1399,12 +1499,12 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
             paramsList = newASTNode(AST_LIST, NULL);
             while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
                 // Support optional named parameters: name ':' type
-                if (parser->current_token->type == TOKEN_IDENTIFIER) {
+                if (tokenIsIdentifierLike(parser->current_token)) {
                     Token* nextTok = peekToken(parser);
                     bool hasNameThenColon = (nextTok && nextTok->type == TOKEN_COLON);
                     if (nextTok) freeToken(nextTok);
                     if (hasNameThenColon) {
-                        eat(parser, TOKEN_IDENTIFIER); // consume param name
+                        eat(parser, parser->current_token->type); // consume param name
                         eat(parser, TOKEN_COLON);      // consume ':'
                     }
                 }
@@ -1449,7 +1549,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         setTypeAST(procType, TYPE_POINTER);
         return procType;
 
-    } else if (initialTokenType == TOKEN_IDENTIFIER) {
+    } else if (tokenTypeIsIdentifierLike(initialTokenType)) {
         // IDENTIFIER logic for basic types, user types, string[N]
         // Use initialToken for newASTNode calls
         char *typeName = initialToken->value; // Use value from initialToken
@@ -1492,7 +1592,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
             if (basicType != TYPE_VOID) {
                 node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken
                 setTypeAST(node, basicType);
-                eat(parser, TOKEN_IDENTIFIER); // Consume the type identifier
+                eat(parser, parser->current_token->type); // Consume the type identifier
             } else {
                 // User-defined type reference
                 AST *userType = lookupType(typeNameCopy);
@@ -1505,7 +1605,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                 node = newASTNode(AST_TYPE_REFERENCE, initialToken); // Use initialToken
                 setTypeAST(node, userType->var_type);
                 node->right = userType; // Link to definition
-                eat(parser, TOKEN_IDENTIFIER); // Consume the type identifier
+                eat(parser, parser->current_token->type); // Consume the type identifier
             }
         }
         free(typeNameCopy);
@@ -1536,7 +1636,7 @@ AST *parseEnumDefinition(Parser *parser, Token* enumTypeNameToken) {
     int ordinal = 0;
 
     // Parse enumeration values (e.g., cred, cgreen, ...)
-    while (parser->current_token->type == TOKEN_IDENTIFIER) {
+    while (currentTokenIsIdentifierLike(parser)) {
 
         // --- COPY the enum value token BEFORE calling eat ---
         Token *originalValueToken = parser->current_token;
@@ -1590,7 +1690,7 @@ AST *typeDeclaration(Parser *parser) {
     // --- COPY the token BEFORE calling eat ---
     Token *originalTypeNameToken = parser->current_token;
     // Basic check that we actually have an identifier
-    if (originalTypeNameToken->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(originalTypeNameToken)) {
          errorParser(parser, "Expected type name identifier");
          // You might want better error handling/recovery here
          return newASTNode(AST_NOOP, NULL);
@@ -1641,9 +1741,9 @@ AST *typeDeclaration(Parser *parser) {
 // variable: Simple variable parsing (e.g., for param list names) - No changes needed here usually
 AST *variable(Parser *parser) {
     Token *token = parser->current_token;
-    if (!token || token->type != TOKEN_IDENTIFIER){errorParser(parser,"Expected var name"); return NULL;}
+    if (!tokenIsIdentifierLike(token)){errorParser(parser,"Expected var name"); return NULL;}
     AST* node = newASTNode(AST_VARIABLE, token); // Uses copy
-    eat(parser, TOKEN_IDENTIFIER);
+    eat(parser, token->type);
     // Does NOT parse field/array access
     return node;
 }
@@ -1652,13 +1752,13 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
     AST *groupNode = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
 
     // 1. Parse variable list into groupNode children
-    while (parser->current_token->type == TOKEN_IDENTIFIER) {
+    while (currentTokenIsIdentifierLike(parser)) {
         // Pass current_token directly to newASTNode, which handles copying.
         AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
         if (!varNode) { /* Malloc error */ freeAST(groupNode); EXIT_FAILURE_HANDLER(); }
-        
+
         // Eat the token *after* it has been copied by newASTNode.
-        eat(parser, TOKEN_IDENTIFIER);
+        eat(parser, parser->current_token->type);
 
         addChild(groupNode, varNode);
 
@@ -1759,14 +1859,14 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
 AST *functionDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_FUNCTION);
     Token *originalFuncNameToken = parser->current_token;
-    if (!originalFuncNameToken || originalFuncNameToken->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(originalFuncNameToken)) {
         errorParser(parser,"Expected function name after FUNCTION");
         return newASTNode(AST_NOOP, NULL);
     }
     Token *copiedFuncNameToken = copyToken(originalFuncNameToken);
     if (!copiedFuncNameToken) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
     
-    eat(parser, TOKEN_IDENTIFIER); // Consumes function name
+    eat(parser, originalFuncNameToken->type); // Consumes function name
     
     AST *node = newASTNode(AST_FUNCTION_DECL, copiedFuncNameToken);
     // newASTNode makes its own copy, so we can free copiedFuncNameToken after node creation
@@ -1906,14 +2006,14 @@ AST *paramList(Parser *parser) {
 
         AST *group = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
         while (1) { // Parse identifier names into group->children
-            if (parser->current_token->type != TOKEN_IDENTIFIER) { errorParser(parser, "Expected identifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
+            if (!currentTokenIsIdentifierLike(parser)) { errorParser(parser, "Expected identifier in parameter list"); freeAST(group); freeAST(compound); return NULL; }
             
             // Directly use current_token to create the node, which copies it internally.
             AST *id_node = newASTNode(AST_VARIABLE, parser->current_token);
             if (!id_node) { fprintf(stderr, "Memory allocation failed for id_node in paramList\n"); freeAST(group); freeAST(compound); EXIT_FAILURE_HANDLER(); }
             
             // Eat the token AFTER it has been safely copied.
-            eat(parser, TOKEN_IDENTIFIER);
+            eat(parser, parser->current_token->type);
             
             addChild(group, id_node);
 
@@ -2064,6 +2164,41 @@ AST* compoundStatement(Parser *parser) {
 }
 
 AST *statement(Parser *parser) {
+    if (!parser || !parser->current_token) {
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    if (parser->current_token->type == TOKEN_IDENTIFIER ||
+        parser->current_token->type == TOKEN_LABEL ||
+        parser->current_token->type == TOKEN_INTEGER_CONST) {
+        Token *lookahead = peekToken(parser);
+        bool is_label = (lookahead && lookahead->type == TOKEN_COLON);
+        if (lookahead) {
+            freeToken(lookahead);
+        }
+        if (is_label) {
+            Token *label_copy = copyToken(parser->current_token);
+            if (!label_copy && parser->current_token) {
+                EXIT_FAILURE_HANDLER();
+            }
+            TokenType label_type = parser->current_token->type;
+            eat(parser, label_type);
+            eat(parser, TOKEN_COLON);
+
+            AST *inner_stmt = NULL;
+            if (parser->current_token &&
+                !tokenTerminatesStatement(parser->current_token->type)) {
+                inner_stmt = statement(parser);
+            } else {
+                inner_stmt = newASTNode(AST_NOOP, NULL);
+            }
+
+            AST *label_node = newLabelStatement(label_copy, inner_stmt);
+            freeToken(label_copy);
+            return label_node;
+        }
+    }
+
     AST *node = NULL; // Initialize node
 
     switch (parser->current_token->type) {
@@ -2073,6 +2208,7 @@ AST *statement(Parser *parser) {
             // compoundStatement handles its own END token.
             break; // No semicolon needed after END
 
+        case TOKEN_LABEL:
         case TOKEN_IDENTIFIER: {
             AST *lval_or_proc_id = lvalue(parser); // Parses identifier, field access, array access
 
@@ -2272,6 +2408,24 @@ AST *statement(Parser *parser) {
         case TOKEN_JOIN:
             node = joinStatement(parser);
             break;
+        case TOKEN_GOTO: {
+            eat(parser, TOKEN_GOTO);
+            if (!parser->current_token ||
+                (!tokenIsIdentifierLike(parser->current_token) &&
+                 parser->current_token->type != TOKEN_INTEGER_CONST)) {
+                errorParser(parser, "Expected label after GOTO");
+                return newASTNode(AST_NOOP, NULL);
+            }
+            Token *target_copy = copyToken(parser->current_token);
+            if (!target_copy && parser->current_token) {
+                EXIT_FAILURE_HANDLER();
+            }
+            TokenType target_type = parser->current_token->type;
+            eat(parser, target_type);
+            node = newGotoStatement(target_copy);
+            freeToken(target_copy);
+            break;
+        }
         case TOKEN_BREAK:
             eat(parser, TOKEN_BREAK); // Consume BREAK keyword
             node = newASTNode(AST_BREAK, NULL);
@@ -2357,7 +2511,13 @@ AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
 // procedureCall: Calls exprList (which calls expression)
 AST *procedureCall(Parser *parser) {
     // Assumes current token is the procedure identifier
-    AST *node = newASTNode(AST_PROCEDURE_CALL, parser->current_token); eat(parser,TOKEN_IDENTIFIER);
+    if (!currentTokenIsIdentifierLike(parser)) {
+        errorParser(parser, "Expected procedure identifier");
+        return newASTNode(AST_NOOP, NULL);
+    }
+    TokenType proc_token_type = parser->current_token->type;
+    AST *node = newASTNode(AST_PROCEDURE_CALL, parser->current_token);
+    eat(parser, proc_token_type);
     if(parser->current_token && parser->current_token->type==TOKEN_LPAREN){
         eat(parser,TOKEN_LPAREN); AST* args=NULL;
         if(parser->current_token && parser->current_token->type!=TOKEN_RPAREN) args=exprList(parser); // <<< exprList uses expression()
@@ -2534,7 +2694,7 @@ AST *readlnStatement(Parser *parser) {
 
 AST *spawnStatement(Parser *parser) {
     eat(parser, TOKEN_SPAWN);
-    if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(parser->current_token)) {
         errorParser(parser, "Expected procedure identifier after SPAWN");
         return newASTNode(AST_NOOP, NULL);
     }
@@ -2589,11 +2749,11 @@ AST *parseSetConstructor(Parser *parser) {
 
 AST *enumDeclaration(Parser *parser) {
     Token *enumToken = parser->current_token; // Store the TYPE NAME token
-    if (enumToken->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(enumToken)) {
          errorParser(parser, "Expected type name for enum declaration");
          return newASTNode(AST_NOOP, NULL); // Error recovery
     }
-    eat(parser, TOKEN_IDENTIFIER); // Consume type name
+    eat(parser, enumToken->type); // Consume type name
 
     eat(parser, TOKEN_EQUAL);
     eat(parser, TOKEN_LPAREN);
@@ -2607,9 +2767,9 @@ AST *enumDeclaration(Parser *parser) {
     char *typeNameStr = strdup(enumToken->value); // Store the type name string for symbol table
 
     // Parse enumeration values (e.g., valone, valtwo, ...)
-    while (parser->current_token->type == TOKEN_IDENTIFIER) {
+    while (currentTokenIsIdentifierLike(parser)) {
         Token *valueToken = parser->current_token; // Token for the VALUE (e.g., valone)
-        eat(parser, TOKEN_IDENTIFIER);
+        eat(parser, valueToken->type);
 
         // Create the AST node for this specific enum VALUE
         AST *valueNode = newASTNode(AST_ENUM_VALUE, valueToken);
@@ -3127,7 +3287,7 @@ AST *factor(Parser *parser) {
         eat(parser, TOKEN_AT);
 
         AST* target = NULL;
-        if (parser->current_token && parser->current_token->type == TOKEN_IDENTIFIER) {
+        if (currentTokenIsIdentifierLike(parser)) {
             target = lvalue(parser);
         } else {
             errorParser(parser, "Expected addressable expression after '@'");
@@ -3205,7 +3365,7 @@ AST *parsePointerType(Parser *parser) {
     eat(parser, TOKEN_CARET); // Consume '^'
 
     // The next token *must* be a type identifier
-    if (!parser->current_token || parser->current_token->type != TOKEN_IDENTIFIER) {
+    if (!tokenIsIdentifierLike(parser->current_token)) {
         errorParser(parser, "Expected type identifier after '^'");
         return NULL; // Indicate error
     }
@@ -3227,7 +3387,7 @@ AST *parsePointerType(Parser *parser) {
     }
     setTypeAST(baseTypeNameNode, baseVt); // Set tentative base type
 
-    eat(parser, TOKEN_IDENTIFIER); // Consume the base type identifier
+    eat(parser, parser->current_token->type); // Consume the base type identifier
 
     // --- Create the AST_POINTER_TYPE node ---
     AST *pointerTypeNode = newASTNode(AST_POINTER_TYPE, NULL); // No specific token for the pointer type itself
