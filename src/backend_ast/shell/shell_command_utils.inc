@@ -31,6 +31,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                                        ShellExecRedirBackup **out_backups,
                                        size_t *out_count);
 static bool shellEnsureExecRedirBackup(int target_fd,
+                                       int avoid_fd,
                                        ShellExecRedirBackup **backups,
                                        size_t *count,
                                        size_t *capacity);
