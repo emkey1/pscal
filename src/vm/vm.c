@@ -195,6 +195,18 @@ static bool vmResolveStringIndex(VM* vm,
 #endif
 }
 
+static Value makeOwnedString(char* data, size_t len) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_STRING;
+    v.s_val = data;
+    v.max_length = -1;
+    if (data) {
+        data[len] = '\0';
+    }
+    return v;
+}
+
 static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
 #ifndef FRONTEND_SHELL
     return (unsigned long long)(offset + 1);
@@ -2065,8 +2077,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 memcpy(temp_concat_buffer, s_a, len_a); \
                 memcpy(temp_concat_buffer + len_a, s_b, len_b); \
                 temp_concat_buffer[total_len] = '\0'; \
-                result_val = makeString(temp_concat_buffer); \
-                free(temp_concat_buffer); \
+                result_val = makeOwnedString(temp_concat_buffer, total_len); \
                 op_is_handled = true; \
             } \
         } \
