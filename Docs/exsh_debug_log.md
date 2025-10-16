@@ -32,3 +32,11 @@ This document records troubleshooting steps and findings while investigating the
 - Adjusted `shellRunSource` so any exit requests signalled by the EXIT trap are folded back into the outer interpreter and the trap's exit status becomes the script's final status.
 - Verified the fix with `/tmp/shellbench -e -s /workspace/pscal/build/bin/exsh /tmp/assign.sh`, which now reports consistent counts across all four `assign.sh` benches (e.g. `29,959 / 18,807 / 18,976 / 19,722`).
 - Collected additional samples (`/tmp/assign_variable.sh`, `/tmp/assign_local.sh`) to confirm EXIT traps now fire reliably in both `local` and `typeset` variants under `set -e`.
+
+## Session 2025-10-24
+- Re-ran shellbench smoke scripts and observed every logical/loop benchmark falling back to `?`, with direct reproducers showing `set -e` terminating on the first failing clause in constructs like `false && body`.
+- Traced the regression to `shellUpdateStatus` forcing an immediate `shellRuntimeRequestExit()` for all non-zero statuses, which aborted the VM before the logical short-circuit bytecode could inspect `$?` and skip the right-hand side.
+- Introduced a deferred-`errexit` flow: failures mark `errexit_pending` while the VM loop calls a new `shellRuntimeMaybeRequestPendingExit()` helper that only escalates after one iteration. The logical guard (`vmHostShellLastStatus`) clears the pending flag when the failure is intentionally handled, so short-circuit and conditional contexts proceed, but ordinary `set -e` failures still exit immediately.
+- Added the VM hook via weak symbols so non-shell frontends continue to link, and verified hand-authored scripts (`set -e; false && echo ok`, `set -e; false || echo ok`, `set -e; if false; then ...`) now match bash semantics.
+- Cleaned up the temporary `/tmp/exsh_*` logging that accumulated during earlier diagnostics to remove unnecessary file I/O and warning spam, then rebuilt `exsh` to confirm a clean compile.
+- Confirmed the EXIT trap handshake survives the change by running the bench-style harness (`trap 'echo "$count" >&3' EXIT` loop) and checking FD3 captures the expected iteration count.

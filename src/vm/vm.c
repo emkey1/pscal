@@ -2214,7 +2214,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+        shellRuntimeMaybeRequestPendingExit(vm);
         if (vm->exit_requested || vm->abort_requested) {
+            if (shellRuntimeShouldDeferExit(vm)) {
+                continue;
+            }
             bool halted = false;
             InterpretResult res = returnFromCall(vm, &halted);
             vm->exit_requested = false;
@@ -5449,4 +5453,13 @@ comparison_error_label:
         next_instruction:;
     }
     return INTERPRET_OK;
+}
+__attribute__((weak)) bool shellRuntimeShouldDeferExit(VM* vm) {
+    (void)vm;
+    return false;
+}
+
+__attribute__((weak)) bool shellRuntimeMaybeRequestPendingExit(VM* vm) {
+    (void)vm;
+    return false;
 }

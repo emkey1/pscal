@@ -1742,15 +1742,11 @@ static void shellUpdateStatus(int status) {
     if (status != 0) {
         if (gShellRuntime.errexit_enabled && !suppress_errexit) {
             gShellRuntime.errexit_pending = true;
-            shellRuntimeRequestExit();
-            if (gShellCurrentVm) {
-                gShellCurrentVm->abort_requested = true;
-                gShellCurrentVm->exit_requested = true;
-                gShellCurrentVm->current_builtin_name = "errexit";
-            }
+            gShellRuntime.errexit_defer_active = true;
         }
     } else {
         gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
     }
 }
 

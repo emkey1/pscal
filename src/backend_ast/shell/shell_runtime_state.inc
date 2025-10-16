@@ -878,6 +878,7 @@ typedef struct {
     bool job_control_initialized;
     bool errexit_enabled;
     bool errexit_pending;
+    bool errexit_defer_active;
     bool trap_enabled;
     bool posix_mode;
     bool local_scope_active;
@@ -1256,6 +1257,7 @@ static ShellRuntimeState gShellRuntime = {
     .job_control_initialized = false,
     .errexit_enabled = false,
     .errexit_pending = false,
+    .errexit_defer_active = false,
     .trap_enabled = false,
     .posix_mode = false,
     .local_scope_active = false,
@@ -1457,11 +1459,6 @@ void shellRuntimeAbandonConditionEvaluation(void) {
 void shellRuntimeRequestExit(void) {
     shellRuntimeAbandonConditionEvaluation();
     gShellExitRequested = true;
-    FILE *exit_log = fopen("/tmp/exsh_exit.log", "a");
-    if (exit_log) {
-        fprintf(exit_log, "shellRuntimeRequestExit invoked (vm=%p)\n", (void*)gShellCurrentVm);
-        fclose(exit_log);
-    }
     if (gShellCurrentVm) {
         gShellCurrentVm->exit_requested = true;
         gShellCurrentVm->abort_requested = true;
@@ -1533,6 +1530,7 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     gShellRuntime.continue_requested = false;
     gShellRuntime.continue_requested_levels = 0;
     gShellRuntime.errexit_pending = false;
+    gShellRuntime.errexit_defer_active = false;
 
     bool exit_requested = false;
     int status = EXIT_FAILURE;
@@ -1617,6 +1615,47 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     shellUpdateStatus(status);
 
     gShellTrapExecuting = false;
+}
+
+bool shellRuntimeShouldDeferExit(VM *vm) {
+    if (!gShellRuntime.errexit_defer_active) {
+        return false;
+    }
+    gShellRuntime.errexit_defer_active = false;
+    if (vm) {
+        vm->exit_requested = false;
+        vm->abort_requested = false;
+    }
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = false;
+        gShellCurrentVm->abort_requested = false;
+        gShellCurrentVm->current_builtin_name = NULL;
+    }
+    return true;
+}
+
+bool shellRuntimeMaybeRequestPendingExit(VM *vm) {
+    if (!gShellRuntime.errexit_pending) {
+        return false;
+    }
+    if (gShellRuntime.errexit_defer_active) {
+        gShellRuntime.errexit_defer_active = false;
+        return false;
+    }
+    gShellRuntime.errexit_pending = false;
+    shellRuntimeRequestExit();
+    if (vm) {
+        vm->exit_requested = true;
+        vm->abort_requested = true;
+    }
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = true;
+        gShellCurrentVm->abort_requested = true;
+        if (!gShellCurrentVm->current_builtin_name) {
+            gShellCurrentVm->current_builtin_name = "errexit";
+        }
+    }
+    return true;
 }
 
 ShellTrapAction shellRuntimeGetSignalTrapAction(int signo) {
@@ -1935,7 +1974,6 @@ static void shellRuntimeInitialisePosixMode(void) {
 }
 
 void shellRuntimeSetPosixMode(bool enabled) {
-    bool previously_enabled = gShellRuntime.posix_mode;
     gShellRuntime.posix_mode = enabled;
     if (enabled) {
         const char *current = getenv("POSIXLY_CORRECT");
@@ -2934,6 +2972,7 @@ static bool shellLoopEvaluateConditionText(const char *expr, bool *out_ready) {
     shellUpdateStatus(0);
     if (!gShellExitRequested) {
         gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
         if (gShellCurrentVm) {
             gShellCurrentVm->exit_requested = false;
             gShellCurrentVm->abort_requested = false;
