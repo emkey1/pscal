@@ -2966,13 +2966,14 @@ static bool shellLoopEvaluateConditionText(const char *expr, bool *out_ready) {
         *out_ready = ready;
     }
     shellUpdateStatus(0);
-    gShellRuntime.errexit_pending = false;
-    gShellRuntime.errexit_defer_active = false;
-    gShellExitRequested = false;
-    if (gShellCurrentVm) {
-        gShellCurrentVm->exit_requested = false;
-        gShellCurrentVm->abort_requested = false;
-        gShellCurrentVm->current_builtin_name = NULL;
+    if (!gShellExitRequested) {
+        gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = false;
+            gShellCurrentVm->abort_requested = false;
+            gShellCurrentVm->current_builtin_name = NULL;
+        }
     }
     shellRuntimeLeaveCondition();
     return true;
