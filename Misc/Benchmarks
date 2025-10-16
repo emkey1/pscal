@@ -1,0 +1,133 @@
+Oct 10 2025
+mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           36,386    465,330
+assign.sh: variable                                    40,782    707,253
+assign.sh: local var                                   41,111    697,178
+assign.sh: local var (typeset)                         41,100    698,273
+------------------------------------------------------------------------
+* count: number of executions per second
+
+Baseline
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           36,268    454,278 
+assign.sh: variable                                    40,463    699,913 
+assign.sh: local var                                   40,439    693,382 
+assign.sh: local var (typeset)                         40,534    691,530 
+cmp.sh: [ ]                                            22,404    377,805 
+cmp.sh: [[ ]]                                          21,072    528,989 
+cmp.sh: case                                           30,748    669,336 
+eval.sh: direct assign                                 22,110    332,424
+eval.sh: eval assign                                    3,632    194,901
+null.sh: blank                                         60,546      error 
+null.sh: assign variable                               40,804    731,789 
+null.sh: define function                               41,028    776,276 
+null.sh: undefined variable                            40,612    575,879 
+null.sh: : command                                     36,228    649,398 
+------------------------------------------------------------------------
+
+o register builtin catalog once via pthread_once and reuse the populated registry
+o add an exsh regression that repeatedly exercises command substitution to confirm the registry setup remains cheap
+
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           36,627    464,423
+assign.sh: variable                                    41,163    704,908
+assign.sh: local var                                   40,973    694,241
+assign.sh: local var (typeset)                         40,833    694,903
+cmp.sh: [ ]                                            22,698    381,092
+cmp.sh: [[ ]]                                          21,349    530,118
+cmp.sh: case                                           30,955    673,339
+eval.sh: direct assign                                 22,072    332,717
+eval.sh: eval assign                                    3,632    194,187
+eval.sh: command subs                                   error      1,797
+null.sh: blank                                         61,073      error
+null.sh: assign variable                               40,798    731,948
+null.sh: define function                               41,314    776,072
+null.sh: undefined variable                            40,788    570,572
+null.sh: : command                                     36,342    649,347
+------------------------------------------------------------------------
+
+o Added vmResetExecutionState so VMs can be safely reused across invocations without re-running initVM/freeVM, and exposed it in the public VM interface.
+o Reworked shellInvokeFunction to keep a cached VM instance, resetting it between calls instead of constructing and destroying a fresh VM each time.
+o Added an exsh regression script and manifest entry that repeatedly calls a shell function to verify positional parameters and exit statuses remain correct under VM reuse.
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           35,680    455,222
+assign.sh: variable                                    40,103    680,855
+assign.sh: local var                                   40,469    689,560
+assign.sh: local var (typeset)                         40,404    693,286
+cmp.sh: [ ]                                            22,256    377,260
+cmp.sh: [[ ]]                                          21,070    528,686
+cmp.sh: case                                           30,523    670,665
+
+o Extend `struct VM_s` in `src/vm/vm.h` with a dynamic array (e.g., `Symbol** procedureByAddress` plus a size field) that maps bytecode offsets to `Symbol*`.
+o Initialize the new fields to `NULL`/`0` in `initVM`, and release them in both `vmResetExecutionState` and `freeVM`.
+o Add a helper in `src/vm/vm.c` near the existing symbol helpers that walks `vm->procedureTable` (including nested symbol tables) and populates the cache for each `Symbol` whose `bytecode_address` is non-negative; grow the array to at least `chunk->count` bytes.
+o Invoke that helper at the start of `interpretBytecode` (after `vm->chunk` and `vm->procedureTable` are set) and replace the hot-path calls to `findProcedureByAddress` in `CALL`, `CALL_METHOD`, `CALL_INDIRECT`, and `PROC_CALL_INDIRECT` with cache lookups that fall back to the old search only when the cache slot is empty.
+o Update the thread bootstrap in `threadStart` (also in `src/vm/vm.c`) to consult the cache before falling back to `findProcedureByAddress`, so worker threads benefit from the same optimization.
+
+Thu Oct 16 19:45:27 CEST 2025
+mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sample/cmp.sh sample/eval.sh sample/null.sh sample/subshell.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           53,676    451,804 
+assign.sh: variable                                    65,298    692,804 
+assign.sh: local var                                   64,890    681,423 
+assign.sh: local var (typeset)                         64,895    683,591 
+cmp.sh: [ ]                                            34,541    374,774 
+cmp.sh: [[ ]]                                          30,311    522,162 
+cmp.sh: case                                           49,952    662,035 
+eval.sh: direct assign                                 37,695    325,207 
+eval.sh: eval assign                                    5,034    191,033 
+eval.sh: command subs                                   error      1,753 
+null.sh: blank                                         96,926      error 
+null.sh: assign variable                               64,893    718,328 
+null.sh: define function                               67,573    763,725 
+null.sh: undefined variable                            65,271    571,010 
+null.sh: : command                                     52,558    632,211 
+subshell.sh: no subshell                               53,997    582,902 
+subshell.sh: brace                                     49,108    576,546 
+subshell.sh: subshell                                  44,231      2,067 
+subshell.sh: command subs                               4,601      1,865 
+subshell.sh: external command                           error        570 
+------------------------------------------------------------------------
+
+Thu Oct 16 20:00:35 CEST 2025
+
+o Added a makeOwnedString helper so dynamically allocated string buffers can be wrapped directly by Value instances owned by the VM.
+o Updated the ADD branch of the BINARY_OP macro to use the owned-string helper, avoiding redundant copies and manual frees during string concatenation.
+
+mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sample/cmp.sh sample/eval.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           53,517    454,518
+assign.sh: variable                                    65,133    690,777
+assign.sh: local var                                   65,259    686,093
+assign.sh: local var (typeset)                         64,634    684,078
+cmp.sh: [ ]                                            34,222    374,569
+cmp.sh: [[ ]]                                          30,531    522,432
+cmp.sh: case                                           49,806    660,219
+eval.sh: direct assign                                 37,787    324,887
+eval.sh: eval assign                                    5,112    190,818
+eval.sh: command subs                                   error      1,730
+null.sh: blank                                         97,947      error
+null.sh: assign variable                               65,391    722,864
+null.sh: define function                               67,469    766,741
+null.sh: undefined variable                            65,218    572,542
+null.sh: : command                                     52,708    640,401
+subshell.sh: no subshell                               54,915    585,166
+subshell.sh: brace                                     49,162    577,727
+subshell.sh: subshell                                  44,563      2,049
+subshell.sh: command subs                               4,626      1,803
+subshell.sh: external command                           error        566
+stringop1.sh: string length                            63,904    596,289
+------------------------------------------------------------------------
