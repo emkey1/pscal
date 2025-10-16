@@ -6132,9 +6132,11 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
         if (strcmp(token, "-e") == 0) {
             gShellRuntime.errexit_enabled = true;
             gShellRuntime.errexit_pending = false;
+            gShellRuntime.errexit_defer_active = false;
         } else if (strcmp(token, "+e") == 0) {
             gShellRuntime.errexit_enabled = false;
             gShellRuntime.errexit_pending = false;
+            gShellRuntime.errexit_defer_active = false;
         } else if ((strcmp(token, "-o") == 0 || strcmp(token, "+o") == 0)) {
             bool enable = (token[0] == '-');
             if (i + 1 >= arg_count) {
@@ -6152,6 +6154,7 @@ Value vmBuiltinShellSet(VM *vm, int arg_count, Value *args) {
                 gShellRuntime.errexit_enabled = enable;
                 if (!enable) {
                     gShellRuntime.errexit_pending = false;
+                    gShellRuntime.errexit_defer_active = false;
                 }
             } else if (strcasecmp(name_val.s_val, "posix") == 0) {
                 shellRuntimeSetPosixMode(enable);
@@ -7792,6 +7795,16 @@ Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
 
 Value vmHostShellLastStatus(VM *vm) {
     (void)vm;
+    if (gShellRuntime.errexit_pending) {
+        gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
+        shellRuntimeConsumeExitRequested();
+        if (gShellCurrentVm) {
+            gShellCurrentVm->exit_requested = false;
+            gShellCurrentVm->abort_requested = false;
+            gShellCurrentVm->current_builtin_name = NULL;
+        }
+    }
     return makeInt(gShellRuntime.last_status);
 }
 
@@ -7800,14 +7813,6 @@ Value vmHostShellLoopIsReady(VM *vm) {
     shellRuntimeProcessPendingSignals();
     ShellLoopFrame *frame = shellLoopTop();
     if ((gShellExitRequested || gShellRuntime.break_requested) && frame) {
-        FILE *log_ready = fopen("/tmp/exsh_loop_is_ready.log", "a");
-        if (log_ready) {
-            fprintf(log_ready, "is_ready: exit=%d break=%d frame=%p\n",
-                    gShellExitRequested ? 1 : 0,
-                    gShellRuntime.break_requested ? 1 : 0,
-                    (void *)frame);
-            fclose(log_ready);
-        }
         frame->break_pending = true;
         frame->continue_pending = false;
         frame->skip_body = true;
@@ -7847,22 +7852,6 @@ Value vmHostShellLoopAdvance(VM *vm) {
     }
 
     if (gShellExitRequested || gShellRuntime.break_requested) {
-        FILE *log_adv = fopen("/tmp/exsh_loop.log", "a");
-        if (log_adv) {
-            fprintf(log_adv, "advance: exit=%d break=%d frame=%p\n",
-                    gShellExitRequested ? 1 : 0,
-                    gShellRuntime.break_requested ? 1 : 0,
-                    (void *)frame);
-            fclose(log_adv);
-        }
-        FILE *log = fopen("/tmp/exsh_loop.log", "a");
-        if (log) {
-            fprintf(log, "advance: exit=%d break=%d frame=%p\n",
-                    gShellExitRequested ? 1 : 0,
-                    gShellRuntime.break_requested ? 1 : 0,
-                    (void*)frame);
-            fclose(log);
-        }
         frame->break_pending = true;
     }
 

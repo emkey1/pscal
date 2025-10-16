@@ -531,11 +531,6 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 continue;
             }
             if (gShellExitRequested || gShellRuntime.break_requested) {
-                FILE *log = fopen("/tmp/exsh_pipeline.log", "a");
-                if (log) {
-                    fprintf(log, "pipeline kill pid=%d pgid=%d\n", (int)pid, (int)ctx->pgid);
-                    fclose(log);
-                }
                 if (ctx->pgid > 0) {
                     kill(-ctx->pgid, SIGTERM);
                 } else {
