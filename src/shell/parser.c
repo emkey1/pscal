@@ -1622,6 +1622,10 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
         return NULL;
     }
     ShellToken number_token = parser->current;
+    char *io_number_copy = NULL;
+    if (number_token.type == SHELL_TOKEN_IO_NUMBER && number_token.lexeme) {
+        io_number_copy = strdup(number_token.lexeme);
+    }
     ShellTokenType redir_type = SHELL_TOKEN_ERROR;
     if (parser->current.type == SHELL_TOKEN_IO_NUMBER) {
         parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
@@ -1673,8 +1677,10 @@ static ShellRedirection *parseRedirection(ShellParser *parser, bool *strip_tabs_
     }
     populateWordExpansions(target);
 
-    ShellRedirection *redir = shellCreateRedirection(type, number_token.lexeme, target, number_token.line,
+    const char *io_number_text = io_number_copy ? io_number_copy : number_token.lexeme;
+    ShellRedirection *redir = shellCreateRedirection(type, io_number_text, target, number_token.line,
                                                     number_token.column);
+    free(io_number_copy);
     if (redir && (type == SHELL_REDIRECT_DUP_INPUT || type == SHELL_REDIRECT_DUP_OUTPUT)) {
         char *dup_copy = parserCopyWordWithoutMarkers(target);
         const char *text = dup_copy ? dup_copy : (target && target->text ? target->text : "");
