@@ -455,8 +455,16 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
     size_t pipeline_count = logical->count;
     size_t connector_count = (pipeline_count > 0) ? (pipeline_count - 1) : 0;
 
+    bool guard_condition = connector_count > 0;
+    if (guard_condition) {
+        emitBuiltinProc(chunk, "__shell_enter_condition", 0, line);
+    }
+
     if (connector_count == 0) {
         compilePipeline(chunk, logical->pipelines[0], false);
+        if (guard_condition) {
+            emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+        }
         return;
     }
 
@@ -472,6 +480,9 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
                 emitPushString(chunk, meta, line);
                 emitBuiltinProc(chunk, name, 1, line);
             }
+        }
+        if (guard_condition) {
+            emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
         }
         return;
     }
@@ -492,10 +503,16 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
 
     compilePipeline(chunk, logical->pipelines[pipeline_count - 1], false);
 
+    int leave_label = chunk->count;
+    if (guard_condition) {
+        emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+    }
+
     int end_label = chunk->count;
     for (size_t i = 0; i < patch_count; ++i) {
         int index = patch_sites[i];
-        uint16_t offset = (uint16_t)(end_label - (index + 2));
+        uint16_t target = guard_condition ? leave_label : end_label;
+        uint16_t offset = (uint16_t)(target - (index + 2));
         patchShort(chunk, index, offset);
     }
 
