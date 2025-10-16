@@ -297,7 +297,9 @@ cleanup:
         shellRuntimeRunExitTrap();
         bool trap_exit_requested = shellRuntimeConsumeExitRequested();
         exit_flag = exit_flag || trap_exit_requested;
-        exit_code = shellRuntimeLastStatus();
+        if (trap_exit_requested) {
+            exit_code = shellRuntimeLastStatus();
+        }
     }
     if (source_pushed) {
         shellRuntimeTrackSourcePop();
