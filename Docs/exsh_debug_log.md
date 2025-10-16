@@ -40,3 +40,10 @@ This document records troubleshooting steps and findings while investigating the
 - Added the VM hook via weak symbols so non-shell frontends continue to link, and verified hand-authored scripts (`set -e; false && echo ok`, `set -e; false || echo ok`, `set -e; if false; then ...`) now match bash semantics.
 - Cleaned up the temporary `/tmp/exsh_*` logging that accumulated during earlier diagnostics to remove unnecessary file I/O and warning spam, then rebuilt `exsh` to confirm a clean compile.
 - Confirmed the EXIT trap handshake survives the change by running the bench-style harness (`trap 'echo "$count" >&3' EXIT` loop) and checking FD3 captures the expected iteration count.
+
+## Session 2025-10-30
+- Followed up on the catastrophic shellbench run where every benchmark either returned `?` or `error`, signalling that the deferred `errexit` logic was still exiting too aggressively.
+- Reproduced locally with `./build/bin/exsh -c 'set -e; false && echo ok; echo after'`, which exited before printing `echo after`, proving the VM promoted the pending exit while the conditional bytecode was still unwinding.
+- Diagnosed the culprit as `shellRuntimeMaybeRequestPendingExit()` clearing its deferral flag on the very next VM tick even if `shellRuntimeEvaluatingCondition()` reported that a guard was still active, so the subsequent tick always requested an exit before the guard could run `vmHostShellLastStatus()` to consume the handled failure.
+- Updated the helper to keep deferring while a condition is active and only clear the flag once normal execution resumes, allowing guarded failures (`&&`, `||`, `if`, `while`) to acknowledge the status before `set -e` exits propagate.
+- Rebuilt `exsh` and spot-checked both `set -e; false && echo ok; echo after` and `set -e; false || echo recovered; echo done` to confirm they now mirror bash (the script continues, the guard controls the flow, and the final status matches expectations).

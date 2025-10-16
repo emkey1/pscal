@@ -1642,7 +1642,9 @@ bool shellRuntimeMaybeRequestPendingExit(VM *vm) {
         return false;
     }
     if (gShellRuntime.errexit_defer_active) {
-        gShellRuntime.errexit_defer_active = false;
+        if (!shellRuntimeEvaluatingCondition()) {
+            gShellRuntime.errexit_defer_active = false;
+        }
         return false;
     }
     gShellRuntime.errexit_pending = false;
