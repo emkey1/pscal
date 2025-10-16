@@ -463,7 +463,7 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
     if (connector_count == 0) {
         compilePipeline(chunk, logical->pipelines[0], false);
         if (guard_condition) {
-            emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+            emitBuiltinProc(chunk, "__shell_leave_condition_preserve", 0, line);
         }
         return;
     }
@@ -482,7 +482,7 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
             }
         }
         if (guard_condition) {
-            emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+            emitBuiltinProc(chunk, "__shell_leave_condition_preserve", 0, line);
         }
         return;
     }
@@ -505,7 +505,7 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
 
     int leave_label = chunk->count;
     if (guard_condition) {
-        emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+        emitBuiltinProc(chunk, "__shell_leave_condition_preserve", 0, line);
     }
 
     int end_label = chunk->count;

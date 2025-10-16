@@ -1459,15 +1459,6 @@ void shellRuntimeAbandonConditionEvaluation(void) {
 void shellRuntimeRequestExit(void) {
     shellRuntimeAbandonConditionEvaluation();
     gShellExitRequested = true;
-    if (gShellCurrentVm) {
-        gShellCurrentVm->exit_requested = true;
-        gShellCurrentVm->abort_requested = true;
-        if (!gShellCurrentVm->current_builtin_name) {
-            gShellCurrentVm->current_builtin_name = "exit";
-        }
-    }
-    shellForceBreakAllLoops();
-    shellAbortPipeline();
 }
 
 void shellRuntimeRefreshTrapEnabled(void) {

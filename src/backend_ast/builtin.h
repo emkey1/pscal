@@ -115,6 +115,7 @@ Value vmBuiltinShellLoop(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLoopEnd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEnterCondition(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLeaveCondition(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLeaveConditionPreserve(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellIf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCaseClause(struct VM_s* vm, int arg_count, Value* args);
