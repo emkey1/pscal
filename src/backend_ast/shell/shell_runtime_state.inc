@@ -1501,13 +1501,38 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     }
     gShellTrapExecuting = true;
 
-    ShellRunOptions opts = {0};
+    ShellRunOptions opts = (ShellRunOptions){0};
     opts.no_cache = 1;
     opts.quiet = true;
     opts.exit_on_signal = shellRuntimeExitOnSignal();
     opts.suppress_warnings = true;
     const char *frontend = shellRuntimeGetArg0();
     opts.frontend_path = frontend ? frontend : "exsh";
+
+    bool saved_exit_requested = gShellExitRequested;
+    bool saved_break_requested = gShellRuntime.break_requested;
+    int saved_break_levels = gShellRuntime.break_requested_levels;
+    bool saved_continue_requested = gShellRuntime.continue_requested;
+    int saved_continue_levels = gShellRuntime.continue_requested_levels;
+    bool saved_errexit_pending = gShellRuntime.errexit_pending;
+    VM *current_vm = gShellCurrentVm;
+    bool saved_vm_exit = false;
+    bool saved_vm_abort = false;
+    const char *saved_vm_builtin = NULL;
+    if (current_vm) {
+        saved_vm_exit = current_vm->exit_requested;
+        saved_vm_abort = current_vm->abort_requested;
+        saved_vm_builtin = current_vm->current_builtin_name;
+        current_vm->exit_requested = false;
+        current_vm->abort_requested = false;
+        current_vm->current_builtin_name = NULL;
+    }
+    gShellExitRequested = false;
+    gShellRuntime.break_requested = false;
+    gShellRuntime.break_requested_levels = 0;
+    gShellRuntime.continue_requested = false;
+    gShellRuntime.continue_requested_levels = 0;
+    gShellRuntime.errexit_pending = false;
 
     bool exit_requested = false;
     int status = EXIT_FAILURE;
@@ -1540,6 +1565,55 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     if (exit_requested) {
         shellRuntimeRequestExit();
     }
+
+    bool trap_exit_requested = gShellExitRequested;
+    bool trap_break_requested = gShellRuntime.break_requested;
+    int trap_break_levels = gShellRuntime.break_requested_levels;
+    bool trap_continue_requested = gShellRuntime.continue_requested;
+    int trap_continue_levels = gShellRuntime.continue_requested_levels;
+    bool trap_errexit_pending = gShellRuntime.errexit_pending;
+    bool trap_vm_exit = current_vm ? current_vm->exit_requested : false;
+    bool trap_vm_abort = current_vm ? current_vm->abort_requested : false;
+    const char *trap_vm_builtin = current_vm ? current_vm->current_builtin_name : NULL;
+
+    gShellExitRequested = saved_exit_requested || trap_exit_requested;
+    if (saved_break_requested || trap_break_requested) {
+        gShellRuntime.break_requested = true;
+        if (saved_break_requested && trap_break_requested) {
+            gShellRuntime.break_requested_levels =
+                (saved_break_levels > trap_break_levels) ? saved_break_levels : trap_break_levels;
+        } else if (trap_break_requested) {
+            gShellRuntime.break_requested_levels = trap_break_levels;
+        } else {
+            gShellRuntime.break_requested_levels = saved_break_levels;
+        }
+    } else {
+        gShellRuntime.break_requested = false;
+        gShellRuntime.break_requested_levels = 0;
+    }
+    if (saved_continue_requested || trap_continue_requested) {
+        gShellRuntime.continue_requested = true;
+        if (saved_continue_requested && trap_continue_requested) {
+            gShellRuntime.continue_requested_levels =
+                (saved_continue_levels > trap_continue_levels) ? saved_continue_levels : trap_continue_levels;
+        } else if (trap_continue_requested) {
+            gShellRuntime.continue_requested_levels = trap_continue_levels;
+        } else {
+            gShellRuntime.continue_requested_levels = saved_continue_levels;
+        }
+    } else {
+        gShellRuntime.continue_requested = false;
+        gShellRuntime.continue_requested_levels = 0;
+    }
+    gShellRuntime.errexit_pending = saved_errexit_pending || trap_errexit_pending;
+    if (current_vm) {
+        current_vm->exit_requested = saved_vm_exit || trap_vm_exit;
+        current_vm->abort_requested = saved_vm_abort || trap_vm_abort;
+        if (!current_vm->current_builtin_name) {
+            current_vm->current_builtin_name = trap_vm_builtin ? trap_vm_builtin : saved_vm_builtin;
+        }
+    }
+
     shellUpdateStatus(status);
 
     gShellTrapExecuting = false;

@@ -25,3 +25,10 @@ This document records troubleshooting steps and findings while investigating the
 - Noticed `echo hi >&3` continued to print to stdout when FD 3 was closed; traced this to `shellEnsureExecRedirBackup` reusing the same descriptor as the redirection source.
 - Updated redirection backup logic to duplicate into a descriptor past the avoid range, preventing collisions with the source FD and restoring expected `>&` semantics.
 - Rebuilt exsh and confirmed direct tests (`echo hi >&3` with closed FD) now error out; reran `assign.sh` benchmarks to verify `variable`/`positional params` counts recover (remaining anomalies isolated to `local`/`typeset` cases pending follow-up).
+
+## Session 2025-10-17
+- Reproduced the intermittent `?` tallies with the upstream `shellbench` harness and noted EXIT traps were skipped whenever `set -e` had marked the run for termination.
+- Updated `shellRuntimeExecuteTrap` to snapshot and clear exit/break/continue/errexit flags (plus the current VM state) before invoking a trap body, then merge the trap's results back into the caller so traps run with a clean slate without losing pending exits.
+- Adjusted `shellRunSource` so any exit requests signalled by the EXIT trap are folded back into the outer interpreter and the trap's exit status becomes the script's final status.
+- Verified the fix with `/tmp/shellbench -e -s /workspace/pscal/build/bin/exsh /tmp/assign.sh`, which now reports consistent counts across all four `assign.sh` benches (e.g. `29,959 / 18,807 / 18,976 / 19,722`).
+- Collected additional samples (`/tmp/assign_variable.sh`, `/tmp/assign_local.sh`) to confirm EXIT traps now fire reliably in both `local` and `typeset` variants under `set -e`.
