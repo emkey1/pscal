@@ -1015,6 +1015,14 @@ Value vmBuiltinShellLeaveCondition(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellLeaveConditionPreserve(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellRuntimeLeaveCondition();
+    return makeVoid();
+}
+
 Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
@@ -7854,7 +7862,6 @@ Value vmHostShellLoopAdvance(VM *vm) {
     if (gShellExitRequested || gShellRuntime.break_requested) {
         frame->break_pending = true;
     }
-
     if (frame->break_pending) {
         frame->break_pending = false;
         frame->continue_pending = false;

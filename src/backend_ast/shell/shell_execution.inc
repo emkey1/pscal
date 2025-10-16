@@ -365,23 +365,11 @@ static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_s
     int status = 0;
     int options = allow_stop ? WUNTRACED : 0;
     pid_t waited;
-    bool sent_terminate = false;
-    while (true) {
+    do {
         waited = waitpid(pid, &status, options);
-        if (waited >= 0) {
-            break;
-        }
-        if (errno != EINTR) {
-            return errno;
-        }
-        shellRuntimeProcessPendingSignals();
-        if (gShellExitRequested || gShellRuntime.break_requested) {
-            if (!sent_terminate) {
-                kill(pid, SIGTERM);
-                sent_terminate = true;
-            }
-            return EINTR;
-        }
+    } while (waited < 0 && errno == EINTR);
+    if (waited < 0) {
+        return errno;
     }
     if (out_stopped && WIFSTOPPED(status)) {
         *out_stopped = true;
@@ -541,10 +529,6 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             bool stopped = false;
             int status = 0;
             int err = shellWaitPid(pid, &status, job_control, &stopped);
-            if (err == EINTR && (gShellExitRequested || gShellRuntime.break_requested)) {
-                ctx->pids[i] = -1;
-                continue;
-            }
             if (err != 0) {
                 continue;
             }
@@ -999,10 +983,6 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         return makeVoid();
     }
     shellRuntimeProcessPendingSignals();
-    if (gShellExitRequested || gShellRuntime.break_requested) {
-        shellFreeCommand(cmd);
-        return makeVoid();
-    }
     if (shellLoopSkipActive()) {
         shellFreeCommand(cmd);
         return makeVoid();
@@ -1249,36 +1229,15 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (job_control) {
                 shellJobControlSetForeground(child);
             }
-            if (gShellExitRequested || gShellRuntime.break_requested) {
-                kill(-child, SIGTERM);
-            }
-            int wait_err = shellWaitPid(child, &status, job_control, &stopped);
-            if (wait_err == EINTR && (gShellExitRequested || gShellRuntime.break_requested)) {
-                kill(-child, SIGTERM);
-                int cleanup_status = 0;
-                while (shellWaitPid(child, &cleanup_status, false, NULL) == EINTR) {
-                    shellRuntimeProcessPendingSignals();
-                }
-                if (job_control) {
-                    shellJobControlRestoreForeground();
-                }
-                int interrupted_status = gShellRuntime.last_status;
-                shellRuntimeProcessPendingSignals();
-                shellUpdateStatus(interrupted_status);
-                shellFreeCommand(cmd);
-                return makeVoid();
-            }
-            if (wait_err != 0) {
-                status = 127;
-            }
+            shellWaitPid(child, &status, job_control, &stopped);
             if (job_control) {
                 shellJobControlRestoreForeground();
             }
-            if (wait_err == 0 && !cmd->background && status >= 128 && status < 128 + NSIG) {
+            if (!cmd->background && status >= 128 && status < 128 + NSIG) {
                 shellHandlePendingSignal(status - 128);
             }
             shellRuntimeProcessPendingSignals();
-            if (wait_err == 0 && stopped && job_control) {
+            if (stopped && job_control) {
                 pid_t job_pids[1];
                 job_pids[0] = child;
                 ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
@@ -1309,3 +1268,4 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     shellFreeCommand(cmd);
     return makeVoid();
 }
+

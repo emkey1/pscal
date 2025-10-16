@@ -1459,15 +1459,6 @@ void shellRuntimeAbandonConditionEvaluation(void) {
 void shellRuntimeRequestExit(void) {
     shellRuntimeAbandonConditionEvaluation();
     gShellExitRequested = true;
-    if (gShellCurrentVm) {
-        gShellCurrentVm->exit_requested = true;
-        gShellCurrentVm->abort_requested = true;
-        if (!gShellCurrentVm->current_builtin_name) {
-            gShellCurrentVm->current_builtin_name = "exit";
-        }
-    }
-    shellForceBreakAllLoops();
-    shellAbortPipeline();
 }
 
 void shellRuntimeRefreshTrapEnabled(void) {
@@ -2975,14 +2966,13 @@ static bool shellLoopEvaluateConditionText(const char *expr, bool *out_ready) {
         *out_ready = ready;
     }
     shellUpdateStatus(0);
-    if (!gShellExitRequested) {
-        gShellRuntime.errexit_pending = false;
-        gShellRuntime.errexit_defer_active = false;
-        if (gShellCurrentVm) {
-            gShellCurrentVm->exit_requested = false;
-            gShellCurrentVm->abort_requested = false;
-            gShellCurrentVm->current_builtin_name = NULL;
-        }
+    gShellRuntime.errexit_pending = false;
+    gShellRuntime.errexit_defer_active = false;
+    gShellExitRequested = false;
+    if (gShellCurrentVm) {
+        gShellCurrentVm->exit_requested = false;
+        gShellCurrentVm->abort_requested = false;
+        gShellCurrentVm->current_builtin_name = NULL;
     }
     shellRuntimeLeaveCondition();
     return true;
