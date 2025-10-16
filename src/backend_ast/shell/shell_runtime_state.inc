@@ -1512,6 +1512,7 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     bool saved_continue_requested = gShellRuntime.continue_requested;
     int saved_continue_levels = gShellRuntime.continue_requested_levels;
     bool saved_errexit_pending = gShellRuntime.errexit_pending;
+    bool saved_errexit_defer_active = gShellRuntime.errexit_defer_active;
     VM *current_vm = gShellCurrentVm;
     bool saved_vm_exit = false;
     bool saved_vm_abort = false;
@@ -1570,6 +1571,7 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
     bool trap_continue_requested = gShellRuntime.continue_requested;
     int trap_continue_levels = gShellRuntime.continue_requested_levels;
     bool trap_errexit_pending = gShellRuntime.errexit_pending;
+    bool trap_errexit_defer_active = gShellRuntime.errexit_defer_active;
     bool trap_vm_exit = current_vm ? current_vm->exit_requested : false;
     bool trap_vm_abort = current_vm ? current_vm->abort_requested : false;
     const char *trap_vm_builtin = current_vm ? current_vm->current_builtin_name : NULL;
@@ -1604,6 +1606,7 @@ static void shellRuntimeExecuteTrap(const char *command, const char *label) {
         gShellRuntime.continue_requested_levels = 0;
     }
     gShellRuntime.errexit_pending = saved_errexit_pending || trap_errexit_pending;
+    gShellRuntime.errexit_defer_active = saved_errexit_defer_active || trap_errexit_defer_active;
     if (current_vm) {
         current_vm->exit_requested = saved_vm_exit || trap_vm_exit;
         current_vm->abort_requested = saved_vm_abort || trap_vm_abort;
