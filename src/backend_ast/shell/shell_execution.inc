@@ -617,6 +617,7 @@ static bool shellCommandIsExecBuiltin(const ShellCommand *cmd) {
 }
 
 static bool shellEnsureExecRedirBackup(int target_fd,
+                                       int avoid_fd,
                                        ShellExecRedirBackup **backups,
                                        size_t *count,
                                        size_t *capacity) {
@@ -633,11 +634,60 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     backup.saved_fd = -1;
     backup.saved_valid = false;
     backup.was_closed = false;
-    int dup_fd = dup(target_fd);
+    int min_fd = target_fd + 1;
+    if (avoid_fd >= 0 && avoid_fd >= min_fd) {
+        min_fd = avoid_fd + 1;
+    }
+    int dup_fd = -1;
+#ifdef F_DUPFD_CLOEXEC
+    dup_fd = fcntl(target_fd, F_DUPFD_CLOEXEC, min_fd);
+    if (dup_fd < 0 && errno == EINVAL) {
+        dup_fd = -1;
+    }
+#endif
+    if (dup_fd < 0) {
+        dup_fd = fcntl(target_fd, F_DUPFD, min_fd);
+        if (dup_fd >= 0) {
+            fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
+        }
+    }
+    if (dup_fd < 0) {
+        dup_fd = dup(target_fd);
+        if (dup_fd >= 0) {
+            fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
+        }
+    }
+    if (dup_fd >= 0 && avoid_fd >= 0 && dup_fd == avoid_fd) {
+#ifdef F_DUPFD_CLOEXEC
+        int alt_fd = fcntl(target_fd, F_DUPFD_CLOEXEC, avoid_fd + 1);
+        if (alt_fd >= 0) {
+            close(dup_fd);
+            dup_fd = alt_fd;
+        } else if (errno == EINVAL) {
+            alt_fd = -1;
+        }
+#else
+        int alt_fd = -1;
+#endif
+        if (dup_fd >= 0 && dup_fd == avoid_fd) {
+            if (alt_fd < 0) {
+                alt_fd = fcntl(target_fd, F_DUPFD, avoid_fd + 1);
+                if (alt_fd >= 0) {
+                    fcntl(alt_fd, F_SETFD, FD_CLOEXEC);
+                }
+            }
+            if (alt_fd >= 0) {
+                close(dup_fd);
+                dup_fd = alt_fd;
+            } else {
+                close(dup_fd);
+                dup_fd = -1;
+            }
+        }
+    }
     if (dup_fd >= 0) {
         backup.saved_fd = dup_fd;
         backup.saved_valid = true;
-        fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
     } else if (errno == EBADF) {
         backup.was_closed = true;
     } else {
@@ -709,7 +759,11 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
     for (size_t i = 0; i < cmd->redir_count; ++i) {
         const ShellRedirection *redir = &cmd->redirs[i];
         int target_fd = redir->fd;
-        if (!shellEnsureExecRedirBackup(target_fd, &backups, &backup_count, &backup_capacity)) {
+        int avoid_fd = -1;
+        if (redir->kind == SHELL_RUNTIME_REDIR_DUP && !redir->close_target) {
+            avoid_fd = redir->dup_target_fd;
+        }
+        if (!shellEnsureExecRedirBackup(target_fd, avoid_fd, &backups, &backup_count, &backup_capacity)) {
             int err = errno;
             if (err == 0) {
                 err = ENOMEM;
