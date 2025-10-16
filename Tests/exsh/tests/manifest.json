@@ -65,6 +65,15 @@
             "expected_stdout": "echo is a shell builtin\ntrue is a shell builtin\nfalse is a shell builtin\necho:plain:start\nalpha beta\necho:plain:end\necho:-e:start\nline1\nline2\necho:-e:end\necho:-E:start\nline1\\nline2\necho:-E:end\nno-newline:sentinel\nprefix:sentinel\ntrue-status:0\nfalse-status:1"
         },
         {
+            "id": "dash_c_option",
+            "name": "Dash-c executes inline commands",
+            "category": "cli",
+            "description": "Verify -c honours bash-compatible argument handling and diagnostics.",
+            "script": "Tests/exsh/tests/dash_c_option.psh",
+            "expect": "runtime_ok",
+            "expected_stdout": "command-output:custom0:first:second\nmissing-status:2\nmissing-error:exsh: -c: option requires an argument"
+        },
+        {
             "id": "builtin_functions",
             "name": "Builtins update environment and status",
             "category": "builtins",
