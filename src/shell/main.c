@@ -2756,8 +2756,15 @@ int main(int argc, char **argv) {
             options.verbose_errors = true;
         } else if (strcmp(argv[i], "-c") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "-c requires an argument\n%s\n", SHELL_USAGE);
-                return EXIT_FAILURE;
+                const char *program = options.frontend_path ? options.frontend_path : "exsh";
+                const char *slash = strrchr(program, '/');
+                const char *backslash = strrchr(program, '\\');
+                if (backslash && (!slash || backslash > slash)) {
+                    slash = backslash;
+                }
+                const char *program_name = (slash && slash[1]) ? slash + 1 : program;
+                fprintf(stderr, "%s: -c: option requires an argument\n", program_name);
+                return vmExitWithCleanup(2);
             }
             command_string = argv[i + 1];
             if (i + 2 < argc) {

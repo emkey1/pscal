@@ -19,6 +19,10 @@ build/bin/exsh script.psh [arguments]
 ends:
 
 - `-v` prints the generated version string and latest git tag.
+- `-c <command> [name] [args...]` executes an inline command string. When
+  additional arguments follow the string, the first argument becomes `$0` for
+  diagnostics and the remainder populate the positional parameters so inline
+  runs match Bash semantics.
 - `--dump-ast-json` writes the parsed program to stdout in JSON form.
 - `--dump-bytecode` disassembles the compiled bytecode before execution.
 - `--dump-bytecode-only` disassembles and exits without running the VM.
@@ -30,6 +34,9 @@ ends:
 
 Example scripts live under `Examples/exsh/` and cover pipelines, conditionals,
 and environment-aware builtins.
+
+Omitting the command string after `-c` emits the diagnostic `exsh: -c: option
+requires an argument` and exits with status `2`, mirroring Bash's behaviour.
 
 ## Interactive mode
 

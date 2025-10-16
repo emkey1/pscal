@@ -1,0 +1,39 @@
+EXSH_BIN="./build/bin/exsh"
+
+if [ ! -x "$EXSH_BIN" ]; then
+  echo "command-output:missing-executable"
+  echo "missing-status:-1"
+  echo "missing-error:exsh binary not built"
+  exit 1
+fi
+
+command_output=$("$EXSH_BIN" -c 'printf "%s:%s:%s\n" "$0" "$1" "$2"' custom0 first second)
+"$EXSH_BIN" -c 1>/dev/null 2>__dash_c_err.txt
+missing_status=$?
+missing_error=$(tr -d '\n' < __dash_c_err.txt)
+rm -f __dash_c_err.txt
+
+if [ "$command_output" != "custom0:first:second" ]; then
+  echo "command-output:$command_output"
+  echo "missing-status:$missing_status"
+  echo "missing-error:$missing_error"
+  exit 1
+fi
+
+if [ "$missing_status" -ne 2 ]; then
+  echo "command-output:$command_output"
+  echo "missing-status:$missing_status"
+  echo "missing-error:$missing_error"
+  exit 1
+fi
+
+if [ "$missing_error" != "exsh: -c: option requires an argument" ]; then
+  echo "command-output:$command_output"
+  echo "missing-status:$missing_status"
+  echo "missing-error:$missing_error"
+  exit 1
+fi
+
+echo "command-output:$command_output"
+echo "missing-status:$missing_status"
+echo "missing-error:$missing_error"
