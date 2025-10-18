@@ -4918,17 +4918,18 @@ comparison_error_label:
                 const char* canonical_name = builtin_name;
                 int resolved_id = -1;
                 int effective_id = (int)builtin_id;
-                VmBuiltinMapping* mapping = NULL;
+                VmBuiltinMapping mapping;
+                bool have_mapping = false;
 
                 if ((!handler || !canonical_name) && encoded_name && *encoded_name) {
-                    mapping = getVmBuiltinMapping(encoded_name, &resolved_id);
+                    have_mapping = getVmBuiltinMapping(encoded_name, &mapping, &resolved_id);
                 } else if (!handler && canonical_name) {
-                    mapping = getVmBuiltinMapping(canonical_name, &resolved_id);
+                    have_mapping = getVmBuiltinMapping(canonical_name, &mapping, &resolved_id);
                 }
 
-                if (mapping) {
-                    handler = mapping->handler;
-                    canonical_name = mapping->name;
+                if (have_mapping) {
+                    handler = mapping.handler;
+                    canonical_name = mapping.name;
                     if (resolved_id >= 0) {
                         effective_id = resolved_id;
                     }
@@ -5020,9 +5021,10 @@ comparison_error_label:
                 Value* args = vm->stackTop - arg_count;
                 const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
 
-                VmBuiltinMapping* mapping = getVmBuiltinMapping(builtin_name_original_case, NULL);
-                VmBuiltinFn handler = mapping ? mapping->handler : NULL;
-                const char* canonical_name = mapping ? mapping->name : NULL;
+                VmBuiltinMapping mapping;
+                bool have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, NULL);
+                VmBuiltinFn handler = have_mapping ? mapping.handler : NULL;
+                const char* canonical_name = have_mapping ? mapping.name : NULL;
 
                 if (handler) {
                     bool needs_lock = false;

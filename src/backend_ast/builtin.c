@@ -862,29 +862,33 @@ const char* getVmBuiltinNameById(int id) {
     return name;
 }
 
-VmBuiltinMapping* getVmBuiltinMapping(const char *name, int *out_id) {
+bool getVmBuiltinMapping(const char *name, VmBuiltinMapping *out_mapping, int *out_id) {
     if (out_id) {
         *out_id = -1;
     }
     if (!name) {
-        return NULL;
+        return false;
     }
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     char canonical[MAX_SYMBOL_LENGTH];
     if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
-        return NULL;
+        return false;
     }
 
     pthread_mutex_lock(&builtin_registry_mutex);
     size_t id = SIZE_MAX;
     VmBuiltinMapping *mapping = builtinRegistryLookupMappingUnlocked(canonical, &id);
-    if (mapping && out_id) {
-        if (id <= (size_t)INT_MAX) {
+    bool found = mapping != NULL;
+    if (found) {
+        if (out_mapping) {
+            *out_mapping = *mapping;
+        }
+        if (out_id && id <= (size_t)INT_MAX) {
             *out_id = (int)id;
         }
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
-    return mapping;
+    return found;
 }
 
 int getVmBuiltinID(const char *name) {
