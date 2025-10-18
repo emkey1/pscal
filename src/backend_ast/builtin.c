@@ -915,6 +915,7 @@ int getVmBuiltinID(const char *name) {
         }
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
+
     return result;
 }
 
@@ -4732,19 +4733,36 @@ static int builtin_registry_count = 0;
 static int builtin_registry_capacity = 0;
 static pthread_once_t builtin_registration_once = PTHREAD_ONCE_INIT;
 
-static void registerBuiltinFunctionUnlocked(const char *name,
-        ASTNodeType declType,
-        const char* unit_context_name_param_for_addproc) {
-    (void)unit_context_name_param_for_addproc;
+typedef struct {
+    Symbol symbol;
+    BuiltinRoutineType builtinType;
+    int registryIndex;
+} BuiltinTypeEntry;
+
+static HashTable *builtinTypeHash = NULL;
+
+static void destroyBuiltinTypeHashUnlocked(void) {
+    if (!builtinTypeHash) {
+        return;
+    }
+    freeHashTable(builtinTypeHash);
+    builtinTypeHash = NULL;
+}
+
+static BuiltinRoutineType builtinRoutineTypeFromDecl(ASTNodeType declType) {
+    return (declType == AST_FUNCTION_DECL)
+               ? BUILTIN_TYPE_FUNCTION
+               : BUILTIN_TYPE_PROCEDURE;
+}
+
+static void registerBuiltinFunctionLinear(const char *name, BuiltinRoutineType type) {
     if (!name) {
         return;
     }
 
     for (int i = 0; i < builtin_registry_count; ++i) {
         if (strcasecmp(name, builtin_registry[i].name) == 0) {
-            builtin_registry[i].type = (declType == AST_FUNCTION_DECL)
-                ? BUILTIN_TYPE_FUNCTION
-                : BUILTIN_TYPE_PROCEDURE;
+            builtin_registry[i].type = type;
             return;
         }
     }
@@ -4759,14 +4777,136 @@ static void registerBuiltinFunctionUnlocked(const char *name,
         builtin_registry_capacity = new_capacity;
     }
 
-    builtin_registry[builtin_registry_count].name = strdup(name);
-    if (!builtin_registry[builtin_registry_count].name) {
+    char *dup_name = strdup(name);
+    if (!dup_name) {
         return;
     }
-    builtin_registry[builtin_registry_count].type = (declType == AST_FUNCTION_DECL)
-        ? BUILTIN_TYPE_FUNCTION
-        : BUILTIN_TYPE_PROCEDURE;
+
+    builtin_registry[builtin_registry_count].name = dup_name;
+    builtin_registry[builtin_registry_count].type = type;
     builtin_registry_count++;
+}
+
+static BuiltinTypeEntry *lookupBuiltinTypeEntryUnlocked(const char *canonical_name) {
+    if (!builtinTypeHash || !canonical_name || !*canonical_name) {
+        return NULL;
+    }
+
+    Symbol *sym = hashTableLookup(builtinTypeHash, canonical_name);
+    if (!sym) {
+        return NULL;
+    }
+    return (BuiltinTypeEntry *)sym;
+}
+
+static bool ensureBuiltinTypeHashUnlocked(void) {
+    if (builtinTypeHash) {
+        return true;
+    }
+
+    builtinTypeHash = createHashTable();
+    if (!builtinTypeHash) {
+        return false;
+    }
+
+    for (int i = 0; i < builtin_registry_count; ++i) {
+        char canonical[MAX_SYMBOL_LENGTH];
+        if (!canonicalizeBuiltinName(builtin_registry[i].name, canonical, sizeof(canonical))) {
+            continue;
+        }
+
+        BuiltinTypeEntry *entry = calloc(1, sizeof(*entry));
+        if (!entry) {
+            destroyBuiltinTypeHashUnlocked();
+            return false;
+        }
+
+        entry->symbol.name = strdup(canonical);
+        if (!entry->symbol.name) {
+            free(entry);
+            destroyBuiltinTypeHashUnlocked();
+            return false;
+        }
+        entry->symbol.is_alias = true;
+        entry->builtinType = builtin_registry[i].type;
+        entry->registryIndex = i;
+        hashTableInsert(builtinTypeHash, &entry->symbol);
+    }
+
+    return true;
+}
+
+static void registerBuiltinFunctionUnlocked(const char *name,
+        ASTNodeType declType,
+        const char* unit_context_name_param_for_addproc) {
+    (void)unit_context_name_param_for_addproc;
+    if (!name) {
+        return;
+    }
+
+    BuiltinRoutineType builtinType = builtinRoutineTypeFromDecl(declType);
+
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
+        registerBuiltinFunctionLinear(name, builtinType);
+        return;
+    }
+
+    if (!ensureBuiltinTypeHashUnlocked()) {
+        registerBuiltinFunctionLinear(name, builtinType);
+        return;
+    }
+
+    BuiltinTypeEntry *existing = lookupBuiltinTypeEntryUnlocked(canonical);
+    if (existing) {
+        existing->builtinType = builtinType;
+        if (existing->registryIndex >= 0 && existing->registryIndex < builtin_registry_count) {
+            builtin_registry[existing->registryIndex].type = builtinType;
+        }
+        return;
+    }
+
+    if (builtin_registry_count >= builtin_registry_capacity) {
+        int new_capacity = builtin_registry_capacity < 64 ? 64 : builtin_registry_capacity * 2;
+        RegisteredBuiltin* new_registry = realloc(builtin_registry, sizeof(RegisteredBuiltin) * new_capacity);
+        if (!new_registry) {
+            return;
+        }
+        builtin_registry = new_registry;
+        builtin_registry_capacity = new_capacity;
+    }
+
+    BuiltinTypeEntry *entry = calloc(1, sizeof(*entry));
+    if (!entry) {
+        destroyBuiltinTypeHashUnlocked();
+        registerBuiltinFunctionLinear(name, builtinType);
+        return;
+    }
+
+    entry->symbol.name = strdup(canonical);
+    if (!entry->symbol.name) {
+        free(entry);
+        destroyBuiltinTypeHashUnlocked();
+        registerBuiltinFunctionLinear(name, builtinType);
+        return;
+    }
+
+    char *dup_name = strdup(name);
+    if (!dup_name) {
+        free(entry->symbol.name);
+        free(entry);
+        return;
+    }
+
+    int index = builtin_registry_count;
+    builtin_registry[index].name = dup_name;
+    builtin_registry[index].type = builtinType;
+    builtin_registry_count++;
+
+    entry->symbol.is_alias = true;
+    entry->builtinType = builtinType;
+    entry->registryIndex = index;
+    hashTableInsert(builtinTypeHash, &entry->symbol);
 }
 
 void registerBuiltinFunction(const char *name, ASTNodeType declType, const char* unit_context_name_param_for_addproc) {
@@ -4777,21 +4917,66 @@ void registerBuiltinFunction(const char *name, ASTNodeType declType, const char*
 }
 
 int isBuiltin(const char *name) {
-    return getBuiltinIDForCompiler(name) != -1;
+    if (!name) {
+        return 0;
+    }
+
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+
+    int result = 0;
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (canonicalizeBuiltinName(name, canonical, sizeof(canonical)) && ensureBuiltinTypeHashUnlocked()) {
+        result = lookupBuiltinTypeEntryUnlocked(canonical) != NULL;
+    }
+
+    if (!result) {
+        for (int i = 0; i < builtin_registry_count; ++i) {
+            if (strcasecmp(name, builtin_registry[i].name) == 0) {
+                result = 1;
+                break;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&builtin_registry_mutex);
+
+    if (!result) {
+        result = getVmBuiltinID(name) != -1;
+    }
+
+    return result;
 }
 
 BuiltinRoutineType getBuiltinType(const char *name) {
+    if (!name) {
+        return BUILTIN_TYPE_NONE;
+    }
+
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
     pthread_mutex_lock(&builtin_registry_mutex);
-    for (int i = 0; i < builtin_registry_count; ++i) {
-        if (strcasecmp(name, builtin_registry[i].name) == 0) {
-            BuiltinRoutineType t = builtin_registry[i].type;
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return t;
+
+    BuiltinRoutineType result = BUILTIN_TYPE_NONE;
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (canonicalizeBuiltinName(name, canonical, sizeof(canonical)) && ensureBuiltinTypeHashUnlocked()) {
+        BuiltinTypeEntry *entry = lookupBuiltinTypeEntryUnlocked(canonical);
+        if (entry) {
+            result = entry->builtinType;
         }
     }
+
+    if (result == BUILTIN_TYPE_NONE) {
+        for (int i = 0; i < builtin_registry_count; ++i) {
+            if (strcasecmp(name, builtin_registry[i].name) == 0) {
+                result = builtin_registry[i].type;
+                break;
+            }
+        }
+    }
+
     pthread_mutex_unlock(&builtin_registry_mutex);
-    return BUILTIN_TYPE_NONE;
+
+    return result;
 }
 
 static void populateBuiltinRegistry(void) {

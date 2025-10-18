@@ -754,6 +754,33 @@ add({
     "failure_reason": "Pascal requires types to be declared before they're referenced in variable sections.",
 })
 
+add({
+    "id": "resolution_builtin_repeated_lookup_stability",
+    "name": "Builtin detection remains stable across repeated lookups",
+    "category": "resolution_scope",
+    "description": "Exercise repeated builtin queries with case variants to ensure the hash-backed registry remains consistent.",
+    "expect": "runtime_ok",
+    "code": """
+        program BuiltinRepeatedLookup;
+        var
+          first: Integer;
+          second: Integer;
+        begin
+          first := Abs(-5);
+          second := abs(-first);
+          writeln('first=', first);
+          writeln('second=', second);
+          Delay(0);
+          writeln('done');
+        end.
+    """,
+    "expected_stdout": """
+        first=5
+        second=5
+        done
+    """,
+})
+
 # ---------------------------------------------------------------------------
 # Integration test combining multiple rules
 # ---------------------------------------------------------------------------

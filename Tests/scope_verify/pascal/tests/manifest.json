@@ -219,6 +219,15 @@
       "failure_reason": "Pascal requires types to be declared before they're referenced in variable sections."
     },
     {
+      "id": "resolution_builtin_repeated_lookup_stability",
+      "name": "Builtin detection remains stable across repeated lookups",
+      "category": "resolution_scope",
+      "description": "Exercise repeated builtin queries with case variants to ensure the hash-backed registry remains consistent.",
+      "expect": "runtime_ok",
+      "code": "program BuiltinRepeatedLookup;\nvar\n  first: Integer;\n  second: Integer;\nbegin\n  first := Abs(-5);\n  second := abs(-first);\n  writeln('first=', first);\n  writeln('second=', second);\n  Delay(0);\n  writeln('done');\nend.",
+      "expected_stdout": "first=5\nsecond=5\ndone"
+    },
+    {
       "id": "integration_nested_scope_mix",
       "name": "Nested routines with shadowed consts and types",
       "category": "integration",

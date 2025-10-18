@@ -5455,7 +5455,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             bool is_read_proc = (strcasecmp(calleeName, "read") == 0 || strcasecmp(calleeName, "readln") == 0);
-            bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol;
+            bool host_thread_helper = (strcasecmp(calleeName, "createthread") == 0 ||
+                                       strcasecmp(calleeName, "waitforthread") == 0);
+            bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol && !host_thread_helper;
 
             int arg_start = receiver_offset;
             int arg_count = node->child_count - receiver_offset;
@@ -5676,7 +5678,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
 
-            if (isBuiltin(calleeName) && !proc_symbol) {
+            if (callee_is_builtin) {
                 if (strcasecmp(calleeName, "exit") == 0) {
                     if (node->child_count > 0) {
                         fprintf(stderr, "L%d: exit does not take arguments.\n", line);
