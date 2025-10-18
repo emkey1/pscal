@@ -916,8 +916,18 @@ int getVmBuiltinID(const char *name) {
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
 
+    if (result) {
+        VmBuiltinMapping mapping;
+        if (!getVmBuiltinMapping(name, &mapping, NULL)) {
+            result = 0;
+        }
+    }
+
     if (!result) {
-        result = getVmBuiltinID(name) != -1;
+        VmBuiltinMapping mapping;
+        if (getVmBuiltinMapping(name, &mapping, NULL)) {
+            result = 1;
+        }
     }
 
     return result;
@@ -4979,6 +4989,14 @@ BuiltinRoutineType getBuiltinType(const char *name) {
     }
 
     pthread_mutex_unlock(&builtin_registry_mutex);
+
+    if (result != BUILTIN_TYPE_NONE) {
+        VmBuiltinMapping mapping;
+        if (!getVmBuiltinMapping(name, &mapping, NULL)) {
+            result = BUILTIN_TYPE_NONE;
+        }
+    }
+
     return result;
 }
 
