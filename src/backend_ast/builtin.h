@@ -25,6 +25,8 @@ typedef struct {
 VmBuiltinFn getVmBuiltinHandler(const char* name);
 VmBuiltinFn getVmBuiltinHandlerById(int id);
 const char* getVmBuiltinNameById(int id);
+bool getVmBuiltinMapping(const char* name, VmBuiltinMapping* out_mapping, int* out_id);
+int getVmBuiltinID(const char* name);
 void registerVmBuiltin(const char *vm_name, VmBuiltinFn handler,
                        BuiltinRoutineType type, const char *display_name);
 

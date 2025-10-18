@@ -635,12 +635,136 @@ static size_t num_extra_vm_builtins = 0;
 static pthread_mutex_t builtin_registry_mutex;
 static pthread_once_t builtin_registry_once = PTHREAD_ONCE_INIT;
 
+typedef struct {
+    Symbol symbol;
+    size_t id;
+} BuiltinRegistryEntry;
+
+static HashTable *builtinRegistryHash = NULL;
+
+static VmBuiltinMapping *builtinMappingFromId(size_t id) {
+    if (id < num_vm_builtins) {
+        return &vmBuiltinDispatchTable[id];
+    }
+    size_t extra_index = id - num_vm_builtins;
+    if (extra_index < num_extra_vm_builtins) {
+        return &extra_vm_builtins[extra_index];
+    }
+    return NULL;
+}
+
+static bool canonicalizeBuiltinName(const char *name, char *out, size_t out_size) {
+    if (!name || !out || out_size == 0) {
+        return false;
+    }
+
+    size_t i = 0;
+    for (; i + 1 < out_size && name[i]; ++i) {
+        out[i] = (char)tolower((unsigned char)name[i]);
+    }
+    out[i] = '\0';
+    return i > 0;
+}
+
+static BuiltinRegistryEntry *lookupBuiltinEntryUnlocked(const char *canonical_name) {
+    if (!canonical_name || !builtinRegistryHash) {
+        return NULL;
+    }
+    Symbol *sym = hashTableLookup(builtinRegistryHash, canonical_name);
+    if (!sym) {
+        return NULL;
+    }
+    return (BuiltinRegistryEntry *)sym;
+}
+
+static void builtinRegistryInsertUnlocked(const char *canonical_name, size_t id) {
+    if (!builtinRegistryHash || !canonical_name || !*canonical_name) {
+        return;
+    }
+
+    BuiltinRegistryEntry *existing = lookupBuiltinEntryUnlocked(canonical_name);
+    if (existing) {
+        existing->id = id;
+        if (existing->symbol.name && strcmp(existing->symbol.name, canonical_name) != 0) {
+            char *dup = strdup(canonical_name);
+            if (dup) {
+                free(existing->symbol.name);
+                existing->symbol.name = dup;
+            }
+        }
+        return;
+    }
+
+    BuiltinRegistryEntry *entry = calloc(1, sizeof(*entry));
+    if (!entry) {
+        return;
+    }
+    entry->symbol.name = strdup(canonical_name);
+    if (!entry->symbol.name) {
+        free(entry);
+        return;
+    }
+    entry->symbol.is_alias = true;
+    entry->id = id;
+    hashTableInsert(builtinRegistryHash, &entry->symbol);
+}
+
+static VmBuiltinMapping *builtinRegistryLookupMappingUnlocked(const char *canonical_name, size_t *out_id) {
+    if (out_id) {
+        *out_id = SIZE_MAX;
+    }
+    if (!canonical_name || !*canonical_name) {
+        return NULL;
+    }
+
+    if (builtinRegistryHash) {
+        BuiltinRegistryEntry *entry = lookupBuiltinEntryUnlocked(canonical_name);
+        if (!entry) {
+            return NULL;
+        }
+        if (out_id) {
+            *out_id = entry->id;
+        }
+        return builtinMappingFromId(entry->id);
+    }
+
+    for (size_t i = 0; i < num_vm_builtins; ++i) {
+        if (strcasecmp(canonical_name, vmBuiltinDispatchTable[i].name) == 0) {
+            if (out_id) {
+                *out_id = i;
+            }
+            return &vmBuiltinDispatchTable[i];
+        }
+    }
+    for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
+        if (strcasecmp(canonical_name, extra_vm_builtins[i].name) == 0) {
+            if (out_id) {
+                *out_id = num_vm_builtins + i;
+            }
+            return &extra_vm_builtins[i];
+        }
+    }
+    return NULL;
+}
+
 static void initBuiltinRegistryMutex(void) {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&builtin_registry_mutex, &attr);
     pthread_mutexattr_destroy(&attr);
+
+    builtinRegistryHash = createHashTable();
+    if (!builtinRegistryHash) {
+        return;
+    }
+
+    for (size_t i = 0; i < num_vm_builtins; ++i) {
+        char canonical[MAX_SYMBOL_LENGTH];
+        if (canonicalizeBuiltinName(vmBuiltinDispatchTable[i].name, canonical, sizeof(canonical))) {
+            builtinRegistryInsertUnlocked(canonical, i);
+        }
+    }
 }
 
 void registerVmBuiltin(const char *name, VmBuiltinFn handler,
@@ -656,20 +780,18 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler,
         registerBuiltinFunction(reg_name, declType, NULL);
     }
 
-    pthread_mutex_lock(&builtin_registry_mutex);
-    for (size_t i = 0; i < num_vm_builtins; ++i) {
-        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-            vmBuiltinDispatchTable[i].handler = handler;
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return;
-        }
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
+        return;
     }
-    for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
-        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            extra_vm_builtins[i].handler = handler;
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return;
-        }
+
+    pthread_mutex_lock(&builtin_registry_mutex);
+    size_t existing_id = SIZE_MAX;
+    VmBuiltinMapping *mapping = builtinRegistryLookupMappingUnlocked(canonical, &existing_id);
+    if (mapping) {
+        mapping->handler = handler;
+        pthread_mutex_unlock(&builtin_registry_mutex);
+        return;
     }
 
     VmBuiltinMapping *new_table = realloc(extra_vm_builtins,
@@ -679,9 +801,11 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler,
         return;
     }
     extra_vm_builtins = new_table;
-    extra_vm_builtins[num_extra_vm_builtins].name = strdup(name);
+    extra_vm_builtins[num_extra_vm_builtins].name = strdup(canonical);
     extra_vm_builtins[num_extra_vm_builtins].handler = handler;
+    size_t new_index = num_extra_vm_builtins;
     num_extra_vm_builtins++;
+    builtinRegistryInsertUnlocked(canonical, num_vm_builtins + new_index);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 
@@ -689,23 +813,19 @@ void registerVmBuiltin(const char *name, VmBuiltinFn handler,
 VmBuiltinFn getVmBuiltinHandler(const char *name) {
     if (!name) return NULL;
     pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
-    pthread_mutex_lock(&builtin_registry_mutex);
-    for (size_t i = 0; i < num_vm_builtins; i++) {
-        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-            VmBuiltinFn h = vmBuiltinDispatchTable[i].handler;
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return h;
-        }
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
+        return NULL;
     }
-    for (size_t i = 0; i < num_extra_vm_builtins; i++) {
-        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            VmBuiltinFn h = extra_vm_builtins[i].handler;
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return h;
-        }
+
+    pthread_mutex_lock(&builtin_registry_mutex);
+    VmBuiltinFn handler = NULL;
+    VmBuiltinMapping *mapping = builtinRegistryLookupMappingUnlocked(canonical, NULL);
+    if (mapping) {
+        handler = mapping->handler;
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
-    return NULL;
+    return handler;
 }
 
 VmBuiltinFn getVmBuiltinHandlerById(int id) {
@@ -740,6 +860,62 @@ const char* getVmBuiltinNameById(int id) {
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
     return name;
+}
+
+bool getVmBuiltinMapping(const char *name, VmBuiltinMapping *out_mapping, int *out_id) {
+    if (out_id) {
+        *out_id = -1;
+    }
+    if (!name) {
+        return false;
+    }
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
+        return false;
+    }
+
+    pthread_mutex_lock(&builtin_registry_mutex);
+    size_t id = SIZE_MAX;
+    VmBuiltinMapping *mapping = builtinRegistryLookupMappingUnlocked(canonical, &id);
+    bool found = mapping != NULL;
+    if (found) {
+        if (out_mapping) {
+            *out_mapping = *mapping;
+        }
+        if (out_id && id <= (size_t)INT_MAX) {
+            *out_id = (int)id;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return found;
+}
+
+int getVmBuiltinID(const char *name) {
+    if (!name) {
+        return -1;
+    }
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    char canonical[MAX_SYMBOL_LENGTH];
+    if (!canonicalizeBuiltinName(name, canonical, sizeof(canonical))) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&builtin_registry_mutex);
+    size_t id = SIZE_MAX;
+    VmBuiltinMapping *mapping = builtinRegistryLookupMappingUnlocked(canonical, &id);
+    int result = -1;
+    if (mapping && id != SIZE_MAX && id <= (size_t)INT_MAX) {
+        if (id < num_vm_builtins) {
+            if (mapping->handler) {
+                result = (int)id;
+            }
+        } else if (id - num_vm_builtins < num_extra_vm_builtins) {
+            result = (int)id;
+        }
+    }
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return result;
 }
 
 Value vmBuiltinSqr(VM* vm, int arg_count, Value* args) {
@@ -4543,28 +4719,7 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
 }
 
 int getBuiltinIDForCompiler(const char *name) {
-    if (!name) return -1;
-    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
-    pthread_mutex_lock(&builtin_registry_mutex);
-    for (size_t i = 0; i < num_vm_builtins; ++i) {
-        if (strcasecmp(name, vmBuiltinDispatchTable[i].name) == 0) {
-            if (vmBuiltinDispatchTable[i].handler) {
-                pthread_mutex_unlock(&builtin_registry_mutex);
-                return (int)i;
-            }
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return -1;
-        }
-    }
-    for (size_t i = 0; i < num_extra_vm_builtins; ++i) {
-        if (strcasecmp(name, extra_vm_builtins[i].name) == 0) {
-            int id = (int)(num_vm_builtins + i);
-            pthread_mutex_unlock(&builtin_registry_mutex);
-            return id;
-        }
-    }
-    pthread_mutex_unlock(&builtin_registry_mutex);
-    return -1;
+    return getVmBuiltinID(name);
 }
 
 typedef struct {
