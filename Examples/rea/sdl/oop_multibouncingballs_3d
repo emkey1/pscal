@@ -16,13 +16,18 @@ const float VelocityDrag = 0.995;
 
 const float ManualYawSpeed = 160.0;
 const float ManualPitchSpeed = 90.0;
+const float ManualZoomSpeed = 820.0;
 const float MinCameraPitch = -60.0;
 const float MaxCameraPitch = 25.0;
+const float MinCameraDistance = 620.0;
+const float MaxCameraDistance = 3200.0;
 
 const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
 const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
 const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+const int ScanCodeForward = 26; // SDL_SCANCODE_W
+const int ScanCodeBackward = 22; // SDL_SCANCODE_S
 
 const int SphereStacks = 20;
 const int SphereSlices = 36;
@@ -74,6 +79,8 @@ class Camera {
     bool rightDown = IsKeyDown(ScanCodeRight);
     bool upDown = IsKeyDown(ScanCodeUp);
     bool downDown = IsKeyDown(ScanCodeDown);
+    bool forwardDown = IsKeyDown(ScanCodeForward);
+    bool backwardDown = IsKeyDown(ScanCodeBackward);
 
     float yawInput = 0.0;
     if (leftDown) yawInput = yawInput - 1.0;
@@ -92,6 +99,15 @@ class Camera {
 
     if (myself.pitch > myself.maxPitch) myself.pitch = myself.maxPitch;
     if (myself.pitch < myself.minPitch) myself.pitch = myself.minPitch;
+
+    if (forwardDown && !backwardDown) {
+      myself.distance = myself.distance - deltaTime * ManualZoomSpeed;
+    } else if (backwardDown && !forwardDown) {
+      myself.distance = myself.distance + deltaTime * ManualZoomSpeed;
+    }
+
+    if (myself.distance < MinCameraDistance) myself.distance = MinCameraDistance;
+    if (myself.distance > MaxCameraDistance) myself.distance = MaxCameraDistance;
   }
 
   void update(float deltaTime) {
@@ -475,7 +491,7 @@ class BouncingBalls3DApp {
   }
 
   void run() {
-    writeln("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause.");
+    writeln("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause, W/S to move.");
     while (!myself.quit) {
       if (QuitRequested()) {
         myself.quit = true;
