@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <inttypes.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -25,7 +26,246 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+#define VM_USE_COMPUTED_GOTO 1
+#else
+#define VM_USE_COMPUTED_GOTO 0
+#endif
+
+#define VM_OPCODE_LIST(X) \
+    X(RETURN) \
+    X(CONSTANT) \
+    X(CONSTANT16) \
+    X(ADD) \
+    X(SUBTRACT) \
+    X(MULTIPLY) \
+    X(DIVIDE) \
+    X(NEGATE) \
+    X(NOT) \
+    X(TO_BOOL) \
+    X(EQUAL) \
+    X(NOT_EQUAL) \
+    X(GREATER) \
+    X(GREATER_EQUAL) \
+    X(LESS) \
+    X(LESS_EQUAL) \
+    X(INT_DIV) \
+    X(MOD) \
+    X(AND) \
+    X(OR) \
+    X(XOR) \
+    X(SHL) \
+    X(SHR) \
+    X(JUMP_IF_FALSE) \
+    X(JUMP) \
+    X(SWAP) \
+    X(DUP) \
+    X(DEFINE_GLOBAL) \
+    X(DEFINE_GLOBAL16) \
+    X(GET_GLOBAL) \
+    X(SET_GLOBAL) \
+    X(GET_GLOBAL_ADDRESS) \
+    X(GET_GLOBAL16) \
+    X(SET_GLOBAL16) \
+    X(GET_GLOBAL_ADDRESS16) \
+    X(GET_LOCAL) \
+    X(SET_LOCAL) \
+    X(INC_LOCAL) \
+    X(DEC_LOCAL) \
+    X(INIT_LOCAL_ARRAY) \
+    X(INIT_LOCAL_FILE) \
+    X(INIT_LOCAL_POINTER) \
+    X(INIT_LOCAL_STRING) \
+    X(INIT_FIELD_ARRAY) \
+    X(GET_LOCAL_ADDRESS) \
+    X(GET_UPVALUE) \
+    X(SET_UPVALUE) \
+    X(GET_UPVALUE_ADDRESS) \
+    X(GET_FIELD_ADDRESS) \
+    X(GET_FIELD_ADDRESS16) \
+    X(LOAD_FIELD_VALUE_BY_NAME) \
+    X(LOAD_FIELD_VALUE_BY_NAME16) \
+    X(GET_ELEMENT_ADDRESS) \
+    X(GET_ELEMENT_ADDRESS_CONST) \
+    X(LOAD_ELEMENT_VALUE) \
+    X(LOAD_ELEMENT_VALUE_CONST) \
+    X(GET_CHAR_ADDRESS) \
+    X(SET_INDIRECT) \
+    X(GET_INDIRECT) \
+    X(IN) \
+    X(GET_CHAR_FROM_STRING) \
+    X(ALLOC_OBJECT) \
+    X(ALLOC_OBJECT16) \
+    X(GET_FIELD_OFFSET) \
+    X(GET_FIELD_OFFSET16) \
+    X(LOAD_FIELD_VALUE) \
+    X(LOAD_FIELD_VALUE16) \
+    X(CALL_BUILTIN) \
+    X(CALL_BUILTIN_PROC) \
+    X(CALL_USER_PROC) \
+    X(CALL_HOST) \
+    X(POP) \
+    X(CALL) \
+    X(CALL_INDIRECT) \
+    X(CALL_METHOD) \
+    X(PROC_CALL_INDIRECT) \
+    X(HALT) \
+    X(EXIT) \
+    X(FORMAT_VALUE) \
+    X(THREAD_CREATE) \
+    X(THREAD_JOIN) \
+    X(MUTEX_CREATE) \
+    X(RCMUTEX_CREATE) \
+    X(MUTEX_LOCK) \
+    X(MUTEX_UNLOCK) \
+    X(MUTEX_DESTROY)
+
+static unsigned long long gVmOpcodeCounts[OPCODE_COUNT];
+static bool gVmOpcodeProfileEnabled = false;
+static FILE *gVmOpcodeProfileStream = NULL;
+static pthread_once_t gVmOpcodeProfileOnce = PTHREAD_ONCE_INIT;
+static bool gVmOpcodeProfileHeaderPrinted = false;
+static bool gVmOpcodeProfileStreamOwned = false;
+static bool gVmBuiltinProfileEnabled = false;
+static unsigned long long gVmBuiltinCallCounts[UINT16_MAX + 1];
+typedef struct {
+    char *name;
+    unsigned long long count;
+} VmShellBuiltinProfileEntry;
+
+static VmShellBuiltinProfileEntry *gVmShellBuiltinProfiles = NULL;
+static size_t gVmShellBuiltinProfileCount = 0;
+static size_t gVmShellBuiltinProfileCapacity = 0;
+
+static void vmOpcodeProfileInitOnce(void);
+static void vmOpcodeProfileRecord(uint8_t opcode);
+static void vmOpcodeProfileAtExit(void);
+
 static bool s_vmVerboseErrors = false;
+
+#define OPCODE_NAME_ENTRY(op) #op,
+static const char *const kOpcodeNames[OPCODE_COUNT] = {
+    VM_OPCODE_LIST(OPCODE_NAME_ENTRY)
+};
+#undef OPCODE_NAME_ENTRY
+
+static void vmOpcodeProfileInitOnce(void) {
+    const char *spec = getenv("EXSH_PROFILE_OPCODES");
+    if (!spec || *spec == '\0') {
+        gVmOpcodeProfileEnabled = false;
+        gVmBuiltinProfileEnabled = false;
+        return;
+    }
+
+    gVmOpcodeProfileEnabled = true;
+    gVmBuiltinProfileEnabled = true;
+    if (strcmp(spec, "stderr") == 0 || strcmp(spec, "2") == 0 || strcmp(spec, "true") == 0) {
+        gVmOpcodeProfileStream = stderr;
+    } else if (strcmp(spec, "stdout") == 0) {
+        gVmOpcodeProfileStream = stdout;
+    } else if (strcmp(spec, "1") == 0) {
+        gVmOpcodeProfileStream = stderr;
+    } else {
+        FILE *fp = fopen(spec, "a");
+        if (fp) {
+            gVmOpcodeProfileStream = fp;
+            gVmOpcodeProfileStreamOwned = true;
+            atexit(vmOpcodeProfileAtExit);
+        } else {
+            gVmOpcodeProfileStream = stderr;
+        }
+    }
+
+    if (!gVmOpcodeProfileStream) {
+        gVmOpcodeProfileStream = stderr;
+    }
+}
+
+static void vmOpcodeProfileAtExit(void) {
+    if (gVmOpcodeProfileStreamOwned && gVmOpcodeProfileStream &&
+        gVmOpcodeProfileStream != stdout && gVmOpcodeProfileStream != stderr) {
+        fclose(gVmOpcodeProfileStream);
+        gVmOpcodeProfileStream = NULL;
+        gVmOpcodeProfileStreamOwned = false;
+    }
+}
+
+static void vmOpcodeProfileRecord(uint8_t opcode) {
+    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
+    if (!gVmOpcodeProfileEnabled || opcode >= OPCODE_COUNT) {
+        return;
+    }
+    gVmOpcodeCounts[opcode]++;
+}
+
+void vmOpcodeProfileDump(void) {
+    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
+    if (!gVmOpcodeProfileEnabled || !gVmOpcodeProfileStream) {
+        return;
+    }
+
+    uint64_t total = 0;
+    for (size_t i = 0; i < OPCODE_COUNT; ++i) {
+        total += gVmOpcodeCounts[i];
+    }
+    if (total == 0) {
+        return;
+    }
+
+    FILE *out = gVmOpcodeProfileStream;
+    if (!gVmOpcodeProfileHeaderPrinted) {
+        fprintf(out, "== exsh opcode profile ==\n");
+        gVmOpcodeProfileHeaderPrinted = true;
+    }
+    for (size_t i = 0; i < OPCODE_COUNT; ++i) {
+        if (gVmOpcodeCounts[i] == 0) {
+            continue;
+        }
+        fprintf(out, "%-24s %" PRIu64 "\n", kOpcodeNames[i], (uint64_t)gVmOpcodeCounts[i]);
+    }
+    fprintf(out, "%-24s %" PRIu64 "\n\n", "TOTAL", total);
+    fflush(out);
+    memset(gVmOpcodeCounts, 0, sizeof(gVmOpcodeCounts));
+
+    if (gVmBuiltinProfileEnabled) {
+        bool printed_header = false;
+        for (size_t i = 0; i < sizeof(gVmBuiltinCallCounts) / sizeof(gVmBuiltinCallCounts[0]); ++i) {
+            uint64_t count = gVmBuiltinCallCounts[i];
+            if (count == 0) {
+                continue;
+            }
+            if (!printed_header) {
+                fprintf(out, "== exsh builtin profile ==\n");
+                printed_header = true;
+            }
+            const char *name = getVmBuiltinNameById((int)i);
+            if (!name || !*name) {
+                fprintf(out, "builtin#%zu           %" PRIu64 "\n", i, count);
+            } else {
+                fprintf(out, "%-24s %" PRIu64 "\n", name, count);
+            }
+        }
+        if (printed_header) {
+            fprintf(out, "\n");
+            fflush(out);
+        }
+        memset(gVmBuiltinCallCounts, 0, sizeof(gVmBuiltinCallCounts));
+
+        if (gVmShellBuiltinProfileCount > 0) {
+            fprintf(out, "== exsh shell builtin profile ==\n");
+            for (size_t i = 0; i < gVmShellBuiltinProfileCount; ++i) {
+                VmShellBuiltinProfileEntry *entry = &gVmShellBuiltinProfiles[i];
+                if (!entry->name) {
+                    continue;
+                }
+                fprintf(out, "%-24s %" PRIu64 "\n", entry->name, entry->count);
+                entry->count = 0;
+            }
+            fprintf(out, "\n");
+            fflush(out);
+        }
+    }
+}
 
 void vmSetVerboseErrors(bool enabled) {
     s_vmVerboseErrors = enabled;
@@ -962,6 +1202,29 @@ static Value copyValueForStack(const Value* src) {
         return makeNil();
     }
 
+    switch (src->type) {
+        case TYPE_VOID:
+        case TYPE_INT32:
+        case TYPE_DOUBLE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+        case TYPE_BYTE:
+        case TYPE_WORD:
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
+        case TYPE_FLOAT:
+        case TYPE_LONG_DOUBLE:
+        case TYPE_NIL:
+            return *src;
+        default:
+            break;
+    }
+
     if (src->type == TYPE_MEMORYSTREAM) {
         Value alias = *src;
         if (alias.mstream) {
@@ -1127,9 +1390,9 @@ static Value pop(VM* vm) {
     vm->stackTop--;
     Value result = *vm->stackTop; // Make a copy of the value to return.
 
-    // Overwrite the just-popped slot with a safe NIL value to invalidate it
-    // and prevent dangling pointers if the returned copy's contents are freed.
-    *vm->stackTop = makeNil();
+    // Mark the slot as vacant without incurring the cost of makeNil().
+    vm->stackTop->type = TYPE_VOID;
+    vm->stackTop->ptr_val = NULL;
 
     return result; // Return the copy, which the caller is now responsible for.
 }
@@ -1981,6 +2244,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->procedureTable = procedures; // <--- STORED procedureTable
     vmPopulateProcedureAddressCache(vm);
 
+#if VM_USE_COMPUTED_GOTO
+#define VM_DISPATCH_ENTRY(op) &&LABEL_##op,
+    static void *dispatch_table[OPCODE_COUNT] = {
+        VM_OPCODE_LIST(VM_DISPATCH_ENTRY)
+    };
+#undef VM_DISPATCH_ENTRY
+#endif
+
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
         pthread_mutex_lock(&globals_mutex);
@@ -2258,12 +2529,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         //vmDumpStackInfo(vm); // Call new helper at the start of each instruction
 
         instruction_val = READ_BYTE();
+        vmOpcodeProfileRecord(instruction_val);
         if (vm->trace_head_instructions > 0 && vm->trace_executed < vm->trace_head_instructions) {
             int offset = (int)(vm->ip - vm->chunk->code) - 1;
             long stacksz = (long)(vm->stackTop - vm->stack);
             fprintf(stderr, "[VM-TRACE] IP=%04d OPC=%u STACK=%ld\n", offset, (unsigned)instruction_val, stacksz);
             vm->trace_executed++;
         }
+#if VM_USE_COMPUTED_GOTO
+        if (instruction_val >= OPCODE_COUNT) {
+            goto LABEL_INVALID;
+        }
+        goto *dispatch_table[instruction_val];
+
+#define VM_DEFINE_DISPATCH_LABEL(op) \
+LABEL_##op: \
+        instruction_val = op; \
+        goto dispatch_switch;
+        VM_OPCODE_LIST(VM_DEFINE_DISPATCH_LABEL)
+#undef VM_DEFINE_DISPATCH_LABEL
+LABEL_INVALID:
+        instruction_val = OPCODE_COUNT;
+        goto dispatch_switch;
+#endif
+
+#if VM_USE_COMPUTED_GOTO
+dispatch_switch:
+#endif
         switch (instruction_val) {
             case RETURN: {
                 bool halted = false;
@@ -4646,6 +4938,10 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                if (gVmBuiltinProfileEnabled && builtin_id <= UINT16_MAX) {
+                    gVmBuiltinCallCounts[builtin_id]++;
+                }
+
                 bool needs_lock = (lookup_name[0] != '\0') ? builtinUsesGlobalStructures(lookup_name) : false;
                 if (needs_lock) pthread_mutex_lock(&globals_mutex);
 
@@ -5457,6 +5753,7 @@ comparison_error_label:
                 break;
             }
 
+            case OPCODE_COUNT:
             default:
                 runtimeError(vm, "VM Error: Unknown opcode %d.", instruction_val);
                 return INTERPRET_RUNTIME_ERROR;
@@ -5473,4 +5770,44 @@ __attribute__((weak)) bool shellRuntimeShouldDeferExit(VM* vm) {
 __attribute__((weak)) bool shellRuntimeMaybeRequestPendingExit(VM* vm) {
     (void)vm;
     return false;
+}
+bool vmOpcodeProfileIsEnabled(void) {
+    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
+    return gVmOpcodeProfileEnabled;
+}
+
+static void vmShellBuiltinProfileIncrement(const char *name) {
+    if (!name || !*name) {
+        return;
+    }
+    for (size_t i = 0; i < gVmShellBuiltinProfileCount; ++i) {
+        if (strcmp(gVmShellBuiltinProfiles[i].name, name) == 0) {
+            gVmShellBuiltinProfiles[i].count++;
+            return;
+        }
+    }
+    if (gVmShellBuiltinProfileCount == gVmShellBuiltinProfileCapacity) {
+        size_t new_cap = gVmShellBuiltinProfileCapacity ? gVmShellBuiltinProfileCapacity * 2 : 16;
+        VmShellBuiltinProfileEntry *resized = realloc(gVmShellBuiltinProfiles, new_cap * sizeof(*resized));
+        if (!resized) {
+            return;
+        }
+        gVmShellBuiltinProfiles = resized;
+        gVmShellBuiltinProfileCapacity = new_cap;
+    }
+    char *copy = strdup(name);
+    if (!copy) {
+        return;
+    }
+    gVmShellBuiltinProfiles[gVmShellBuiltinProfileCount].name = copy;
+    gVmShellBuiltinProfiles[gVmShellBuiltinProfileCount].count = 1;
+    gVmShellBuiltinProfileCount++;
+}
+
+void vmProfileShellBuiltin(const char *name) {
+    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
+    if (!gVmOpcodeProfileEnabled) {
+        return;
+    }
+    vmShellBuiltinProfileIncrement(name);
 }

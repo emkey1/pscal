@@ -142,5 +142,8 @@ void runtimeWarning(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
 void vmSetVerboseErrors(bool enabled);
+void vmOpcodeProfileDump(void);
+bool vmOpcodeProfileIsEnabled(void);
+void vmProfileShellBuiltin(const char *name);
 
 #endif // PSCAL_VM_H

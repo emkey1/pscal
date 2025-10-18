@@ -131,3 +131,102 @@ subshell.sh: command subs                               4,626      1,803
 subshell.sh: external command                           error        566
 stringop1.sh: string length                            63,904    596,289
 ------------------------------------------------------------------------
+
+Fri Oct 17 08:50:01 CEST 2025
+
+mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sample/cmp.sh sample/eval.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           55,044    462,107
+assign.sh: variable                                    66,654    706,384
+assign.sh: local var                                   64,997    675,615
+assign.sh: local var (typeset)                         64,606    675,869
+cmp.sh: [ ]                                            33,555    369,638
+cmp.sh: [[ ]]                                          29,832    518,143
+cmp.sh: case                                           49,565    650,733
+eval.sh: direct assign                                 37,654    322,700
+eval.sh: eval assign                                    5,048    189,051
+eval.sh: command subs                                   error      1,825
+null.sh: blank                                         96,890      error
+null.sh: assign variable                               64,381    712,966
+null.sh: define function                               67,482    759,559
+null.sh: undefined variable                            64,734    563,055
+null.sh: : command                                     52,415    633,453
+subshell.sh: no subshell                               54,198    577,398
+subshell.sh: brace                                     48,740    573,085
+subshell.sh: subshell                                  44,338      2,000
+subshell.sh: command subs                               4,596      1,958
+subshell.sh: external command                           error        575
+stringop1.sh: string length                            63,783    589,314
+------------------------------------------------------------------------
+
+Sat Oct 18 08:01:44 CEST 2025
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           54,243    456,049
+assign.sh: variable                                    65,678    698,115
+assign.sh: local var                                   65,848    690,750
+assign.sh: local var (typeset)                         65,005    680,768
+cmp.sh: [ ]                                            34,311    374,213
+cmp.sh: [[ ]]                                          30,719    527,560
+cmp.sh: case                                           50,206    668,711
+count.sh: posix                                        64,119    514,889
+count.sh: typeset -i                                   64,300    488,311
+count.sh: increment                                    50,192    635,580
+eval.sh: direct assign                                 38,092    327,456
+eval.sh: eval assign                                    5,032    192,337
+eval.sh: command subs                                   error      1,926
+func.sh: no func                                       53,068    646,152
+func.sh: func                                          39,174    345,142
+null.sh: blank                                         98,761      error
+null.sh: assign variable                               66,006    727,103
+null.sh: define function                               67,859    771,402
+null.sh: undefined variable                            65,683    573,597
+null.sh: : command                                     52,995    639,542
+subshell.sh: no subshell                               55,243    587,158
+subshell.sh: brace                                     49,382    580,020
+subshell.sh: subshell                                  44,929      2,123
+subshell.sh: command subs                               4,457      1,834
+subshell.sh: external command                           error        581
+stringop1.sh: string length                            64,332    595,905
+------------------------------------------------------------------------
+
+Sat Oct 18 11:25:02 CEST 2025
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           53,508    453,248
+assign.sh: variable                                    64,708    694,448
+assign.sh: local var                                   65,012    687,525
+assign.sh: local var (typeset)                         64,860    688,530
+cmp.sh: [ ]                                            34,299    372,173
+cmp.sh: [[ ]]                                          30,393    515,170
+cmp.sh: case                                           50,155    661,141
+count.sh: posix                                        63,215    513,578
+count.sh: typeset -i                                   62,874    490,824
+count.sh: increment                                    49,788    629,958
+eval.sh: direct assign                                 37,630    325,981
+eval.sh: eval assign                                    4,880    190,992
+eval.sh: command subs                                   error      1,699
+func.sh: no func                                       52,355    641,392
+func.sh: func                                          39,026    344,143
+null.sh: blank                                         98,059      error
+null.sh: assign variable                               65,365    721,401
+null.sh: define function                               67,551    768,465
+null.sh: undefined variable                            65,390    570,889
+null.sh: : command                                     52,587    642,398
+subshell.sh: no subshell                               54,651    584,553
+subshell.sh: brace                                     49,144    576,218
+subshell.sh: subshell                                  44,659      1,947
+subshell.sh: command subs                               4,359      1,800
+subshell.sh: external command                           error        562
+stringop1.sh: string length                            63,737    588,745
+------------------------------------------------------------------------
+* count: number of executions per second
+/Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh   231.58s user 15.74s system 123% cpu 3:19.63 total

@@ -60,6 +60,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"bind", "bind", 33},
     {"shopt", "shopt", 34},
     {"type", "type", 42},
+    {"which", "which", 54},
     {"dirs", "dirs", 35},
     {"pushd", "pushd", 36},
     {"popd", "popd", 37},

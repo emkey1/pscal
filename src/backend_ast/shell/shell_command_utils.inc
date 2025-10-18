@@ -39,6 +39,21 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups,
                                          size_t count);
 static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups,
                                       size_t count);
+static inline ShellScalarCacheEntry *shellScalarCacheFind(const char *command);
+static inline ShellScalarCacheEntry *shellScalarCacheStore(const char *command,
+                                                          const char *result,
+                                                          size_t result_length);
+static inline void shellScalarCacheRemoveAt(size_t index);
+static inline void shellScalarCacheClear(void);
+static inline void shellScalarCacheInvalidate(void);
+static inline bool shellCaptureStackPush(ShellScalarCacheEntry *entry,
+                                         const char *command,
+                                         const char *capture,
+                                         size_t capture_length,
+                                         bool from_cache);
+static inline void shellCaptureStackPop(void);
+static inline ShellScalarCaptureFrame *shellCaptureStackTop(void);
+static inline void shellCaptureStackClear(void);
 
 static bool shellDecodeWordSpec(const char *encoded, const char **out_text, uint8_t *out_flags,
                                 const char **out_meta, size_t *out_meta_len) {
@@ -228,42 +243,96 @@ static void *shellCommandSubstitutionReader(void *arg) {
 }
 
 static char *shellRunCommandSubstitution(const char *command) {
-    int pipes[2] = {-1, -1};
-    if (pipe(pipes) != 0) {
-        return strdup("");
+    const char *source = command ? command : "";
+    ShellScalarCacheEntry *cached_entry = NULL;
+    ShellScalarCacheEntry *stored_entry = NULL;
+    ShellScalarCaptureFrame *capture_frame = NULL;
+    bool capture_pushed = shellCaptureStackPush(NULL, source, NULL, 0, false);
+    if (capture_pushed) {
+        capture_frame = shellCaptureStackTop();
     }
 
-    int saved_stdout = dup(STDOUT_FILENO);
-    if (saved_stdout < 0) {
-        close(pipes[0]);
-        close(pipes[1]);
-        return strdup("");
-    }
-
-    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
-        int err = errno;
-        close(pipes[0]);
-        close(pipes[1]);
-        close(saved_stdout);
-        fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
-        return strdup("");
-    }
-    close(pipes[1]);
+    char *result = NULL;
+    size_t result_length = 0;
+    bool from_cache = false;
 
     ShellCommandSubReadContext reader;
-    reader.fd = pipes[0];
+    reader.fd = -1;
     reader.buffer = NULL;
     reader.length = 0;
     reader.capacity = 0;
     reader.error = 0;
 
     pthread_t reader_thread;
-    bool reader_started = (pthread_create(&reader_thread, NULL, shellCommandSubstitutionReader, &reader) == 0);
+    bool reader_started = false;
+
+    int pipes[2] = {-1, -1};
+    int saved_stdout = -1;
+    bool stdout_redirected = false;
+
+    ShellRunOptions opts;
+    ShellSymbolTableScope table_scope;
+    bool scope_pushed = false;
+    bool exit_requested = false;
+    int status = EXIT_FAILURE;
+
+    if (*source) {
+        cached_entry = shellScalarCacheFind(source);
+        if (cached_entry && cached_entry->result) {
+            from_cache = true;
+            stored_entry = cached_entry;
+            gShellRuntime.scalar_cache_hits++;
+            cached_entry->hits++;
+            result = strdup(cached_entry->result);
+            if (!result) {
+                result = strdup("");
+                result_length = 0;
+            } else {
+                result_length = cached_entry->result_length;
+            }
+            goto substitution_finish;
+        }
+        gShellRuntime.scalar_cache_misses++;
+    }
+
+    if (pipe(pipes) != 0) {
+        result = strdup("");
+        result_length = 0;
+        goto substitution_finish;
+    }
+
+    saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout < 0) {
+        close(pipes[0]);
+        close(pipes[1]);
+        pipes[0] = pipes[1] = -1;
+        result = strdup("");
+        result_length = 0;
+        goto substitution_finish;
+    }
+
+    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+        int err = errno;
+        close(pipes[0]);
+        close(pipes[1]);
+        pipes[0] = pipes[1] = -1;
+        close(saved_stdout);
+        saved_stdout = -1;
+        fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
+        result = strdup("");
+        result_length = 0;
+        goto substitution_finish;
+    }
+    stdout_redirected = true;
+    close(pipes[1]);
+    pipes[1] = -1;
+
+    reader.fd = pipes[0];
+    reader_started = (pthread_create(&reader_thread, NULL, shellCommandSubstitutionReader, &reader) == 0);
     if (!reader_started) {
         /* Fallback to synchronous draining if thread creation fails. */
     }
 
-    ShellRunOptions opts;
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
     opts.quiet = true;
@@ -271,13 +340,10 @@ static char *shellRunCommandSubstitution(const char *command) {
     const char *frontend_path = shellRuntimeGetArg0();
     opts.frontend_path = frontend_path ? frontend_path : "exsh";
 
-    const char *source = command ? command : "";
-    bool exit_requested = false;
-    int status = EXIT_FAILURE;
+    exit_requested = false;
+    status = EXIT_FAILURE;
 
-    ShellSymbolTableScope table_scope;
     shellSymbolTableScopeInit(&table_scope);
-    bool scope_pushed = false;
     if (!shellSymbolTableScopeIsActive()) {
         if (!shellSymbolTableScopePush(&table_scope)) {
             fprintf(stderr, "shell: failed to allocate symbol tables.\n");
@@ -296,15 +362,28 @@ static char *shellRunCommandSubstitution(const char *command) {
 
     fflush(NULL);
 
-    if (dup2(saved_stdout, STDOUT_FILENO) < 0) {
-        /* best effort restore */
+    if (stdout_redirected) {
+        dup2(saved_stdout, STDOUT_FILENO);
+        stdout_redirected = false;
     }
-    close(saved_stdout);
+    if (saved_stdout >= 0) {
+        close(saved_stdout);
+        saved_stdout = -1;
+    }
 
     if (reader_started) {
         pthread_join(reader_thread, NULL);
     } else {
         shellCommandSubstitutionDrain(&reader);
+    }
+
+    if (reader.fd >= 0) {
+        close(reader.fd);
+        reader.fd = -1;
+    }
+    if (pipes[0] >= 0) {
+        close(pipes[0]);
+        pipes[0] = -1;
     }
 
     int final_status = shellRuntimeLastStatus();
@@ -313,15 +392,71 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
     shellUpdateStatus(final_status);
 
+    if (!reader.buffer) {
+        result = strdup("");
+        result_length = 0;
+        goto substitution_finish;
+    }
+
     char *output = reader.buffer;
     size_t length = reader.length;
-    if (!output) {
-        return strdup("");
-    }
     while (length > 0 && (output[length - 1] == '\n' || output[length - 1] == '\r')) {
         output[--length] = '\0';
     }
-    return output;
+    result = output;
+    result_length = length;
+
+    if (*source) {
+        stored_entry = shellScalarCacheStore(source, result, result_length);
+        if (stored_entry) {
+            gShellRuntime.scalar_cache_stores++;
+        }
+    }
+
+substitution_finish:
+    if (capture_frame) {
+        capture_frame->entry = stored_entry;
+        capture_frame->from_cache = from_cache;
+        if (capture_frame->capture) {
+            free(capture_frame->capture);
+            capture_frame->capture = NULL;
+        }
+        if (result) {
+            capture_frame->capture = strdup(result);
+            if (capture_frame->capture) {
+                capture_frame->capture_length = result_length;
+            } else {
+                capture_frame->capture_length = 0;
+            }
+        } else {
+            capture_frame->capture_length = 0;
+        }
+    }
+
+    if (capture_pushed) {
+        shellCaptureStackPop();
+    }
+
+    if (stdout_redirected && saved_stdout >= 0) {
+        dup2(saved_stdout, STDOUT_FILENO);
+    }
+    if (saved_stdout >= 0) {
+        close(saved_stdout);
+    }
+    if (pipes[0] >= 0) {
+        close(pipes[0]);
+    }
+    if (pipes[1] >= 0) {
+        close(pipes[1]);
+    }
+    if (reader.fd >= 0) {
+        close(reader.fd);
+    }
+
+    if (!result) {
+        result = strdup("");
+    }
+    return result;
 }
 
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra) {

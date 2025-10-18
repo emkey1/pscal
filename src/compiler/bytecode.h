@@ -132,7 +132,9 @@ typedef enum {
     RCMUTEX_CREATE,     // Create a recursive mutex. Pushes mutex id
     MUTEX_LOCK,         // Lock mutex whose id is on top of stack
     MUTEX_UNLOCK,       // Unlock mutex whose id is on top of stack
-    MUTEX_DESTROY       // Destroy mutex whose id is on top of stack
+    MUTEX_DESTROY,      // Destroy mutex whose id is on top of stack
+
+    OPCODE_COUNT        // Total number of opcodes (must remain last)
 
 } OpCode;
 

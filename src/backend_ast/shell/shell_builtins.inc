@@ -1316,6 +1316,67 @@ static void shellTestReportError(ShellTestParser *parser, const char *message) {
 
 static bool shellTestParseExpression(ShellTestParser *parser, bool *out_result);
 
+static bool shellTestTryFastEvaluation(const char **argv, int argc, bool *out_result) {
+    if (!argv || argc < 0 || !out_result) {
+        return false;
+    }
+
+    if (argc == 0) {
+        *out_result = false;
+        return true;
+    }
+
+    if (argc == 1) {
+        *out_result = (argv[0] && argv[0][0] != '\0');
+        return true;
+    }
+
+    if (strcmp(argv[0], "!") == 0 && argc > 1) {
+        bool inner = false;
+        if (!shellTestTryFastEvaluation(argv + 1, argc - 1, &inner)) {
+            return false;
+        }
+        *out_result = !inner;
+        return true;
+    }
+
+    if (argc == 2) {
+        bool unary_result = false;
+        if (shellTestApplyUnary(argv[0], argv[1], &unary_result)) {
+            *out_result = unary_result;
+            return true;
+        }
+        *out_result = (argv[0] && argv[1] && strcmp(argv[0], argv[1]) == 0);
+        return true;
+    }
+
+    if (argc == 3) {
+        bool binary_result = false;
+        if (shellTestApplyBinary(argv[0], argv[1], argv[2], &binary_result)) {
+            *out_result = binary_result;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool shellBuiltinTestFastEval(const char **argv, int argc, bool is_bracket, bool *out_result) {
+    if (!argv || argc < 0 || !out_result) {
+        return false;
+    }
+    if (is_bracket) {
+        if (argc == 0) {
+            return false;
+        }
+        if (strcmp(argv[argc - 1], "]") != 0) {
+            return false;
+        }
+        argc--;
+    }
+    return shellTestTryFastEvaluation(argv, argc, out_result);
+}
+
 static bool shellTestParsePrimary(ShellTestParser *parser, bool *out_result) {
     if (!parser || !out_result) {
         return false;
@@ -1489,6 +1550,13 @@ Value vmBuiltinShellTest(VM *vm, int arg_count, Value *args) {
     if (argc == 0) {
         free(argv);
         shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool fast_result = false;
+    if (shellTestTryFastEvaluation(argv, argc, &fast_result)) {
+        shellUpdateStatus(fast_result ? 0 : 1);
+        free(argv);
         return makeVoid();
     }
 
@@ -5611,6 +5679,120 @@ Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellWhich(VM *vm, int arg_count, Value *args) {
+    bool parsing_options = true;
+    bool list_all = false;
+    bool silent = false;
+    bool use_default_path = false;
+    int first_name = arg_count;
+
+    for (int i = 0; i < arg_count; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "which: arguments must be strings");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        const char *text = v.s_val;
+        if (parsing_options) {
+            if (strcmp(text, "--") == 0) {
+                parsing_options = false;
+                continue;
+            }
+            if (text[0] == '-' && text[1] != '\0') {
+                for (const char *opt = text + 1; *opt; ++opt) {
+                    switch (*opt) {
+                        case 'a':
+                            list_all = true;
+                            break;
+                        case 's':
+                            silent = true;
+                            break;
+                        case 'p':
+                            use_default_path = true;
+                            break;
+                        default:
+                            runtimeError(vm, "which: invalid option -- '%c'", *opt);
+                            shellUpdateStatus(1);
+                            return makeVoid();
+                    }
+                }
+                continue;
+            }
+            parsing_options = false;
+        }
+        if (first_name == arg_count) {
+            first_name = i;
+        }
+    }
+
+    if (first_name == arg_count) {
+        runtimeError(vm, "which: expected name");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool overall_ok = true;
+    bool collect_all_paths = list_all;
+
+    for (int i = first_name; i < arg_count; ++i) {
+        const char *name = args[i].s_val;
+        ShellCommandResult *results = NULL;
+        size_t count = 0;
+        if (!shellCommandCollectInfo(name, collect_all_paths, use_default_path, &results, &count)) {
+            runtimeError(vm, "which: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+
+        bool printed = false;
+        for (size_t j = 0; j < count; ++j) {
+            ShellCommandResult *res = &results[j];
+            const char *detail = res->detail ? res->detail : "";
+            switch (res->kind) {
+                case SHELL_COMMAND_RESULT_ALIAS:
+                    if (!silent) {
+                        printf("%s: aliased to `%s'\n", name, detail);
+                    }
+                    printed = true;
+                    break;
+                case SHELL_COMMAND_RESULT_FUNCTION:
+                    if (!silent) {
+                        printf("%s: shell function\n", name);
+                    }
+                    printed = true;
+                    break;
+                case SHELL_COMMAND_RESULT_BUILTIN:
+                    if (!silent) {
+                        printf("%s: shell builtin\n", name);
+                    }
+                    printed = true;
+                    break;
+                case SHELL_COMMAND_RESULT_FILE:
+                    if (!silent) {
+                        printf("%s\n", detail);
+                    }
+                    printed = true;
+                    break;
+            }
+            if (printed && !list_all) {
+                break;
+            }
+        }
+
+        if (!printed) {
+            overall_ok = false;
+            if (!silent) {
+                fprintf(stderr, "%s: not found\n", name);
+            }
+        }
+        shellCommandFreeResults(results, count);
+    }
+
+    shellUpdateStatus(overall_ok ? 0 : 1);
+    return makeVoid();
+}
+
 Value vmBuiltinShellHash(VM *vm, int arg_count, Value *args) {
     bool parsing_options = true;
     bool reset_table = false;
@@ -6562,6 +6744,17 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         " builtins, and executable paths. -V prints verbose descriptions. The -a"
         " flag lists every match and -p searches using the default PATH. Execution"
         " without -v or -V is not currently supported.",
+        NULL,
+        0
+    },
+    {
+        "which",
+        "Locate commands and builtins.",
+        "which [-a] [-s] [-p] name ...",
+        "Prints how each NAME resolves in the current shell. Aliases, functions,"
+        " builtins, and executable files are reported in that order. With -a every"
+        " match is listed, -s suppresses output and relies on the exit status, and"
+        " -p performs the search using the default PATH instead of the current one.",
         NULL,
         0
     },

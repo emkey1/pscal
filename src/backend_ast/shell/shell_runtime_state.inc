@@ -898,6 +898,11 @@ typedef struct {
     size_t disabled_builtin_capacity;
     int getopts_index;
     int getopts_offset;
+    unsigned long scalar_cache_hits;
+    unsigned long scalar_cache_misses;
+    unsigned long scalar_cache_stores;
+    size_t scalar_cache_generation;
+    size_t scalar_capture_peak_depth;
 } ShellRuntimeState;
 
 typedef enum {
@@ -1276,7 +1281,12 @@ static ShellRuntimeState gShellRuntime = {
     .disabled_builtin_count = 0,
     .disabled_builtin_capacity = 0,
     .getopts_index = 1,
-    .getopts_offset = 0
+    .getopts_offset = 0,
+    .scalar_cache_hits = 0,
+    .scalar_cache_misses = 0,
+    .scalar_cache_stores = 0,
+    .scalar_cache_generation = 0,
+    .scalar_capture_peak_depth = 0
 };
 
 static unsigned long gShellStatusVersion = 0;
@@ -3357,3 +3367,305 @@ typedef struct {
     size_t span_length;
     char *command;
 } ShellMetaSubstitution;
+
+#if defined(__GNUC__) || defined(__clang__)
+#define SHELL_STATIC_UNUSED static inline __attribute__((unused))
+#else
+#define SHELL_STATIC_UNUSED static inline
+#endif
+
+typedef struct {
+    char *command;
+    char *result;
+    size_t result_length;
+    size_t generation;
+    unsigned long hits;
+    unsigned long stores;
+} ShellScalarCacheEntry;
+
+typedef struct {
+    ShellScalarCacheEntry *entry;
+    char *command;
+    char *capture;
+    size_t capture_length;
+    bool from_cache;
+} ShellScalarCaptureFrame;
+
+static ShellScalarCacheEntry *gShellScalarCache = NULL;
+static size_t gShellScalarCacheCount = 0;
+static size_t gShellScalarCacheCapacity = 0;
+static size_t gShellScalarCacheGeneration = 0;
+
+static ShellScalarCaptureFrame *gShellScalarCaptureStack = NULL;
+static size_t gShellScalarCaptureDepth = 0;
+static size_t gShellScalarCaptureCapacity = 0;
+
+SHELL_STATIC_UNUSED void shellScalarCacheEntryDispose(ShellScalarCacheEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    free(entry->command);
+    entry->command = NULL;
+    free(entry->result);
+    entry->result = NULL;
+    entry->result_length = 0;
+    entry->generation = 0;
+    entry->hits = 0;
+    entry->stores = 0;
+}
+
+SHELL_STATIC_UNUSED bool shellScalarCacheEnsureCapacity(size_t needed) {
+    if (gShellScalarCacheCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellScalarCacheCapacity ? (gShellScalarCacheCapacity * 2) : 4;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    ShellScalarCacheEntry *resized =
+        (ShellScalarCacheEntry *)realloc(gShellScalarCache, new_capacity * sizeof(ShellScalarCacheEntry));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellScalarCacheCapacity; i < new_capacity; ++i) {
+        resized[i].command = NULL;
+        resized[i].result = NULL;
+        resized[i].result_length = 0;
+        resized[i].generation = 0;
+        resized[i].hits = 0;
+        resized[i].stores = 0;
+    }
+    gShellScalarCache = resized;
+    gShellScalarCacheCapacity = new_capacity;
+    return true;
+}
+
+SHELL_STATIC_UNUSED bool shellScalarCacheEntryEquals(const ShellScalarCacheEntry *entry,
+                                                     const char *command) {
+    if (!entry || !command || !entry->command) {
+        return false;
+    }
+    return strcmp(entry->command, command) == 0;
+}
+
+SHELL_STATIC_UNUSED ShellScalarCacheEntry *shellScalarCacheFind(const char *command) {
+    if (!command || *command == '\0') {
+        return NULL;
+    }
+    for (size_t i = 0; i < gShellScalarCacheCount;) {
+        ShellScalarCacheEntry *entry = &gShellScalarCache[i];
+        if (entry->generation != gShellScalarCacheGeneration) {
+            shellScalarCacheEntryDispose(entry);
+            if (i + 1 < gShellScalarCacheCount) {
+                memmove(&gShellScalarCache[i],
+                        &gShellScalarCache[i + 1],
+                        (gShellScalarCacheCount - i - 1) * sizeof(ShellScalarCacheEntry));
+            }
+            gShellScalarCacheCount--;
+            continue;
+        }
+        if (shellScalarCacheEntryEquals(entry, command)) {
+            return entry;
+        }
+        ++i;
+    }
+    return NULL;
+}
+
+SHELL_STATIC_UNUSED ShellScalarCacheEntry *shellScalarCacheStore(const char *command,
+                                                                 const char *result,
+                                                                 size_t result_length) {
+    if (!command || *command == '\0') {
+        return NULL;
+    }
+    size_t copy_length = 0;
+    if (result) {
+        copy_length = result_length ? result_length : strlen(result);
+    }
+    char *copy = (char *)malloc(copy_length + 1);
+    if (!copy) {
+        return NULL;
+    }
+    if (copy_length > 0 && result) {
+        memcpy(copy, result, copy_length);
+    }
+    copy[copy_length] = '\0';
+
+    ShellScalarCacheEntry *existing = shellScalarCacheFind(command);
+    if (existing) {
+        free(existing->result);
+        existing->result = copy;
+        existing->result_length = copy_length;
+        existing->generation = gShellScalarCacheGeneration;
+        existing->hits = 0;
+        existing->stores++;
+        gShellRuntime.scalar_cache_generation = gShellScalarCacheGeneration;
+        return existing;
+    }
+
+    if (!shellScalarCacheEnsureCapacity(gShellScalarCacheCount + 1)) {
+        free(copy);
+        return NULL;
+    }
+    ShellScalarCacheEntry *entry = &gShellScalarCache[gShellScalarCacheCount];
+    entry->command = strdup(command);
+    if (!entry->command) {
+        free(copy);
+        return NULL;
+    }
+    entry->result = copy;
+    entry->result_length = copy_length;
+    entry->generation = gShellScalarCacheGeneration;
+    entry->hits = 0;
+    entry->stores = 1;
+    gShellScalarCacheCount++;
+    gShellRuntime.scalar_cache_generation = gShellScalarCacheGeneration;
+    return entry;
+}
+
+SHELL_STATIC_UNUSED void shellScalarCacheRemoveAt(size_t index) {
+    if (index >= gShellScalarCacheCount) {
+        return;
+    }
+    shellScalarCacheEntryDispose(&gShellScalarCache[index]);
+    if (index + 1 < gShellScalarCacheCount) {
+        memmove(&gShellScalarCache[index],
+                &gShellScalarCache[index + 1],
+                (gShellScalarCacheCount - index - 1) * sizeof(ShellScalarCacheEntry));
+    }
+    gShellScalarCacheCount--;
+}
+
+SHELL_STATIC_UNUSED void shellScalarCacheClear(void) {
+    for (size_t i = 0; i < gShellScalarCacheCount; ++i) {
+        shellScalarCacheEntryDispose(&gShellScalarCache[i]);
+    }
+    free(gShellScalarCache);
+    gShellScalarCache = NULL;
+    gShellScalarCacheCount = 0;
+    gShellScalarCacheCapacity = 0;
+    gShellScalarCacheGeneration = 0;
+    gShellRuntime.scalar_cache_generation = gShellScalarCacheGeneration;
+}
+
+SHELL_STATIC_UNUSED void shellScalarCacheInvalidate(void) {
+    for (size_t i = 0; i < gShellScalarCacheCount; ++i) {
+        shellScalarCacheEntryDispose(&gShellScalarCache[i]);
+    }
+    gShellScalarCacheCount = 0;
+    if (gShellScalarCacheGeneration == SIZE_MAX) {
+        gShellScalarCacheGeneration = 0;
+    } else {
+        gShellScalarCacheGeneration++;
+    }
+    gShellRuntime.scalar_cache_generation = gShellScalarCacheGeneration;
+}
+
+SHELL_STATIC_UNUSED bool shellCaptureStackEnsureCapacity(size_t needed) {
+    if (gShellScalarCaptureCapacity >= needed) {
+        return true;
+    }
+    size_t new_capacity = gShellScalarCaptureCapacity ? (gShellScalarCaptureCapacity * 2) : 4;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) {
+            new_capacity = needed;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    ShellScalarCaptureFrame *resized =
+        (ShellScalarCaptureFrame *)realloc(gShellScalarCaptureStack,
+                                           new_capacity * sizeof(ShellScalarCaptureFrame));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = gShellScalarCaptureCapacity; i < new_capacity; ++i) {
+        resized[i].entry = NULL;
+        resized[i].command = NULL;
+        resized[i].capture = NULL;
+        resized[i].capture_length = 0;
+        resized[i].from_cache = false;
+    }
+    gShellScalarCaptureStack = resized;
+    gShellScalarCaptureCapacity = new_capacity;
+    return true;
+}
+
+SHELL_STATIC_UNUSED bool shellCaptureStackPush(ShellScalarCacheEntry *entry,
+                                               const char *command,
+                                               const char *capture,
+                                               size_t capture_length,
+                                               bool from_cache) {
+    if (!shellCaptureStackEnsureCapacity(gShellScalarCaptureDepth + 1)) {
+        return false;
+    }
+    ShellScalarCaptureFrame *frame = &gShellScalarCaptureStack[gShellScalarCaptureDepth];
+    frame->entry = entry;
+    frame->command = command ? strdup(command) : NULL;
+    if (command && !frame->command) {
+        return false;
+    }
+    frame->capture = NULL;
+    frame->capture_length = 0;
+    if (capture) {
+        size_t length = capture_length;
+        if (length == 0) {
+            length = strlen(capture);
+        }
+        frame->capture = (char *)malloc(length + 1);
+        if (!frame->capture) {
+            free(frame->command);
+            frame->command = NULL;
+            return false;
+        }
+        memcpy(frame->capture, capture, length);
+        frame->capture[length] = '\0';
+        frame->capture_length = length;
+    }
+    frame->from_cache = from_cache;
+    gShellScalarCaptureDepth++;
+    if (gShellScalarCaptureDepth > gShellRuntime.scalar_capture_peak_depth) {
+        gShellRuntime.scalar_capture_peak_depth = gShellScalarCaptureDepth;
+    }
+    return true;
+}
+
+SHELL_STATIC_UNUSED void shellCaptureStackPop(void) {
+    if (gShellScalarCaptureDepth == 0) {
+        return;
+    }
+    size_t index = gShellScalarCaptureDepth - 1;
+    ShellScalarCaptureFrame *frame = &gShellScalarCaptureStack[index];
+    free(frame->command);
+    frame->command = NULL;
+    free(frame->capture);
+    frame->capture = NULL;
+    frame->capture_length = 0;
+    frame->entry = NULL;
+    frame->from_cache = false;
+    gShellScalarCaptureDepth--;
+    if (gShellScalarCaptureDepth == 0) {
+        free(gShellScalarCaptureStack);
+        gShellScalarCaptureStack = NULL;
+        gShellScalarCaptureCapacity = 0;
+    }
+}
+
+SHELL_STATIC_UNUSED ShellScalarCaptureFrame *shellCaptureStackTop(void) {
+    if (gShellScalarCaptureDepth == 0) {
+        return NULL;
+    }
+    return &gShellScalarCaptureStack[gShellScalarCaptureDepth - 1];
+}
+
+SHELL_STATIC_UNUSED void shellCaptureStackClear(void) {
+    while (gShellScalarCaptureDepth > 0) {
+        shellCaptureStackPop();
+    }
+}
+
+#undef SHELL_STATIC_UNUSED

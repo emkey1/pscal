@@ -2283,7 +2283,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
         "readonly","umask",  "command","hash",   "enable", "trap",   "local",   "let",     "break",
         "continue","alias", "caller", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
         "fg",     "finger", "bg",     "wait",   "builtin","source", "read",   "printf",
-        "shift",  "return", "help",   "type",   "test",   "[",      ":",      "unalias",
+        "shift",  "return", "help",   "type",   "which", "test",   "[",      ":",      "unalias",
         "getopts",
         "mapfile","__shell_double_bracket",
         "__shell_arithmetic", "times",  "echo",   "true",   "false"
@@ -2457,18 +2457,6 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     int previous_line = gShellCurrentCommandLine;
     int previous_column = gShellCurrentCommandColumn;
     shellRuntimeSetCurrentCommandLocation(cmd->line, cmd->column);
-    if (arg_count > 0) {
-        args = calloc((size_t)arg_count, sizeof(Value));
-        if (!args) {
-            runtimeError(vm, "shell builtin '%s': out of memory", name);
-            shellUpdateStatus(1);
-            shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
-            return true;
-        }
-        for (int i = 0; i < arg_count; ++i) {
-            args[i] = makeString(cmd->argv[i + 1]);
-        }
-    }
     ShellExecRedirBackup *redir_backups = NULL;
     size_t redir_backup_count = 0;
     fflush(NULL);
@@ -2485,7 +2473,43 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
 
     const char *previous_name = shellRuntimeCurrentCommandName();
     shellRuntimeSetCurrentCommandName(name);
-    handler(vm, arg_count, args);
+    bool profile_enabled = vmOpcodeProfileIsEnabled();
+    const char *profile_name = canonical ? canonical : name;
+    if (profile_enabled) {
+        vmProfileShellBuiltin(profile_name);
+    }
+
+    bool handled = false;
+    if (canonical && strcmp(canonical, "test") == 0) {
+        const char **expr_args = (const char **)(cmd->argv + 1);
+        int expr_argc = (int)cmd->argc - 1;
+        bool is_bracket = (name && strcmp(name, "[") == 0);
+        bool fast_result = false;
+        if (shellBuiltinTestFastEval(expr_args, expr_argc, is_bracket, &fast_result)) {
+            shellUpdateStatus(fast_result ? 0 : 1);
+            handled = true;
+        }
+    }
+
+    if (!handled) {
+        if (arg_count > 0) {
+            args = calloc((size_t)arg_count, sizeof(Value));
+            if (!args) {
+                runtimeError(vm, "shell builtin '%s': out of memory", name);
+                shellUpdateStatus(1);
+                shellRuntimeSetCurrentCommandName(previous_name);
+                fflush(NULL);
+                shellRestoreExecRedirections(redir_backups, redir_backup_count);
+                shellFreeExecRedirBackups(redir_backups, redir_backup_count);
+                shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
+                return true;
+            }
+            for (int i = 0; i < arg_count; ++i) {
+                args[i] = makeString(cmd->argv[i + 1]);
+            }
+        }
+        handler(vm, arg_count, args);
+    }
     shellRuntimeSetCurrentCommandName(previous_name);
     fflush(NULL);
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
@@ -3211,4 +3235,3 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
     free(copy);
     return true;
 }
-

@@ -82,6 +82,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "enable", vmBuiltinShellEnable);
     registerShellBuiltin(category, command_group, "help", vmBuiltinShellHelp);
     registerShellBuiltin(category, command_group, "type", vmBuiltinShellType);
+    registerShellBuiltin(category, command_group, "which", vmBuiltinShellWhich);
     registerShellBuiltin(category, command_group, "builtin", vmBuiltinShellBuiltin);
     registerShellBuiltin(category, command_group, ":", vmBuiltinShellColon);
     registerShellBuiltin(category, command_group, "bind", vmBuiltinShellBind);

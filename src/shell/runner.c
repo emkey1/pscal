@@ -331,5 +331,6 @@ cleanup:
     if (pre_src) {
         free(pre_src);
     }
+    vmOpcodeProfileDump();
     return exit_code;
 }

@@ -980,11 +980,13 @@ static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
 
 static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (!cmd) {
+        shellScalarCacheInvalidate();
         return makeVoid();
     }
     shellRuntimeProcessPendingSignals();
     if (shellLoopSkipActive()) {
         shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
         return makeVoid();
     }
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
@@ -1035,6 +1037,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             }
         }
         shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
         return makeVoid();
     }
 
@@ -1057,6 +1060,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 shellAbortPipeline();
             }
             shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
         assignments_applied = true;
@@ -1082,6 +1086,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             ctx->last_status = status;
             shellResetPipeline();
             shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
         if (ctx->stage_count == 1 && shellInvokeBuiltin(vm, cmd)) {
@@ -1099,6 +1104,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             ctx->last_status = status;
             shellResetPipeline();
             shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
         size_t idx = (size_t)cmd->pipeline_index;
@@ -1111,6 +1117,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             runtimeError(vm, "shell exec: pipeline index out of range");
             shellFreeCommand(cmd);
             shellResetPipeline();
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
         if (ctx->stage_count > 1) {
@@ -1134,6 +1141,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 assignment_backup_count = 0;
             }
             shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
         if (shellInvokeBuiltin(vm, cmd)) {
@@ -1144,6 +1152,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 assignment_backup_count = 0;
             }
             shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
             return makeVoid();
         }
     }
@@ -1182,6 +1191,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         }
         shellFreeCommand(cmd);
         shellUpdateStatus(127);
+        shellScalarCacheInvalidate();
         return makeVoid();
     }
 
@@ -1248,6 +1258,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 }
                 shellUpdateStatus(status);
                 shellFreeCommand(cmd);
+                shellScalarCacheInvalidate();
                 return makeVoid();
             }
         } else {
@@ -1266,6 +1277,6 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
 
     shellFreeCommand(cmd);
+    shellScalarCacheInvalidate();
     return makeVoid();
 }
-
