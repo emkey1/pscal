@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <stdbool.h> // For bool, true, false
 #include <ctype.h>
@@ -2245,7 +2246,7 @@ static bool builtinUsesGlobalStructures(const char* name) {
     };
 
     for (size_t i = 0; i < sizeof(needs_lock)/sizeof(needs_lock[0]); i++) {
-        if (strcmp(name, needs_lock[i]) == 0) return true;
+        if (strcasecmp(name, needs_lock[i]) == 0) return true;
     }
     return false;
 }
@@ -4914,31 +4915,28 @@ comparison_error_label:
                 Value* args = vm->stackTop - arg_count;
                 const char* builtin_name = getVmBuiltinNameById((int)builtin_id);
                 VmBuiltinFn handler = getVmBuiltinHandlerById((int)builtin_id);
+                const char* canonical_name = builtin_name;
+                int resolved_id = -1;
+                int effective_id = (int)builtin_id;
+                VmBuiltinMapping* mapping = NULL;
 
-                char lookup_name[MAX_ID_LENGTH + 1];
-                lookup_name[0] = '\0';
-                if (encoded_name && *encoded_name) {
-                    strncpy(lookup_name, encoded_name, MAX_ID_LENGTH);
-                    lookup_name[MAX_ID_LENGTH] = '\0';
-                    toLowerString(lookup_name);
-                } else if (builtin_name) {
-                    strncpy(lookup_name, builtin_name, MAX_ID_LENGTH);
-                    lookup_name[MAX_ID_LENGTH] = '\0';
-                    toLowerString(lookup_name);
+                if ((!handler || !canonical_name) && encoded_name && *encoded_name) {
+                    mapping = getVmBuiltinMapping(encoded_name, &resolved_id);
+                } else if (!handler && canonical_name) {
+                    mapping = getVmBuiltinMapping(canonical_name, &resolved_id);
                 }
 
-                if (!handler && lookup_name[0] != '\0') {
-                    handler = getVmBuiltinHandler(lookup_name);
-                    if (!builtin_name && encoded_name && *encoded_name) {
-                        builtin_name = encoded_name;
+                if (mapping) {
+                    handler = mapping->handler;
+                    canonical_name = mapping->name;
+                    if (resolved_id >= 0) {
+                        effective_id = resolved_id;
                     }
                 }
 
-                const char* effective_name = builtin_name;
+                const char* effective_name = canonical_name;
                 if (!effective_name && encoded_name && *encoded_name) {
                     effective_name = encoded_name;
-                } else if (!effective_name && lookup_name[0] != '\0') {
-                    effective_name = lookup_name;
                 }
 
                 if (!handler) {
@@ -4958,16 +4956,21 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (gVmBuiltinProfileEnabled && builtin_id <= UINT16_MAX) {
-                    gVmBuiltinCallCounts[builtin_id]++;
+                if (gVmBuiltinProfileEnabled && effective_id >= 0 && effective_id <= UINT16_MAX) {
+                    gVmBuiltinCallCounts[effective_id]++;
                 }
 
-                bool needs_lock = (lookup_name[0] != '\0') ? builtinUsesGlobalStructures(lookup_name) : false;
+                bool needs_lock = false;
+                if (canonical_name && *canonical_name) {
+                    needs_lock = builtinUsesGlobalStructures(canonical_name);
+                } else if (encoded_name && *encoded_name) {
+                    needs_lock = builtinUsesGlobalStructures(encoded_name);
+                }
                 if (needs_lock) pthread_mutex_lock(&globals_mutex);
 
-                const char* context_name = effective_name;
+                const char* context_name = encoded_name && *encoded_name ? encoded_name : effective_name;
                 if (!context_name) {
-                    context_name = (lookup_name[0] != '\0') ? lookup_name : builtin_name;
+                    context_name = builtin_name;
                 }
                 const char* previous_builtin_name = vm->current_builtin_name;
                 vm->current_builtin_name = context_name;
@@ -5017,19 +5020,22 @@ comparison_error_label:
                 Value* args = vm->stackTop - arg_count;
                 const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
 
-                // Convert builtin_name to lowercase for lookup in the dispatch table
-                char builtin_name_lower[MAX_ID_LENGTH + 1]; // Use a buffer large enough for builtin names
-                strncpy(builtin_name_lower, builtin_name_original_case, MAX_ID_LENGTH);
-                builtin_name_lower[MAX_ID_LENGTH] = '\0'; // Ensure null termination
-                toLowerString(builtin_name_lower); // toLowerString is in utils.h/c
-
-                VmBuiltinFn handler = getVmBuiltinHandler(builtin_name_lower); // Pass the lowercase name
+                VmBuiltinMapping* mapping = getVmBuiltinMapping(builtin_name_original_case, NULL);
+                VmBuiltinFn handler = mapping ? mapping->handler : NULL;
+                const char* canonical_name = mapping ? mapping->name : NULL;
 
                 if (handler) {
-                    bool needs_lock = builtinUsesGlobalStructures(builtin_name_lower);
+                    bool needs_lock = false;
+                    if (canonical_name && *canonical_name) {
+                        needs_lock = builtinUsesGlobalStructures(canonical_name);
+                    } else if (builtin_name_original_case && *builtin_name_original_case) {
+                        needs_lock = builtinUsesGlobalStructures(builtin_name_original_case);
+                    }
                     if (needs_lock) pthread_mutex_lock(&globals_mutex);
 
-                    const char* context_name = builtin_name_original_case ? builtin_name_original_case : builtin_name_lower;
+                    const char* context_name = builtin_name_original_case && *builtin_name_original_case
+                        ? builtin_name_original_case
+                        : canonical_name;
                     const char* previous_builtin_name = vm->current_builtin_name;
                     vm->current_builtin_name = context_name;
 
@@ -5038,19 +5044,11 @@ comparison_error_label:
                     if (needs_lock) pthread_mutex_unlock(&globals_mutex);
                     vm->current_builtin_name = previous_builtin_name;
 
-                    // Pop arguments from the stack and free their contents when safe.
-                    // Arrays and pointers reference caller-managed memory, so avoid freeing
-                    // the underlying data to prevent invalidating VAR arguments.
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
                         if (args[i].type == TYPE_POINTER) {
-                            // Pointer arguments reference caller-managed memory; do not dereference here.
                             continue;
                         }
-
-                        // Arrays are copied when arguments are evaluated, so the VM owns the
-                        // temporary buffer on the stack.  Free it now to avoid leaking large
-                        // allocations (e.g., texture pixel buffers) on every builtin call.
                         freeValue(&args[i]);
                     }
 
@@ -5059,14 +5057,14 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
-                    if (getBuiltinType(builtin_name_original_case) == BUILTIN_TYPE_FUNCTION) {
+                    const char* type_name = canonical_name ? canonical_name : context_name;
+                    if (type_name && getBuiltinType(type_name) == BUILTIN_TYPE_FUNCTION) {
                         push(vm, result);
                     } else {
                         freeValue(&result);
                     }
                 } else {
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
-                    // Cleanup stack even on error, preserving caller-owned arrays/pointers
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
                         if (args[i].type == TYPE_POINTER) {
