@@ -912,6 +912,16 @@ typedef enum {
     SHELL_LOOP_KIND_CFOR
 } ShellLoopKind;
 
+typedef enum {
+    SHELL_LOOP_CONDITION_NONE = 0,
+    SHELL_LOOP_CONDITION_TEST = 1,
+    SHELL_LOOP_CONDITION_BRACKET = 2,
+    SHELL_LOOP_CONDITION_COLON = 3,
+    SHELL_LOOP_CONDITION_TRUE = 4,
+    SHELL_LOOP_CONDITION_FALSE = 5,
+    SHELL_LOOP_CONDITION_ARITH = 6
+} ShellLoopConditionKind;
+
 typedef struct {
     char *name;
     char *previous_value;
@@ -1242,6 +1252,12 @@ typedef struct {
     char *cfor_update;
     bool cfor_condition_cached;
     bool cfor_condition_value;
+    ShellLoopConditionKind cond_kind;
+    char **cond_words;
+    size_t cond_word_count;
+    char *cond_arith_expression;
+    ShellLoopConditionKind body_kind;
+    char *body_arith_expression;
     bool redirs_active;
     ShellRedirection *applied_redirs;
     size_t applied_redir_count;
@@ -2339,6 +2355,28 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
     }
     frame->cfor_condition_cached = false;
     frame->cfor_condition_value = false;
+    frame->cond_kind = SHELL_LOOP_CONDITION_NONE;
+    if (frame->cond_words) {
+        for (size_t i = 0; i < frame->cond_word_count; ++i) {
+            free(frame->cond_words[i]);
+        }
+        free(frame->cond_words);
+        frame->cond_words = NULL;
+    }
+    frame->cond_word_count = 0;
+    if (frame->cond_arith_expression) {
+        free(frame->cond_arith_expression);
+        frame->cond_arith_expression = NULL;
+    }
+    frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+    if (frame->body_arith_expression) {
+        free(frame->body_arith_expression);
+        frame->body_arith_expression = NULL;
+    }
+    if (frame->cond_arith_expression) {
+        free(frame->cond_arith_expression);
+        frame->cond_arith_expression = NULL;
+    }
     if (frame->redirs_active) {
         shellRestoreExecRedirections(frame->redir_backups, frame->redir_backup_count);
     }
@@ -3052,6 +3090,12 @@ static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     frame.cfor_update = NULL;
     frame.cfor_condition_cached = false;
     frame.cfor_condition_value = false;
+    frame.cond_kind = SHELL_LOOP_CONDITION_NONE;
+    frame.cond_words = NULL;
+    frame.cond_word_count = 0;
+    frame.cond_arith_expression = NULL;
+    frame.body_kind = SHELL_LOOP_CONDITION_NONE;
+    frame.body_arith_expression = NULL;
     frame.redirs_active = false;
     frame.applied_redirs = NULL;
     frame.applied_redir_count = 0;

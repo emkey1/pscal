@@ -2490,6 +2490,26 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             handled = true;
         }
     }
+    if (!handled && canonical && strcmp(canonical, ":") == 0) {
+        shellUpdateStatus(0);
+        handled = true;
+    }
+    if (!handled && canonical && strcmp(canonical, "true") == 0) {
+        shellUpdateStatus(0);
+        handled = true;
+    }
+    if (!handled && canonical && strcmp(canonical, "false") == 0) {
+        shellUpdateStatus(1);
+        handled = true;
+    }
+    if (!handled && canonical && strcmp(canonical, "__shell_arithmetic") == 0) {
+        const char *expression = (cmd->argc > 1 && cmd->argv[1]) ? cmd->argv[1] : NULL;
+        int status = 0;
+        if (expression && shellBuiltinArithmeticFastEval(expression, &status)) {
+            shellUpdateStatus(status);
+            handled = true;
+        }
+    }
 
     if (!handled) {
         if (arg_count > 0) {

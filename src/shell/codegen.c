@@ -175,6 +175,309 @@ static void emitPushWord(BytecodeChunk *chunk, const ShellWord *word, int line) 
     free(encoded);
 }
 
+#define LOOP_COND_KIND_NONE   0
+#define LOOP_COND_KIND_TEST   1
+#define LOOP_COND_KIND_BRACKET 2
+#define LOOP_COND_KIND_COLON  3
+#define LOOP_COND_KIND_TRUE   4
+#define LOOP_COND_KIND_FALSE  5
+#define LOOP_COND_KIND_ARITH  6
+
+typedef struct {
+    int kind;
+    char **encoded_words;
+    size_t word_count;
+    char *arith_expression;
+} LoopConditionSpec;
+
+static void initLoopConditionSpec(LoopConditionSpec *spec) {
+    if (!spec) {
+        return;
+    }
+    spec->kind = LOOP_COND_KIND_NONE;
+    spec->encoded_words = NULL;
+    spec->word_count = 0;
+    spec->arith_expression = NULL;
+}
+
+static void freeLoopConditionSpec(LoopConditionSpec *spec) {
+    if (!spec) {
+        return;
+    }
+    if (spec->encoded_words) {
+        for (size_t i = 0; i < spec->word_count; ++i) {
+            free(spec->encoded_words[i]);
+        }
+        free(spec->encoded_words);
+    }
+    spec->encoded_words = NULL;
+    spec->word_count = 0;
+    if (spec->arith_expression) {
+        free(spec->arith_expression);
+        spec->arith_expression = NULL;
+    }
+    spec->kind = LOOP_COND_KIND_NONE;
+}
+
+static bool wordIsLiteralCommand(const ShellWord *word) {
+    if (!word || !word->text) {
+        return false;
+    }
+    if (word->single_quoted || word->double_quoted) {
+        return false;
+    }
+    if (word->has_parameter_expansion || word->has_command_substitution || word->has_arithmetic_expansion) {
+        return false;
+    }
+    return true;
+}
+
+static bool gatherLoopConditionSpec(const ShellLoop *loop, LoopConditionSpec *out_spec) {
+    if (!loop || !out_spec) {
+        return false;
+    }
+    initLoopConditionSpec(out_spec);
+    if (loop->is_for || loop->is_cstyle_for) {
+        return false;
+    }
+    const ShellCommand *cond = loop->condition;
+    if (!cond) {
+        return false;
+    }
+    if (cond->type == SHELL_COMMAND_PIPELINE && cond->data.pipeline && cond->data.pipeline->command_count == 1) {
+        const ShellPipeline *pipeline = cond->data.pipeline;
+        if (pipeline && pipeline->commands && pipeline->commands[0]) {
+            cond = pipeline->commands[0];
+        }
+    }
+    if (cond->exec.runs_in_background) {
+        return false;
+    }
+    if (cond->type == SHELL_COMMAND_SIMPLE) {
+        const ShellWordArray *words = &cond->data.simple.words;
+        if (cond->data.simple.redirections.count > 0 || words->count == 0) {
+            return false;
+        }
+        const ShellWord *first = words->items[0];
+        if (!wordIsLiteralCommand(first)) {
+            return false;
+        }
+        const char *cmd = first->text ? first->text : "";
+        int kind = LOOP_COND_KIND_NONE;
+        if (strcmp(cmd, "test") == 0) {
+            if (words->count > 4) {
+                return false;
+            }
+            kind = LOOP_COND_KIND_TEST;
+        } else if (strcmp(cmd, "[") == 0) {
+            if (words->count < 2 || words->count > 5) {
+                return false;
+            }
+            const ShellWord *last = words->items[words->count - 1];
+            if (!last || !last->text || strcmp(last->text, "]") != 0) {
+                return false;
+            }
+            if (!wordIsLiteralCommand(last)) {
+                return false;
+            }
+            kind = LOOP_COND_KIND_BRACKET;
+        } else if (strcmp(cmd, ":") == 0) {
+            if (words->count != 1) {
+                return false;
+            }
+            kind = LOOP_COND_KIND_COLON;
+        } else if (strcmp(cmd, "true") == 0) {
+            if (words->count != 1) {
+                return false;
+            }
+            kind = LOOP_COND_KIND_TRUE;
+        } else if (strcmp(cmd, "false") == 0) {
+            if (words->count != 1) {
+                return false;
+            }
+            kind = LOOP_COND_KIND_FALSE;
+        } else {
+            return false;
+        }
+        if (kind == LOOP_COND_KIND_TEST || kind == LOOP_COND_KIND_BRACKET) {
+            for (size_t i = 1; i < words->count; ++i) {
+                const ShellWord *word = words->items[i];
+                if (!word || !word->text) {
+                    continue;
+                }
+                if (strcmp(word->text, "-a") == 0 || strcmp(word->text, "-o") == 0) {
+                    return false;
+                }
+            }
+            char **encoded = (char **)calloc(words->count, sizeof(char *));
+            if (!encoded) {
+                return false;
+            }
+            for (size_t i = 0; i < words->count; ++i) {
+                encoded[i] = encodeWord(words->items[i]);
+                if (!encoded[i]) {
+                    for (size_t j = 0; j < i; ++j) {
+                        free(encoded[j]);
+                    }
+                    free(encoded);
+                    return false;
+                }
+            }
+            out_spec->encoded_words = encoded;
+            out_spec->word_count = words->count;
+        }
+        out_spec->kind = kind;
+        return true;
+    } else if (cond->type == SHELL_COMMAND_ARITHMETIC) {
+        const char *expr = cond->data.arithmetic.expression ? cond->data.arithmetic.expression : "";
+        if (cond->data.arithmetic.redirections.count > 0) {
+            return false;
+        }
+        out_spec->arith_expression = strdup(expr);
+        if (!out_spec->arith_expression) {
+            return false;
+        }
+        out_spec->kind = LOOP_COND_KIND_ARITH;
+        return true;
+    }
+    return false;
+}
+
+typedef enum {
+    LOOP_BODY_KIND_NONE = LOOP_COND_KIND_NONE,
+    LOOP_BODY_KIND_COLON = LOOP_COND_KIND_COLON,
+    LOOP_BODY_KIND_TRUE = LOOP_COND_KIND_TRUE,
+    LOOP_BODY_KIND_FALSE = LOOP_COND_KIND_FALSE,
+    LOOP_BODY_KIND_ARITH = LOOP_COND_KIND_ARITH
+} LoopBodyKind;
+
+typedef struct {
+    LoopBodyKind kind;
+    char *arith_expression;
+} LoopBodySpec;
+
+static void initLoopBodySpec(LoopBodySpec *spec) {
+    if (!spec) {
+        return;
+    }
+    spec->kind = LOOP_BODY_KIND_NONE;
+    spec->arith_expression = NULL;
+}
+
+static void freeLoopBodySpec(LoopBodySpec *spec) {
+    if (!spec) {
+        return;
+    }
+    if (spec->arith_expression) {
+        free(spec->arith_expression);
+        spec->arith_expression = NULL;
+    }
+    spec->kind = LOOP_BODY_KIND_NONE;
+}
+
+static bool gatherLoopBodySpec(const ShellLoop *loop, LoopBodySpec *out_spec) {
+    if (!loop || !out_spec) {
+        return false;
+    }
+    initLoopBodySpec(out_spec);
+
+    const ShellProgram *body = loop->body;
+    if (!body) {
+        out_spec->kind = LOOP_BODY_KIND_COLON;
+        return true;
+    }
+
+    const ShellCommand *cmd = NULL;
+    size_t meaningful = 0;
+    for (size_t i = 0; i < body->commands.count; ++i) {
+        const ShellCommand *candidate = body->commands.items[i];
+        if (!candidate) {
+            continue;
+        }
+        if (candidate->type == SHELL_COMMAND_SIMPLE) {
+            const ShellWordArray *words = &candidate->data.simple.words;
+            const ShellRedirectionArray *redirs = &candidate->data.simple.redirections;
+            if (words->count == 0 && redirs->count == 0) {
+                continue;
+            }
+        }
+        meaningful++;
+        cmd = candidate;
+        if (meaningful > 1) {
+            return false;
+        }
+    }
+
+    if (meaningful == 0) {
+        out_spec->kind = LOOP_BODY_KIND_COLON;
+        return true;
+    }
+
+    if (!cmd) {
+        return false;
+    }
+    if (cmd->exec.runs_in_background || cmd->exec.is_async_parent) {
+        return false;
+    }
+
+    if (cmd->type == SHELL_COMMAND_PIPELINE && cmd->data.pipeline && cmd->data.pipeline->command_count == 1) {
+        const ShellPipeline *pipeline = cmd->data.pipeline;
+        if (pipeline && pipeline->commands && pipeline->commands[0]) {
+            cmd = pipeline->commands[0];
+        }
+    }
+
+    switch (cmd->type) {
+        case SHELL_COMMAND_SIMPLE: {
+            const ShellWordArray *words = &cmd->data.simple.words;
+            const ShellRedirectionArray *redirs = &cmd->data.simple.redirections;
+            if (redirs->count > 0) {
+                return false;
+            }
+            if (words->count == 0) {
+                out_spec->kind = LOOP_BODY_KIND_COLON;
+                return true;
+            }
+            if (words->count != 1) {
+                return false;
+            }
+            const ShellWord *word = words->items[0];
+            if (!wordIsLiteralCommand(word)) {
+                return false;
+            }
+            const char *text = word->text ? word->text : "";
+            if (strcmp(text, ":") == 0) {
+                out_spec->kind = LOOP_BODY_KIND_COLON;
+                return true;
+            }
+            if (strcmp(text, "true") == 0) {
+                out_spec->kind = LOOP_BODY_KIND_TRUE;
+                return true;
+            }
+            if (strcmp(text, "false") == 0) {
+                out_spec->kind = LOOP_BODY_KIND_FALSE;
+                return true;
+            }
+            return false;
+        }
+        case SHELL_COMMAND_ARITHMETIC: {
+            const ShellRedirectionArray *redirs = &cmd->data.arithmetic.redirections;
+            if (redirs->count > 0) {
+                return false;
+            }
+            const char *expr = cmd->data.arithmetic.expression ? cmd->data.arithmetic.expression : "";
+            out_spec->arith_expression = strdup(expr);
+            if (!out_spec->arith_expression) {
+                return false;
+            }
+            out_spec->kind = LOOP_BODY_KIND_ARITH;
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 static void emitPushInt(BytecodeChunk *chunk, int value, int line) {
     Value constant = makeInt(value);
     int index = addConstantToChunk(chunk, &constant);
@@ -537,17 +840,122 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     const ShellRedirectionArray *redirs = loop ? &loop->redirections : NULL;
     size_t redir_count = redirs ? redirs->count : 0;
 
-    char meta[128];
+    LoopConditionSpec cond_spec;
+    initLoopConditionSpec(&cond_spec);
+    bool cond_fast = false;
+    size_t cond_payload_count = 0;
+    if (!isFor && !isCStyle && gatherLoopConditionSpec(loop, &cond_spec)) {
+        if (cond_spec.kind != LOOP_COND_KIND_NONE) {
+            cond_fast = true;
+            if (cond_spec.kind == LOOP_COND_KIND_ARITH) {
+                cond_payload_count = 1;
+            } else if (cond_spec.kind == LOOP_COND_KIND_TEST || cond_spec.kind == LOOP_COND_KIND_BRACKET) {
+                cond_payload_count = cond_spec.word_count;
+            } else {
+                cond_payload_count = 0;
+            }
+        }
+    }
+
+    LoopBodySpec body_spec;
+    initLoopBodySpec(&body_spec);
+    bool body_fast = false;
+    size_t body_payload_count = 0;
+    if (!isFor && !isCStyle && gatherLoopBodySpec(loop, &body_spec)) {
+        if (body_spec.kind != LOOP_BODY_KIND_NONE) {
+            body_fast = true;
+            if (body_spec.kind == LOOP_BODY_KIND_ARITH) {
+                body_payload_count = 1;
+            }
+        }
+    }
+
+    if (!isFor && !isCStyle) {
+        size_t projected = 1 + cond_payload_count + body_payload_count + redir_count;
+        if (projected > 255) {
+            if (body_fast && body_payload_count > 0) {
+                body_fast = false;
+                body_payload_count = 0;
+            }
+            projected = 1 + cond_payload_count + body_payload_count + redir_count;
+            if (projected > 255 && cond_fast && cond_payload_count > 0) {
+                cond_fast = false;
+                cond_payload_count = 0;
+                freeLoopConditionSpec(&cond_spec);
+                initLoopConditionSpec(&cond_spec);
+            }
+        }
+    }
+
+    int cond_kind_meta = cond_fast ? cond_spec.kind : LOOP_COND_KIND_NONE;
+    size_t cond_words_meta = cond_fast ? cond_payload_count : 0;
+    int body_kind_meta = body_fast ? body_spec.kind : LOOP_BODY_KIND_NONE;
+    size_t body_words_meta = body_fast ? body_payload_count : 0;
+
+    char meta[192];
     if (isFor) {
-        snprintf(meta, sizeof(meta), "mode=for;redirs=%zu", redir_count);
+        snprintf(meta,
+                 sizeof(meta),
+                 "mode=for;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0",
+                 redir_count);
     } else if (isCStyle) {
-        snprintf(meta, sizeof(meta), "mode=cfor;redirs=%zu", redir_count);
+        snprintf(meta,
+                 sizeof(meta),
+                 "mode=cfor;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0",
+                 redir_count);
     } else {
-        snprintf(meta, sizeof(meta), "mode=%s;redirs=%zu", loop->is_until ? "until" : "while", redir_count);
+        snprintf(meta,
+                 sizeof(meta),
+                 "mode=%s;redirs=%zu;condkind=%d;condwords=%zu;bodykind=%d;bodywords=%zu",
+                 loop->is_until ? "until" : "while",
+                 redir_count,
+                 cond_kind_meta,
+                 cond_words_meta,
+                 body_kind_meta,
+                 body_words_meta);
     }
     emitPushString(chunk, meta, line);
 
     uint8_t arg_count = 1;
+    if (cond_fast) {
+        if (cond_spec.kind == LOOP_COND_KIND_ARITH) {
+            const char *expr = cond_spec.arith_expression ? cond_spec.arith_expression : "";
+            emitPushString(chunk, expr, line);
+            if (arg_count < 255) {
+                arg_count++;
+            } else {
+                cond_fast = false;
+            }
+        } else if (cond_spec.kind == LOOP_COND_KIND_TEST || cond_spec.kind == LOOP_COND_KIND_BRACKET) {
+            for (size_t i = 0; i < cond_spec.word_count; ++i) {
+                if (arg_count >= 255) {
+                    cond_fast = false;
+                    break;
+                }
+                const char *encoded = cond_spec.encoded_words[i] ? cond_spec.encoded_words[i] : "";
+                emitPushString(chunk, encoded, line);
+                arg_count++;
+            }
+            if (!cond_fast) {
+                freeLoopConditionSpec(&cond_spec);
+                initLoopConditionSpec(&cond_spec);
+                cond_payload_count = 0;
+                cond_kind_meta = LOOP_COND_KIND_NONE;
+            }
+        }
+    }
+    if (body_fast) {
+        if (body_spec.kind == LOOP_BODY_KIND_ARITH) {
+            const char *expr = body_spec.arith_expression ? body_spec.arith_expression : "";
+            emitPushString(chunk, expr, line);
+            if (arg_count < 255) {
+                arg_count++;
+            } else {
+                body_fast = false;
+                body_payload_count = 0;
+            }
+        }
+    }
     if (isFor) {
         if (loop->for_variable) {
             emitPushWord(chunk, loop->for_variable, line);
@@ -616,21 +1024,33 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         exitJump = chunk->count;
         emitShort(chunk, 0xFFFF, line);
     } else {
-        emitBuiltinProc(chunk, "__shell_enter_condition", 0, line);
-        compileCommand(chunk, loop->condition, false);
-        emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
-        emitPushInt(chunk, 0, line);
-        writeBytecodeChunk(chunk, EQUAL, line);
-        if (loop->is_until) {
-            writeBytecodeChunk(chunk, NOT, line);
+        if (cond_fast && cond_kind_meta != LOOP_COND_KIND_NONE) {
+            emitCallHost(chunk, HOST_FN_SHELL_LOOP_CHECK_CONDITION, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            exitJump = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
+        } else {
+            emitBuiltinProc(chunk, "__shell_enter_condition", 0, line);
+            compileCommand(chunk, loop->condition, false);
+            emitCallHost(chunk, HOST_FN_SHELL_LAST_STATUS, line);
+            emitPushInt(chunk, 0, line);
+            writeBytecodeChunk(chunk, EQUAL, line);
+            if (loop->is_until) {
+                writeBytecodeChunk(chunk, NOT, line);
+            }
+            emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            exitJump = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
         }
-        emitBuiltinProc(chunk, "__shell_leave_condition", 0, line);
-        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-        exitJump = chunk->count;
-        emitShort(chunk, 0xFFFF, line);
     }
 
-    compileProgram(chunk, loop->body);
+    if (body_fast) {
+        emitCallHost(chunk, HOST_FN_SHELL_LOOP_EXEC_BODY, line);
+        writeBytecodeChunk(chunk, POP, line);
+    } else {
+        compileProgram(chunk, loop->body);
+    }
 
     emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
     writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
@@ -654,6 +1074,9 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
 
     uint16_t exitOffset2 = (uint16_t)(exitLabel - (exitJump2 + 2));
     patchShort(chunk, exitJump2, exitOffset2);
+
+    freeLoopConditionSpec(&cond_spec);
+    freeLoopBodySpec(&body_spec);
 }
 
 static void compileConditional(BytecodeChunk *chunk, const ShellConditional *conditional, int line) {
