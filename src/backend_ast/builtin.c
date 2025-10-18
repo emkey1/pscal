@@ -915,6 +915,11 @@ int getVmBuiltinID(const char *name) {
         }
     }
     pthread_mutex_unlock(&builtin_registry_mutex);
+
+    if (!result) {
+        result = getVmBuiltinID(name) != -1;
+    }
+
     return result;
 }
 
@@ -4939,6 +4944,11 @@ int isBuiltin(const char *name) {
     }
 
     pthread_mutex_unlock(&builtin_registry_mutex);
+
+    if (!result) {
+        result = getVmBuiltinID(name) != -1;
+    }
+
     return result;
 }
 
