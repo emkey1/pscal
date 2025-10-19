@@ -340,3 +340,39 @@ subshell.sh: external command                           error        597
 stringop1.sh: string length                           138,867    594,724 
 ------------------------------------------------------------------------
 
+Sun Oct 19 17:00:04 CEST 2025
+o Annotate bytecode chunks with precomputed lowercase builtin constant indices and propagate the metadata through serialization and tooling
+o Update builtin dispatch in the VM, CLike, and shell frontends to consume the cached lowercase names instead of normalising at runtime
+o Extend Pascal fixtures with mixed-case builtin coverage to exercise the new metadata
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                          116,531    454,552
+assign.sh: variable                                   145,362    689,875
+assign.sh: local var                                  144,927    683,177
+assign.sh: local var (typeset)                        143,613    686,475
+cmp.sh: [ ]                                            76,913    372,027
+cmp.sh: [[ ]]                                          59,065    522,645
+cmp.sh: case                                          122,865    662,789
+count.sh: posix                                       139,045    510,926
+count.sh: typeset -i                                  138,394    489,424
+count.sh: increment                                   198,249    626,828
+eval.sh: direct assign                                 80,139    325,973
+eval.sh: eval assign                                    6,271    191,745
+eval.sh: command subs                                   error      1,841
+func.sh: no func                                      214,146    640,440
+func.sh: func                                          78,580    343,180
+null.sh: blank                                        212,405      error
+null.sh: assign variable                              146,645    724,101
+null.sh: define function                              162,249    762,756
+null.sh: undefined variable                           144,984    569,846
+null.sh: : command                                    213,877    643,002
+subshell.sh: no subshell                              213,811    587,849
+subshell.sh: brace                                    113,920    578,864
+subshell.sh: subshell                                 106,438      2,077
+subshell.sh: command subs                               5,735      1,993
+subshell.sh: external command                           error        586
+stringop1.sh: string length                           139,050    596,037
+------------------------------------------------------------------------

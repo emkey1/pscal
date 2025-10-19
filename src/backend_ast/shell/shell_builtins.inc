@@ -8315,7 +8315,12 @@ Value vmHostShellLoopExecuteBody(VM *vm) {
     ShellLoopFrame *frame = shellLoopTop();
     if (!frame) {
         shellUpdateStatus(0);
-        return makeVoid();
+        return makeBoolean(true);
+    }
+
+    if (frame->body_kind == SHELL_LOOP_CONDITION_NONE) {
+        shellUpdateStatus(0);
+        return makeBoolean(true);
     }
 
     int status = 0;
@@ -8337,14 +8342,14 @@ Value vmHostShellLoopExecuteBody(VM *vm) {
             }
             break;
         }
-        case SHELL_LOOP_CONDITION_NONE:
         default:
             status = 0;
             break;
     }
 
     shellUpdateStatus(status);
-    return makeVoid();
+    Value advance = vmHostShellLoopAdvance(vm);
+    return advance;
 }
 
 Value vmHostShellLastStatus(VM *vm) {

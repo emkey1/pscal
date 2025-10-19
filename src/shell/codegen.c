@@ -1074,17 +1074,19 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         }
     }
 
+    int exitJump2 = -1;
     if (body_fast) {
         emitCallHost(chunk, HOST_FN_SHELL_LOOP_EXEC_BODY, line);
-        writeBytecodeChunk(chunk, POP, line);
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        exitJump2 = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
     } else {
         compileProgram(chunk, loop->body);
+        emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        exitJump2 = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
     }
-
-    emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
-    writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-    int exitJump2 = chunk->count;
-    emitShort(chunk, 0xFFFF, line);
 
     writeBytecodeChunk(chunk, JUMP, line);
     int loopJump = chunk->count;
@@ -1101,8 +1103,10 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         patchShort(chunk, exitJump, exitOffset);
     }
 
-    uint16_t exitOffset2 = (uint16_t)(exitLabel - (exitJump2 + 2));
-    patchShort(chunk, exitJump2, exitOffset2);
+    if (exitJump2 >= 0) {
+        uint16_t exitOffset2 = (uint16_t)(exitLabel - (exitJump2 + 2));
+        patchShort(chunk, exitJump2, exitOffset2);
+    }
 
     freeLoopConditionSpec(&cond_spec);
     freeLoopBodySpec(&body_spec);
