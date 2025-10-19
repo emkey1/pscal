@@ -43,6 +43,9 @@ typedef struct {
     StringIndex index;
 } ExtBuiltinRegistry;
 
+static char *buildFullName(const ExtBuiltinGroup *parent, const char *component);
+static char *dupComponent(const char *component, size_t component_len);
+
 static void stringIndexInit(StringIndex *index) {
     if (!index) return;
     index->keys = NULL;
