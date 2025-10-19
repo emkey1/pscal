@@ -5019,10 +5019,34 @@ comparison_error_label:
                 }
 
                 Value* args = vm->stackTop - arg_count;
-                const char* builtin_name_original_case = AS_STRING(vm->chunk->constants[name_const_idx]);
+                if (!vm->chunk || name_const_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Invalid built-in name index %u.", name_const_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                Value* name_val = &vm->chunk->constants[name_const_idx];
+                const char* builtin_name_original_case = NULL;
+                if (name_val->type == TYPE_STRING) {
+                    builtin_name_original_case = name_val->s_val;
+                }
+
+                const char* builtin_name_lower = NULL;
+                int lower_idx = getBuiltinLowercaseIndex(vm->chunk, (int)name_const_idx);
+                if (lower_idx >= 0 && lower_idx < vm->chunk->constants_count) {
+                    Value* lower_val = &vm->chunk->constants[lower_idx];
+                    if (lower_val->type == TYPE_STRING) {
+                        builtin_name_lower = lower_val->s_val;
+                    }
+                }
 
                 VmBuiltinMapping mapping;
-                bool have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, NULL);
+                bool have_mapping = false;
+                if (builtin_name_lower && builtin_name_lower[0]) {
+                    have_mapping = getVmBuiltinMappingCanonical(builtin_name_lower, &mapping, NULL);
+                }
+                if (!have_mapping) {
+                    have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, NULL);
+                }
                 VmBuiltinFn handler = have_mapping ? mapping.handler : NULL;
                 const char* canonical_name = have_mapping ? mapping.name : NULL;
 

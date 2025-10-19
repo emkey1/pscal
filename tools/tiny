@@ -465,7 +465,7 @@ class tinyCompiler:
 # Serialization
 # ---------------------------------------------------------------------------
 
-CACHE_MAGIC = 0x50534332  # 'PSC2'
+CACHE_MAGIC = 0x50534232  # 'PSB2'
 
 
 def load_vm_version(root: Path) -> int:
@@ -495,6 +495,12 @@ def write_bytecode(builder: BytecodeBuilder, path: Path, version: int) -> None:
     consts = builder.constants
     with open(path, "wb") as f:
         f.write(struct.pack("<II", CACHE_MAGIC, version))
+        # source_hash and combined_hash are unused for tiny output; write zeros
+        f.write(struct.pack("<QQ", 0, 0))
+        path_bytes = b"tiny"
+        f.write(struct.pack("<i", -len(path_bytes)))
+        if path_bytes:
+            f.write(path_bytes)
         f.write(struct.pack("<ii", len(code), len(consts)))
         f.write(code)
         f.write(struct.pack("<" + "i" * len(lines), *lines))
@@ -512,6 +518,8 @@ def write_bytecode(builder: BytecodeBuilder, path: Path, version: int) -> None:
                         f.write(data)
             else:
                 raise NotImplementedError("Unsupported constant type")
+        # Builtin lowercase mapping count (tiny backend does not emit metadata)
+        f.write(struct.pack("<i", 0))
         # Procedure table uses the convention stored_proc_count = -(count + 1).
         # The tiny frontend never emits procedures, so we write -1 to signal
         # an empty table to match the VM loader's expectations.

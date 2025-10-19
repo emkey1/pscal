@@ -440,6 +440,27 @@ static int addStringConstantLen(BytecodeChunk* chunk, const char* str, size_t le
     return index;
 }
 
+static int ensureBuiltinStringConstants(BytecodeChunk* chunk, const char* original_name, int* out_lower_index) {
+    if (!original_name) {
+        original_name = "";
+    }
+
+    int name_index = addStringConstant(chunk, original_name);
+    int lower_index = getBuiltinLowercaseIndex(chunk, name_index);
+    if (lower_index < 0) {
+        char normalized_name[MAX_SYMBOL_LENGTH];
+        strncpy(normalized_name, original_name, sizeof(normalized_name) - 1);
+        normalized_name[sizeof(normalized_name) - 1] = '\0';
+        toLowerString(normalized_name);
+        lower_index = addStringConstant(chunk, normalized_name);
+        setBuiltinLowercaseIndex(chunk, name_index, lower_index);
+    }
+    if (out_lower_index) {
+        *out_lower_index = lower_index;
+    }
+    return name_index;
+}
+
 static int addIntConstant(BytecodeChunk* chunk, long long intValue) {
     Value val = makeInt(intValue);
     int index = addConstantToChunk(chunk, &val);
@@ -478,12 +499,7 @@ static int ensureMyselfGlobalNameIndex(BytecodeChunk* chunk) {
 static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* name, uint8_t arg_count, int line) {
     if (!name) name = "";
 
-    char normalized_name[MAX_SYMBOL_LENGTH];
-    strncpy(normalized_name, name, sizeof(normalized_name) - 1);
-    normalized_name[sizeof(normalized_name) - 1] = '\0';
-    toLowerString(normalized_name);
-
-    int name_index = addStringConstant(chunk, normalized_name);
+    int name_index = ensureBuiltinStringConstants(chunk, name, NULL);
     int builtin_id = getBuiltinIDForCompiler(name);
     if (builtin_id < 0) {
         fprintf(stderr, "L%d: Compiler Error: Unknown built-in procedure '%s'.\n", line, name);
@@ -5700,11 +5716,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     if (type == BUILTIN_TYPE_PROCEDURE) {
                         emitBuiltinProcedureCall(chunk, calleeName, (uint8_t)call_arg_count, line);
                     } else if (type == BUILTIN_TYPE_FUNCTION) {
-                        char normalized_name[MAX_SYMBOL_LENGTH];
-                        strncpy(normalized_name, calleeName, sizeof(normalized_name) - 1);
-                        normalized_name[sizeof(normalized_name) - 1] = '\0';
-                        toLowerString(normalized_name);
-                        int nameIndex = addStringConstant(chunk, normalized_name);
+                        int nameIndex = ensureBuiltinStringConstants(chunk, calleeName, NULL);
                         writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                         emitShort(chunk, (uint16_t)nameIndex, line);
                         writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
@@ -6862,11 +6874,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     for (uint8_t i = 0; i < call_arg_count; ++i) writeBytecodeChunk(chunk, POP, line);
                     emitConstant(chunk, addNilConstant(chunk), line);
                 } else if (type == BUILTIN_TYPE_FUNCTION) {
-                    char normalized_name[MAX_SYMBOL_LENGTH];
-                    strncpy(normalized_name, functionName, sizeof(normalized_name) - 1);
-                    normalized_name[sizeof(normalized_name) - 1] = '\0';
-                    toLowerString(normalized_name);
-                    int nameIndex = addStringConstant(chunk, normalized_name);
+                    int nameIndex = ensureBuiltinStringConstants(chunk, functionName, NULL);
                     writeBytecodeChunk(chunk, CALL_BUILTIN, line);
                     emitShort(chunk, (uint16_t)nameIndex, line);
                     writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);

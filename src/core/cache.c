@@ -221,6 +221,7 @@ static void resetChunk(BytecodeChunk* chunk, int read_consts) {
     free(chunk->code);
     free(chunk->lines);
     free(chunk->constants);
+    free(chunk->builtin_lowercase_indices);
     initBytecodeChunk(chunk);
 }
 
@@ -1562,6 +1563,38 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                         for (read_consts = 0; read_consts < const_count; ++read_consts) {
                             if (!readValue(f, &chunk->constants[read_consts])) { ok = false; break; }
                         }
+                        if (ok && chunk->constants_capacity > 0) {
+                            chunk->builtin_lowercase_indices = (int*)malloc(sizeof(int) * chunk->constants_capacity);
+                            if (!chunk->builtin_lowercase_indices) {
+                                ok = false;
+                            } else {
+                                for (int i = 0; i < chunk->constants_capacity; ++i) {
+                                    chunk->builtin_lowercase_indices[i] = -1;
+                                }
+                            }
+                        }
+                        if (ok && ver >= 8) {
+                            int builtin_map_count = 0;
+                            if (fread(&builtin_map_count, sizeof(builtin_map_count), 1, f) != 1) {
+                                ok = false;
+                            } else {
+                                for (int i = 0; i < builtin_map_count; ++i) {
+                                    int original_idx = 0;
+                                    int lower_idx = 0;
+                                    if (fread(&original_idx, sizeof(original_idx), 1, f) != 1 ||
+                                        fread(&lower_idx, sizeof(lower_idx), 1, f) != 1) {
+                                        ok = false;
+                                        break;
+                                    }
+                                    if (!chunk->builtin_lowercase_indices) {
+                                        continue;
+                                    }
+                                    if (original_idx >= 0 && original_idx < chunk->constants_count) {
+                                        chunk->builtin_lowercase_indices[original_idx] = lower_idx;
+                                    }
+                                }
+                            }
+                        }
                         if (ok) {
                             int stored_proc_count = 0;
                             if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) == 1) {
@@ -1667,6 +1700,25 @@ static bool serializeBytecodeChunk(FILE* f,
     fwrite(chunk->lines, sizeof(int), chunk->count, f);
     for (int i = 0; i < chunk->constants_count; ++i) {
         if (!writeValue(f, &chunk->constants[i])) { return false; }
+    }
+    int builtin_map_count = 0;
+    if (chunk->builtin_lowercase_indices) {
+        for (int i = 0; i < chunk->constants_count; ++i) {
+            int lower_idx = chunk->builtin_lowercase_indices[i];
+            if (lower_idx >= 0 && lower_idx < chunk->constants_count) {
+                builtin_map_count++;
+            }
+        }
+    }
+    fwrite(&builtin_map_count, sizeof(builtin_map_count), 1, f);
+    if (chunk->builtin_lowercase_indices) {
+        for (int i = 0; i < chunk->constants_count; ++i) {
+            int lower_idx = chunk->builtin_lowercase_indices[i];
+            if (lower_idx >= 0 && lower_idx < chunk->constants_count) {
+                fwrite(&i, sizeof(i), 1, f);
+                fwrite(&lower_idx, sizeof(lower_idx), 1, f);
+            }
+        }
     }
     int proc_count = 0;
     countProceduresRecursive(procedure_table, &proc_count);

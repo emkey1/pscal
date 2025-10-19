@@ -4,6 +4,7 @@
 #include "shell/function.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "Pascal/globals.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,34 @@ static int addStringConstant(BytecodeChunk *chunk, const char *str) {
     int index = addConstantToChunk(chunk, &val);
     freeValue(&val);
     return index;
+}
+
+static int addBuiltinNameConstant(BytecodeChunk *chunk,
+                                  const char *encoded_name,
+                                  const char *canonical_hint) {
+    if (!chunk) {
+        return -1;
+    }
+    int name_index = addStringConstant(chunk, encoded_name);
+    if (name_index < 0) {
+        return name_index;
+    }
+
+    if (getBuiltinLowercaseIndex(chunk, name_index) >= 0) {
+        return name_index;
+    }
+
+    const char *lower_source = (canonical_hint && *canonical_hint) ? canonical_hint : encoded_name;
+    char lowered[MAX_SYMBOL_LENGTH];
+    strncpy(lowered, lower_source ? lower_source : "", sizeof(lowered) - 1);
+    lowered[sizeof(lowered) - 1] = '\0';
+    toLowerString(lowered);
+
+    Value lower_val = makeString(lowered);
+    int lower_index = addConstantToChunk(chunk, &lower_val);
+    freeValue(&lower_val);
+    setBuiltinLowercaseIndex(chunk, name_index, lower_index);
+    return name_index;
 }
 
 static void emitConstantOperand(BytecodeChunk *chunk, int constant_index, int line) {
@@ -492,7 +521,7 @@ static void emitCallHost(BytecodeChunk *chunk, HostFunctionID id, int line) {
 
 static void emitBuiltinProc(BytecodeChunk *chunk, const char *name, uint8_t arg_count, int line) {
     const char *canonical = shellBuiltinCanonicalName(name);
-    int name_index = addStringConstant(chunk, canonical);
+    int name_index = addBuiltinNameConstant(chunk, canonical, canonical);
     int builtin_id = shellGetBuiltinId(name);
     if (builtin_id < 0) {
         fprintf(stderr, "shell codegen warning: unknown builtin '%s'\n", name);
