@@ -230,3 +230,113 @@ stringop1.sh: string length                            63,737    588,745
 ------------------------------------------------------------------------
 * count: number of executions per second
 /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh   231.58s user 15.74s system 123% cpu 3:19.63 total
+
+Sat Oct 18 19:32:16 CEST 2025
+
+Extensive optimizations.  More to come.  See git log for details
+
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           53,206    454,806
+assign.sh: variable                                    64,963    693,520
+assign.sh: local var                                   64,828    684,776
+assign.sh: local var (typeset)                         64,836    683,142
+cmp.sh: [ ]                                            34,560    376,086
+cmp.sh: [[ ]]                                          30,458    525,369
+cmp.sh: case                                           49,936    653,437
+count.sh: posix                                        62,974    509,069
+count.sh: typeset -i                                   63,382    485,150
+count.sh: increment                                    92,117    633,618
+eval.sh: direct assign                                 37,252    326,437
+eval.sh: eval assign                                    3,270    189,990
+eval.sh: command subs                                   error      1,766
+func.sh: no func                                       95,241    640,724
+func.sh: func                                          38,533    341,664
+null.sh: blank                                         95,649      error
+null.sh: assign variable                               64,986    722,977
+null.sh: define function                               66,811    765,752
+null.sh: undefined variable                            65,096    568,330
+null.sh: : command                                     95,634    638,384
+subshell.sh: no subshell                               95,820    578,635
+subshell.sh: brace                                     48,506    579,358
+subshell.sh: subshell                                  43,945      2,008
+subshell.sh: command subs                               3,022      1,873
+subshell.sh: external command                           error        557
+stringop1.sh: string length                            63,171    592,104
+------------------------------------------------------------------------
+
+Sat Oct 18 21:51:37 CEST 2025
+o Populate a dedicated hash table for core and dynamically registered VM builtins during registry initialisation
+o Expose hashed lookup helpers so registration, handler resolution, and ID queries avoid linear scans and update VM call sites accordingly
+o Extend the CLike ExtBuiltinQuery fixture to ensure dynamically registered builtins execute successfully
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           56,538    441,955
+assign.sh: variable                                    62,744    672,985
+assign.sh: local var                                   62,679    668,205
+assign.sh: local var (typeset)                         62,761    664,372
+cmp.sh: [ ]                                            35,251    363,948
+cmp.sh: [[ ]]                                          30,702    509,603
+cmp.sh: case                                           48,628    645,718
+count.sh: posix                                        61,497    499,313
+count.sh: typeset -i                                   61,684    476,053
+count.sh: increment                                    87,612    577,543
+eval.sh: direct assign                                 36,278    318,063
+eval.sh: eval assign                                    5,530    185,007
+eval.sh: command subs                                   error      1,704
+func.sh: no func                                       92,595    626,456
+func.sh: func                                          40,096    333,968
+null.sh: blank                                         92,036      error
+null.sh: assign variable                               62,874    707,218
+null.sh: define function                               65,194    744,380
+null.sh: undefined variable                            62,751    553,028
+null.sh: : command                                     92,917    627,613
+subshell.sh: no subshell                               92,513    566,067
+subshell.sh: brace                                     51,564    563,285
+subshell.sh: subshell                                  46,608      1,962
+subshell.sh: command subs                               4,933      1,790
+subshell.sh: external command                           error        540
+stringop1.sh: string length                            61,483    577,200
+------------------------------------------------------------------------
+
+Sat Oct 18 22:05:45 CEST 2025
+o Maintain a hash table keyed by canonical builtin names alongside the existing array to avoid linear scans when registering functions
+o Update builtin helpers to query the new hash and keep isBuiltin/getBuiltinType in sync
+o Extend the Pascal scope manifest with a case-sensitive builtin regression test
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh      
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                          116,918    453,125 
+assign.sh: variable                                   144,545    693,143 
+assign.sh: local var                                  144,231    673,168 
+assign.sh: local var (typeset)                        142,966    687,199 
+cmp.sh: [ ]                                            76,582    374,593 
+cmp.sh: [[ ]]                                          58,746    525,199 
+cmp.sh: case                                          121,946    663,920 
+count.sh: posix                                       137,869    513,640 
+count.sh: typeset -i                                  137,775    491,918 
+count.sh: increment                                   198,963    632,043 
+eval.sh: direct assign                                 80,364    327,839 
+eval.sh: eval assign                                    6,521    191,919 
+eval.sh: command subs                                   error      1,796 
+func.sh: no func                                      212,971    642,455 
+func.sh: func                                          78,423    344,568 
+null.sh: blank                                        212,116      error 
+null.sh: assign variable                              146,431    727,476 
+null.sh: define function                              162,479    768,369 
+null.sh: undefined variable                           144,226    573,774 
+null.sh: : command                                    212,958    644,596 
+subshell.sh: no subshell                              213,802    585,015 
+subshell.sh: brace                                    113,699    580,889 
+subshell.sh: subshell                                 106,276      2,192 
+subshell.sh: command subs                               5,746      1,947 
+subshell.sh: external command                           error        597 
+stringop1.sh: string length                           138,867    594,724 
+------------------------------------------------------------------------
+
