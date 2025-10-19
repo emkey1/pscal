@@ -373,17 +373,21 @@ static bool gatherLoopConditionSpec(const ShellLoop *loop, LoopConditionSpec *ou
 }
 
 typedef enum {
-    LOOP_BODY_KIND_NONE = LOOP_COND_KIND_NONE,
-    LOOP_BODY_KIND_COLON = LOOP_COND_KIND_COLON,
-    LOOP_BODY_KIND_TRUE = LOOP_COND_KIND_TRUE,
-    LOOP_BODY_KIND_FALSE = LOOP_COND_KIND_FALSE,
-    LOOP_BODY_KIND_ARITH = LOOP_COND_KIND_ARITH
+    LOOP_BODY_KIND_NONE = 0,
+    LOOP_BODY_KIND_COLON,
+    LOOP_BODY_KIND_TRUE,
+    LOOP_BODY_KIND_FALSE,
+    LOOP_BODY_KIND_TEST,
+    LOOP_BODY_KIND_BRACKET,
+    LOOP_BODY_KIND_ARITH,
+    LOOP_BODY_KIND_TEST_ARITH,
+    LOOP_BODY_KIND_BRACKET_ARITH
 } LoopBodyKind;
 
 typedef struct {
     LoopBodyKind kind;
-    char **encoded_words;
-    size_t word_count;
+    char **test_words;
+    size_t test_word_count;
     char *arith_expression;
 } LoopBodySpec;
 
@@ -392,8 +396,8 @@ static void initLoopBodySpec(LoopBodySpec *spec) {
         return;
     }
     spec->kind = LOOP_BODY_KIND_NONE;
-    spec->encoded_words = NULL;
-    spec->word_count = 0;
+    spec->test_words = NULL;
+    spec->test_word_count = 0;
     spec->arith_expression = NULL;
 }
 
@@ -401,19 +405,186 @@ static void freeLoopBodySpec(LoopBodySpec *spec) {
     if (!spec) {
         return;
     }
-    if (spec->encoded_words) {
-        for (size_t i = 0; i < spec->word_count; ++i) {
-            free(spec->encoded_words[i]);
+    if (spec->test_words) {
+        for (size_t i = 0; i < spec->test_word_count; ++i) {
+            free(spec->test_words[i]);
         }
-        free(spec->encoded_words);
-        spec->encoded_words = NULL;
+        free(spec->test_words);
+        spec->test_words = NULL;
     }
-    spec->word_count = 0;
+    spec->test_word_count = 0;
     if (spec->arith_expression) {
         free(spec->arith_expression);
         spec->arith_expression = NULL;
     }
     spec->kind = LOOP_BODY_KIND_NONE;
+}
+
+typedef enum {
+    BODY_CMD_NONE = 0,
+    BODY_CMD_COLON,
+    BODY_CMD_TRUE,
+    BODY_CMD_FALSE,
+    BODY_CMD_TEST,
+    BODY_CMD_BRACKET,
+    BODY_CMD_ARITH,
+    BODY_CMD_OTHER
+} BodyCommandType;
+
+static const ShellCommand *unwrapPipelineCommand(const ShellCommand *cmd) {
+    if (!cmd || cmd->type != SHELL_COMMAND_PIPELINE || !cmd->data.pipeline) {
+        return cmd;
+    }
+    const ShellPipeline *pipeline = cmd->data.pipeline;
+    if (!pipeline || pipeline->command_count != 1 || !pipeline->commands || !pipeline->commands[0]) {
+        return cmd;
+    }
+    return pipeline->commands[0];
+}
+
+static bool captureArithmeticExpression(const ShellCommand *cmd, LoopBodySpec *spec) {
+    if (!cmd || cmd->type != SHELL_COMMAND_ARITHMETIC || !spec) {
+        return false;
+    }
+    const char *expr = cmd->data.arithmetic.expression ? cmd->data.arithmetic.expression : "";
+    spec->arith_expression = strdup(expr);
+    if (!spec->arith_expression) {
+        return false;
+    }
+    return true;
+}
+
+static bool captureTestWords(const ShellCommand *cmd, LoopBodySpec *spec) {
+    if (!cmd || cmd->type != SHELL_COMMAND_SIMPLE || !spec) {
+        return false;
+    }
+    const ShellWordArray *words = &cmd->data.simple.words;
+    size_t count = words->count;
+    if (count == 0) {
+        return false;
+    }
+    char **encoded = (char **)calloc(count, sizeof(char *));
+    if (!encoded) {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        encoded[i] = encodeWord(words->items[i]);
+        if (!encoded[i]) {
+            for (size_t j = 0; j < i; ++j) {
+                free(encoded[j]);
+            }
+            free(encoded);
+            return false;
+        }
+    }
+    spec->test_words = encoded;
+    spec->test_word_count = count;
+    return true;
+}
+
+static BodyCommandType classifyBodyCommand(const ShellCommand *cmd) {
+    if (!cmd) {
+        return BODY_CMD_NONE;
+    }
+    if (cmd->exec.runs_in_background || cmd->exec.is_async_parent) {
+        return BODY_CMD_OTHER;
+    }
+    switch (cmd->type) {
+        case SHELL_COMMAND_SIMPLE: {
+            const ShellWordArray *words = &cmd->data.simple.words;
+            const ShellRedirectionArray *redirs = &cmd->data.simple.redirections;
+            if (redirs->count > 0) {
+                return BODY_CMD_OTHER;
+            }
+            if (words->count == 0) {
+                return BODY_CMD_NONE;
+            }
+            const ShellWord *first = words->items[0];
+            if (!wordIsLiteralCommand(first) || !first->text) {
+                return BODY_CMD_OTHER;
+            }
+            const char *text = first->text;
+            if (strcmp(text, ":") == 0) {
+                return BODY_CMD_COLON;
+            }
+            if (strcmp(text, "true") == 0) {
+                return BODY_CMD_TRUE;
+            }
+            if (strcmp(text, "false") == 0) {
+                return BODY_CMD_FALSE;
+            }
+            if (strcmp(text, "test") == 0) {
+                return BODY_CMD_TEST;
+            }
+            if (strcmp(text, "[") == 0) {
+                if (words->count < 2) {
+                    return BODY_CMD_OTHER;
+                }
+                const ShellWord *last = words->items[words->count - 1];
+                if (!last || !last->text || strcmp(last->text, "]") != 0 || !wordIsLiteralCommand(last)) {
+                    return BODY_CMD_OTHER;
+                }
+                return BODY_CMD_BRACKET;
+            }
+            if (strcmp(text, "[[") == 0) {
+                if (words->count < 2) {
+                    return BODY_CMD_OTHER;
+                }
+                const ShellWord *last = words->items[words->count - 1];
+                if (!last || !last->text || strcmp(last->text, "]]") != 0 || !wordIsLiteralCommand(last)) {
+                    return BODY_CMD_OTHER;
+                }
+                return BODY_CMD_BRACKET;
+            }
+            return BODY_CMD_OTHER;
+        }
+        case SHELL_COMMAND_ARITHMETIC: {
+            const ShellRedirectionArray *redirs = &cmd->data.arithmetic.redirections;
+            if (redirs->count > 0) {
+                return BODY_CMD_OTHER;
+            }
+            return BODY_CMD_ARITH;
+        }
+        default:
+            return BODY_CMD_OTHER;
+    }
+}
+
+static bool populateSingleBodySpec(BodyCommandType type, const ShellCommand *cmd, LoopBodySpec *spec) {
+    switch (type) {
+        case BODY_CMD_COLON:
+            spec->kind = LOOP_BODY_KIND_COLON;
+            return true;
+        case BODY_CMD_TRUE:
+            spec->kind = LOOP_BODY_KIND_TRUE;
+            return true;
+        case BODY_CMD_FALSE:
+            spec->kind = LOOP_BODY_KIND_FALSE;
+            return true;
+        case BODY_CMD_TEST:
+            if (!captureTestWords(cmd, spec)) {
+                return false;
+            }
+            spec->kind = LOOP_BODY_KIND_TEST;
+            return true;
+        case BODY_CMD_BRACKET:
+            if (!captureTestWords(cmd, spec)) {
+                return false;
+            }
+            spec->kind = LOOP_BODY_KIND_BRACKET;
+            return true;
+        case BODY_CMD_ARITH:
+            if (!captureArithmeticExpression(cmd, spec)) {
+                return false;
+            }
+            spec->kind = LOOP_BODY_KIND_ARITH;
+            return true;
+        case BODY_CMD_NONE:
+            spec->kind = LOOP_BODY_KIND_COLON;
+            return true;
+        default:
+            return false;
+    }
 }
 
 static bool gatherLoopBodySpec(const ShellLoop *loop, LoopBodySpec *out_spec) {
@@ -428,139 +599,103 @@ static bool gatherLoopBodySpec(const ShellLoop *loop, LoopBodySpec *out_spec) {
         return true;
     }
 
-    const ShellCommand *cmd = NULL;
-    size_t meaningful = 0;
+    typedef struct {
+        BodyCommandType type;
+        const ShellCommand *cmd;
+    } BodyComponent;
+
+    BodyComponent components[3];
+    size_t component_count = 0;
+
     for (size_t i = 0; i < body->commands.count; ++i) {
         const ShellCommand *candidate = body->commands.items[i];
         if (!candidate) {
             continue;
         }
-        if (candidate->type == SHELL_COMMAND_SIMPLE) {
-            const ShellWordArray *words = &candidate->data.simple.words;
-            const ShellRedirectionArray *redirs = &candidate->data.simple.redirections;
-            if (words->count == 0 && redirs->count == 0) {
-                continue;
-            }
+        if (candidate->exec.runs_in_background || candidate->exec.is_async_parent) {
+            return false;
         }
-        meaningful++;
-        cmd = candidate;
-        if (meaningful > 1) {
+        const ShellCommand *unwrapped = unwrapPipelineCommand(candidate);
+        BodyCommandType type = classifyBodyCommand(unwrapped);
+        if (type == BODY_CMD_NONE) {
+            continue;
+        }
+        if (type == BODY_CMD_OTHER) {
+            return false;
+        }
+        components[component_count].type = type;
+        components[component_count].cmd = unwrapped;
+        component_count++;
+        if (component_count > 2) {
             return false;
         }
     }
 
-    if (meaningful == 0) {
+    if (component_count == 0) {
         out_spec->kind = LOOP_BODY_KIND_COLON;
         return true;
     }
 
-    if (!cmd) {
-        return false;
-    }
-    if (cmd->exec.runs_in_background || cmd->exec.is_async_parent) {
-        return false;
-    }
-
-    if (cmd->type == SHELL_COMMAND_PIPELINE && cmd->data.pipeline && cmd->data.pipeline->command_count == 1) {
-        const ShellPipeline *pipeline = cmd->data.pipeline;
-        if (pipeline && pipeline->commands && pipeline->commands[0]) {
-            cmd = pipeline->commands[0];
-        }
-    }
-
-    switch (cmd->type) {
-        case SHELL_COMMAND_SIMPLE: {
-            const ShellWordArray *words = &cmd->data.simple.words;
-            const ShellRedirectionArray *redirs = &cmd->data.simple.redirections;
-            if (redirs->count > 0) {
-                return false;
-            }
-            if (words->count == 0) {
-                out_spec->kind = LOOP_BODY_KIND_COLON;
-                return true;
-            }
-            if (words->count != 1) {
-                const ShellWord *first = words->items[0];
-                if (!wordIsLiteralCommand(first)) {
-                    return false;
-                }
-                const char *text = first->text ? first->text : "";
-                if (strcmp(text, "test") == 0 || strcmp(text, "[") == 0) {
-                    if (strcmp(text, "[") == 0) {
-                        if (words->count < 2) {
-                            return false;
-                        }
-                        const ShellWord *last = words->items[words->count - 1];
-                        if (!last || !last->text || strcmp(last->text, "]") != 0) {
-                            return false;
-                        }
-                        if (!wordIsLiteralCommand(last)) {
-                            return false;
-                        }
-                        out_spec->kind = LOOP_BODY_KIND_BRACKET;
-                    } else {
-                        if (words->count > 4) {
-                            return false;
-                        }
-                        out_spec->kind = LOOP_BODY_KIND_TEST;
-                    }
-                    char **encoded = (char **)calloc(words->count, sizeof(char *));
-                    if (!encoded) {
-                        out_spec->kind = LOOP_BODY_KIND_NONE;
-                        return false;
-                    }
-                    for (size_t i = 0; i < words->count; ++i) {
-                        encoded[i] = encodeWord(words->items[i]);
-                        if (!encoded[i]) {
-                            for (size_t j = 0; j < i; ++j) {
-                                free(encoded[j]);
-                            }
-                            free(encoded);
-                            out_spec->kind = LOOP_BODY_KIND_NONE;
-                            return false;
-                        }
-                    }
-                    out_spec->encoded_words = encoded;
-                    out_spec->word_count = words->count;
-                    return true;
-                }
-                return false;
-            }
-            const ShellWord *word = words->items[0];
-            if (!wordIsLiteralCommand(word)) {
-                return false;
-            }
-            const char *text = word->text ? word->text : "";
-            if (strcmp(text, ":") == 0) {
-                out_spec->kind = LOOP_BODY_KIND_COLON;
-                return true;
-            }
-            if (strcmp(text, "true") == 0) {
-                out_spec->kind = LOOP_BODY_KIND_TRUE;
-                return true;
-            }
-            if (strcmp(text, "false") == 0) {
-                out_spec->kind = LOOP_BODY_KIND_FALSE;
-                return true;
-            }
+    if (component_count == 1) {
+        if (!populateSingleBodySpec(components[0].type, components[0].cmd, out_spec)) {
+            freeLoopBodySpec(out_spec);
+            initLoopBodySpec(out_spec);
             return false;
         }
-        case SHELL_COMMAND_ARITHMETIC: {
-            const ShellRedirectionArray *redirs = &cmd->data.arithmetic.redirections;
-            if (redirs->count > 0) {
-                return false;
-            }
-            const char *expr = cmd->data.arithmetic.expression ? cmd->data.arithmetic.expression : "";
-            out_spec->arith_expression = strdup(expr);
-            if (!out_spec->arith_expression) {
-                return false;
-            }
-            out_spec->kind = LOOP_BODY_KIND_ARITH;
-            return true;
-        }
-        default:
-            return false;
+        return true;
     }
+
+    BodyCommandType firstType = components[0].type;
+    BodyCommandType secondType = components[1].type;
+
+    if (firstType == BODY_CMD_COLON || firstType == BODY_CMD_TRUE) {
+        bool ok = populateSingleBodySpec(secondType, components[1].cmd, out_spec);
+        if (!ok) {
+            freeLoopBodySpec(out_spec);
+            initLoopBodySpec(out_spec);
+        }
+        return ok;
+    }
+
+    if (firstType == BODY_CMD_ARITH && (secondType == BODY_CMD_COLON || secondType == BODY_CMD_TRUE)) {
+        bool ok = populateSingleBodySpec(firstType, components[0].cmd, out_spec);
+        if (!ok) {
+            freeLoopBodySpec(out_spec);
+            initLoopBodySpec(out_spec);
+        }
+        return ok;
+    }
+
+    if ((firstType == BODY_CMD_TEST || firstType == BODY_CMD_BRACKET) && secondType == BODY_CMD_ARITH) {
+        if (!captureTestWords(components[0].cmd, out_spec)) {
+            return false;
+        }
+        if (!captureArithmeticExpression(components[1].cmd, out_spec)) {
+            freeLoopBodySpec(out_spec);
+            initLoopBodySpec(out_spec);
+            return false;
+        }
+        out_spec->kind = (firstType == BODY_CMD_TEST) ? LOOP_BODY_KIND_TEST_ARITH : LOOP_BODY_KIND_BRACKET_ARITH;
+        return true;
+    }
+
+    if (firstType == BODY_CMD_ARITH && (secondType == BODY_CMD_COLON || secondType == BODY_CMD_TRUE)) {
+        bool ok = populateSingleBodySpec(firstType, components[0].cmd, out_spec);
+        if (!ok) {
+            freeLoopBodySpec(out_spec);
+            initLoopBodySpec(out_spec);
+        }
+        return ok;
+    }
+
+    if ((firstType == BODY_CMD_COLON || firstType == BODY_CMD_TRUE) && (secondType == BODY_CMD_COLON || secondType == BODY_CMD_TRUE)) {
+        out_spec->kind = LOOP_BODY_KIND_COLON;
+        return true;
+    }
+
+    freeLoopBodySpec(out_spec);
+    initLoopBodySpec(out_spec);
+    return false;
 }
 
 static void emitPushInt(BytecodeChunk *chunk, int value, int line) {
@@ -946,25 +1081,38 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     initLoopBodySpec(&body_spec);
     bool body_fast = false;
     size_t body_payload_count = 0;
+    size_t body_expression_count = 0;
     if (!isFor && !isCStyle && gatherLoopBodySpec(loop, &body_spec)) {
         if (body_spec.kind != LOOP_BODY_KIND_NONE) {
             body_fast = true;
-            if (body_spec.kind == LOOP_BODY_KIND_ARITH) {
-                body_payload_count = 1;
-            } else if (body_spec.kind == LOOP_BODY_KIND_TEST || body_spec.kind == LOOP_BODY_KIND_BRACKET) {
-                body_payload_count = body_spec.word_count;
+            switch (body_spec.kind) {
+                case LOOP_BODY_KIND_ARITH:
+                    body_expression_count = 1;
+                    break;
+                case LOOP_BODY_KIND_TEST:
+                case LOOP_BODY_KIND_BRACKET:
+                    body_payload_count = body_spec.test_word_count;
+                    break;
+                case LOOP_BODY_KIND_TEST_ARITH:
+                case LOOP_BODY_KIND_BRACKET_ARITH:
+                    body_payload_count = body_spec.test_word_count;
+                    body_expression_count = 1;
+                    break;
+                default:
+                    break;
             }
         }
     }
 
     if (!isFor && !isCStyle) {
-        size_t projected = 1 + cond_payload_count + body_payload_count + redir_count;
+        size_t projected = 1 + cond_payload_count + body_payload_count + body_expression_count + redir_count;
         if (projected > 255) {
-            if (body_fast && body_payload_count > 0) {
+            if (body_fast && (body_payload_count + body_expression_count) > 0) {
                 body_fast = false;
                 body_payload_count = 0;
+                body_expression_count = 0;
             }
-            projected = 1 + cond_payload_count + body_payload_count + redir_count;
+            projected = 1 + cond_payload_count + body_payload_count + body_expression_count + redir_count;
             if (projected > 255 && cond_fast && cond_payload_count > 0) {
                 cond_fast = false;
                 cond_payload_count = 0;
@@ -978,6 +1126,11 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     size_t cond_words_meta = cond_fast ? cond_payload_count : 0;
     int body_kind_meta = body_fast ? body_spec.kind : LOOP_BODY_KIND_NONE;
     size_t body_words_meta = body_fast ? body_payload_count : 0;
+
+    if (!body_fast) {
+        body_payload_count = 0;
+        body_expression_count = 0;
+    }
 
     char meta[192];
     if (isFor) {
@@ -1032,26 +1185,31 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
         }
     }
     if (body_fast) {
-        if (body_spec.kind == LOOP_BODY_KIND_ARITH) {
+        if (body_words_meta > 0) {
+            for (size_t i = 0; i < body_spec.test_word_count; ++i) {
+                if (arg_count >= 255) {
+                    body_fast = false;
+                    break;
+                }
+                const char *encoded = body_spec.test_words[i] ? body_spec.test_words[i] : "";
+                emitPushString(chunk, encoded, line);
+                arg_count++;
+            }
+        }
+        if (body_fast && body_expression_count > 0) {
             const char *expr = body_spec.arith_expression ? body_spec.arith_expression : "";
             emitPushString(chunk, expr, line);
             if (arg_count < 255) {
                 arg_count++;
             } else {
                 body_fast = false;
-                body_payload_count = 0;
             }
-        } else if (body_spec.kind == LOOP_BODY_KIND_TEST || body_spec.kind == LOOP_BODY_KIND_BRACKET) {
-            for (size_t i = 0; i < body_spec.word_count; ++i) {
-                if (arg_count >= 255) {
-                    body_fast = false;
-                    body_payload_count = 0;
-                    break;
-                }
-                const char *encoded = body_spec.encoded_words[i] ? body_spec.encoded_words[i] : "";
-                emitPushString(chunk, encoded, line);
-                arg_count++;
-            }
+        }
+        if (!body_fast) {
+            body_kind_meta = LOOP_BODY_KIND_NONE;
+            body_words_meta = 0;
+            body_payload_count = 0;
+            body_expression_count = 0;
         }
     }
     if (isFor) {
@@ -1114,10 +1272,17 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
 
     int conditionStart = chunk->count;
     int exitJump = -1;
+    bool fusedLoop = false;
 
     bool usesLoopReady = isFor || isCStyle;
     if (usesLoopReady) {
         emitCallHost(chunk, HOST_FN_SHELL_LOOP_IS_READY, line);
+        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+        exitJump = chunk->count;
+        emitShort(chunk, 0xFFFF, line);
+    } else if (cond_fast && body_fast && cond_kind_meta != LOOP_COND_KIND_NONE) {
+        fusedLoop = true;
+        emitCallHost(chunk, HOST_FN_SHELL_LOOP_CHECK_BODY, line);
         writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
         exitJump = chunk->count;
         emitShort(chunk, 0xFFFF, line);
@@ -1144,17 +1309,19 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     }
 
     int exitJump2 = -1;
-    if (body_fast) {
-        emitCallHost(chunk, HOST_FN_SHELL_LOOP_EXEC_BODY, line);
-        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-        exitJump2 = chunk->count;
-        emitShort(chunk, 0xFFFF, line);
-    } else {
-        compileProgram(chunk, loop->body);
-        emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
-        writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
-        exitJump2 = chunk->count;
-        emitShort(chunk, 0xFFFF, line);
+    if (!fusedLoop) {
+        if (body_fast) {
+            emitCallHost(chunk, HOST_FN_SHELL_LOOP_EXEC_BODY, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            exitJump2 = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
+        } else {
+            compileProgram(chunk, loop->body);
+            emitCallHost(chunk, HOST_FN_SHELL_LOOP_ADVANCE, line);
+            writeBytecodeChunk(chunk, JUMP_IF_FALSE, line);
+            exitJump2 = chunk->count;
+            emitShort(chunk, 0xFFFF, line);
+        }
     }
 
     writeBytecodeChunk(chunk, JUMP, line);

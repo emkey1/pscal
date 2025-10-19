@@ -922,6 +922,18 @@ typedef enum {
     SHELL_LOOP_CONDITION_ARITH = 6
 } ShellLoopConditionKind;
 
+typedef enum {
+    SHELL_LOOP_BODY_KIND_NONE = 0,
+    SHELL_LOOP_BODY_KIND_COLON,
+    SHELL_LOOP_BODY_KIND_TRUE,
+    SHELL_LOOP_BODY_KIND_FALSE,
+    SHELL_LOOP_BODY_KIND_TEST,
+    SHELL_LOOP_BODY_KIND_BRACKET,
+    SHELL_LOOP_BODY_KIND_ARITH,
+    SHELL_LOOP_BODY_KIND_TEST_ARITH,
+    SHELL_LOOP_BODY_KIND_BRACKET_ARITH
+} ShellLoopBodyKind;
+
 typedef struct {
     char *name;
     char *previous_value;
@@ -1256,7 +1268,7 @@ typedef struct {
     char **cond_words;
     size_t cond_word_count;
     char *cond_arith_expression;
-    ShellLoopConditionKind body_kind;
+    ShellLoopBodyKind body_kind;
     char **body_words;
     size_t body_word_count;
     char *body_arith_expression;
@@ -2370,7 +2382,7 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
         free(frame->cond_arith_expression);
         frame->cond_arith_expression = NULL;
     }
-    frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+    frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
     if (frame->body_words) {
         for (size_t i = 0; i < frame->body_word_count; ++i) {
             free(frame->body_words[i]);
@@ -3104,7 +3116,7 @@ static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     frame.cond_words = NULL;
     frame.cond_word_count = 0;
     frame.cond_arith_expression = NULL;
-    frame.body_kind = SHELL_LOOP_CONDITION_NONE;
+    frame.body_kind = SHELL_LOOP_BODY_KIND_NONE;
     frame.body_words = NULL;
     frame.body_word_count = 0;
     frame.body_arith_expression = NULL;

@@ -184,6 +184,7 @@ Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellLoopAdvance(struct VM_s* vm);
 Value vmHostShellLoopCheckCondition(struct VM_s* vm);
 Value vmHostShellLoopExecuteBody(struct VM_s* vm);
+Value vmHostShellLoopCheckBody(struct VM_s* vm);
 Value vmHostShellLoopIsReady(struct VM_s* vm);
 Value vmHostShellPollJobs(struct VM_s* vm);
 bool shellBuiltinTestFastEval(const char **argv, int argc, bool is_bracket, bool *out_result);

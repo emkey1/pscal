@@ -704,8 +704,6 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
             }
         free(copy);
     }
-    (void)body_kind_value;
-    (void)body_payload_count;
     }
     if (kind != SHELL_LOOP_KIND_FOR && until_flag) {
         kind = SHELL_LOOP_KIND_UNTIL;
@@ -736,17 +734,36 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
         frame->cond_kind = SHELL_LOOP_CONDITION_NONE;
     }
 
-    if (body_kind_value < SHELL_LOOP_CONDITION_NONE ||
-        body_kind_value > SHELL_LOOP_CONDITION_ARITH) {
-        body_kind_value = SHELL_LOOP_CONDITION_NONE;
+    if (body_kind_value < SHELL_LOOP_BODY_KIND_NONE ||
+        body_kind_value > SHELL_LOOP_BODY_KIND_BRACKET_ARITH) {
+        body_kind_value = SHELL_LOOP_BODY_KIND_NONE;
     }
-    frame->body_kind = (ShellLoopConditionKind)body_kind_value;
-    if (frame->body_kind == SHELL_LOOP_CONDITION_ARITH && body_payload_count == 0) {
-        frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+    frame->body_kind = (ShellLoopBodyKind)body_kind_value;
+    size_t body_expression_count = 0;
+    switch (frame->body_kind) {
+        case SHELL_LOOP_BODY_KIND_ARITH:
+            body_expression_count = 1;
+            break;
+        case SHELL_LOOP_BODY_KIND_TEST:
+        case SHELL_LOOP_BODY_KIND_BRACKET:
+            if (body_payload_count == 0) {
+                frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+            }
+            break;
+        case SHELL_LOOP_BODY_KIND_TEST_ARITH:
+        case SHELL_LOOP_BODY_KIND_BRACKET_ARITH:
+            if (body_payload_count == 0) {
+                frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+            } else {
+                body_expression_count = 1;
+            }
+            break;
+        default:
+            break;
     }
-    if (frame->body_kind == SHELL_LOOP_CONDITION_TEST ||
-        frame->body_kind == SHELL_LOOP_CONDITION_BRACKET) {
-        frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+    if (frame->body_kind == SHELL_LOOP_BODY_KIND_NONE) {
+        body_payload_count = 0;
+        body_expression_count = 0;
     }
 
     ShellCommand redir_cmd;
@@ -757,7 +774,7 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     bool ok = true;
 
     int payload_total = (arg_count > 0) ? arg_count - 1 : 0;
-    size_t meta_payload = condition_payload_count + body_payload_count;
+    size_t meta_payload = condition_payload_count + body_payload_count + body_expression_count;
     if ((size_t)payload_total < redir_count + meta_payload) {
         runtimeError(vm, "shell loop: redirection metadata mismatch");
         ok = false;
@@ -776,6 +793,8 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
     payload_cursor += (int)condition_payload_count;
     int body_start_index = payload_cursor;
     payload_cursor += (int)body_payload_count;
+    int body_expression_index = (body_expression_count > 0) ? payload_cursor : -1;
+    payload_cursor += (int)body_expression_count;
     int redir_start_index = arg_count - (int)redir_count;
     if (redir_start_index < payload_cursor) {
         redir_start_index = payload_cursor;
@@ -800,6 +819,8 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                 ok = false;
             }
         }
+
+        payload_cursor++;
 
         size_t value_start_index = (size_t)payload_cursor;
         size_t value_count = 0;
@@ -1017,28 +1038,36 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                 }
             }
         }
-        if (ok && frame->body_kind == SHELL_LOOP_CONDITION_ARITH) {
-            if (body_payload_count == 0 || body_start_index >= arg_count) {
-                frame->body_kind = SHELL_LOOP_CONDITION_NONE;
-            } else {
-                const Value *entry = &args[body_start_index];
-                const char *expr = (entry->type == TYPE_STRING && entry->s_val) ? entry->s_val : "";
-                frame->body_arith_expression = strdup(expr);
-                if (!frame->body_arith_expression) {
-                    ok = false;
-                    frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+        if (ok) {
+            switch (frame->body_kind) {
+                case SHELL_LOOP_BODY_KIND_ARITH: {
+                    if (body_expression_count == 0 || body_expression_index < 0 || body_expression_index >= redir_start_index) {
+                        frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                    } else {
+                        const Value *entry = &args[body_expression_index];
+                        const char *expr = (entry->type == TYPE_STRING && entry->s_val) ? entry->s_val : "";
+                        frame->body_arith_expression = strdup(expr);
+                        if (!frame->body_arith_expression) {
+                            ok = false;
+                            frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                        }
+                    }
+                    break;
                 }
-            }
-        } else if (ok && (frame->body_kind == SHELL_LOOP_CONDITION_TEST ||
-                           frame->body_kind == SHELL_LOOP_CONDITION_BRACKET)) {
-            if (body_payload_count == 0 || body_start_index + (int)body_payload_count > redir_start_index) {
-                frame->body_kind = SHELL_LOOP_CONDITION_NONE;
-            } else {
-                frame->body_words = (char **)calloc(body_payload_count, sizeof(char *));
-                if (!frame->body_words) {
-                    frame->body_kind = SHELL_LOOP_CONDITION_NONE;
-                    ok = false;
-                } else {
+                case SHELL_LOOP_BODY_KIND_TEST:
+                case SHELL_LOOP_BODY_KIND_BRACKET:
+                case SHELL_LOOP_BODY_KIND_TEST_ARITH:
+                case SHELL_LOOP_BODY_KIND_BRACKET_ARITH: {
+                    if (body_payload_count == 0 || body_start_index + (int)body_payload_count > redir_start_index) {
+                        frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                        break;
+                    }
+                    frame->body_words = (char **)calloc(body_payload_count, sizeof(char *));
+                    if (!frame->body_words) {
+                        frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                        ok = false;
+                        break;
+                    }
                     frame->body_word_count = body_payload_count;
                     for (size_t i = 0; i < body_payload_count; ++i) {
                         const Value *entry = &args[body_start_index + (int)i];
@@ -1046,7 +1075,7 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                         frame->body_words[i] = strdup(spec);
                         if (!frame->body_words[i]) {
                             ok = false;
-                            frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+                            frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
                             for (size_t j = 0; j < i; ++j) {
                                 free(frame->body_words[j]);
                             }
@@ -1056,12 +1085,41 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                             break;
                         }
                     }
+                    if (!ok) {
+                        break;
+                    }
+                    if (frame->body_kind == SHELL_LOOP_BODY_KIND_TEST_ARITH ||
+                        frame->body_kind == SHELL_LOOP_BODY_KIND_BRACKET_ARITH) {
+                        if (body_expression_count == 0 || body_expression_index < 0 || body_expression_index >= redir_start_index) {
+                            frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                            break;
+                        }
+                        const Value *entry = &args[body_expression_index];
+                        const char *expr = (entry->type == TYPE_STRING && entry->s_val) ? entry->s_val : "";
+                        frame->body_arith_expression = strdup(expr);
+                        if (!frame->body_arith_expression) {
+                            ok = false;
+                            frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                        }
+                    }
+                    break;
                 }
+                case SHELL_LOOP_BODY_KIND_COLON:
+                case SHELL_LOOP_BODY_KIND_TRUE:
+                case SHELL_LOOP_BODY_KIND_FALSE:
+                case SHELL_LOOP_BODY_KIND_NONE:
+                default:
+                    if (body_payload_count != 0 || body_expression_count != 0) {
+                        frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+                    }
+                    break;
             }
-        } else if (frame->body_kind != SHELL_LOOP_CONDITION_NONE) {
-            if (body_payload_count != 0) {
-                frame->body_kind = SHELL_LOOP_CONDITION_NONE;
-            }
+        } else {
+            frame->body_kind = SHELL_LOOP_BODY_KIND_NONE;
+        }
+        if (frame->body_kind == SHELL_LOOP_BODY_KIND_NONE) {
+            body_payload_count = 0;
+            body_expression_count = 0;
         }
         if (payload_without_redirs > 0) {
             runtimeError(vm, "shell loop: unexpected arguments");
@@ -8267,6 +8325,97 @@ static bool shellLoopExpandEncodedWords(const char *const *encoded_words,
     return true;
 }
 
+static int shellLoopEvaluateTestWordsEncoded(char **encoded_words,
+                                             size_t word_count,
+                                             bool is_bracket) {
+    char **words = NULL;
+    size_t expanded = 0;
+    int status = 1;
+    if (encoded_words &&
+        shellLoopExpandEncodedWords((const char *const *)encoded_words,
+                                    word_count,
+                                    &words,
+                                    &expanded) &&
+        expanded >= 1) {
+        const char **argv = (const char **)((expanded > 1) ? &words[1] : NULL);
+        int argc = (int)((expanded > 1) ? (expanded - 1) : 0);
+        bool result = false;
+        if (shellBuiltinTestFastEval(argv, argc, is_bracket, &result)) {
+            status = result ? 0 : 1;
+        }
+    }
+    shellLoopFreeWordList(words, expanded);
+    return status;
+}
+
+static int shellLoopEvaluateArithmeticExpression(const char *expression) {
+    int arith_status = 1;
+    if (expression && shellBuiltinArithmeticFastEval(expression, &arith_status)) {
+        return arith_status;
+    }
+    return arith_status;
+}
+
+static bool shellLoopEvaluateConditionSimple(ShellLoopFrame *frame, int *status_out) {
+    int status = 1;
+    switch (frame->cond_kind) {
+        case SHELL_LOOP_CONDITION_TEST:
+        case SHELL_LOOP_CONDITION_BRACKET:
+            status = shellLoopEvaluateTestWordsEncoded(frame->cond_words,
+                                                       frame->cond_word_count,
+                                                       frame->cond_kind == SHELL_LOOP_CONDITION_BRACKET);
+            break;
+        case SHELL_LOOP_CONDITION_COLON:
+        case SHELL_LOOP_CONDITION_TRUE:
+            status = 0;
+            break;
+        case SHELL_LOOP_CONDITION_FALSE:
+            status = 1;
+            break;
+        case SHELL_LOOP_CONDITION_ARITH:
+            status = shellLoopEvaluateArithmeticExpression(frame->cond_arith_expression);
+            break;
+        case SHELL_LOOP_CONDITION_NONE:
+        default:
+            status = 1;
+            break;
+    }
+    if (status_out) {
+        *status_out = status;
+    }
+    bool ready = (status == 0);
+    if (frame->kind == SHELL_LOOP_KIND_UNTIL) {
+        ready = !ready;
+    }
+    return ready;
+}
+
+static int shellLoopExecuteBodySimple(ShellLoopFrame *frame) {
+    switch (frame->body_kind) {
+        case SHELL_LOOP_BODY_KIND_NONE:
+        case SHELL_LOOP_BODY_KIND_COLON:
+        case SHELL_LOOP_BODY_KIND_TRUE:
+            return 0;
+        case SHELL_LOOP_BODY_KIND_FALSE:
+            return 1;
+        case SHELL_LOOP_BODY_KIND_TEST:
+        case SHELL_LOOP_BODY_KIND_BRACKET:
+            return shellLoopEvaluateTestWordsEncoded(frame->body_words,
+                                                     frame->body_word_count,
+                                                     frame->body_kind == SHELL_LOOP_BODY_KIND_BRACKET);
+        case SHELL_LOOP_BODY_KIND_ARITH:
+            return shellLoopEvaluateArithmeticExpression(frame->body_arith_expression);
+        case SHELL_LOOP_BODY_KIND_TEST_ARITH:
+        case SHELL_LOOP_BODY_KIND_BRACKET_ARITH:
+            (void)shellLoopEvaluateTestWordsEncoded(frame->body_words,
+                                                    frame->body_word_count,
+                                                    frame->body_kind == SHELL_LOOP_BODY_KIND_BRACKET_ARITH);
+            return shellLoopEvaluateArithmeticExpression(frame->body_arith_expression);
+        default:
+            return 0;
+    }
+}
+
 Value vmHostShellLoopCheckCondition(VM *vm) {
     (void)vm;
     shellRuntimeProcessPendingSignals();
@@ -8281,56 +8430,9 @@ Value vmHostShellLoopCheckCondition(VM *vm) {
     shellRuntimeEnterCondition();
 
     int status = 1;
-    bool ready = false;
-
-    switch (frame->cond_kind) {
-        case SHELL_LOOP_CONDITION_TEST:
-        case SHELL_LOOP_CONDITION_BRACKET: {
-            char **words = NULL;
-            size_t word_count = 0;
-            if (frame->cond_words &&
-                shellLoopExpandEncodedWords((const char *const *)frame->cond_words,
-                                            frame->cond_word_count,
-                                            &words,
-                                            &word_count) &&
-                word_count >= 1) {
-                const char **argv = (const char **)((word_count > 1) ? &words[1] : NULL);
-                int argc = (int)((word_count > 1) ? (word_count - 1) : 0);
-                bool is_bracket = (frame->cond_kind == SHELL_LOOP_CONDITION_BRACKET);
-                bool result = false;
-                if (shellBuiltinTestFastEval(argv, argc, is_bracket, &result)) {
-                    status = result ? 0 : 1;
-                }
-            }
-            shellLoopFreeWordList(words, word_count);
-            break;
-        }
-        case SHELL_LOOP_CONDITION_COLON:
-        case SHELL_LOOP_CONDITION_TRUE:
-            status = 0;
-            break;
-        case SHELL_LOOP_CONDITION_FALSE:
-            status = 1;
-            break;
-        case SHELL_LOOP_CONDITION_ARITH: {
-            int arith_status = 1;
-            if (frame->cond_arith_expression &&
-                shellBuiltinArithmeticFastEval(frame->cond_arith_expression, &arith_status)) {
-                status = arith_status;
-            }
-            break;
-        }
-        case SHELL_LOOP_CONDITION_NONE:
-        default:
-            status = 1;
-            break;
-    }
+    bool ready = shellLoopEvaluateConditionSimple(frame, &status);
 
     shellUpdateStatus(status);
-    ready = (status == 0);
-    if (frame->kind == SHELL_LOOP_KIND_UNTIL) {
-        ready = !ready;
-    }
 
     shellRuntimeLeaveCondition();
     shellUpdateStatus(0);
@@ -8347,61 +8449,36 @@ Value vmHostShellLoopExecuteBody(VM *vm) {
         return makeBoolean(true);
     }
 
-    if (frame->body_kind == SHELL_LOOP_CONDITION_NONE) {
+    int status = shellLoopExecuteBodySimple(frame);
+    shellUpdateStatus(status);
+    Value advance = vmHostShellLoopAdvance(vm);
+    return advance;
+}
+
+Value vmHostShellLoopCheckBody(VM *vm) {
+    (void)vm;
+    shellRuntimeProcessPendingSignals();
+    ShellLoopFrame *frame = shellLoopTop();
+    if (!frame) {
+        shellRuntimeEnterCondition();
+        shellRuntimeLeaveCondition();
         shellUpdateStatus(0);
         return makeBoolean(true);
     }
 
-    int status = 0;
-    switch (frame->body_kind) {
-        case SHELL_LOOP_CONDITION_COLON:
-        case SHELL_LOOP_CONDITION_TRUE:
-            status = 0;
-            break;
-        case SHELL_LOOP_CONDITION_FALSE:
-            status = 1;
-            break;
-        case SHELL_LOOP_CONDITION_TEST:
-        case SHELL_LOOP_CONDITION_BRACKET: {
-            char **words = NULL;
-            size_t word_count = 0;
-            if (frame->body_words &&
-                shellLoopExpandEncodedWords((const char *const *)frame->body_words,
-                                            frame->body_word_count,
-                                            &words,
-                                            &word_count) &&
-                word_count >= 1) {
-                const char **argv = (const char **)((word_count > 1) ? &words[1] : NULL);
-                int argc = (int)((word_count > 1) ? (word_count - 1) : 0);
-                bool is_bracket = (frame->body_kind == SHELL_LOOP_CONDITION_BRACKET);
-                bool result = false;
-                if (shellBuiltinTestFastEval(argv, argc, is_bracket, &result)) {
-                    status = result ? 0 : 1;
-                } else {
-                    status = 1;
-                }
-            } else {
-                status = 1;
-            }
-            shellLoopFreeWordList(words, word_count);
-            break;
-        }
-        case SHELL_LOOP_CONDITION_ARITH: {
-            int arith_status = 1;
-            if (frame->body_arith_expression &&
-                shellBuiltinArithmeticFastEval(frame->body_arith_expression, &arith_status)) {
-                status = arith_status;
-            } else {
-                status = 1;
-            }
-            break;
-        }
-        default:
-            status = 0;
-            break;
+    shellRuntimeEnterCondition();
+    int cond_status = 1;
+    bool ready = shellLoopEvaluateConditionSimple(frame, &cond_status);
+    shellUpdateStatus(cond_status);
+    shellRuntimeLeaveCondition();
+    shellUpdateStatus(0);
+
+    if (!ready) {
+        return makeBoolean(false);
     }
 
-    shellUpdateStatus(status);
+    int body_status = shellLoopExecuteBodySimple(frame);
+    shellUpdateStatus(body_status);
     Value advance = vmHostShellLoopAdvance(vm);
     return advance;
 }

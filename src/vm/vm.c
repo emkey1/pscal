@@ -1691,6 +1691,10 @@ static Value vmHostShellLoopCheckConditionHost(VM* vm) {
     return vmHostShellLoopCheckCondition(vm);
 }
 
+static Value vmHostShellLoopCheckBodyHost(VM* vm) {
+    return vmHostShellLoopCheckBody(vm);
+}
+
 static Value vmHostShellLoopExecuteBodyHost(VM* vm) {
     return vmHostShellLoopExecuteBody(vm);
 }
@@ -1713,6 +1717,11 @@ static Value vmHostShellLastStatusHost(VM* vm) {
 }
 
 static Value vmHostShellLoopCheckConditionHost(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+static Value vmHostShellLoopCheckBodyHost(VM* vm) {
     (void)vm;
     return makeNil();
 }
@@ -1871,6 +1880,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
     registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_CHECK_CONDITION, vmHostShellLoopCheckConditionHost);
+    registerHostFunction(vm, HOST_FN_SHELL_LOOP_CHECK_BODY, vmHostShellLoopCheckBodyHost);
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_EXEC_BODY, vmHostShellLoopExecuteBodyHost);
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_ADVANCE, vmHostShellLoopAdvanceHost);
     registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
