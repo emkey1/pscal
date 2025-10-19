@@ -1257,6 +1257,8 @@ typedef struct {
     size_t cond_word_count;
     char *cond_arith_expression;
     ShellLoopConditionKind body_kind;
+    char **body_words;
+    size_t body_word_count;
     char *body_arith_expression;
     bool redirs_active;
     ShellRedirection *applied_redirs;
@@ -2369,6 +2371,14 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
         frame->cond_arith_expression = NULL;
     }
     frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+    if (frame->body_words) {
+        for (size_t i = 0; i < frame->body_word_count; ++i) {
+            free(frame->body_words[i]);
+        }
+        free(frame->body_words);
+        frame->body_words = NULL;
+    }
+    frame->body_word_count = 0;
     if (frame->body_arith_expression) {
         free(frame->body_arith_expression);
         frame->body_arith_expression = NULL;
@@ -3095,6 +3105,8 @@ static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     frame.cond_word_count = 0;
     frame.cond_arith_expression = NULL;
     frame.body_kind = SHELL_LOOP_CONDITION_NONE;
+    frame.body_words = NULL;
+    frame.body_word_count = 0;
     frame.body_arith_expression = NULL;
     frame.redirs_active = false;
     frame.applied_redirs = NULL;

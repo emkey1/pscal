@@ -801,7 +801,7 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
             }
         }
 
-        size_t value_start_index = (size_t)payload_cursor + 1;
+        size_t value_start_index = (size_t)payload_cursor;
         size_t value_count = 0;
         if (redir_start_index > (int)value_start_index) {
             value_count = (size_t)(redir_start_index - (int)value_start_index);
@@ -1027,6 +1027,35 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                 if (!frame->body_arith_expression) {
                     ok = false;
                     frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+                }
+            }
+        } else if (ok && (frame->body_kind == SHELL_LOOP_CONDITION_TEST ||
+                           frame->body_kind == SHELL_LOOP_CONDITION_BRACKET)) {
+            if (body_payload_count == 0 || body_start_index + (int)body_payload_count > redir_start_index) {
+                frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+            } else {
+                frame->body_words = (char **)calloc(body_payload_count, sizeof(char *));
+                if (!frame->body_words) {
+                    frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+                    ok = false;
+                } else {
+                    frame->body_word_count = body_payload_count;
+                    for (size_t i = 0; i < body_payload_count; ++i) {
+                        const Value *entry = &args[body_start_index + (int)i];
+                        const char *spec = (entry->type == TYPE_STRING && entry->s_val) ? entry->s_val : "";
+                        frame->body_words[i] = strdup(spec);
+                        if (!frame->body_words[i]) {
+                            ok = false;
+                            frame->body_kind = SHELL_LOOP_CONDITION_NONE;
+                            for (size_t j = 0; j < i; ++j) {
+                                free(frame->body_words[j]);
+                            }
+                            free(frame->body_words);
+                            frame->body_words = NULL;
+                            frame->body_word_count = 0;
+                            break;
+                        }
+                    }
                 }
             }
         } else if (frame->body_kind != SHELL_LOOP_CONDITION_NONE) {
@@ -8332,6 +8361,31 @@ Value vmHostShellLoopExecuteBody(VM *vm) {
         case SHELL_LOOP_CONDITION_FALSE:
             status = 1;
             break;
+        case SHELL_LOOP_CONDITION_TEST:
+        case SHELL_LOOP_CONDITION_BRACKET: {
+            char **words = NULL;
+            size_t word_count = 0;
+            if (frame->body_words &&
+                shellLoopExpandEncodedWords((const char *const *)frame->body_words,
+                                            frame->body_word_count,
+                                            &words,
+                                            &word_count) &&
+                word_count >= 1) {
+                const char **argv = (const char **)((word_count > 1) ? &words[1] : NULL);
+                int argc = (int)((word_count > 1) ? (word_count - 1) : 0);
+                bool is_bracket = (frame->body_kind == SHELL_LOOP_CONDITION_BRACKET);
+                bool result = false;
+                if (shellBuiltinTestFastEval(argv, argc, is_bracket, &result)) {
+                    status = result ? 0 : 1;
+                } else {
+                    status = 1;
+                }
+            } else {
+                status = 1;
+            }
+            shellLoopFreeWordList(words, word_count);
+            break;
+        }
         case SHELL_LOOP_CONDITION_ARITH: {
             int arith_status = 1;
             if (frame->body_arith_expression &&

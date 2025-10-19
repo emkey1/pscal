@@ -382,6 +382,8 @@ typedef enum {
 
 typedef struct {
     LoopBodyKind kind;
+    char **encoded_words;
+    size_t word_count;
     char *arith_expression;
 } LoopBodySpec;
 
@@ -390,6 +392,8 @@ static void initLoopBodySpec(LoopBodySpec *spec) {
         return;
     }
     spec->kind = LOOP_BODY_KIND_NONE;
+    spec->encoded_words = NULL;
+    spec->word_count = 0;
     spec->arith_expression = NULL;
 }
 
@@ -397,6 +401,14 @@ static void freeLoopBodySpec(LoopBodySpec *spec) {
     if (!spec) {
         return;
     }
+    if (spec->encoded_words) {
+        for (size_t i = 0; i < spec->word_count; ++i) {
+            free(spec->encoded_words[i]);
+        }
+        free(spec->encoded_words);
+        spec->encoded_words = NULL;
+    }
+    spec->word_count = 0;
     if (spec->arith_expression) {
         free(spec->arith_expression);
         spec->arith_expression = NULL;
@@ -468,6 +480,50 @@ static bool gatherLoopBodySpec(const ShellLoop *loop, LoopBodySpec *out_spec) {
                 return true;
             }
             if (words->count != 1) {
+                const ShellWord *first = words->items[0];
+                if (!wordIsLiteralCommand(first)) {
+                    return false;
+                }
+                const char *text = first->text ? first->text : "";
+                if (strcmp(text, "test") == 0 || strcmp(text, "[") == 0) {
+                    if (strcmp(text, "[") == 0) {
+                        if (words->count < 2) {
+                            return false;
+                        }
+                        const ShellWord *last = words->items[words->count - 1];
+                        if (!last || !last->text || strcmp(last->text, "]") != 0) {
+                            return false;
+                        }
+                        if (!wordIsLiteralCommand(last)) {
+                            return false;
+                        }
+                        out_spec->kind = LOOP_BODY_KIND_BRACKET;
+                    } else {
+                        if (words->count > 4) {
+                            return false;
+                        }
+                        out_spec->kind = LOOP_BODY_KIND_TEST;
+                    }
+                    char **encoded = (char **)calloc(words->count, sizeof(char *));
+                    if (!encoded) {
+                        out_spec->kind = LOOP_BODY_KIND_NONE;
+                        return false;
+                    }
+                    for (size_t i = 0; i < words->count; ++i) {
+                        encoded[i] = encodeWord(words->items[i]);
+                        if (!encoded[i]) {
+                            for (size_t j = 0; j < i; ++j) {
+                                free(encoded[j]);
+                            }
+                            free(encoded);
+                            out_spec->kind = LOOP_BODY_KIND_NONE;
+                            return false;
+                        }
+                    }
+                    out_spec->encoded_words = encoded;
+                    out_spec->word_count = words->count;
+                    return true;
+                }
                 return false;
             }
             const ShellWord *word = words->items[0];
@@ -895,6 +951,8 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
             body_fast = true;
             if (body_spec.kind == LOOP_BODY_KIND_ARITH) {
                 body_payload_count = 1;
+            } else if (body_spec.kind == LOOP_BODY_KIND_TEST || body_spec.kind == LOOP_BODY_KIND_BRACKET) {
+                body_payload_count = body_spec.word_count;
             }
         }
     }
@@ -982,6 +1040,17 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
             } else {
                 body_fast = false;
                 body_payload_count = 0;
+            }
+        } else if (body_spec.kind == LOOP_BODY_KIND_TEST || body_spec.kind == LOOP_BODY_KIND_BRACKET) {
+            for (size_t i = 0; i < body_spec.word_count; ++i) {
+                if (arg_count >= 255) {
+                    body_fast = false;
+                    body_payload_count = 0;
+                    break;
+                }
+                const char *encoded = body_spec.encoded_words[i] ? body_spec.encoded_words[i] : "";
+                emitPushString(chunk, encoded, line);
+                arg_count++;
             }
         }
     }
