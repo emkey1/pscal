@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/myself_keyword.rea ==
+== Disassembly: rea/myself_keyword.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -46,7 +46,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0082    | GET_INDIRECT
 0083    | PROC_CALL_INDIRECT (args=1)
 0085    0 HALT
-== End Disassembly: Tests/rea/myself_keyword.rea ==
+== End Disassembly: rea/myself_keyword.rea ==
 
 Constants (10):\n  0000: STR   "myself"
   0001: NIL

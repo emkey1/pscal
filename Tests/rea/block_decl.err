@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/block_decl.rea ==
+== Disassembly: rea/block_decl.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -19,7 +19,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0037    | SWAP
 0038    | SET_INDIRECT
 0039    0 HALT
-== End Disassembly: Tests/rea/block_decl.rea ==
+== End Disassembly: rea/block_decl.rea ==
 
 Constants (8):\n  0000: STR   "myself"
   0001: NIL

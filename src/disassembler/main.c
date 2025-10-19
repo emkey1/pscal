@@ -91,7 +91,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    disassembleBytecodeChunk(&chunk, path, procedure_table);
+    const char* disasm_name = bytecodeDisplayNameForPath(path);
+    disassembleBytecodeChunk(&chunk, disasm_name ? disasm_name : path, procedure_table);
 
     freeBytecodeChunk(&chunk);
     if (globalSymbols) freeHashTable(globalSymbols);

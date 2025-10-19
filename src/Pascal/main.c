@@ -237,7 +237,8 @@ int runProgram(const char *source, const char *programName, const char *frontend
                                 chunk.count, chunk.constants_count);
                     }
                     if (dump_bytecode_flag) {
-                        disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
+                        const char* disasm_name = programName ? bytecodeDisplayNameForPath(programName) : "CompiledChunk";
+                        disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
                         if (!dump_bytecode_only_flag) {
                             fprintf(stderr, "\n--- executing Program with VM ---\n");
                         }
@@ -249,7 +250,8 @@ int runProgram(const char *source, const char *programName, const char *frontend
                             chunk.count, chunk.constants_count);
                 }
                 if (dump_bytecode_flag) {
-                    disassembleBytecodeChunk(&chunk, programName ? programName : "CompiledChunk", procedure_table);
+                    const char* disasm_name = programName ? bytecodeDisplayNameForPath(programName) : "CompiledChunk";
+                    disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
                     if (!dump_bytecode_only_flag) {
                         fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
                     }

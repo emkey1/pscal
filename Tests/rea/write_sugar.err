@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/write_sugar.rea ==
+== Disassembly: rea/write_sugar.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -12,7 +12,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0021    | CONSTANT            7 'B'
 0023    | CALL_BUILTIN_PROC   176 'write' (2 args)
 0029    0 HALT
-== End Disassembly: Tests/rea/write_sugar.rea ==
+== End Disassembly: rea/write_sugar.rea ==
 
 Constants (8):\n  0000: STR   "myself"
   0001: NIL

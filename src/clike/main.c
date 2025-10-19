@@ -29,6 +29,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include "compiler/bytecode.h"
 #include "clike/parser.h"
 #include "clike/codegen.h"
 #include "clike/builtins.h"
@@ -305,7 +306,8 @@ int main(int argc, char **argv) {
         }
         if (dump_bytecode_flag) {
             fprintf(stderr, "--- Compiling Main Program AST to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            const char* disasm_name = path ? bytecodeDisplayNameForPath(path) : "CompiledChunk";
+            disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
             if (!dump_bytecode_only_flag) {
                 fprintf(stderr, "\n--- executing Program with VM ---\n");
             }
@@ -316,7 +318,8 @@ int main(int argc, char **argv) {
                     chunk.count, chunk.constants_count);
         }
         if (dump_bytecode_flag) {
-            disassembleBytecodeChunk(&chunk, path ? path : "CompiledChunk", procedure_table);
+            const char* disasm_name = path ? bytecodeDisplayNameForPath(path) : "CompiledChunk";
+            disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
             if (!dump_bytecode_only_flag) {
                 fprintf(stderr, "\n--- executing Program with VM (cached) ---\n");
             }

@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/printf_format.rea ==
+== Disassembly: rea/printf_format.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -11,7 +11,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0015    | CALL_HOST           3 (ID: 3)
 0017    | POP
 0018    0 HALT
-== End Disassembly: Tests/rea/printf_format.rea ==
+== End Disassembly: rea/printf_format.rea ==
 
 Constants (7):\n  0000: STR   "myself"
   0001: NIL

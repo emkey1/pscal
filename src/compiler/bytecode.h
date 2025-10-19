@@ -161,6 +161,7 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add by
 void freeBytecodeChunk(BytecodeChunk* chunk);
 int addConstantToChunk(BytecodeChunk* chunk, const Value* value); // Add a value to constant pool, return index
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
+const char* bytecodeDisplayNameForPath(const char* path);
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
 void emitInt32(BytecodeChunk* chunk, uint32_t value, int line);

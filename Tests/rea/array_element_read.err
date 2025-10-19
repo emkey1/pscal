@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/array_element_read.rea ==
+== Disassembly: rea/array_element_read.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -10,7 +10,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0024    | LOAD_ELEMENT_VALUE_CONST          1 (flat offset)
 0029    | SET_GLOBAL          7 'value'
 0031    0 HALT
-== End Disassembly: Tests/rea/array_element_read.rea ==
+== End Disassembly: rea/array_element_read.rea ==
 
 Constants (8):\n  0000: STR   "myself"
   0001: NIL

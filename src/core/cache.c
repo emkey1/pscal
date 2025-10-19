@@ -1367,6 +1367,48 @@ bool loadBytecodeFromCache(const char* source_path,
             continue;
         }
 
+        if (chunk->constants_capacity > 0) {
+            chunk->builtin_lowercase_indices = (int*)malloc(sizeof(int) * chunk->constants_capacity);
+            if (!chunk->builtin_lowercase_indices) {
+                fclose(f);
+                resetChunk(chunk, read_consts);
+                unlink(cache_path);
+                continue;
+            }
+            for (int i = 0; i < chunk->constants_capacity; ++i) {
+                chunk->builtin_lowercase_indices[i] = -1;
+            }
+        }
+
+        if (ver >= 8) {
+            int builtin_map_count = 0;
+            if (fread(&builtin_map_count, sizeof(builtin_map_count), 1, f) != 1) {
+                fclose(f);
+                resetChunk(chunk, read_consts);
+                unlink(cache_path);
+                continue;
+            }
+            for (int i = 0; i < builtin_map_count; ++i) {
+                int original_idx = 0;
+                int lower_idx = 0;
+                if (fread(&original_idx, sizeof(original_idx), 1, f) != 1 ||
+                    fread(&lower_idx, sizeof(lower_idx), 1, f) != 1) {
+                    fclose(f);
+                    resetChunk(chunk, read_consts);
+                    unlink(cache_path);
+                    candidate_ok = false;
+                    break;
+                }
+                if (chunk->builtin_lowercase_indices &&
+                    original_idx >= 0 && original_idx < chunk->constants_count) {
+                    chunk->builtin_lowercase_indices[original_idx] = lower_idx;
+                }
+            }
+            if (!candidate_ok) {
+                continue;
+            }
+        }
+
         uint64_t computed_combined = computeCombinedHash(source_hash, chunk);
         if (computed_combined != stored_combined_hash) {
             fclose(f);

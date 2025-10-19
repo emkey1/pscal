@@ -253,7 +253,8 @@ int shellRunSource(const char *source,
         }
         if (options->dump_bytecode) {
             fprintf(stderr, "--- Compiling Shell Script to Bytecode ---\n");
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
+            const char* disasm_name = path ? bytecodeDisplayNameForPath(path) : "script";
+            disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
             if (!options->dump_bytecode_only) {
                 fprintf(stderr, "\n--- executing Script with VM ---\n");
             }
@@ -264,7 +265,8 @@ int shellRunSource(const char *source,
                     chunk.count, chunk.constants_count);
         }
         if (options->dump_bytecode) {
-            disassembleBytecodeChunk(&chunk, path ? path : "script", procedure_table);
+            const char* disasm_name = path ? bytecodeDisplayNameForPath(path) : "script";
+            disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
             if (!options->dump_bytecode_only) {
                 fprintf(stderr, "\n--- executing Script with VM (cached) ---\n");
             }

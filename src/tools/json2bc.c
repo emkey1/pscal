@@ -156,7 +156,8 @@ int main(int argc, char** argv) {
     }
 
     if (dump_bc) {
-        disassembleBytecodeChunk(&chunk, in_path ? in_path : "<stdin>", procedure_table);
+        const char* disasm_name = in_path ? bytecodeDisplayNameForPath(in_path) : "<stdin>";
+        disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
         if (dump_only) {
             freeBytecodeChunk(&chunk);
             freeAST(root);

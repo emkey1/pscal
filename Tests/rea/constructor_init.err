@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/constructor_init.rea ==
+== Disassembly: rea/constructor_init.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -20,7 +20,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0029    | CALL_USER_PROC       6 'point' @0010 (2 args)
 0033    | SET_GLOBAL          3 'p'
 0035    0 HALT
-== End Disassembly: Tests/rea/constructor_init.rea ==
+== End Disassembly: rea/constructor_init.rea ==
 
 Constants (7):\n  0000: STR   "myself"
   0001: NIL

@@ -39,6 +39,36 @@ void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     initBytecodeChunk(chunk);
 }
 
+const char* bytecodeDisplayNameForPath(const char* path) {
+    if (!path) {
+        return NULL;
+    }
+
+    const char* trimmed = path;
+    const char* tests_sub = strstr(path, "/Tests/");
+    if (tests_sub) {
+        trimmed = tests_sub + 7; // skip "/Tests/"
+    } else {
+        const char* tests_back_sub = strstr(path, "\\Tests\\");
+        if (tests_back_sub) {
+            trimmed = tests_back_sub + 7; // skip "\\Tests\\"
+        } else if (strncmp(path, "Tests/", 6) == 0) {
+            trimmed = path + 6;
+        } else if (strncmp(path, "Tests\\", 6) == 0) {
+            trimmed = path + 6;
+        }
+    }
+
+    while (*trimmed == '/' || *trimmed == '\\') {
+        ++trimmed;
+    }
+
+    if (*trimmed == '\0') {
+        return path;
+    }
+    return trimmed;
+}
+
 static void* reallocate(void* pointer, size_t oldSize, size_t newSize) { // From all.txt
     (void)oldSize;
     if (newSize == 0) {
