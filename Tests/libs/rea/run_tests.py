@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -40,6 +42,95 @@ def _discover_ext_builtins(executable: Path) -> set[str]:
         if len(parts) >= 2 and parts[0] == "category":
             available.add(parts[1])
     return available
+
+
+def _capture_ext_builtin_dump(executable: Path) -> str:
+    """Return the raw ``--dump-ext-builtins`` output for *executable*."""
+
+    try:
+        proc = subprocess.run(
+            [str(executable), "--dump-ext-builtins"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ""
+    return proc.stdout
+
+
+def _parse_ext_builtin_dump(output: str) -> dict[str, object]:
+    """Parse the dump output into ordered collections for comparison."""
+
+    categories: list[str] = []
+    groups: dict[str, list[str]] = {}
+    functions: dict[tuple[str, str], list[str]] = {}
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        tag = parts[0]
+        if tag == "category" and len(parts) >= 2:
+            category = parts[1]
+            categories.append(category)
+            groups.setdefault(category, [])
+        elif tag == "group" and len(parts) >= 3:
+            category, group = parts[1], parts[2]
+            groups.setdefault(category, []).append(group)
+        elif tag == "function" and len(parts) >= 4:
+            category, group, func = parts[1], parts[2], parts[3]
+            functions.setdefault((category, group), []).append(func)
+
+    ordered_groups = {cat: tuple(groups.get(cat, [])) for cat in categories}
+    ordered_functions = {key: tuple(funcs) for key, funcs in functions.items()}
+    return {
+        "categories": tuple(categories),
+        "groups": ordered_groups,
+        "functions": ordered_functions,
+    }
+
+
+def _validate_ext_builtin_dump(executable: Path) -> bool:
+    """Verify enumeration stability and capture simple timing data."""
+
+    baseline_output = _capture_ext_builtin_dump(executable)
+    if not baseline_output:
+        return True
+
+    baseline = _parse_ext_builtin_dump(baseline_output)
+
+    # Sequential consistency: repeated runs should match exactly.
+    for attempt in range(3):
+        candidate = _parse_ext_builtin_dump(_capture_ext_builtin_dump(executable))
+        if candidate != baseline:
+            print(
+                "rea --dump-ext-builtins order changed between runs",
+                file=sys.stderr,
+            )
+            return False
+
+    # Concurrent reads should expose the same inventory and order.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(_capture_ext_builtin_dump, [executable] * 4))
+    if any(result != baseline_output for result in results):
+        print(
+            "rea --dump-ext-builtins produced inconsistent output under load",
+            file=sys.stderr,
+        )
+        return False
+
+    # Lightweight timing harness to document lookup improvements.
+    iterations = 8
+    start = time.perf_counter()
+    for _ in range(iterations):
+        _capture_ext_builtin_dump(executable)
+    elapsed = time.perf_counter() - start
+    avg_ms = (elapsed / iterations) * 1000 if iterations else 0.0
+    print(f"[rea] ext builtin dump: {iterations} runs, avg {avg_ms:.2f} ms")
+
+    return True
 
 
 def build_env(
@@ -199,6 +290,9 @@ def main() -> int:
             "a valid executable path.",
             file=sys.stderr,
         )
+        return 1
+
+    if not _validate_ext_builtin_dump(rea_bin):
         return 1
 
     server, base_url = start_server()

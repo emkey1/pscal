@@ -259,7 +259,7 @@ void vmOpcodeProfileDump(void) {
                 if (!entry->name) {
                     continue;
                 }
-                fprintf(out, "%-24s %" PRIu64 "\n", entry->name, entry->count);
+                fprintf(out, "%-24s %" PRIu64 "\n", entry->name, (uint64_t)entry->count);
                 entry->count = 0;
             }
             fprintf(out, "\n");
