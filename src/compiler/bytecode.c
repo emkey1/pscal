@@ -24,6 +24,7 @@ void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     chunk->constants_count = 0;
     chunk->constants_capacity = 0;
     chunk->constants = NULL;
+    chunk->builtin_lowercase_indices = NULL;
   //  chunk->lines = 0;
 }
 
@@ -34,7 +35,38 @@ void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
         freeValue(&chunk->constants[i]);
     }
     free(chunk->constants);
+    free(chunk->builtin_lowercase_indices);
     initBytecodeChunk(chunk);
+}
+
+const char* bytecodeDisplayNameForPath(const char* path) {
+    if (!path) {
+        return NULL;
+    }
+
+    const char* trimmed = path;
+    const char* tests_sub = strstr(path, "/Tests/");
+    if (tests_sub) {
+        trimmed = tests_sub + 7; // skip "/Tests/"
+    } else {
+        const char* tests_back_sub = strstr(path, "\\Tests\\");
+        if (tests_back_sub) {
+            trimmed = tests_back_sub + 7; // skip "\\Tests\\"
+        } else if (strncmp(path, "Tests/", 6) == 0) {
+            trimmed = path + 6;
+        } else if (strncmp(path, "Tests\\", 6) == 0) {
+            trimmed = path + 6;
+        }
+    }
+
+    while (*trimmed == '/' || *trimmed == '\\') {
+        ++trimmed;
+    }
+
+    if (*trimmed == '\0') {
+        return path;
+    }
+    return trimmed;
 }
 
 static void* reallocate(void* pointer, size_t oldSize, size_t newSize) { // From all.txt
@@ -94,14 +126,61 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
         chunk->constants = (Value*)reallocate(chunk->constants,
                                              sizeof(Value) * oldCapacity,
                                              sizeof(Value) * chunk->constants_capacity);
+        chunk->builtin_lowercase_indices = (int*)reallocate(chunk->builtin_lowercase_indices,
+                                                           sizeof(int) * oldCapacity,
+                                                           sizeof(int) * chunk->constants_capacity);
+        for (int i = oldCapacity; i < chunk->constants_capacity; ++i) {
+            chunk->builtin_lowercase_indices[i] = -1;
+        }
+    } else if (!chunk->builtin_lowercase_indices && chunk->constants_capacity > 0) {
+        chunk->builtin_lowercase_indices = (int*)reallocate(NULL,
+                                                           0,
+                                                           sizeof(int) * chunk->constants_capacity);
+        for (int i = 0; i < chunk->constants_capacity; ++i) {
+            chunk->builtin_lowercase_indices[i] = -1;
+        }
     }
-    
+
     // Perform a deep copy from the provided pointer.
-    chunk->constants[chunk->constants_count] = makeCopyOfValue(value);
+    int index = chunk->constants_count;
+    chunk->constants[index] = makeCopyOfValue(value);
+    if (chunk->builtin_lowercase_indices) {
+        chunk->builtin_lowercase_indices[index] = -1;
+    }
 
     // The function NO LONGER frees the incoming value. The caller is responsible.
-    
+
     return chunk->constants_count++;
+}
+
+void setBuiltinLowercaseIndex(BytecodeChunk* chunk, int original_idx, int lowercase_idx) {
+    if (!chunk || original_idx < 0) {
+        return;
+    }
+    if (!chunk->builtin_lowercase_indices) {
+        int capacity = chunk->constants_capacity > 0 ? chunk->constants_capacity : chunk->constants_count;
+        if (capacity <= 0) {
+            return;
+        }
+        chunk->builtin_lowercase_indices = (int*)reallocate(NULL, 0, sizeof(int) * capacity);
+        for (int i = 0; i < capacity; ++i) {
+            chunk->builtin_lowercase_indices[i] = -1;
+        }
+    }
+    if (original_idx >= chunk->constants_capacity) {
+        return;
+    }
+    chunk->builtin_lowercase_indices[original_idx] = lowercase_idx;
+}
+
+int getBuiltinLowercaseIndex(const BytecodeChunk* chunk, int original_idx) {
+    if (!chunk || !chunk->builtin_lowercase_indices) {
+        return -1;
+    }
+    if (original_idx < 0 || original_idx >= chunk->constants_count) {
+        return -1;
+    }
+    return chunk->builtin_lowercase_indices[original_idx];
 }
 
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line) { // From all.txt
@@ -782,8 +861,20 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                 AS_STRING(chunk->constants[name_index])) {
                 name = AS_STRING(chunk->constants[name_index]);
             }
-            fprintf(stderr, "%-16s %5d '%s' (%d args)\n",
-                    "CALL_BUILTIN", name_index, name, arg_count);
+            const char* lower_name = NULL;
+            int lower_idx = getBuiltinLowercaseIndex(chunk, (int)name_index);
+            if (lower_idx >= 0 && lower_idx < chunk->constants_count &&
+                chunk->constants[lower_idx].type == TYPE_STRING &&
+                AS_STRING(chunk->constants[lower_idx])) {
+                lower_name = AS_STRING(chunk->constants[lower_idx]);
+            }
+            if (lower_name && name && strcmp(name, lower_name) != 0) {
+                fprintf(stderr, "%-16s %5d '%s' (lower='%s') (%d args)\n",
+                        "CALL_BUILTIN", name_index, name, lower_name, arg_count);
+            } else {
+                fprintf(stderr, "%-16s %5d '%s' (%d args)\n",
+                        "CALL_BUILTIN", name_index, name, arg_count);
+            }
             return offset + 4;
         }
 
@@ -971,7 +1062,17 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
                     } else {
                     fprintf(stderr, "NULL_STR");
                     }
-                    fprintf(stderr, "\"\n");
+                    fprintf(stderr, "\"");
+                    int lower_idx = getBuiltinLowercaseIndex(chunk, i);
+                    if (lower_idx >= 0 && lower_idx < chunk->constants_count &&
+                        chunk->constants[lower_idx].type == TYPE_STRING &&
+                        chunk->constants[lower_idx].s_val &&
+                        (!constantValue.s_val || strcmp(constantValue.s_val, chunk->constants[lower_idx].s_val) != 0)) {
+                        fprintf(stderr, " (lower -> %04d: \"", lower_idx);
+                        printEscapedString(chunk->constants[lower_idx].s_val);
+                        fprintf(stderr, "\"");
+                    }
+                    fprintf(stderr, "\n");
                     break;
                 case TYPE_CHAR:
                     fprintf(stderr, "CHAR  '");

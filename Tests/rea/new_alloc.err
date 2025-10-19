@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/new_alloc.rea ==
+== Disassembly: rea/new_alloc.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -8,7 +8,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0012    | ALLOC_OBJECT        3 (fields)
 0014    | SET_GLOBAL          3 'p'
 0016    0 HALT
-== End Disassembly: Tests/rea/new_alloc.rea ==
+== End Disassembly: rea/new_alloc.rea ==
 
 Constants (5):\n  0000: STR   "myself"
   0001: NIL

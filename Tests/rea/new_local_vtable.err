@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/new_local_vtable.rea ==
+== Disassembly: rea/new_local_vtable.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -24,7 +24,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0041    | SET_GLOBAL          4 'mixedcase_vtable'
 0043    5 CALL_USER_PROC       8 'run' @0014 (0 args)
 0047    0 HALT
-== End Disassembly: Tests/rea/new_local_vtable.rea ==
+== End Disassembly: rea/new_local_vtable.rea ==
 
 Constants (9):\n  0000: STR   "myself"
   0001: NIL

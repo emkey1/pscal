@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/new_assign_ptr.rea ==
+== Disassembly: rea/new_assign_ptr.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -10,7 +10,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0016    | SWAP
 0017    | SET_INDIRECT
 0018    0 HALT
-== End Disassembly: Tests/rea/new_assign_ptr.rea ==
+== End Disassembly: rea/new_assign_ptr.rea ==
 
 Constants (5):\n  0000: STR   "myself"
   0001: NIL

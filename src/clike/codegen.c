@@ -65,6 +65,37 @@ static int addStringConstant(BytecodeChunk* chunk, const char* str) {
     return index;
 }
 
+static int addBuiltinNameConstant(BytecodeChunk* chunk,
+                                  const char* encoded_name,
+                                  const char* canonical_hint) {
+    if (!chunk) {
+        return -1;
+    }
+    if (!encoded_name) {
+        encoded_name = "";
+    }
+    int name_index = addStringConstant(chunk, encoded_name);
+    if (name_index < 0) {
+        return name_index;
+    }
+
+    if (getBuiltinLowercaseIndex(chunk, name_index) >= 0) {
+        return name_index;
+    }
+
+    const char* lower_source = canonical_hint && *canonical_hint ? canonical_hint : encoded_name;
+    char lowered[MAX_SYMBOL_LENGTH];
+    strncpy(lowered, lower_source, sizeof(lowered) - 1);
+    lowered[sizeof(lowered) - 1] = '\0';
+    toLowerString(lowered);
+
+    Value lower_val = makeString(lowered);
+    int lower_index = addConstantToChunk(chunk, &lower_val);
+    freeValue(&lower_val);
+    setBuiltinLowercaseIndex(chunk, name_index, lower_index);
+    return name_index;
+}
+
 static void emitConstantOperand(BytecodeChunk* chunk, int constant_index, int line) {
     if (!chunk) {
         return;
@@ -100,7 +131,7 @@ static void emitBuiltinProcedureCall(BytecodeChunk* chunk, const char* vmName,
     normalized_name[sizeof(normalized_name) - 1] = '\0';
     toLowerString(normalized_name);
 
-    int nameIndex = addStringConstant(chunk, normalized_name);
+    int nameIndex = addBuiltinNameConstant(chunk, normalized_name, dispatch_name);
     int builtin_id = clikeGetBuiltinID(vmName);
     if (builtin_id < 0) {
         fprintf(stderr,
@@ -128,7 +159,7 @@ static void emitBuiltinFunctionCall(BytecodeChunk* chunk, const char* vmName,
     normalized_name[sizeof(normalized_name) - 1] = '\0';
     toLowerString(normalized_name);
 
-    int nameIndex = addStringConstant(chunk, normalized_name);
+    int nameIndex = addBuiltinNameConstant(chunk, normalized_name, dispatch_name);
     if (clikeGetBuiltinID(vmName) < 0) {
         fprintf(stderr,
                 "L%d: Compiler Error: Unknown built-in function '%s'.\n",
@@ -1445,7 +1476,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                                              (uint8_t)node->child_count,
                                              node->token.line);
                 } else {
-                    int fnIndex = addStringConstant(chunk, vmName);
+                    int fnIndex = addBuiltinNameConstant(chunk, vmName, vmName);
                     writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
                     emitShort(chunk, (uint16_t)fnIndex, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count,
@@ -1456,7 +1487,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                int rIndex = addStringConstant(chunk, "random");
+                int rIndex = addBuiltinNameConstant(chunk, "random", "random");
                 writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)rIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);
@@ -1479,7 +1510,7 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 for (int i = 0; i < node->child_count; ++i) {
                     compileExpression(node->children[i], chunk, ctx);
                 }
-                int lenIndex = addStringConstant(chunk, "length");
+                int lenIndex = addBuiltinNameConstant(chunk, "length", "length");
                 writeBytecodeChunk(chunk, CALL_BUILTIN, node->token.line);
                 emitShort(chunk, (uint16_t)lenIndex, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, node->token.line);

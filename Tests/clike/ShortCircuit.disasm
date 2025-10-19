@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/clike/ShortCircuit.cl ==
+== Disassembly: clike/ShortCircuit.cl ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CALL_USER_PROC       0 'main' @0039 (0 args)
@@ -90,7 +90,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0192    | CONSTANT            4 '0'
 0194   11 RETURN
 0195    4 RETURN
-== End Disassembly: Tests/clike/ShortCircuit.cl ==
+== End Disassembly: clike/ShortCircuit.cl ==
 
 Constants (20):\n  0000: STR   "main"
   0001: INT   2

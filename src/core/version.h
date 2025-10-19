@@ -1,7 +1,7 @@
 #ifndef PSCAL_VERSION_H
 #define PSCAL_VERSION_H
 
-#define PSCAL_VM_VERSION 7  // Bump for expanded locals metadata in cache format
+#define PSCAL_VM_VERSION 8  // Bump for builtin lowercase mapping metadata in bytecode
 
 #include <stdint.h>
 

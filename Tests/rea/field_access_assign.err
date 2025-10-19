@@ -1,5 +1,5 @@
 --- Compiling Main Program AST to Bytecode ---
-== Disassembly: Tests/rea/field_access_assign.rea ==
+== Disassembly: rea/field_access_assign.rea ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
@@ -11,7 +11,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0018    | SWAP
 0019    | SET_INDIRECT
 0020    0 HALT
-== End Disassembly: Tests/rea/field_access_assign.rea ==
+== End Disassembly: rea/field_access_assign.rea ==
 
 Constants (6):\n  0000: STR   "myself"
   0001: NIL

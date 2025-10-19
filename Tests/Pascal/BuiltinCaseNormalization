@@ -1,0 +1,9 @@
+program BuiltinCaseNormalization;
+var
+  s: string;
+begin
+  s := 'abc';
+  writeln(LENGTH(s));
+  writeln(Length(s));
+  writeln(length(s));
+end.

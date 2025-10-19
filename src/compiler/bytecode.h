@@ -149,6 +149,7 @@ typedef struct {
     int constants_count; // Number of constants currently in use
     int constants_capacity; // Allocated capacity for 'constants'
     Value* constants;   // Array of constants (Value structs: numbers, strings)
+    int* builtin_lowercase_indices; // Maps string constant indices to their lowercase copies (-1 if not a builtin)
 
     // Optional: For debugging runtime errors
     int* lines;         // Array storing the source line number for each byte of code
@@ -160,10 +161,13 @@ void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line); // Add by
 void freeBytecodeChunk(BytecodeChunk* chunk);
 int addConstantToChunk(BytecodeChunk* chunk, const Value* value); // Add a value to constant pool, return index
 void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable* procedureTable);
+const char* bytecodeDisplayNameForPath(const char* path);
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable);
 void emitShort(BytecodeChunk* chunk, uint16_t value, int line);
 void emitInt32(BytecodeChunk* chunk, uint32_t value, int line);
 void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 int getInstructionLength(BytecodeChunk* chunk, int offset);
+void setBuiltinLowercaseIndex(BytecodeChunk* chunk, int original_idx, int lowercase_idx);
+int getBuiltinLowercaseIndex(const BytecodeChunk* chunk, int original_idx);
 
 #endif // PSCAL_BYTECODE_H
