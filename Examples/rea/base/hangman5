@@ -100,7 +100,38 @@ class WordRepository {
     return dir;
   }
 
-  str buildCandidate(str base, int depth) {
+  bool hasResolvedPath(str path) {
+    if (length(path) == 0) return false;
+    return path[1] != '@';
+  }
+
+  bool isWhitespace(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+  }
+
+  str trim(str input) {
+    int len = length(input);
+    if (len == 0) return "";
+    int start = 1;
+    while (start <= len && my.isWhitespace(input[start])) {
+      start = start + 1;
+    }
+    if (start > len) return "";
+    int finish = len;
+    while (finish >= start && my.isWhitespace(input[finish])) {
+      finish = finish - 1;
+    }
+    if (finish < start) return "";
+    str result = "";
+    int i = start;
+    while (i <= finish) {
+      result = result + input[i];
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str buildCandidate(str base, int depth, str leaf) {
     str candidate = "";
     if (length(base) > 0) {
       candidate = base;
@@ -118,15 +149,68 @@ class WordRepository {
       candidate = candidate + "../";
       step = step + 1;
     }
-    candidate = candidate + "etc/words";
+    candidate = candidate + leaf;
     return candidate;
+  }
+
+  str loadInstallRootFile(str path) {
+    if (!fileexists(path)) {
+      return "";
+    }
+    text f;
+    assign(f, path);
+    reset(f);
+    str line = "";
+    if (!eof(f)) {
+      readln(f, line);
+    }
+    close(f);
+    return my.trim(my.normalizeSlashes(line));
+  }
+
+  str installRootFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return "";
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth, "pscal_install_root.txt");
+      str resolved = my.loadInstallRootFile(candidate);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      str buildCandidatePath = my.buildCandidate(base, depth, "build/pscal_install_root.txt");
+      resolved = my.loadInstallRootFile(buildCandidatePath);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      depth = depth + 1;
+    }
+    return "";
+  }
+
+  str detectInstallRoot() {
+    str envRoot = my.normalizeSlashes(getenv("PSCAL_INSTALL_ROOT"));
+    if (length(envRoot) > 0) {
+      return envRoot;
+    }
+    str scriptDir = my.scriptDirectory();
+    if (length(scriptDir) > 0) {
+      str resolved = my.installRootFromBase(scriptDir, 6);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+    }
+    str resolved = my.installRootFromBase("", 6);
+    if (length(resolved) > 0) {
+      return resolved;
+    }
+    return "";
   }
 
   bool loadFromBase(str base, int maxDepth) {
     if (maxDepth < 0) return false;
     int depth = 0;
     while (depth <= maxDepth) {
-      str candidate = my.buildCandidate(base, depth);
+      str candidate = my.buildCandidate(base, depth, "etc/words");
       if (my.load(candidate)) {
         return true;
       }
@@ -143,7 +227,15 @@ class WordRepository {
       ok = my.load(paramstr(1));
     }
     if (!ok) {
-      ok = my.load(ConfiguredWordsPath);
+      if (my.hasResolvedPath(ConfiguredWordsPath)) {
+        ok = my.load(ConfiguredWordsPath);
+      }
+    }
+    if (!ok) {
+      str installRoot = my.detectInstallRoot();
+      if (length(installRoot) > 0) {
+        ok = my.load(my.buildCandidate(installRoot, 0, "etc/words"));
+      }
     }
     if (!ok) {
       str scriptDir = my.scriptDirectory();
