@@ -63,6 +63,162 @@ class WordRepository {
   str words[2048];
   int count;
 
+  str normalizeSlashes(str input) {
+    str result = input;
+    int i = 1;
+    while (i <= length(result)) {
+      int code = ord(result[i]);
+      if (code == 92) {
+        result[i] = '/';
+      }
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str scriptDirectory() {
+    str script = paramstr(0);
+    if (length(script) == 0) return "";
+    script = my.normalizeSlashes(script);
+    int len = length(script);
+    while (len > 0 && script[len] == '/') {
+      len = len - 1;
+    }
+    if (len <= 0) return "";
+    int i = len;
+    while (i > 0 && script[i] != '/') {
+      i = i - 1;
+    }
+    if (i <= 0) return "";
+    if (i == 1 && script[1] == '/') return "/";
+    str dir = "";
+    int j = 1;
+    while (j < i) {
+      dir = dir + script[j];
+      j = j + 1;
+    }
+    return dir;
+  }
+
+  bool hasResolvedPath(str path) {
+    if (length(path) == 0) return false;
+    return path[1] != '@';
+  }
+
+  bool isWhitespace(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+  }
+
+  str trim(str input) {
+    int len = length(input);
+    if (len == 0) return "";
+    int start = 1;
+    while (start <= len && my.isWhitespace(input[start])) {
+      start = start + 1;
+    }
+    if (start > len) return "";
+    int finish = len;
+    while (finish >= start && my.isWhitespace(input[finish])) {
+      finish = finish - 1;
+    }
+    if (finish < start) return "";
+    str result = "";
+    int i = start;
+    while (i <= finish) {
+      result = result + input[i];
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str buildCandidate(str base, int depth, str leaf) {
+    str candidate = "";
+    if (length(base) > 0) {
+      candidate = base;
+      int last = length(candidate);
+      if (last > 0) {
+        char tail = candidate[last];
+        int tailCode = ord(tail);
+        if (tail != '/' && tailCode != 92) {
+          candidate = candidate + "/";
+        }
+      }
+    }
+    int step = 0;
+    while (step < depth) {
+      candidate = candidate + "../";
+      step = step + 1;
+    }
+    candidate = candidate + leaf;
+    return candidate;
+  }
+
+  str loadInstallRootFile(str path) {
+    if (!fileexists(path)) {
+      return "";
+    }
+    text f;
+    assign(f, path);
+    reset(f);
+    str line = "";
+    if (!eof(f)) {
+      readln(f, line);
+    }
+    close(f);
+    return my.trim(my.normalizeSlashes(line));
+  }
+
+  str installRootFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return "";
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth, "pscal_install_root.txt");
+      str resolved = my.loadInstallRootFile(candidate);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      str buildCandidatePath = my.buildCandidate(base, depth, "build/pscal_install_root.txt");
+      resolved = my.loadInstallRootFile(buildCandidatePath);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      depth = depth + 1;
+    }
+    return "";
+  }
+
+  str detectInstallRoot() {
+    str envRoot = my.normalizeSlashes(getenv("PSCAL_INSTALL_ROOT"));
+    if (length(envRoot) > 0) {
+      return envRoot;
+    }
+    str scriptDir = my.scriptDirectory();
+    if (length(scriptDir) > 0) {
+      str resolved = my.installRootFromBase(scriptDir, 6);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+    }
+    str resolved = my.installRootFromBase("", 6);
+    if (length(resolved) > 0) {
+      return resolved;
+    }
+    return "";
+  }
+
+  bool loadFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return false;
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth, "etc/words");
+      if (my.load(candidate)) {
+        return true;
+      }
+      depth = depth + 1;
+    }
+    return false;
+  }
+
   void WordRepository() {
     my.count = 0;
 
@@ -71,16 +227,28 @@ class WordRepository {
       ok = my.load(paramstr(1));
     }
     if (!ok) {
-      ok = my.load(ConfiguredWordsPath);
+      if (my.hasResolvedPath(ConfiguredWordsPath)) {
+        ok = my.load(ConfiguredWordsPath);
+      }
     }
     if (!ok) {
-      ok = my.load("etc/words");
+      str installRoot = my.detectInstallRoot();
+      if (length(installRoot) > 0) {
+        ok = my.load(my.buildCandidate(installRoot, 0, "etc/words"));
+      }
     }
     if (!ok) {
-      ok = my.load("../etc/words");
+      str scriptDir = my.scriptDirectory();
+      if (length(scriptDir) > 0) {
+        ok = my.loadFromBase(scriptDir, 8);
+      }
     }
     if (!ok) {
-      my.load("../../etc/words");
+      ok = my.loadFromBase("", 8);
+    }
+    if (!ok) {
+      writeln("Unable to load hangman dictionary. Pass a dictionary path (rea hangman5 <path>) or set PSCAL_INSTALL_ROOT.");
+      halt(1);
     }
   }
 
@@ -340,6 +508,7 @@ class HangmanGame {
   bool hintUsed;
   int wins;
   int losses;
+  bool hasWord;
 
   void HangmanGame() {
     my.repo = new WordRepository();
@@ -351,20 +520,26 @@ class HangmanGame {
     my.guessed = "";
     my.wins = 0;
     my.losses = 0;
+    my.hasWord = false;
   }
 
   void startRound() {
     randomize();
     my.chosen = my.repo.randomWord();
     my.display = "";
+    my.guessed = "";
+    my.wrong = 0;
+    my.hintUsed = false;
+    my.hasWord = length(my.chosen) > 0;
+    if (!my.hasWord) {
+      my.display = "(no words)";
+      return;
+    }
     int i = 1;
     while (i <= length(my.chosen)) {
       my.display = my.display + "_";
       i = i + 1;
     }
-    my.guessed = "";
-    my.wrong = 0;
-    my.hintUsed = false;
   }
 
   bool handleGuess(char c) {
@@ -383,6 +558,17 @@ class HangmanGame {
   }
 
   void playRound() {
+    if (!my.hasWord) {
+      my.view.render(my.display, my.guessed, my.wrong);
+      TextColor(CRT.LightRed);
+      my.view.showMessage("No words available. Run with a dictionary path (rea hangman5 <path>).");
+      TextColor(CRT.White);
+      HideCursor();
+      my.view.showMessageAt("Press Enter to continue...", my.view.vMsgRow + 1);
+      str pause; readln(pause);
+      ShowCursor();
+      return;
+    }
     bool win = false;
     str msg;
     while (my.wrong < MAX_WRONG && my.display != my.chosen) {
