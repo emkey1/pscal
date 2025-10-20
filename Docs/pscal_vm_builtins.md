@@ -267,6 +267,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | getpixelcolor | (x: Integer, y: Integer) | Integer | Read pixel color. |
 | getmaxx | () | Integer | Width of window. |
 | getmaxy | () | Integer | Height of window. |
+| getscreensize | (var width: Integer, var height: Integer) | void | Query the current SDL window dimensions. |
 | gettextsize | (text: String) | (w: Integer, h: Integer) | Measure text. |
 | outtextxy | (x: Integer, y: Integer, text: String) | void | Draw text at position. |
 | waitkeyevent | () | Integer | Wait for key event. |
@@ -292,6 +293,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | getmousestate | (var x: Integer, var y: Integer, var buttons: Integer [, var insideWindow: Integer]) | void | Query mouse position and button state. When the optional `insideWindow` VAR parameter is supplied it receives `1` if the cursor is inside the focused window, otherwise `0`. |
 | getticks | () | Integer | Milliseconds since start. |
 | pollkey | () | Integer | Poll for key press. |
+| pollkeyany | () | Integer | Returns the next pending key from either the SDL window queue (when graphics are active) or the console input buffer, falling back to 0 when no input is available. |
 | iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
 
 For OpenGL programs, PSCAL now exposes additional fixed-function helpers alongside the existing pipeline calls: `GLColor4f`, `GLNormal3f`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, and `GLBlendFunc` simplify configuring lighting, materials, and blending directly from Pascal, Rea, and the other front ends. Use `GLCullFace('back')`, `GLCullFace('front')`, or `GLCullFace('front_and_back')` (or pass the corresponding numeric `GLenum`) to toggle which primitives are rejected during rasterization.

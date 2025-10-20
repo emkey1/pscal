@@ -610,6 +610,59 @@ Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
     return makeInt((long long)SDL_GetTicks());
 }
 
+Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "GetScreenSize expects 2 arguments.");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER) {
+        runtimeError(vm, "GetScreenSize requires VAR parameters, but a non-pointer type was received.");
+        return makeVoid();
+    }
+
+    Value* width_ptr = (Value*)args[0].ptr_val;
+    Value* height_ptr = (Value*)args[1].ptr_val;
+
+    if (!width_ptr || !height_ptr) {
+        runtimeError(vm, "GetScreenSize received a NIL pointer for a VAR parameter.");
+        return makeVoid();
+    }
+
+    if (!gSdlInitialized || !gSdlWindow) {
+        runtimeError(vm, "Graphics system not initialized for GetScreenSize.");
+        return makeVoid();
+    }
+
+    int width = gSdlWidth;
+    int height = gSdlHeight;
+
+    if (gSdlWindow) {
+        int currentWidth = 0;
+        int currentHeight = 0;
+        SDL_GetWindowSize(gSdlWindow, &currentWidth, &currentHeight);
+        if (currentWidth > 0) {
+            width = currentWidth;
+        }
+        if (currentHeight > 0) {
+            height = currentHeight;
+        }
+    }
+
+    if (width > 0) {
+        gSdlWidth = width;
+    }
+    if (height > 0) {
+        gSdlHeight = height;
+    }
+
+    freeValue(width_ptr);
+    *width_ptr = makeInt(width);
+    freeValue(height_ptr);
+    *height_ptr = makeInt(height);
+
+    return makeVoid();
+}
+
 Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
     gSdlCurrentColor.r = (Uint8)AS_INTEGER(args[0]);
@@ -760,7 +813,17 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 #endif
 
     // Ignore buttons if the window is not focused or the pointer is outside it.
-    if (!inside_window || !has_focus) {
+    if (gSdlWindow) {
+        Uint32 windowFlags = SDL_GetWindowFlags(gSdlWindow);
+        if (!inside_window && (windowFlags & SDL_WINDOW_MOUSE_FOCUS)) {
+            inside_window = true;
+        }
+        if (!has_focus && (windowFlags & SDL_WINDOW_INPUT_FOCUS)) {
+            has_focus = true;
+        }
+    }
+
+    if (!inside_window) {
         sdl_buttons = 0;
     }
     
@@ -1317,22 +1380,18 @@ Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
     return makeBoolean(state[sc] != 0);
 }
 
-Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 0) {
-        runtimeError(vm, "PollKey expects 0 arguments.");
-        return makeInt(0);
-    }
-    if (!gSdlInitialized || !gSdlWindow) {
-        runtimeError(vm, "Graphics mode not initialized before PollKey.");
-        return makeInt(0);
+bool sdlPollNextKey(SDL_Keycode* outCode) {
+    if (!outCode || !sdlIsGraphicsActive()) {
+        return false;
     }
 
     SDL_Keycode queuedCode;
     if (dequeuePendingKeycode(&queuedCode)) {
         if (queuedCode == SDLK_q) {
-            break_requested = 1;
+            atomic_store(&break_requested, 1);
         }
-        return makeInt((int)queuedCode);
+        *outCode = queuedCode;
+        return true;
     }
 
     SDL_Event event;
@@ -1344,16 +1403,41 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
 
         if (event.type == SDL_QUIT) {
             atomic_store(&break_requested, 1);
-            return makeInt(0);
-        } else if (event.type == SDL_KEYDOWN) {
+            return false;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
             if (event.key.keysym.sym == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
             enqueuePendingKeycode(event.key.keysym.sym);
             if (dequeuePendingKeycode(&queuedCode)) {
-                return makeInt((int)queuedCode);
+                *outCode = queuedCode;
+                return true;
             }
         }
+    }
+
+    return false;
+}
+
+Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "PollKey expects 0 arguments.");
+        return makeInt(0);
+    }
+    if (!gSdlInitialized || !gSdlWindow) {
+        runtimeError(vm, "Graphics mode not initialized before PollKey.");
+        return makeInt(0);
+    }
+
+    SDL_Keycode code;
+    if (sdlPollNextKey(&code)) {
+        return makeInt((int)code);
     }
     return makeInt(0);
 }

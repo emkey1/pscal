@@ -225,11 +225,21 @@ BEGIN
 END;
 
 PROCEDURE KeyboardInputThread;
+VAR
+  KeyCode: Integer;
 BEGIN
   WHILE NOT QuitProgram DO BEGIN
-    IF KeyPressed THEN BEGIN
-      IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True;
+    KeyCode := PollKeyAny();
+    WHILE KeyCode <> 0 DO BEGIN
+      IF (KeyCode >= 0) AND (KeyCode <= $FF) THEN BEGIN
+        IF UpCase(Chr(KeyCode)) = 'Q' THEN BEGIN
+          QuitProgram := True;
+          BREAK;
+        END;
+      END;
+      KeyCode := PollKeyAny();
     END;
+    IF QuitRequested THEN QuitProgram := True;
   END;
 END;
 

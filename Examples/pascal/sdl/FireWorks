@@ -68,6 +68,7 @@ var
   fontsize: Integer;
   boom: Integer;
   FontFileName : String;
+  keyCode: Integer;
 
 procedure SpawnFirework(px, py: Integer);
 var j: Integer; angle, speed: Real;
@@ -99,7 +100,7 @@ begin
 
   SpawnFirework(400, 300);  { initial burst }
 
-  while not (PollKey() in [Ord('q'), Ord('Q')]) do
+  while True do
   begin
     ClearDevice();
 
@@ -122,6 +123,16 @@ begin
     OutTextXY(10, 10, 'Click to launch fireworks – Q or q quits');
     UpdateScreen();
     GraphLoop(16);  { ~60 fps }
+
+    keyCode := PollKeyAny();
+    if (keyCode <> 0) and (keyCode >= 0) and (keyCode <= $FF) then
+    begin
+      if UpCase(Chr(keyCode)) = 'Q' then
+        break;
+    end;
+
+    if QuitRequested() then
+      break;
   end;
 
   if boom <> -1 then FreeSound(boom);
@@ -129,4 +140,3 @@ begin
   QuitTextSystem();
   CloseGraph();
 end.
-

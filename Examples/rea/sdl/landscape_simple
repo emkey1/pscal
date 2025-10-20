@@ -337,7 +337,7 @@ class LandscapeDemo {
   }
 
   void handleDiscreteInput() {
-    int key = pollkey();
+    int key = pollkeyany();
     while (key != 0) {
       if (key == 'q' || key == 'Q' || key == 27) {
         my.running = false;
@@ -351,7 +351,7 @@ class LandscapeDemo {
         if (tickSeed == 0) tickSeed = my.seed + 7;
         my.regenerate(tickSeed);
       }
-      key = pollkey();
+      key = pollkeyany();
     }
   }
 

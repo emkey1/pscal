@@ -38,6 +38,7 @@ bool sdlCachedKeyDown(SDL_Scancode sc);
 bool sdlIsGraphicsActive(void);
 bool sdlHasPendingKeycode(void);
 SDL_Keycode sdlWaitNextKeycode(void);
+bool sdlPollNextKey(SDL_Keycode* outCode);
 
 
 // System Functions
@@ -59,6 +60,7 @@ Value vmBuiltinCleardevice(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGetmaxx(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGetmaxy(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGetticks(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGetscreensize(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetrgbcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinInittextsystem(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinQuittextsystem(struct VM_s* vm, int arg_count, Value* args);

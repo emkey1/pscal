@@ -464,50 +464,59 @@ class Game {
     }
     
     bool handleInput() {
-        if (keypressed()) {
-            char c = readkey();
-            int code = ord(c);
-            if (code == 0 || code == 224) {
-                char extended = readkey();
-                int extCode = ord(extended);
-                if (extCode == 75) {
-                    myself.movePiece(-1, 0); // Left arrow
-                } else if (extCode == 77) {
-                    myself.movePiece(1, 0); // Right arrow
-                } else if (extCode == 72) {
-                    myself.rotatePiece(); // Up arrow
-                } else if (extCode == 80) {
-                    myself.movePiece(0, 1); // Down arrow
-                }
-                return false;
-            }
-
-            char key = toupper(c);
-            if (key == 'Q') {
+        int keyCode = pollkeyany();
+        while (keyCode != 0) {
+            if (keyCode == 'q' || keyCode == 'Q') {
                 return true; // Quit
             }
-            if (myself.gameOver) return false;
 
-            switch (key) {
-                case 'A':
-                    myself.movePiece(-1, 0);
-                    break;
-                case 'D':
-                    myself.movePiece(1, 0);
-                    break;
-                case 'S':
-                    myself.movePiece(0, 1);
-                    break;
-                case 'W':
-                    myself.rotatePiece();
-                    break;
+            if (keyCode == 1073741904) {
+                if (!myself.gameOver) myself.movePiece(-1, 0); // SDL left
+            } else if (keyCode == 1073741903) {
+                if (!myself.gameOver) myself.movePiece(1, 0); // SDL right
+            } else if (keyCode == 1073741906) {
+                if (!myself.gameOver) myself.rotatePiece(); // SDL up
+            } else if (keyCode == 1073741905) {
+                if (!myself.gameOver) myself.movePiece(0, 1); // SDL down
+            } else if (keyCode == 0 || keyCode == 224) {
+                int extCode = pollkeyany();
+                if (extCode == 75) {
+                    if (!myself.gameOver) myself.movePiece(-1, 0);
+                } else if (extCode == 77) {
+                    if (!myself.gameOver) myself.movePiece(1, 0);
+                } else if (extCode == 72) {
+                    if (!myself.gameOver) myself.rotatePiece();
+                } else if (extCode == 80) {
+                    if (!myself.gameOver) myself.movePiece(0, 1);
+                }
+            } else {
+                if (keyCode >= 0 && keyCode <= 255) {
+                    char c = tochar(keyCode);
+                    char key = toupper(c);
+                    if (!myself.gameOver) {
+                        switch (key) {
+                            case 'A':
+                                myself.movePiece(-1, 0);
+                                break;
+                            case 'D':
+                                myself.movePiece(1, 0);
+                                break;
+                            case 'S':
+                                myself.movePiece(0, 1);
+                                break;
+                            case 'W':
+                                myself.rotatePiece();
+                                break;
+                        }
+                        if (c == ' ') {
+                            myself.hardDrop();
+                        }
+                    }
+                }
             }
-
-            if (c == ' ') {
-                myself.hardDrop();
-            }
+            keyCode = pollkeyany();
         }
-        
+
         return false; // Continue running
     }
     

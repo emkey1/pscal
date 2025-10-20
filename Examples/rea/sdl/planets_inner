@@ -226,10 +226,19 @@ class SolarSystemApp {
     myself.startThreads();
     writeln("Inner solar system simulation running. Press Q to quit.");
     while (!quit) {
-      if (keypressed()) {
-        char c = readkey();
-        if (toupper(c) == 'Q') quit = true;
+      if (quitrequested()) {
+        quit = true;
+        break;
       }
+      int keyCode = pollkeyany();
+      while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
+          quit = true;
+          break;
+        }
+        keyCode = pollkeyany();
+      }
+      if (quit) break;
       // Draw all planets based on their updated positions
       myself.draw();
       // Use the object's frame delay to pace the main loop and yield time to

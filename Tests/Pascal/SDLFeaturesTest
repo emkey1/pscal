@@ -18,10 +18,39 @@ CONST
 
 VAR
   mx, my, buttons : Integer;
+  insideWindow    : Integer;
+  lastButtons     : Integer;
+  lastInside      : Integer;
   quit            : Boolean;
   eventInfo       : String;
   frameCount      : Integer;
   r, g, b         : Byte;
+
+FUNCTION ShouldQuit: Boolean;
+VAR
+  keyCode: Integer;
+BEGIN
+  ShouldQuit := False;
+
+  keyCode := PollKeyAny();
+  IF keyCode <> 0 THEN
+  BEGIN
+    IF (keyCode >= 0) AND (keyCode <= $FF) THEN
+    BEGIN
+      IF Chr(keyCode) IN ['q', 'Q'] THEN
+      BEGIN
+        ShouldQuit := True;
+        EXIT;
+      END;
+    END;
+  END;
+
+  IF QuitRequested THEN
+  BEGIN
+    ShouldQuit := True;
+    EXIT;
+  END;
+END;
 
 BEGIN
   InitGraph(ScreenWidth, ScreenHeight, Title);
@@ -33,14 +62,23 @@ BEGIN
   quit := False;
   frameCount := 0;
   eventInfo := 'Move mouse and click... Press Q to quit.';
+  lastButtons := -1;
+  lastInside := -1;
 
   // Main loop
   WHILE NOT quit DO
   BEGIN
     frameCount := frameCount + 1;
 
-    // Get mouse state
-    GetMouseState(mx, my, buttons);
+    // Get mouse state (capture inside flag for debugging feedback)
+    GetMouseState(mx, my, buttons, insideWindow);
+
+    if (buttons <> lastButtons) or (insideWindow <> lastInside) then
+    begin
+      WriteLn('[Mouse] x=', mx, ' y=', my, ' buttons=', buttons, ' inside=', insideWindow);
+      lastButtons := buttons;
+      lastInside := insideWindow;
+    end;
 
     // --- Background ---
     SetRGBColor(30, 30, 50); // Dark blue background
@@ -66,7 +104,7 @@ BEGIN
     SetRGBColor(255, 255, 0); // Yellow text
     OutTextXY(10, 10, 'Pascal SDL Test Program!');
     OutTextXY(10, 30, 'Mouse X: ' + IntToStr(mx) + ' Y: ' + IntToStr(my));
-    OutTextXY(10, 50, 'Buttons: ' + IntToStr(buttons));
+    OutTextXY(10, 50, 'Buttons: ' + IntToStr(buttons) + ' Inside: ' + IntToStr(insideWindow));
     OutTextXY(10, ScreenHeight - 30, eventInfo);
 
     // --- Handle Mouse Clicks for simple interaction ---
@@ -90,11 +128,7 @@ BEGIN
     UpdateScreen;
     GraphLoop(16);
 
-    IF KeyPressed THEN
-    BEGIN
-      IF UpCase(ReadKey) = 'Q' THEN
-        quit := True;
-    END;
+    quit := ShouldQuit;
 
   END; // WHILE NOT quit
 

@@ -101,8 +101,10 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLMaterialf", "glmaterialf", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlmaterialf},
     {"opengl", "GLColorMaterial", "glcolormaterial", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcolormaterial},
     {"opengl", "GLBlendFunc", "glblendfunc", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlblendfunc},
-    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface}, // Append new builtins to preserve existing IDs.
+    {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface},
     {"opengl", "GLIsHardwareAccelerated", "glishardwareaccelerated", BUILTIN_TYPE_FUNCTION, vmBuiltinGlishardwareaccelerated},
+    {"window", "GetScreenSize", "getscreensize", BUILTIN_TYPE_PROCEDURE, vmBuiltinGetscreensize}, // Append new builtins to preserve existing IDs.
+    {"input", "PollKeyAny", "pollkeyany", BUILTIN_TYPE_FUNCTION, vmBuiltinPollkeyany}, // Append new builtins to preserve existing IDs.
 };
 #endif
 

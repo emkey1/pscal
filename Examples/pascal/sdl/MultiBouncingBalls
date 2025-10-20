@@ -29,6 +29,7 @@ VAR
   i, j        : Integer; // Loop counters
   QuitProgram : Boolean;
   MaxX, MaxY  : Integer;
+  keyCode     : Integer;
 
 PROCEDURE InitializeBalls;
 VAR
@@ -193,8 +194,25 @@ BEGIN // Main Program
 
   WHILE NOT QuitProgram DO
   BEGIN
-    IF KeyPressed THEN
-    BEGIN IF UpCase(ReadKey) = 'Q' THEN QuitProgram := True; END;
+    IF QuitRequested THEN
+      QuitProgram := True
+    ELSE
+    BEGIN
+      keyCode := PollKeyAny();
+      WHILE keyCode <> 0 DO
+      BEGIN
+        IF (keyCode >= 0) AND (keyCode <= $FF) THEN
+        BEGIN
+          IF UpCase(Chr(keyCode)) = 'Q' THEN
+          BEGIN
+            QuitProgram := True;
+            BREAK;
+          END;
+        END;
+        keyCode := PollKeyAny();
+      END;
+    END;
+    IF QuitProgram THEN BREAK;
 
     UpdateAndCollideBalls; // Updates positions and handles all collisions
 

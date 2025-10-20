@@ -241,9 +241,12 @@ class MandelbrotApp {
   bool handleInput() {
     graphloop(0);
     bool changed = false;
-    int key = pollkey();
-    if (key != 0) {
-      if (key == 'q' || key == 'Q') { myself.setQuit(true); return false; }
+    int key = pollkeyany();
+    while (key != 0) {
+      if (key == 'q' || key == 'Q') {
+        myself.setQuit(true);
+        return false;
+      }
       double widthRe = (myself.maxRe - myself.minRe);
       double heightIm = (myself.maxIm - myself.minIm);
       double dx = widthRe * 0.5;
@@ -252,6 +255,7 @@ class MandelbrotApp {
       else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; changed = true; }
       else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; }
       else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; }
+      key = pollkeyany();
     }
     int x = 0;
     int y = 0;

@@ -184,10 +184,19 @@ class BallsApp {
     myself.init();
     writeln("Multi Bouncing Balls... Press Q to quit.");
     while (!myself.quit) {
-      if (keypressed()) {
-        char c = readkey();
-        if (toupper(c) == 'Q') myself.quit = true;
+      if (quitrequested()) {
+        myself.quit = true;
+        break;
       }
+      int keyCode = pollkeyany();
+      while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
+          myself.quit = true;
+          break;
+        }
+        keyCode = pollkeyany();
+      }
+      if (myself.quit) break;
       myself.update();
       myself.draw();
       graphloop(myself.FrameDelay);
@@ -199,4 +208,3 @@ class BallsApp {
 
 BallsApp app = new BallsApp();
 app.run();
-

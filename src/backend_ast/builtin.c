@@ -623,6 +623,8 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"wherey", vmBuiltinWherey},
     {"window", vmBuiltinWindow},
     {"quitrequested", vmBuiltinQuitrequested},
+    {"getscreensize", NULL},
+    {"pollkeyany", vmBuiltinPollkeyany},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -2412,6 +2414,32 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
     int bytes_available = 0;
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
     return makeBoolean(bytes_available > 0);
+}
+
+Value vmBuiltinPollkeyany(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 0) {
+        runtimeError(vm, "PollKeyAny expects 0 arguments.");
+        return makeInt(0);
+    }
+
+#ifdef SDL
+    SDL_Keycode sdl_code;
+    if (sdlPollNextKey(&sdl_code)) {
+        return makeInt((int)sdl_code);
+    }
+#endif
+
+    vmEnableRawMode();
+    int bytes_available = 0;
+    ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+    if (bytes_available > 0) {
+        unsigned char ch_byte = 0;
+        if (read(STDIN_FILENO, &ch_byte, 1) == 1) {
+            return makeInt((int)ch_byte);
+        }
+    }
+
+    return makeInt(0);
 }
 
 Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
@@ -5232,4 +5260,3 @@ static void populateBuiltinRegistry(void) {
 void registerAllBuiltins(void) {
     pthread_once(&builtin_registration_once, populateBuiltinRegistry);
 }
-

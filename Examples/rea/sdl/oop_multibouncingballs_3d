@@ -4,6 +4,10 @@
 
 const int WindowWidth = 1600;
 const int WindowHeight = 1000;
+const int WindowMarginX = 160;
+const int WindowMarginY = 160;
+const int MinWindowWidth = 1024;
+const int MinWindowHeight = 720;
 
 float TargetFPS = 90.0;
 
@@ -311,20 +315,47 @@ class BouncingBalls3DApp {
   float elapsedSeconds;
   float minSpeed;
   float maxSpeed;
+  int windowWidthPx;
+  int windowHeightPx;
  
   BouncingBalls3DApp() {
     myself.balls = new BallField();
     myself.stars = new StarField();
     myself.camera = new Camera(0.0, InitialCameraPitch, InitialCameraDistance);
 
-    InitGraph3D(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D", 24, 8);
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    getscreensize(screenWidth, screenHeight);
+
+    int availableWidth = screenWidth - WindowMarginX;
+    int availableHeight = screenHeight - WindowMarginY;
+
+    if (availableWidth > screenWidth) availableWidth = screenWidth;
+    if (availableHeight > screenHeight) availableHeight = screenHeight;
+
+    if (availableWidth < MinWindowWidth) {
+      availableWidth = screenWidth;
+    }
+    if (availableHeight < MinWindowHeight) {
+      availableHeight = screenHeight;
+    }
+    if (availableWidth <= 0) availableWidth = WindowWidth;
+    if (availableHeight <= 0) availableHeight = WindowHeight;
+
+    int windowWidthPx = availableWidth;
+    int windowHeightPx = availableHeight;
+
+    myself.windowWidthPx = windowWidthPx;
+    myself.windowHeightPx = windowHeightPx;
+
+    InitGraph3D(myself.windowWidthPx, myself.windowHeightPx, "Rea Multi Bouncing Balls 3D", 24, 8);
     bool gpuAccelerated = GLIsHardwareAccelerated();
     if (gpuAccelerated) {
       writeln("OpenGL acceleration: hardware (GPU).");
     } else {
       writeln("OpenGL acceleration: software fallback.");
     }
-    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLViewport(0, 0, myself.windowWidthPx, myself.windowHeightPx);
     GLSetSwapInterval(1);
     myself.setupLighting();
 
@@ -454,7 +485,7 @@ class BouncingBalls3DApp {
 
     GLMatrixMode("projection");
     GLLoadIdentity();
-    float aspect = WindowWidth * 1.0 / WindowHeight;
+    float aspect = myself.windowWidthPx * 1.0 / myself.windowHeightPx;
     GLPerspective(55.0, aspect, 24.0, 8000.0);
 
     GLMatrixMode("modelview");
@@ -480,13 +511,17 @@ class BouncingBalls3DApp {
   void handleInput() {
     myself.camera.handleInput(myself.DeltaTime);
 
-    if (keypressed()) {
-      char key = readkey();
-      if (key == 'q' || key == 'Q') {
-        myself.quit = true;
-      } else if (key == ' ') {
-        myself.paused = !myself.paused;
+    int keyCode = pollkeyany();
+    while (keyCode != 0) {
+      if (keyCode >= 0 && keyCode <= 255) {
+        int ascii = keyCode;
+        if (ascii == 'q' || ascii == 'Q') {
+          myself.quit = true;
+        } else if (ascii == ' ') {
+          myself.paused = !myself.paused;
+        }
       }
+      keyCode = pollkeyany();
     }
   }
 

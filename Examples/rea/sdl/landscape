@@ -1344,7 +1344,7 @@ class LandscapeDemo {
   }
 
   void handleDiscreteInput() {
-    int key = pollkey();
+    int key = pollkeyany();
     while (key != 0) {
       if (key == 'q' || key == 'Q' || key == 27) {
         my.running = false;
@@ -1360,7 +1360,7 @@ class LandscapeDemo {
       } else if (key == 'f' || key == 'F') {
         my.toggleFastDraw();
       }
-      key = pollkey();
+      key = pollkeyany();
     }
   }
 

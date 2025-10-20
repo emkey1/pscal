@@ -73,6 +73,7 @@ Value vmBuiltinWherex(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWherey(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGotoxy(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinKeypressed(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinPollkeyany(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadkey(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextcolor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTextbackground(struct VM_s* vm, int arg_count, Value* args);

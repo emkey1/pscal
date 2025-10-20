@@ -254,10 +254,6 @@ int main() {
                     rendercopy(textureID);
                     updatescreen();
                 }
-                if (keypressed()) {
-                    keyCode = readkey();
-                    if (keyCode == 'q' || keyCode == 'Q') setQuit(1);
-                }
                 if (!done || update)
                     pollMouse();
                 if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
@@ -287,27 +283,28 @@ int main() {
         }
         /* Keyboard controls: Q to quit, arrows to pan by half a screen */
         {
-            int key = pollkey();
-            if (key != 0) {
+            int key = pollkeyany();
+            while (key != 0) {
                 if (key == 'q' || key == 'Q') {
                     setQuit(1);
-                    continue;
+                } else {
+                    double widthRe = (maxRe - minRe);
+                    double heightIm = (maxIm - minIm);
+                    double dx = widthRe * 0.5;
+                    double dy = heightIm * 0.5;
+                    if (key == KEY_LEFT) {
+                        minRe -= dx; maxRe -= dx; redraw = 1;
+                    } else if (key == KEY_RIGHT) {
+                        minRe += dx; maxRe += dx; redraw = 1;
+                    } else if (key == KEY_UP) {
+                        /* Move view up in complex plane: increase both Im bounds */
+                        minIm += dy; maxIm += dy; redraw = 1;
+                    } else if (key == KEY_DOWN) {
+                        /* Move view down: decrease both Im bounds */
+                        minIm -= dy; maxIm -= dy; redraw = 1;
+                    }
                 }
-                double widthRe = (maxRe - minRe);
-                double heightIm = (maxIm - minIm);
-                double dx = widthRe * 0.5;
-                double dy = heightIm * 0.5;
-                if (key == KEY_LEFT) {
-                    minRe -= dx; maxRe -= dx; redraw = 1;
-                } else if (key == KEY_RIGHT) {
-                    minRe += dx; maxRe += dx; redraw = 1;
-                } else if (key == KEY_UP) {
-                    /* Move view up in complex plane: increase both Im bounds */
-                    minIm += dy; maxIm += dy; redraw = 1;
-                } else if (key == KEY_DOWN) {
-                    /* Move view down: decrease both Im bounds */
-                    minIm -= dy; maxIm -= dy; redraw = 1;
-                }
+                key = pollkeyany();
             }
         }
 

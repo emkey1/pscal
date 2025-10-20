@@ -1,0 +1,25 @@
+#!/usr/bin/env pascal
+program GetScreenSizeTest;
+
+const
+  ScreenWidth  = 320;
+  ScreenHeight = 240;
+  Title        = 'GetScreenSizeTest';
+
+var
+  width, height: Integer;
+begin
+  InitGraph(ScreenWidth, ScreenHeight, Title);
+
+  width := -1;
+  height := -1;
+  GetScreenSize(width, height);
+
+  CloseGraph;
+
+  WriteLn('width=', width, ' height=', height);
+  if (width = ScreenWidth) and (height = ScreenHeight) then
+    WriteLn('ok')
+  else
+    WriteLn('fail expected ', ScreenWidth, 'x', ScreenHeight);
+end.

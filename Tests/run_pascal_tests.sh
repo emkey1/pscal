@@ -269,7 +269,7 @@ run_pascal_fixture() {
     local details=()
     local status="PASS"
 
-    if [ "$test_name" = "SDLFeaturesTest" ]; then
+    if [ "$test_name" = "SDLFeaturesTest" ] || [ "$test_name" = "GetScreenSizeTest" ]; then
         if [ "$PASCAL_GRAPHICS_AVAILABLE" -ne 1 ]; then
             harness_report SKIP "pascal_${test_name}" "Pascal fixture $test_name" "Graphics builtins unavailable"
             return

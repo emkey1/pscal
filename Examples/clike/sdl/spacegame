@@ -38,6 +38,7 @@ int main() {
     int maxAlienX;
     int ShotSound;
     int ExplodeSound;
+    int ManualQuit;
 
     /* Arrays are 1-based to match the underlying Pascal VM. */
     int AlienX[AlienRows * AlienCols + 1];
@@ -69,6 +70,7 @@ int main() {
     AlienPaddingY = 10;
     AlienSpeed = 2;
     AlienDir = 1;
+    ManualQuit = 0;
 
     i = 1;
     while (i <= AlienRows) {
@@ -85,13 +87,16 @@ int main() {
     }
     AliensAlive = AlienRows * AlienCols;
 
-    while (!quitrequested() && AliensAlive > 0) {
+    while (!quitrequested() && !ManualQuit && AliensAlive > 0) {
         graphloop(16);
 
         int key;
-        key = pollkey();
+        key = pollkeyany();
         while (key != 0) {
-            if (key == 1073741904) {
+            if (key == 'q' || key == 'Q') {
+                ManualQuit = 1;
+                break;
+            } else if (key == 1073741904) {
                 PlayerX = PlayerX - PlayerSpeed;
             } else if (key == 1073741903) {
                 PlayerX = PlayerX + PlayerSpeed;
@@ -105,7 +110,10 @@ int main() {
                     }
                 }
             }
-            key = pollkey();
+            key = pollkeyany();
+        }
+        if (ManualQuit) {
+            break;
         }
         if (PlayerX < 0) { PlayerX = 0; }
         if (PlayerX > ScreenWidth - PlayerW) { PlayerX = ScreenWidth - PlayerW; }

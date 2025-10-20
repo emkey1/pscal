@@ -387,13 +387,14 @@ void handleInput() {
     if (cameraPitch > MaxCameraPitch) cameraPitch = MaxCameraPitch;
     if (cameraPitch < MinCameraPitch) cameraPitch = MinCameraPitch;
 
-    if (keypressed()) {
-        char key = readkey();
-        if (key == 'q' || key == 'Q') {
+    int keyCode = pollkeyany();
+    while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
             quit = true;
-        } else if (key == ' ') {
+        } else if (keyCode == ' ') {
             paused = !paused;
         }
+        keyCode = pollkeyany();
     }
 }
 

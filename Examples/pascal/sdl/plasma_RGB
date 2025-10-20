@@ -148,7 +148,7 @@ BEGIN
   KeyCode := 0;
   REPEAT
     GraphLoop(16);
-    KeyCode := PollKey();
+    KeyCode := PollKeyAny();
   UNTIL (KeyCode <> 0) OR QuitRequested();
 
   DestroyTexture(TextureID);
