@@ -644,7 +644,7 @@ Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
-    shellResetPipeline();
+    shellMaybeResetPipeline();
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
@@ -1176,7 +1176,7 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
         shellFreeRedirections(&redir_cmd);
     }
 
-    shellResetPipeline();
+    shellMaybeResetPipeline();
     shellRestoreCurrentVm(previous_vm);
     return result;
 }
@@ -1234,7 +1234,7 @@ Value vmBuiltinShellIf(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
-    shellResetPipeline();
+    shellMaybeResetPipeline();
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
@@ -8548,7 +8548,7 @@ Value vmHostShellLoopAdvance(VM *vm) {
         frame->continue_pending = false;
         frame->skip_body = false;
         frame->for_active = false;
-        shellResetPipeline();
+        shellMaybeResetPipeline();
         return makeBoolean(false);
     }
 
@@ -8564,7 +8564,7 @@ Value vmHostShellLoopAdvance(VM *vm) {
                 shellUpdateStatus(1);
                 frame->skip_body = false;
                 frame->for_active = false;
-                shellResetPipeline();
+                shellMaybeResetPipeline();
                 return makeBoolean(false);
             }
             frame->for_index++;
@@ -8579,7 +8579,7 @@ Value vmHostShellLoopAdvance(VM *vm) {
             shellUpdateStatus(1);
             frame->skip_body = false;
             frame->break_pending = true;
-            shellResetPipeline();
+            shellMaybeResetPipeline();
             return makeBoolean(false);
         }
         bool condition_ready = false;
@@ -8587,14 +8587,14 @@ Value vmHostShellLoopAdvance(VM *vm) {
             shellUpdateStatus(1);
             frame->skip_body = false;
             frame->break_pending = true;
-            shellResetPipeline();
+            shellMaybeResetPipeline();
             return makeBoolean(false);
         }
         should_continue = condition_ready;
     }
 
     frame->skip_body = false;
-    shellResetPipeline();
+    shellMaybeResetPipeline();
     if (!should_continue) {
         shellUpdateStatus(0);
     }

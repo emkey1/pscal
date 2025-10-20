@@ -414,6 +414,14 @@ static void shellResetPipeline(void) {
     ctx->pgid = -1;
 }
 
+static void shellMaybeResetPipeline(void) {
+    ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    if (ctx->active && ctx->stage_count > 1) {
+        return;
+    }
+    shellResetPipeline();
+}
+
 static void shellAbortPipeline(void) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     if (!ctx->active) {
