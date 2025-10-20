@@ -63,6 +63,78 @@ class WordRepository {
   str words[2048];
   int count;
 
+  str normalizeSlashes(str input) {
+    str result = input;
+    int i = 1;
+    while (i <= length(result)) {
+      int code = ord(result[i]);
+      if (code == 92) {
+        result[i] = '/';
+      }
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str scriptDirectory() {
+    str script = paramstr(0);
+    if (length(script) == 0) return "";
+    script = my.normalizeSlashes(script);
+    int len = length(script);
+    while (len > 0 && script[len] == '/') {
+      len = len - 1;
+    }
+    if (len <= 0) return "";
+    int i = len;
+    while (i > 0 && script[i] != '/') {
+      i = i - 1;
+    }
+    if (i <= 0) return "";
+    if (i == 1 && script[1] == '/') return "/";
+    str dir = "";
+    int j = 1;
+    while (j < i) {
+      dir = dir + script[j];
+      j = j + 1;
+    }
+    return dir;
+  }
+
+  str buildCandidate(str base, int depth) {
+    str candidate = "";
+    if (length(base) > 0) {
+      candidate = base;
+      int last = length(candidate);
+      if (last > 0) {
+        char tail = candidate[last];
+        int tailCode = ord(tail);
+        if (tail != '/' && tailCode != 92) {
+          candidate = candidate + "/";
+        }
+      }
+    }
+    int step = 0;
+    while (step < depth) {
+      candidate = candidate + "../";
+      step = step + 1;
+    }
+    candidate = candidate + "etc/words";
+    return candidate;
+  }
+
+  bool loadFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return false;
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth);
+      if (my.load(candidate)) {
+        return true;
+      }
+      depth = depth + 1;
+    }
+    return false;
+  }
+
   void WordRepository() {
     my.count = 0;
 
@@ -74,13 +146,13 @@ class WordRepository {
       ok = my.load(ConfiguredWordsPath);
     }
     if (!ok) {
-      ok = my.load("etc/words");
+      str scriptDir = my.scriptDirectory();
+      if (length(scriptDir) > 0) {
+        ok = my.loadFromBase(scriptDir, 8);
+      }
     }
     if (!ok) {
-      ok = my.load("../etc/words");
-    }
-    if (!ok) {
-      my.load("../../etc/words");
+      ok = my.loadFromBase("", 8);
     }
   }
 
@@ -340,6 +412,7 @@ class HangmanGame {
   bool hintUsed;
   int wins;
   int losses;
+  bool hasWord;
 
   void HangmanGame() {
     my.repo = new WordRepository();
@@ -351,20 +424,26 @@ class HangmanGame {
     my.guessed = "";
     my.wins = 0;
     my.losses = 0;
+    my.hasWord = false;
   }
 
   void startRound() {
     randomize();
     my.chosen = my.repo.randomWord();
     my.display = "";
+    my.guessed = "";
+    my.wrong = 0;
+    my.hintUsed = false;
+    my.hasWord = length(my.chosen) > 0;
+    if (!my.hasWord) {
+      my.display = "(no words)";
+      return;
+    }
     int i = 1;
     while (i <= length(my.chosen)) {
       my.display = my.display + "_";
       i = i + 1;
     }
-    my.guessed = "";
-    my.wrong = 0;
-    my.hintUsed = false;
   }
 
   bool handleGuess(char c) {
@@ -383,6 +462,17 @@ class HangmanGame {
   }
 
   void playRound() {
+    if (!my.hasWord) {
+      my.view.render(my.display, my.guessed, my.wrong);
+      TextColor(CRT.LightRed);
+      my.view.showMessage("No words available. Run with a dictionary path (rea hangman5 <path>).");
+      TextColor(CRT.White);
+      HideCursor();
+      my.view.showMessageAt("Press Enter to continue...", my.view.vMsgRow + 1);
+      str pause; readln(pause);
+      ShowCursor();
+      return;
+    }
     bool win = false;
     str msg;
     while (my.wrong < MAX_WRONG && my.display != my.chosen) {
