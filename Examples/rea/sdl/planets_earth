@@ -12,6 +12,23 @@ float earthMonths = 0.0;
 
 str ConfiguredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
 
+str resolveFontPath() {
+  str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+  if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+    return ConfiguredFontPath;
+  }
+  if (fileexists(legacyFontPath)) {
+    return legacyFontPath;
+  }
+  if (fileexists(repoFontPath1)) {
+    return repoFontPath1;
+  }
+  return repoFontPath2;
+}
+
 
 const float SunMinRadiusPixels = 32.0;
 const float PlanetVisualScale = 12.0;
@@ -211,7 +228,7 @@ class SolarSystemApp {
       myself.SizeScale = 1.0;
     }
     myself.sunRadius = trunc(rawSun * myself.SizeScale);
-    inittextsystem(ConfiguredFontPath, 16);
+    inittextsystem(resolveFontPath(), 16);
     randomize();
     myself.FrameDelay = trunc(1000 / TargetFPS);
     myself.initPlanets();

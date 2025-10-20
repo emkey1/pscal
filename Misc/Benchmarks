@@ -376,3 +376,38 @@ subshell.sh: command subs                               5,735      1,993
 subshell.sh: external command                           error        586
 stringop1.sh: string length                           139,050    596,037
 ------------------------------------------------------------------------
+
+Sun Oct 19 20:05:16 CEST 2025
+o More optimizations via the codex command line
+
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                          120,216    468,689
+assign.sh: variable                                   149,596    712,181
+assign.sh: local var                                  149,419    707,229
+assign.sh: local var (typeset)                        147,721    705,614
+cmp.sh: [ ]                                            79,180    384,047
+cmp.sh: [[ ]]                                          60,637    526,250
+cmp.sh: case                                          126,788    683,889
+count.sh: posix                                       142,961    523,509
+count.sh: typeset -i                                  142,921    506,107
+count.sh: increment                                   205,043    652,006
+eval.sh: direct assign                                 83,049    336,336
+eval.sh: eval assign                                    6,622    198,627
+eval.sh: command subs                                   error      1,993
+func.sh: no func                                      223,243    660,830
+func.sh: func                                          80,897    354,402
+null.sh: blank                                        221,457      error
+null.sh: assign variable                              150,688    744,171
+null.sh: define function                              168,587    791,115
+null.sh: undefined variable                           149,035    589,112
+null.sh: : command                                    222,300    661,342
+subshell.sh: no subshell                              222,228    601,541
+subshell.sh: brace                                    117,144    594,056
+subshell.sh: subshell                                 109,291      2,214
+subshell.sh: command subs                               5,993      2,099
+subshell.sh: external command                           error        676
+stringop1.sh: string length                           143,281    607,630
+------------------------------------------------------------------------

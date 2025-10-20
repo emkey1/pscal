@@ -2,7 +2,7 @@
 // Uses SDL for graphics and input handling
 
 const int BoardWidth = 18;
-const int BoardHeight = 14;
+const int BoardHeight = 18;
 const int CellSize = 30;
 
 const int FBlockCount = 7;
@@ -445,13 +445,13 @@ class Game {
         // Draw score info
         setrgbcolor(255, 255, 255);
         str scoreStr = "Score: " + inttostr(myself.board.getScore());
-        outtextxy(20, 470, scoreStr);
+        outtextxy(20, 570, scoreStr);
         
         str levelStr = "Level: " + inttostr(myself.board.getLevel());
-        outtextxy(150, 470, levelStr);
+        outtextxy(150, 570, levelStr);
         
         str linesStr = "Lines: " + inttostr(myself.board.getLines());
-        outtextxy(250, 470, linesStr);
+        outtextxy(250, 570, linesStr);
         
         if (myself.gameOver) {
             str gameOverStr = "GAME OVER - Press Q to quit";
