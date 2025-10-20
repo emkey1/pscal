@@ -17,6 +17,23 @@ bool FBlockDataInitialized = false;
 
 str ConfiguredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
 
+str resolveFontPath() {
+    str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+    if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+        return ConfiguredFontPath;
+    }
+    if (fileexists(legacyFontPath)) {
+        return legacyFontPath;
+    }
+    if (fileexists(repoFontPath1)) {
+        return repoFontPath1;
+    }
+    return repoFontPath2;
+}
+
 void initializeFBlockData() {
     if (FBlockDataInitialized) {
         return;
@@ -522,18 +539,7 @@ class Game {
     
     void run() {
         initgraph(WindowWidth, WindowHeight, "Rea Block Game");
-        str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
-        str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
-        str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
-        if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
-            inittextsystem(ConfiguredFontPath, 18);
-        } else if (fileexists(legacyFontPath)) {
-            inittextsystem(legacyFontPath, 18);
-        } else if (fileexists(repoFontPath1)) {
-            inittextsystem(repoFontPath1, 18);
-        } else {
-            inittextsystem(repoFontPath2, 18);
-        }
+        inittextsystem(resolveFontPath(), 18);
         randomize();
 
         writeln("Block Game - Use A/D or "+
