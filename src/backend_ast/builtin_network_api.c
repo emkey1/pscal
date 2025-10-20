@@ -50,18 +50,52 @@ typedef struct SocketInfo_s {
 
 static SocketInfo* g_socket_info_list = NULL;
 
+static const Value* resolveStringPointer(const Value* value) {
+    const Value* current = value;
+    int depth = 0;
+    while (current && current->type == TYPE_POINTER &&
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+        if (!current->ptr_val) {
+            return NULL;
+        }
+        current = (const Value*)current->ptr_val;
+        if (++depth > 16) {
+            return NULL;
+        }
+    }
+    return current;
+}
+
 static int valueIsStringLike(const Value* value) {
     if (!value) return 0;
     if (value->type == TYPE_STRING) return 1;
-    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+    if (value->type == TYPE_POINTER) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+        const Value* resolved = resolveStringPointer(value);
+        if (!resolved) return 0;
+        if (resolved->type == TYPE_STRING) return 1;
+        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return 1;
+        }
+    }
     return 0;
 }
 
 static const char* valueToCStringLike(const Value* value) {
     if (!value) return NULL;
     if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
-    if (value->type == TYPE_POINTER && value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
-        return (const char*)value->ptr_val;
+    if (value->type == TYPE_POINTER) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)value->ptr_val;
+        }
+        const Value* resolved = resolveStringPointer(value);
+        if (!resolved) return NULL;
+        if (resolved->type == TYPE_STRING) {
+            return resolved->s_val ? resolved->s_val : "";
+        }
+        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)resolved->ptr_val;
+        }
     }
     return NULL;
 }
@@ -2030,6 +2064,8 @@ Value vmBuiltinSocketBind(VM* vm, int arg_count, Value* args) {
     int family = AF_INET;
     lookupSocketInfo(s, &family, NULL);
     int r = -1;
+    int optval = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&optval, sizeof(optval));
 #ifdef AF_INET6
     if (family == AF_INET6) {
         struct sockaddr_in6 addr6;
@@ -2073,6 +2109,8 @@ Value vmBuiltinSocketBindAddr(VM* vm, int arg_count, Value* args) {
     int family = AF_INET;
     lookupSocketInfo(s, &family, NULL);
     int r = -1;
+    int optval = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&optval, sizeof(optval));
 #ifdef AF_INET6
     if (family == AF_INET6) {
         struct sockaddr_in6 addr6;

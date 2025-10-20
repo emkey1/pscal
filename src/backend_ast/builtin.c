@@ -5,6 +5,7 @@
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
+#include "vm/string_sentinels.h"
 
 // Standard library includes remain the same
 #include <math.h>
@@ -38,6 +39,59 @@ static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
 static int gSdlReadKeyBufferStart = 0;
 static int gSdlReadKeyBufferCount = 0;
 
+#endif
+
+static const Value* resolveStringPointerBuiltin(const Value* value) {
+    const Value* current = value;
+    int depth = 0;
+    while (current && current->type == TYPE_POINTER &&
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+        if (!current->ptr_val) {
+            return NULL;
+        }
+        current = (const Value*)current->ptr_val;
+        if (++depth > 16) {
+            return NULL;
+        }
+    }
+    return current;
+}
+
+static int builtinValueIsStringLike(const Value* value) {
+    if (!value) return 0;
+    if (value->type == TYPE_STRING) return 1;
+    if (value->type == TYPE_POINTER) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+        const Value* resolved = resolveStringPointerBuiltin(value);
+        if (!resolved) return 0;
+        if (resolved->type == TYPE_STRING) return 1;
+        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static const char* builtinValueToCString(const Value* value) {
+    if (!value) return NULL;
+    if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
+    if (value->type == TYPE_POINTER) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)value->ptr_val;
+        }
+        const Value* resolved = resolveStringPointerBuiltin(value);
+        if (!resolved) return NULL;
+        if (resolved->type == TYPE_STRING) {
+            return resolved->s_val ? resolved->s_val : "";
+        }
+        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)resolved->ptr_val;
+        }
+    }
+    return NULL;
+}
+
+#ifdef SDL
 static bool sdlReadKeyBufferHasData(void) {
     return gSdlReadKeyBufferCount > 0;
 }
@@ -4603,6 +4657,50 @@ Value vmBuiltinMstreambuffer(VM* vm, int arg_count, Value* args) {
     return makeString(buffer_content);
 }
 
+Value vmBuiltinMstreamFromString(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "MStreamFromString expects 1 argument (string).");
+        return makeMStream(NULL);
+    }
+
+    if (!builtinValueIsStringLike(&args[0])) {
+        runtimeError(vm, "MStreamFromString requires a string argument.");
+        return makeMStream(NULL);
+    }
+
+    const char* payload = builtinValueToCString(&args[0]);
+    if (!payload) {
+        payload = "";
+    }
+
+    size_t len = strlen(payload);
+    size_t capacity = len + 1;
+
+    MStream* ms = createMStream();
+    if (!ms) {
+        runtimeError(vm, "MStreamFromString failed to allocate stream.");
+        return makeMStream(NULL);
+    }
+
+    if (capacity > 0) {
+        unsigned char* buffer = (unsigned char*)malloc(capacity);
+        if (!buffer) {
+            releaseMStream(ms);
+            runtimeError(vm, "MStreamFromString failed to allocate buffer.");
+            return makeMStream(NULL);
+        }
+        if (len > 0) {
+            memcpy(buffer, payload, len);
+        }
+        buffer[len] = '\0';
+        ms->buffer = buffer;
+        ms->capacity = (int)capacity;
+        ms->size = (int)len;
+    }
+
+    return makeMStream(ms);
+}
+
 Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Real() expects 1 argument.");
@@ -5158,6 +5256,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("mkDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFree", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamFromString", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamBuffer", AST_FUNCTION_DECL, NULL);
@@ -5255,6 +5354,7 @@ static void populateBuiltinRegistry(void) {
     registerVmBuiltin("tochar",   vmBuiltinToChar,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("mstreamfromstring", vmBuiltinMstreamFromString, BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 void registerAllBuiltins(void) {

@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.0.0 – 2025-10-20
+
+Enhancements
+- Added the `exsh` shell front end with PSCAL builtin integration, Bash-compatible `-c` execution, and tuned caching/pipeline helpers for scripts.
+- Replaced the VM builtin registry with hash-indexed lookups and cached procedure symbols, cutting dispatch overhead across all languages.
+- Extended Pascal with `goto`/`label` support, compound assignment operators, and refreshed CRT demos such as the Blackjack scoreboard.
+- Optimised tight VM paths by inlining guarded loops and introducing owned string helpers that trim transient allocations.
+
+Stability and correctness
+- Fixed Pascal dynamic-array `SetLength` and `Low/High` behaviour so nested data retains contents and bounds stay accurate.
+- Hardened exsh errexit, redirection, and directory-stack handling to align parity tests and shellbench workloads with Bash.
+- Patched Rea parser/CLI edge cases and expanded regression coverage with new scope suites and cached-bytecode guards.
+- Ensured extended builtin detection stays stable alongside host thread helpers and optional module toggles.
+
+Developer experience
+- `Tests/run_all_tests` now auto-selects a writable `TMPDIR`, runs from any working directory, and leaves network suites opt-in.
+- Rea's regression harness tolerates `set -u` shells and handles empty arg manifests without aborting.
+- Expanded documentation for exsh debugging, compiler flags, and the Rea programmer workflow.
+- Shared library runners spin up local HTTP helpers per language and summarise results consistently.
+- Introduced `MStreamFromString` so front ends can materialise string payloads for socket APIs without scratch files.
+
+Fixed
+- Resolved Blackjack prompt placement and CRT scoreboard layout glitches.
+- Restored SDL demo controls, fonts, and fast landscape rendering fallbacks across Pascal and Rea samples.
+- Addressed shellbench performance regressions while keeping EXIT traps and status propagation correct.
+- Eliminated builtin registry double frees and stale cache metadata introduced during hashing refactors.
+
 ## v2.3.0 – 2025-10-01
 
 Enhancements

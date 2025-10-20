@@ -6,15 +6,48 @@ var
   ms: mstream;
   msg: string;
   serverReady: integer;
+  targetPort: integer;
 
 procedure Server;
-var srv, conn: integer; data: mstream;
+var
+  srv, conn: integer;
+  data: mstream;
+  attempt: integer;
+  candidatePort: integer;
+  bound: boolean;
 begin
   srv := SocketCreate(0);
-  SocketBind(srv, 54321);
+  if srv < 0 then
+  begin
+    writeln('server socket creation failed');
+    halt(1);
+  end;
+  bound := False;
+  for attempt := 0 to 9 do
+  begin
+    candidatePort := 55000 + Random(5000);
+    if SocketBind(srv, candidatePort) = 0 then
+    begin
+      targetPort := candidatePort;
+      bound := True;
+      break;
+    end;
+  end;
+  if not bound then
+  begin
+    writeln('unable to bind server socket');
+    SocketClose(srv);
+    halt(1);
+  end;
   SocketListen(srv, 1);
   serverReady := 1;
   conn := SocketAccept(srv);
+  if conn < 0 then
+  begin
+    SocketClose(srv);
+    writeln('accept failed');
+    halt(1);
+  end;
   data := SocketReceive(conn, 1024);
   SocketSend(conn, data);
   mstreamfree(data);
@@ -23,13 +56,27 @@ begin
 end;
 
 begin
+  Randomize;
   serverReady := 0;
+  targetPort := 0;
   t := CreateThread(@Server);
   while serverReady = 0 do
     Delay(10);
   client := SocketCreate(0);
-  SocketConnect(client, '127.0.0.1', 54321);
-  SocketSend(client, 'hi');
+  if client < 0 then
+  begin
+    writeln('client socket creation failed');
+    halt(1);
+  end;
+  if SocketConnect(client, '127.0.0.1', targetPort) <> 0 then
+  begin
+    SocketClose(client);
+    writeln('client connect failed');
+    halt(1);
+  end;
+  ms := MStreamFromString('hi');
+  SocketSend(client, ms);
+  mstreamfree(ms);
   ms := SocketReceive(client, 1024);
   msg := mstreambuffer(ms);
   writeln(msg);

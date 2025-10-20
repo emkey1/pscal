@@ -11,3 +11,8 @@ Misc/old
 
 Tests/edge_input.txt
 Tests/readln_test.txt
+Tests/async_test_src.txt
+Tests/async_test_dst.txt
+Tests/src_to_file.txt
+Tests/dst_to_file.txt
+Tests/headers_test.txt

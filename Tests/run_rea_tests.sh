@@ -291,11 +291,21 @@ fi
 
 should_skip() {
     local candidate="$1"
+    local entry
+    local found=1
+
+    set +u
     for entry in "${SKIP_TESTS[@]}"; do
         if [ "$entry" = "$candidate" ]; then
-            return 0
+            found=0
+            break
         fi
     done
+    set -u
+
+    if [ $found -eq 0 ]; then
+        return 0
+    fi
     return 1
 }
 
@@ -387,11 +397,17 @@ run_rea_fixture() {
     local actual_err=$(mktemp)
 
     if [ "$status" = "PASS" ]; then
+        local -a cmd=(python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN")
+        if (( ${#arg_list[@]} )); then
+            cmd+=("${arg_list[@]}")
+        fi
+        cmd+=("$src_rel")
+
         set +e
         if [ -f "$input_file" ]; then
-            python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" "${arg_list[@]}" "$src_rel" < "$input_file" > "$actual_out" 2> "$actual_err"
+            "${cmd[@]}" < "$input_file" > "$actual_out" 2> "$actual_err"
         else
-            python3 "$RUNNER_PY" --timeout "$TEST_TIMEOUT" "$REA_BIN" "${arg_list[@]}" "$src_rel" > "$actual_out" 2> "$actual_err"
+            "${cmd[@]}" > "$actual_out" 2> "$actual_err"
         fi
         local run_status=$?
         set -e

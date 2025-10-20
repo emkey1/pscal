@@ -1,32 +1,65 @@
 #!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TMP_FALLBACK="$SCRIPT_DIR/tmp"
+
+ensure_tmpdir() {
+    local candidate="${TMPDIR:-}"
+    local probe=""
+    if [ -n "$candidate" ]; then
+        if probe="$(TMPDIR="$candidate" mktemp -d 2>/dev/null)"; then
+            rmdir "$probe"
+            export TMPDIR="$candidate"
+            return
+        fi
+    fi
+
+    mkdir -p "$TMP_FALLBACK"
+    if probe="$(TMPDIR="$TMP_FALLBACK" mktemp -d 2>/dev/null)"; then
+        rmdir "$probe"
+        export TMPDIR="$TMP_FALLBACK"
+        return
+    fi
+
+    echo "Unable to create a writable temporary directory. Set TMPDIR manually and retry." >&2
+    exit 1
+}
+
+ensure_tmpdir
+
+pushd "$SCRIPT_DIR" >/dev/null
+trap 'popd >/dev/null' EXIT
+
 # Network tests are disabled by default. Set RUN_NET_TESTS=1 to enable.
-export RUN_NET_TESTS=1
+export RUN_NET_TESTS="${RUN_NET_TESTS:-0}"
+
 echo "Running Pascal Tests"
-./run_pascal_tests.sh
+bash ./run_pascal_tests.sh
 echo "Pascal Tests End"
 echo
 echo "====================================="
 echo "Running CLike Tests"
-./run_clike_tests.sh
+bash ./run_clike_tests.sh
 echo "CLike Tests End"
 echo
 echo "====================================="
 echo "Running exsh Tests"
-./run_exsh_tests.sh
+bash ./run_exsh_tests.sh
 echo "exsh Tests End"
 echo
 echo "====================================="
 echo "Running Rea Tests"
-./run_rea_tests.sh
+bash ./run_rea_tests.sh
 echo "Rea Tests End"
 echo
 echo "====================================="
 echo "Running Tiny Tests"
-./run_tiny_tests.sh
+bash ./run_tiny_tests.sh
 echo
 echo "Tiny Tests End"
 echo
 echo "====================================="
 echo "Running JSON2BC Tests"
-./run_json2bc_tests.sh
+bash ./run_json2bc_tests.sh
 echo "JSON2BC Tests End"
