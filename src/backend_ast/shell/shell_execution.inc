@@ -388,6 +388,8 @@ static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_s
     return 0;
 }
 
+static int shellFinishPipeline(const ShellCommand *tail_cmd);
+
 static void shellResetPipeline(void) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     if (!ctx->active) {
@@ -412,6 +414,18 @@ static void shellResetPipeline(void) {
     ctx->background = false;
     ctx->last_status = 0;
     ctx->pgid = -1;
+}
+
+static void shellMaybeResetPipeline(void) {
+    ShellPipelineContext *ctx = &gShellRuntime.pipeline;
+    if (!ctx->active) {
+        return;
+    }
+    if (ctx->stage_count > 1) {
+        shellFinishPipeline(NULL);
+        return;
+    }
+    shellResetPipeline();
 }
 
 static void shellAbortPipeline(void) {
@@ -552,7 +566,10 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
         shellRuntimeProcessPendingSignals();
 
         if (stopped_job && job_control) {
-            ShellJob *job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+            ShellJob *job = NULL;
+            if (tail_cmd) {
+                job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+            }
             if (job) {
                 job->stopped = true;
                 job->running = false;
@@ -564,7 +581,10 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             return final_status;
         }
     } else if (ctx->launched > 0) {
-        ShellJob *job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+        ShellJob *job = NULL;
+        if (tail_cmd) {
+            job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+        }
         if (job) {
             job->running = true;
             job->stopped = false;
