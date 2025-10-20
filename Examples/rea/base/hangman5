@@ -246,6 +246,10 @@ class WordRepository {
     if (!ok) {
       ok = my.loadFromBase("", 8);
     }
+    if (!ok) {
+      writeln("Unable to load hangman dictionary. Pass a dictionary path (rea hangman5 <path>) or set PSCAL_INSTALL_ROOT.");
+      halt(1);
+    }
   }
 
   bool load(str path) {
