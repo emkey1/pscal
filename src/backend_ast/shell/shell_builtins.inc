@@ -2258,9 +2258,8 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
             (void)chdir(old_cwd);
             if (!shellDirectoryStackAssignTopOwned(old_cwd)) {
                 free(old_cwd);
-            } else {
-                old_cwd = NULL;
             }
+            old_cwd = NULL;
         } else {
             (void)shellDirectoryStackAssignTopOwned(NULL);
         }
