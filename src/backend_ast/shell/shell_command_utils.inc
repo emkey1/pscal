@@ -957,7 +957,7 @@ static bool shellApplyAssignmentsTemporary(const ShellCommand *cmd,
             }
             backups[i].had_previous = true;
         } else {
-            const char *previous = getenv(backups[i].name);
+            const char *previous = shellSafeGetenv(backups[i].name);
             if (previous) {
                 backups[i].previous_value = strdup(previous);
                 if (!backups[i].previous_value) {
@@ -1174,7 +1174,7 @@ static bool shellSplitExpandedWord(const char *expanded, uint8_t word_flags,
         return true;
     }
     bool use_map = quoted_map && quoted_len == length;
-    const char *ifs = getenv("IFS");
+    const char *ifs = shellSafeGetenv("IFS");
     if (!ifs) {
         ifs = " \t\n";
     }
@@ -2103,7 +2103,7 @@ static char *shellLookupParameterValueInternal(const char *name,
         free(key);
         return local_value ? local_value : strdup("");
     }
-    const char *env = getenv(key);
+    const char *env = shellSafeGetenv(key);
     if (out_is_set) {
         *out_is_set = (env != NULL);
     }
@@ -2818,7 +2818,7 @@ static void shellReadonlyPrintVariables(void) {
         if (!name) {
             continue;
         }
-        const char *value = getenv(name);
+        const char *value = shellSafeGetenv(name);
         if (!value) {
             printf("readonly %s\n", name);
             continue;
@@ -3033,7 +3033,7 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
         return false;
     }
     if (is_array_literal) {
-        const char *current = getenv(name);
+        const char *current = shellSafeGetenv(name);
         shellArrayRegistryAssignFromText(name, current);
     } else {
         shellArrayRegistryRemove(name);
@@ -3172,7 +3172,7 @@ static bool shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char
     if (old_cwd) {
         if (!shellSetTrackedVariable("OLDPWD", old_cwd, false)) {
             if (new_cwd) {
-                const char *current = getenv("PWD");
+                const char *current = shellSafeGetenv("PWD");
                 if (!current || strcmp(current, old_cwd) != 0) {
                     (void)shellSetTrackedVariable("PWD", old_cwd, false);
                 }
@@ -3264,7 +3264,7 @@ static void shellDirectoryStackWriteEntry(int fd, const char *entry) {
     if (!entry) {
         return;
     }
-    const char *home = getenv("HOME");
+    const char *home = shellSafeGetenv("HOME");
     size_t home_len = home ? strlen(home) : 0;
     if (home_len > 0 && strncmp(entry, home, home_len) == 0 &&
         (entry[home_len] == '\0' || entry[home_len] == '/')) {
@@ -3318,7 +3318,7 @@ static char *shellLookupRawEnvironmentValue(const char *name, size_t len) {
         }
         return local_value;
     }
-    const char *env = getenv(key);
+    const char *env = shellSafeGetenv(key);
     free(key);
     if (!env) {
         return strdup("");

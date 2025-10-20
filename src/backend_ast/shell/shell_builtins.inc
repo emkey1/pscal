@@ -10,7 +10,7 @@ static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
     if (cached_style < 0) {
         cached_style = 0;
-        const char *bash_path = getenv("BASH");
+        const char *bash_path = shellSafeGetenv("BASH");
         if (!bash_path || bash_path[0] == '\0') {
             bash_path = "/bin/bash";
         }
@@ -2217,7 +2217,7 @@ done:
 Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     const char *path = NULL;
     if (arg_count == 0) {
-        path = getenv("HOME");
+        path = shellSafeGetenv("HOME");
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
@@ -3054,7 +3054,7 @@ Value vmBuiltinShellReturn(VM *vm, int arg_count, Value *args) {
 }
 
 static const char *shellReadResolveIFS(void) {
-    const char *ifs = getenv("IFS");
+    const char *ifs = shellSafeGetenv("IFS");
     if (!ifs) {
         return " \t\n";
     }
@@ -4787,7 +4787,7 @@ Value vmBuiltinShellDeclare(VM *vm, int arg_count, Value *args) {
                         const ShellArrayVariable *array_var = shellArrayRegistryFindConst(spec);
                         bool exists = (array_var != NULL);
                         if (!exists) {
-                            const char *existing = getenv(spec);
+                            const char *existing = shellSafeGetenv(spec);
                             exists = (existing != NULL);
                         }
                         if (!exists) {
@@ -5037,7 +5037,7 @@ Value vmBuiltinShellReadonly(VM *vm, int arg_count, Value *args) {
             return makeVoid();
         }
         if (!shellReadonlyContains(text)) {
-            const char *existing = getenv(text);
+            const char *existing = shellSafeGetenv(text);
             if (!existing) {
                 if (!shellSetTrackedVariable(text, "", false)) {
                     const char *readonly = shellReadonlyGetErrorName();
@@ -5143,7 +5143,7 @@ static bool shellCommandEnumerateExecutables(const char *name,
         return true;
     }
 
-    const char *env_value = path_env ? path_env : getenv("PATH");
+    const char *env_value = path_env ? path_env : shellSafeGetenv("PATH");
     if (!env_value) {
         env_value = "";
     }
@@ -5600,7 +5600,7 @@ Value vmBuiltinShellExport(VM *vm, int arg_count, Value *args) {
                 shellUpdateStatus(1);
                 return makeVoid();
             }
-            const char *value = getenv(text);
+            const char *value = shellSafeGetenv(text);
             if (!value) {
                 value = "";
             }

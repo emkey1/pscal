@@ -37,6 +37,48 @@
 #include <pthread.h>
 #include <time.h>
 
+#if defined(__GLIBC__) || defined(__ANDROID__)
+#define SHELL_HAVE_SECURE_GETENV 1
+extern char *secure_getenv(const char *name);
+#endif
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+#define SHELL_HAVE_ISSETUGID 1
+#endif
+
+static bool shellProcessIsPrivileged(void) {
+#if defined(SHELL_HAVE_ISSETUGID)
+    if (issetugid()) {
+        return true;
+    }
+#endif
+    if (geteuid() != getuid() || getegid() != getgid()) {
+        return true;
+    }
+    return false;
+}
+
+static const char *shellSafeGetenv(const char *name) {
+    if (!name) {
+        return NULL;
+    }
+#if defined(SHELL_HAVE_SECURE_GETENV)
+    if (shellProcessIsPrivileged()) {
+        return NULL;
+    }
+    const char *value = secure_getenv(name);
+    if (!value) {
+        return NULL;
+    }
+    return value;
+#else
+    if (shellProcessIsPrivileged()) {
+        return NULL;
+    }
+    return getenv(name);
+#endif
+}
+
 extern char **environ;
 
 #define SHELL_ARRAY_ELEMENT_SEP '\x1d'
@@ -336,7 +378,7 @@ static const char *shellResolveBashPath(void) {
     if (initialised) {
         return resolved[0] ? resolved : "/bin/bash";
     }
-    const char *env_bash = getenv("BASH");
+    const char *env_bash = shellSafeGetenv("BASH");
     const char *candidates[] = {
         env_bash,
         "/opt/homebrew/bin/bash",
@@ -368,7 +410,7 @@ static bool shellAssociativeArraysSupported(void) {
         return gShellAssociativeArraySupport == 1;
     }
 
-    int override_value = shellParseEnvBool(getenv("PSCALSHELL_ASSOC_ARRAYS"));
+    int override_value = shellParseEnvBool(shellSafeGetenv("PSCALSHELL_ASSOC_ARRAYS"));
     if (override_value == 0 || override_value == 1) {
         gShellAssociativeArraySupport = override_value ? 1 : 0;
         return gShellAssociativeArraySupport == 1;
@@ -405,7 +447,7 @@ static bool shellBindRequiresInteractive(void) {
         return gShellBindInteractiveStatus == 1;
     }
 
-    int override_value = shellParseEnvBool(getenv("PSCALSHELL_BIND_INTERACTIVE"));
+    int override_value = shellParseEnvBool(shellSafeGetenv("PSCALSHELL_BIND_INTERACTIVE"));
     if (override_value == 0 || override_value == 1) {
         gShellBindInteractiveStatus = override_value ? 1 : 0;
         return gShellBindInteractiveStatus == 1;
@@ -1067,7 +1109,7 @@ static void shellArrayRegistryRestoreVisibleValue(const char *name,
         shellArrayRegistryAssignFromText(name, text);
         return;
     }
-    const char *env_text = getenv(name);
+    const char *env_text = shellSafeGetenv(name);
     if (env_text) {
         shellArrayRegistryAssignFromText(name, env_text);
     } else {
@@ -2003,7 +2045,7 @@ bool shellRuntimeSetSignalTrap(int signo, ShellTrapAction action, const char *co
 static void shellRuntimeInitialisePosixMode(void) __attribute__((constructor));
 
 static void shellRuntimeInitialisePosixMode(void) {
-    const char *posix_env = getenv("POSIXLY_CORRECT");
+    const char *posix_env = shellSafeGetenv("POSIXLY_CORRECT");
     if (posix_env) {
         gShellRuntime.posix_mode = true;
     }
@@ -2012,7 +2054,7 @@ static void shellRuntimeInitialisePosixMode(void) {
 void shellRuntimeSetPosixMode(bool enabled) {
     gShellRuntime.posix_mode = enabled;
     if (enabled) {
-        const char *current = getenv("POSIXLY_CORRECT");
+        const char *current = shellSafeGetenv("POSIXLY_CORRECT");
         if (!current) {
             setenv("POSIXLY_CORRECT", "y", 1);
         }
