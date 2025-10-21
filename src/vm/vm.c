@@ -2282,6 +2282,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 #endif
 
     bool opcode_profile_enabled = vmOpcodeProfileIsEnabled();
+    const volatile bool *pending_exit_flag = shellRuntimePendingExitFlag();
 
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
@@ -2527,7 +2528,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
-        shellRuntimeMaybeRequestPendingExit(vm);
+        if (pending_exit_flag && *pending_exit_flag) {
+            shellRuntimeMaybeRequestPendingExit(vm);
+        }
         if (vm->exit_requested || vm->abort_requested) {
             if (shellRuntimeShouldDeferExit(vm)) {
                 continue;
@@ -5818,6 +5821,10 @@ comparison_error_label:
     }
     return INTERPRET_OK;
 }
+__attribute__((weak)) const volatile bool *shellRuntimePendingExitFlag(void) {
+    return NULL;
+}
+
 __attribute__((weak)) bool shellRuntimeShouldDeferExit(VM* vm) {
     (void)vm;
     return false;

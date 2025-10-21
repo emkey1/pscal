@@ -221,6 +221,7 @@ void shellRuntimePopScript(void);
 bool shellRuntimeIsOutermostScript(void);
 bool shellRuntimeShouldDeferExit(struct VM_s* vm);
 bool shellRuntimeMaybeRequestPendingExit(struct VM_s* vm);
+const volatile bool *shellRuntimePendingExitFlag(void);
 void shellRuntimeSetInteractive(bool interactive);
 bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);

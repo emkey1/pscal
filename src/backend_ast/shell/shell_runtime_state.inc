@@ -1743,6 +1743,10 @@ bool shellRuntimeMaybeRequestPendingExit(VM *vm) {
     return true;
 }
 
+const volatile bool *shellRuntimePendingExitFlag(void) {
+    return &gShellRuntime.errexit_pending;
+}
+
 ShellTrapAction shellRuntimeGetSignalTrapAction(int signo) {
     if (signo <= 0 || signo >= NSIG) {
         return SHELL_TRAP_ACTION_DEFAULT;
