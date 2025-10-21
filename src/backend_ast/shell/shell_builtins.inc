@@ -6097,6 +6097,7 @@ Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
             }
             shellCommandFreeResults(results, count);
         }
+        cmd.ignore_functions = true;
         cmd.argv[exec_argc] = NULL;
         VM *previous_vm = shellSwapCurrentVm(vm);
         Value result = shellExecuteCommand(vm, &cmd);

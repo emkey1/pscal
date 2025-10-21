@@ -2430,7 +2430,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0) {
         return false;
     }
-    if (shellInvokeFunction(vm, cmd)) {
+    if (!cmd->ignore_functions && shellInvokeFunction(vm, cmd)) {
         return true;
     }
     const char *name = cmd->argv[0];
