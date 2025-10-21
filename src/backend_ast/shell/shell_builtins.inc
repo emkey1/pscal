@@ -746,7 +746,7 @@ static bool shellLoopAdoptPipeline(VM *vm,
                 ctx->pipes[pipeline_index][1] = -1;
                 return false;
             }
-            if (dup2(stdout_fd, STDOUT_FILENO) != 0) {
+            if (dup2(stdout_fd, STDOUT_FILENO) == -1) {
                 int err = errno;
                 runtimeError(vm, "shell loop: failed to adopt pipeline stdout: %s", strerror(err));
                 shellRestoreExecRedirections(frame->redir_backups, frame->redir_backup_count);
@@ -774,7 +774,7 @@ static bool shellLoopAdoptPipeline(VM *vm,
             runtimeError(vm, "shell loop: failed to prepare stderr backup");
             return false;
         }
-        if (dup2(STDOUT_FILENO, STDERR_FILENO) != 0) {
+        if (dup2(STDOUT_FILENO, STDERR_FILENO) == -1) {
             int err = errno;
             runtimeError(vm, "shell loop: failed to adopt pipeline stderr: %s", strerror(err));
             shellRestoreExecRedirections(frame->redir_backups, frame->redir_backup_count);
