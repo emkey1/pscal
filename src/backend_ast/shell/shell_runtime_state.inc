@@ -926,6 +926,7 @@ typedef struct {
     bool local_scope_active;
     bool break_requested;
     bool continue_requested;
+    bool pipeline_subshell_active;
     int break_requested_levels;
     int continue_requested_levels;
     char **dir_stack;
@@ -1319,6 +1320,11 @@ typedef struct {
     size_t applied_redir_count;
     ShellExecRedirBackup *redir_backups;
     size_t redir_backup_count;
+    size_t redir_backup_capacity;
+    bool pipeline_subshell;
+    bool pipeline_scope_pushed;
+    bool pipeline_prev_local_scope_flag;
+    bool pipeline_prev_pipeline_flag;
 } ShellLoopFrame;
 
 static ShellLoopFrame *gShellLoopStack = NULL;
@@ -1340,6 +1346,7 @@ static ShellRuntimeState gShellRuntime = {
     .local_scope_active = false,
     .break_requested = false,
     .continue_requested = false,
+    .pipeline_subshell_active = false,
     .break_requested_levels = 0,
     .continue_requested_levels = 0,
     .dir_stack = NULL,
@@ -2383,6 +2390,15 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
     if (!frame) {
         return;
     }
+    if (frame->pipeline_scope_pushed) {
+        shellLocalScopePop();
+        frame->pipeline_scope_pushed = false;
+    }
+    if (frame->pipeline_subshell) {
+        gShellRuntime.pipeline_subshell_active = frame->pipeline_prev_pipeline_flag;
+        gShellRuntime.local_scope_active = frame->pipeline_prev_local_scope_flag;
+        frame->pipeline_subshell = false;
+    }
     if (frame->for_variable) {
         free(frame->for_variable);
         frame->for_variable = NULL;
@@ -2448,6 +2464,7 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
         shellFreeExecRedirBackups(frame->redir_backups, frame->redir_backup_count);
         frame->redir_backups = NULL;
         frame->redir_backup_count = 0;
+        frame->redir_backup_capacity = 0;
     }
     if (frame->applied_redirs) {
         ShellCommand temp;
@@ -3167,6 +3184,11 @@ static ShellLoopFrame *shellLoopPushFrame(ShellLoopKind kind) {
     frame.applied_redir_count = 0;
     frame.redir_backups = NULL;
     frame.redir_backup_count = 0;
+    frame.redir_backup_capacity = 0;
+    frame.pipeline_subshell = false;
+    frame.pipeline_scope_pushed = false;
+    frame.pipeline_prev_local_scope_flag = false;
+    frame.pipeline_prev_pipeline_flag = false;
     gShellLoopStack[gShellLoopStackSize++] = frame;
     return &gShellLoopStack[gShellLoopStackSize - 1];
 }

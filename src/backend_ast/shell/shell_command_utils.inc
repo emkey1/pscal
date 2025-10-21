@@ -276,6 +276,16 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool exit_requested = false;
     int status = EXIT_FAILURE;
 
+    bool local_scope_pushed = false;
+    bool restore_local_scope_flag = gShellRuntime.local_scope_active;
+    bool restore_pipeline_flag = gShellRuntime.pipeline_subshell_active;
+
+    local_scope_pushed = shellLocalScopePush();
+    if (local_scope_pushed) {
+        gShellRuntime.local_scope_active = true;
+        gShellRuntime.pipeline_subshell_active = true;
+    }
+
     if (*source) {
         cached_entry = shellScalarCacheFind(source);
         if (cached_entry && cached_entry->result) {
@@ -452,6 +462,12 @@ substitution_finish:
     if (reader.fd >= 0) {
         close(reader.fd);
     }
+
+    if (local_scope_pushed) {
+        shellLocalScopePop();
+    }
+    gShellRuntime.pipeline_subshell_active = restore_pipeline_flag;
+    gShellRuntime.local_scope_active = restore_local_scope_flag;
 
     if (!result) {
         result = strdup("");
@@ -3015,6 +3031,13 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
         return false;
     }
     ShellLocalVariable *local_entry = shellLocalScopeFind(name);
+    if (!local_entry && gShellRuntime.pipeline_subshell_active && shellLocalScopeDepth() > 0) {
+        if (!shellLocalScopeSetOnCurrentFrame(name, value ? value : "", is_array_literal)) {
+            errno = ENOMEM;
+            return false;
+        }
+        local_entry = shellLocalScopeFind(name);
+    }
     if (local_entry) {
         if (shellLocalScopeAssignExisting(name, value ? value : "", is_array_literal)) {
             if (is_array_literal) {
