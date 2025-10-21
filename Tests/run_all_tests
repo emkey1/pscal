@@ -60,6 +60,10 @@ echo
 echo "Tiny Tests End"
 echo
 echo "====================================="
+echo "Running Example Program Tests"
+python3 ./examples/run_examples.py
+echo "Example Program Tests End"
+echo
 echo "Running JSON2BC Tests"
 bash ./run_json2bc_tests.sh
 echo "JSON2BC Tests End"

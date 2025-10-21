@@ -1,0 +1,461 @@
+[
+  {
+    "id": "pascal_hello",
+    "description": "Pascal hello world prints greeting",
+    "language": "pascal",
+    "path": "Examples/pascal/base/hello",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Hello, World!"
+      }
+    ]
+  },
+  {
+    "id": "pascal_area_calculation",
+    "description": "Area calculation example reports computed areas",
+    "language": "pascal",
+    "path": "Examples/pascal/base/AreaCalculation",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Area of Rectangle"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Area of Circle"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Area of Triangle"
+      }
+    ]
+  },
+  {
+    "id": "pascal_check_ext_builtin",
+    "description": "Check extended builtin availability reports PID",
+    "language": "pascal",
+    "path": "Examples/pascal/base/CheckExtBuiltin",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "GetPid available"
+      }
+    ]
+  },
+  {
+    "id": "pascal_find_primes",
+    "description": "Find primes example lists primes up to the provided limit",
+    "language": "pascal",
+    "path": "Examples/pascal/base/FindPrimes",
+    "stdin": "20\n",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Prime numbers found up to 20"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Done."
+      }
+    ],
+    "input_delay": 0.2
+  },
+  {
+    "id": "pascal_quick_sort",
+    "description": "Quick sort demo prints sorted array banner",
+    "language": "pascal",
+    "path": "Examples/pascal/base/QuickSort",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Sorted array:"
+      }
+    ]
+  },
+  {
+    "id": "pascal_threading_demo",
+    "description": "Threading demo spawns worker threads",
+    "language": "pascal",
+    "path": "Examples/pascal/base/ThreadingDemo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "spawning threads"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "all threads joined"
+      }
+    ]
+  },
+  {
+    "id": "pascal_threads_proc_ptr_demo",
+    "description": "Threads and procedure pointers demo reports thread result",
+    "language": "pascal",
+    "path": "Examples/pascal/base/ThreadsProcPtrDemo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "thread result"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "func ptr"
+      }
+    ]
+  },
+  {
+    "id": "pascal_show_extended_builtins",
+    "description": "Show extended builtins prints PID and swap result",
+    "language": "pascal",
+    "path": "Examples/pascal/base/ShowExtendedBuiltins",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "PID"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "After Swap"
+      }
+    ]
+  },
+  {
+    "id": "pascal_vm_version_demo",
+    "description": "VM version demo prints VM and bytecode versions",
+    "language": "pascal",
+    "path": "Examples/pascal/base/VMVersionDemo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "VM version"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Bytecode version"
+      }
+    ]
+  },
+  {
+    "id": "clike_hello",
+    "description": "CLike hello world prints greeting",
+    "language": "clike",
+    "path": "Examples/clike/base/hello",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Hello World"
+      }
+    ]
+  },
+  {
+    "id": "clike_func_ptr_indirect_call",
+    "description": "Function pointer example prints computed value",
+    "language": "clike",
+    "path": "Examples/clike/base/FuncPtrIndirectCall",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "42"
+      }
+    ]
+  },
+  {
+    "id": "clike_http_async_demo",
+    "description": "HTTP async demo prints fetched body",
+    "language": "clike",
+    "path": "Examples/clike/base/HttpAsyncDemo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Body:"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "HelloAsyncCL"
+      }
+    ]
+  },
+  {
+    "id": "clike_http_fetch_data_url",
+    "description": "HTTP data URL fetch prints payload",
+    "language": "clike",
+    "path": "Examples/clike/base/HttpFetchDataURL",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "hello world"
+      }
+    ]
+  },
+  {
+    "id": "clike_module_demo",
+    "description": "Module demo imports helper and prints squares",
+    "language": "clike",
+    "path": "Examples/clike/base/module_demo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "5 squared"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "5 cubed"
+      }
+    ]
+  },
+  {
+    "id": "clike_thread_demo",
+    "description": "Thread demo spawns worker and prints completion",
+    "language": "clike",
+    "path": "Examples/clike/base/thread_demo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "child"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "done"
+      }
+    ]
+  },
+  {
+    "id": "clike_vm_version_demo",
+    "description": "VM version demo prints runtime versions",
+    "language": "clike",
+    "path": "Examples/clike/base/vm_version_demo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "VM version"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Bytecode version"
+      }
+    ]
+  },
+  {
+    "id": "clike_show_pid",
+    "description": "Show PID example prints process identifier",
+    "language": "clike",
+    "path": "Examples/clike/base/show_pid",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "PID"
+      }
+    ]
+  },
+  {
+    "id": "clike_fibonacci_native",
+    "description": "Native fibonacci implementation prints sequence",
+    "language": "clike",
+    "path": "Examples/clike/base/fibonacci_native",
+    "stdin": "10\n",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Please enter an integer value"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "10:55"
+      }
+    ],
+    "input_delay": 0.2
+  },
+  {
+    "id": "clike_factorial_native",
+    "description": "Native factorial implementation prints computed value",
+    "language": "clike",
+    "path": "Examples/clike/base/factorial_native",
+    "stdin": "5\n",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Please enter an integer value"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "factorial"
+      }
+    ],
+    "input_delay": 0.2
+  },
+  {
+    "id": "clike_chudnovsky_native",
+    "description": "Chudnovsky native implementation prints approximation",
+    "language": "clike",
+    "path": "Examples/clike/base/chudnovsky_native",
+    "stdin": "2\n",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Please enter an integer value"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "pi:"
+      }
+    ],
+    "input_delay": 0.2
+  },
+  {
+    "id": "rea_hello",
+    "description": "Rea hello world prints greeting",
+    "language": "rea",
+    "path": "Examples/rea/base/hello",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Hello World"
+      }
+    ]
+  },
+  {
+    "id": "rea_base_syntax",
+    "description": "Base syntax example prints arithmetic and loop output",
+    "language": "rea",
+    "path": "Examples/rea/base/base_syntax",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Initial values"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Counting up"
+      }
+    ]
+  },
+  {
+    "id": "rea_flow",
+    "description": "Flow example prints loop and switch sections",
+    "language": "rea",
+    "path": "Examples/rea/base/flow",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "For Loop Test"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Switch Statement"
+      }
+    ]
+  },
+  {
+    "id": "rea_inheritance",
+    "description": "Inheritance example constructs dog and prints speech",
+    "language": "rea",
+    "path": "Examples/rea/base/inheritance_and_constructor",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "An animal was created"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "barks loudly"
+      }
+    ]
+  },
+  {
+    "id": "rea_myself",
+    "description": "myself keyword example prints point information",
+    "language": "rea",
+    "path": "Examples/rea/base/myself",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "New Point created"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "sum of coordinates"
+      }
+    ]
+  },
+  {
+    "id": "rea_crt_demo",
+    "description": "CRT demo clears screen and prints messages",
+    "language": "rea",
+    "path": "Examples/rea/base/crt_demo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Hello from Rea"
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "Screen cleared"
+      }
+    ]
+  },
+  {
+    "id": "rea_method_demo",
+    "description": "Method call sugar example updates counters",
+    "language": "rea",
+    "path": "Examples/rea/base/method_demo",
+    "checks": [
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "c="
+      },
+      {
+        "type": "contains",
+        "stream": "stdout",
+        "value": "d="
+      }
+    ]
+  }
+]
