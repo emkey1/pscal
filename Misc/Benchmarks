@@ -1,12 +1,12 @@
-Oct 10 2025
+Oct 10 2025    0.5%
 mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           36,386    465,330
-assign.sh: variable                                    40,782    707,253
-assign.sh: local var                                   41,111    697,178
-assign.sh: local var (typeset)                         41,100    698,273
+assign.sh: positional params                           36,386    465,330    7.8%
+assign.sh: variable                                    40,782    707,253    5.8%
+assign.sh: local var                                   41,111    697,178    5.9%
+assign.sh: local var (typeset)                         41,100    698,273    5.9%
 ------------------------------------------------------------------------
 * count: number of executions per second
 
@@ -14,20 +14,20 @@ Baseline
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           36,268    454,278 
-assign.sh: variable                                    40,463    699,913 
-assign.sh: local var                                   40,439    693,382 
-assign.sh: local var (typeset)                         40,534    691,530 
-cmp.sh: [ ]                                            22,404    377,805 
-cmp.sh: [[ ]]                                          21,072    528,989 
-cmp.sh: case                                           30,748    669,336 
-eval.sh: direct assign                                 22,110    332,424
-eval.sh: eval assign                                    3,632    194,901
-null.sh: blank                                         60,546      error 
-null.sh: assign variable                               40,804    731,789 
-null.sh: define function                               41,028    776,276 
-null.sh: undefined variable                            40,612    575,879 
-null.sh: : command                                     36,228    649,398 
+assign.sh: positional params                           36,268    454,278     8.0%
+assign.sh: variable                                    40,463    699,913     5.8%
+assign.sh: local var                                   40,439    693,382     5.8%
+assign.sh: local var (typeset)                         40,534    691,530     5.9%
+cmp.sh: [ ]                                            22,404    377,805     5.9%
+cmp.sh: [[ ]]                                          21,072    528,989     4.0%
+cmp.sh: case                                           30,748    669,336     4.6%
+eval.sh: direct assign                                 22,110    332,424    6.7%
+eval.sh: eval assign                                    3,632    194,901    1.9%
+null.sh: blank                                         60,546      error     n/a
+null.sh: assign variable                               40,804    731,789     5.6%
+null.sh: define function                               41,028    776,276     5.3%
+null.sh: undefined variable                            40,612    575,879     7.1%
+null.sh: : command                                     36,228    649,398     5.6%
 ------------------------------------------------------------------------
 
 o register builtin catalog once via pthread_once and reuse the populated registry
@@ -36,21 +36,21 @@ o add an exsh regression that repeatedly exercises command substitution to confi
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           36,627    464,423
-assign.sh: variable                                    41,163    704,908
-assign.sh: local var                                   40,973    694,241
-assign.sh: local var (typeset)                         40,833    694,903
-cmp.sh: [ ]                                            22,698    381,092
-cmp.sh: [[ ]]                                          21,349    530,118
-cmp.sh: case                                           30,955    673,339
-eval.sh: direct assign                                 22,072    332,717
-eval.sh: eval assign                                    3,632    194,187
-eval.sh: command subs                                   error      1,797
-null.sh: blank                                         61,073      error
-null.sh: assign variable                               40,798    731,948
-null.sh: define function                               41,314    776,072
-null.sh: undefined variable                            40,788    570,572
-null.sh: : command                                     36,342    649,347
+assign.sh: positional params                           36,627    464,423    7.9%
+assign.sh: variable                                    41,163    704,908    5.8%
+assign.sh: local var                                   40,973    694,241    5.9%
+assign.sh: local var (typeset)                         40,833    694,903    5.9%
+cmp.sh: [ ]                                            22,698    381,092    6.0%
+cmp.sh: [[ ]]                                          21,349    530,118    4.0%
+cmp.sh: case                                           30,955    673,339    4.6%
+eval.sh: direct assign                                 22,072    332,717    6.6%
+eval.sh: eval assign                                    3,632    194,187    1.9%
+eval.sh: command subs                                   error      1,797    n/a
+null.sh: blank                                         61,073      error    n/a
+null.sh: assign variable                               40,798    731,948    5.6%
+null.sh: define function                               41,314    776,072    5.3%
+null.sh: undefined variable                            40,788    570,572    7.1%
+null.sh: : command                                     36,342    649,347    5.6%
 ------------------------------------------------------------------------
 
 o Added vmResetExecutionState so VMs can be safely reused across invocations without re-running initVM/freeVM, and exposed it in the public VM interface.
@@ -59,13 +59,13 @@ o Added an exsh regression script and manifest entry that repeatedly calls a she
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           35,680    455,222
-assign.sh: variable                                    40,103    680,855
-assign.sh: local var                                   40,469    689,560
-assign.sh: local var (typeset)                         40,404    693,286
-cmp.sh: [ ]                                            22,256    377,260
-cmp.sh: [[ ]]                                          21,070    528,686
-cmp.sh: case                                           30,523    670,665
+assign.sh: positional params                           35,680    455,222    7.8%
+assign.sh: variable                                    40,103    680,855    5.9%
+assign.sh: local var                                   40,469    689,560    5.9%
+assign.sh: local var (typeset)                         40,404    693,286    5.8%
+cmp.sh: [ ]                                            22,256    377,260    5.9%
+cmp.sh: [[ ]]                                          21,070    528,686    4.0%
+cmp.sh: case                                           30,523    670,665    4.6%
 
 o Extend `struct VM_s` in `src/vm/vm.h` with a dynamic array (e.g., `Symbol** procedureByAddress` plus a size field) that maps bytecode offsets to `Symbol*`.
 o Initialize the new fields to `NULL`/`0` in `initVM`, and release them in both `vmResetExecutionState` and `freeVM`.
@@ -78,26 +78,26 @@ mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sampl
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           53,676    451,804 
-assign.sh: variable                                    65,298    692,804 
-assign.sh: local var                                   64,890    681,423 
-assign.sh: local var (typeset)                         64,895    683,591 
-cmp.sh: [ ]                                            34,541    374,774 
-cmp.sh: [[ ]]                                          30,311    522,162 
-cmp.sh: case                                           49,952    662,035 
-eval.sh: direct assign                                 37,695    325,207 
-eval.sh: eval assign                                    5,034    191,033 
-eval.sh: command subs                                   error      1,753 
-null.sh: blank                                         96,926      error 
-null.sh: assign variable                               64,893    718,328 
-null.sh: define function                               67,573    763,725 
-null.sh: undefined variable                            65,271    571,010 
-null.sh: : command                                     52,558    632,211 
-subshell.sh: no subshell                               53,997    582,902 
-subshell.sh: brace                                     49,108    576,546 
-subshell.sh: subshell                                  44,231      2,067 
-subshell.sh: command subs                               4,601      1,865 
-subshell.sh: external command                           error        570 
+assign.sh: positional params                           53,676    451,804    11.9%
+assign.sh: variable                                    65,298    692,804     9.4%
+assign.sh: local var                                   64,890    681,423     9.5%
+assign.sh: local var (typeset)                         64,895    683,591     9.5%
+cmp.sh: [ ]                                            34,541    374,774     9.2%
+cmp.sh: [[ ]]                                          30,311    522,162     5.8%
+cmp.sh: case                                           49,952    662,035     7.5%
+eval.sh: direct assign                                 37,695    325,207    11.6%
+eval.sh: eval assign                                    5,034    191,033     2.6%
+eval.sh: command subs                                   error      1,753     n/a
+null.sh: blank                                         96,926      error     n/a
+null.sh: assign variable                               64,893    718,328     9.0%
+null.sh: define function                               67,573    763,725     8.8%
+null.sh: undefined variable                            65,271    571,010    11.4%
+null.sh: : command                                     52,558    632,211     8.3%
+subshell.sh: no subshell                               53,997    582,902     9.3%
+subshell.sh: brace                                     49,108    576,546     8.5%
+subshell.sh: subshell                                  44,231      2,067  2139.9%
+subshell.sh: command subs                               4,601      1,865   246.7%
+subshell.sh: external command                           error        570     n/a
 ------------------------------------------------------------------------
 
 Thu Oct 16 20:00:35 CEST 2025
@@ -109,27 +109,27 @@ mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sampl
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           53,517    454,518
-assign.sh: variable                                    65,133    690,777
-assign.sh: local var                                   65,259    686,093
-assign.sh: local var (typeset)                         64,634    684,078
-cmp.sh: [ ]                                            34,222    374,569
-cmp.sh: [[ ]]                                          30,531    522,432
-cmp.sh: case                                           49,806    660,219
-eval.sh: direct assign                                 37,787    324,887
-eval.sh: eval assign                                    5,112    190,818
-eval.sh: command subs                                   error      1,730
-null.sh: blank                                         97,947      error
-null.sh: assign variable                               65,391    722,864
-null.sh: define function                               67,469    766,741
-null.sh: undefined variable                            65,218    572,542
-null.sh: : command                                     52,708    640,401
-subshell.sh: no subshell                               54,915    585,166
-subshell.sh: brace                                     49,162    577,727
-subshell.sh: subshell                                  44,563      2,049
-subshell.sh: command subs                               4,626      1,803
-subshell.sh: external command                           error        566
-stringop1.sh: string length                            63,904    596,289
+assign.sh: positional params                           53,517    454,518   11.8%
+assign.sh: variable                                    65,133    690,777    9.4%
+assign.sh: local var                                   65,259    686,093    9.5%
+assign.sh: local var (typeset)                         64,634    684,078    9.4%
+cmp.sh: [ ]                                            34,222    374,569    9.1%
+cmp.sh: [[ ]]                                          30,531    522,432    5.8%
+cmp.sh: case                                           49,806    660,219    7.5%
+eval.sh: direct assign                                 37,787    324,887   11.6%
+eval.sh: eval assign                                    5,112    190,818    2.7%
+eval.sh: command subs                                   error      1,730    n/a
+null.sh: blank                                         97,947      error    n/a
+null.sh: assign variable                               65,391    722,864    9.0%
+null.sh: define function                               67,469    766,741    8.8%
+null.sh: undefined variable                            65,218    572,542   11.4%
+null.sh: : command                                     52,708    640,401    8.2%
+subshell.sh: no subshell                               54,915    585,166    9.4%
+subshell.sh: brace                                     49,162    577,727    8.5%
+subshell.sh: subshell                                  44,563      2,049 2174.9%
+subshell.sh: command subs                               4,626      1,803  256.6%
+subshell.sh: external command                           error        566    n/a
+stringop1.sh: string length                            63,904    596,289   10.7%
 ------------------------------------------------------------------------
 
 Fri Oct 17 08:50:01 CEST 2025
@@ -138,27 +138,27 @@ mke@MacBook-Pro-M1 shellbench % ./shellbench -s exsh,bash sample/assign.sh sampl
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           55,044    462,107
-assign.sh: variable                                    66,654    706,384
-assign.sh: local var                                   64,997    675,615
-assign.sh: local var (typeset)                         64,606    675,869
-cmp.sh: [ ]                                            33,555    369,638
-cmp.sh: [[ ]]                                          29,832    518,143
-cmp.sh: case                                           49,565    650,733
-eval.sh: direct assign                                 37,654    322,700
-eval.sh: eval assign                                    5,048    189,051
-eval.sh: command subs                                   error      1,825
-null.sh: blank                                         96,890      error
-null.sh: assign variable                               64,381    712,966
-null.sh: define function                               67,482    759,559
-null.sh: undefined variable                            64,734    563,055
-null.sh: : command                                     52,415    633,453
-subshell.sh: no subshell                               54,198    577,398
-subshell.sh: brace                                     48,740    573,085
-subshell.sh: subshell                                  44,338      2,000
-subshell.sh: command subs                               4,596      1,958
-subshell.sh: external command                           error        575
-stringop1.sh: string length                            63,783    589,314
+assign.sh: positional params                           55,044    462,107   11.9%
+assign.sh: variable                                    66,654    706,384    9.4%
+assign.sh: local var                                   64,997    675,615    9.6%
+assign.sh: local var (typeset)                         64,606    675,869    9.6%
+cmp.sh: [ ]                                            33,555    369,638    9.1%
+cmp.sh: [[ ]]                                          29,832    518,143    5.8%
+cmp.sh: case                                           49,565    650,733    7.6%
+eval.sh: direct assign                                 37,654    322,700   11.7%
+eval.sh: eval assign                                    5,048    189,051    2.7%
+eval.sh: command subs                                   error      1,825    n/a
+null.sh: blank                                         96,890      error    n/a
+null.sh: assign variable                               64,381    712,966    9.0%
+null.sh: define function                               67,482    759,559    8.9%
+null.sh: undefined variable                            64,734    563,055   11.5%
+null.sh: : command                                     52,415    633,453    8.3%
+subshell.sh: no subshell                               54,198    577,398    9.4%
+subshell.sh: brace                                     48,740    573,085    8.5%
+subshell.sh: subshell                                  44,338      2,000 2216.9%
+subshell.sh: command subs                               4,596      1,958  234.7%
+subshell.sh: external command                           error        575    n/a
+stringop1.sh: string length                            63,783    589,314   10.8%
 ------------------------------------------------------------------------
 
 Sat Oct 18 08:01:44 CEST 2025
@@ -167,32 +167,32 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           54,243    456,049
-assign.sh: variable                                    65,678    698,115
-assign.sh: local var                                   65,848    690,750
-assign.sh: local var (typeset)                         65,005    680,768
-cmp.sh: [ ]                                            34,311    374,213
-cmp.sh: [[ ]]                                          30,719    527,560
-cmp.sh: case                                           50,206    668,711
-count.sh: posix                                        64,119    514,889
-count.sh: typeset -i                                   64,300    488,311
-count.sh: increment                                    50,192    635,580
-eval.sh: direct assign                                 38,092    327,456
-eval.sh: eval assign                                    5,032    192,337
-eval.sh: command subs                                   error      1,926
-func.sh: no func                                       53,068    646,152
-func.sh: func                                          39,174    345,142
-null.sh: blank                                         98,761      error
-null.sh: assign variable                               66,006    727,103
-null.sh: define function                               67,859    771,402
-null.sh: undefined variable                            65,683    573,597
-null.sh: : command                                     52,995    639,542
-subshell.sh: no subshell                               55,243    587,158
-subshell.sh: brace                                     49,382    580,020
-subshell.sh: subshell                                  44,929      2,123
-subshell.sh: command subs                               4,457      1,834
-subshell.sh: external command                           error        581
-stringop1.sh: string length                            64,332    595,905
+assign.sh: positional params                           54,243    456,049   11.9%
+assign.sh: variable                                    65,678    698,115    9.4%
+assign.sh: local var                                   65,848    690,750    9.5%
+assign.sh: local var (typeset)                         65,005    680,768    9.5%
+cmp.sh: [ ]                                            34,311    374,213    9.2%
+cmp.sh: [[ ]]                                          30,719    527,560    5.8%
+cmp.sh: case                                           50,206    668,711    7.5%
+count.sh: posix                                        64,119    514,889   12.5%
+count.sh: typeset -i                                   64,300    488,311   13.2%
+count.sh: increment                                    50,192    635,580    7.9%
+eval.sh: direct assign                                 38,092    327,456   11.6%
+eval.sh: eval assign                                    5,032    192,337    2.6%
+eval.sh: command subs                                   error      1,926    n/a
+func.sh: no func                                       53,068    646,152    8.2%
+func.sh: func                                          39,174    345,142   11.4%
+null.sh: blank                                         98,761      error    n/a
+null.sh: assign variable                               66,006    727,103    9.1%
+null.sh: define function                               67,859    771,402    8.8%
+null.sh: undefined variable                            65,683    573,597   11.5%
+null.sh: : command                                     52,995    639,542    8.3%
+subshell.sh: no subshell                               55,243    587,158    9.4%
+subshell.sh: brace                                     49,382    580,020    8.5%
+subshell.sh: subshell                                  44,929      2,123 2116.3%
+subshell.sh: command subs                               4,457      1,834  243.0%
+subshell.sh: external command                           error        581    n/a
+stringop1.sh: string length                            64,332    595,905   10.8%
 ------------------------------------------------------------------------
 
 Sat Oct 18 11:25:02 CEST 2025
@@ -201,32 +201,32 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           53,508    453,248
-assign.sh: variable                                    64,708    694,448
-assign.sh: local var                                   65,012    687,525
-assign.sh: local var (typeset)                         64,860    688,530
-cmp.sh: [ ]                                            34,299    372,173
-cmp.sh: [[ ]]                                          30,393    515,170
-cmp.sh: case                                           50,155    661,141
-count.sh: posix                                        63,215    513,578
-count.sh: typeset -i                                   62,874    490,824
-count.sh: increment                                    49,788    629,958
-eval.sh: direct assign                                 37,630    325,981
-eval.sh: eval assign                                    4,880    190,992
-eval.sh: command subs                                   error      1,699
-func.sh: no func                                       52,355    641,392
-func.sh: func                                          39,026    344,143
-null.sh: blank                                         98,059      error
-null.sh: assign variable                               65,365    721,401
-null.sh: define function                               67,551    768,465
-null.sh: undefined variable                            65,390    570,889
-null.sh: : command                                     52,587    642,398
-subshell.sh: no subshell                               54,651    584,553
-subshell.sh: brace                                     49,144    576,218
-subshell.sh: subshell                                  44,659      1,947
-subshell.sh: command subs                               4,359      1,800
-subshell.sh: external command                           error        562
-stringop1.sh: string length                            63,737    588,745
+assign.sh: positional params                           53,508    453,248   11.8%
+assign.sh: variable                                    64,708    694,448    9.3%
+assign.sh: local var                                   65,012    687,525    9.5%
+assign.sh: local var (typeset)                         64,860    688,530    9.4%
+cmp.sh: [ ]                                            34,299    372,173    9.2%
+cmp.sh: [[ ]]                                          30,393    515,170    5.9%
+cmp.sh: case                                           50,155    661,141    7.6%
+count.sh: posix                                        63,215    513,578   12.3%
+count.sh: typeset -i                                   62,874    490,824   12.8%
+count.sh: increment                                    49,788    629,958    7.9%
+eval.sh: direct assign                                 37,630    325,981   11.5%
+eval.sh: eval assign                                    4,880    190,992    2.6%
+eval.sh: command subs                                   error      1,699    n/a
+func.sh: no func                                       52,355    641,392    8.2%
+func.sh: func                                          39,026    344,143   11.3%
+null.sh: blank                                         98,059      error    n/a
+null.sh: assign variable                               65,365    721,401    9.1%
+null.sh: define function                               67,551    768,465    8.8%
+null.sh: undefined variable                            65,390    570,889   11.5%
+null.sh: : command                                     52,587    642,398    8.2%
+subshell.sh: no subshell                               54,651    584,553    9.3%
+subshell.sh: brace                                     49,144    576,218    8.5%
+subshell.sh: subshell                                  44,659      1,947 2293.7%
+subshell.sh: command subs                               4,359      1,800  242.2%
+subshell.sh: external command                           error        562    n/a
+stringop1.sh: string length                            63,737    588,745   10.8%
 ------------------------------------------------------------------------
 * count: number of executions per second
 /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh   231.58s user 15.74s system 123% cpu 3:19.63 total
@@ -238,32 +238,32 @@ Extensive optimizations.  More to come.  See git log for details
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           53,206    454,806
-assign.sh: variable                                    64,963    693,520
-assign.sh: local var                                   64,828    684,776
-assign.sh: local var (typeset)                         64,836    683,142
-cmp.sh: [ ]                                            34,560    376,086
-cmp.sh: [[ ]]                                          30,458    525,369
-cmp.sh: case                                           49,936    653,437
-count.sh: posix                                        62,974    509,069
-count.sh: typeset -i                                   63,382    485,150
-count.sh: increment                                    92,117    633,618
-eval.sh: direct assign                                 37,252    326,437
-eval.sh: eval assign                                    3,270    189,990
-eval.sh: command subs                                   error      1,766
-func.sh: no func                                       95,241    640,724
-func.sh: func                                          38,533    341,664
-null.sh: blank                                         95,649      error
-null.sh: assign variable                               64,986    722,977
-null.sh: define function                               66,811    765,752
-null.sh: undefined variable                            65,096    568,330
-null.sh: : command                                     95,634    638,384
-subshell.sh: no subshell                               95,820    578,635
-subshell.sh: brace                                     48,506    579,358
-subshell.sh: subshell                                  43,945      2,008
-subshell.sh: command subs                               3,022      1,873
-subshell.sh: external command                           error        557
-stringop1.sh: string length                            63,171    592,104
+assign.sh: positional params                           53,206    454,806   11.7%
+assign.sh: variable                                    64,963    693,520    9.4%
+assign.sh: local var                                   64,828    684,776    9.5%
+assign.sh: local var (typeset)                         64,836    683,142    9.5%
+cmp.sh: [ ]                                            34,560    376,086    9.2%
+cmp.sh: [[ ]]                                          30,458    525,369    5.8%
+cmp.sh: case                                           49,936    653,437    7.6%
+count.sh: posix                                        62,974    509,069   12.4%
+count.sh: typeset -i                                   63,382    485,150   13.1%
+count.sh: increment                                    92,117    633,618   14.5%
+eval.sh: direct assign                                 37,252    326,437   11.4%
+eval.sh: eval assign                                    3,270    189,990    1.7%
+eval.sh: command subs                                   error      1,766    n/a
+func.sh: no func                                       95,241    640,724   14.9%
+func.sh: func                                          38,533    341,664   11.3%
+null.sh: blank                                         95,649      error    n/a
+null.sh: assign variable                               64,986    722,977    9.0%
+null.sh: define function                               66,811    765,752    8.7%
+null.sh: undefined variable                            65,096    568,330   11.5%
+null.sh: : command                                     95,634    638,384   15.0%
+subshell.sh: no subshell                               95,820    578,635   16.6%
+subshell.sh: brace                                     48,506    579,358    8.4%
+subshell.sh: subshell                                  43,945      2,008 2188.5%
+subshell.sh: command subs                               3,022      1,873  161.3%
+subshell.sh: external command                           error        557    n/a
+stringop1.sh: string length                            63,171    592,104   10.7%
 ------------------------------------------------------------------------
 
 Sat Oct 18 21:51:37 CEST 2025
@@ -275,32 +275,32 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                           56,538    441,955
-assign.sh: variable                                    62,744    672,985
-assign.sh: local var                                   62,679    668,205
-assign.sh: local var (typeset)                         62,761    664,372
-cmp.sh: [ ]                                            35,251    363,948
-cmp.sh: [[ ]]                                          30,702    509,603
-cmp.sh: case                                           48,628    645,718
-count.sh: posix                                        61,497    499,313
-count.sh: typeset -i                                   61,684    476,053
-count.sh: increment                                    87,612    577,543
-eval.sh: direct assign                                 36,278    318,063
-eval.sh: eval assign                                    5,530    185,007
-eval.sh: command subs                                   error      1,704
-func.sh: no func                                       92,595    626,456
-func.sh: func                                          40,096    333,968
-null.sh: blank                                         92,036      error
-null.sh: assign variable                               62,874    707,218
-null.sh: define function                               65,194    744,380
-null.sh: undefined variable                            62,751    553,028
-null.sh: : command                                     92,917    627,613
-subshell.sh: no subshell                               92,513    566,067
-subshell.sh: brace                                     51,564    563,285
-subshell.sh: subshell                                  46,608      1,962
-subshell.sh: command subs                               4,933      1,790
-subshell.sh: external command                           error        540
-stringop1.sh: string length                            61,483    577,200
+assign.sh: positional params                           56,538    441,955   12.8%
+assign.sh: variable                                    62,744    672,985    9.3%
+assign.sh: local var                                   62,679    668,205    9.4%
+assign.sh: local var (typeset)                         62,761    664,372    9.4%
+cmp.sh: [ ]                                            35,251    363,948    9.7%
+cmp.sh: [[ ]]                                          30,702    509,603    6.0%
+cmp.sh: case                                           48,628    645,718    7.5%
+count.sh: posix                                        61,497    499,313   12.3%
+count.sh: typeset -i                                   61,684    476,053   13.0%
+count.sh: increment                                    87,612    577,543   15.2%
+eval.sh: direct assign                                 36,278    318,063   11.4%
+eval.sh: eval assign                                    5,530    185,007    3.0%
+eval.sh: command subs                                   error      1,704    n/a
+func.sh: no func                                       92,595    626,456   14.8%
+func.sh: func                                          40,096    333,968   12.0%
+null.sh: blank                                         92,036      error    n/a
+null.sh: assign variable                               62,874    707,218    8.9%
+null.sh: define function                               65,194    744,380    8.8%
+null.sh: undefined variable                            62,751    553,028   11.3%
+null.sh: : command                                     92,917    627,613   14.8%
+subshell.sh: no subshell                               92,513    566,067   16.3%
+subshell.sh: brace                                     51,564    563,285    9.2%
+subshell.sh: subshell                                  46,608      1,962 2375.5%
+subshell.sh: command subs                               4,933      1,790  275.6%
+subshell.sh: external command                           error        540    n/a
+stringop1.sh: string length                            61,483    577,200   10.7%
 ------------------------------------------------------------------------
 
 Sat Oct 18 22:05:45 CEST 2025
@@ -312,32 +312,32 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                          116,918    453,125 
-assign.sh: variable                                   144,545    693,143 
-assign.sh: local var                                  144,231    673,168 
-assign.sh: local var (typeset)                        142,966    687,199 
-cmp.sh: [ ]                                            76,582    374,593 
-cmp.sh: [[ ]]                                          58,746    525,199 
-cmp.sh: case                                          121,946    663,920 
-count.sh: posix                                       137,869    513,640 
-count.sh: typeset -i                                  137,775    491,918 
-count.sh: increment                                   198,963    632,043 
-eval.sh: direct assign                                 80,364    327,839 
-eval.sh: eval assign                                    6,521    191,919 
-eval.sh: command subs                                   error      1,796 
-func.sh: no func                                      212,971    642,455 
-func.sh: func                                          78,423    344,568 
-null.sh: blank                                        212,116      error 
-null.sh: assign variable                              146,431    727,476 
-null.sh: define function                              162,479    768,369 
-null.sh: undefined variable                           144,226    573,774 
-null.sh: : command                                    212,958    644,596 
-subshell.sh: no subshell                              213,802    585,015 
-subshell.sh: brace                                    113,699    580,889 
-subshell.sh: subshell                                 106,276      2,192 
-subshell.sh: command subs                               5,746      1,947 
-subshell.sh: external command                           error        597 
-stringop1.sh: string length                           138,867    594,724 
+assign.sh: positional params                          116,918    453,125    25.8%
+assign.sh: variable                                   144,545    693,143    20.9%
+assign.sh: local var                                  144,231    673,168    21.4%
+assign.sh: local var (typeset)                        142,966    687,199    20.8%
+cmp.sh: [ ]                                            76,582    374,593    20.4%
+cmp.sh: [[ ]]                                          58,746    525,199    11.2%
+cmp.sh: case                                          121,946    663,920    18.4%
+count.sh: posix                                       137,869    513,640    26.8%
+count.sh: typeset -i                                  137,775    491,918    28.0%
+count.sh: increment                                   198,963    632,043    31.5%
+eval.sh: direct assign                                 80,364    327,839    24.5%
+eval.sh: eval assign                                    6,521    191,919     3.4%
+eval.sh: command subs                                   error      1,796     n/a
+func.sh: no func                                      212,971    642,455    33.1%
+func.sh: func                                          78,423    344,568    22.8%
+null.sh: blank                                        212,116      error     n/a
+null.sh: assign variable                              146,431    727,476    20.1%
+null.sh: define function                              162,479    768,369    21.1%
+null.sh: undefined variable                           144,226    573,774    25.1%
+null.sh: : command                                    212,958    644,596    33.0%
+subshell.sh: no subshell                              213,802    585,015    36.5%
+subshell.sh: brace                                    113,699    580,889    19.6%
+subshell.sh: subshell                                 106,276      2,192  4848.4%
+subshell.sh: command subs                               5,746      1,947   295.1%
+subshell.sh: external command                           error        597     n/a
+stringop1.sh: string length                           138,867    594,724    23.3%
 ------------------------------------------------------------------------
 
 Sun Oct 19 17:00:04 CEST 2025
@@ -349,32 +349,32 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                          116,531    454,552
-assign.sh: variable                                   145,362    689,875
-assign.sh: local var                                  144,927    683,177
-assign.sh: local var (typeset)                        143,613    686,475
-cmp.sh: [ ]                                            76,913    372,027
-cmp.sh: [[ ]]                                          59,065    522,645
-cmp.sh: case                                          122,865    662,789
-count.sh: posix                                       139,045    510,926
-count.sh: typeset -i                                  138,394    489,424
-count.sh: increment                                   198,249    626,828
-eval.sh: direct assign                                 80,139    325,973
-eval.sh: eval assign                                    6,271    191,745
-eval.sh: command subs                                   error      1,841
-func.sh: no func                                      214,146    640,440
-func.sh: func                                          78,580    343,180
-null.sh: blank                                        212,405      error
-null.sh: assign variable                              146,645    724,101
-null.sh: define function                              162,249    762,756
-null.sh: undefined variable                           144,984    569,846
-null.sh: : command                                    213,877    643,002
-subshell.sh: no subshell                              213,811    587,849
-subshell.sh: brace                                    113,920    578,864
-subshell.sh: subshell                                 106,438      2,077
-subshell.sh: command subs                               5,735      1,993
-subshell.sh: external command                           error        586
-stringop1.sh: string length                           139,050    596,037
+assign.sh: positional params                          116,531    454,552   25.6%
+assign.sh: variable                                   145,362    689,875   21.1%
+assign.sh: local var                                  144,927    683,177   21.2%
+assign.sh: local var (typeset)                        143,613    686,475   20.9%
+cmp.sh: [ ]                                            76,913    372,027   20.7%
+cmp.sh: [[ ]]                                          59,065    522,645   11.3%
+cmp.sh: case                                          122,865    662,789   18.5%
+count.sh: posix                                       139,045    510,926   27.2%
+count.sh: typeset -i                                  138,394    489,424   28.3%
+count.sh: increment                                   198,249    626,828   31.6%
+eval.sh: direct assign                                 80,139    325,973   24.6%
+eval.sh: eval assign                                    6,271    191,745    3.3%
+eval.sh: command subs                                   error      1,841    n/a
+func.sh: no func                                      214,146    640,440   33.4%
+func.sh: func                                          78,580    343,180   22.9%
+null.sh: blank                                        212,405      error    n/a
+null.sh: assign variable                              146,645    724,101   20.3%
+null.sh: define function                              162,249    762,756   21.3%
+null.sh: undefined variable                           144,984    569,846   25.4%
+null.sh: : command                                    213,877    643,002   33.3%
+subshell.sh: no subshell                              213,811    587,849   36.4%
+subshell.sh: brace                                    113,920    578,864   19.7%
+subshell.sh: subshell                                 106,438      2,077 5124.6%
+subshell.sh: command subs                               5,735      1,993  287.8%
+subshell.sh: external command                           error        586    n/a
+stringop1.sh: string length                           139,050    596,037   23.3%
 ------------------------------------------------------------------------
 
 Sun Oct 19 20:05:16 CEST 2025
@@ -384,30 +384,65 @@ mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbenc
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
-assign.sh: positional params                          120,216    468,689
-assign.sh: variable                                   149,596    712,181
-assign.sh: local var                                  149,419    707,229
-assign.sh: local var (typeset)                        147,721    705,614
-cmp.sh: [ ]                                            79,180    384,047
-cmp.sh: [[ ]]                                          60,637    526,250
-cmp.sh: case                                          126,788    683,889
-count.sh: posix                                       142,961    523,509
-count.sh: typeset -i                                  142,921    506,107
-count.sh: increment                                   205,043    652,006
-eval.sh: direct assign                                 83,049    336,336
-eval.sh: eval assign                                    6,622    198,627
-eval.sh: command subs                                   error      1,993
-func.sh: no func                                      223,243    660,830
-func.sh: func                                          80,897    354,402
-null.sh: blank                                        221,457      error
-null.sh: assign variable                              150,688    744,171
-null.sh: define function                              168,587    791,115
-null.sh: undefined variable                           149,035    589,112
-null.sh: : command                                    222,300    661,342
-subshell.sh: no subshell                              222,228    601,541
-subshell.sh: brace                                    117,144    594,056
-subshell.sh: subshell                                 109,291      2,214
-subshell.sh: command subs                               5,993      2,099
-subshell.sh: external command                           error        676
-stringop1.sh: string length                           143,281    607,630
+assign.sh: positional params                          120,216    468,689   25.6%
+assign.sh: variable                                   149,596    712,181   21.0%
+assign.sh: local var                                  149,419    707,229   21.1%
+assign.sh: local var (typeset)                        147,721    705,614   20.9%
+cmp.sh: [ ]                                            79,180    384,047   20.6%
+cmp.sh: [[ ]]                                          60,637    526,250   11.5%
+cmp.sh: case                                          126,788    683,889   18.5%
+count.sh: posix                                       142,961    523,509   27.3%
+count.sh: typeset -i                                  142,921    506,107   28.2%
+count.sh: increment                                   205,043    652,006   31.4%
+eval.sh: direct assign                                 83,049    336,336   24.7%
+eval.sh: eval assign                                    6,622    198,627    3.3%
+eval.sh: command subs                                   error      1,993    n/a
+func.sh: no func                                      223,243    660,830   33.8%
+func.sh: func                                          80,897    354,402   22.8%
+null.sh: blank                                        221,457      error    n/a
+null.sh: assign variable                              150,688    744,171   20.2%
+null.sh: define function                              168,587    791,115   21.3%
+null.sh: undefined variable                           149,035    589,112   25.3%
+null.sh: : command                                    222,300    661,342   33.6%
+subshell.sh: no subshell                              222,228    601,541   36.9%
+subshell.sh: brace                                    117,144    594,056   19.7%
+subshell.sh: subshell                                 109,291      2,214 4936.4%
+subshell.sh: command subs                               5,993      2,099  285.5%
+subshell.sh: external command                           error        676    n/a
+stringop1.sh: string length                           143,281    607,630   23.6%
+------------------------------------------------------------------------
+
+Tue Oct 21 20:27:29 CEST 2025
+o Various thiings. For some reason performance got worse, even when I rolled
+  back to the date/time above.  :(
+
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           89,716    394,084    22.8%
+assign.sh: variable                                   134,036    714,531    18.8%
+assign.sh: local var                                  135,784    703,433    19.3%
+assign.sh: local var (typeset)                        134,480    707,496    19.0%
+cmp.sh: [ ]                                            56,798    383,630    14.8%
+cmp.sh: [[ ]]                                          62,168    539,464    11.5%
+cmp.sh: case                                          103,627    681,190    15.2%
+count.sh: posix                                       118,931    519,743    22.9%
+count.sh: typeset -i                                  118,906    502,377    23.7%
+count.sh: increment                                   160,014    651,717    24.6%
+eval.sh: direct assign                                 74,152    335,033    22.1%
+eval.sh: eval assign                                   18,181    197,049     9.2%
+eval.sh: command subs                                   8,785      1,973   445.3%
+func.sh: no func                                      192,542    661,900    29.1%
+func.sh: func                                          69,225    350,904    19.7%
+null.sh: blank                                        190,995      error     n/a
+null.sh: assign variable                              136,113    739,840    18.4%
+null.sh: define function                              150,897    791,853    19.1%
+null.sh: undefined variable                           113,616    589,715    19.3%
+null.sh: : command                                    192,228    653,645    29.4%
+subshell.sh: no subshell                              192,584    601,719    32.0%
+subshell.sh: brace                                    102,505    596,134    17.2%
+subshell.sh: subshell                                  96,609      2,190  4411.4%
+subshell.sh: command subs                              13,380      2,066   647.6%
+subshell.sh: external command                             598        648    92.3%
+stringop1.sh: string length                           119,144    607,470    19.6%
 ------------------------------------------------------------------------
