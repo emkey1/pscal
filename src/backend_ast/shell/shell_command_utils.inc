@@ -382,7 +382,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     gShellRuntime.local_scope_active = previous_local_scope_flag;
     gShellRuntime.pipeline_subshell_active = previous_pipeline_flag;
 
-    fflush(NULL);
+    shellFlushStandardStreams();
 
     if (stdout_redirected) {
         dup2(saved_stdout, STDOUT_FILENO);
