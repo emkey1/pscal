@@ -2459,7 +2459,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     shellRuntimeSetCurrentCommandLocation(cmd->line, cmd->column);
     ShellExecRedirBackup *redir_backups = NULL;
     size_t redir_backup_count = 0;
-    fflush(NULL);
+    shellFlushStandardStreams();
     if (!shellApplyExecRedirections(vm, cmd, &redir_backups, &redir_backup_count)) {
         if (args) {
             for (int i = 0; i < arg_count; ++i) {
@@ -2518,7 +2518,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
                 runtimeError(vm, "shell builtin '%s': out of memory", name);
                 shellUpdateStatus(1);
                 shellRuntimeSetCurrentCommandName(previous_name);
-                fflush(NULL);
+                shellFlushStandardStreams();
                 shellRestoreExecRedirections(redir_backups, redir_backup_count);
                 shellFreeExecRedirBackups(redir_backups, redir_backup_count);
                 shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
@@ -2531,7 +2531,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         handler(vm, arg_count, args);
     }
     shellRuntimeSetCurrentCommandName(previous_name);
-    fflush(NULL);
+    shellFlushStandardStreams();
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
     shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {

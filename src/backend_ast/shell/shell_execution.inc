@@ -273,7 +273,7 @@ static int shellSpawnProcess(VM *vm,
             bool builtin_ran = shellInvokeBuiltin(vm ? vm : gShellCurrentVm, (ShellCommand *)cmd);
             if (builtin_ran) {
                 int status = gShellRuntime.last_status;
-                fflush(NULL);
+                shellFlushStandardStreams();
                 _exit(status);
             }
 

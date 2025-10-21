@@ -37,6 +37,11 @@
 #include <pthread.h>
 #include <time.h>
 
+static void shellFlushStandardStreams(void) {
+    fflush(stdout);
+    fflush(stderr);
+}
+
 #if defined(__GLIBC__) || defined(__ANDROID__)
 #define SHELL_HAVE_SECURE_GETENV 1
 extern char *secure_getenv(const char *name);
