@@ -275,6 +275,10 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool scope_pushed = false;
     bool exit_requested = false;
     int status = EXIT_FAILURE;
+    bool can_run = true;
+    bool local_scope_pushed = false;
+    bool previous_local_scope_flag = gShellRuntime.local_scope_active;
+    bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
 
     if (*source) {
         cached_entry = shellScalarCacheFind(source);
@@ -352,13 +356,31 @@ static char *shellRunCommandSubstitution(const char *command) {
         }
     }
 
-    if (scope_pushed || shellSymbolTableScopeIsActive()) {
+    can_run = scope_pushed || shellSymbolTableScopeIsActive();
+    if (can_run) {
+        if (!shellLocalScopePush()) {
+            fprintf(stderr, "shell: command substitution: failed to allocate local scope.\n");
+            can_run = false;
+        } else {
+            local_scope_pushed = true;
+            gShellRuntime.local_scope_active = true;
+            gShellRuntime.pipeline_subshell_active = true;
+        }
+    }
+
+    if (can_run) {
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
 
     if (scope_pushed) {
         shellSymbolTableScopePop(&table_scope);
     }
+
+    if (local_scope_pushed) {
+        shellLocalScopePop();
+    }
+    gShellRuntime.local_scope_active = previous_local_scope_flag;
+    gShellRuntime.pipeline_subshell_active = previous_pipeline_flag;
 
     fflush(NULL);
 

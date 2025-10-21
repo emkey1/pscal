@@ -1050,10 +1050,20 @@ static void compileSubshell(BytecodeChunk *chunk, const ShellProgram *body, int 
     compileProgram(chunk, body);
 }
 
-static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
+static void compileLoop(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
+    (void)runs_in_background;
+    if (!command) {
+        return;
+    }
+    const ShellLoop *loop = command->data.loop;
     if (!loop) {
         return;
     }
+
+    int line = command->line;
+    int pipeline_index = command->exec.pipeline_index;
+    int pipeline_head = command->exec.is_pipeline_head ? 1 : 0;
+    int pipeline_tail = command->exec.is_pipeline_tail ? 1 : 0;
 
     bool isFor = loop->is_for;
     bool isCStyle = loop->is_cstyle_for;
@@ -1136,23 +1146,32 @@ static void compileLoop(BytecodeChunk *chunk, const ShellLoop *loop, int line) {
     if (isFor) {
         snprintf(meta,
                  sizeof(meta),
-                 "mode=for;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0",
-                 redir_count);
+                 "mode=for;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0;pipe=%d;head=%d;tail=%d",
+                 redir_count,
+                 pipeline_index,
+                 pipeline_head,
+                 pipeline_tail);
     } else if (isCStyle) {
         snprintf(meta,
                  sizeof(meta),
-                 "mode=cfor;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0",
-                 redir_count);
+                 "mode=cfor;redirs=%zu;condkind=0;condwords=0;bodykind=0;bodywords=0;pipe=%d;head=%d;tail=%d",
+                 redir_count,
+                 pipeline_index,
+                 pipeline_head,
+                 pipeline_tail);
     } else {
         snprintf(meta,
                  sizeof(meta),
-                 "mode=%s;redirs=%zu;condkind=%d;condwords=%zu;bodykind=%d;bodywords=%zu",
+                 "mode=%s;redirs=%zu;condkind=%d;condwords=%zu;bodykind=%d;bodywords=%zu;pipe=%d;head=%d;tail=%d",
                  loop->is_until ? "until" : "while",
                  redir_count,
                  cond_kind_meta,
                  cond_words_meta,
                  body_kind_meta,
-                 body_words_meta);
+                 body_words_meta,
+                 pipeline_index,
+                 pipeline_head,
+                 pipeline_tail);
     }
     emitPushString(chunk, meta, line);
 
@@ -1495,7 +1514,7 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bo
             compileProgram(chunk, command->data.brace_group.body);
             break;
         case SHELL_COMMAND_LOOP:
-            compileLoop(chunk, command->data.loop, command->line);
+            compileLoop(chunk, command, runs_in_background);
             break;
         case SHELL_COMMAND_CONDITIONAL:
             compileConditional(chunk, command->data.conditional, command->line);
