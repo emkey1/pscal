@@ -12,6 +12,7 @@
 - Scope validation suites live in `Tests/scope_verify/` (`clike`, `pascal`, `rea`). The harnesses are manifest-driven and support `--only`, `--list`, `--seed`, and `--cmd` overrides. Rea's runner (`Tests/scope_verify/rea/rea_scope_test_harness.py`) materialises fixtures via `--update` and records reports under `Tests/scope_verify/rea/out/`.
 - Test manifests (e.g., `Tests/scope_verify/rea/tests/manifest.json`) are generated through the corresponding `build_manifest.py`; regenerate them when adding or editing cases to keep fixtures in sync.
 - For exsh tests that don't include PSCAL extenstions, the output should always be identical to what the bash shell would produce
+- For exsh shellbench (https://github.com/shellspec/shellbench) is used as both benchmarking and functionality verification
 
 ## Coding Practices
 - C11 style: 4-space indent, braces on same line, camelCase for functions, uppercase snake for macros.
