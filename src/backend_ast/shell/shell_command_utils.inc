@@ -3015,6 +3015,13 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
         return false;
     }
     ShellLocalVariable *local_entry = shellLocalScopeFind(name);
+    if (!local_entry && gShellRuntime.pipeline_subshell_active && shellLocalScopeDepth() > 0) {
+        if (!shellLocalScopeSetOnCurrentFrame(name, value ? value : "", is_array_literal)) {
+            errno = ENOMEM;
+            return false;
+        }
+        local_entry = shellLocalScopeFind(name);
+    }
     if (local_entry) {
         if (shellLocalScopeAssignExisting(name, value ? value : "", is_array_literal)) {
             if (is_array_literal) {
