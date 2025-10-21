@@ -192,7 +192,6 @@ static void vmOpcodeProfileAtExit(void) {
 }
 
 static void vmOpcodeProfileRecord(uint8_t opcode) {
-    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
     if (!gVmOpcodeProfileEnabled || opcode >= OPCODE_COUNT) {
         return;
     }
@@ -200,8 +199,7 @@ static void vmOpcodeProfileRecord(uint8_t opcode) {
 }
 
 void vmOpcodeProfileDump(void) {
-    pthread_once(&gVmOpcodeProfileOnce, vmOpcodeProfileInitOnce);
-    if (!gVmOpcodeProfileEnabled || !gVmOpcodeProfileStream) {
+    if (!vmOpcodeProfileIsEnabled() || !gVmOpcodeProfileStream) {
         return;
     }
 
@@ -2283,6 +2281,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 #undef VM_DISPATCH_ENTRY
 #endif
 
+    bool opcode_profile_enabled = vmOpcodeProfileIsEnabled();
+
     // Initialize default file variables if present but not yet opened.
     if (vm->vmGlobalSymbols) {
         pthread_mutex_lock(&globals_mutex);
@@ -2560,7 +2560,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         //vmDumpStackInfo(vm); // Call new helper at the start of each instruction
 
         instruction_val = READ_BYTE();
-        vmOpcodeProfileRecord(instruction_val);
+        if (opcode_profile_enabled) {
+            vmOpcodeProfileRecord(instruction_val);
+        }
         if (vm->trace_head_instructions > 0 && vm->trace_executed < vm->trace_head_instructions) {
             int offset = (int)(vm->ip - vm->chunk->code) - 1;
             long stacksz = (long)(vm->stackTop - vm->stack);
