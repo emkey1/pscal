@@ -340,6 +340,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
     opts.quiet = true;
+    opts.suppress_warnings = true;
     opts.exit_on_signal = shellRuntimeExitOnSignal();
     const char *frontend_path = shellRuntimeGetArg0();
     opts.frontend_path = frontend_path ? frontend_path : "exsh";

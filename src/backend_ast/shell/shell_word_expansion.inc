@@ -2883,6 +2883,7 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
     if (!expanded) {
         return false;
     }
+    bool literal_mode = cmd->disable_field_splitting;
     if (saw_command_word && !*saw_command_word) {
         if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
             bool is_array_literal = shellAssignmentIsArrayLiteral(text, flags);
@@ -2893,7 +2894,22 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
             free(quoted_map);
             return true;
         }
-    } else if ((flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
+    } else if (!literal_mode && (flags & SHELL_WORD_FLAG_ASSIGNMENT) && shellLooksLikeAssignment(expanded)) {
+        if (!shellCommandAppendArgOwned(cmd, expanded)) {
+            free(quoted_map);
+            return false;
+        }
+        if (saw_command_word) {
+            *saw_command_word = true;
+        }
+        free(quoted_map);
+        return true;
+    }
+    if (!literal_mode && cmd->argc == 0 && strcmp(expanded, "[[") == 0) {
+        literal_mode = true;
+        cmd->disable_field_splitting = true;
+    }
+    if (literal_mode) {
         if (!shellCommandAppendArgOwned(cmd, expanded)) {
             free(quoted_map);
             return false;

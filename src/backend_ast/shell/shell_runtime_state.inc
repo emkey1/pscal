@@ -896,6 +896,7 @@ typedef struct {
     ShellRedirection *redirs;
     size_t redir_count;
     bool background;
+    bool disable_field_splitting;
     int pipeline_index;
     bool is_pipeline_head;
     bool is_pipeline_tail;

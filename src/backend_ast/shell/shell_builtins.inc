@@ -6039,9 +6039,69 @@ Value vmBuiltinShellCommand(VM *vm, int arg_count, Value *args) {
     }
 
     if (!print_short && !print_verbose) {
-        runtimeError(vm, "command: execution without -v or -V is not implemented");
-        shellUpdateStatus(1);
-        return makeVoid();
+        if (first_name == arg_count) {
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        size_t exec_argc = (size_t)(arg_count - first_name);
+        ShellCommand cmd;
+        memset(&cmd, 0, sizeof(cmd));
+        cmd.argc = exec_argc;
+        cmd.argv = (char **)calloc(exec_argc + 1, sizeof(char *));
+        if (!cmd.argv) {
+            runtimeError(vm, "command: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        bool ok = true;
+        for (size_t i = 0; i < exec_argc; ++i) {
+            const char *source = args[first_name + (int)i].s_val;
+            cmd.argv[i] = strdup(source ? source : "");
+            if (!cmd.argv[i]) {
+                ok = false;
+                for (size_t j = 0; j < i; ++j) {
+                    free(cmd.argv[j]);
+                }
+                free(cmd.argv);
+                cmd.argv = NULL;
+                break;
+            }
+        }
+        if (!ok) {
+            runtimeError(vm, "command: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (cmd.argv && cmd.argv[0] && cmd.argv[0][0] != '\0') {
+            ShellCommandResult *results = NULL;
+            size_t count = 0;
+            if (!shellCommandCollectInfo(cmd.argv[0], false, use_default_path, &results, &count)) {
+                runtimeError(vm, "command: out of memory");
+                shellUpdateStatus(1);
+                for (size_t j = 0; j < exec_argc; ++j) {
+                    free(cmd.argv[j]);
+                }
+                free(cmd.argv);
+                return makeVoid();
+            }
+            for (size_t idx = 0; idx < count; ++idx) {
+                ShellCommandResult *entry = &results[idx];
+                if (entry->kind == SHELL_COMMAND_RESULT_FILE && entry->detail && entry->detail[0] != '\0') {
+                    char *replacement = strdup(entry->detail);
+                    if (replacement) {
+                        free(cmd.argv[0]);
+                        cmd.argv[0] = replacement;
+                    }
+                    break;
+                }
+            }
+            shellCommandFreeResults(results, count);
+        }
+        cmd.argv[exec_argc] = NULL;
+        VM *previous_vm = shellSwapCurrentVm(vm);
+        Value result = shellExecuteCommand(vm, &cmd);
+        shellRestoreCurrentVm(previous_vm);
+        return result;
     }
 
     if (first_name == arg_count) {
