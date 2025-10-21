@@ -276,16 +276,6 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool exit_requested = false;
     int status = EXIT_FAILURE;
 
-    bool local_scope_pushed = false;
-    bool restore_local_scope_flag = gShellRuntime.local_scope_active;
-    bool restore_pipeline_flag = gShellRuntime.pipeline_subshell_active;
-
-    local_scope_pushed = shellLocalScopePush();
-    if (local_scope_pushed) {
-        gShellRuntime.local_scope_active = true;
-        gShellRuntime.pipeline_subshell_active = true;
-    }
-
     if (*source) {
         cached_entry = shellScalarCacheFind(source);
         if (cached_entry && cached_entry->result) {
@@ -462,12 +452,6 @@ substitution_finish:
     if (reader.fd >= 0) {
         close(reader.fd);
     }
-
-    if (local_scope_pushed) {
-        shellLocalScopePop();
-    }
-    gShellRuntime.pipeline_subshell_active = restore_pipeline_flag;
-    gShellRuntime.local_scope_active = restore_local_scope_flag;
 
     if (!result) {
         result = strdup("");
