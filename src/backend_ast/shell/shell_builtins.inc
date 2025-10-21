@@ -712,7 +712,7 @@ static bool shellLoopAdoptPipeline(VM *vm,
                 ctx->pipes[pipeline_index - 1][0] = -1;
                 return false;
             }
-            if (dup2(stdin_fd, STDIN_FILENO) != 0) {
+           if (dup2(stdin_fd, STDIN_FILENO) == -1) {
                 int err = errno;
                 runtimeError(vm, "shell loop: failed to adopt pipeline stdin: %s", strerror(err));
                 shellRestoreExecRedirections(frame->redir_backups, frame->redir_backup_count);
