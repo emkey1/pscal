@@ -236,12 +236,12 @@
         },
         {
             "id": "command_substitution_scope",
-            "name": "Command substitution retains caller context",
+            "name": "Command substitution isolates caller scope",
             "category": "expansion",
-            "description": "$(func) can access existing functions and leaves outer variables intact.",
+            "description": "$(func) can access existing functions while restoring caller variables afterwards.",
             "script": "Tests/exsh/tests/command_substitution_scope.psh",
             "expect": "runtime_ok",
-            "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:inner\nafter-var:inner\ncmdsub-retain:end"
+            "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:outer\nafter-var:outer\ncmdsub-retain:end"
         },
         {
             "id": "repeated_command_execution",
