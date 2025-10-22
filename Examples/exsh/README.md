@@ -45,16 +45,16 @@ echo "functions:start"
 export GREETING=hello
 printenv GREETING
 false
-printenv PSCALSHELL_LAST_STATUS
+printenv EXSH_LAST_STATUS
 true
-printenv PSCALSHELL_LAST_STATUS
+printenv EXSH_LAST_STATUS
 unset GREETING
 printenv GREETING
 echo "functions:end"
 ```
 
 `exsh` scripts have access to the shared builtin catalog. The `export`/`unset`
-pair mutates the host environment, and `PSCALSHELL_LAST_STATUS` reflects the
+pair mutates the host environment, and `EXSH_LAST_STATUS` reflects the
 result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
 complex workflows.
@@ -84,7 +84,7 @@ force other types:
 - `nil` or `nil:` – pass the VM's `nil` value.
 
 When a builtin returns a result the command prints it to `stdout`. Procedures
-that return `void` simply update `PSCALSHELL_LAST_STATUS` to `0` on success so
+that return `void` simply update `EXSH_LAST_STATUS` to `0` on success so
 you can chain them in conditionals.
 
 ## `sierpinski_threads`

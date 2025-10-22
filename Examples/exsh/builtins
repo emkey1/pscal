@@ -1,7 +1,7 @@
 #!/usr/bin/env exsh
 # Demonstrate invoking VM builtins from the exsh front end.
 
-setenv ORIGINAL_STATUS $PSCALSHELL_LAST_STATUS
+setenv ORIGINAL_STATUS $EXSH_LAST_STATUS
 
 echo "builtins:start"
 
@@ -23,5 +23,5 @@ echo "builtins:end"
 
 # Restore the environment variable we touched at the top.
 if [ -n "$ORIGINAL_STATUS" ]; then
-    setenv PSCALSHELL_LAST_STATUS "$ORIGINAL_STATUS"
+    setenv EXSH_LAST_STATUS "$ORIGINAL_STATUS"
 fi

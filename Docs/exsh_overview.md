@@ -88,7 +88,7 @@ The exsh front end honours the standard process environment:
 - Builtins such as `export`, `setenv`, and `unset` mutate the host environment
   for the current process. External utilities like `printenv` observe those changes
   immediately because `exsh` runs everything in-process.
-- `PSCALSHELL_LAST_STATUS` mirrors the most recent exit status observed by the
+- `EXSH_LAST_STATUS` mirrors the most recent exit status observed by the
   runtime and is updated after every builtin or pipeline execution.
 - Caching relies on `$HOME` to locate the cache directory and `$PATH` to resolve
   executables when necessary.
@@ -138,7 +138,7 @@ default; prefix a token with `int:`, `float:`/`double:`/`real:`, `bool:` or
 `str:` to coerce the argument to the corresponding VM type. Supplying `nil` (or
 `nil:`) passes the VM's `nil` value directly. When the target builtin returns a
 value, `builtin` prints it to `stdout`; procedures that return `void` simply set
-`PSCALSHELL_LAST_STATUS` to `0` on success.
+`EXSH_LAST_STATUS` to `0` on success.
 
 High-level control-flow syntax (`if`, `while`/`until`, and `for`) lowers to the
 loop helpers above, which cooperate with real VM jump opcodes. The runtime
