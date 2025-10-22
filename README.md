@@ -250,7 +250,7 @@ build/bin/exsh Examples/exsh/builtins
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a
 `<identifier>-<hash>.bc` name derived from exsh's compiler identifier; pass `--no-cache` to force recompilation. The runtime
-exports `PSCALSHELL_LAST_STATUS` after every builtin invocation so scripts can
+exports `EXSH_LAST_STATUS` after every builtin invocation so scripts can
 inspect the most recent exit code without parsing stderr. Builtins such as
 `export` and `unset` mutate the process environment for subsequent commands, and
 standard utilities (`printenv`, `env`) reflect those changes immediately.

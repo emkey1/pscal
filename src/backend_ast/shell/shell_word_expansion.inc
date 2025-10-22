@@ -1737,7 +1737,7 @@ static void shellUpdateStatus(int status) {
     gShellRuntime.last_status = status;
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%d", status);
-    shellSetTrackedVariable("PSCALSHELL_LAST_STATUS", buffer, false);
+    shellSetTrackedVariable("EXSH_LAST_STATUS", buffer, false);
     bool suppress_errexit = shellRuntimeEvaluatingCondition();
     if (status != 0) {
         if (gShellRuntime.errexit_enabled && !suppress_errexit) {
