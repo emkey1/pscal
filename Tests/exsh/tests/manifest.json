@@ -223,7 +223,7 @@
             "description": "case selects the first matching clause and defaults otherwise.",
             "script": "Examples/exsh/casec",
             "expect": "runtime_ok",
-            "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
+            "expected_stdout": "casec:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
         },
         {
             "id": "case_leading_paren",
