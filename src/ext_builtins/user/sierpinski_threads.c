@@ -1,0 +1,145 @@
+#include "backend_ast/builtin.h"
+#include "core/utils.h"
+#include "vm/vm.h"
+
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+    int x3;
+    int y3;
+    int level;
+    char drawChar;
+} SierpinskiWorkerTask;
+
+static pthread_mutex_t gSierpinskiMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void sierpinskiDrawPoint(VM *vm, int x, int y, char drawChar) {
+    if (!vm) {
+        return;
+    }
+
+    Value coords[2];
+    coords[0] = makeInt(x);
+    coords[1] = makeInt(y);
+
+    pthread_mutex_lock(&gSierpinskiMutex);
+    vmBuiltinGotoxy(vm, 2, coords);
+    putchar(drawChar);
+    fflush(stdout);
+    pthread_mutex_unlock(&gSierpinskiMutex);
+}
+
+static void sierpinskiDrawRecursive(VM *vm,
+                                    int x1,
+                                    int y1,
+                                    int x2,
+                                    int y2,
+                                    int x3,
+                                    int y3,
+                                    int level,
+                                    char drawChar) {
+    if (level <= 0) {
+        sierpinskiDrawPoint(vm, x1, y1, drawChar);
+        sierpinskiDrawPoint(vm, x2, y2, drawChar);
+        sierpinskiDrawPoint(vm, x3, y3, drawChar);
+        return;
+    }
+
+    int mx1 = (x1 + x2) / 2;
+    int my1 = (y1 + y2) / 2;
+    int mx2 = (x2 + x3) / 2;
+    int my2 = (y2 + y3) / 2;
+    int mx3 = (x3 + x1) / 2;
+    int my3 = (y3 + y1) / 2;
+    int nextLevel = level - 1;
+
+    sierpinskiDrawRecursive(vm, x1, y1, mx1, my1, mx3, my3, nextLevel, drawChar);
+    sierpinskiDrawRecursive(vm, mx1, my1, x2, y2, mx2, my2, nextLevel, drawChar);
+    sierpinskiDrawRecursive(vm, mx3, my3, mx2, my2, x3, y3, nextLevel, drawChar);
+}
+
+static void sierpinskiThreadEntry(VM *threadVm, void *user_data) {
+    SierpinskiWorkerTask *task = (SierpinskiWorkerTask *)user_data;
+    if (!task || !threadVm) {
+        return;
+    }
+
+    int level = task->level >= 0 ? task->level : 0;
+    sierpinskiDrawRecursive(threadVm,
+                            task->x1,
+                            task->y1,
+                            task->x2,
+                            task->y2,
+                            task->x3,
+                            task->y3,
+                            level,
+                            task->drawChar);
+}
+
+static void sierpinskiThreadCleanup(void *user_data) {
+    free(user_data);
+}
+
+static char coerceDrawChar(const Value *value) {
+    if (!value) {
+        return '+';
+    }
+    if (value->type == TYPE_CHAR) {
+        return (char)value->c_val;
+    }
+    if (IS_INTLIKE(*value)) {
+        return (char)AS_INTEGER(*value);
+    }
+    if (value->type == TYPE_STRING && value->s_val && value->s_val[0] != '\0') {
+        return value->s_val[0];
+    }
+    return '+';
+}
+
+Value vmBuiltinSierpinskiSpawnWorker(VM *vm, int arg_count, Value *args) {
+    if (arg_count != 7 && arg_count != 8) {
+        runtimeError(vm, "SierpinskiSpawnWorker expects 7 or 8 arguments.");
+        return makeInt(-1);
+    }
+
+    for (int i = 0; i < 7; ++i) {
+        if (!IS_INTLIKE(args[i])) {
+            runtimeError(vm, "SierpinskiSpawnWorker argument %d must be integral.", i + 1);
+            return makeInt(-1);
+        }
+    }
+
+    SierpinskiWorkerTask *task = (SierpinskiWorkerTask *)calloc(1, sizeof(SierpinskiWorkerTask));
+    if (!task) {
+        runtimeError(vm, "SierpinskiSpawnWorker failed to allocate task.");
+        return makeInt(-1);
+    }
+
+    task->x1 = (int)AS_INTEGER(args[0]);
+    task->y1 = (int)AS_INTEGER(args[1]);
+    task->x2 = (int)AS_INTEGER(args[2]);
+    task->y2 = (int)AS_INTEGER(args[3]);
+    task->x3 = (int)AS_INTEGER(args[4]);
+    task->y3 = (int)AS_INTEGER(args[5]);
+    task->level = (int)AS_INTEGER(args[6]);
+    task->drawChar = (arg_count == 8) ? coerceDrawChar(&args[7]) : '+';
+
+    int id = vmSpawnCallbackThread(vm, sierpinskiThreadEntry, task, sierpinskiThreadCleanup);
+    if (id < 0) {
+        runtimeError(vm, "SierpinskiSpawnWorker failed to spawn thread.");
+        return makeInt(-1);
+    }
+
+    return makeInt(id);
+}
+
+void registerSierpinskiBuiltins(void) {
+    registerVmBuiltin("SierpinskiSpawnWorker", vmBuiltinSierpinskiSpawnWorker,
+                      BUILTIN_TYPE_FUNCTION, NULL);
+}

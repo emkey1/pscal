@@ -80,6 +80,9 @@ typedef struct {
     bool active;                // Whether this thread is running
 } Thread;
 
+typedef void (*VMThreadCallback)(struct VM_s* threadVm, void* user_data);
+typedef void (*VMThreadCleanup)(void* user_data);
+
 typedef struct {
     pthread_mutex_t handle;
     bool active;
@@ -135,6 +138,7 @@ void vmResetExecutionState(VM* vm); // Reset stack/frames so a VM can be reused
 // Takes a BytecodeChunk that was successfully compiled.
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
+int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup);
 
 // Register and lookup class methods in the VM's procedure table
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol);
