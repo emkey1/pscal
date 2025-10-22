@@ -2366,10 +2366,11 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     static bool function_vm_initialized = false;
     static bool function_vm_in_use = false;
     VM *invoke_vm = NULL;
-    VM nested_vm;
+    VM *nested_vm = NULL;
     bool using_cached_vm = false;
     bool nested_vm_initialized = false;
     bool frame_pushed = false;
+    InterpretResult result = INTERPRET_OK;
     if (!function_vm_in_use) {
         if (!function_vm_initialized) {
             initVM(&function_vm);
@@ -2381,9 +2382,19 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         using_cached_vm = true;
         invoke_vm = &function_vm;
     } else {
-        initVM(&nested_vm);
-        invoke_vm = &nested_vm;
+        nested_vm = (VM *)malloc(sizeof(VM));
+        if (!nested_vm) {
+            runtimeError(vm, "%s: out of memory", name);
+            shellUpdateStatus(1);
+            goto invoke_cleanup;
+        }
+        initVM(nested_vm);
+        invoke_vm = nested_vm;
         nested_vm_initialized = true;
+    }
+
+    if (!invoke_vm) {
+        goto invoke_cleanup;
     }
 
     if (!shellRuntimePushCallFrame(name, cmd->line, cmd->column)) {
@@ -2393,8 +2404,8 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     }
     frame_pushed = true;
 
-    InterpretResult result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
-                                               globalSymbols, constGlobalSymbols, procedure_table, 0);
+    result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
+                               globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result != INTERPRET_OK) {
         shellUpdateStatus(1);
     } else {
@@ -2405,8 +2416,11 @@ invoke_cleanup:
     if (using_cached_vm) {
         vmResetExecutionState(&function_vm);
         function_vm_in_use = false;
-    } else if (nested_vm_initialized) {
-        freeVM(&nested_vm);
+    } else if (nested_vm) {
+        if (nested_vm_initialized) {
+            freeVM(nested_vm);
+        }
+        free(nested_vm);
     }
     if (frame_pushed) {
         shellRuntimePopCallFrame();
