@@ -78,6 +78,18 @@ typedef struct {
     pthread_t handle;           // OS-level thread handle
     struct VM_s* vm;            // Pointer to the VM executing on this thread
     bool active;                // Whether this thread is running
+
+    // Result hand-off state for builtin jobs.
+    bool statusReady;           // True when a worker has published a status/result
+    bool statusFlag;            // Worker-reported success flag
+    bool statusConsumed;        // Tracks whether readers consumed the status
+    bool resultReady;           // True when resultValue holds a pending result
+    bool resultConsumed;        // Tracks whether the pending result has been taken
+    Value resultValue;          // Stored builtin result value
+
+    pthread_mutex_t resultMutex; // Protects result/status hand-off
+    pthread_cond_t resultCond;   // Notifies waiters when hand-off is ready
+    bool syncInitialized;        // True once mutex/cond initialised
 } Thread;
 
 typedef void (*VMThreadCallback)(struct VM_s* threadVm, void* user_data);
@@ -123,6 +135,9 @@ typedef struct VM_s {
     pthread_mutex_t mutexRegistryLock; // Protects mutex registry updates
     struct VM_s* mutexOwner; // VM that owns the mutex registry
 
+    Thread* owningThread;        // Non-NULL when running inside a worker slot
+    int threadId;                // Slot index for owningThread (0 for main VM)
+
     // Optional tracing: when >0, print execution of first N instructions
     int trace_head_instructions;
     int trace_executed;
@@ -139,6 +154,9 @@ void vmResetExecutionState(VM* vm); // Reset stack/frames so a VM can be reused
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup);
+int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount, const Value* args);
+void vmThreadStoreResult(VM* vm, const Value* result, bool success);
+bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, bool* outStatus, bool takeStatus);
 bool vmJoinThreadById(struct VM_s* vm, int id);
 
 // Register and lookup class methods in the VM's procedure table

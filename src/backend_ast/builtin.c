@@ -679,12 +679,17 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"quitrequested", vmBuiltinQuitrequested},
     {"getscreensize", NULL},
     {"pollkeyany", vmBuiltinPollkeyany},
+    {"threadgetresult", vmBuiltinThreadGetResult},
+    {"threadgetstatus", vmBuiltinThreadGetStatus},
+    {"threadspawnbuiltin", vmBuiltinThreadSpawnBuiltin},
     {"waitforthread", vmBuiltinWaitForThread},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
+
+static bool threadBuiltinIsAllowlisted(int id);
 
 /* Dynamic registry for user-supplied VM built-ins. */
 static VmBuiltinMapping *extra_vm_builtins = NULL;
@@ -4871,6 +4876,36 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+static bool parseThreadIdValue(const Value* value, int* outId) {
+    if (!value || !outId) {
+        return false;
+    }
+    if (value->type == TYPE_THREAD || IS_INTLIKE(*value)) {
+        long long raw = asI64(*value);
+        if (raw <= 0 || raw >= VM_MAX_THREADS) {
+            return false;
+        }
+        *outId = (int)raw;
+        return true;
+    }
+    return false;
+}
+
+static bool parseBooleanValue(const Value* value, bool* outBool) {
+    if (!value || !outBool) {
+        return false;
+    }
+    if (value->type == TYPE_BOOLEAN) {
+        *outBool = value->i_val != 0;
+        return true;
+    }
+    if (IS_INTLIKE(*value)) {
+        *outBool = asI64(*value) != 0;
+        return true;
+    }
+    return false;
+}
+
 Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     if (!vm) {
         return makeInt(-1);
@@ -4895,6 +4930,145 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+Value vmBuiltinThreadSpawnBuiltin(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeInt(-1);
+    }
+    if (arg_count < 1) {
+        runtimeError(vm, "ThreadSpawnBuiltin expects a builtin identifier followed by optional arguments.");
+        return makeInt(-1);
+    }
+
+    Value target = args[0];
+    int builtin_id = -1;
+    const char* builtin_name = NULL;
+    if (target.type == TYPE_STRING || target.type == TYPE_POINTER) {
+        const char* source_name = builtinValueToCString(&target);
+        if (!source_name || !*source_name) {
+            runtimeError(vm, "ThreadSpawnBuiltin requires a builtin name or id.");
+            return makeInt(-1);
+        }
+        builtin_id = getVmBuiltinID(source_name);
+        builtin_name = getVmBuiltinNameById(builtin_id);
+    } else if (IS_INTLIKE(target)) {
+        builtin_id = (int)asI64(target);
+        builtin_name = getVmBuiltinNameById(builtin_id);
+    } else {
+        runtimeError(vm, "ThreadSpawnBuiltin requires a builtin name (string) or id (integer).");
+        return makeInt(-1);
+    }
+
+    if (builtin_id < 0 || !builtin_name) {
+        runtimeError(vm, "ThreadSpawnBuiltin received an unknown builtin identifier.");
+        return makeInt(-1);
+    }
+    if (!threadBuiltinIsAllowlisted(builtin_id)) {
+        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+        return makeInt(-1);
+    }
+
+    const Value* builtin_args = (arg_count > 1) ? &args[1] : NULL;
+    int thread_id = vmSpawnBuiltinThread(vm, builtin_id, builtin_name, arg_count - 1, builtin_args);
+    if (thread_id < 0) {
+        runtimeError(vm, "ThreadSpawnBuiltin failed to start builtin '%s'.", builtin_name);
+        return makeInt(-1);
+    }
+
+    Value thread_value = makeInt(thread_id);
+    thread_value.type = TYPE_THREAD;
+    return thread_value;
+}
+
+Value vmBuiltinThreadGetResult(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeNil();
+    }
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "ThreadGetResult expects a thread id and optional consumeStatus flag.");
+        return makeNil();
+    }
+
+    int thread_id = -1;
+    if (!parseThreadIdValue(&args[0], &thread_id)) {
+        runtimeError(vm, "ThreadGetResult argument must be a valid thread id.");
+        return makeNil();
+    }
+    if (thread_id >= VM_MAX_THREADS) {
+        runtimeError(vm, "ThreadGetResult received thread id %d out of range.", thread_id);
+        return makeNil();
+    }
+
+    bool consume_status = false;
+    if (arg_count == 2) {
+        if (!parseBooleanValue(&args[1], &consume_status)) {
+            runtimeError(vm, "ThreadGetResult consume flag must be boolean or integer.");
+            return makeNil();
+        }
+    }
+
+    Thread* slot = &vm->threads[thread_id];
+    if (slot->active) {
+        runtimeError(vm, "Thread %d is still running; join it before retrieving the result.", thread_id);
+        return makeNil();
+    }
+
+    bool status = false;
+    Value result = makeNil();
+    if (!vmThreadTakeResult(vm, thread_id, &result, true, &status, consume_status)) {
+        runtimeError(vm, "Thread %d has no stored result.", thread_id);
+        return makeNil();
+    }
+    return result;
+}
+
+Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeBoolean(false);
+    }
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "ThreadGetStatus expects a thread id and optional dropResult flag.");
+        return makeBoolean(false);
+    }
+
+    int thread_id = -1;
+    if (!parseThreadIdValue(&args[0], &thread_id)) {
+        runtimeError(vm, "ThreadGetStatus argument must be a valid thread id.");
+        return makeBoolean(false);
+    }
+    if (thread_id >= VM_MAX_THREADS) {
+        runtimeError(vm, "ThreadGetStatus received thread id %d out of range.", thread_id);
+        return makeBoolean(false);
+    }
+
+    bool drop_result = false;
+    if (arg_count == 2) {
+        if (!parseBooleanValue(&args[1], &drop_result)) {
+            runtimeError(vm, "ThreadGetStatus drop flag must be boolean or integer.");
+            return makeBoolean(false);
+        }
+    }
+
+    Thread* slot = &vm->threads[thread_id];
+    if (slot->active) {
+        runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
+        return makeBoolean(false);
+    }
+
+    bool status = false;
+    Value dropped = makeNil();
+    if (!vmThreadTakeResult(vm, thread_id, drop_result ? &dropped : NULL, drop_result, &status, true)) {
+        runtimeError(vm, "Thread %d has no stored status.", thread_id);
+        if (drop_result) {
+            freeValue(&dropped);
+        }
+        return makeBoolean(false);
+    }
+    if (drop_result) {
+        freeValue(&dropped);
+    }
+    return makeBoolean(status);
+}
+
 int getBuiltinIDForCompiler(const char *name) {
     return getVmBuiltinID(name);
 }
@@ -4908,6 +5082,78 @@ static RegisteredBuiltin* builtin_registry = NULL;
 static int builtin_registry_count = 0;
 static int builtin_registry_capacity = 0;
 static pthread_once_t builtin_registration_once = PTHREAD_ONCE_INIT;
+
+/*
+ * Thread-safe builtin allowlist.
+ *
+ * Only builtins that are re-entrant and do not mutate global VM state may run
+ * on worker threads. Audit new candidates carefully (no shared static buffers,
+ * no implicit interaction with the interpreter state) before adding them to
+ * this table.
+ */
+static pthread_once_t gThreadBuiltinAllowlistOnce = PTHREAD_ONCE_INIT;
+static bool *gThreadBuiltinAllowlist = NULL;
+static size_t gThreadBuiltinAllowlistCount = 0;
+static const char *const kThreadBuiltinAllowlistNames[] = {
+    "delay",
+    "httprequest",
+    "httprequesttofile",
+    "httprequestasync",
+    "httprequestasynctofile",
+    "httptryawait",
+    "httpawait",
+    "httpisdone",
+    "httpcancel",
+    "httpgetasyncprogress",
+    "httpgetasynctotal",
+    "httpgetlastheaders",
+    "httpgetheader",
+    "httpclearheaders",
+    "httpsetheader",
+    "httpsetoption",
+    "httperrorcode",
+    "httplasterror",
+    "apireceive",
+    "apisend",
+    "dnslookup"
+};
+
+static void initThreadBuiltinAllowlist(void) {
+    gThreadBuiltinAllowlistCount = num_vm_builtins;
+    if (gThreadBuiltinAllowlistCount == 0) {
+        return;
+    }
+
+    gThreadBuiltinAllowlist = calloc(gThreadBuiltinAllowlistCount, sizeof(bool));
+    if (!gThreadBuiltinAllowlist) {
+        gThreadBuiltinAllowlistCount = 0;
+        return;
+    }
+
+    const size_t count = sizeof(kThreadBuiltinAllowlistNames) / sizeof(kThreadBuiltinAllowlistNames[0]);
+    for (size_t i = 0; i < count; ++i) {
+        int id = getVmBuiltinID(kThreadBuiltinAllowlistNames[i]);
+        if (id >= 0 && (size_t)id < gThreadBuiltinAllowlistCount) {
+            gThreadBuiltinAllowlist[id] = true;
+        }
+    }
+}
+
+static bool threadBuiltinIsAllowlisted(int id) {
+    if (id < 0) {
+        return false;
+    }
+
+    pthread_once(&gThreadBuiltinAllowlistOnce, initThreadBuiltinAllowlist);
+    if (!gThreadBuiltinAllowlist || gThreadBuiltinAllowlistCount == 0) {
+        return false;
+    }
+
+    if ((size_t)id < gThreadBuiltinAllowlistCount) {
+        return gThreadBuiltinAllowlist[id];
+    }
+    return false;
+}
 
 typedef struct {
     Symbol symbol;
@@ -5353,6 +5599,9 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("printf", AST_FUNCTION_DECL, NULL); // special-case handled by compiler
     registerBuiltinFunctionUnlocked("CreateThread", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("WaitForThread", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadSpawnBuiltin", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadGetResult", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadGetStatus", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);
