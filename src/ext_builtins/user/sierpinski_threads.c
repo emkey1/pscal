@@ -1,6 +1,7 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "Pascal/globals.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -24,14 +25,21 @@ static void sierpinskiDrawPoint(VM *vm, int x, int y, char drawChar) {
         return;
     }
 
-    Value coords[2];
-    coords[0] = makeInt(x);
-    coords[1] = makeInt(y);
-
     pthread_mutex_lock(&gSierpinskiMutex);
-    vmBuiltinGotoxy(vm, 2, coords);
-    putchar(drawChar);
+
+    int absX = gWindowLeft + x - 1;
+    int absY = gWindowTop + y - 1;
+
+    if (absX < 1) {
+        absX = 1;
+    }
+    if (absY < 1) {
+        absY = 1;
+    }
+
+    fprintf(stdout, "\x1B[%d;%dH%c", absY, absX, drawChar);
     fflush(stdout);
+
     pthread_mutex_unlock(&gSierpinskiMutex);
 }
 

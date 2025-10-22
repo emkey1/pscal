@@ -317,8 +317,15 @@ is_positive_integer() {
 draw_point() {
     local x="$1"
     local y="$2"
-    run_exsh_builtin GotoXY "int:$x" "int:$y"
-    run_exsh_builtin Write "int:0" "str:$CHAR_TO_DRAW"
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if ! run_exsh_builtin GotoXY "int:$x" "int:$y"; then
+        printf '\033[%d;%dH' "$y" "$x"
+    fi
+
+    printf '%s' "$CHAR_TO_DRAW"
 }
 
 draw_sierpinski() {
