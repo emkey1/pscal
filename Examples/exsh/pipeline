@@ -1,3 +1,4 @@
+#!/usr/bin/env exsh
 echo "pipeline:start"
 echo "alpha" | cat
 echo "pipeline:end"

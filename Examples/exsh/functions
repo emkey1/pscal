@@ -1,3 +1,4 @@
+#!/usr/bin/env exsh
 echo "functions:start"
 export GREETING=hello
 printenv GREETING
