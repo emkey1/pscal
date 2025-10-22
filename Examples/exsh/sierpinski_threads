@@ -209,9 +209,24 @@ resolve_exsh_binary() {
         return 0
     fi
 
-    local script_dir repo_root
-    script_dir=${0%/*}
-    if [ -z "$script_dir" ] || [ "$script_dir" = "$0" ]; then
+    local script_path script_dir repo_root
+
+    script_path="$0"
+    case "$script_path" in
+        */*)
+            script_dir=${script_path%/*}
+            ;;
+        *)
+            script_path=$(find_in_path "$script_path" 2>/dev/null || printf '')
+            if [ -n "$script_path" ]; then
+                script_dir=${script_path%/*}
+            else
+                script_dir='.'
+            fi
+            ;;
+    esac
+
+    if [ -z "$script_dir" ]; then
         script_dir='.'
     fi
 
