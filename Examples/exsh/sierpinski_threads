@@ -264,31 +264,15 @@ cleanup() {
     fi
 }
 
-terminate_workers() {
-    if [ -z "$WORKER_PIDS" ]; then
-        return
-    fi
-
-    for pid in $WORKER_PIDS; do
-        if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-            kill "$pid" >/dev/null 2>&1 || :
-        fi
-    done
-
-    WORKER_PIDS=""
-}
-
 handle_exit() {
     local status=$?
-    trap - EXIT INT TERM TSTP
-    terminate_workers
+    trap - EXIT INT TERM
     cleanup
     exit "$status"
 }
 
 handle_interrupt() {
-    trap - EXIT INT TERM TSTP
-    terminate_workers
+    trap - EXIT INT TERM
     cleanup
 
     case "$1" in
@@ -301,36 +285,7 @@ handle_interrupt() {
     esac
 }
 
-handle_tstp() {
-    trap - TSTP
-    cleanup
-    if [ -n "$WORKER_PIDS" ]; then
-        for pid in $WORKER_PIDS; do
-            if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-                kill -s TSTP "$pid" >/dev/null 2>&1 || :
-            fi
-        done
-    fi
-    kill -s TSTP "$$" >/dev/null 2>&1 || :
-    if [ -n "$WORKER_PIDS" ]; then
-        for pid in $WORKER_PIDS; do
-            if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-                kill -s CONT "$pid" >/dev/null 2>&1 || :
-            fi
-        done
-    fi
-    if [ "$CURSOR_SHOULD_HIDE" = "1" ]; then
-        if run_exsh_builtin HideCursor >/dev/null 2>&1; then
-            CURSOR_HIDDEN=1
-        else
-            CURSOR_HIDDEN=0
-        fi
-    fi
-    trap 'handle_tstp' TSTP
-}
-
 RUN_EXSH_BUILTIN_STDOUT=""
-WORKER_PIDS=""
 CURSOR_HIDDEN=0
 CURSOR_SHOULD_HIDE=0
 HEADLESS_MODE=0
@@ -348,6 +303,20 @@ case "${SIERPINSKI_HEADLESS:-0}" in
 esac
 HEADLESS_ROWS=${SIERPINSKI_HEADLESS_ROWS:-$HEADLESS_ROWS}
 HEADLESS_COLS=${SIERPINSKI_HEADLESS_COLS:-$HEADLESS_COLS}
+
+is_positive_integer() {
+    case "$1" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+        0)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
 
 draw_point() {
     local x="$1"
@@ -390,24 +359,12 @@ ensure_exsh "$@"
 trap 'handle_exit' EXIT
 trap 'handle_interrupt INT' INT
 trap 'handle_interrupt TERM' TERM
-trap 'handle_tstp' TSTP
 if [ -z "${CHAR_TO_DRAW+x}" ]; then
     CHAR_TO_DRAW="${SIERPINSKI_CHAR:-+}"
 fi
 export CHAR_TO_DRAW
 
-WORKER_MODE=${SIERPINSKI_WORKER:-0}
 SKIP_WAIT=${SIERPINSKI_SKIP_WAIT:-0}
-
-if [ "$WORKER_MODE" = "1" ]; then
-    if [ "$#" -ne 7 ]; then
-        echo "sierpinski_threads: worker expects 7 arguments." >&2
-        exit 1
-    fi
-
-    draw_sierpinski "$@"
-    exit 0
-fi
 
 MAX_LEVEL_RAW="${SIERPINSKI_LEVEL:-13}"
 
@@ -516,57 +473,37 @@ if [ "$HEADLESS_MODE" = "1" ]; then
     # without depending on the console builtins or background jobs.
     :
 else
-    if resolve_exsh_binary; then
-        :
-    else
-        echo "sierpinski_threads: unable to locate exsh binary for worker threads." >&2
-        exit 1
-    fi
-
-    exsh_path="$RESOLVED_EXSH_PATH"
-    if [ -z "$exsh_path" ]; then
-        echo "sierpinski_threads: unable to locate exsh binary for worker threads." >&2
-        exit 1
-    fi
-
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$X1" "$Y1" "$MX1" "$MY1" "$MX3" "$MY3" "$THREAD_LEVEL" &
-    PID0=$!
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$MX1" "$MY1" "$X2" "$Y2" "$MX2" "$MY2" "$THREAD_LEVEL" &
-    PID1=$!
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$MX3" "$MY3" "$MX2" "$MY2" "$X3" "$Y3" "$THREAD_LEVEL" &
-    PID2=$!
-
-    WORKER_PIDS="$PID0 $PID1 $PID2"
-
     worker_failure=0
+    thread_ids=""
 
-    jobs_remaining=0
-    if [ -n "$PID0" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
-    else
+    PID0=$(builtin SierpinskiSpawnWorker "int:$X1" "int:$Y1" "int:$MX1" "int:$MY1" "int:$MX3" "int:$MY3" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW")
+    if [ $? -ne 0 ] || ! is_positive_integer "$PID0"; then
         worker_failure=1
-    fi
-    if [ -n "$PID1" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
     else
-        worker_failure=1
-    fi
-    if [ -n "$PID2" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
-    else
-        worker_failure=1
+        thread_ids="$thread_ids $PID0"
     fi
 
-    while [ "$jobs_remaining" -gt 0 ]; do
-        if wait; then
+    PID1=$(builtin SierpinskiSpawnWorker "int:$MX1" "int:$MY1" "int:$X2" "int:$Y2" "int:$MX2" "int:$MY2" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW")
+    if [ $? -ne 0 ] || ! is_positive_integer "$PID1"; then
+        worker_failure=1
+    else
+        thread_ids="$thread_ids $PID1"
+    fi
+
+    PID2=$(builtin SierpinskiSpawnWorker "int:$MX3" "int:$MY3" "int:$MX2" "int:$MY2" "int:$X3" "int:$Y3" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW")
+    if [ $? -ne 0 ] || ! is_positive_integer "$PID2"; then
+        worker_failure=1
+    else
+        thread_ids="$thread_ids $PID2"
+    fi
+
+    for tid in $thread_ids; do
+        if run_exsh_builtin WaitForThread "int:$tid"; then
             :
         else
             worker_failure=1
         fi
-        jobs_remaining=$((jobs_remaining - 1))
     done
-
-    WORKER_PIDS=""
 
     if [ "$worker_failure" -ne 0 ]; then
         echo "sierpinski_threads: worker thread exited with an error." >&2
@@ -584,5 +521,5 @@ if [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
 fi
 run_exsh_builtin ClrScr
 
-trap - EXIT INT TERM TSTP
+trap - EXIT INT TERM
 cleanup

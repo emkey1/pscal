@@ -550,11 +550,21 @@ Symbol* vmFindClassMethod(VM* vm, const char* className, uint16_t methodIndex) {
 }
 
 // --- Threading Helpers ---
+typedef enum {
+    THREAD_JOB_BYTECODE,
+    THREAD_JOB_CALLBACK
+} ThreadJobKind;
+
 typedef struct {
     Thread* thread;
+    ThreadJobKind kind;
     uint16_t entry;
+    BytecodeChunk* chunk;
     int argc;
     Value args[8]; // up to 8 arguments supported
+    VMThreadCallback callback;
+    VMThreadCleanup cleanup;
+    void* user_data;
 } ThreadStartArgs;
 
 // Forward declarations for helpers used by threadStart.
@@ -565,12 +575,35 @@ static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address);
 
 static void* threadStart(void* arg) {
     ThreadStartArgs* args = (ThreadStartArgs*)arg;
+    if (!args) return NULL;
+
     Thread* thread = args->thread;
-    VM* vm = thread->vm;
+    VM* vm = thread ? thread->vm : NULL;
+    if (!thread || !vm) {
+        free(args);
+        return NULL;
+    }
+
+    if (args->kind == THREAD_JOB_CALLBACK) {
+        VMThreadCallback callback = args->callback;
+        VMThreadCleanup cleanup = args->cleanup;
+        void* user_data = args->user_data;
+        free(args);
+        if (callback) {
+            callback(vm, user_data);
+        }
+        if (cleanup) {
+            cleanup(user_data);
+        }
+        thread->active = false;
+        return NULL;
+    }
+
     uint16_t entry = args->entry;
     int argc = args->argc;
     Value local_args[8];
     for (int i = 0; i < argc && i < 8; i++) local_args[i] = args->args[i];
+    BytecodeChunk* chunk = args->chunk ? args->chunk : vm->chunk;
     free(args);
 
     Symbol* proc_symbol = vmGetProcedureByAddress(vm, entry);
@@ -625,12 +658,21 @@ static void* threadStart(void* arg) {
         frame->slotCount = (uint16_t)pushed_args;
     }
 
-    interpretBytecode(vm, vm->chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
+    interpretBytecode(vm, chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
     thread->active = false;
     return NULL;
 }
 
-static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
+static int createThreadJob(VM* vm,
+                           ThreadJobKind kind,
+                           BytecodeChunk* chunk,
+                           uint16_t entry,
+                           int argc,
+                           Value* argv,
+                           VMThreadCallback callback,
+                           VMThreadCleanup cleanup,
+                           void* user_data) {
+    if (!vm) return -1;
     int id = -1;
     for (int i = 1; i < VM_MAX_THREADS; i++) {
         if (!vm->threads[i].active && vm->threads[i].vm == NULL) {
@@ -648,7 +690,7 @@ static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
     t->vm->vmConstGlobalSymbols = vm->vmConstGlobalSymbols;
     t->vm->procedureTable = vm->procedureTable;
     memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
-    t->vm->chunk = vm->chunk;
+    t->vm->chunk = chunk ? chunk : vm->chunk;
     t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
     t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
     t->vm->trace_head_instructions = vm->trace_head_instructions;
@@ -661,15 +703,29 @@ static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
         return -1;
     }
     args->thread = t;
+    args->kind = kind;
     args->entry = entry;
+    args->chunk = chunk ? chunk : vm->chunk;
     args->argc = (argc > 8) ? 8 : argc;
-    for (int i = 0; i < args->argc; i++) args->args[i] = argv[i];
+    for (int i = 0; i < args->argc; i++) {
+        if (argv) {
+            args->args[i] = argv[i];
+        } else {
+            args->args[i] = makeNil();
+        }
+    }
+    args->callback = callback;
+    args->cleanup = cleanup;
+    args->user_data = user_data;
     t->active = true;
     if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
         free(args);
         free(t->vm);
         t->vm = NULL;
         t->active = false;
+        if (cleanup && user_data) {
+            cleanup(user_data);
+        }
         return -1;
     }
 
@@ -679,9 +735,23 @@ static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
     return id;
 }
 
+static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, Value* argv) {
+    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL);
+}
+
 // Backward-compatible helper: no argument provided, pass NIL
 static int createThread(VM* vm, uint16_t entry) {
     return createThreadWithArgs(vm, entry, 0, NULL);
+}
+
+int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup) {
+    if (!vm || !callback) {
+        if (cleanup && user_data) {
+            cleanup(user_data);
+        }
+        return -1;
+    }
+    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data);
 }
 
 static void joinThread(VM* vm, int id) {

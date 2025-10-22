@@ -97,11 +97,13 @@ builtin HideCursor
 ```
 
 This port of the Pascal `SierpinskiTriangleThreads` demo renders the fractal
-with three background jobs that share the VM's console helpers. The script
-queries the terminal size, hides the cursor, and then dispatches three recursive
-workers that call `GotoXY`/`Write` to fill the screen. By default it uses level
-13 detail; set `SIERPINSKI_LEVEL` (and optionally `SIERPINSKI_CHAR`) before
-invocation to tweak the recursion depth and drawing character:
+with three VM threads started via the `SierpinskiSpawnWorker` builtin. The
+script queries the terminal size, hides the cursor, and dispatches three
+recursive workers that call `GotoXY`/`Write` to fill the screen. Each thread id
+is joined with the standard `WaitForThread` builtin so the rendering stays
+inside a single exsh process. By default it uses level 13 detail; set
+`SIERPINSKI_LEVEL` (and optionally `SIERPINSKI_CHAR`) before invocation to tweak
+the recursion depth and drawing character:
 
 ```sh
 SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
