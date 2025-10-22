@@ -2416,15 +2416,28 @@ done:
 
 Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     const char *path = NULL;
-    if (arg_count == 0) {
+    int arg_index = 0;
+
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val &&
+        strcmp(args[0].s_val, "--") == 0) {
+        arg_index = 1;
+    }
+
+    int remaining = arg_count - arg_index;
+    if (remaining <= 0) {
         path = shellSafeGetenv("HOME");
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
             return makeVoid();
         }
-    } else if (args[0].type == TYPE_STRING && args[0].s_val) {
-        path = args[0].s_val;
+    } else if (args[arg_index].type == TYPE_STRING && args[arg_index].s_val) {
+        if (remaining > 1) {
+            runtimeError(vm, "cd: too many arguments");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        path = args[arg_index].s_val;
     } else {
         runtimeError(vm, "cd: expected directory path");
         shellUpdateStatus(1);
