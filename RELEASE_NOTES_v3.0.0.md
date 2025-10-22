@@ -42,7 +42,7 @@ Date: 2025-10-20
 3. `TMPDIR=$PWD/Tests/tmp python3 Tests/libs/run_all_tests.py` *(requires local socket permissions)*
 4. `TMPDIR=$PWD/Tests/tmp python3 Tests/scope_verify/rea/rea_scope_test_harness.py`
 5. Spot-check flagship examples:  
-   - `build/bin/exsh Examples/exsh/pipeline.psh`  
+   - `build/bin/exsh Examples/exsh/pipeline`
    - `build/bin/pascal Examples/pascal/base/ThreadsProcPtrDemo`  
    - `build/bin/clike Examples/clike/base/thread_demo`  
    - `build/bin/rea Examples/rea/base/threads`

@@ -3,9 +3,9 @@
 The exsh front end ships with a few minimal scripts that are used by the
 regression suite and serve as reference material for new programs. Each script
 lives alongside this README so you can run it directly with the `exsh`
-executable (for example, `build/bin/exsh Examples/exsh/pipeline.psh`).
+executable (for example, `build/bin/exsh Examples/exsh/pipeline`).
 
-## `pipeline.psh`
+## `pipeline`
 
 ```sh
 #!/usr/bin/env exsh
@@ -19,7 +19,7 @@ standard POSIX `|` operator through the builtin pipeline helpers so you can
 combine multiple commands. Additional stages can be appended with more `|`
 operators; each stage runs sequentially within the VM process.
 
-## `conditionals.psh`
+## `conditionals`
 
 ```sh
 #!/usr/bin/env exsh
@@ -37,7 +37,7 @@ VM. Because the current implementation executes helpers sequentially, this
 example uses constant `true`/`false` commands to keep behaviour deterministic.
 Replace them with your own conditions to drive different branches.
 
-## `functions.psh`
+## `functions`
 
 ```sh
 #!/usr/bin/env exsh
@@ -59,7 +59,7 @@ result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
 complex workflows.
 
-## `builtins.psh`
+## `builtins`
 
 ```sh
 #!/usr/bin/env exsh
@@ -87,7 +87,7 @@ When a builtin returns a result the command prints it to `stdout`. Procedures
 that return `void` simply update `PSCALSHELL_LAST_STATUS` to `0` on success so
 you can chain them in conditionals.
 
-## `sierpinski_threads.psh`
+## `sierpinski_threads`
 
 ```sh
 #!/usr/bin/env exsh
@@ -105,10 +105,10 @@ invocation to tweak the recursion depth and drawing character:
 
 ```sh
 SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
-    Examples/exsh/sierpinski_threads.psh
+    Examples/exsh/sierpinski_threads
 ```
 
-## `logical.psh`
+## `logical`
 
 ```sh
 #!/usr/bin/env exsh
@@ -124,7 +124,7 @@ echo "logical:end"
 short-circuit based on the status of the previous stage. This sample shows which
 branches execute when paired with the standard `true`/`false` utilities.
 
-## `redirection.psh`
+## `redirection`
 
 ```sh
 #!/usr/bin/env exsh
@@ -140,7 +140,7 @@ Redirections map to the VM's file descriptor helpers. The script writes to a
 temporary file, appends an extra line, reads it back via input redirection, and
 removes the temporary resource.
 
-## `env.psh`
+## `env`
 
 ```sh
 #!/usr/bin/env exsh
@@ -172,7 +172,7 @@ cmake --build build
 You can then run any script directly:
 
 ```sh
-build/bin/exsh Examples/exsh/pipeline.psh
+build/bin/exsh Examples/exsh/pipeline
 ```
 
 Pass additional arguments after the script path to expose them to `$0`, `$1`,

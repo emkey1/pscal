@@ -243,9 +243,9 @@ tokens to the appropriate VM types before dispatch.
 Example usage:
 
 ```sh
-build/bin/exsh Examples/exsh/pipeline.psh
-build/bin/exsh --dump-bytecode Examples/exsh/functions.psh
-build/bin/exsh Examples/exsh/builtins.psh
+build/bin/exsh Examples/exsh/pipeline
+build/bin/exsh --dump-bytecode Examples/exsh/functions
+build/bin/exsh Examples/exsh/builtins
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a
