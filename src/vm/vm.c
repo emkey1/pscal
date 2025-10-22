@@ -754,11 +754,17 @@ int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VM
     return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data);
 }
 
-static void joinThread(VM* vm, int id) {
+static bool joinThreadInternal(VM* vm, int id) {
+    if (!vm) {
+        return false;
+    }
     // Thread IDs start at 1. ID 0 represents the main thread and cannot be
     // joined through this helper. Only negative IDs or those beyond the
     // current thread count are invalid.
-    if (id <= 0 || id >= vm->threadCount) return;
+    if (id <= 0 || id >= vm->threadCount) {
+        return false;
+    }
+
     Thread* t = &vm->threads[id];
     if (t->active) {
         pthread_join(t->handle, NULL);
@@ -774,6 +780,15 @@ static void joinThread(VM* vm, int id) {
            vm->threads[vm->threadCount - 1].vm == NULL) {
         vm->threadCount--;
     }
+    return true;
+}
+
+static void joinThread(VM* vm, int id) {
+    joinThreadInternal(vm, id);
+}
+
+bool vmJoinThreadById(VM* vm, int id) {
+    return joinThreadInternal(vm, id);
 }
 
 // --- Mutex Helpers ---

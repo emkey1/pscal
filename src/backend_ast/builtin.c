@@ -679,6 +679,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"quitrequested", vmBuiltinQuitrequested},
     {"getscreensize", NULL},
     {"pollkeyany", vmBuiltinPollkeyany},
+    {"waitforthread", vmBuiltinWaitForThread},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -4868,6 +4869,30 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
     long long ms = AS_INTEGER(args[0]);
     if (ms > 0) usleep((useconds_t)ms * 1000);
     return makeVoid();
+}
+
+Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeInt(-1);
+    }
+    if (arg_count != 1) {
+        runtimeError(vm, "WaitForThread expects exactly 1 argument (thread id).");
+        return makeInt(-1);
+    }
+
+    Value tidVal = args[0];
+    if (!(tidVal.type == TYPE_THREAD || IS_INTLIKE(tidVal))) {
+        runtimeError(vm, "WaitForThread argument must be a thread id.");
+        return makeInt(-1);
+    }
+
+    int id = (int)asI64(tidVal);
+    if (!vmJoinThreadById(vm, id)) {
+        runtimeError(vm, "WaitForThread received invalid thread id %d.", id);
+        return makeInt(-1);
+    }
+
+    return makeInt(0);
 }
 
 int getBuiltinIDForCompiler(const char *name) {

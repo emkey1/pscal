@@ -8392,6 +8392,71 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "WaitForThread: expected thread id");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    Value thread_value = args[0];
+    Value converted = makeVoid();
+    bool converted_valid = false;
+
+    if (thread_value.type == TYPE_STRING && thread_value.s_val && thread_value.s_val[0] != '\0') {
+        const char *raw = thread_value.s_val;
+        const char *id_text = raw;
+        const char *colon = strchr(raw, ':');
+        if (colon && colon[1] != '\0') {
+            id_text = colon + 1;
+        }
+
+        long long parsed = 0;
+        if (!shellParseSignedLongLong(id_text, &parsed)) {
+            runtimeError(vm, "WaitForThread: %s: invalid thread id", raw);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        converted = makeInt(parsed);
+        thread_value = converted;
+        converted_valid = true;
+    }
+
+    if (!(thread_value.type == TYPE_THREAD || IS_INTLIKE(thread_value))) {
+        runtimeError(vm, "WaitForThread: expected thread id");
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    long long thread_id = asI64(thread_value);
+    if (thread_id <= 0 || thread_id > INT_MAX) {
+        runtimeError(vm, "WaitForThread: %lld: invalid thread id", thread_id);
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (!vmJoinThreadById(vm, (int)thread_id)) {
+        runtimeError(vm, "WaitForThread: %lld: invalid thread id", thread_id);
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    if (converted_valid) {
+        freeValue(&converted);
+    }
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
     if (arg_count < 1 || args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
         runtimeError(vm, "builtin: expected VM builtin name");

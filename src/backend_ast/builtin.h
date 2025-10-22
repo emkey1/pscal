@@ -107,6 +107,7 @@ Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWaitForThread(struct VM_s* vm, int arg_count, Value* args);
 
 /* Shell builtins */
 Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
@@ -169,6 +170,7 @@ Value vmBuiltinShellKill(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellWaitForThread(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEcho(struct VM_s* vm, int arg_count, Value* args);
