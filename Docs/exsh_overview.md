@@ -12,7 +12,7 @@ Build the project with CMake and invoke the new `exsh` executable:
 ```sh
 cmake -S . -B build
 cmake --build build
-build/bin/exsh script.psh [arguments]
+build/bin/exsh script.exsh [arguments]
 ```
 
 `exsh` accepts the same tracing and bytecode inspection flags as the other front
@@ -100,7 +100,7 @@ variables (printing the environment when invoked without arguments), and the
 new `unsetenv` builtin mirrors `unset` for scripts that prefer csh-style
 naming. The VM argument vector (`$0`, `$1` …) maps directly to the parameters
 passed after the script path (`gParamValues` inside the VM), so invoking
-`build/bin/exsh script.psh 1 2 3` exposes `1`, `2`, and `3` to the program.
+`build/bin/exsh script.exsh 1 2 3` exposes `1`, `2`, and `3` to the program.
 
 Interactive sessions also support history expansion beyond `!!`. Numeric
 designators like `!-2` and `!42`, prefix/substring searches (`!foo`, `!?bar?`),

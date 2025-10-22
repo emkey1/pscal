@@ -237,7 +237,7 @@ ensure_exsh() {
         fi
     fi
 
-    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
+    echo "sierpinski_threads: this demo must be run with exsh." >&2
     echo "Build exsh via CMake and ensure it is on PATH before running the script." >&2
     exit 1
 }
@@ -386,7 +386,7 @@ SKIP_WAIT=${SIERPINSKI_SKIP_WAIT:-0}
 
 if [ "$WORKER_MODE" = "1" ]; then
     if [ "$#" -ne 7 ]; then
-        echo "sierpinski_threads.psh: worker expects 7 arguments." >&2
+        echo "sierpinski_threads: worker expects 7 arguments." >&2
         exit 1
     fi
 
@@ -424,14 +424,14 @@ MAX_Y=0
 if run_exsh_builtin ClrScr; then
     :
 else
-    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
+    echo "sierpinski_threads: this demo must be run with exsh." >&2
     exit 1
 fi
 
 if run_exsh_builtin HideCursor; then
     :
 else
-    echo "sierpinski_threads.psh: failed to hide cursor; ensure exsh console builtins are available." >&2
+    echo "sierpinski_threads: failed to hide cursor; ensure exsh console builtins are available." >&2
     exit 1
 fi
 
@@ -504,13 +504,13 @@ else
     if resolve_exsh_binary; then
         :
     else
-        echo "sierpinski_threads.psh: unable to locate exsh binary for worker threads." >&2
+        echo "sierpinski_threads: unable to locate exsh binary for worker threads." >&2
         exit 1
     fi
 
     exsh_path="$RESOLVED_EXSH_PATH"
     if [ -z "$exsh_path" ]; then
-        echo "sierpinski_threads.psh: unable to locate exsh binary for worker threads." >&2
+        echo "sierpinski_threads: unable to locate exsh binary for worker threads." >&2
         exit 1
     fi
 
@@ -554,7 +554,7 @@ else
     WORKER_PIDS=""
 
     if [ "$worker_failure" -ne 0 ]; then
-        echo "sierpinski_threads.psh: worker thread exited with an error." >&2
+        echo "sierpinski_threads: worker thread exited with an error." >&2
         exit 1
     fi
 fi
