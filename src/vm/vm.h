@@ -139,6 +139,7 @@ void vmResetExecutionState(VM* vm); // Reset stack/frames so a VM can be reused
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup);
+bool vmJoinThreadById(struct VM_s* vm, int id);
 
 // Register and lookup class methods in the VM's procedure table
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol);
