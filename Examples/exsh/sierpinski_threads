@@ -318,7 +318,7 @@ draw_point() {
     local x="$1"
     local y="$2"
     run_exsh_builtin GotoXY "int:$x" "int:$y"
-    run_exsh_builtin Write "str:$CHAR_TO_DRAW"
+    run_exsh_builtin Write "int:0" "str:$CHAR_TO_DRAW"
 }
 
 draw_sierpinski() {
@@ -512,9 +512,16 @@ run_exsh_builtin GotoXY "int:1" "int:$MAX_Y"
 run_exsh_builtin ShowCursor
 CURSOR_HIDDEN=0
 CURSOR_SHOULD_HIDE=0
-run_exsh_builtin Write "str:Done. Press any key to exit."
-if [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
-    run_exsh_builtin ReadKey >/dev/null
+run_exsh_builtin Write "int:1" "str:Done. Press any key to exit."
+if [ "$HEADLESS_MODE" != "1" ] && [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
+    while :; do
+        if ! run_exsh_builtin_capture ReadKey; then
+            break
+        fi
+        if [ -n "${RUN_EXSH_BUILTIN_STDOUT:-}" ]; then
+            break
+        fi
+    done
 fi
 run_exsh_builtin ClrScr
 
