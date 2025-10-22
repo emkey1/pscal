@@ -105,7 +105,16 @@
             "name": "setenv/unsetenv mirror POSIX behaviour",
             "category": "builtins",
             "description": "setenv updates variables, prints the environment, and unsetenv removes entries.",
-            "script": "Examples/exsh/env",
+            "script": "Examples/exsh/envc",
+            "expect": "runtime_ok",
+            "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
+        },
+        {
+            "id": "builtin_export",
+            "name": "export/unset mirror POSIX behaviour",
+            "category": "builtins",
+            "description": "export updates variables, prints the environment, and unset removes entries.",
+            "script": "Examples/exsh/envb",
             "expect": "runtime_ok",
             "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
         },
@@ -212,7 +221,7 @@
             "name": "Case statements dispatch patterns",
             "category": "control",
             "description": "case selects the first matching clause and defaults otherwise.",
-            "script": "Examples/exsh/case",
+            "script": "Examples/exsh/casec",
             "expect": "runtime_ok",
             "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
         },
