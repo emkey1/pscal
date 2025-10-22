@@ -135,7 +135,7 @@ typedef struct VM_s {
     pthread_mutex_t mutexRegistryLock; // Protects mutex registry updates
     struct VM_s* mutexOwner; // VM that owns the mutex registry
 
-    struct Thread* owningThread; // Non-NULL when running inside a worker slot
+    Thread* owningThread;        // Non-NULL when running inside a worker slot
     int threadId;                // Slot index for owningThread (0 for main VM)
 
     // Optional tracing: when >0, print execution of first N instructions

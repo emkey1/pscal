@@ -689,6 +689,8 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
 
 static const size_t num_vm_builtins = sizeof(vmBuiltinDispatchTable) / sizeof(vmBuiltinDispatchTable[0]);
 
+static bool threadBuiltinIsAllowlisted(int id);
+
 /* Dynamic registry for user-supplied VM built-ins. */
 static VmBuiltinMapping *extra_vm_builtins = NULL;
 static size_t num_extra_vm_builtins = 0;
@@ -5090,7 +5092,8 @@ static pthread_once_t builtin_registration_once = PTHREAD_ONCE_INIT;
  * this table.
  */
 static pthread_once_t gThreadBuiltinAllowlistOnce = PTHREAD_ONCE_INIT;
-static bool gThreadBuiltinAllowlist[num_vm_builtins];
+static bool *gThreadBuiltinAllowlist = NULL;
+static size_t gThreadBuiltinAllowlistCount = 0;
 static const char *const kThreadBuiltinAllowlistNames[] = {
     "delay",
     "httprequest",
@@ -5116,11 +5119,21 @@ static const char *const kThreadBuiltinAllowlistNames[] = {
 };
 
 static void initThreadBuiltinAllowlist(void) {
-    memset(gThreadBuiltinAllowlist, 0, sizeof(gThreadBuiltinAllowlist));
+    gThreadBuiltinAllowlistCount = num_vm_builtins;
+    if (gThreadBuiltinAllowlistCount == 0) {
+        return;
+    }
+
+    gThreadBuiltinAllowlist = calloc(gThreadBuiltinAllowlistCount, sizeof(bool));
+    if (!gThreadBuiltinAllowlist) {
+        gThreadBuiltinAllowlistCount = 0;
+        return;
+    }
+
     const size_t count = sizeof(kThreadBuiltinAllowlistNames) / sizeof(kThreadBuiltinAllowlistNames[0]);
     for (size_t i = 0; i < count; ++i) {
         int id = getVmBuiltinID(kThreadBuiltinAllowlistNames[i]);
-        if (id >= 0 && id < (int)num_vm_builtins) {
+        if (id >= 0 && (size_t)id < gThreadBuiltinAllowlistCount) {
             gThreadBuiltinAllowlist[id] = true;
         }
     }
@@ -5130,8 +5143,13 @@ static bool threadBuiltinIsAllowlisted(int id) {
     if (id < 0) {
         return false;
     }
+
     pthread_once(&gThreadBuiltinAllowlistOnce, initThreadBuiltinAllowlist);
-    if (id < (int)num_vm_builtins) {
+    if (!gThreadBuiltinAllowlist || gThreadBuiltinAllowlistCount == 0) {
+        return false;
+    }
+
+    if ((size_t)id < gThreadBuiltinAllowlistCount) {
         return gThreadBuiltinAllowlist[id];
     }
     return false;
