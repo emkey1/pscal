@@ -115,6 +115,10 @@ VM. For instructions on adding your own routines, see
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
 
+> **Worker reuse tip:** Workers remain reserved until both the status flag and result value have been consumed. Use
+> `ThreadGetResult(handle, true)` to release the slot in a single call, or pair `ThreadGetResult` with
+> `ThreadGetStatus(handle, true)` when you prefer to fetch the value before discarding it.
+
 Allow-listed targets are capped at re-entrant helpers that avoid shared global
 state: `delay`, `httprequest`, `httprequesttofile`, `httprequestasync`,
 `httprequestasynctofile`, `httptryawait`, `httpawait`, `httpisdone`,

@@ -83,6 +83,15 @@
             "expected_stdout": "reject_status:1"
         },
         {
+            "id": "thread_worker_reuse",
+            "name": "Worker pool reuses idle threads",
+            "category": "threading",
+            "description": "Sequential ThreadSpawnBuiltin calls reuse the same worker slot once results and statuses are consumed.",
+            "script": "Tests/exsh/tests/thread_worker_reuse.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "iterations:18\nunique:15\nunique_ids:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15\nwait_statuses:0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\nstatus_reads:true true true true true true true true true true true true true true true true true true"
+        },
+        {
             "id": "dash_c_option",
             "name": "Dash-c executes inline commands",
             "category": "cli",
