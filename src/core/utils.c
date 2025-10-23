@@ -824,8 +824,12 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_BOOLEAN: v.i_val = 0; break;
         case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
         case TYPE_RECORD:
-             v.record_val = createEmptyRecord(node_to_inspect);
-             break;
+            if (node_to_inspect) {
+                v.record_val = createEmptyRecord(node_to_inspect);
+            } else {
+                v.record_val = NULL;
+            }
+            break;
         case TYPE_ARRAY: {
             v.dimensions = 0;
             v.lower_bounds = NULL;

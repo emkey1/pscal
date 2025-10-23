@@ -2103,8 +2103,8 @@ add({
             int lookup_match = (lookup == pooled) ? 1 : 0;
             int stats_len = length(thread_stats());
 
-            printf("named_status=%d\n", named_ok);
-            printf("pooled_status=%d lookup_match=%d stats=%d\n", pooled_ok, lookup_match, stats_len);
+            printf("named_status=%d\\n", named_ok);
+            printf("pooled_status=%d lookup_match=%d stats=%d\\n", pooled_ok, lookup_match, stats_len);
             return 0;
         }
     """,
