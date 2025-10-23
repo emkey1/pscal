@@ -119,6 +119,9 @@ VM. For instructions on adding your own routines, see
 > `ThreadGetResult(handle, true)` to release the slot in a single call, or pair `ThreadGetResult` with
 > `ThreadGetStatus(handle, true)` when you prefer to fetch the value before discarding it.
 
+For pool sizing guidance, naming rules, and the schema returned by
+`ThreadStats`, see the dedicated [threading guide](threading.md).
+
 Allow-listed targets are capped at re-entrant helpers that avoid shared global
 state: `delay`, `httprequest`, `httprequesttofile`, `httprequestasync`,
 `httprequestasynctofile`, `httptryawait`, `httpawait`, `httpisdone`,

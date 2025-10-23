@@ -67,6 +67,28 @@ alias reload='. ~/.exshrc'
 alias hist='history'
 
 # ---------------------------------------------------------------------------
+# Thread pool tuning & metrics
+# ---------------------------------------------------------------------------
+# Clamp the shared worker pool by exporting PSCALSHELL_THREAD_POOL_SIZE before
+# launching exsh. The VM honours integers between 1 and its compile-time cap.
+#
+# Example:
+#   export PSCALSHELL_THREAD_POOL_SIZE=8
+#
+# The helpers below make it easy to inspect `ThreadStats` output while working
+# interactively. Set PSCALSHELL_THREAD_METRICS=1 to print a snapshot at login.
+threadpool_report() {
+    builtin ThreadStats
+}
+
+alias threadpool='threadpool_report'
+
+if [ "${PSCALSHELL_THREAD_METRICS:-0}" != "0" ]; then
+    echo "[exsh] worker pool snapshot"
+    threadpool_report
+fi
+
+# ---------------------------------------------------------------------------
 # Convenience functions
 # ---------------------------------------------------------------------------
 # Create a directory (and parents) before changing into it.

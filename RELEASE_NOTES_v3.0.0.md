@@ -36,6 +36,7 @@ Date: 2025-10-20
 - `Tests/run_all_tests` now defaults to `RUN_NET_TESTS=0`. Export `RUN_NET_TESTS=1` (and optionally `RUN_SDL=1`) before invoking the script to exercise socket and HTTP fixtures as part of release verification.
 - Library regression suites (`Tests/libs/run_all_tests.py`) start local HTTP servers; when running inside restricted environments you may need elevated permissions (passable via `--python` or sandbox approvals).
 - exsh scripts share PSCAL’s builtin catalog; rebuild or redeploy extended modules (SQLite, yyjson, OpenAI, etc.) alongside the VM so optional capabilities remain discoverable via `--dump-ext-builtins`.
+- Threaded scripts should review the new [Docs/threading.md](Docs/threading.md) guide. The worker pool still honours legacy handle-based APIs (`WaitForThread`, `ThreadGetStatus`, etc.), and Pascal’s `Threading` unit remains compatible—existing code keeps working while newer helpers add naming, metrics, and pool-size overrides.
 
 ## Verification Checklist
 1. `cmake -S . -B build && cmake --build build`
