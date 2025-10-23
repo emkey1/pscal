@@ -2019,6 +2019,9 @@ void printValueToStream(Value v, FILE *stream) {
         case TYPE_WORD:
             fprintf(stream, "%lld", v.i_val & 0xFFFF);
             break;
+        case TYPE_THREAD:
+            fprintf(stream, "%lld", v.i_val);
+            break;
         case TYPE_VOID:
             fprintf(stream, "<VOID_TYPE>");
             break;

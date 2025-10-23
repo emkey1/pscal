@@ -1,0 +1,48 @@
+#!/usr/bin/env exsh
+set -euo pipefail
+
+dns_thread=$(builtin ThreadSpawnBuiltin str:dnslookup str:localhost)
+delay_thread=$(builtin ThreadSpawnBuiltin str:delay int:10)
+
+WaitForThread "$delay_thread"
+delay_status=$EXSH_LAST_STATUS
+WaitForThread "$dns_thread"
+dns_status=$EXSH_LAST_STATUS
+
+if [ "$delay_status" -ne 0 ]; then
+    echo "delay_status:$delay_status" >&2
+    exit 1
+fi
+if [ "$dns_status" -ne 0 ]; then
+    echo "dns_status:$dns_status" >&2
+    exit 1
+fi
+
+dns_value=$(builtin ThreadGetResult "$dns_thread")
+if [ -z "${dns_value:-}" ]; then
+    echo "dns_value:empty" >&2
+    exit 1
+fi
+
+status_consumed=$(builtin ThreadGetStatus "$dns_thread" bool:true)
+
+dns_family_valid=false
+case "$dns_value" in
+    *:*)
+        dns_family_valid=true
+        ;;
+    *.*)
+        dns_family_valid=true
+        ;;
+esac
+
+dns_length_valid=false
+if [ ${#dns_value} -gt 0 ]; then
+    dns_length_valid=true
+fi
+
+echo "delay_status:$delay_status"
+echo "dns_status:$dns_status"
+echo "dns_length_valid:$dns_length_valid"
+echo "dns_family_valid:$dns_family_valid"
+echo "dns_status_consumed:$status_consumed"
