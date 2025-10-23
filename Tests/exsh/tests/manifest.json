@@ -6,7 +6,7 @@
             "name": "Pipeline echoes through cat",
             "category": "pipeline",
             "description": "Single pipeline stage forwards data between commands.",
-            "script": "Examples/exsh/pipeline.psh",
+            "script": "Examples/exsh/pipeline",
             "expect": "runtime_ok",
             "expected_stdout": "pipeline:start\nalpha\npipeline:end"
         },
@@ -15,7 +15,7 @@
             "name": "Conditionals execute matching branches",
             "category": "control",
             "description": "if/then/else executes only the branch whose condition succeeds.",
-            "script": "Examples/exsh/conditionals.psh",
+            "script": "Examples/exsh/conditionals",
             "expect": "runtime_ok",
             "expected_stdout": "conditionals:start\nthen-branch\nconditionals:end"
         },
@@ -24,7 +24,7 @@
             "name": "If statements respect truthiness",
             "category": "control",
             "description": "true selects the then branch and false triggers the else branch.",
-            "script": "Tests/exsh/tests/if_truthy_falsy.psh",
+            "script": "Tests/exsh/tests/if_truthy_falsy.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "if-eval:start\nif:true\nif:false-else\nif-eval:end"
         },
@@ -33,7 +33,7 @@
             "name": "Loops iterate expected counts",
             "category": "control",
             "description": "while, until, and for loops iterate until their conditions change.",
-            "script": "Tests/exsh/tests/loop_counters.psh",
+            "script": "Tests/exsh/tests/loop_counters.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "loop:start\nwhile:0\nwhile:1\nwhile:2\nuntil:0\nuntil:1\nfor:one\nfor:two\nloop:end"
         },
@@ -42,7 +42,7 @@
             "name": "C-style for loops execute arithmetic clauses",
             "category": "control",
             "description": "initializer, condition, and update clauses drive numeric for (( )) loops.",
-            "script": "Tests/exsh/tests/for_c_style.psh",
+            "script": "Tests/exsh/tests/for_c_style.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "cfor:start\ncfor:inc:0\ncfor:inc:1\ncfor:inc:2\ncfor:dec:start\ncfor:dec:5\ncfor:dec:3\ncfor:cond-missing:start\ncfor:cond:0\ncfor:cond:1\ncfor:end"
         },
@@ -51,7 +51,7 @@
             "name": "Colon builtin drives control flow",
             "category": "control",
             "description": "The ':' builtin executes in-place so while loops can spin without launching processes.",
-            "script": "Tests/exsh/tests/colon_builtin.psh",
+            "script": "Tests/exsh/tests/colon_builtin.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "tick"
         },
@@ -60,16 +60,43 @@
             "name": "echo/true/false execute as builtins",
             "category": "builtins",
             "description": "Ensure echo, true, and false run without spawning processes and mirror Bash-style options.",
-            "script": "Tests/exsh/tests/builtin_echo_true_false.psh",
+            "script": "Tests/exsh/tests/builtin_echo_true_false.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "echo is a shell builtin\ntrue is a shell builtin\nfalse is a shell builtin\necho:plain:start\nalpha beta\necho:plain:end\necho:-e:start\nline1\nline2\necho:-e:end\necho:-E:start\nline1\\nline2\necho:-E:end\nno-newline:sentinel\nprefix:sentinel\ntrue-status:0\nfalse-status:1"
+        },
+        {
+            "id": "thread_spawn_builtin_success",
+            "name": "ThreadSpawnBuiltin joins allow-listed builtins",
+            "category": "threading",
+            "description": "Spawns delay/dnslookup workers, joins them, and validates stored status/result metadata.",
+            "script": "Tests/exsh/tests/thread_spawn_builtin_success.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "delay_status:0\ndns_status:0\ndns_length_valid:true\ndns_family_valid:true\ndns_status_consumed:true"
+        },
+        {
+            "id": "thread_spawn_builtin_reject",
+            "name": "ThreadSpawnBuiltin rejects disallowed builtins",
+            "category": "threading",
+            "description": "Non-allow-listed builtins are rejected when queued for threaded execution.",
+            "script": "Tests/exsh/tests/thread_spawn_builtin_reject.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "reject_status:1"
+        },
+        {
+            "id": "thread_worker_reuse",
+            "name": "Worker pool reuses idle threads",
+            "category": "threading",
+            "description": "Sequential ThreadSpawnBuiltin calls reuse the same worker slot once results and statuses are consumed.",
+            "script": "Tests/exsh/tests/thread_worker_reuse.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "iterations:18\nunique:15\nunique_ids:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15\nwait_statuses:0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\nstatus_reads:true true true true true true true true true true true true true true true true true true"
         },
         {
             "id": "dash_c_option",
             "name": "Dash-c executes inline commands",
             "category": "cli",
             "description": "Verify -c honours bash-compatible argument handling and diagnostics.",
-            "script": "Tests/exsh/tests/dash_c_option.psh",
+            "script": "Tests/exsh/tests/dash_c_option.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "command-output:custom0:first:second\nmissing-status:2\nmissing-error:exsh: -c: option requires an argument"
         },
@@ -78,7 +105,7 @@
             "name": "Builtins update environment and status",
             "category": "builtins",
             "description": "export/unset update environment and shell status variables.",
-            "script": "Examples/exsh/functions.psh",
+            "script": "Examples/exsh/functions",
             "expect": "runtime_ok",
             "expected_stdout": "functions:start\nhello\n1\n0\nfunctions:end"
         },
@@ -87,7 +114,7 @@
             "name": "Shell functions execute stored bodies",
             "category": "functions",
             "description": "function keyword and name() syntax register and invoke shell functions.",
-            "script": "Examples/exsh/user_functions.psh",
+            "script": "Examples/exsh/user_functions",
             "expect": "runtime_ok",
             "expected_stdout": "functions:start\nhello from greet\ngoodbye from farewell\nfunctions:end"
         },
@@ -96,7 +123,7 @@
             "name": "Shell functions reuse cached VM state",
             "category": "functions",
             "description": "Repeatedly invoking a compiled shell function preserves positional parameters and status.",
-            "script": "Tests/exsh/tests/function_vm_reuse.psh",
+            "script": "Tests/exsh/tests/function_vm_reuse.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "call:0:arg:2\nstatus:0\ncall:1:arg:2\nstatus:1\ncall:2:arg:2\nstatus:2\ncall:3:arg:2\nstatus:3\ncall:4:arg:2\nstatus:4\ncall:5:arg:2\nstatus:5\ncall:6:arg:2\nstatus:6\ncall:7:arg:2\nstatus:7\ncall:8:arg:2\nstatus:8\ncall:9:arg:2\nstatus:9\npost:2:global1:global2\n"
         },
@@ -105,7 +132,16 @@
             "name": "setenv/unsetenv mirror POSIX behaviour",
             "category": "builtins",
             "description": "setenv updates variables, prints the environment, and unsetenv removes entries.",
-            "script": "Examples/exsh/env.psh",
+            "script": "Examples/exsh/envc",
+            "expect": "runtime_ok",
+            "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
+        },
+        {
+            "id": "builtin_export",
+            "name": "export/unset mirror POSIX behaviour",
+            "category": "builtins",
+            "description": "export updates variables, prints the environment, and unset removes entries.",
+            "script": "Examples/exsh/envb",
             "expect": "runtime_ok",
             "expected_stdout": "env:start\nalpha\nbeta\n<EMPTY>\n<UNSET>\nenv:end"
         },
@@ -114,7 +150,7 @@
             "name": "declare -g updates global scope",
             "category": "builtins",
             "description": "declare -g assigns to the global scope even when run inside functions.",
-            "script": "Tests/exsh/tests/declare_global.psh",
+            "script": "Tests/exsh/tests/declare_global.exsh",
             "expect": "match_bash",
             "expected_stdout": "mp_prompt_loaded=yes\n"
         },
@@ -123,7 +159,7 @@
             "name": "dot builtin sources scripts",
             "category": "builtins",
             "description": "The '.' command aliases source and runs helpers in the current environment.",
-            "script": "Tests/exsh/tests/source_dot_alias.psh",
+            "script": "Tests/exsh/tests/source_dot_alias.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "source-dot:start\nsource-dot-helper:start\nsource-dot-helper:end\nafter:from-dot\nsource-dot:end"
         },
@@ -132,7 +168,7 @@
             "name": "help -l lists shell builtins",
             "category": "builtins",
             "description": "help -l output includes the help builtin entry.",
-            "script": "Tests/exsh/tests/help_list.psh",
+            "script": "Tests/exsh/tests/help_list.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "help-builtin-present\n"
         },
@@ -141,7 +177,7 @@
             "name": "disown removes jobs from listings",
             "category": "builtins",
             "description": "disown hides jobs from jobs output and allows wait to succeed with no tracked jobs.",
-            "script": "Tests/exsh/tests/disown_job.psh",
+            "script": "Tests/exsh/tests/disown_job.exsh",
             "expect": "match_bash"
         },
         {
@@ -149,7 +185,7 @@
             "name": "(( expr )) updates status and variables",
             "category": "builtins",
             "description": "Arithmetic command evaluates expressions in place, updates variables, and reports exit status.",
-            "script": "Tests/exsh/tests/arithmetic_command.psh",
+            "script": "Tests/exsh/tests/arithmetic_command.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "after1:1:1\nafter2:2:0\nzero:1\nnonzero:0\nerror:1\n"
         },
@@ -158,7 +194,7 @@
             "name": "let evaluates expressions and assignments",
             "category": "builtins",
             "description": "let updates shell variables, supports compound assignments, and reports truthiness via status.",
-            "script": "Tests/exsh/tests/let_builtin.psh",
+            "script": "Tests/exsh/tests/let_builtin.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "let:start\nstatus:true\nstatus:false-zero\nassign:5\ncompound-add:8\ncompound-mul:16\ncompound-sub:12\ncompound-mod:2\ncompound-div:1\nmulti:5:0\nmulti-zero:0:1\nlet:end"
         },
@@ -167,7 +203,7 @@
             "name": "eval keeps existing definitions",
             "category": "builtins",
             "description": "eval executes within the caller environment so earlier functions and variables remain available.",
-            "script": "Tests/exsh/tests/eval_scope_retention.psh",
+            "script": "Tests/exsh/tests/eval_scope_retention.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "eval-retain:start\neval-first:outer\ngreet:outer\neval-second:inner\ngreet:inner\ngreet:inner\nafter-greeting:inner\nnewvar:from-eval\neval-retain:end"
         },
@@ -176,7 +212,7 @@
             "name": "logout reports non-login error",
             "category": "builtins",
             "description": "logout matches Bash by failing when invoked outside a login shell.",
-            "script": "Tests/exsh/tests/logout_not_login.psh",
+            "script": "Tests/exsh/tests/logout_not_login.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "logout_status:1\nafter_logout",
             "expected_stderr_substring": "not login shell"
@@ -186,7 +222,7 @@
             "name": "getopts parses short options",
             "category": "builtins",
             "description": "getopts walks short options, exposes OPTARG, and advances OPTIND.",
-            "script": "Tests/exsh/tests/getopts_basic.psh",
+            "script": "Tests/exsh/tests/getopts_basic.exsh",
             "expect": "match_bash"
         },
         {
@@ -194,7 +230,7 @@
             "name": "mapfile loads array from stdin",
             "category": "builtins",
             "description": "mapfile and its -t flag populate arrays using data read from standard input.",
-            "script": "Tests/exsh/tests/mapfile_basic.psh",
+            "script": "Tests/exsh/tests/mapfile_basic.exsh",
             "expect": "match_bash"
         },
         {
@@ -202,7 +238,7 @@
             "name": "Pipeline cache reuse emits notice",
             "category": "cache",
             "description": "Second run loads cached bytecode for the same script.",
-            "script": "Examples/exsh/pipeline.psh",
+            "script": "Examples/exsh/pipeline",
             "expect": "runtime_ok",
             "prime_cache": true,
             "expected_stdout": "pipeline:start\nalpha\npipeline:end"
@@ -212,16 +248,16 @@
             "name": "Case statements dispatch patterns",
             "category": "control",
             "description": "case selects the first matching clause and defaults otherwise.",
-            "script": "Examples/exsh/case.psh",
+            "script": "Examples/exsh/casec",
             "expect": "runtime_ok",
-            "expected_stdout": "case:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
+            "expected_stdout": "casec:start\nmatch foo\nmatch group\nmatch default qux\ncase:end"
         },
         {
             "id": "case_leading_paren",
             "name": "Case clauses accept leading parentheses",
             "category": "control",
             "description": "case pattern lists accept an optional leading '(' and still honour alternation with |.",
-            "script": "Tests/exsh/tests/parser_case_leading_paren.psh",
+            "script": "Tests/exsh/tests/parser_case_leading_paren.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "case-leading-paren:start\ncase-leading-paren:match\ncase-leading-paren:end\n"
         },
@@ -230,7 +266,7 @@
             "name": "Command substitution captures stdout",
             "category": "expansion",
             "description": "$(...) trims trailing newlines and supports line continuations.",
-            "script": "Tests/exsh/tests/command_substitution.psh",
+            "script": "Tests/exsh/tests/command_substitution.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "command-substitution:start\nvalue:foo\ninline:xABy\nquoted:line1\nline2\ncommand-substitution:end"
         },
@@ -239,7 +275,7 @@
             "name": "Command substitution isolates caller scope",
             "category": "expansion",
             "description": "$(func) can access existing functions while restoring caller variables afterwards.",
-            "script": "Tests/exsh/tests/command_substitution_scope.psh",
+            "script": "Tests/exsh/tests/command_substitution_scope.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:outer\nafter-var:outer\ncmdsub-retain:end"
         },
@@ -248,7 +284,7 @@
             "name": "Command substitution loops reuse builtins",
             "category": "expansion",
             "description": "Repeated $(...) invocations reuse the builtin registry without duplicate work.",
-            "script": "Tests/exsh/tests/repeated_command_execution.psh",
+            "script": "Tests/exsh/tests/repeated_command_execution.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "multi-exec:start\nloop:1:1\nloop:2:2\nloop:3:3\nmulti-exec:end"
         },
@@ -257,7 +293,7 @@
             "name": "Legacy backtick substitution is supported",
             "category": "expansion",
             "description": "Backtick command substitution trims trailing newlines and honors escapes.",
-            "script": "Tests/exsh/tests/backtick_substitution.psh",
+            "script": "Tests/exsh/tests/backtick_substitution.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nassign:alpha beta\nplain:foo\nbacktick:end"
         },
@@ -266,7 +302,7 @@
             "name": "Parameter default expansion uses fallback",
             "category": "expansion",
             "description": "The ${var:-word} form substitutes word when the variable is unset or empty.",
-            "script": "Tests/exsh/tests/parameter_default.psh",
+            "script": "Tests/exsh/tests/parameter_default.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "param-default:start\nunset:fallback\nempty:fallback\nset:value\nparam-default:end"
         },
@@ -275,7 +311,7 @@
             "name": "Here documents expand and quote correctly",
             "category": "grammar",
             "description": "Exercises unquoted, single-quoted, and multi-line here documents.",
-            "script": "Tests/exsh/tests/here_documents.psh",
+            "script": "Tests/exsh/tests/here_documents.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "heredoc:start\nplain:xyz\nliteral:$VALUE\nmultiline\ncontent\ninline\nheredoc:end"
         },
@@ -284,7 +320,7 @@
             "name": "Arithmetic expansion evaluates expressions",
             "category": "expansion",
             "description": "Handles integer math, variables, and syntax errors with preserved text.",
-            "script": "Tests/exsh/tests/arithmetic_expansion.psh",
+            "script": "Tests/exsh/tests/arithmetic_expansion.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "arithmetic:start\nmath:14\nvars:10\ndollar:6\nnested:3\nbad:$((BAR+))\nstatus:1\narithmetic:end"
         },
@@ -293,7 +329,7 @@
             "name": "RANDOM parameter generates seeded pseudo-random values",
             "category": "expansion",
             "description": "RANDOM supports seeding and yields 0-32767 values rather than a constant.",
-            "script": "Tests/exsh/tests/random_parameter.psh",
+            "script": "Tests/exsh/tests/random_parameter.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "random:test-start\nrandom:first:16838\nrandom:second:5758\nrandom:reset:16838\nrandom:test-end"
         },
@@ -302,7 +338,7 @@
             "name": "jobs lists and fg reaps background work",
             "category": "jobs",
             "description": "jobs reports running background jobs and fg waits for completion.",
-            "script": "Tests/exsh/tests/jobs_foreground.psh",
+            "script": "Tests/exsh/tests/jobs_foreground.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "jobs-foreground:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\njobs:after-start\njobs:after-end\njobs-foreground:end"
         },
@@ -311,7 +347,7 @@
             "name": "bg resumes jobs and wait observes completion",
             "category": "jobs",
             "description": "bg continues the latest background job and wait blocks until it exits.",
-            "script": "Tests/exsh/tests/jobs_wait.psh",
+            "script": "Tests/exsh/tests/jobs_wait.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
         },
@@ -320,7 +356,7 @@
             "name": "Assignment detection respects arithmetic words",
             "category": "lexer",
             "description": "Reserved contexts mark plain VAR=value as assignment but skip words containing arithmetic substitutions.",
-            "script": "Tests/exsh/tests/lexer_assignment_context.psh",
+            "script": "Tests/exsh/tests/lexer_assignment_context.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "lexer-assignment:ok"
         },
@@ -329,7 +365,7 @@
             "name": "Array assignments stay intact",
             "category": "lexer",
             "description": "name=(...) remains a single assignment word so complex initialisers survive parsing.",
-            "script": "Tests/exsh/tests/array_assignment.psh",
+            "script": "Tests/exsh/tests/array_assignment.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "lexer-array-assignment:ok"
         },
@@ -338,7 +374,7 @@
             "name": "Array assignments allow embedded newlines",
             "category": "lexer",
             "description": "name=(...) spanning multiple lines should remain a single assignment word.",
-            "script": "Tests/exsh/tests/array_assignment_multiline.psh",
+            "script": "Tests/exsh/tests/array_assignment_multiline.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "primary=blue\nlen=2"
         },
@@ -347,7 +383,7 @@
             "name": "Scalar assignments with parentheses stay scalars",
             "category": "builtins",
             "description": "Values that gain parentheses via expansion should not be treated as array literals.",
-            "script": "Tests/exsh/tests/array_assignment_expansion_scalar.psh",
+            "script": "Tests/exsh/tests/array_assignment_expansion_scalar.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "scalar=(1 2)"
         },
@@ -356,7 +392,7 @@
             "name": "Parameter and arithmetic expansions retain metadata",
             "category": "lexer",
             "description": "${name} records variable names while $((..)) is distinguished as arithmetic expansion.",
-            "script": "Tests/exsh/tests/lexer_expansion_shapes.psh",
+            "script": "Tests/exsh/tests/lexer_expansion_shapes.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "lexer-expansions:ok"
         },
@@ -365,7 +401,7 @@
             "name": "Brace groups share scope and join pipelines",
             "category": "grammar",
             "description": "Validates inline, multi-line, and piped brace groups.",
-            "script": "Tests/exsh/tests/brace_groups.psh",
+            "script": "Tests/exsh/tests/brace_groups.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "brace-group:start\ngroup:inner:1\ngroup:outer:1\ngroup:block-line\ngroup:block-second\nGROUP:PIPELINE\nbrace-group:end"
         },
@@ -374,7 +410,7 @@
             "name": "Bang prefixes invert pipeline status",
             "category": "grammar",
             "description": "Covers ! pipelines inside conditionals and at the top level.",
-            "script": "Tests/exsh/tests/bang_pipeline.psh",
+            "script": "Tests/exsh/tests/bang_pipeline.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "bang-pipeline:start\nbang-pipeline:alpha\nbang-pipeline:beta\nbang-pipeline:status:1\nbang-pipeline:brace-status:0\nbang-pipeline:end"
         },
@@ -383,7 +419,7 @@
             "name": "Complex for/case layouts parse correctly",
             "category": "grammar",
             "description": "Exercises multiline for lists and case patterns with continuations.",
-            "script": "Tests/exsh/tests/for_case_layouts.psh",
+            "script": "Tests/exsh/tests/for_case_layouts.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "for-case:start\ncase:one\ncase:two-three:two\ncase:two-three:three\ncase:quoted:quoted value\ncase:rest:four\nfor-case:end"
         },
@@ -392,7 +428,7 @@
             "name": "For loops require valid shell names",
             "category": "grammar",
             "description": "Simple for loop with a valid name parses and executes.",
-            "script": "Tests/exsh/tests/parser_for_valid_name.psh",
+            "script": "Tests/exsh/tests/parser_for_valid_name.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "parser-for-valid:start\nparser-for-valid:body:one\nparser-for-valid:body:two\nparser-for-valid:body:three\nparser-for-valid:end"
         },
@@ -401,7 +437,7 @@
             "name": "For loops reject invalid names",
             "category": "grammar",
             "description": "Parser emits a syntax error when the loop variable is not a name token.",
-            "script": "Tests/exsh/tests/parser_for_invalid_name.psh",
+            "script": "Tests/exsh/tests/parser_for_invalid_name.exsh",
             "expect": "parse_error",
             "expected_stderr_substring": "Expected name after 'for'"
         },
@@ -410,7 +446,7 @@
             "name": "function keyword requires parentheses",
             "category": "grammar",
             "description": "function foo() form registers and executes a shell function.",
-            "script": "Tests/exsh/tests/parser_function_valid_keyword.psh",
+            "script": "Tests/exsh/tests/parser_function_valid_keyword.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "parser-function-valid:start\nparser-function-valid:body\nparser-function-valid:end"
         },
@@ -419,7 +455,7 @@
             "name": "function keyword rejects invalid names",
             "category": "grammar",
             "description": "Parser emits a syntax error when function names are not NAME tokens.",
-            "script": "Tests/exsh/tests/parser_function_invalid_name.psh",
+            "script": "Tests/exsh/tests/parser_function_invalid_name.exsh",
             "expect": "parse_error",
             "expected_stderr_substring": "Expected function name"
         },
@@ -428,7 +464,7 @@
             "name": "function keyword accepts omitted parentheses",
             "category": "grammar",
             "description": "function name { ... } form registers and executes a shell function.",
-            "script": "Tests/exsh/tests/parser_function_missing_parens.psh",
+            "script": "Tests/exsh/tests/parser_function_missing_parens.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "parser-function-missing-parens:start\nparser-function-missing-parens:body\nparser-function-missing-parens:end"
         },
@@ -437,7 +473,7 @@
             "name": "[[ ! -f ]] conditions accept unary negation",
             "category": "grammar",
             "description": "Double-bracket tests treat ! as part of the conditional expression when not at command start.",
-            "script": "Tests/exsh/tests/parser_double_bracket_negation.psh",
+            "script": "Tests/exsh/tests/parser_double_bracket_negation.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "double-bracket:start\nbranch:missing\nbranch:now-present\ndouble-bracket:end"
         },
@@ -446,7 +482,7 @@
             "name": "[[ ]] handles file-test operators",
             "category": "grammar",
             "description": "File-test operators like -e, -f, -d, -L, -s, -nt, -ot, and -ef evaluate correctly within double brackets.",
-            "script": "Tests/exsh/tests/parser_double_bracket_file_tests.psh",
+            "script": "Tests/exsh/tests/parser_double_bracket_file_tests.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "file-tests:start\nmissing-before\nexists-after\nis-regular\nis-directory\nis-symlink\nempty-before\nnon-empty-after\nnot-newer-before\nolder-before\nnewer-after\nnot-older-after\nsame-inode\nfile-tests:end"
         },
@@ -455,7 +491,7 @@
             "name": "Structural tokens can be literal words",
             "category": "lexer",
             "description": "Parentheses, braces, and escaped semicolons survive as literal words in command contexts.",
-            "script": "Tests/exsh/tests/literal_structural_words.psh",
+            "script": "Tests/exsh/tests/literal_structural_words.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "( ) {} ;\n"
         },
@@ -464,7 +500,7 @@
             "name": "Comments between branches preserve newline separators",
             "category": "grammar",
             "description": "Ensures comments between then/elif do not remove the separating newline.",
-            "script": "Tests/exsh/tests/parser_if_comment_boundary.psh",
+            "script": "Tests/exsh/tests/parser_if_comment_boundary.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "if-comment:start\nbranch:then\nif-comment:end"
         },
@@ -473,7 +509,7 @@
             "name": "Logical connectors work in if/while conditions",
             "category": "grammar",
             "description": "Allows && and || lists in conditional and loop headers.",
-            "script": "Tests/exsh/tests/parser_if_and_or.psh",
+            "script": "Tests/exsh/tests/parser_if_and_or.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "if-andor:start\nif-andor:else\nif-andor:loop:0\nif-andor:loop:1\nif-andor:end"
         },
@@ -482,7 +518,7 @@
             "name": "Arithmetic expansion matches bash",
             "category": "parity",
             "description": "Verify arithmetic evaluation keeps parity with bash for nested expressions.",
-            "script": "Tests/exsh/tests/bash_parity_arithmetic.psh",
+            "script": "Tests/exsh/tests/bash_parity_arithmetic.exsh",
             "expect": "match_bash",
             "expected_stdout": "sum=5\nprod=20\ndiv=3\nfmt=1+2=3\n"
         },
@@ -491,7 +527,7 @@
             "name": "Function locals mirror bash semantics",
             "category": "parity",
             "description": "Function locals and string assembly behave the same as bash.",
-            "script": "Tests/exsh/tests/bash_parity_functions.psh",
+            "script": "Tests/exsh/tests/bash_parity_functions.exsh",
             "expect": "match_bash",
             "expected_stdout": "count:3\nvalues:alpha,beta,gamma\nafter-shift:2\nremaining:beta,gamma\n"
         },
@@ -500,7 +536,7 @@
             "name": "caller mirrors Bash call stack output",
             "category": "builtins",
             "description": "caller reports call frames with optional depth in parity with Bash.",
-            "script": "Tests/exsh/tests/bash_parity_caller.psh",
+            "script": "Tests/exsh/tests/bash_parity_caller.exsh",
             "expect": "match_bash"
         },
         {
@@ -508,7 +544,7 @@
             "name": "export works in pipelines",
             "category": "parity",
             "description": "Ensure the export builtin runs correctly when piped to another command.",
-            "script": "Tests/exsh/tests/bash_parity_export_pipeline.psh",
+            "script": "Tests/exsh/tests/bash_parity_export_pipeline.exsh",
             "expect": "match_bash"
         },
         {
@@ -516,7 +552,7 @@
             "name": "Associative arrays mirror bash declare",
             "category": "parity",
             "description": "declare -A assignments and iteration match bash semantics.",
-            "script": "Tests/exsh/tests/bash_parity_declare_assoc.psh",
+            "script": "Tests/exsh/tests/bash_parity_declare_assoc.exsh",
             "expect": "match_bash"
         },
         {
@@ -524,7 +560,7 @@
             "name": "bind and shopt mimic bash",
             "category": "parity",
             "description": "Verify bind accepts readline settings and shopt reports state like bash.",
-            "script": "Tests/exsh/tests/bash_parity_bind_shopt.psh",
+            "script": "Tests/exsh/tests/bash_parity_bind_shopt.exsh",
             "expect": "match_bash"
         },
         {
@@ -532,7 +568,7 @@
             "name": "unalias mirrors bash error handling",
             "category": "parity",
             "description": "Removing aliases individually or via -a matches Bash status codes and failures.",
-            "script": "Tests/exsh/tests/bash_parity_unalias.psh",
+            "script": "Tests/exsh/tests/bash_parity_unalias.exsh",
             "expect": "match_bash"
         },
         {
@@ -540,7 +576,7 @@
             "name": "enable builtin toggles runtime builtins",
             "category": "builtins",
             "description": "Enable and disable builtins while matching Bash output for listings.",
-            "script": "Tests/exsh/tests/bash_parity_enable.psh",
+            "script": "Tests/exsh/tests/bash_parity_enable.exsh",
             "expect": "match_bash"
         },
         {
@@ -548,7 +584,7 @@
             "name": "hash builtin caches external commands",
             "category": "builtins",
             "description": "hash caches resolved executables and reports hits like Bash.",
-            "script": "Tests/exsh/tests/bash_parity_hash.psh",
+            "script": "Tests/exsh/tests/bash_parity_hash.exsh",
             "expect": "match_bash"
         },
         {
@@ -556,7 +592,7 @@
             "name": "enable toggles builtins like bash",
             "category": "parity",
             "description": "Disabling and re-enabling builtins mirrors Bash behaviour and reporting.",
-            "script": "Tests/exsh/tests/bash_parity_enable.psh",
+            "script": "Tests/exsh/tests/bash_parity_enable.exsh",
             "expect": "match_bash"
         },
         {
@@ -564,7 +600,7 @@
             "name": "kill builtin matches bash",
             "category": "builtins",
             "description": "kill sends signals to jobs and processes while mirroring bash translations.",
-            "script": "Tests/exsh/tests/bash_parity_kill.psh",
+            "script": "Tests/exsh/tests/bash_parity_kill.exsh",
             "expect": "match_bash"
         },
         {
@@ -572,7 +608,7 @@
             "name": "set -o posix mirrors POSIXLY_CORRECT",
             "category": "parity",
             "description": "Ensure set -o posix and set +o posix update POSIXLY_CORRECT like Bash.",
-            "script": "Tests/exsh/tests/bash_parity_set_posix.psh",
+            "script": "Tests/exsh/tests/bash_parity_set_posix.exsh",
             "expect": "match_bash"
         },
         {
@@ -580,7 +616,7 @@
             "name": "read honours custom IFS",
             "category": "builtin",
             "description": "Confirm the read builtin splits fields using the active IFS value.",
-            "script": "Tests/exsh/tests/read_ifs.psh",
+            "script": "Tests/exsh/tests/read_ifs.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "read_fields:alpha:beta:gamma\n"
         },
@@ -589,7 +625,7 @@
             "name": "read -a populates arrays",
             "category": "builtin",
             "description": "Ensure the read builtin assigns fields to indexed arrays like bash.",
-            "script": "Tests/exsh/tests/read_array_assign.psh",
+            "script": "Tests/exsh/tests/read_array_assign.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "count:3\nfield0:alpha\nfield1:beta\nfield2:gamma\nrest:\nblank_count:0\nstatus:0\n"
         },
@@ -598,7 +634,7 @@
             "name": "Here strings feed stdin",
             "category": "redirection",
             "description": "The <<< operator should redirect expanded text with a trailing newline to stdin.",
-            "script": "Tests/exsh/tests/here_string.psh",
+            "script": "Tests/exsh/tests/here_string.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "here-string:start\nalpha beta\nfoo\nhere-string:end\n"
         },
@@ -607,7 +643,7 @@
             "name": "Bash parity for directory stack builtins",
             "category": "parity",
             "description": "pushd, popd, and dirs align with Bash output.",
-            "script": "Tests/exsh/tests/bash_parity_directory_stack.psh",
+            "script": "Tests/exsh/tests/bash_parity_directory_stack.exsh",
             "expect": "match_bash"
         },
         {
@@ -615,7 +651,7 @@
             "name": "umask prints numeric and symbolic forms",
             "category": "builtins",
             "description": "Setting umask updates the process mask and reports numeric/symbolic output.",
-            "script": "Tests/exsh/tests/umask_basic.psh",
+            "script": "Tests/exsh/tests/umask_basic.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "numeric:0002\nsymbolic:u=rwx,g=rwx,o=r-x\n"
         },
@@ -624,7 +660,7 @@
             "name": "umask rejects invalid modes",
             "category": "builtins",
             "description": "Invalid digits produce a runtime error without changing the mask.",
-            "script": "Tests/exsh/tests/umask_invalid.psh",
+            "script": "Tests/exsh/tests/umask_invalid.exsh",
             "expect": "runtime_error",
             "expected_stderr_substring": "umask: invalid mode '18'"
         },
@@ -633,7 +669,7 @@
             "name": "umask rejects extra operands",
             "category": "builtins",
             "description": "Supplying more than one operand triggers a runtime error.",
-            "script": "Tests/exsh/tests/umask_too_many.psh",
+            "script": "Tests/exsh/tests/umask_too_many.exsh",
             "expect": "runtime_error",
             "expected_stderr_substring": "umask: too many arguments"
         },
@@ -642,7 +678,7 @@
             "name": "typeset -i coerces arithmetic expressions",
             "category": "parity",
             "description": "typeset -i evaluates arithmetic expressions and matches Bash diagnostics for invalid input.",
-            "script": "Tests/exsh/tests/typeset_integer.psh",
+            "script": "Tests/exsh/tests/typeset_integer.exsh",
             "expect": "match_bash"
         },
         {
@@ -650,7 +686,7 @@
             "name": "typeset locals stay within functions",
             "category": "parity",
             "description": "typeset inside functions keeps variables scoped and hidden from the global environment.",
-            "script": "Tests/exsh/tests/bash_parity_typeset_local.psh",
+            "script": "Tests/exsh/tests/bash_parity_typeset_local.exsh",
             "expect": "match_bash"
         },
         {
@@ -658,7 +694,7 @@
             "name": "printf formats strings and numbers",
             "category": "builtins",
             "description": "printf renders formatted output and reports usage errors when invoked without a format string.",
-            "script": "Tests/exsh/tests/printf_builtin.psh",
+            "script": "Tests/exsh/tests/printf_builtin.exsh",
             "expect": "match_bash",
             "expected_stdout": "greeting:world:0007:3.5:A:%\nfirst-status:0\nusage-status:2",
             "expected_stderr_substring": "printf: usage"
@@ -668,7 +704,7 @@
             "name": "times reports CPU usage lines",
             "category": "builtins",
             "description": "Verify the times builtin prints two timing lines and succeeds without arguments.",
-            "script": "Tests/exsh/tests/times_builtin.psh",
+            "script": "Tests/exsh/tests/times_builtin.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "status:0\nline_count:2\nfirst_format:ok\nsecond_format:ok\n"
         }

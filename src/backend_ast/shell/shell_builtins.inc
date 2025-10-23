@@ -2416,15 +2416,28 @@ done:
 
 Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     const char *path = NULL;
-    if (arg_count == 0) {
+    int arg_index = 0;
+
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val &&
+        strcmp(args[0].s_val, "--") == 0) {
+        arg_index = 1;
+    }
+
+    int remaining = arg_count - arg_index;
+    if (remaining <= 0) {
         path = shellSafeGetenv("HOME");
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
             return makeVoid();
         }
-    } else if (args[0].type == TYPE_STRING && args[0].s_val) {
-        path = args[0].s_val;
+    } else if (args[arg_index].type == TYPE_STRING && args[arg_index].s_val) {
+        if (remaining > 1) {
+            runtimeError(vm, "cd: too many arguments");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        path = args[arg_index].s_val;
     } else {
         runtimeError(vm, "cd: expected directory path");
         shellUpdateStatus(1);
@@ -8389,6 +8402,88 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     }
     shellRemoveJobAt(index);
     shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "WaitForThread: expected thread id");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    Value thread_value = args[0];
+    Value converted = makeVoid();
+    bool converted_valid = false;
+
+    if (thread_value.type == TYPE_STRING && thread_value.s_val && thread_value.s_val[0] != '\0') {
+        const char *raw = thread_value.s_val;
+        const char *id_text = raw;
+        const char *colon = strchr(raw, ':');
+        if (colon && colon[1] != '\0') {
+            id_text = colon + 1;
+        }
+
+        long long parsed = 0;
+        if (!shellParseSignedLongLong(id_text, &parsed)) {
+            runtimeError(vm, "WaitForThread: %s: invalid thread id", raw);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        converted = makeInt(parsed);
+        thread_value = converted;
+        converted_valid = true;
+    }
+
+    if (!(thread_value.type == TYPE_THREAD || IS_INTLIKE(thread_value))) {
+        runtimeError(vm, "WaitForThread: expected thread id");
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    long long thread_id = asI64(thread_value);
+    if (thread_id <= 0 || thread_id > INT_MAX) {
+        runtimeError(vm, "WaitForThread: %lld: invalid thread id", thread_id);
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    VM *thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    bool joined = thread_vm ? vmJoinThreadById(thread_vm, (int)thread_id) : false;
+    if (!joined && thread_vm && thread_vm != vm) {
+        joined = vmJoinThreadById(vm, (int)thread_id);
+        if (joined) {
+            thread_vm = vm;
+        }
+    }
+    if (!joined) {
+        runtimeError(vm, "WaitForThread: %lld: invalid thread id", thread_id);
+        if (converted_valid) {
+            freeValue(&converted);
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    bool status_flag = true;
+    if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, false)) {
+        shellUpdateStatus(status_flag ? 0 : 1);
+    } else {
+        shellUpdateStatus(0);
+    }
+    if (converted_valid) {
+        freeValue(&converted);
+    }
     return makeVoid();
 }
 

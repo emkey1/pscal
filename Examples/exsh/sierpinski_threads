@@ -83,15 +83,19 @@ run_exsh_builtin_capture() {
             ScreenCols)
                 RUN_EXSH_BUILTIN_STDOUT="$HEADLESS_COLS"
                 ;;
+            HasExtBuiltin)
+                if [ "$2" = "str:user" ] && [ "${3:-}" = "str:SierpinskiSpawnWorker" ]; then
+                    RUN_EXSH_BUILTIN_STDOUT="true"
+                else
+                    RUN_EXSH_BUILTIN_STDOUT="false"
+                fi
+                ;;
             *)
                 RUN_EXSH_BUILTIN_STDOUT=""
                 ;;
         esac
         return 0
     fi
-
-    local tmp_file status
-    status=1
 
     if [ "$#" -eq 0 ]; then
         return 1
@@ -101,63 +105,55 @@ run_exsh_builtin_capture() {
     name="$1"
     shift
 
-    tmp_file=$(mktemp "${TMPDIR:-/tmp}/sierpinski_threads.XXXXXX" 2>/dev/null) || return 1
-
-    case "$#" in
-        0)
-            if builtin "$name" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-        1)
-            if builtin "$name" "$1" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-        2)
-            if builtin "$name" "$1" "$2" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-        3)
-            if builtin "$name" "$1" "$2" "$3" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-        4)
-            if builtin "$name" "$1" "$2" "$3" "$4" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-        *)
-            if builtin "$name" "$1" "$2" "$3" "$4" "$5" >"$tmp_file" 2>/dev/null; then
-                status=0
-            else
-                status=$?
-            fi
-            ;;
-    esac
-
-    if [ "$status" -eq 0 ]; then
-        if IFS= read -r RUN_EXSH_BUILTIN_STDOUT <"$tmp_file"; then
-            :
-        else
-            RUN_EXSH_BUILTIN_STDOUT=""
-        fi
+    local output
+    if output=$(builtin "$name" "$@" 2>/dev/null); then
+        RUN_EXSH_BUILTIN_STDOUT="$output"
+        return 0
     fi
 
-    rm -f "$tmp_file"
-    return $status
+    RUN_EXSH_BUILTIN_STDOUT=""
+    return 1
+}
+
+ensure_sierpinski_builtin() {
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if run_exsh_builtin_capture HasExtBuiltin "str:user" "str:SierpinskiSpawnWorker"; then
+        case "${RUN_EXSH_BUILTIN_STDOUT:-}" in
+            true|TRUE|1)
+                return 0
+                ;;
+        esac
+    fi
+
+    echo "sierpinski_threads: SierpinskiSpawnWorker builtin is unavailable." >&2
+    echo "Rebuild PSCAL with ENABLE_EXT_BUILTIN_USER=ON to enable VM threading demos." >&2
+    exit 1
+}
+
+spawn_sierpinski_worker() {
+    local label="$1"
+    shift
+
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    local pid
+    if ! pid=$(builtin SierpinskiSpawnWorker "$@" 2>/dev/null); then
+        LAST_SPAWN_ERROR="failed to spawn ${label} worker via SierpinskiSpawnWorker builtin"
+        return 1
+    fi
+
+    if ! is_positive_integer "$pid"; then
+        LAST_SPAWN_ERROR="SierpinskiSpawnWorker returned invalid thread id '$pid' for ${label} worker"
+        return 1
+    fi
+
+    THREAD_IDS="$THREAD_IDS $pid"
+    return 0
 }
 
 find_in_path() {
@@ -209,13 +205,28 @@ resolve_exsh_binary() {
         return 0
     fi
 
-    local script_dir repo_root
-    script_dir=${0%/*}
-    if [ -z "$script_dir" ] || [ "$script_dir" = "$0" ]; then
+    local script_path script_dir repo_root
+
+    script_path="$0"
+    case "$script_path" in
+        */*)
+            script_dir=${script_path%/*}
+            ;;
+        *)
+            script_path=$(find_in_path "$script_path" 2>/dev/null || printf '')
+            if [ -n "$script_path" ]; then
+                script_dir=${script_path%/*}
+            else
+                script_dir='.'
+            fi
+            ;;
+    esac
+
+    if [ -z "$script_dir" ]; then
         script_dir='.'
     fi
 
-    repo_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
+    repo_root="$(CDPATH='' cd -- "$script_dir/../.." 2>/dev/null && pwd)"
     if [ -n "$repo_root" ] && [ -x "$repo_root/build/bin/exsh" ]; then
         EXSH_BIN="$repo_root/build/bin/exsh"
         RESOLVED_EXSH_PATH="$EXSH_BIN"
@@ -237,7 +248,7 @@ ensure_exsh() {
         fi
     fi
 
-    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
+    echo "sierpinski_threads: this demo must be run with exsh." >&2
     echo "Build exsh via CMake and ensure it is on PATH before running the script." >&2
     exit 1
 }
@@ -249,31 +260,15 @@ cleanup() {
     fi
 }
 
-terminate_workers() {
-    if [ -z "$WORKER_PIDS" ]; then
-        return
-    fi
-
-    for pid in $WORKER_PIDS; do
-        if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-            kill "$pid" >/dev/null 2>&1 || :
-        fi
-    done
-
-    WORKER_PIDS=""
-}
-
 handle_exit() {
     local status=$?
-    trap - EXIT INT TERM TSTP
-    terminate_workers
+    trap - EXIT INT TERM
     cleanup
     exit "$status"
 }
 
 handle_interrupt() {
-    trap - EXIT INT TERM TSTP
-    terminate_workers
+    trap - EXIT INT TERM
     cleanup
 
     case "$1" in
@@ -286,36 +281,7 @@ handle_interrupt() {
     esac
 }
 
-handle_tstp() {
-    trap - TSTP
-    cleanup
-    if [ -n "$WORKER_PIDS" ]; then
-        for pid in $WORKER_PIDS; do
-            if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-                kill -s TSTP "$pid" >/dev/null 2>&1 || :
-            fi
-        done
-    fi
-    kill -s TSTP "$$" >/dev/null 2>&1 || :
-    if [ -n "$WORKER_PIDS" ]; then
-        for pid in $WORKER_PIDS; do
-            if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
-                kill -s CONT "$pid" >/dev/null 2>&1 || :
-            fi
-        done
-    fi
-    if [ "$CURSOR_SHOULD_HIDE" = "1" ]; then
-        if run_exsh_builtin HideCursor >/dev/null 2>&1; then
-            CURSOR_HIDDEN=1
-        else
-            CURSOR_HIDDEN=0
-        fi
-    fi
-    trap 'handle_tstp' TSTP
-}
-
 RUN_EXSH_BUILTIN_STDOUT=""
-WORKER_PIDS=""
 CURSOR_HIDDEN=0
 CURSOR_SHOULD_HIDE=0
 HEADLESS_MODE=0
@@ -334,11 +300,32 @@ esac
 HEADLESS_ROWS=${SIERPINSKI_HEADLESS_ROWS:-$HEADLESS_ROWS}
 HEADLESS_COLS=${SIERPINSKI_HEADLESS_COLS:-$HEADLESS_COLS}
 
+is_positive_integer() {
+    case "$1" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+        0)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 draw_point() {
     local x="$1"
     local y="$2"
-    run_exsh_builtin GotoXY "int:$x" "int:$y"
-    run_exsh_builtin Write "str:$CHAR_TO_DRAW"
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if ! run_exsh_builtin GotoXY "int:$x" "int:$y"; then
+        printf '\033[%d;%dH' "$y" "$x"
+    fi
+
+    printf '%s' "$CHAR_TO_DRAW"
 }
 
 draw_sierpinski() {
@@ -371,28 +358,17 @@ draw_sierpinski() {
 }
 
 ensure_exsh "$@"
+ensure_sierpinski_builtin
 
 trap 'handle_exit' EXIT
 trap 'handle_interrupt INT' INT
 trap 'handle_interrupt TERM' TERM
-trap 'handle_tstp' TSTP
 if [ -z "${CHAR_TO_DRAW+x}" ]; then
     CHAR_TO_DRAW="${SIERPINSKI_CHAR:-+}"
 fi
 export CHAR_TO_DRAW
 
-WORKER_MODE=${SIERPINSKI_WORKER:-0}
 SKIP_WAIT=${SIERPINSKI_SKIP_WAIT:-0}
-
-if [ "$WORKER_MODE" = "1" ]; then
-    if [ "$#" -ne 7 ]; then
-        echo "sierpinski_threads.psh: worker expects 7 arguments." >&2
-        exit 1
-    fi
-
-    draw_sierpinski "$@"
-    exit 0
-fi
 
 MAX_LEVEL_RAW="${SIERPINSKI_LEVEL:-13}"
 
@@ -424,14 +400,14 @@ MAX_Y=0
 if run_exsh_builtin ClrScr; then
     :
 else
-    echo "sierpinski_threads.psh: this demo must be run with exsh." >&2
+    echo "sierpinski_threads: this demo must be run with exsh." >&2
     exit 1
 fi
 
 if run_exsh_builtin HideCursor; then
     :
 else
-    echo "sierpinski_threads.psh: failed to hide cursor; ensure exsh console builtins are available." >&2
+    echo "sierpinski_threads: failed to hide cursor; ensure exsh console builtins are available." >&2
     exit 1
 fi
 
@@ -496,65 +472,45 @@ MY2=$(((Y2 + Y3) / 2))
 MX3=$(((X3 + X1) / 2))
 MY3=$(((Y3 + Y1) / 2))
 
+THREAD_IDS=""
+LAST_SPAWN_ERROR=""
+
 if [ "$HEADLESS_MODE" = "1" ]; then
     # Headless mode skips worker orchestration so automated tests can run
     # without depending on the console builtins or background jobs.
     :
 else
-    if resolve_exsh_binary; then
-        :
-    else
-        echo "sierpinski_threads.psh: unable to locate exsh binary for worker threads." >&2
+    if ! spawn_sierpinski_worker "top" "int:$X1" "int:$Y1" "int:$MX1" "int:$MY1" "int:$MX3" "int:$MY3" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW"; then
+        echo "sierpinski_threads: $LAST_SPAWN_ERROR." >&2
         exit 1
     fi
 
-    exsh_path="$RESOLVED_EXSH_PATH"
-    if [ -z "$exsh_path" ]; then
-        echo "sierpinski_threads.psh: unable to locate exsh binary for worker threads." >&2
+    if ! spawn_sierpinski_worker "left" "int:$MX1" "int:$MY1" "int:$X2" "int:$Y2" "int:$MX2" "int:$MY2" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW"; then
+        echo "sierpinski_threads: $LAST_SPAWN_ERROR." >&2
         exit 1
     fi
 
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$X1" "$Y1" "$MX1" "$MY1" "$MX3" "$MY3" "$THREAD_LEVEL" &
-    PID0=$!
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$MX1" "$MY1" "$X2" "$Y2" "$MX2" "$MY2" "$THREAD_LEVEL" &
-    PID1=$!
-    SIERPINSKI_WORKER=1 "$exsh_path" "$0" "$MX3" "$MY3" "$MX2" "$MY2" "$X3" "$Y3" "$THREAD_LEVEL" &
-    PID2=$!
-
-    WORKER_PIDS="$PID0 $PID1 $PID2"
+    if ! spawn_sierpinski_worker "right" "int:$MX3" "int:$MY3" "int:$MX2" "int:$MY2" "int:$X3" "int:$Y3" "int:$THREAD_LEVEL" "str:$CHAR_TO_DRAW"; then
+        echo "sierpinski_threads: $LAST_SPAWN_ERROR." >&2
+        exit 1
+    fi
 
     worker_failure=0
-
-    jobs_remaining=0
-    if [ -n "$PID0" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
-    else
-        worker_failure=1
-    fi
-    if [ -n "$PID1" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
-    else
-        worker_failure=1
-    fi
-    if [ -n "$PID2" ]; then
-        jobs_remaining=$((jobs_remaining + 1))
-    else
-        worker_failure=1
-    fi
-
-    while [ "$jobs_remaining" -gt 0 ]; do
-        if wait; then
+    for tid in $THREAD_IDS; do
+        if run_exsh_builtin WaitForThread "int:$tid"; then
             :
         else
             worker_failure=1
+            LAST_SPAWN_ERROR="WaitForThread failed for worker thread id $tid"
         fi
-        jobs_remaining=$((jobs_remaining - 1))
     done
 
-    WORKER_PIDS=""
-
     if [ "$worker_failure" -ne 0 ]; then
-        echo "sierpinski_threads.psh: worker thread exited with an error." >&2
+        if [ -n "$LAST_SPAWN_ERROR" ]; then
+            echo "sierpinski_threads: $LAST_SPAWN_ERROR." >&2
+        else
+            echo "sierpinski_threads: worker thread exited with an error." >&2
+        fi
         exit 1
     fi
 fi
@@ -563,11 +519,18 @@ run_exsh_builtin GotoXY "int:1" "int:$MAX_Y"
 run_exsh_builtin ShowCursor
 CURSOR_HIDDEN=0
 CURSOR_SHOULD_HIDE=0
-run_exsh_builtin Write "str:Done. Press any key to exit."
-if [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
-    run_exsh_builtin ReadKey >/dev/null
+run_exsh_builtin Write "int:1" "str:Done. Press any key to exit."
+if [ "$HEADLESS_MODE" != "1" ] && [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
+    while :; do
+        if ! run_exsh_builtin_capture ReadKey; then
+            break
+        fi
+        if [ -n "${RUN_EXSH_BUILTIN_STDOUT:-}" ]; then
+            break
+        fi
+    done
 fi
 run_exsh_builtin ClrScr
 
-trap - EXIT INT TERM TSTP
+trap - EXIT INT TERM
 cleanup

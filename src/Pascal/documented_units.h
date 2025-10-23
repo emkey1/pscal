@@ -14,6 +14,7 @@ static const char *documented_units[] = {
     "mathlib",
     "mylib",
     "sysutils",
+    "threading",
 };
 static const size_t documented_units_count = sizeof(documented_units) / sizeof(documented_units[0]);
 

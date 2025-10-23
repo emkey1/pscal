@@ -1,0 +1,41 @@
+#!/usr/bin/env exsh
+# csh like.  Don't ask me why
+echo "casec:start"
+
+setenv CASE_SUBJECT foo
+case "$CASE_SUBJECT" in
+  foo)
+    echo "match foo"
+    ;;
+  *)
+    echo "unexpected"
+    ;;
+esac
+
+setenv CASE_SUBJECT baz
+setenv CASE_PATTERN baz
+case "$CASE_SUBJECT" in
+  foo)
+    echo "no foo"
+    ;;
+  "$CASE_PATTERN"|bar)
+    echo "match group"
+    ;;
+  *)
+    echo "fallback"
+    ;;
+esac
+
+setenv CASE_SUBJECT qux
+setenv CASE_DEFAULT qux
+case "$CASE_SUBJECT" in
+  foo|bar)
+    echo "unexpected branch"
+    ;;
+  *)
+    echo "match default $CASE_DEFAULT"
+    ;;
+esac
+
+echo "case:end"
+

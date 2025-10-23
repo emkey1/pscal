@@ -24,3 +24,8 @@ by the core or extended VM built-ins:
 * `datetime` – reusable routines for formatting Unix timestamps with timezone
   offsets, computing day boundaries, performing simple arithmetic, and creating
   human-friendly duration descriptions.
+
+The front end also registers the worker-pool helpers `thread_spawn_named`,
+`thread_pool_submit`, `thread_pause`/`thread_resume`/`thread_cancel`, and
+`thread_stats`.  They mirror the VM builtins but use lowercase names that are
+easier to import from scripts or REPL snippets.

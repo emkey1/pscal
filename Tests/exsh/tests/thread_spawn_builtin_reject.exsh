@@ -1,0 +1,9 @@
+#!/usr/bin/env exsh
+set -euo pipefail
+
+if builtin ThreadSpawnBuiltin str:length str:alpha 2>/dev/null; then
+    echo "unexpected-success" >&2
+    exit 1
+fi
+
+echo "reject_status:$EXSH_LAST_STATUS"

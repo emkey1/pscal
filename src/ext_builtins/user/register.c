@@ -2,6 +2,7 @@
 #include "ext_builtins/registry.h"
 
 void registerLandscapeBuiltins(void);
+void registerSierpinskiBuiltins(void);
 
 void registerUserBuiltins(void) {
     const char *category = "user";
@@ -9,6 +10,7 @@ void registerUserBuiltins(void) {
     extBuiltinRegisterGroup(category, "landscape");
     extBuiltinRegisterGroup(category, "landscape/rendering");
     extBuiltinRegisterGroup(category, "landscape/precompute");
+    extBuiltinRegisterGroup(category, "demos");
     extBuiltinRegisterFunction(category, "landscape/rendering",
                                "LandscapeDrawTerrain");
     extBuiltinRegisterFunction(category, "landscape/rendering",
@@ -21,6 +23,9 @@ void registerUserBuiltins(void) {
                                "LandscapeBuildHeightField");
     extBuiltinRegisterFunction(category, "landscape/precompute",
                                "LandscapeBakeVertexData");
+    extBuiltinRegisterFunction(category, "demos",
+                               "SierpinskiSpawnWorker");
 
     registerLandscapeBuiltins();
+    registerSierpinskiBuiltins();
 }

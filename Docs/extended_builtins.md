@@ -178,6 +178,17 @@ avoid race conditions or other undefined behavior:
 The VM itself does not provide locking for custom built-ins, so each
 extension is responsible for its own thread safety.
 
+Front ends can now queue vetted helpers on worker threads via
+`ThreadSpawnBuiltin`, `ThreadGetResult`, and `ThreadGetStatus`. Only the
+allow-listed routines enumerated in `src/backend_ast/builtin.c` may execute this
+way; they are limited to re-entrant HTTP/API helpers and `dnslookup`. Builtins
+that touch mutable global state must stay off the list unless they provide their
+own synchronisation.
+
+Consult [Docs/threading.md](threading.md) for pool sizing environment variables,
+worker-naming rules, and advice on interpreting the metrics returned by
+`ThreadStats` when you need to debug long-running builtins.
+
 ## Creating a new built-in
 
 1. Choose a category under `src/ext_builtins` or create a new one.  For

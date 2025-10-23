@@ -70,7 +70,14 @@ static const char *CLIKE_USAGE =
     "     --dump-ext-builtins         List extended builtin inventory and exit.\n"
     "     --no-cache                  Compile fresh (ignore cached bytecode).\n"
     "     --verbose                 Print compilation/cache status messages.\n"
-    "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n";
+    "     --vm-trace-head=N           Trace first N VM instructions (also enabled by 'trace on' in source).\n"
+    "\n"
+    "   Thread helpers registered by the REPL/front end:\n"
+    "     thread_spawn_named(target, name, ...)  Launch allow-listed builtin on worker thread.\n"
+    "     thread_pool_submit(target, name, ...) Queue work on the shared pool without blocking the caller.\n"
+    "     thread_pause/resume/cancel(handle)    Mirror the VM control operations; return 1 on success.\n"
+    "     thread_get_status(handle, drop)       Fetch success flags (pass non-zero drop to free the slot).\n"
+    "     thread_stats()                        Array describing active worker slots for dashboards/metrics.\n";
 
 static const char *const kClikeCompilerId = "clike";
 

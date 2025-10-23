@@ -100,6 +100,16 @@ make -C Examples threads-procptr-demo
 
 The example source lives at `Examples/pascal/base/ThreadsProcPtrDemo`.
 
+The exsh front end now includes `Examples/exsh/threading_demo`, which shows how
+to launch allow-listed VM builtins on worker threads with
+`ThreadSpawnBuiltin`/`WaitForThread`/`ThreadGetResult`. The script resolves
+`localhost` on a background worker, joins both the DNS lookup and a timer, and
+prints the stored result via the new helpers. For a fuller tour, run
+`Examples/exsh/threading_showcase` to see `ThreadPoolSubmit`,
+`ThreadSetName`/`ThreadLookup`, the alternate `ThreadGetResult(..., true)`
+path, and a `ThreadStats` snapshot; set `THREAD_SHOWCASE_DELAY_MS` to tweak the
+queued delay.
+
 ## Tiny language front end (Written in Python)
 
 A minimal compiler for a small educational language, often called *tiny*, is
@@ -243,14 +253,14 @@ tokens to the appropriate VM types before dispatch.
 Example usage:
 
 ```sh
-build/bin/exsh Examples/exsh/pipeline.psh
-build/bin/exsh --dump-bytecode Examples/exsh/functions.psh
-build/bin/exsh Examples/exsh/builtins.psh
+build/bin/exsh Examples/exsh/pipeline
+build/bin/exsh --dump-bytecode Examples/exsh/functions
+build/bin/exsh Examples/exsh/builtins
 ```
 
 Bytecode for each script is cached in `~/.pscal/bc_cache` under a
 `<identifier>-<hash>.bc` name derived from exsh's compiler identifier; pass `--no-cache` to force recompilation. The runtime
-exports `PSCALSHELL_LAST_STATUS` after every builtin invocation so scripts can
+exports `EXSH_LAST_STATUS` after every builtin invocation so scripts can
 inspect the most recent exit code without parsing stderr. Builtins such as
 `export` and `unset` mutate the process environment for subsequent commands, and
 standard utilities (`printenv`, `env`) reflect those changes immediately.

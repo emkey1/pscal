@@ -2084,6 +2084,36 @@ add({
     "failure_reason": "Only declared fields may be accessed through `my`/`myself`.",
 })
 
+add({
+    "id": "thread_wrappers_spawn_queue",
+    "name": "Thread helpers expose VM worker controls",
+    "category": "integration",
+    "description": "thread_spawn_named and thread_pool_submit wrap the VM worker pool with JSON-friendly helpers.",
+    "expect": "runtime_ok",
+    "code": """
+        int main() {
+            int named = thread_spawn_named("delay", "rea_worker", 5);
+            WaitForThread(named);
+            int named_ok = thread_get_status(named, 1);
+
+            int pooled = thread_pool_submit("delay", "rea_pool", 5);
+            WaitForThread(pooled);
+            int lookup = thread_lookup("rea_pool");
+            int pooled_ok = thread_get_status(pooled, 1);
+            int lookup_match = (lookup == pooled) ? 1 : 0;
+            int stats_len = length(thread_stats());
+
+            printf("named_status=%d\\n", named_ok);
+            printf("pooled_status=%d lookup_match=%d stats=%d\\n", pooled_ok, lookup_match, stats_len);
+            return 0;
+        }
+    """,
+    "expected_stdout": """
+        named_status=1
+        pooled_status=1 lookup_match=1 stats=1
+    """,
+})
+
 # ---------------------------------------------------------------------------
 # Emit manifest
 # ---------------------------------------------------------------------------

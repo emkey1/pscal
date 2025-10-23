@@ -42,6 +42,7 @@
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
+#include "rea/builtins/thread.h"
 #include "rea/parser.h"
 #include "rea/semantic.h"
 #include "Pascal/lexer.h"
@@ -70,7 +71,14 @@ static const char *REA_USAGE =
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --verbose              Print compilation/cache status messages.\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
-    "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n";
+    "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n"
+    "\n"
+    "   Thread helpers available to JSON snippets and the REPL:\n"
+    "     thread_spawn_named(target, name, ...)  Launch allow-listed builtin on worker thread.\n"
+    "     thread_pool_submit(target, name, ...) Queue work on the shared pool for asynchronous execution.\n"
+    "     thread_pause/resume/cancel(handle)    Control pooled workers (returns 1 on success).\n"
+    "     thread_get_status(handle, drop)       Inspect success flags (drop non-zero releases the slot).\n"
+    "     thread_stats()                        Array of records summarizing pool usage.\n";
 
 static const char *const kReaCompilerId = "rea";
 
@@ -349,6 +357,7 @@ int main(int argc, char **argv) {
     gSuppressWriteSpacing = 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
+    reaRegisterThreadBuiltins();
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);
