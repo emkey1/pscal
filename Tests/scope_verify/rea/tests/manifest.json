@@ -1093,6 +1093,15 @@
       "code": "class Bucket {\n    int capacity;\n\n    int remaining() {\n        return my.level;\n    }\n}\n\nint main() {\n    Bucket bucket = new Bucket();\n    return bucket.remaining();\n}",
       "expected_stderr_substring": "Unknown field",
       "failure_reason": "Only declared fields may be accessed through `my`/`myself`."
+    },
+    {
+      "id": "thread_wrappers_spawn_queue",
+      "name": "Thread helpers expose VM worker controls",
+      "category": "integration",
+      "description": "thread_spawn_named and thread_pool_submit wrap the VM worker pool with JSON-friendly helpers.",
+      "expect": "runtime_ok",
+      "code": "        int main() {\n            int named = thread_spawn_named(\"delay\", \"rea_worker\", 5);\n            WaitForThread(named);\n            int named_ok = thread_get_status(named, 1);\n\n            int pooled = thread_pool_submit(\"delay\", \"rea_pool\", 5);\n            WaitForThread(pooled);\n            int lookup = thread_lookup(\"rea_pool\");\n            int pooled_ok = thread_get_status(pooled, 1);\n            int lookup_match = (lookup == pooled) ? 1 : 0;\n            int stats_len = length(thread_stats());\n\n            printf(\"named_status=%d\\n\", named_ok);\n            printf(\"pooled_status=%d lookup_match=%d stats=%d\\n\", pooled_ok, lookup_match, stats_len);\n            return 0;\n        }",
+      "expected_stdout": "named_status=1\npooled_status=1 lookup_match=1 stats=1"
     }
   ]
 }

@@ -575,6 +575,7 @@ typedef struct ThreadJob {
     pthread_mutex_t assignmentMutex;
     pthread_cond_t assignmentCond;
     bool assignmentSyncInitialized;
+    bool submitOnly;
     char name[THREAD_NAME_MAX];
     struct timespec queuedAt;
     struct ThreadJob* next;
@@ -787,6 +788,7 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
                                     VmBuiltinFn builtin,
                                     int builtin_id,
                                     const char* builtin_name,
+                                    bool submitOnly,
                                     const char* explicitName) {
     (void)vm;
     ThreadJob* job = (ThreadJob*)calloc(1, sizeof(ThreadJob));
@@ -809,6 +811,7 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
     job->assignedThreadId = -1;
     job->assignmentSatisfied = false;
     job->assignmentSyncInitialized = false;
+    job->submitOnly = submitOnly;
     job->next = NULL;
     clock_gettime(CLOCK_REALTIME, &job->queuedAt);
 
@@ -1019,6 +1022,7 @@ static void vmThreadInitSlot(Thread* thread) {
     thread->awaitingReuse = false;
     thread->readyForReuse = false;
     thread->poolGeneration = 0;
+    thread->poolWorker = false;
     thread->currentJob = NULL;
     atomic_store(&thread->paused, false);
     atomic_store(&thread->cancelRequested, false);
@@ -1091,6 +1095,7 @@ static void* threadStart(void* arg) {
         vmThreadAssignInternalName(thread, threadId, job->name);
         thread->queuedAt = job->queuedAt;
         thread->currentJob = job;
+        thread->poolWorker = thread->poolWorker || job->submitOnly;
         thread->active = true;
         atomic_store(&thread->cancelRequested, false);
         atomic_store(&thread->paused, false);
@@ -1297,12 +1302,13 @@ static int createThreadJob(VM* vm,
                            VmBuiltinFn builtin,
                            int builtin_id,
                            const char* builtin_name,
+                           bool submitOnly,
                            const char* threadName) {
     if (!vm) {
         return -1;
     }
 
-    ThreadJob* job = vmThreadJobCreate(vm, kind, chunk, entry, argc, argv, callback, cleanup, user_data, builtin, builtin_id, builtin_name, threadName);
+    ThreadJob* job = vmThreadJobCreate(vm, kind, chunk, entry, argc, argv, callback, cleanup, user_data, builtin, builtin_id, builtin_name, submitOnly, threadName);
     if (!job) {
         return -1;
     }
@@ -1399,7 +1405,7 @@ static int createThreadJob(VM* vm,
 }
 
 static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, const Value* argv) {
-    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL, NULL, -1, NULL, NULL);
+    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL, NULL, -1, NULL, false, NULL);
 }
 
 // Backward-compatible helper: no argument provided, pass NIL
@@ -1414,10 +1420,11 @@ int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VM
         }
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL, NULL);
+    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL, false, NULL);
 }
 
-int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount, const Value* args) {
+int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount,
+                         const Value* args, bool submitOnly, const char* threadName) {
     if (!vm || builtinId < 0) {
         return -1;
     }
@@ -1425,7 +1432,8 @@ int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int arg
     if (!handler) {
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, argCount, args, NULL, NULL, NULL, handler, builtinId, builtinName, builtinName);
+    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, argCount, args, NULL, NULL, NULL,
+                           handler, builtinId, builtinName, submitOnly, threadName);
 }
 
 void vmThreadStoreResult(VM* vm, const Value* result, bool success) {

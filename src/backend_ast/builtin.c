@@ -5191,7 +5191,9 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
         thread_vm = vm->threadOwner;
     }
 
-    int thread_id = vmSpawnBuiltinThread(thread_vm, builtin_id, builtin_name, builtin_argc, builtin_args);
+    const char* thread_name = (options.name[0] != '\0') ? options.name : NULL;
+    int thread_id = vmSpawnBuiltinThread(thread_vm, builtin_id, builtin_name, builtin_argc, builtin_args,
+                                        options.submitOnly, thread_name);
     if (thread_id < 0) {
         runtimeError(vm, "%s failed to start builtin '%s'.", opName, builtin_name);
         return makeInt(-1);
@@ -5504,7 +5506,7 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     pthread_mutex_lock(&thread_vm->threadRegistryLock);
     int active_count = 0;
     for (int i = 1; i < VM_MAX_THREADS; ++i) {
-        if (thread_vm->threads[i].inPool) {
+        if (thread_vm->threads[i].inPool && thread_vm->threads[i].poolWorker) {
             active_count++;
         }
     }
@@ -5519,7 +5521,7 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     int index = 0;
     for (int i = 1; i < VM_MAX_THREADS && index < active_count; ++i) {
         Thread* thread = &thread_vm->threads[i];
-        if (!thread->inPool) {
+        if (!thread->inPool || !thread->poolWorker) {
             continue;
         }
         Value entry = makeThreadStateRecord(i, thread);

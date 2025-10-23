@@ -127,6 +127,7 @@ typedef struct {
     bool shouldExit;                // Signals worker loop shutdown
     bool ownsVm;                    // Tracks whether vm pointer should be destroyed
     int poolGeneration;             // Bumps when recycled so handles stay unique
+    bool poolWorker;                // True when thread should be reported as part of the shared pool
     ThreadJob* currentJob;          // Currently executing job (if any)
     bool awaitingReuse;             // True once job finished but not yet released
     bool readyForReuse;             // Set by consumers to allow thread to return to pool
@@ -211,7 +212,8 @@ void vmResetExecutionState(VM* vm); // Reset stack/frames so a VM can be reused
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry);
 void vmNullifyAliases(VM* vm, uintptr_t disposedAddrValue);
 int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup);
-int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount, const Value* args);
+int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount,
+                         const Value* args, bool submitOnly, const char* threadName);
 void vmThreadStoreResult(VM* vm, const Value* result, bool success);
 bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, bool* outStatus, bool takeStatus);
 bool vmJoinThreadById(struct VM_s* vm, int id);

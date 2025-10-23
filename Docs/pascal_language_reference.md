@@ -74,6 +74,8 @@ The language supports a variety of built-in data types:
 | `Thread` | `TYPE_THREAD` | A handle identifying a VM thread. |
 | `MStream` | `TYPE_MEMORYSTREAM` | A dynamic in-memory stream of bytes. |
 
+`ThreadSpawnBuiltin` and `ThreadPoolSubmit` expose the VM's worker pool directly.  The standard `Threading` unit provides small helpers so you can forward thread names or queue-only flags without hand-crafting records.  For example, `SpawnBuiltinNamed('delay', 'worker')` wraps `ThreadSpawnBuiltin` with a name, while `ThreadOptionsQueue('loader')` returns a record suitable for queuing a job via `ThreadPoolSubmit`.  Additional wrappers such as `ThreadStatusOk(t, true)` and `ThreadStatsCount` mirror the VM builtins for checking results and sampling pool metrics.
+
 ### **Variables and Constants**
 
 #### **Variable Declarations**

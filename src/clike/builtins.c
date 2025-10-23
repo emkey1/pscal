@@ -1,4 +1,5 @@
 #include "clike/builtins.h"
+#include "clike/builtins/thread.h"
 #include "backend_ast/builtin.h"
 #include <string.h>
 #include <strings.h>
@@ -90,4 +91,6 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("tochar", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
+
+    clikeRegisterThreadBuiltins();
 }
