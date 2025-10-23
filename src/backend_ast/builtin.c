@@ -4939,15 +4939,17 @@ static void initThreadRequestOptions(ThreadRequestOptions* options) {
     options->submitOnly = false;
 }
 
-static void parseThreadRequestOptionsValue(const Value* value, ThreadRequestOptions* options) {
+static bool parseThreadRequestOptionsValue(const Value* value, ThreadRequestOptions* options) {
     if (!value || !options || value->type != TYPE_RECORD) {
-        return;
+        return false;
     }
+    bool recognized = false;
     for (FieldValue* field = value->record_val; field; field = field->next) {
         if (!field->name) {
             continue;
         }
         if (strcasecmp(field->name, "name") == 0) {
+            recognized = true;
             const char* requested = builtinValueToCString(&field->value);
             if (requested) {
                 strncpy(options->name, requested, sizeof(options->name) - 1);
@@ -4958,12 +4960,14 @@ static void parseThreadRequestOptionsValue(const Value* value, ThreadRequestOpti
                    strcasecmp(field->name, "queueonly") == 0 ||
                    strcasecmp(field->name, "queue_only") == 0 ||
                    strcasecmp(field->name, "queue") == 0) {
+            recognized = true;
             bool flag = false;
             if (parseBooleanValue(&field->value, &flag)) {
                 options->submitOnly = flag;
             }
         }
     }
+    return recognized;
 }
 
 static bool appendThreadField(FieldValue** head, FieldValue** tail, const char* name, Value value) {
@@ -5168,8 +5172,11 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
     if (arg_count > 1) {
         const Value* maybe_options = &args[arg_count - 1];
         if (maybe_options->type == TYPE_RECORD) {
-            options_index = arg_count - 1;
-            parseThreadRequestOptionsValue(maybe_options, &options);
+            ThreadRequestOptions parsed = options;
+            if (parseThreadRequestOptionsValue(maybe_options, &parsed)) {
+                options_index = arg_count - 1;
+                options = parsed;
+            }
         }
     }
 
