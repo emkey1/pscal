@@ -27,21 +27,30 @@ function ThreadStatsCount: Integer;
 implementation
 
 function ThreadOptionsNamed(const ThreadName: string): ThreadRequestOptions;
+var
+  Options: ThreadRequestOptions;
 begin
-  ThreadOptionsNamed.Name := ThreadName;
-  ThreadOptionsNamed.SubmitOnly := False;
+  Options.Name := ThreadName;
+  Options.SubmitOnly := False;
+  ThreadOptionsNamed := Options;
 end;
 
 function ThreadOptionsQueue(const ThreadName: string): ThreadRequestOptions;
+var
+  Options: ThreadRequestOptions;
 begin
-  ThreadOptionsQueue.Name := ThreadName;
-  ThreadOptionsQueue.SubmitOnly := True;
+  Options.Name := ThreadName;
+  Options.SubmitOnly := True;
+  ThreadOptionsQueue := Options;
 end;
 
 function ThreadOptionsQueueOnly: ThreadRequestOptions;
+var
+  Options: ThreadRequestOptions;
 begin
-  ThreadOptionsQueueOnly.Name := '';
-  ThreadOptionsQueueOnly.SubmitOnly := True;
+  Options.Name := '';
+  Options.SubmitOnly := True;
+  ThreadOptionsQueueOnly := Options;
 end;
 
 function SpawnBuiltinNamed(const BuiltinName, ThreadName: string): Integer;
