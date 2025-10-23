@@ -341,6 +341,7 @@ set(PSCAL_SOURCES
     src/symbol/symbol.c
     src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
     src/vm/vm.c
@@ -615,6 +616,7 @@ set(CLIKE_SOURCES
     src/compiler/bytecode.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/symbol/symbol.c
     src/clike/stubs.c
 )
@@ -733,6 +735,7 @@ set(REA_SOURCES
     src/compiler/compiler.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/symbol/symbol.c
 )
 
