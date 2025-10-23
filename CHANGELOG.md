@@ -4,6 +4,7 @@
 
 Enhancements
 - Added the `exsh` shell front end with PSCAL builtin integration, Bash-compatible `-c` execution, and tuned caching/pipeline helpers for scripts.
+- Threading helpers now include `ThreadSpawnBuiltin`, `ThreadGetResult`, and `ThreadGetStatus`, allowing exsh to launch allow-listed VM builtins on worker threads while `WaitForThread` reports their stored success flags.
 - Replaced the VM builtin registry with hash-indexed lookups and cached procedure symbols, cutting dispatch overhead across all languages.
 - Extended Pascal with `goto`/`label` support, compound assignment operators, and refreshed CRT demos such as the Blackjack scoreboard.
 - Optimised tight VM paths by inlining guarded loops and introducing owned string helpers that trim transient allocations.

@@ -1729,25 +1729,11 @@ static Value shellConvertBuiltinArgument(const char *text) {
 }
 
 static void shellUpdateStatus(int status) {
-    gShellStatusVersion++;
-    if (gShellArithmeticErrorPending) {
-        status = 1;
-        gShellArithmeticErrorPending = false;
+    if (gShellStatusSticky && status == 0) {
+        gShellStatusSticky = false;
+        return;
     }
-    gShellRuntime.last_status = status;
-    char buffer[16];
-    snprintf(buffer, sizeof(buffer), "%d", status);
-    shellSetTrackedVariable("EXSH_LAST_STATUS", buffer, false);
-    bool suppress_errexit = shellRuntimeEvaluatingCondition();
-    if (status != 0) {
-        if (gShellRuntime.errexit_enabled && !suppress_errexit) {
-            gShellRuntime.errexit_pending = true;
-            gShellRuntime.errexit_defer_active = true;
-        }
-    } else {
-        gShellRuntime.errexit_pending = false;
-        gShellRuntime.errexit_defer_active = false;
-    }
+    shellRuntimeSetLastStatus(status);
 }
 
 /*

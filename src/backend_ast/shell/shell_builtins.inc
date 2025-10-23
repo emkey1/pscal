@@ -8454,7 +8454,19 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
 
-    if (!vmJoinThreadById(vm, (int)thread_id)) {
+    VM *thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    bool joined = thread_vm ? vmJoinThreadById(thread_vm, (int)thread_id) : false;
+    if (!joined && thread_vm && thread_vm != vm) {
+        joined = vmJoinThreadById(vm, (int)thread_id);
+        if (joined) {
+            thread_vm = vm;
+        }
+    }
+    if (!joined) {
         runtimeError(vm, "WaitForThread: %lld: invalid thread id", thread_id);
         if (converted_valid) {
             freeValue(&converted);
@@ -8463,10 +8475,15 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
 
+    bool status_flag = true;
+    if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, false)) {
+        shellUpdateStatus(status_flag ? 0 : 1);
+    } else {
+        shellUpdateStatus(0);
+    }
     if (converted_valid) {
         freeValue(&converted);
     }
-    shellUpdateStatus(0);
     return makeVoid();
 }
 

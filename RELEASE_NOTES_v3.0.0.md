@@ -17,6 +17,7 @@ Date: 2025-10-20
 
 ## Improvements
 - Replaced the builtin registry with hash tables and cached procedure lookup metadata, preventing contention and shaving lookups for hot VM paths.
+- Thread helpers grow `ThreadSpawnBuiltin`/`ThreadGetResult`/`ThreadGetStatus`, letting exsh queue allow-listed VM builtins on worker threads while `WaitForThread` reports their stored status codes. Documentation now includes sample transcripts and the explicit allowlist for threaded builtins.
 - Inlined shell loop guards, added owned-string helpers, and deferred exit handling in logical contexts to eliminate performance regressions observed in shellbench.
 - Updated SDL demos with corrected controls, shared font fallbacks, fast landscape rendering validation, and WASD zoom controls for the 3D bouncing balls showcase.
 - Expanded documentation: compiler flags, exsh debugging, and Rea programmer guidance all reflect the new workflows.

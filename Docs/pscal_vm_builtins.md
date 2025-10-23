@@ -105,12 +105,36 @@ VM. For instructions on adding your own routines, see
 | spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
 | join | (tid: Integer) | void | Wait for the specified thread to finish. |
 | CreateThread | (procAddr: Pointer, arg: Pointer = nil) | Thread | Start a new thread invoking the given routine with `arg`. Backward-compatible with 1-arg form. |
-| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete. |
+| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete, returning `0` on success and `1` when the worker reported a failure. |
+| ThreadSpawnBuiltin | (target: String/Integer, args: Value...) | Thread | Spawn an allow-listed VM builtin on a worker thread and return its handle. |
+| ThreadGetResult | (t: Thread, consumeStatus: Boolean = false) | Any | Retrieve the stored result for a builtin worker. When `consumeStatus` is true the cached status flag is also cleared. |
+| ThreadGetStatus | (t: Thread, dropResult: Boolean = false) | Boolean | Read the stored success flag for a worker thread. Passing `dropResult = true` clears any cached return value. |
 | mutex | () | Integer | Create a standard mutex and return its identifier. |
 | rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
 | lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
+
+Allow-listed targets are capped at re-entrant helpers that avoid shared global
+state: `delay`, `httprequest`, `httprequesttofile`, `httprequestasync`,
+`httprequestasynctofile`, `httptryawait`, `httpawait`, `httpisdone`,
+`httpcancel`, `httpgetasyncprogress`, `httpgetasynctotal`, `httpgetlastheaders`,
+`httpgetheader`, `httpclearheaders`, `httpsetheader`, `httpsetoption`,
+`httperrorcode`, `httplasterror`, `apireceive`, `apisend`, and `dnslookup`.
+
+Sample exsh transcript demonstrating argument prefixes and result collection:
+
+```sh
+$ build/bin/exsh -c 'tid=$(builtin ThreadSpawnBuiltin str:dnslookup str:localhost); \
+    WaitForThread "$tid"; \
+    printf "status:%s\n" "$EXSH_LAST_STATUS"; \
+    printf "result:%s\n" "$(builtin ThreadGetResult "$tid")"'
+status:0
+result:127.0.0.1
+```
+
+The resolved address will reflect the local resolver configuration (`127.0.0.1`,
+`::1`, etc.), but the exit status tracks whether the worker reported success.
 
 ## exsh orchestration
 

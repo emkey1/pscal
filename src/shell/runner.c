@@ -21,6 +21,7 @@
 static const char *const kShellCompilerId = "shell";
 
 static int gShellSymbolTableDepth = 0;
+static VM *gShellThreadOwnerVm = NULL;
 
 void shellSymbolTableScopeInit(ShellSymbolTableScope *scope) {
     if (!scope) {
@@ -205,6 +206,8 @@ int shellRunSource(const char *source,
     bool chunk_initialized = false;
     VM vm;
     bool vm_initialized = false;
+    VM *previous_thread_owner = NULL;
+    bool assigned_thread_owner = false;
     bool exit_flag = false;
     bool should_run_exit_trap = false;
 
@@ -280,6 +283,12 @@ int shellRunSource(const char *source,
 
     initVM(&vm);
     vm_initialized = true;
+    previous_thread_owner = gShellThreadOwnerVm;
+    if (!gShellThreadOwnerVm) {
+        gShellThreadOwnerVm = &vm;
+        assigned_thread_owner = true;
+    }
+    vm.threadOwner = gShellThreadOwnerVm ? gShellThreadOwnerVm : &vm;
     if (options->vm_trace_head > 0) {
         vm.trace_head_instructions = options->vm_trace_head;
     }
@@ -314,6 +323,9 @@ cleanup:
         *out_exit_requested = exit_flag;
     } else {
         (void)exit_flag;
+    }
+    if (assigned_thread_owner) {
+        gShellThreadOwnerVm = previous_thread_owner;
     }
     if (vm_initialized) {
         freeVM(&vm);

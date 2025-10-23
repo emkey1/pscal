@@ -87,6 +87,28 @@ When a builtin returns a result the command prints it to `stdout`. Procedures
 that return `void` simply update `EXSH_LAST_STATUS` to `0` on success so
 you can chain them in conditionals.
 
+## `threading_demo`
+
+```sh
+#!/usr/bin/env exsh
+dns_thread=$(builtin ThreadSpawnBuiltin str:dnslookup str:localhost)
+delay_thread=$(builtin ThreadSpawnBuiltin str:delay int:25)
+WaitForThread "$delay_thread"
+WaitForThread "$dns_thread"
+dns_result=$(builtin ThreadGetResult "$dns_thread")
+dns_status=$(builtin ThreadGetStatus "$dns_thread" bool:true)
+printf "dns:%s (status:%s)\n" "${dns_result:-<empty>}" "$dns_status"
+```
+
+The thread helpers run allow-listed VM builtins on worker threads without
+needing the legacy `ThreadDemo*` helpers. `ThreadSpawnBuiltin` accepts either a
+builtin name or numeric id followed by its arguments, returning a thread handle.
+`WaitForThread` joins the worker and reflects the stored success flag in
+`EXSH_LAST_STATUS`, while `ThreadGetResult`/`ThreadGetStatus` retrieve the
+worker's return value and success bit. The sample script spawns a DNS lookup and
+an asynchronous delay, waits for both handles, and prints the resolved IP and
+status flag.
+
 ## `sierpinski_threads`
 
 ```sh

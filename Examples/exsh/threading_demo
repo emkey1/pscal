@@ -1,0 +1,35 @@
+#!/usr/bin/env exsh
+# Demonstrate spawning VM builtins on worker threads and collecting their results.
+# Usage: build/bin/exsh Examples/exsh/threading_demo [hostname] [delay_ms]
+
+set -euo pipefail
+
+HOSTNAME=${1:-localhost}
+DELAY_MS=${2:-25}
+
+if [ "$DELAY_MS" -lt 0 ]; then
+    echo "threading_demo: delay must be non-negative" >&2
+    exit 1
+fi
+
+echo "threading_demo:start"
+
+dns_thread=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$HOSTNAME")
+delay_thread=$(builtin ThreadSpawnBuiltin str:delay "int:$DELAY_MS")
+
+echo "threading_demo:dns_thread:$dns_thread"
+echo "threading_demo:delay_thread:$delay_thread"
+
+WaitForThread "$delay_thread"
+DELAY_STATUS=$EXSH_LAST_STATUS
+WaitForThread "$dns_thread"
+DNS_STATUS=$EXSH_LAST_STATUS
+
+dns_result=$(builtin ThreadGetResult "$dns_thread")
+dns_status_consumed=$(builtin ThreadGetStatus "$dns_thread" bool:true)
+
+echo "threading_demo:delay_status:$DELAY_STATUS"
+echo "threading_demo:dns_status:$DNS_STATUS"
+echo "threading_demo:dns_result:${dns_result:-<empty>}"
+echo "threading_demo:dns_status_consumed:$dns_status_consumed"
+echo "threading_demo:end"

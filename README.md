@@ -100,6 +100,12 @@ make -C Examples threads-procptr-demo
 
 The example source lives at `Examples/pascal/base/ThreadsProcPtrDemo`.
 
+The exsh front end now includes `Examples/exsh/threading_demo`, which shows how
+to launch allow-listed VM builtins on worker threads with
+`ThreadSpawnBuiltin`/`WaitForThread`/`ThreadGetResult`. The script resolves
+`localhost` on a background worker, joins both the DNS lookup and a timer, and
+prints the stored result via the new helpers.
+
 ## Tiny language front end (Written in Python)
 
 A minimal compiler for a small educational language, often called *tiny*, is

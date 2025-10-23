@@ -805,6 +805,7 @@ static int createThreadJob(VM* vm,
     t->vm->chunk = chunk ? chunk : vm->chunk;
     t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
     t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
+    t->vm->threadOwner = vm->threadOwner ? vm->threadOwner : vm;
     t->vm->trace_head_instructions = vm->trace_head_instructions;
     t->vm->trace_executed = 0;
     t->vm->owningThread = t;
@@ -2130,6 +2131,7 @@ void vmResetExecutionState(VM* vm) {
         }
     }
     vm->threadCount = 1;
+    vm->threadOwner = vm;
     vm->threads[0].active = false;
     vm->threads[0].vm = NULL;
 
@@ -2169,6 +2171,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->current_builtin_name = NULL;
 
     vm->threadCount = 1; // main thread occupies index 0
+    vm->threadOwner = vm;
     memset(vm->threads, 0, sizeof(vm->threads));
     for (int i = 0; i < VM_MAX_THREADS; i++) {
         vmThreadInitSlot(&vm->threads[i]);

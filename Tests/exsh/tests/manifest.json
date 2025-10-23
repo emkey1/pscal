@@ -65,6 +65,24 @@
             "expected_stdout": "echo is a shell builtin\ntrue is a shell builtin\nfalse is a shell builtin\necho:plain:start\nalpha beta\necho:plain:end\necho:-e:start\nline1\nline2\necho:-e:end\necho:-E:start\nline1\\nline2\necho:-E:end\nno-newline:sentinel\nprefix:sentinel\ntrue-status:0\nfalse-status:1"
         },
         {
+            "id": "thread_spawn_builtin_success",
+            "name": "ThreadSpawnBuiltin joins allow-listed builtins",
+            "category": "threading",
+            "description": "Spawns delay/dnslookup workers, joins them, and validates stored status/result metadata.",
+            "script": "Tests/exsh/tests/thread_spawn_builtin_success.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "delay_status:0\ndns_status:0\ndns_length_valid:true\ndns_family_valid:true\ndns_status_consumed:true"
+        },
+        {
+            "id": "thread_spawn_builtin_reject",
+            "name": "ThreadSpawnBuiltin rejects disallowed builtins",
+            "category": "threading",
+            "description": "Non-allow-listed builtins are rejected when queued for threaded execution.",
+            "script": "Tests/exsh/tests/thread_spawn_builtin_reject.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "reject_status:1"
+        },
+        {
             "id": "dash_c_option",
             "name": "Dash-c executes inline commands",
             "category": "cli",
