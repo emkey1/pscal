@@ -4994,16 +4994,20 @@ Value vmBuiltinThreadSpawnBuiltin(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
         if (shellRuntimeSetLastStatusSticky) {
             shellRuntimeSetLastStatusSticky(1);
+#if defined(FRONTEND_SHELL)
             if (vm) {
                 vm->abort_requested = false;
                 vm->exit_requested = false;
             }
+#endif
         } else if (shellRuntimeSetLastStatus) {
             shellRuntimeSetLastStatus(1);
+#if defined(FRONTEND_SHELL)
             if (vm) {
                 vm->abort_requested = false;
                 vm->exit_requested = false;
             }
+#endif
         }
         return makeInt(-1);
     }
