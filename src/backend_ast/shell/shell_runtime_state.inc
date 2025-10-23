@@ -1376,6 +1376,7 @@ static ShellRuntimeState gShellRuntime = {
 };
 
 static unsigned long gShellStatusVersion = 0;
+static bool gShellStatusSticky = false;
 
 static bool gShellExitRequested = false;
 static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
@@ -1555,6 +1556,34 @@ void shellRuntimeAbandonConditionEvaluation(void) {
 void shellRuntimeRequestExit(void) {
     shellRuntimeAbandonConditionEvaluation();
     gShellExitRequested = true;
+}
+
+void shellRuntimeSetLastStatus(int status) {
+    gShellStatusVersion++;
+    if (gShellArithmeticErrorPending) {
+        status = 1;
+        gShellArithmeticErrorPending = false;
+    }
+    gShellRuntime.last_status = status;
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", status);
+    shellSetTrackedVariable("EXSH_LAST_STATUS", buffer, false);
+    bool suppress_errexit = shellRuntimeEvaluatingCondition();
+    if (status != 0) {
+        if (gShellRuntime.errexit_enabled && !suppress_errexit) {
+            gShellRuntime.errexit_pending = true;
+            gShellRuntime.errexit_defer_active = true;
+        }
+    } else {
+        gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
+    }
+    gShellStatusSticky = false;
+}
+
+void shellRuntimeSetLastStatusSticky(int status) {
+    shellRuntimeSetLastStatus(status);
+    gShellStatusSticky = true;
 }
 
 void shellRuntimeRefreshTrapEnabled(void) {

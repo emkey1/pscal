@@ -28,6 +28,14 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 
+#if defined(__GNUC__)
+__attribute__((weak)) void shellRuntimeSetLastStatus(int status);
+__attribute__((weak)) void shellRuntimeSetLastStatusSticky(int status);
+#else
+void shellRuntimeSetLastStatus(int status);
+void shellRuntimeSetLastStatusSticky(int status);
+#endif
+
 // Maximum number of arguments allowed for write/writeln
 #define MAX_WRITE_ARGS_VM 32
 
@@ -4922,13 +4930,25 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     }
 
     int id = (int)asI64(tidVal);
-    if (!vmJoinThreadById(vm, id)) {
+    VM* thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    bool joined = thread_vm ? vmJoinThreadById(thread_vm, id) : false;
+    if (!joined && thread_vm && thread_vm != vm) {
+        joined = vmJoinThreadById(vm, id);
+        if (joined) {
+            thread_vm = vm;
+        }
+    }
+    if (!joined) {
         runtimeError(vm, "WaitForThread received invalid thread id %d.", id);
         return makeInt(-1);
     }
 
     bool status_flag = true;
-    if (vmThreadTakeResult(vm, id, NULL, false, &status_flag, false)) {
+    if (vmThreadTakeResult(thread_vm, id, NULL, false, &status_flag, false)) {
         return makeInt(status_flag ? 0 : 1);
     }
 
@@ -4969,11 +4989,28 @@ Value vmBuiltinThreadSpawnBuiltin(VM* vm, int arg_count, Value* args) {
     }
     if (!threadBuiltinIsAllowlisted(builtin_id)) {
         runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+        if (shellRuntimeSetLastStatusSticky) {
+            shellRuntimeSetLastStatusSticky(1);
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = false;
+            }
+        } else if (shellRuntimeSetLastStatus) {
+            shellRuntimeSetLastStatus(1);
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = false;
+            }
+        }
         return makeInt(-1);
     }
 
     const Value* builtin_args = (arg_count > 1) ? &args[1] : NULL;
-    int thread_id = vmSpawnBuiltinThread(vm, builtin_id, builtin_name, arg_count - 1, builtin_args);
+    VM* thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+    int thread_id = vmSpawnBuiltinThread(thread_vm, builtin_id, builtin_name, arg_count - 1, builtin_args);
     if (thread_id < 0) {
         runtimeError(vm, "ThreadSpawnBuiltin failed to start builtin '%s'.", builtin_name);
         return makeInt(-1);
@@ -5011,19 +5048,44 @@ Value vmBuiltinThreadGetResult(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    Thread* slot = &vm->threads[thread_id];
-    if (slot->active) {
-        runtimeError(vm, "Thread %d is still running; join it before retrieving the result.", thread_id);
-        return makeNil();
+    VM* thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    Thread* slot = NULL;
+    if (thread_vm && thread_id > 0 && thread_id < VM_MAX_THREADS) {
+        slot = &thread_vm->threads[thread_id];
+        if (slot->active) {
+            runtimeError(vm, "Thread %d is still running; join it before retrieving the result.", thread_id);
+            return makeNil();
+        }
     }
 
     bool status = false;
     Value result = makeNil();
-    if (!vmThreadTakeResult(vm, thread_id, &result, true, &status, consume_status)) {
-        runtimeError(vm, "Thread %d has no stored result.", thread_id);
-        return makeNil();
+    if (thread_vm && vmThreadTakeResult(thread_vm, thread_id, &result, true, &status, consume_status)) {
+        return result;
     }
-    return result;
+
+    if (thread_vm && thread_vm != vm) {
+        Thread* fallback_slot = NULL;
+        if (thread_id > 0 && thread_id < VM_MAX_THREADS) {
+            fallback_slot = &vm->threads[thread_id];
+            if (fallback_slot->active) {
+                runtimeError(vm,
+                             "Thread %d is still running; join it before retrieving the result.",
+                             thread_id);
+                return makeNil();
+            }
+        }
+        if (vmThreadTakeResult(vm, thread_id, &result, true, &status, consume_status)) {
+            return result;
+        }
+    }
+
+    runtimeError(vm, "Thread %d has no stored result.", thread_id);
+    return makeNil();
 }
 
 Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
@@ -5053,25 +5115,55 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    Thread* slot = &vm->threads[thread_id];
-    if (slot->active) {
-        runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
-        return makeBoolean(false);
+    VM* thread_vm = vm;
+    if (vm && vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    Thread* slot = NULL;
+    if (thread_vm && thread_id > 0 && thread_id < VM_MAX_THREADS) {
+        slot = &thread_vm->threads[thread_id];
+        if (slot->active) {
+            runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
+            return makeBoolean(false);
+        }
     }
 
     bool status = false;
     Value dropped = makeNil();
-    if (!vmThreadTakeResult(vm, thread_id, drop_result ? &dropped : NULL, drop_result, &status, true)) {
-        runtimeError(vm, "Thread %d has no stored status.", thread_id);
+    if (thread_vm &&
+        vmThreadTakeResult(thread_vm, thread_id, drop_result ? &dropped : NULL, drop_result, &status, true)) {
         if (drop_result) {
             freeValue(&dropped);
         }
-        return makeBoolean(false);
+        return makeBoolean(status);
     }
+
+    if (thread_vm && thread_vm != vm) {
+        Thread* fallback_slot = NULL;
+        if (thread_id > 0 && thread_id < VM_MAX_THREADS) {
+            fallback_slot = &vm->threads[thread_id];
+            if (fallback_slot->active) {
+                runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
+                if (drop_result) {
+                    freeValue(&dropped);
+                }
+                return makeBoolean(false);
+            }
+        }
+        if (vmThreadTakeResult(vm, thread_id, drop_result ? &dropped : NULL, drop_result, &status, true)) {
+            if (drop_result) {
+                freeValue(&dropped);
+            }
+            return makeBoolean(status);
+        }
+    }
+
+    runtimeError(vm, "Thread %d has no stored status.", thread_id);
     if (drop_result) {
         freeValue(&dropped);
     }
-    return makeBoolean(status);
+    return makeBoolean(false);
 }
 
 int getBuiltinIDForCompiler(const char *name) {

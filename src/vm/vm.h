@@ -128,6 +128,7 @@ typedef struct VM_s {
     // Threading support
     Thread threads[VM_MAX_THREADS];
     int threadCount;
+    struct VM_s* threadOwner;
 
     // Mutex support
     Mutex mutexes[VM_MAX_MUTEXES];
