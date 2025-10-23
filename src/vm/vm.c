@@ -743,6 +743,11 @@ static ThreadJob* vmThreadJobQueuePop(ThreadJobQueue* queue,
             pthread_mutex_unlock(&queue->mutex);
             return NULL;
         }
+        if (thread &&
+            (atomic_load(&thread->killRequested) || atomic_load(&thread->cancelRequested))) {
+            pthread_mutex_unlock(&queue->mutex);
+            return NULL;
+        }
         if (queue->head) {
             ThreadJob* job = queue->head;
             queue->head = job->next;
@@ -753,11 +758,6 @@ static ThreadJob* vmThreadJobQueuePop(ThreadJobQueue* queue,
             job->next = NULL;
             pthread_mutex_unlock(&queue->mutex);
             return job;
-        }
-        if (thread &&
-            (atomic_load(&thread->killRequested) || atomic_load(&thread->cancelRequested))) {
-            pthread_mutex_unlock(&queue->mutex);
-            return NULL;
         }
         pthread_cond_wait(&queue->cond, &queue->mutex);
         if (shuttingDownFlag && atomic_load(shuttingDownFlag)) {
