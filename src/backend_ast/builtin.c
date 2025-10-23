@@ -28,9 +28,12 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 
-#if defined(__GNUC__)
-__attribute__((weak)) void shellRuntimeSetLastStatus(int status);
-__attribute__((weak)) void shellRuntimeSetLastStatusSticky(int status);
+#if defined(__APPLE__)
+extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
+extern void shellRuntimeSetLastStatusSticky(int status) __attribute__((weak_import));
+#elif defined(__GNUC__)
+extern void shellRuntimeSetLastStatus(int status) __attribute__((weak));
+extern void shellRuntimeSetLastStatusSticky(int status) __attribute__((weak));
 #else
 void shellRuntimeSetLastStatus(int status);
 void shellRuntimeSetLastStatusSticky(int status);
