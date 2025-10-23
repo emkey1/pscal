@@ -25,8 +25,10 @@
 #include <limits.h>
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
+#include <sys/resource.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
+#include <stdatomic.h>
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -694,6 +696,13 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadgetstatus", vmBuiltinThreadGetStatus},
     {"threadspawnbuiltin", vmBuiltinThreadSpawnBuiltin},
     {"waitforthread", vmBuiltinWaitForThread},
+    {"threadcancel", vmBuiltinThreadCancel},
+    {"threadlookup", vmBuiltinThreadLookup},
+    {"threadpause", vmBuiltinThreadPause},
+    {"threadpoolsubmit", vmBuiltinThreadPoolSubmit},
+    {"threadresume", vmBuiltinThreadResume},
+    {"threadsetname", vmBuiltinThreadSetName},
+    {"threadstats", vmBuiltinThreadStats},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -4917,6 +4926,281 @@ static bool parseBooleanValue(const Value* value, bool* outBool) {
     return false;
 }
 
+typedef struct {
+    char name[THREAD_NAME_MAX];
+    bool submitOnly;
+} ThreadRequestOptions;
+
+static void initThreadRequestOptions(ThreadRequestOptions* options) {
+    if (!options) {
+        return;
+    }
+    options->name[0] = '\0';
+    options->submitOnly = false;
+}
+
+static void parseThreadRequestOptionsValue(const Value* value, ThreadRequestOptions* options) {
+    if (!value || !options || value->type != TYPE_RECORD) {
+        return;
+    }
+    for (FieldValue* field = value->record_val; field; field = field->next) {
+        if (!field->name) {
+            continue;
+        }
+        if (strcasecmp(field->name, "name") == 0) {
+            const char* requested = builtinValueToCString(&field->value);
+            if (requested) {
+                strncpy(options->name, requested, sizeof(options->name) - 1);
+                options->name[sizeof(options->name) - 1] = '\0';
+            }
+        } else if (strcasecmp(field->name, "submitonly") == 0 ||
+                   strcasecmp(field->name, "submit_only") == 0 ||
+                   strcasecmp(field->name, "queueonly") == 0 ||
+                   strcasecmp(field->name, "queue_only") == 0 ||
+                   strcasecmp(field->name, "queue") == 0) {
+            bool flag = false;
+            if (parseBooleanValue(&field->value, &flag)) {
+                options->submitOnly = flag;
+            }
+        }
+    }
+}
+
+static bool appendThreadField(FieldValue** head, FieldValue** tail, const char* name, Value value) {
+    if (!head || !tail || !name) {
+        freeValue(&value);
+        return false;
+    }
+    FieldValue* field = (FieldValue*)calloc(1, sizeof(FieldValue));
+    if (!field) {
+        freeValue(&value);
+        return false;
+    }
+    field->name = strdup(name);
+    if (!field->name) {
+        free(field);
+        freeValue(&value);
+        return false;
+    }
+    field->value = value;
+    field->next = NULL;
+    if (!*head) {
+        *head = field;
+    } else {
+        (*tail)->next = field;
+    }
+    *tail = field;
+    return true;
+}
+
+static long long timevalToMicros(const struct timeval* tv) {
+    if (!tv) {
+        return 0;
+    }
+    return (long long)tv->tv_sec * 1000000LL + (long long)tv->tv_usec;
+}
+
+static Value makeTimespecRecord(const struct timespec* ts) {
+    FieldValue* head = NULL;
+    FieldValue* tail = NULL;
+    const bool has_value = ts != NULL;
+    if (!appendThreadField(&head, &tail, "valid", makeBoolean(has_value ? 1 : 0))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+    if (has_value) {
+        if (!appendThreadField(&head, &tail, "seconds", makeInt64((long long)ts->tv_sec)) ||
+            !appendThreadField(&head, &tail, "nanoseconds", makeInt64((long long)ts->tv_nsec))) {
+            freeFieldValue(head);
+            return makeRecord(NULL);
+        }
+    }
+    return makeRecord(head);
+}
+
+static Value makeMetricsSampleRecord(const ThreadMetricsSample* sample) {
+    FieldValue* head = NULL;
+    FieldValue* tail = NULL;
+    const bool valid = sample && sample->valid;
+    if (!appendThreadField(&head, &tail, "valid", makeBoolean(valid ? 1 : 0))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+    if (valid) {
+        if (!appendThreadField(&head, &tail, "cpu_seconds", makeInt64((long long)sample->cpuTime.tv_sec)) ||
+            !appendThreadField(&head, &tail, "cpu_nanoseconds", makeInt64((long long)sample->cpuTime.tv_nsec)) ||
+            !appendThreadField(&head, &tail, "rss_bytes", makeInt64((long long)sample->rssBytes)) ||
+            !appendThreadField(&head, &tail, "user_micros", makeInt64(timevalToMicros(&sample->usage.ru_utime))) ||
+            !appendThreadField(&head, &tail, "system_micros", makeInt64(timevalToMicros(&sample->usage.ru_stime)))) {
+            freeFieldValue(head);
+            return makeRecord(NULL);
+        }
+    }
+    return makeRecord(head);
+}
+
+static Value makeMetricsRecord(const ThreadMetrics* metrics) {
+    FieldValue* head = NULL;
+    FieldValue* tail = NULL;
+    if (!appendThreadField(&head, &tail, "start", makeMetricsSampleRecord(metrics ? &metrics->start : NULL)) ||
+        !appendThreadField(&head, &tail, "end", makeMetricsSampleRecord(metrics ? &metrics->end : NULL))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+    return makeRecord(head);
+}
+
+static Value makeThreadStateRecord(int threadId, const Thread* thread) {
+    FieldValue* head = NULL;
+    FieldValue* tail = NULL;
+    const char* thread_name = (thread && thread->name[0] != '\0') ? thread->name : "";
+    if (!appendThreadField(&head, &tail, "id", makeInt(threadId)) ||
+        !appendThreadField(&head, &tail, "name", makeString(thread_name))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+
+    const bool active = thread && thread->active;
+    const bool in_pool = thread && thread->inPool;
+    const bool idle = thread && thread->idle;
+    const bool should_exit = thread && thread->shouldExit;
+    const bool awaiting_reuse = thread && thread->awaitingReuse;
+    const bool ready_for_reuse = thread && thread->readyForReuse;
+    const bool status_ready = thread && thread->statusReady;
+    const bool status_flag = thread && thread->statusFlag;
+    const bool status_consumed = thread && thread->statusConsumed;
+    const bool result_ready = thread && thread->resultReady;
+    const bool result_consumed = thread && thread->resultConsumed;
+    const bool paused = thread ? atomic_load(&thread->paused) : false;
+    const bool cancel_requested = thread ? atomic_load(&thread->cancelRequested) : false;
+    const bool kill_requested = thread ? atomic_load(&thread->killRequested) : false;
+
+    if (!appendThreadField(&head, &tail, "active", makeBoolean(active ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "in_pool", makeBoolean(in_pool ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "idle", makeBoolean(idle ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "should_exit", makeBoolean(should_exit ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "awaiting_reuse", makeBoolean(awaiting_reuse ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "ready_for_reuse", makeBoolean(ready_for_reuse ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "status_ready", makeBoolean(status_ready ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "status_success", makeBoolean(status_flag ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "status_consumed", makeBoolean(status_consumed ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "result_ready", makeBoolean(result_ready ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "result_consumed", makeBoolean(result_consumed ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "paused", makeBoolean(paused ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "cancel_requested", makeBoolean(cancel_requested ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "kill_requested", makeBoolean(kill_requested ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "pool_generation", makeInt(thread ? thread->poolGeneration : 0))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+
+    if (!appendThreadField(&head, &tail, "queued_at", makeTimespecRecord(thread ? &thread->queuedAt : NULL)) ||
+        !appendThreadField(&head, &tail, "started_at", makeTimespecRecord(thread ? &thread->startedAt : NULL)) ||
+        !appendThreadField(&head, &tail, "finished_at", makeTimespecRecord(thread ? &thread->finishedAt : NULL)) ||
+        !appendThreadField(&head, &tail, "metrics", makeMetricsRecord(thread ? &thread->metrics : NULL))) {
+        freeFieldValue(head);
+        return makeRecord(NULL);
+    }
+
+    return makeRecord(head);
+}
+
+static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool poolSubmit, const char* opName) {
+    if (!vm) {
+        return makeInt(-1);
+    }
+    if (arg_count < 1) {
+        runtimeError(vm, "%s expects a builtin identifier followed by optional arguments.", opName);
+        return makeInt(-1);
+    }
+
+    Value target = args[0];
+    int builtin_id = -1;
+    const char* builtin_name = NULL;
+    if (target.type == TYPE_STRING || target.type == TYPE_POINTER) {
+        const char* source_name = builtinValueToCString(&target);
+        if (!source_name || !*source_name) {
+            runtimeError(vm, "%s requires a builtin name or id.", opName);
+            return makeInt(-1);
+        }
+        builtin_id = getVmBuiltinID(source_name);
+        builtin_name = getVmBuiltinNameById(builtin_id);
+    } else if (IS_INTLIKE(target)) {
+        builtin_id = (int)asI64(target);
+        builtin_name = getVmBuiltinNameById(builtin_id);
+    } else {
+        runtimeError(vm, "%s requires a builtin name (string) or id (integer).", opName);
+        return makeInt(-1);
+    }
+
+    if (builtin_id < 0 || !builtin_name) {
+        runtimeError(vm, "%s received an unknown builtin identifier.", opName);
+        return makeInt(-1);
+    }
+    if (!threadBuiltinIsAllowlisted(builtin_id)) {
+        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+        if (shellRuntimeSetLastStatusSticky) {
+            shellRuntimeSetLastStatusSticky(1);
+#if defined(FRONTEND_SHELL)
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = false;
+            }
+#endif
+        } else if (shellRuntimeSetLastStatus) {
+            shellRuntimeSetLastStatus(1);
+#if defined(FRONTEND_SHELL)
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = false;
+            }
+#endif
+        }
+        return makeInt(-1);
+    }
+
+    int options_index = -1;
+    ThreadRequestOptions options;
+    initThreadRequestOptions(&options);
+    if (poolSubmit) {
+        options.submitOnly = true;
+    }
+    if (arg_count > 1) {
+        const Value* maybe_options = &args[arg_count - 1];
+        if (maybe_options->type == TYPE_RECORD) {
+            options_index = arg_count - 1;
+            parseThreadRequestOptionsValue(maybe_options, &options);
+        }
+    }
+
+    int builtin_argc = (options_index >= 0 ? options_index : arg_count) - 1;
+    if (builtin_argc < 0) {
+        builtin_argc = 0;
+    }
+    const Value* builtin_args = (builtin_argc > 0) ? &args[1] : NULL;
+
+    VM* thread_vm = vm;
+    if (vm->threadOwner) {
+        thread_vm = vm->threadOwner;
+    }
+
+    int thread_id = vmSpawnBuiltinThread(thread_vm, builtin_id, builtin_name, builtin_argc, builtin_args);
+    if (thread_id < 0) {
+        runtimeError(vm, "%s failed to start builtin '%s'.", opName, builtin_name);
+        return makeInt(-1);
+    }
+
+    if (options.name[0] != '\0') {
+        if (!vmThreadAssignName(thread_vm, thread_id, options.name) && thread_vm != vm) {
+            vmThreadAssignName(vm, thread_id, options.name);
+        }
+    }
+
+    Value thread_value = makeInt(thread_id);
+    thread_value.type = TYPE_THREAD;
+    return thread_value;
+}
+
 Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     if (!vm) {
         return makeInt(-1);
@@ -4959,73 +5243,11 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinThreadSpawnBuiltin(VM* vm, int arg_count, Value* args) {
-    if (!vm) {
-        return makeInt(-1);
-    }
-    if (arg_count < 1) {
-        runtimeError(vm, "ThreadSpawnBuiltin expects a builtin identifier followed by optional arguments.");
-        return makeInt(-1);
-    }
+    return threadSpawnOrSubmitCommon(vm, arg_count, args, false, "ThreadSpawnBuiltin");
+}
 
-    Value target = args[0];
-    int builtin_id = -1;
-    const char* builtin_name = NULL;
-    if (target.type == TYPE_STRING || target.type == TYPE_POINTER) {
-        const char* source_name = builtinValueToCString(&target);
-        if (!source_name || !*source_name) {
-            runtimeError(vm, "ThreadSpawnBuiltin requires a builtin name or id.");
-            return makeInt(-1);
-        }
-        builtin_id = getVmBuiltinID(source_name);
-        builtin_name = getVmBuiltinNameById(builtin_id);
-    } else if (IS_INTLIKE(target)) {
-        builtin_id = (int)asI64(target);
-        builtin_name = getVmBuiltinNameById(builtin_id);
-    } else {
-        runtimeError(vm, "ThreadSpawnBuiltin requires a builtin name (string) or id (integer).");
-        return makeInt(-1);
-    }
-
-    if (builtin_id < 0 || !builtin_name) {
-        runtimeError(vm, "ThreadSpawnBuiltin received an unknown builtin identifier.");
-        return makeInt(-1);
-    }
-    if (!threadBuiltinIsAllowlisted(builtin_id)) {
-        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
-        if (shellRuntimeSetLastStatusSticky) {
-            shellRuntimeSetLastStatusSticky(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
-            }
-#endif
-        } else if (shellRuntimeSetLastStatus) {
-            shellRuntimeSetLastStatus(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
-            }
-#endif
-        }
-        return makeInt(-1);
-    }
-
-    const Value* builtin_args = (arg_count > 1) ? &args[1] : NULL;
-    VM* thread_vm = vm;
-    if (vm && vm->threadOwner) {
-        thread_vm = vm->threadOwner;
-    }
-    int thread_id = vmSpawnBuiltinThread(thread_vm, builtin_id, builtin_name, arg_count - 1, builtin_args);
-    if (thread_id < 0) {
-        runtimeError(vm, "ThreadSpawnBuiltin failed to start builtin '%s'.", builtin_name);
-        return makeInt(-1);
-    }
-
-    Value thread_value = makeInt(thread_id);
-    thread_value.type = TYPE_THREAD;
-    return thread_value;
+Value vmBuiltinThreadPoolSubmit(VM* vm, int arg_count, Value* args) {
+    return threadSpawnOrSubmitCommon(vm, arg_count, args, true, "ThreadPoolSubmit");
 }
 
 Value vmBuiltinThreadGetResult(VM* vm, int arg_count, Value* args) {
@@ -5171,6 +5393,135 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
         freeValue(&dropped);
     }
     return makeBoolean(false);
+}
+
+Value vmBuiltinThreadSetName(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeBoolean(false);
+    }
+    if (arg_count != 2) {
+        runtimeError(vm, "ThreadSetName expects exactly 2 arguments (thread id, name).");
+        return makeBoolean(false);
+    }
+    int thread_id = -1;
+    if (!parseThreadIdValue(&args[0], &thread_id)) {
+        runtimeError(vm, "ThreadSetName requires a valid thread id.");
+        return makeBoolean(false);
+    }
+    const char* requested = builtinValueToCString(&args[1]);
+    if (!requested) {
+        runtimeError(vm, "ThreadSetName requires a thread name (string).");
+        return makeBoolean(false);
+    }
+    VM* thread_vm = vm->threadOwner ? vm->threadOwner : vm;
+    bool renamed = vmThreadAssignName(thread_vm, thread_id, requested);
+    if (!renamed && thread_vm != vm) {
+        renamed = vmThreadAssignName(vm, thread_id, requested);
+    }
+    return makeBoolean(renamed ? 1 : 0);
+}
+
+Value vmBuiltinThreadLookup(VM* vm, int arg_count, Value* args) {
+    if (!vm) {
+        return makeInt(-1);
+    }
+    if (arg_count != 1) {
+        runtimeError(vm, "ThreadLookup expects exactly 1 argument (thread name or id).");
+        return makeInt(-1);
+    }
+    VM* thread_vm = vm->threadOwner ? vm->threadOwner : vm;
+    int thread_id = -1;
+    const char* lookup = builtinValueToCString(&args[0]);
+    if (lookup && *lookup) {
+        thread_id = vmThreadFindIdByName(thread_vm, lookup);
+        if (thread_id < 0 && thread_vm != vm) {
+            thread_id = vmThreadFindIdByName(vm, lookup);
+        }
+    } else if (!parseThreadIdValue(&args[0], &thread_id)) {
+        runtimeError(vm, "ThreadLookup requires a thread name (string) or id (integer).");
+        return makeInt(-1);
+    }
+    if (thread_id <= 0 || thread_id >= VM_MAX_THREADS) {
+        return makeInt(-1);
+    }
+    Value result = makeInt(thread_id);
+    result.type = TYPE_THREAD;
+    return result;
+}
+
+static Value threadControlOperation(VM* vm, int arg_count, Value* args, const char* opName,
+                                    bool (*operation)(VM*, int)) {
+    if (!vm) {
+        return makeBoolean(false);
+    }
+    if (arg_count != 1) {
+        runtimeError(vm, "%s expects exactly 1 argument (thread id).", opName);
+        return makeBoolean(false);
+    }
+    int thread_id = -1;
+    if (!parseThreadIdValue(&args[0], &thread_id)) {
+        runtimeError(vm, "%s requires a valid thread id.", opName);
+        return makeBoolean(false);
+    }
+    VM* thread_vm = vm->threadOwner ? vm->threadOwner : vm;
+    bool success = operation(thread_vm, thread_id);
+    if (!success && thread_vm != vm) {
+        success = operation(vm, thread_id);
+    }
+    return makeBoolean(success ? 1 : 0);
+}
+
+Value vmBuiltinThreadPause(VM* vm, int arg_count, Value* args) {
+    return threadControlOperation(vm, arg_count, args, "ThreadPause", vmThreadPause);
+}
+
+Value vmBuiltinThreadResume(VM* vm, int arg_count, Value* args) {
+    return threadControlOperation(vm, arg_count, args, "ThreadResume", vmThreadResume);
+}
+
+Value vmBuiltinThreadCancel(VM* vm, int arg_count, Value* args) {
+    return threadControlOperation(vm, arg_count, args, "ThreadCancel", vmThreadCancel);
+}
+
+Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (!vm) {
+        return makeEmptyArray(TYPE_RECORD, NULL);
+    }
+    if (arg_count != 0) {
+        runtimeError(vm, "ThreadStats expects no arguments.");
+        return makeEmptyArray(TYPE_RECORD, NULL);
+    }
+
+    VM* thread_vm = vm->threadOwner ? vm->threadOwner : vm;
+    pthread_mutex_lock(&thread_vm->threadRegistryLock);
+    int active_count = 0;
+    for (int i = 1; i < VM_MAX_THREADS; ++i) {
+        if (thread_vm->threads[i].inPool) {
+            active_count++;
+        }
+    }
+    if (active_count <= 0) {
+        pthread_mutex_unlock(&thread_vm->threadRegistryLock);
+        return makeEmptyArray(TYPE_RECORD, NULL);
+    }
+
+    int lower_bounds[1] = {0};
+    int upper_bounds[1] = {active_count - 1};
+    Value result = makeArrayND(1, lower_bounds, upper_bounds, TYPE_RECORD, NULL);
+    int index = 0;
+    for (int i = 1; i < VM_MAX_THREADS && index < active_count; ++i) {
+        Thread* thread = &thread_vm->threads[i];
+        if (!thread->inPool) {
+            continue;
+        }
+        Value entry = makeThreadStateRecord(i, thread);
+        freeValue(&result.array_val[index]);
+        result.array_val[index] = entry;
+        index++;
+    }
+    pthread_mutex_unlock(&thread_vm->threadRegistryLock);
+    return result;
 }
 
 int getBuiltinIDForCompiler(const char *name) {
@@ -5706,6 +6057,13 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadSpawnBuiltin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadGetResult", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadGetStatus", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadPoolSubmit", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadSetName", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadLookup", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadPause", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadResume", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadCancel", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadStats", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);
