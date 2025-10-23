@@ -104,7 +104,11 @@ The exsh front end now includes `Examples/exsh/threading_demo`, which shows how
 to launch allow-listed VM builtins on worker threads with
 `ThreadSpawnBuiltin`/`WaitForThread`/`ThreadGetResult`. The script resolves
 `localhost` on a background worker, joins both the DNS lookup and a timer, and
-prints the stored result via the new helpers.
+prints the stored result via the new helpers. For a fuller tour, run
+`Examples/exsh/threading_showcase` to see `ThreadPoolSubmit`,
+`ThreadSetName`/`ThreadLookup`, the alternate `ThreadGetResult(..., true)`
+path, and a `ThreadStats` snapshot; set `THREAD_SHOWCASE_DELAY_MS` to tweak the
+queued delay.
 
 ## Tiny language front end (Written in Python)
 

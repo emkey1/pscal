@@ -78,6 +78,10 @@ bench run:
 - Run `build/bin/exsh Examples/exsh/threading_demo` to confirm thread names,
   status handling, and cooperative cancellation behave as expected for the
   builtins allowed on worker threads.【F:Examples/exsh/threading_demo†L1-L30】
+- Run `build/bin/exsh Examples/exsh/threading_showcase` to exercise
+  `ThreadSpawnBuiltin`, `ThreadPoolSubmit`, naming/lookup helpers, result
+  collection, and the `ThreadStats` snapshot in a single transcript before
+  landing worker-pool changes.【F:Examples/exsh/threading_showcase†L1-L135】
 - Execute `build/bin/pascal Examples/pascal/base/docs_examples/threading_config`
   after exporting `PSCAL_THREAD_POOL_SIZE=<n>` to verify Pascal observes the
   configured limit and reports worker usage through `ThreadStatsCount`.
