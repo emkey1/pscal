@@ -556,8 +556,7 @@ typedef enum {
     THREAD_JOB_BUILTIN
 } ThreadJobKind;
 
-typedef struct {
-    Thread* thread;
+typedef struct ThreadJob {
     ThreadJobKind kind;
     uint16_t entry;
     BytecodeChunk* chunk;
@@ -569,13 +568,393 @@ typedef struct {
     VmBuiltinFn builtin;
     int builtin_id;
     char* builtin_name;
+    VM* parentVm;
+    Thread* assignedThread;
+    int assignedThreadId;
+    bool assignmentSatisfied;
+    pthread_mutex_t assignmentMutex;
+    pthread_cond_t assignmentCond;
+    bool assignmentSyncInitialized;
+    char name[THREAD_NAME_MAX];
+    struct timespec queuedAt;
+    struct ThreadJob* next;
+} ThreadJob;
+
+typedef struct ThreadJobQueue {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    ThreadJob* head;
+    ThreadJob* tail;
+    int pending;
+    bool shuttingDown;
+} ThreadJobQueue;
+
+typedef struct {
+    Thread* thread;
+    VM* owner;
+    int threadId;
+    ThreadJob* initialJob;
 } ThreadStartArgs;
+
+static ThreadJobQueue* vmThreadJobQueueCreate(void) {
+    ThreadJobQueue* queue = (ThreadJobQueue*)calloc(1, sizeof(ThreadJobQueue));
+    if (!queue) {
+        return NULL;
+    }
+    pthread_mutex_init(&queue->mutex, NULL);
+    pthread_cond_init(&queue->cond, NULL);
+    queue->head = NULL;
+    queue->tail = NULL;
+    queue->pending = 0;
+    queue->shuttingDown = false;
+    return queue;
+}
+
+static void vmThreadJobQueueDestroy(ThreadJobQueue* queue) {
+    if (!queue) {
+        return;
+    }
+    pthread_mutex_lock(&queue->mutex);
+    queue->shuttingDown = true;
+    pthread_cond_broadcast(&queue->cond);
+    ThreadJob* job = queue->head;
+    queue->head = queue->tail = NULL;
+    queue->pending = 0;
+    pthread_mutex_unlock(&queue->mutex);
+    while (job) {
+        ThreadJob* next = job->next;
+        if (job->assignmentSyncInitialized) {
+            pthread_mutex_destroy(&job->assignmentMutex);
+            pthread_cond_destroy(&job->assignmentCond);
+            job->assignmentSyncInitialized = false;
+        }
+        if (job->args) {
+            for (int i = 0; i < job->argc; ++i) {
+                freeValue(&job->args[i]);
+            }
+            free(job->args);
+        }
+        free(job->builtin_name);
+        free(job);
+        job = next;
+    }
+    pthread_mutex_destroy(&queue->mutex);
+    pthread_cond_destroy(&queue->cond);
+    free(queue);
+}
+
+static void vmThreadMetricsReset(ThreadMetrics* metrics) {
+    if (!metrics) {
+        return;
+    }
+    memset(metrics, 0, sizeof(ThreadMetrics));
+    metrics->start.valid = false;
+    metrics->end.valid = false;
+}
+
+static size_t vmThreadConvertRssToBytes(long rss) {
+#if defined(__APPLE__) && defined(__MACH__)
+    return rss < 0 ? 0 : (size_t)rss;
+#else
+    return rss < 0 ? 0 : (size_t)rss * 1024u;
+#endif
+}
+
+static void vmThreadMetricsCapture(ThreadMetricsSample* sample) {
+    if (!sample) {
+        return;
+    }
+    struct timespec cpuTime;
+    bool success = false;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
+        sample->cpuTime = cpuTime;
+        success = true;
+    } else {
+        memset(&sample->cpuTime, 0, sizeof(struct timespec));
+    }
+
+    struct rusage usage;
+#ifdef RUSAGE_THREAD
+    if (getrusage(RUSAGE_THREAD, &usage) == 0) {
+#else
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+#endif
+        sample->usage = usage;
+        sample->rssBytes = vmThreadConvertRssToBytes(usage.ru_maxrss);
+        success = true;
+    } else {
+        memset(&sample->usage, 0, sizeof(struct rusage));
+        sample->rssBytes = 0;
+    }
+
+    sample->valid = success;
+}
+
+static void vmThreadJobDestroy(ThreadJob* job) {
+    if (!job) {
+        return;
+    }
+    if (job->assignmentSyncInitialized) {
+        pthread_mutex_destroy(&job->assignmentMutex);
+        pthread_cond_destroy(&job->assignmentCond);
+        job->assignmentSyncInitialized = false;
+    }
+    if (job->args) {
+        for (int i = 0; i < job->argc; ++i) {
+            freeValue(&job->args[i]);
+        }
+        free(job->args);
+    }
+    free(job->builtin_name);
+    free(job);
+}
+
+static bool vmThreadJobQueuePush(ThreadJobQueue* queue, ThreadJob* job) {
+    if (!queue || !job) {
+        return false;
+    }
+    pthread_mutex_lock(&queue->mutex);
+    if (queue->shuttingDown) {
+        pthread_mutex_unlock(&queue->mutex);
+        return false;
+    }
+    job->next = NULL;
+    if (!queue->head) {
+        queue->head = queue->tail = job;
+    } else {
+        queue->tail->next = job;
+        queue->tail = job;
+    }
+    queue->pending++;
+    pthread_cond_broadcast(&queue->cond);
+    pthread_mutex_unlock(&queue->mutex);
+    return true;
+}
+
+static ThreadJob* vmThreadJobQueuePop(ThreadJobQueue* queue, atomic_bool* shuttingDownFlag) {
+    if (!queue) {
+        return NULL;
+    }
+    pthread_mutex_lock(&queue->mutex);
+    while (!queue->head && !queue->shuttingDown) {
+        pthread_cond_wait(&queue->cond, &queue->mutex);
+        if (shuttingDownFlag && atomic_load(shuttingDownFlag)) {
+            queue->shuttingDown = true;
+            break;
+        }
+    }
+    if (queue->shuttingDown) {
+        pthread_mutex_unlock(&queue->mutex);
+        return NULL;
+    }
+    ThreadJob* job = queue->head;
+    queue->head = job->next;
+    if (!queue->head) {
+        queue->tail = NULL;
+    }
+    queue->pending--;
+    job->next = NULL;
+    pthread_mutex_unlock(&queue->mutex);
+    return job;
+}
+
+static ThreadJob* vmThreadJobCreate(VM* vm,
+                                    ThreadJobKind kind,
+                                    BytecodeChunk* chunk,
+                                    uint16_t entry,
+                                    int argc,
+                                    const Value* argv,
+                                    VMThreadCallback callback,
+                                    VMThreadCleanup cleanup,
+                                    void* user_data,
+                                    VmBuiltinFn builtin,
+                                    int builtin_id,
+                                    const char* builtin_name,
+                                    const char* explicitName) {
+    (void)vm;
+    ThreadJob* job = (ThreadJob*)calloc(1, sizeof(ThreadJob));
+    if (!job) {
+        return NULL;
+    }
+    job->kind = kind;
+    job->chunk = chunk;
+    job->entry = entry;
+    job->argc = 0;
+    job->args = NULL;
+    job->callback = callback;
+    job->cleanup = cleanup;
+    job->user_data = user_data;
+    job->builtin = builtin;
+    job->builtin_id = builtin_id;
+    job->builtin_name = builtin_name ? strdup(builtin_name) : NULL;
+    job->parentVm = vm;
+    job->assignedThread = NULL;
+    job->assignedThreadId = -1;
+    job->assignmentSatisfied = false;
+    job->assignmentSyncInitialized = false;
+    job->next = NULL;
+    clock_gettime(CLOCK_REALTIME, &job->queuedAt);
+
+    if (pthread_mutex_init(&job->assignmentMutex, NULL) == 0 &&
+        pthread_cond_init(&job->assignmentCond, NULL) == 0) {
+        job->assignmentSyncInitialized = true;
+    }
+
+    if (!job->assignmentSyncInitialized) {
+        vmThreadJobDestroy(job);
+        return NULL;
+    }
+
+    if (argc > 0 && argv) {
+        job->args = (Value*)calloc(argc, sizeof(Value));
+        if (!job->args) {
+            vmThreadJobDestroy(job);
+            return NULL;
+        }
+        for (int i = 0; i < argc; ++i) {
+            job->args[i] = makeCopyOfValue(&argv[i]);
+        }
+        job->argc = argc;
+    }
+
+    if (explicitName && explicitName[0] != '\0') {
+        strncpy(job->name, explicitName, sizeof(job->name) - 1);
+        job->name[sizeof(job->name) - 1] = '\0';
+    } else if (builtin_name) {
+        strncpy(job->name, builtin_name, sizeof(job->name) - 1);
+        job->name[sizeof(job->name) - 1] = '\0';
+    } else {
+        snprintf(job->name, sizeof(job->name), "thread-%d", builtin_id >= 0 ? builtin_id : 0);
+    }
+
+    return job;
+}
 
 // Forward declarations for helpers used by threadStart.
 static void push(VM* vm, Value value);
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address);
 static void vmPopulateProcedureAddressCache(VM* vm);
 static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address);
+
+static void vmThreadAssignInternalName(Thread* thread, int threadId, const char* requestedName) {
+    if (!thread) {
+        return;
+    }
+    if (requestedName && requestedName[0] != '\0') {
+        strncpy(thread->name, requestedName, sizeof(thread->name) - 1);
+        thread->name[sizeof(thread->name) - 1] = '\0';
+    } else {
+        snprintf(thread->name, sizeof(thread->name), "worker-%d", threadId);
+    }
+}
+
+static bool vmThreadPrepareWorkerVm(Thread* thread, VM* owner, ThreadJob* job, int threadId) {
+    if (!thread || !owner) {
+        return false;
+    }
+    if (!thread->vm) {
+        thread->vm = (VM*)calloc(1, sizeof(VM));
+        if (!thread->vm) {
+            return false;
+        }
+        initVM(thread->vm);
+        thread->ownsVm = true;
+    }
+
+    vmResetExecutionState(thread->vm);
+
+    VM* sourceVm = job && job->parentVm ? job->parentVm : owner;
+    if (sourceVm) {
+        thread->vm->vmGlobalSymbols = sourceVm->vmGlobalSymbols;
+        thread->vm->vmConstGlobalSymbols = sourceVm->vmConstGlobalSymbols;
+        thread->vm->procedureTable = sourceVm->procedureTable;
+        memcpy(thread->vm->host_functions, sourceVm->host_functions, sizeof(sourceVm->host_functions));
+        thread->vm->chunk = (job && job->chunk) ? job->chunk : sourceVm->chunk;
+        thread->vm->mutexOwner = sourceVm->mutexOwner ? sourceVm->mutexOwner : sourceVm;
+        thread->vm->mutexCount = thread->vm->mutexOwner->mutexCount;
+        thread->vm->threadOwner = sourceVm->threadOwner ? sourceVm->threadOwner : sourceVm;
+        thread->vm->trace_head_instructions = sourceVm->trace_head_instructions;
+    } else {
+        thread->vm->chunk = (job && job->chunk) ? job->chunk : owner->chunk;
+        thread->vm->mutexOwner = owner;
+        thread->vm->threadOwner = owner;
+        thread->vm->trace_head_instructions = owner->trace_head_instructions;
+    }
+    thread->vm->trace_executed = 0;
+    thread->vm->owningThread = thread;
+    thread->vm->threadId = threadId;
+    return true;
+}
+
+static void vmThreadJobSignalAssignment(ThreadJob* job, Thread* thread, int threadId) {
+    if (!job || !job->assignmentSyncInitialized) {
+        return;
+    }
+    pthread_mutex_lock(&job->assignmentMutex);
+    job->assignedThread = thread;
+    job->assignedThreadId = threadId;
+    job->assignmentSatisfied = true;
+    pthread_cond_broadcast(&job->assignmentCond);
+    pthread_mutex_unlock(&job->assignmentMutex);
+}
+
+static bool vmThreadAwaitResume(Thread* thread) {
+    if (!thread) {
+        return false;
+    }
+    if (!thread->stateSyncInitialized) {
+        return true;
+    }
+    bool continueWork = true;
+    pthread_mutex_lock(&thread->stateMutex);
+    while (atomic_load(&thread->paused) && !atomic_load(&thread->killRequested)) {
+        pthread_cond_wait(&thread->stateCond, &thread->stateMutex);
+    }
+    if (atomic_load(&thread->cancelRequested) || atomic_load(&thread->killRequested)) {
+        continueWork = false;
+    }
+    pthread_mutex_unlock(&thread->stateMutex);
+    return continueWork;
+}
+
+static void vmThreadWakeStateWaiters(Thread* thread) {
+    if (!thread) {
+        return;
+    }
+    if (thread->stateSyncInitialized) {
+        pthread_mutex_lock(&thread->stateMutex);
+        pthread_cond_broadcast(&thread->stateCond);
+        pthread_mutex_unlock(&thread->stateMutex);
+    }
+    if (thread->syncInitialized) {
+        pthread_mutex_lock(&thread->resultMutex);
+        pthread_cond_broadcast(&thread->resultCond);
+        pthread_mutex_unlock(&thread->resultMutex);
+    }
+}
+
+static void vmThreadStoreResultDirect(Thread* thread, const Value* result, bool success) {
+    if (!thread || !thread->syncInitialized) {
+        return;
+    }
+    pthread_mutex_lock(&thread->resultMutex);
+    if (thread->resultReady) {
+        freeValue(&thread->resultValue);
+        thread->resultReady = false;
+    }
+    if (result) {
+        thread->resultValue = makeCopyOfValue(result);
+    } else {
+        thread->resultValue = makeNil();
+    }
+    thread->resultReady = result != NULL;
+    thread->resultConsumed = false;
+    thread->statusFlag = success;
+    thread->statusReady = true;
+    thread->statusConsumed = false;
+    pthread_cond_broadcast(&thread->resultCond);
+    pthread_mutex_unlock(&thread->resultMutex);
+}
 
 static void vmThreadResetResult(Thread* thread) {
     if (!thread) {
@@ -590,6 +969,14 @@ static void vmThreadResetResult(Thread* thread) {
     thread->statusReady = false;
     thread->statusFlag = false;
     thread->statusConsumed = false;
+    thread->currentJob = NULL;
+    thread->awaitingReuse = false;
+    thread->readyForReuse = false;
+    thread->queuedAt = (struct timespec){0, 0};
+    thread->startedAt = (struct timespec){0, 0};
+    thread->finishedAt = (struct timespec){0, 0};
+    vmThreadMetricsReset(&thread->metrics);
+    thread->name[0] = '\0';
 }
 
 static void vmThreadInitSlot(Thread* thread) {
@@ -601,8 +988,24 @@ static void vmThreadInitSlot(Thread* thread) {
         pthread_cond_init(&thread->resultCond, NULL);
         thread->syncInitialized = true;
     }
+    if (!thread->stateSyncInitialized) {
+        pthread_mutex_init(&thread->stateMutex, NULL);
+        pthread_cond_init(&thread->stateCond, NULL);
+        thread->stateSyncInitialized = true;
+    }
     thread->active = false;
     thread->vm = NULL;
+    thread->ownsVm = false;
+    thread->inPool = false;
+    thread->idle = false;
+    thread->shouldExit = false;
+    thread->awaitingReuse = false;
+    thread->readyForReuse = false;
+    thread->poolGeneration = 0;
+    thread->currentJob = NULL;
+    atomic_store(&thread->paused, false);
+    atomic_store(&thread->cancelRequested, false);
+    atomic_store(&thread->killRequested, false);
     vmThreadResetResult(thread);
 }
 
@@ -615,158 +1018,252 @@ static void vmThreadDestroySlot(Thread* thread) {
         pthread_cond_destroy(&thread->resultCond);
         thread->syncInitialized = false;
     }
+    if (thread->stateSyncInitialized) {
+        pthread_mutex_destroy(&thread->stateMutex);
+        pthread_cond_destroy(&thread->stateCond);
+        thread->stateSyncInitialized = false;
+    }
     if (thread->resultReady) {
         freeValue(&thread->resultValue);
         thread->resultReady = false;
     }
 }
 
-static bool vmThreadCanAcceptJob(const Thread* thread) {
-    if (!thread) {
-        return false;
-    }
-    return !thread->active && thread->vm == NULL && !thread->statusReady && !thread->resultReady;
-}
-
 static void* threadStart(void* arg) {
     ThreadStartArgs* args = (ThreadStartArgs*)arg;
-    if (!args) return NULL;
+    if (!args) {
+        return NULL;
+    }
 
     Thread* thread = args->thread;
-    VM* vm = thread ? thread->vm : NULL;
-
-    ThreadJobKind kind = args->kind;
-    uint16_t entry = args->entry;
-    BytecodeChunk* chunk = args->chunk;
-    int argc = args->argc;
-    Value* jobArgs = args->args;
-    VMThreadCallback callback = args->callback;
-    VMThreadCleanup cleanup = args->cleanup;
-    void* user_data = args->user_data;
-    VmBuiltinFn builtin = args->builtin;
-    char* builtin_name = args->builtin_name;
-
+    VM* owner = args->owner;
+    int threadId = args->threadId;
+    ThreadJob* job = args->initialJob;
     free(args);
 
-    if (!thread || !vm) {
-        if (jobArgs) {
-            for (int i = 0; i < argc; i++) {
-                freeValue(&jobArgs[i]);
-            }
-            free(jobArgs);
-        }
-        free(builtin_name);
-        if (cleanup && user_data) {
-            cleanup(user_data);
-        }
-        if (thread) {
-            thread->active = false;
+    if (!thread || !owner) {
+        if (job) {
+            vmThreadJobDestroy(job);
         }
         return NULL;
     }
 
-    if (!chunk) {
-        chunk = vm->chunk;
-    }
+    while (!atomic_load(&owner->shuttingDownWorkers) && !atomic_load(&thread->killRequested)) {
+        if (!job) {
+            pthread_mutex_lock(&owner->threadRegistryLock);
+            owner->availableWorkers++;
+            thread->idle = true;
+            pthread_mutex_unlock(&owner->threadRegistryLock);
 
-    switch (kind) {
-        case THREAD_JOB_CALLBACK:
-            if (callback) {
-                callback(vm, user_data);
+            job = vmThreadJobQueuePop(owner->jobQueue, &owner->shuttingDownWorkers);
+
+            pthread_mutex_lock(&owner->threadRegistryLock);
+            if (owner->availableWorkers > 0) {
+                owner->availableWorkers--;
             }
-            if (cleanup) {
-                cleanup(user_data);
+            thread->idle = false;
+            pthread_mutex_unlock(&owner->threadRegistryLock);
+
+            if (!job) {
+                break;
             }
-            break;
-        case THREAD_JOB_BUILTIN: {
-            bool success = false;
-            Value resultValue = makeNil();
-            const char* previous_builtin = vm->current_builtin_name;
-            if (builtin) {
-                if (builtin_name) {
-                    vm->current_builtin_name = builtin_name;
-                }
-                resultValue = builtin(vm, argc, jobArgs);
-                success = !vm->abort_requested;
-                vmThreadStoreResult(vm, &resultValue, success);
-                if (builtin_name) {
-                    vm->current_builtin_name = previous_builtin;
-                }
-                freeValue(&resultValue);
-            } else {
-                vmThreadStoreResult(vm, NULL, false);
-            }
-            break;
         }
-        case THREAD_JOB_BYTECODE: {
-            Symbol* proc_symbol = vmGetProcedureByAddress(vm, entry);
 
-            CallFrame* frame = &vm->frames[vm->frameCount++];
-            frame->return_address = NULL;
-            frame->slots = vm->stack;
-            frame->function_symbol = proc_symbol;
-            frame->slotCount = 0;
-            frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
-            frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
-            frame->upvalues = NULL;
-            frame->discard_result_on_return = false;
-            frame->vtable = NULL;
+        pthread_mutex_lock(&thread->stateMutex);
+        vmThreadResetResult(thread);
+        vmThreadAssignInternalName(thread, threadId, job->name);
+        thread->queuedAt = job->queuedAt;
+        thread->currentJob = job;
+        thread->active = true;
+        atomic_store(&thread->cancelRequested, false);
+        atomic_store(&thread->paused, false);
+        pthread_mutex_unlock(&thread->stateMutex);
+        vmThreadJobSignalAssignment(job, thread, threadId);
 
-            if (proc_symbol && proc_symbol->upvalue_count > 0) {
-                frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
-                if (frame->upvalues) {
-                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
-                        frame->upvalues[i] = NULL;
-                    }
+        if (!vmThreadPrepareWorkerVm(thread, owner, job, threadId)) {
+            vmThreadStoreResultDirect(thread, NULL, false);
+            vmThreadJobDestroy(job);
+            job = NULL;
+            continue;
+        }
+
+        if (!vmThreadAwaitResume(thread)) {
+            atomic_store(&thread->cancelRequested, true);
+        }
+
+        bool canceled = atomic_load(&thread->cancelRequested);
+        bool killed = atomic_load(&thread->killRequested) || atomic_load(&owner->shuttingDownWorkers);
+
+        if (!canceled && !killed) {
+            clock_gettime(CLOCK_REALTIME, &thread->startedAt);
+            pthread_mutex_lock(&thread->stateMutex);
+            vmThreadMetricsCapture(&thread->metrics.start);
+            pthread_mutex_unlock(&thread->stateMutex);
+        }
+
+        VM* workerVm = thread->vm;
+        if (!workerVm) {
+            canceled = true;
+        }
+
+        if (!canceled && !killed && workerVm) {
+            workerVm->current_builtin_name = NULL;
+            workerVm->abort_requested = false;
+            workerVm->exit_requested = false;
+        }
+
+        switch (job->kind) {
+            case THREAD_JOB_CALLBACK:
+                if (!canceled && !killed && job->callback && workerVm) {
+                    job->callback(workerVm, job->user_data);
                 }
+                if (job->cleanup) {
+                    job->cleanup(job->user_data);
+                }
+                if (canceled || killed) {
+                    vmThreadStoreResultDirect(thread, NULL, false);
+                }
+                break;
+            case THREAD_JOB_BUILTIN: {
+                bool success = false;
+                if (!canceled && !killed && job->builtin && workerVm) {
+                    const char* previous_builtin = workerVm->current_builtin_name;
+                    if (job->builtin_name) {
+                        workerVm->current_builtin_name = job->builtin_name;
+                    }
+                    Value resultValue = job->builtin(workerVm, job->argc, job->args);
+                    success = !workerVm->abort_requested;
+                    vmThreadStoreResult(workerVm, &resultValue, success);
+                    freeValue(&resultValue);
+                    workerVm->current_builtin_name = previous_builtin;
+                } else {
+                    vmThreadStoreResultDirect(thread, NULL, false);
+                }
+                break;
             }
+            case THREAD_JOB_BYTECODE: {
+                if (!canceled && !killed && workerVm) {
+                    Symbol* proc_symbol = vmGetProcedureByAddress(workerVm, job->entry);
+                    CallFrame* frame = &workerVm->frames[workerVm->frameCount++];
+                    frame->return_address = NULL;
+                    frame->slots = workerVm->stack;
+                    frame->function_symbol = proc_symbol;
+                    frame->slotCount = 0;
+                    frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
+                    frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
+                    frame->upvalues = NULL;
+                    frame->discard_result_on_return = false;
+                    frame->vtable = NULL;
 
-            int expected = proc_symbol && proc_symbol->type_def ? proc_symbol->type_def->child_count : argc;
-            int pushed_args = 0;
-            int limit = argc;
-            if (limit > 8) limit = 8;
-            for (int i = 0; i < expected && i < limit; i++) {
-                Value v = jobArgs ? jobArgs[i] : makeNil();
-                if (proc_symbol && proc_symbol->type_def) {
-                    AST* param_ast = proc_symbol->type_def->children[i];
-                    if (param_ast) {
-                        if (isRealType(param_ast->var_type) && isIntlikeType(v.type)) {
-                            long double tmp = asLd(v);
-                            setTypeValue(&v, param_ast->var_type);
-                            SET_REAL_VALUE(&v, tmp);
+                    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+                        frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
+                        if (frame->upvalues) {
+                            for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                                frame->upvalues[i] = NULL;
+                            }
                         }
                     }
+
+                    int expected = proc_symbol && proc_symbol->type_def ? proc_symbol->type_def->child_count : job->argc;
+                    int pushed_args = 0;
+                    int limit = job->argc;
+                    if (limit > 8) limit = 8;
+                    for (int i = 0; i < expected && i < limit; i++) {
+                        Value v = job->args ? job->args[i] : makeNil();
+                        if (proc_symbol && proc_symbol->type_def) {
+                            AST* param_ast = proc_symbol->type_def->children[i];
+                            if (param_ast) {
+                                if (isRealType(param_ast->var_type) && isIntlikeType(v.type)) {
+                                    long double tmp = asLd(v);
+                                    setTypeValue(&v, param_ast->var_type);
+                                    SET_REAL_VALUE(&v, tmp);
+                                }
+                            }
+                        }
+                        push(workerVm, v);
+                        pushed_args++;
+                    }
+
+                    for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
+                        push(workerVm, makeNil());
+                    }
+
+                    if (proc_symbol) {
+                        frame->slotCount = (uint16_t)(pushed_args + proc_symbol->locals_count);
+                    } else {
+                        frame->slotCount = (uint16_t)pushed_args;
+                    }
+
+                    interpretBytecode(workerVm, workerVm->chunk, workerVm->vmGlobalSymbols, workerVm->vmConstGlobalSymbols, workerVm->procedureTable, job->entry);
+                } else {
+                    vmThreadStoreResultDirect(thread, NULL, false);
                 }
-                push(vm, v);
-                pushed_args++;
+                break;
             }
+            default:
+                break;
+        }
 
-            for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
-                push(vm, makeNil());
-            }
+        if (!thread->statusReady) {
+            vmThreadStoreResultDirect(thread, NULL, !(canceled || killed));
+        }
 
-            if (proc_symbol) {
-                frame->slotCount = (uint16_t)(pushed_args + proc_symbol->locals_count);
-            } else {
-                frame->slotCount = (uint16_t)pushed_args;
-            }
+        if (!canceled && !killed) {
+            pthread_mutex_lock(&thread->stateMutex);
+            vmThreadMetricsCapture(&thread->metrics.end);
+            pthread_mutex_unlock(&thread->stateMutex);
+            clock_gettime(CLOCK_REALTIME, &thread->finishedAt);
+        } else {
+            vmThreadStoreResultDirect(thread, NULL, false);
+        }
 
-            interpretBytecode(vm, chunk, vm->vmGlobalSymbols, vm->vmConstGlobalSymbols, vm->procedureTable, entry);
+        vmThreadJobDestroy(job);
+        job = NULL;
+
+        pthread_mutex_lock(&thread->stateMutex);
+        thread->awaitingReuse = true;
+        pthread_cond_broadcast(&thread->stateCond);
+        while (!thread->readyForReuse && !atomic_load(&thread->killRequested) && !atomic_load(&owner->shuttingDownWorkers)) {
+            pthread_cond_wait(&thread->stateCond, &thread->stateMutex);
+        }
+        bool exitLoop = atomic_load(&thread->killRequested) || atomic_load(&owner->shuttingDownWorkers);
+        thread->awaitingReuse = false;
+        thread->readyForReuse = false;
+        pthread_mutex_unlock(&thread->stateMutex);
+
+        if (exitLoop) {
             break;
         }
-        default:
-            break;
+
+        pthread_mutex_lock(&thread->stateMutex);
+        vmThreadResetResult(thread);
+        thread->active = false;
+        pthread_mutex_unlock(&thread->stateMutex);
+        workerVm = thread->vm;
     }
 
+    pthread_mutex_lock(&owner->threadRegistryLock);
+    if (owner->availableWorkers > 0 && thread->idle) {
+        owner->availableWorkers--;
+    }
+    pthread_mutex_lock(&thread->stateMutex);
+    thread->idle = false;
     thread->active = false;
+    pthread_mutex_unlock(&thread->stateMutex);
+    owner->workerCount--;
+    pthread_mutex_unlock(&owner->threadRegistryLock);
 
-    if (jobArgs) {
-        for (int i = 0; i < argc; i++) {
-            freeValue(&jobArgs[i]);
-        }
-        free(jobArgs);
+    if (thread->ownsVm && thread->vm) {
+        freeVM(thread->vm);
+        free(thread->vm);
+        thread->vm = NULL;
+        thread->ownsVm = false;
     }
-    free(builtin_name);
+    pthread_mutex_lock(&thread->stateMutex);
+    vmThreadResetResult(thread);
+    pthread_mutex_unlock(&thread->stateMutex);
+    thread->inPool = false;
+    thread->currentJob = NULL;
 
     return NULL;
 }
@@ -782,98 +1279,110 @@ static int createThreadJob(VM* vm,
                            void* user_data,
                            VmBuiltinFn builtin,
                            int builtin_id,
-                           const char* builtin_name) {
-    if (!vm) return -1;
-    int id = -1;
-    for (int i = 1; i < VM_MAX_THREADS; i++) {
-        if (vmThreadCanAcceptJob(&vm->threads[i])) {
-            id = i;
-            break;
-        }
-    }
-    if (id == -1) return -1;
-
-    Thread* t = &vm->threads[id];
-    vmThreadResetResult(t);
-    t->vm = malloc(sizeof(VM));
-    if (!t->vm) return -1;
-    initVM(t->vm);
-    t->vm->vmGlobalSymbols = vm->vmGlobalSymbols;
-    t->vm->vmConstGlobalSymbols = vm->vmConstGlobalSymbols;
-    t->vm->procedureTable = vm->procedureTable;
-    memcpy(t->vm->host_functions, vm->host_functions, sizeof(vm->host_functions));
-    t->vm->chunk = chunk ? chunk : vm->chunk;
-    t->vm->mutexOwner = vm->mutexOwner ? vm->mutexOwner : vm;
-    t->vm->mutexCount = t->vm->mutexOwner->mutexCount;
-    t->vm->threadOwner = vm->threadOwner ? vm->threadOwner : vm;
-    t->vm->trace_head_instructions = vm->trace_head_instructions;
-    t->vm->trace_executed = 0;
-    t->vm->owningThread = t;
-    t->vm->threadId = id;
-
-    ThreadStartArgs* args = calloc(1, sizeof(ThreadStartArgs));
-    if (!args) {
-        free(t->vm);
-        t->vm = NULL;
+                           const char* builtin_name,
+                           const char* threadName) {
+    if (!vm) {
         return -1;
     }
-    args->thread = t;
-    args->kind = kind;
-    args->entry = entry;
-    args->chunk = chunk ? chunk : vm->chunk;
-    args->argc = 0;
-    args->args = NULL;
-    if (argc > 0 && argv) {
-        int copyCount = argc;
-        if (kind == THREAD_JOB_BYTECODE && copyCount > 8) {
-            copyCount = 8;
+
+    ThreadJob* job = vmThreadJobCreate(vm, kind, chunk, entry, argc, argv, callback, cleanup, user_data, builtin, builtin_id, builtin_name, threadName);
+    if (!job) {
+        return -1;
+    }
+
+    int assignedId = -1;
+    Thread* assignedThread = NULL;
+    bool spawnNewWorker = false;
+
+    pthread_mutex_lock(&vm->threadRegistryLock);
+    if (!vm->jobQueue) {
+        pthread_mutex_unlock(&vm->threadRegistryLock);
+        vmThreadJobDestroy(job);
+        return -1;
+    }
+
+    if (vm->workerCount < VM_MAX_WORKERS) {
+        for (int i = 1; i < VM_MAX_THREADS; ++i) {
+            Thread* candidate = &vm->threads[i];
+            if (!candidate->inPool) {
+                assignedThread = candidate;
+                assignedId = i;
+                spawnNewWorker = true;
+                break;
+            }
         }
-        args->args = calloc(copyCount, sizeof(Value));
-        if (!args->args) {
-            free(args);
-            free(t->vm);
-            t->vm = NULL;
+    }
+
+    if (spawnNewWorker && assignedThread) {
+        assignedThread->inPool = true;
+        assignedThread->active = true;
+        assignedThread->idle = false;
+        assignedThread->poolGeneration++;
+        vm->workerCount++;
+        pthread_mutex_unlock(&vm->threadRegistryLock);
+
+        vmThreadAssignInternalName(assignedThread, assignedId, job->name);
+        assignedThread->queuedAt = job->queuedAt;
+        assignedThread->currentJob = job;
+        assignedThread->readyForReuse = false;
+        assignedThread->awaitingReuse = false;
+        atomic_store(&assignedThread->cancelRequested, false);
+        atomic_store(&assignedThread->killRequested, false);
+
+        ThreadStartArgs* args = (ThreadStartArgs*)calloc(1, sizeof(ThreadStartArgs));
+        if (!args) {
+            pthread_mutex_lock(&vm->threadRegistryLock);
+            vm->workerCount--;
+            assignedThread->inPool = false;
+            pthread_mutex_unlock(&vm->threadRegistryLock);
+            vmThreadJobDestroy(job);
             return -1;
         }
-        for (int i = 0; i < copyCount; i++) {
-            args->args[i] = makeCopyOfValue(&argv[i]);
+
+        args->thread = assignedThread;
+        args->owner = vm;
+        args->threadId = assignedId;
+        args->initialJob = job;
+
+        if (pthread_create(&assignedThread->handle, NULL, threadStart, args) != 0) {
+            free(args);
+            pthread_mutex_lock(&vm->threadRegistryLock);
+            vm->workerCount--;
+            assignedThread->inPool = false;
+            pthread_mutex_unlock(&vm->threadRegistryLock);
+            vmThreadJobDestroy(job);
+            return -1;
         }
-        args->argc = copyCount;
+
+        vmThreadJobSignalAssignment(job, assignedThread, assignedId);
+        if (assignedId >= vm->threadCount) {
+            vm->threadCount = assignedId + 1;
+        }
+        return assignedId;
     }
-    args->callback = callback;
-    args->cleanup = cleanup;
-    args->user_data = user_data;
-    args->builtin = builtin;
-    args->builtin_id = builtin_id;
-    args->builtin_name = builtin_name ? strdup(builtin_name) : NULL;
-    t->active = true;
-    if (pthread_create(&t->handle, NULL, threadStart, args) != 0) {
-        if (args->args) {
-            for (int i = 0; i < args->argc; i++) {
-                freeValue(&args->args[i]);
-            }
-            free(args->args);
-        }
-        free(args->builtin_name);
-        free(args);
-        free(t->vm);
-        t->vm = NULL;
-        t->active = false;
-        vmThreadResetResult(t);
-        if (cleanup && user_data) {
-            cleanup(user_data);
-        }
+
+    pthread_mutex_unlock(&vm->threadRegistryLock);
+
+    if (!vmThreadJobQueuePush(vm->jobQueue, job)) {
+        vmThreadJobDestroy(job);
         return -1;
     }
 
-    if (id >= vm->threadCount) {
-        vm->threadCount = id + 1;
+    if (job->assignmentSyncInitialized) {
+        pthread_mutex_lock(&job->assignmentMutex);
+        while (!job->assignmentSatisfied) {
+            pthread_cond_wait(&job->assignmentCond, &job->assignmentMutex);
+        }
+        assignedThread = job->assignedThread;
+        assignedId = job->assignedThreadId;
+        pthread_mutex_unlock(&job->assignmentMutex);
     }
-    return id;
+
+    return assignedThread ? assignedId : -1;
 }
 
 static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, const Value* argv) {
-    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL, NULL, -1, NULL);
+    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL, NULL, -1, NULL, NULL);
 }
 
 // Backward-compatible helper: no argument provided, pass NIL
@@ -888,7 +1397,7 @@ int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VM
         }
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL);
+    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL, NULL);
 }
 
 int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount, const Value* args) {
@@ -899,7 +1408,7 @@ int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int arg
     if (!handler) {
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, argCount, args, NULL, NULL, NULL, handler, builtinId, builtinName);
+    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, argCount, args, NULL, NULL, NULL, handler, builtinId, builtinName, builtinName);
 }
 
 void vmThreadStoreResult(VM* vm, const Value* result, bool success) {
@@ -940,7 +1449,7 @@ bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, 
 
     pthread_mutex_lock(&thread->resultMutex);
     while (!thread->statusReady) {
-        if (!thread->active) {
+        if (!thread->active && !thread->awaitingReuse) {
             pthread_mutex_unlock(&thread->resultMutex);
             return false;
         }
@@ -968,20 +1477,33 @@ bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, 
         }
         thread->resultConsumed = true;
     } else if (outResult) {
-        *outResult = makeNil();
-    }
-
-    if (thread->statusConsumed && !thread->resultReady) {
-        thread->statusReady = false;
-        thread->statusConsumed = false;
-        thread->resultConsumed = false;
-        if (thread->resultValue.type != TYPE_NIL) {
-            freeValue(&thread->resultValue);
-            thread->resultValue = makeNil();
+        if (thread->resultReady) {
+            *outResult = makeCopyOfValue(&thread->resultValue);
+        } else {
+            *outResult = makeNil();
         }
     }
 
+    bool releaseWorker = false;
+    if (thread->statusConsumed && (!thread->resultReady || thread->resultConsumed)) {
+        if (thread->resultReady) {
+            freeValue(&thread->resultValue);
+            thread->resultValue = makeNil();
+            thread->resultReady = false;
+        }
+        thread->statusReady = false;
+        thread->statusConsumed = false;
+        thread->resultConsumed = false;
+        releaseWorker = true;
+    }
     pthread_mutex_unlock(&thread->resultMutex);
+
+    if (releaseWorker) {
+        pthread_mutex_lock(&thread->stateMutex);
+        thread->readyForReuse = true;
+        pthread_cond_broadcast(&thread->stateCond);
+        pthread_mutex_unlock(&thread->stateMutex);
+    }
     return true;
 }
 
@@ -989,28 +1511,23 @@ static bool joinThreadInternal(VM* vm, int id) {
     if (!vm) {
         return false;
     }
-    // Thread IDs start at 1. ID 0 represents the main thread and cannot be
-    // joined through this helper. Only negative IDs or those beyond the
-    // current thread count are invalid.
-    if (id <= 0 || id >= vm->threadCount) {
+    if (id <= 0 || id >= VM_MAX_THREADS) {
         return false;
     }
 
-    Thread* t = &vm->threads[id];
-    if (t->active) {
-        pthread_join(t->handle, NULL);
-        t->active = false;
+    Thread* thread = &vm->threads[id];
+    if (!thread->inPool) {
+        return false;
     }
-    if (t->vm) {
-        freeVM(t->vm);
-        free(t->vm);
-        t->vm = NULL;
+    pthread_mutex_lock(&thread->resultMutex);
+    while (!thread->statusReady) {
+        if (!thread->active && !thread->awaitingReuse) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            return false;
+        }
+        pthread_cond_wait(&thread->resultCond, &thread->resultMutex);
     }
-    while (vm->threadCount > 1 &&
-           !vm->threads[vm->threadCount - 1].active &&
-           vm->threads[vm->threadCount - 1].vm == NULL) {
-        vm->threadCount--;
-    }
+    pthread_mutex_unlock(&thread->resultMutex);
     return true;
 }
 
@@ -1020,6 +1537,122 @@ static void joinThread(VM* vm, int id) {
 
 bool vmJoinThreadById(VM* vm, int id) {
     return joinThreadInternal(vm, id);
+}
+
+bool vmThreadAssignName(VM* vm, int threadId, const char* name) {
+    if (!vm || threadId <= 0 || threadId >= VM_MAX_THREADS) {
+        return false;
+    }
+    pthread_mutex_lock(&vm->threadRegistryLock);
+    Thread* thread = &vm->threads[threadId];
+    if (!thread->inPool) {
+        pthread_mutex_unlock(&vm->threadRegistryLock);
+        return false;
+    }
+    vmThreadAssignInternalName(thread, threadId, name);
+    pthread_mutex_unlock(&vm->threadRegistryLock);
+    return true;
+}
+
+int vmThreadFindIdByName(VM* vm, const char* name) {
+    if (!vm || !name) {
+        return -1;
+    }
+    for (int i = 1; i < VM_MAX_THREADS; ++i) {
+        Thread* thread = &vm->threads[i];
+        if (!thread->inPool) {
+            continue;
+        }
+        if (strncmp(thread->name, name, THREAD_NAME_MAX) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool vmThreadPause(VM* vm, int threadId) {
+    if (!vm || threadId <= 0 || threadId >= VM_MAX_THREADS) {
+        return false;
+    }
+    Thread* thread = &vm->threads[threadId];
+    if (!thread->inPool) {
+        return false;
+    }
+    atomic_store(&thread->paused, true);
+    vmThreadWakeStateWaiters(thread);
+    return true;
+}
+
+bool vmThreadResume(VM* vm, int threadId) {
+    if (!vm || threadId <= 0 || threadId >= VM_MAX_THREADS) {
+        return false;
+    }
+    Thread* thread = &vm->threads[threadId];
+    if (!thread->inPool) {
+        return false;
+    }
+    atomic_store(&thread->paused, false);
+    vmThreadWakeStateWaiters(thread);
+    return true;
+}
+
+bool vmThreadCancel(VM* vm, int threadId) {
+    if (!vm || threadId <= 0 || threadId >= VM_MAX_THREADS) {
+        return false;
+    }
+    Thread* thread = &vm->threads[threadId];
+    if (!thread->inPool) {
+        return false;
+    }
+    atomic_store(&thread->cancelRequested, true);
+    vmThreadWakeStateWaiters(thread);
+    pthread_mutex_lock(&thread->stateMutex);
+    thread->readyForReuse = true;
+    pthread_cond_broadcast(&thread->stateCond);
+    pthread_mutex_unlock(&thread->stateMutex);
+    return true;
+}
+
+bool vmThreadKill(VM* vm, int threadId) {
+    if (!vm || threadId <= 0 || threadId >= VM_MAX_THREADS) {
+        return false;
+    }
+    Thread* thread = &vm->threads[threadId];
+    if (!thread->inPool) {
+        return false;
+    }
+    atomic_store(&thread->killRequested, true);
+    vmThreadWakeStateWaiters(thread);
+    pthread_mutex_lock(&thread->stateMutex);
+    thread->readyForReuse = true;
+    pthread_cond_broadcast(&thread->stateCond);
+    pthread_mutex_unlock(&thread->stateMutex);
+    return true;
+}
+
+size_t vmSnapshotWorkerUsage(VM* vm, ThreadMetrics* outMetrics, size_t capacity) {
+    if (!vm || !outMetrics || capacity == 0) {
+        return 0;
+    }
+    size_t count = 0;
+    for (int i = 1; i < VM_MAX_THREADS && count < capacity; ++i) {
+        Thread* thread = &vm->threads[i];
+        if (!thread->inPool) {
+            continue;
+        }
+        if (pthread_mutex_trylock(&thread->stateMutex) != 0) {
+            continue;
+        }
+        ThreadMetrics snapshot = thread->metrics;
+        if (thread->active) {
+            ThreadMetricsSample currentSample = snapshot.start;
+            vmThreadMetricsCapture(&currentSample);
+            snapshot.end = currentSample;
+        }
+        outMetrics[count++] = snapshot;
+        pthread_mutex_unlock(&thread->stateMutex);
+    }
+    return count;
 }
 
 // --- Mutex Helpers ---
@@ -2117,23 +2750,45 @@ void vmResetExecutionState(VM* vm) {
     vm->current_builtin_name = NULL;
     vm->trace_executed = 0;
 
-    // Ensure any worker threads spawned during previous executions are reclaimed.
+    atomic_store(&vm->shuttingDownWorkers, true);
+    if (vm->jobQueue) {
+        pthread_mutex_lock(&vm->jobQueue->mutex);
+        vm->jobQueue->shuttingDown = true;
+        pthread_cond_broadcast(&vm->jobQueue->cond);
+        pthread_mutex_unlock(&vm->jobQueue->mutex);
+    }
     for (int i = 1; i < VM_MAX_THREADS; ++i) {
         Thread* thread = &vm->threads[i];
+        if (thread->inPool) {
+            atomic_store(&thread->killRequested, true);
+            vmThreadWakeStateWaiters(thread);
+        }
         if (thread->active) {
             pthread_join(thread->handle, NULL);
             thread->active = false;
         }
-        if (thread->vm) {
+        if (thread->ownsVm && thread->vm) {
             freeVM(thread->vm);
             free(thread->vm);
             thread->vm = NULL;
+            thread->ownsVm = false;
         }
+        vmThreadDestroySlot(thread);
+        memset(thread, 0, sizeof(*thread));
+        vmThreadInitSlot(thread);
     }
+    if (vm->jobQueue) {
+        vmThreadJobQueueDestroy(vm->jobQueue);
+    }
+    vm->jobQueue = vmThreadJobQueueCreate();
+    vm->workerCount = 0;
+    vm->availableWorkers = 0;
+    atomic_store(&vm->shuttingDownWorkers, false);
     vm->threadCount = 1;
     vm->threadOwner = vm;
     vm->threads[0].active = false;
     vm->threads[0].vm = NULL;
+    vm->threads[0].vm = vm;
 
     // Reset mutex registry state so a reused VM behaves like a fresh instance.
     if (vm->mutexOwner == vm) {
@@ -2177,6 +2832,11 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         vmThreadInitSlot(&vm->threads[i]);
     }
     vm->threads[0].vm = vm;
+    pthread_mutex_init(&vm->threadRegistryLock, NULL);
+    vm->jobQueue = vmThreadJobQueueCreate();
+    vm->workerCount = 0;
+    vm->availableWorkers = 0;
+    atomic_store(&vm->shuttingDownWorkers, false);
 
     vm->mutexCount = 0;
     pthread_mutex_init(&vm->mutexRegistryLock, NULL);
@@ -2230,17 +2890,37 @@ void freeVM(VM* vm) {
     }
     vm->procedureByAddressSize = 0;
 
-    for (int i = 1; i < vm->threadCount; i++) {
-        if (vm->threads[i].active) {
-            pthread_join(vm->threads[i].handle, NULL);
-            vm->threads[i].active = false;
-        }
-        if (vm->threads[i].vm) {
-            freeVM(vm->threads[i].vm);
-            free(vm->threads[i].vm);
-            vm->threads[i].vm = NULL;
-        }
+    atomic_store(&vm->shuttingDownWorkers, true);
+    if (vm->jobQueue) {
+        pthread_mutex_lock(&vm->jobQueue->mutex);
+        vm->jobQueue->shuttingDown = true;
+        pthread_cond_broadcast(&vm->jobQueue->cond);
+        pthread_mutex_unlock(&vm->jobQueue->mutex);
     }
+    for (int i = 1; i < VM_MAX_THREADS; i++) {
+        Thread* thread = &vm->threads[i];
+        bool shouldJoin = thread->inPool || thread->active;
+        if (thread->inPool) {
+            atomic_store(&thread->killRequested, true);
+            vmThreadWakeStateWaiters(thread);
+        }
+        if (shouldJoin) {
+            pthread_join(thread->handle, NULL);
+            thread->active = false;
+        }
+        if (thread->ownsVm && thread->vm) {
+            freeVM(thread->vm);
+            free(thread->vm);
+            thread->vm = NULL;
+            thread->ownsVm = false;
+        }
+        thread->inPool = false;
+    }
+    if (vm->jobQueue) {
+        vmThreadJobQueueDestroy(vm->jobQueue);
+        vm->jobQueue = NULL;
+    }
+    pthread_mutex_destroy(&vm->threadRegistryLock);
 
     if (vm->mutexOwner == vm) {
         for (int i = 0; i < vm->mutexCount; i++) {
