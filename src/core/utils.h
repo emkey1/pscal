@@ -88,6 +88,7 @@ static inline bool isIntlikeType(VarType t) {
     switch (t) {
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
+        case TYPE_THREAD:
             return true;
         default:
             return false;
