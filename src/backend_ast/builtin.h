@@ -109,8 +109,15 @@ Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWaitForThread(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadSpawnBuiltin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadPoolSubmit(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadGetResult(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadGetStatus(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadSetName(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadLookup(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadPause(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadResume(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadCancel(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadStats(struct VM_s* vm, int arg_count, Value* args);
 
 /* Shell builtins */
 Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
