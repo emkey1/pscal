@@ -109,6 +109,26 @@ worker's return value and success bit. The sample script spawns a DNS lookup and
 an asynchronous delay, waits for both handles, and prints the resolved IP and
 status flag.
 
+## `threading_showcase`
+
+```sh
+#!/usr/bin/env exsh
+tid=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$host")
+builtin ThreadSetName "$tid" "str:dns:$host"
+WaitForThread "$tid"
+result=$(builtin ThreadGetResult "$tid" bool:true)
+stats=$(builtin ThreadStats)
+```
+
+`threading_showcase` expands on the basic demo by exercising every worker-pool
+builtin in one run. It spawns multiple DNS lookups, queues a delay via
+`ThreadPoolSubmit`, assigns human-readable names with `ThreadSetName`, and uses
+`ThreadLookup` to show how the names map back to thread handles. After the
+workers finish, the script demonstrates both result-collection styles (`get`
+followed by `status` and the one-shot `get(..., true)`) before dumping the pool
+snapshot provided by `ThreadStats`. Set
+`THREAD_SHOWCASE_DELAY_MS=<millis>` to adjust the queued delay.
+
 ## `sierpinski_threads`
 
 ```sh
