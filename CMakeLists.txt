@@ -966,6 +966,7 @@ set(JSON2BC_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c
