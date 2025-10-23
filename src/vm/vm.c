@@ -731,31 +731,48 @@ static bool vmThreadJobQueuePush(ThreadJobQueue* queue, ThreadJob* job) {
     return true;
 }
 
-static ThreadJob* vmThreadJobQueuePop(ThreadJobQueue* queue, atomic_bool* shuttingDownFlag) {
+static ThreadJob* vmThreadJobQueuePop(ThreadJobQueue* queue,
+                                     atomic_bool* shuttingDownFlag,
+                                     Thread* thread) {
     if (!queue) {
         return NULL;
     }
     pthread_mutex_lock(&queue->mutex);
-    while (!queue->head && !queue->shuttingDown) {
+    for (;;) {
+        if (queue->shuttingDown) {
+            pthread_mutex_unlock(&queue->mutex);
+            return NULL;
+        }
+        if (thread &&
+            (atomic_load(&thread->killRequested) || atomic_load(&thread->cancelRequested))) {
+            pthread_mutex_unlock(&queue->mutex);
+            return NULL;
+        }
+        if (queue->head) {
+            ThreadJob* job = queue->head;
+            queue->head = job->next;
+            if (!queue->head) {
+                queue->tail = NULL;
+            }
+            queue->pending--;
+            job->next = NULL;
+            pthread_mutex_unlock(&queue->mutex);
+            return job;
+        }
         pthread_cond_wait(&queue->cond, &queue->mutex);
         if (shuttingDownFlag && atomic_load(shuttingDownFlag)) {
             queue->shuttingDown = true;
-            break;
         }
     }
-    if (queue->shuttingDown) {
-        pthread_mutex_unlock(&queue->mutex);
-        return NULL;
+}
+
+static void vmThreadJobQueueWake(ThreadJobQueue* queue) {
+    if (!queue) {
+        return;
     }
-    ThreadJob* job = queue->head;
-    queue->head = job->next;
-    if (!queue->head) {
-        queue->tail = NULL;
-    }
-    queue->pending--;
-    job->next = NULL;
+    pthread_mutex_lock(&queue->mutex);
+    pthread_cond_broadcast(&queue->cond);
     pthread_mutex_unlock(&queue->mutex);
-    return job;
 }
 
 static ThreadJob* vmThreadJobCreate(VM* vm,
@@ -1055,7 +1072,7 @@ static void* threadStart(void* arg) {
             thread->idle = true;
             pthread_mutex_unlock(&owner->threadRegistryLock);
 
-            job = vmThreadJobQueuePop(owner->jobQueue, &owner->shuttingDownWorkers);
+            job = vmThreadJobQueuePop(owner->jobQueue, &owner->shuttingDownWorkers, thread);
 
             pthread_mutex_lock(&owner->threadRegistryLock);
             if (owner->availableWorkers > 0) {
@@ -1610,6 +1627,7 @@ bool vmThreadCancel(VM* vm, int threadId) {
     thread->readyForReuse = true;
     pthread_cond_broadcast(&thread->stateCond);
     pthread_mutex_unlock(&thread->stateMutex);
+    vmThreadJobQueueWake(vm->jobQueue);
     return true;
 }
 
@@ -1627,6 +1645,7 @@ bool vmThreadKill(VM* vm, int threadId) {
     thread->readyForReuse = true;
     pthread_cond_broadcast(&thread->stateCond);
     pthread_mutex_unlock(&thread->stateMutex);
+    vmThreadJobQueueWake(vm->jobQueue);
     return true;
 }
 
