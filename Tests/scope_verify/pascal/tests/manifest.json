@@ -235,6 +235,15 @@
       "expect": "runtime_ok",
       "code": "program IntegrationScopeMix;\nconst\n  Factor = 2;\ntype\n  PInfo = ^TInfo;\n  TInfo = record\n    Value: Integer;\n  end;\n\nprocedure Compute(start: Integer);\nconst\n  Factor = 3;\ntype\n  PLocalInfo = ^TLocalInfo;\n  TLocalInfo = record\n    Value: Integer;\n    Total: Integer;\n  end;\nvar\n  info: PLocalInfo;\n  step: Integer;\n  runningTotal: Integer;\n\n  procedure AddStep(multiplier: Integer);\n  begin\n    runningTotal := runningTotal + multiplier * start;\n  end;\n\nbegin\n  new(info);\n  info^.Value := start;\n  runningTotal := 0;\n  for step := 1 to Factor do\n  begin\n    AddStep(step);\n  end;\n  info^.Total := runningTotal;\n  writeln('inner_total=', info^.Total);\n  writeln('local_factor=', Factor);\nend;\n\nvar\n  summary: PInfo;\nbegin\n  new(summary);\n  summary^.Value := 4;\n  Compute(2);\n  writeln('outer_scaled=', summary^.Value * Factor);\nend.",
       "expected_stdout": "inner_total=12\nlocal_factor=3\nouter_scaled=12"
+    },
+    {
+      "id": "thread_wrappers_named_and_pool",
+      "name": "Threading helpers wrap VM builtins",
+      "category": "integration",
+      "description": "Threading unit helpers forward names, queue-only flags, and expose pool metrics.",
+      "expect": "runtime_ok",
+      "code": "program ThreadWrapperDemo;\nuses Threading;\n\nvar\n  namedId: Integer;\n  queueId: Integer;\n  lookupId: Integer;\n\nbegin\n  namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));\n  WaitForThread(namedId);\n  writeln('named_status=', Ord(ThreadStatusOk(namedId, True)));\n\n  queueId := ThreadPoolSubmit('delay', 5, ThreadOptionsQueue('pascal_pool'));\n  WaitForThread(queueId);\n  lookupId := LookupThreadByName('pascal_pool');\n  writeln('queued_status=', Ord(ThreadStatusOk(queueId, True)));\n  writeln('lookup_matches=', Ord(lookupId = queueId));\n  writeln('stats_len=', ThreadStatsCount);\nend.",
+      "expected_stdout": "named_status=1\nqueued_status=1\nlookup_matches=1\nstats_len=1"
     }
   ]
 }

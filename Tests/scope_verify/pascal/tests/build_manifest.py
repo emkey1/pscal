@@ -849,6 +849,42 @@ add({
     """,
 })
 
+add({
+    "id": "thread_wrappers_named_and_pool",
+    "name": "Threading helpers wrap VM builtins",
+    "category": "integration",
+    "description": "Threading unit helpers forward names, queue-only flags, and expose pool metrics.",
+    "expect": "runtime_ok",
+    "code": """
+        program ThreadWrapperDemo;
+        uses Threading;
+
+        var
+          namedId: Integer;
+          queueId: Integer;
+          lookupId: Integer;
+
+        begin
+          namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));
+          WaitForThread(namedId);
+          writeln('named_status=', Ord(ThreadStatusOk(namedId, True)));
+
+          queueId := ThreadPoolSubmit('delay', 5, ThreadOptionsQueue('pascal_pool'));
+          WaitForThread(queueId);
+          lookupId := LookupThreadByName('pascal_pool');
+          writeln('queued_status=', Ord(ThreadStatusOk(queueId, True)));
+          writeln('lookup_matches=', Ord(lookupId = queueId));
+          writeln('stats_len=', ThreadStatsCount);
+        end.
+    """,
+    "expected_stdout": """
+        named_status=1
+        queued_status=1
+        lookup_matches=1
+        stats_len=1
+    """,
+})
+
 
 def main() -> None:
     manifest = {
