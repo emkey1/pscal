@@ -34,7 +34,13 @@ fi
 DELAY_MS=${THREAD_SHOWCASE_DELAY_MS:-750}
 
 # Accumulate thread metadata as "id|label|kind" tuples (newline separated).
-THREAD_INFO=""
+# Using a temp file keeps the data accessible across multiple passes without
+# relying on shell-specific newline handling quirks.
+THREAD_INFO_FILE=$(mktemp "${TMPDIR:-/tmp}/threading_showcase.XXXXXX")
+trap 'rm -f "$THREAD_INFO_FILE"' EXIT INT TERM
+record_thread_info() {
+    printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$THREAD_INFO_FILE"
+}
 
 printf 'threading_showcase:start hosts=%s delay_ms=%s\n' "$*" "$DELAY_MS"
 
@@ -47,7 +53,7 @@ for host in "$@"; do
     else
         printf 'threading_showcase:spawn:%s:%s (name-pending)\n' "$label" "$tid"
     fi
-    THREAD_INFO="${THREAD_INFO}${tid}|${label}|dns"$'\n'
+    record_thread_info "$tid" "$label" dns
 done
 
 # Try to queue the delay via ThreadPoolSubmit; fall back to ThreadSpawnBuiltin
@@ -63,7 +69,7 @@ fi
 
 delay_label="delay:${DELAY_MS}ms"
 builtin ThreadSetName "$delay_tid" "str:$delay_label" >/dev/null 2>&1 || true
-THREAD_INFO="${THREAD_INFO}${delay_tid}|${delay_label}|${delay_kind}"$'\n'
+record_thread_info "$delay_tid" "$delay_label" "$delay_kind"
 
 # Demonstrate ThreadLookup for every recorded label.
 while IFS='|' read -r tid label kind; do
@@ -74,9 +80,7 @@ while IFS='|' read -r tid label kind; do
     else
         printf 'threading_showcase:lookup:%s:<not-found>\n' "$label"
     fi
-done <<INFO
-$THREAD_INFO
-INFO
+done <"$THREAD_INFO_FILE"
 
 dns_counter=0
 while IFS='|' read -r tid label kind; do
@@ -121,9 +125,7 @@ while IFS='|' read -r tid label kind; do
 
     printf 'threading_showcase:result:%s:join=%s %s value=%s\n' \
         "$label" "$join_status" "$status_note" "$result_payload"
-done <<INFO
-$THREAD_INFO
-INFO
+done <"$THREAD_INFO_FILE"
 
 stats_output=$(builtin ThreadStats 2>/dev/null || printf '')
 if [ -n "$stats_output" ]; then
