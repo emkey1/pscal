@@ -33,9 +33,9 @@ fi
 
 DELAY_MS=${THREAD_SHOWCASE_DELAY_MS:-750}
 
-# Accumulate thread metadata as "id|label|kind" tuples (newline separated).
-# Using a temp file keeps the data accessible across multiple passes without
-# relying on shell-specific newline handling quirks.
+# Accumulate thread metadata as "id|label|kind" tuples. The in-memory list
+# lets us iterate over the data multiple times without reopening the temp file.
+thread_records_list=""
 tmpdir=${TMPDIR:-/tmp}
 if [ -z "$tmpdir" ]; then
     tmpdir=/tmp
@@ -104,7 +104,14 @@ fi
 
 trap 'rm -f "$THREAD_INFO_FILE"' EXIT INT TERM
 record_thread_info() {
-    printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$THREAD_INFO_FILE"
+    record="$1|$2|$3"
+    if [ -z "$thread_records_list" ]; then
+        thread_records_list="$record"
+    else
+        thread_records_list="$thread_records_list $record"
+    fi
+
+    printf '%s\n' "$record" >>"$THREAD_INFO_FILE"
 }
 
 printf 'threading_showcase:start hosts=%s delay_ms=%s\n' "$*" "$DELAY_MS"
@@ -137,60 +144,86 @@ builtin ThreadSetName "$delay_tid" "str:$delay_label" >/dev/null 2>&1 || true
 record_thread_info "$delay_tid" "$delay_label" "$delay_kind"
 
 # Demonstrate ThreadLookup for every recorded label.
-while IFS='|' read -r tid label kind; do
-    [ -z "$tid" ] && continue
-    lookup=$(builtin ThreadLookup "str:$label" 2>/dev/null || printf '')
-    if [ -n "$lookup" ]; then
-        printf 'threading_showcase:lookup:%s:%s\n' "$label" "$lookup"
-    else
-        printf 'threading_showcase:lookup:%s:<not-found>\n' "$label"
-    fi
-done <"$THREAD_INFO_FILE"
+if [ -n "$thread_records_list" ]; then
+    for record in $thread_records_list; do
+        tid=${record%%|*}
+        rest=${record#*|}
+        label=${rest%%|*}
+        kind=${rest#*|}
+
+        [ -z "$tid" ] && continue
+        lookup=$(builtin ThreadLookup "str:$label" 2>/dev/null || printf '')
+        if [ -n "$lookup" ]; then
+            printf 'threading_showcase:lookup:%s:%s\n' "$label" "$lookup"
+        else
+            printf 'threading_showcase:lookup:%s:<not-found>\n' "$label"
+        fi
+    done
+fi
 
 dns_counter=0
-while IFS='|' read -r tid label kind; do
-    [ -z "$tid" ] && continue
-    if WaitForThread "$tid"; then
-        join_status=$EXSH_LAST_STATUS
-    else
-        join_status=$EXSH_LAST_STATUS
-    fi
+if [ -n "$thread_records_list" ]; then
+    for record in $thread_records_list; do
+        tid=${record%%|*}
+        rest=${record#*|}
+        label=${rest%%|*}
+        kind=${rest#*|}
 
-    result_payload=""
-    status_note=""
+        [ -z "$tid" ] && continue
+        if WaitForThread "$tid"; then
+            join_status=$EXSH_LAST_STATUS
+        else
+            join_status=$EXSH_LAST_STATUS
+        fi
 
-    case "$kind" in
-        dns)
-            dns_counter=$((dns_counter + 1))
-            if [ "$dns_counter" -eq 1 ]; then
-                # Two-step collection: read the value, then drop the cached state.
-                result_payload=$(builtin ThreadGetResult "$tid")
-                status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
-                status_note="status=$status_flag"
-            else
-                # Consume the status flag at the same time as the result.
-                result_payload=$(builtin ThreadGetResult "$tid" bool:true)
-                status_note="status via WaitForThread=$join_status"
-            fi
-            ;;
-        delay_queue|delay_spawn)
-            status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
-            status_note="status=$status_flag"
-            result_payload="<void>"
-            ;;
-        *)
-            status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
-            status_note="status=$status_flag"
-            ;;
-    esac
+        result_payload=""
+        status_note=""
 
-    if [ -z "$result_payload" ]; then
-        result_payload="<empty>"
-    fi
+        case "$kind" in
+            dns)
+                dns_counter=$((dns_counter + 1))
+                if [ "$dns_counter" -eq 1 ]; then
+                    # Two-step collection: read the value, then drop the cached state.
+                    result_payload=$(builtin ThreadGetResult "$tid")
+                    status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null || printf '')
+                    if [ -n "$status_flag" ]; then
+                        status_note="status=$status_flag"
+                    else
+                        status_note="status via WaitForThread=$join_status (ThreadGetStatus unavailable)"
+                    fi
+                else
+                    # Consume the status flag at the same time as the result.
+                    result_payload=$(builtin ThreadGetResult "$tid" bool:true)
+                    status_note="status via WaitForThread=$join_status"
+                fi
+                ;;
+            delay_queue|delay_spawn)
+                status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null || printf '')
+                if [ -n "$status_flag" ]; then
+                    status_note="status=$status_flag"
+                else
+                    status_note="status via WaitForThread=$join_status (ThreadGetStatus unavailable)"
+                fi
+                result_payload="<void>"
+                ;;
+            *)
+                status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null || printf '')
+                if [ -n "$status_flag" ]; then
+                    status_note="status=$status_flag"
+                else
+                    status_note="status via WaitForThread=$join_status (ThreadGetStatus unavailable)"
+                fi
+                ;;
+        esac
 
-    printf 'threading_showcase:result:%s:join=%s %s value=%s\n' \
-        "$label" "$join_status" "$status_note" "$result_payload"
-done <"$THREAD_INFO_FILE"
+        if [ -z "$result_payload" ]; then
+            result_payload="<empty>"
+        fi
+
+        printf 'threading_showcase:result:%s:join=%s %s value=%s\n' \
+            "$label" "$join_status" "$status_note" "$result_payload"
+    done
+fi
 
 stats_output=$(builtin ThreadStatsJson 2>/dev/null || printf '')
 if [ -n "$stats_output" ]; then

@@ -126,7 +126,10 @@ builtin in one run. It spawns multiple DNS lookups, queues a delay via
 `ThreadLookup` to show how the names map back to thread handles. After the
 workers finish, the script demonstrates both result-collection styles (`get`
 followed by `status` and the one-shot `get(..., true)`) before dumping the pool
-snapshot provided by `ThreadStats`. Set
+snapshot provided by `ThreadStats`. Each worker now prints a
+`threading_showcase:result:` line describing the join status, cached success
+flag, and collected payload so the transcript records the full lifecycle for
+every thread before the cached metadata is cleared for reuse. Set
 `THREAD_SHOWCASE_DELAY_MS=<millis>` to adjust the queued delay.
 
 ## `sierpinski_threads`
