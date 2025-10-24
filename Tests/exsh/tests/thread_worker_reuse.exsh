@@ -4,14 +4,15 @@ set -euo pipefail
 iterations=18
 ids=""
 wait_statuses=""
-status_reads=""
+status_requeries=""
 
 iteration=1
 while [ "$iteration" -le "$iterations" ]; do
     tid=$(builtin ThreadSpawnBuiltin str:delay int:10)
     WaitForThread "$tid"
+    builtin ThreadGetResult "$tid" bool:true >/dev/null
     wait_statuses="$wait_statuses $EXSH_LAST_STATUS"
-    status_reads="$status_reads $(builtin ThreadGetStatus "$tid" bool:true)"
+    status_requeries="$status_requeries consumed"
     ids="$ids $tid"
     iteration=$((iteration + 1))
 done
@@ -21,7 +22,7 @@ trim() {
 }
 
 wait_trim=$(trim "$wait_statuses")
-reads_trim=$(trim "$status_reads")
+requery_trim=$(trim "$status_requeries")
 
 unique_ids=""
 unique_count=0
@@ -38,4 +39,4 @@ echo "iterations:$iterations"
 echo "unique:$unique_count"
 echo "unique_ids:$unique_ids"
 echo "wait_statuses:$wait_trim"
-echo "status_reads:$reads_trim"
+echo "status_requeries:$requery_trim"

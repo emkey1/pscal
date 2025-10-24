@@ -2093,13 +2093,13 @@ add({
     "code": """
         int main() {
             int named = thread_spawn_named("delay", "rea_worker", 5);
-            WaitForThread(named);
-            int named_ok = thread_get_status(named, 1);
+            int named_wait = WaitForThread(named);
+            int named_ok = (named_wait == 0) ? 1 : 0;
 
             int pooled = thread_pool_submit("delay", "rea_pool", 5);
-            WaitForThread(pooled);
+            int pooled_wait = WaitForThread(pooled);
             int lookup = thread_lookup("rea_pool");
-            int pooled_ok = thread_get_status(pooled, 1);
+            int pooled_ok = (pooled_wait == 0) ? 1 : 0;
             int lookup_match = (lookup == pooled) ? 1 : 0;
             int stats_len = length(thread_stats());
 

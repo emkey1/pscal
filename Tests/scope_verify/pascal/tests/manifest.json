@@ -242,7 +242,7 @@
       "category": "integration",
       "description": "Threading unit helpers forward names, queue-only flags, and expose pool metrics.",
       "expect": "runtime_ok",
-      "code": "program ThreadWrapperDemo;\nuses Threading;\n\nvar\n  namedId: Integer;\n  queueId: Integer;\n  lookupId: Integer;\n\nbegin\n  namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));\n  WaitForThread(namedId);\n  writeln('named_status=', Ord(ThreadStatusOk(namedId, True)));\n\n  queueId := ThreadPoolSubmit('delay', 5, ThreadOptionsQueue('pascal_pool'));\n  WaitForThread(queueId);\n  lookupId := LookupThreadByName('pascal_pool');\n  writeln('queued_status=', Ord(ThreadStatusOk(queueId, True)));\n  writeln('lookup_matches=', Ord(lookupId = queueId));\n  writeln('stats_len=', ThreadStatsCount);\nend.",
+      "code": "program ThreadWrapperDemo;\nuses Threading;\n\nvar\n  namedId: Integer;\n  queueId: Integer;\n  lookupId: Integer;\n  namedStatus: Integer;\n  queuedStatus: Integer;\n\nbegin\n  namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));\n  namedStatus := WaitForThread(namedId);\n  writeln('named_status=', Ord(namedStatus = 0));\n\n  queueId := ThreadPoolSubmit('delay', 5, ThreadOptionsQueue('pascal_pool'));\n  lookupId := LookupThreadByName('pascal_pool');\n  queuedStatus := WaitForThread(queueId);\n  writeln('queued_status=', Ord(queuedStatus = 0));\n  writeln('lookup_matches=', Ord(lookupId = queueId));\n  writeln('stats_len=', ThreadStatsCount);\nend.",
       "expected_stdout": "named_status=1\nqueued_status=1\nlookup_matches=1\nstats_len=1"
     }
   ]

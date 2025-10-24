@@ -105,7 +105,7 @@ VM. For instructions on adding your own routines, see
 | spawn | (address: Integer) | Integer | Start a new thread at the given bytecode address and return its id. |
 | join | (tid: Integer) | void | Wait for the specified thread to finish. |
 | CreateThread | (procAddr: Pointer, arg: Pointer = nil) | Thread | Start a new thread invoking the given routine with `arg`. Backward-compatible with 1-arg form. |
-| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete, returning `0` on success and `1` when the worker reported a failure. |
+| WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete, returning `0` on success and `1` when the worker reported a failure. Consumes the stored status flag so idle workers without cached results immediately return to the pool. |
 | ThreadSpawnBuiltin | (target: String/Integer, args: Value...) | Thread | Spawn an allow-listed VM builtin on a worker thread and return its handle. |
 | ThreadGetResult | (t: Thread, consumeStatus: Boolean = false) | Any | Retrieve the stored result for a builtin worker. When `consumeStatus` is true the cached status flag is also cleared. |
 | ThreadGetStatus | (t: Thread, dropResult: Boolean = false) | Boolean | Read the stored success flag for a worker thread. Passing `dropResult = true` clears any cached return value. |
@@ -115,9 +115,7 @@ VM. For instructions on adding your own routines, see
 | unlock | (mid: Integer) | void | Release the specified mutex. |
 | destroy | (mid: Integer) | void | Destroy the specified mutex. |
 
-> **Worker reuse tip:** Workers remain reserved until both the status flag and result value have been consumed. Use
-> `ThreadGetResult(handle, true)` to release the slot in a single call, or pair `ThreadGetResult` with
-> `ThreadGetStatus(handle, true)` when you prefer to fetch the value before discarding it.
+> **Worker reuse tip:** `WaitForThread` clears the stored status flag as part of the join so threads without cached results re-enter the pool immediately. Builtins that publish result values still reserve the worker until you consume them—call `ThreadGetResult(handle, true)` to clear both the value and status in one go, or pair `ThreadGetResult` with `ThreadGetStatus(handle, true)` when you prefer to fetch the value before discarding it.
 
 For pool sizing guidance, naming rules, and the schema returned by
 `ThreadStats`, see the dedicated [threading guide](threading.md).

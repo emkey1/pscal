@@ -5244,7 +5244,7 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     }
 
     bool status_flag = true;
-    if (vmThreadTakeResult(thread_vm, id, NULL, false, &status_flag, false)) {
+    if (vmThreadTakeResult(thread_vm, id, NULL, false, &status_flag, true)) {
         return makeInt(status_flag ? 0 : 1);
     }
 
@@ -5365,6 +5365,22 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
             runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
             return makeBoolean(false);
         }
+        if (!slot->statusReady || slot->statusConsumed) {
+            if (drop_result && slot->resultReady) {
+                bool dummy_status = false;
+                Value drop_value = makeNil();
+                if (vmThreadTakeResult(thread_vm,
+                                       thread_id,
+                                       &drop_value,
+                                       true,
+                                       &dummy_status,
+                                       false)) {
+                    freeValue(&drop_value);
+                }
+            }
+            runtimeError(vm, "Thread %d has no stored status.", thread_id);
+            return makeBoolean(false);
+        }
     }
 
     bool status = false;
@@ -5383,6 +5399,25 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
             fallback_slot = &vm->threads[thread_id];
             if (fallback_slot->active && !fallback_slot->awaitingReuse) {
                 runtimeError(vm, "Thread %d is still running; join it before querying status.", thread_id);
+                if (drop_result) {
+                    freeValue(&dropped);
+                }
+                return makeBoolean(false);
+            }
+            if (!fallback_slot->statusReady || fallback_slot->statusConsumed) {
+                if (drop_result && fallback_slot->resultReady) {
+                    bool dummy_status = false;
+                    Value drop_value = makeNil();
+                    if (vmThreadTakeResult(vm,
+                                           thread_id,
+                                           &drop_value,
+                                           true,
+                                           &dummy_status,
+                                           false)) {
+                        freeValue(&drop_value);
+                    }
+                }
+                runtimeError(vm, "Thread %d has no stored status.", thread_id);
                 if (drop_result) {
                     freeValue(&dropped);
                 }
