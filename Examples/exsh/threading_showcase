@@ -74,7 +74,7 @@ while IFS='|' read -r tid label kind; do
     else
         printf 'threading_showcase:lookup:%s:<not-found>\n' "$label"
     fi
-done <<'INFO'
+done <<INFO
 $THREAD_INFO
 INFO
 
@@ -121,7 +121,7 @@ while IFS='|' read -r tid label kind; do
 
     printf 'threading_showcase:result:%s:join=%s %s value=%s\n' \
         "$label" "$join_status" "$status_note" "$result_payload"
-done <<'INFO'
+done <<INFO
 $THREAD_INFO
 INFO
 
