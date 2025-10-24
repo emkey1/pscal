@@ -1,0 +1,69 @@
+#!/usr/bin/env exsh
+#
+# parallel-check [host1] [host2] ...
+#
+# Uses exsh threads to check if hosts are resolvable in parallel.
+# Reports a simple "UP" or "DOWN" status.
+
+set -o pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 <host-to-check> [host-to-check]..." >&2
+    exit 1
+fi
+
+printf "checker: Spawning health checks for %s hosts...\n" "$#"
+
+thread_records_list=""
+
+# 1. Spawn all threads
+for host in "$@"; do
+    tid=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$host")
+    label="check:$host"
+    builtin ThreadSetName "$tid" "str:$label" >/dev/null 2>&1 || true
+
+    if [ -z "$thread_records_list" ]; then
+        thread_records_list="$tid|$host"
+    else
+        thread_records_list="$thread_records_list $tid|$host"
+    fi
+done
+
+printf "checker: All checks running. Waiting for completion...\n"
+echo "---"
+
+success_count=0
+fail_count=0
+
+# 2. Wait and check status
+for record in $thread_records_list; do
+    tid=${record%%|*}
+    host=${record#*|}
+
+    # Wait for the thread to finish
+    WaitForThread "$tid"
+    join_status=$EXSH_LAST_STATUS
+
+    # We DON'T need the result, so drop any cached payload/status in one call.
+    # Using ThreadGetResult(... bool:true) avoids the fatal runtime error that
+    # occurs if we probe ThreadGetStatus after WaitForThread has already consumed
+    # the stored status flag.
+    builtin ThreadGetResult "$tid" bool:true >/dev/null 2>&1 || true
+
+    # 3. Report the status
+    if [ "$join_status" -eq 0 ]; then
+        printf "UP:   %-30s (Resolved)\n" "$host"
+        ((success_count++))
+    else
+        printf "DOWN: %-30s (Resolve failed)\n" "$host"
+        ((fail_count++))
+    fi
+done
+
+echo "---"
+printf "checker: Complete. Success: %s, Failed: %s\n" "$success_count" "$fail_count"
+
+# Exit with an error if any checks failed
+if [ "$fail_count" -gt 0 ]; then
+    exit 1
+fi
