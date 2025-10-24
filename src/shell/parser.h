@@ -19,6 +19,7 @@ typedef struct {
     bool panic_mode;
     unsigned int next_rule_mask;
     ShellPendingHereDocArray *pending_here_docs;
+    unsigned int structural_closer_mask;
 } ShellParser;
 
 ShellProgram *shellParseString(const char *source, ShellParser *parser);
