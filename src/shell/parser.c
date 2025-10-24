@@ -16,6 +16,9 @@
 #define RULE_MASK_FUNCTION_NAME (SHELL_LEXER_RULE_8 | SHELL_LEXER_RULE_1)
 #define RULE_MASK_FUNCTION_BODY (SHELL_LEXER_RULE_9)
 
+#define STRUCTURAL_CLOSER_RPAREN (1u << 0)
+#define STRUCTURAL_CLOSER_RBRACE (1u << 1)
+
 typedef struct {
     ShellRedirection *redir;
     char *delimiter;
@@ -39,6 +42,7 @@ static bool parserWordArrayAppend(ShellWordArray *array, ShellWord *word);
 static void parserWordArrayFree(ShellWordArray *array);
 
 static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask);
+static unsigned int parserStructuralCloserBit(ShellTokenType type);
 static void shellParserAdvance(ShellParser *parser);
 static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
 static bool shellParserCheck(const ShellParser *parser, ShellTokenType type);
@@ -225,6 +229,17 @@ static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask) {
         return;
     }
     parser->next_rule_mask = mask;
+}
+
+static unsigned int parserStructuralCloserBit(ShellTokenType type) {
+    switch (type) {
+        case SHELL_TOKEN_RPAREN:
+            return STRUCTURAL_CLOSER_RPAREN;
+        case SHELL_TOKEN_RBRACE:
+            return STRUCTURAL_CLOSER_RBRACE;
+        default:
+            return 0u;
+    }
 }
 
 static void applyLexicalRules(ShellToken *token) {
@@ -1039,7 +1054,13 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
     while (!parser->had_error) {
         if (parser->current.type == SHELL_TOKEN_WORD && parser->current.lexeme && parser->current.length == 1) {
             char ch = parser->current.lexeme[0];
-            if ((ch == ')' || ch == '}') && !parser->current.single_quoted && !parser->current.double_quoted) {
+            bool treat_as_closer = false;
+            if (ch == ')' && (parser->structural_closer_mask & STRUCTURAL_CLOSER_RPAREN)) {
+                treat_as_closer = true;
+            } else if (ch == '}' && (parser->structural_closer_mask & STRUCTURAL_CLOSER_RBRACE)) {
+                treat_as_closer = true;
+            }
+            if (treat_as_closer && !parser->current.single_quoted && !parser->current.double_quoted) {
                 parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
                 if (parser->current.type == SHELL_TOKEN_RPAREN || parser->current.type == SHELL_TOKEN_RBRACE) {
                     break;
@@ -1182,8 +1203,17 @@ static ShellCommand *parseSubshell(ShellParser *parser) {
 
 static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType terminator1,
                                            ShellTokenType terminator2, ShellTokenType terminator3) {
+    if (!parser) {
+        return NULL;
+    }
+    unsigned int saved_closer_mask = parser->structural_closer_mask;
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator1);
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator2);
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator3);
+
     ShellProgram *program = shellCreateProgram();
     if (!program) {
+        parser->structural_closer_mask = saved_closer_mask;
         return NULL;
     }
     parseLinebreak(parser);
@@ -1203,6 +1233,7 @@ static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType 
         parseLinebreak(parser);
         parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     }
+    parser->structural_closer_mask = saved_closer_mask;
     return program;
 }
 
