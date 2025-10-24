@@ -118,6 +118,7 @@ Value vmBuiltinThreadPause(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadResume(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadCancel(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinThreadStats(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadStatsJson(struct VM_s* vm, int arg_count, Value* args);
 
 /* Shell builtins */
 Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);

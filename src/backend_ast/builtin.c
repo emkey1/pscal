@@ -22,6 +22,7 @@
 #include <dirent.h>  // For directory traversal
 #include <sys/stat.h> // For file attributes
 #include <stdlib.h>  // For system(), getenv, malloc
+#include <stdarg.h>  // For va_list operations in JSON helpers
 #include <limits.h>
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
@@ -703,6 +704,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadresume", vmBuiltinThreadResume},
     {"threadsetname", vmBuiltinThreadSetName},
     {"threadstats", vmBuiltinThreadStats},
+    {"threadstatsjson", vmBuiltinThreadStatsJson},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -5109,6 +5111,224 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
     return makeRecord(head);
 }
 
+typedef struct {
+    char *data;
+    size_t length;
+    size_t capacity;
+} JsonBuffer;
+
+static bool jsonBufferReserve(JsonBuffer *buffer, size_t additional) {
+    if (!buffer) {
+        return false;
+    }
+    size_t required = buffer->length + additional + 1;
+    if (required <= buffer->capacity) {
+        return true;
+    }
+    size_t new_capacity = buffer->capacity ? buffer->capacity : 256;
+    while (new_capacity < required) {
+        new_capacity *= 2;
+    }
+    char *new_data = (char *)realloc(buffer->data, new_capacity);
+    if (!new_data) {
+        return false;
+    }
+    buffer->data = new_data;
+    buffer->capacity = new_capacity;
+    return true;
+}
+
+static bool jsonBufferAppendFormat(JsonBuffer *buffer, const char *fmt, ...) {
+    if (!buffer || !fmt) {
+        return false;
+    }
+    va_list args;
+    va_start(args, fmt);
+    va_list copy;
+    va_copy(copy, args);
+    int needed = vsnprintf(NULL, 0, fmt, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        return false;
+    }
+    if (!jsonBufferReserve(buffer, (size_t)needed)) {
+        va_end(args);
+        return false;
+    }
+    vsnprintf(buffer->data + buffer->length,
+              buffer->capacity - buffer->length,
+              fmt, args);
+    buffer->length += (size_t)needed;
+    va_end(args);
+    return true;
+}
+
+static bool jsonAppendEscapedString(JsonBuffer *buffer, const char *text) {
+    if (!jsonBufferAppendFormat(buffer, "\"")) {
+        return false;
+    }
+    const unsigned char *ptr = (const unsigned char *)(text ? text : "");
+    while (*ptr) {
+        unsigned char ch = *ptr++;
+        switch (ch) {
+            case '\\':
+                if (!jsonBufferAppendFormat(buffer, "\\\\")) {
+                    return false;
+                }
+                break;
+            case '"':
+                if (!jsonBufferAppendFormat(buffer, "\\\"")) {
+                    return false;
+                }
+                break;
+            case '\n':
+                if (!jsonBufferAppendFormat(buffer, "\\n")) {
+                    return false;
+                }
+                break;
+            case '\r':
+                if (!jsonBufferAppendFormat(buffer, "\\r")) {
+                    return false;
+                }
+                break;
+            case '\t':
+                if (!jsonBufferAppendFormat(buffer, "\\t")) {
+                    return false;
+                }
+                break;
+            default:
+                if (ch < 0x20) {
+                    if (!jsonBufferAppendFormat(buffer, "\\u%04x", ch)) {
+                        return false;
+                    }
+                } else {
+                    if (!jsonBufferReserve(buffer, 1)) {
+                        return false;
+                    }
+                    buffer->data[buffer->length++] = (char)ch;
+                    buffer->data[buffer->length] = '\0';
+                }
+                break;
+        }
+    }
+    return jsonBufferAppendFormat(buffer, "\"");
+}
+
+static bool jsonAppendValue(JsonBuffer *buffer, const Value *value);
+
+static bool jsonAppendArrayRecursive(JsonBuffer *buffer, const Value *array,
+                                     int dimension, int *indices) {
+    if (!jsonBufferAppendFormat(buffer, "[")) {
+        return false;
+    }
+    int lower = array->lower_bounds[dimension];
+    int upper = array->upper_bounds[dimension];
+    for (int idx = lower; idx <= upper; ++idx) {
+        if (idx > lower && !jsonBufferAppendFormat(buffer, ", ")) {
+            return false;
+        }
+        indices[dimension] = idx;
+        if (dimension + 1 >= array->dimensions) {
+            int offset = computeFlatOffset((Value *)array, indices);
+            if (!jsonAppendValue(buffer, &array->array_val[offset])) {
+                return false;
+            }
+        } else {
+            if (!jsonAppendArrayRecursive(buffer, array, dimension + 1, indices)) {
+                return false;
+            }
+        }
+    }
+    return jsonBufferAppendFormat(buffer, "]");
+}
+
+static bool jsonAppendArray(JsonBuffer *buffer, const Value *array) {
+    if (!array || array->dimensions <= 0 || !array->array_val ||
+        !array->lower_bounds || !array->upper_bounds) {
+        return jsonBufferAppendFormat(buffer, "[]");
+    }
+    int *indices = (int *)malloc(sizeof(int) * array->dimensions);
+    if (!indices) {
+        return false;
+    }
+    bool ok = jsonAppendArrayRecursive(buffer, array, 0, indices);
+    free(indices);
+    return ok;
+}
+
+static bool jsonAppendRecord(JsonBuffer *buffer, const FieldValue *field) {
+    if (!jsonBufferAppendFormat(buffer, "{")) {
+        return false;
+    }
+    bool first = true;
+    while (field) {
+        if (!first && !jsonBufferAppendFormat(buffer, ", ")) {
+            return false;
+        }
+        if (!jsonAppendEscapedString(buffer, field->name ? field->name : "?")) {
+            return false;
+        }
+        if (!jsonBufferAppendFormat(buffer, ": ")) {
+            return false;
+        }
+        if (!jsonAppendValue(buffer, &field->value)) {
+            return false;
+        }
+        first = false;
+        field = field->next;
+    }
+    return jsonBufferAppendFormat(buffer, "}");
+}
+
+static bool jsonAppendValue(JsonBuffer *buffer, const Value *value) {
+    if (!value) {
+        return jsonBufferAppendFormat(buffer, "null");
+    }
+    switch (value->type) {
+        case TYPE_BOOLEAN:
+            return jsonBufferAppendFormat(buffer, "%s",
+                                         value->i_val ? "true" : "false");
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+            return jsonBufferAppendFormat(buffer, "%lld", value->i_val);
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+            return jsonBufferAppendFormat(buffer, "%llu", value->u_val);
+        case TYPE_FLOAT:
+            return jsonBufferAppendFormat(buffer, "%g", value->real.f32_val);
+        case TYPE_DOUBLE:
+            return jsonBufferAppendFormat(buffer, "%g", value->real.d_val);
+        case TYPE_LONG_DOUBLE:
+            return jsonBufferAppendFormat(buffer, "%Lg", value->real.r_val);
+        case TYPE_STRING:
+            return jsonAppendEscapedString(buffer, value->s_val ? value->s_val : "");
+        case TYPE_RECORD:
+            return jsonAppendRecord(buffer, value->record_val);
+        case TYPE_ARRAY:
+            return jsonAppendArray(buffer, value);
+        case TYPE_NIL:
+        case TYPE_VOID:
+            return jsonBufferAppendFormat(buffer, "null");
+        default:
+            return jsonAppendEscapedString(buffer, varTypeToString(value->type));
+    }
+}
+
+static void jsonBufferFree(JsonBuffer *buffer) {
+    if (!buffer) {
+        return;
+    }
+    free(buffer->data);
+    buffer->data = NULL;
+    buffer->length = 0;
+    buffer->capacity = 0;
+}
+
 static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool poolSubmit, const char* opName) {
     if (!vm) {
         return makeInt(-1);
@@ -5565,6 +5785,66 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
         index++;
     }
     pthread_mutex_unlock(&thread_vm->threadRegistryLock);
+    return result;
+}
+
+Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
+    (void)args;
+    if (!vm) {
+        return makeStringLen("", 0);
+    }
+    if (arg_count != 0) {
+        runtimeError(vm, "ThreadStatsJson expects no arguments.");
+        return makeStringLen("", 0);
+    }
+
+    VM *thread_vm = vm->threadOwner ? vm->threadOwner : vm;
+    pthread_mutex_lock(&thread_vm->threadRegistryLock);
+
+    JsonBuffer buffer = {0, 0, 0};
+    bool ok = jsonBufferAppendFormat(&buffer, "[");
+    int emitted = 0;
+    for (int i = 1; i < VM_MAX_THREADS && ok; ++i) {
+        Thread *thread = &thread_vm->threads[i];
+        if (!thread->inPool || !thread->poolWorker) {
+            continue;
+        }
+        if (emitted > 0) {
+            ok = jsonBufferAppendFormat(&buffer, ", ");
+        }
+        if (!ok) {
+            break;
+        }
+        const char *name = (thread->name[0] != '\0') ? thread->name : "";
+        ok = jsonBufferAppendFormat(&buffer, "{\"id\": %d, \"name\": ", i);
+        if (ok) {
+            ok = jsonAppendEscapedString(&buffer, name);
+        }
+        if (ok) {
+            ok = jsonBufferAppendFormat(&buffer,
+                                        ", \"active\": %s, \"idle\": %s, \"status_success\": %s, \"ready_for_reuse\": %s, \"pool_generation\": %d}",
+                                        thread->active ? "true" : "false",
+                                        thread->idle ? "true" : "false",
+                                        thread->statusFlag ? "true" : "false",
+                                        thread->readyForReuse ? "true" : "false",
+                                        thread->poolGeneration);
+        }
+        emitted++;
+    }
+    pthread_mutex_unlock(&thread_vm->threadRegistryLock);
+
+    if (ok) {
+        ok = jsonBufferAppendFormat(&buffer, "]");
+    }
+
+    Value result;
+    if (!ok) {
+        jsonBufferFree(&buffer);
+        result = makeStringLen("[]", 2);
+    } else {
+        result = makeStringLen(buffer.data ? buffer.data : "", buffer.length);
+        jsonBufferFree(&buffer);
+    }
     return result;
 }
 
@@ -6108,6 +6388,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadResume", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadCancel", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStats", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ThreadStatsJson", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);

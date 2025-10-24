@@ -192,11 +192,11 @@ while IFS='|' read -r tid label kind; do
         "$label" "$join_status" "$status_note" "$result_payload"
 done <"$THREAD_INFO_FILE"
 
-stats_output=$(builtin ThreadStats 2>/dev/null || printf '')
+stats_output=$(builtin ThreadStatsJson 2>/dev/null || printf '')
 if [ -n "$stats_output" ]; then
     printf 'threading_showcase:stats:%s\n' "$stats_output"
 else
-    printf 'threading_showcase:stats:<empty>\n'
+    printf 'threading_showcase:stats:[]\n'
 fi
 
 printf 'threading_showcase:end\n'
