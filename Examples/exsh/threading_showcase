@@ -37,9 +37,17 @@ DELAY_MS=${THREAD_SHOWCASE_DELAY_MS:-750}
 # Using a temp file keeps the data accessible across multiple passes without
 # relying on shell-specific newline handling quirks.
 tmpdir=${TMPDIR:-/tmp}
+if [ -z "$tmpdir" ]; then
+    tmpdir=/tmp
+fi
 # macOS exposes TMPDIR with a trailing slash, so strip any suffix to avoid
 # generating paths with a "//" sequence that some mktemp(1) builds reject.
-tmpdir=${tmpdir%/}
+# Preserve the root directory so we do not end up with an empty string when
+# TMPDIR="/".
+case "$tmpdir" in
+    /) : ;;
+    */) tmpdir=${tmpdir%/} ;;
+esac
 mktemp_template="$tmpdir/threading_showcase.XXXXXX"
 
 if THREAD_INFO_FILE=$(mktemp "$mktemp_template" 2>/dev/null); then
@@ -53,6 +61,31 @@ else
         printf 'threading_showcase:error:mktemp_failed dir=%s\n' "$tmpdir" >&2
         exit 1
     fi
+fi
+
+# Some environments (notably certain macOS shells) may claim success but still
+# yield an empty path. Ensure we have a usable file before continuing.
+if [ -n "$THREAD_INFO_FILE" ] && [ ! -e "$THREAD_INFO_FILE" ]; then
+    if ! (umask 077 && : >"$THREAD_INFO_FILE") 2>/dev/null; then
+        THREAD_INFO_FILE=""
+    fi
+fi
+
+if [ -z "$THREAD_INFO_FILE" ]; then
+    fallback_idx=0
+    while [ "$fallback_idx" -lt 128 ]; do
+        candidate="$tmpdir/threading_showcase.$$.$fallback_idx"
+        if (umask 077 && : >"$candidate") 2>/dev/null; then
+            THREAD_INFO_FILE="$candidate"
+            break
+        fi
+        fallback_idx=$((fallback_idx + 1))
+    done
+fi
+
+if [ -z "$THREAD_INFO_FILE" ]; then
+    printf 'threading_showcase:error:mktemp_failed dir=%s\n' "$tmpdir" >&2
+    exit 1
 fi
 
 trap 'rm -f "$THREAD_INFO_FILE"' EXIT INT TERM
