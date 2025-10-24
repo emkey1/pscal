@@ -36,7 +36,25 @@ DELAY_MS=${THREAD_SHOWCASE_DELAY_MS:-750}
 # Accumulate thread metadata as "id|label|kind" tuples (newline separated).
 # Using a temp file keeps the data accessible across multiple passes without
 # relying on shell-specific newline handling quirks.
-THREAD_INFO_FILE=$(mktemp "${TMPDIR:-/tmp}/threading_showcase.XXXXXX")
+tmpdir=${TMPDIR:-/tmp}
+# macOS exposes TMPDIR with a trailing slash, so strip any suffix to avoid
+# generating paths with a "//" sequence that some mktemp(1) builds reject.
+tmpdir=${tmpdir%/}
+mktemp_template="$tmpdir/threading_showcase.XXXXXX"
+
+if THREAD_INFO_FILE=$(mktemp "$mktemp_template" 2>/dev/null); then
+    : # primary path succeeded
+else
+    # Some BSD mktemp implementations require -t when the directory component
+    # comes from TMPDIR; retry with that behaviour for portability.
+    if THREAD_INFO_FILE=$(TMPDIR="$tmpdir" mktemp -t threading_showcase.XXXXXX 2>/dev/null); then
+        : # fallback succeeded
+    else
+        printf 'threading_showcase:error:mktemp_failed dir=%s\n' "$tmpdir" >&2
+        exit 1
+    fi
+fi
+
 trap 'rm -f "$THREAD_INFO_FILE"' EXIT INT TERM
 record_thread_info() {
     printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$THREAD_INFO_FILE"
