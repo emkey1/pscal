@@ -48,39 +48,53 @@ case "$tmpdir" in
     /) : ;;
     */) tmpdir=${tmpdir%/} ;;
 esac
-mktemp_template="$tmpdir/threading_showcase.XXXXXX"
 
-if THREAD_INFO_FILE=$(mktemp "$mktemp_template" 2>/dev/null); then
-    : # primary path succeeded
-else
-    # Some BSD mktemp implementations require -t when the directory component
-    # comes from TMPDIR; retry with that behaviour for portability.
-    if THREAD_INFO_FILE=$(TMPDIR="$tmpdir" mktemp -t threading_showcase.XXXXXX 2>/dev/null); then
-        : # fallback succeeded
+create_thread_info_file() {
+    dir="$1"
+    THREAD_INFO_FILE=""
+
+    if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then
+        return
+    fi
+
+    mktemp_template="$dir/threading_showcase.XXXXXX"
+
+    if THREAD_INFO_FILE=$(mktemp "$mktemp_template" 2>/dev/null); then
+        :
     else
-        printf 'threading_showcase:error:mktemp_failed dir=%s\n' "$tmpdir" >&2
-        exit 1
-    fi
-fi
-
-# Some environments (notably certain macOS shells) may claim success but still
-# yield an empty path. Ensure we have a usable file before continuing.
-if [ -n "$THREAD_INFO_FILE" ] && [ ! -e "$THREAD_INFO_FILE" ]; then
-    if ! (umask 077 && : >"$THREAD_INFO_FILE") 2>/dev/null; then
-        THREAD_INFO_FILE=""
-    fi
-fi
-
-if [ -z "$THREAD_INFO_FILE" ]; then
-    fallback_idx=0
-    while [ "$fallback_idx" -lt 128 ]; do
-        candidate="$tmpdir/threading_showcase.$$.$fallback_idx"
-        if (umask 077 && : >"$candidate") 2>/dev/null; then
-            THREAD_INFO_FILE="$candidate"
-            break
+        if THREAD_INFO_FILE=$(TMPDIR="$dir" mktemp -t threading_showcase.XXXXXX 2>/dev/null); then
+            :
+        else
+            THREAD_INFO_FILE=""
         fi
-        fallback_idx=$((fallback_idx + 1))
-    done
+    fi
+
+    if [ -n "$THREAD_INFO_FILE" ] && [ ! -e "$THREAD_INFO_FILE" ]; then
+        if ! (umask 077 && : >"$THREAD_INFO_FILE") 2>/dev/null; then
+            THREAD_INFO_FILE=""
+        fi
+    fi
+
+    if [ -z "$THREAD_INFO_FILE" ]; then
+        fallback_idx=0
+        while [ "$fallback_idx" -lt 128 ]; do
+            candidate="$dir/threading_showcase.$$.$fallback_idx"
+            if (umask 077 && : >"$candidate") 2>/dev/null; then
+                THREAD_INFO_FILE="$candidate"
+                break
+            fi
+            fallback_idx=$((fallback_idx + 1))
+        done
+    fi
+}
+
+create_thread_info_file "$tmpdir"
+if [ -z "$THREAD_INFO_FILE" ] && [ "$tmpdir" != "/tmp" ]; then
+    # Some macOS configurations expose TMPDIR under a restricted path (e.g.,
+    # `~/Library/Containers/...`) that rejects manual file creation even when
+    # mktemp(1) succeeds. Retry under /tmp before surfacing an error.
+    tmpdir=/tmp
+    create_thread_info_file "$tmpdir"
 fi
 
 if [ -z "$THREAD_INFO_FILE" ]; then
