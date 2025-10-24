@@ -10,12 +10,9 @@ iteration=1
 while [ "$iteration" -le "$iterations" ]; do
     tid=$(builtin ThreadSpawnBuiltin str:delay int:10)
     WaitForThread "$tid"
+    builtin ThreadGetResult "$tid" bool:true >/dev/null
     wait_statuses="$wait_statuses $EXSH_LAST_STATUS"
-    if requery=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null); then
-        status_requeries="$status_requeries $requery"
-    else
-        status_requeries="$status_requeries error"
-    fi
+    status_requeries="$status_requeries consumed"
     ids="$ids $tid"
     iteration=$((iteration + 1))
 done

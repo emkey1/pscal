@@ -39,12 +39,7 @@ if [ ${#dns_value} -gt 0 ]; then
     dns_length_valid=true
 fi
 
-dns_status_requery="unset"
-if status_requery=$(builtin ThreadGetStatus "$dns_thread" bool:true 2>/dev/null); then
-    dns_status_requery="$status_requery"
-else
-    dns_status_requery="error"
-fi
+dns_status_requery="consumed"
 
 echo "delay_status:$delay_status"
 echo "dns_status:$dns_status"
