@@ -65,19 +65,9 @@ fi
 
 # Some environments (notably certain macOS shells) may claim success but still
 # yield an empty path. Ensure we have a usable file before continuing.
-if [ -n "$THREAD_INFO_FILE" ]; then
-    if [ ! -e "$THREAD_INFO_FILE" ]; then
-        old_umask=$(umask)
-        creation_ok=0
-        if umask 077 2>/dev/null; then
-            if : >"$THREAD_INFO_FILE" 2>/dev/null; then
-                creation_ok=1
-            fi
-        fi
-        umask "$old_umask" >/dev/null 2>&1 || true
-        if [ "$creation_ok" -ne 1 ]; then
-            THREAD_INFO_FILE=""
-        fi
+if [ -n "$THREAD_INFO_FILE" ] && [ ! -e "$THREAD_INFO_FILE" ]; then
+    if ! (umask 077 && : >"$THREAD_INFO_FILE") 2>/dev/null; then
+        THREAD_INFO_FILE=""
     fi
 fi
 
@@ -85,15 +75,10 @@ if [ -z "$THREAD_INFO_FILE" ]; then
     fallback_idx=0
     while [ "$fallback_idx" -lt 128 ]; do
         candidate="$tmpdir/threading_showcase.$$.$fallback_idx"
-        old_umask=$(umask)
-        if umask 077 2>/dev/null; then
-            if : >"$candidate" 2>/dev/null; then
-                THREAD_INFO_FILE="$candidate"
-                umask "$old_umask" >/dev/null 2>&1 || true
-                break
-            fi
+        if (umask 077 && : >"$candidate") 2>/dev/null; then
+            THREAD_INFO_FILE="$candidate"
+            break
         fi
-        umask "$old_umask" >/dev/null 2>&1 || true
         fallback_idx=$((fallback_idx + 1))
     done
 fi
@@ -137,39 +122,20 @@ delay_label="delay:${DELAY_MS}ms"
 builtin ThreadSetName "$delay_tid" "str:$delay_label" >/dev/null 2>&1 || true
 record_thread_info "$delay_tid" "$delay_label" "$delay_kind"
 
-# Snapshot the thread metadata so we can iterate over it multiple times without
-# relying on shell-specific redirection semantics.
-thread_info_snapshot=$(cat "$THREAD_INFO_FILE" 2>/dev/null || printf '')
-old_IFS=$IFS
-IFS=$(printf '\n_')
-IFS=${IFS%_}
-
 # Demonstrate ThreadLookup for every recorded label.
-for line in $thread_info_snapshot; do
-    [ -z "$line" ] && continue
-    tid=${line%%|*}
-    rest=${line#*|}
-    [ "$rest" = "$line" ] && continue
-    label=${rest%%|*}
-    kind=${rest#*|}
-
+while IFS='|' read -r tid label kind; do
+    [ -z "$tid" ] && continue
     lookup=$(builtin ThreadLookup "str:$label" 2>/dev/null || printf '')
     if [ -n "$lookup" ]; then
         printf 'threading_showcase:lookup:%s:%s\n' "$label" "$lookup"
     else
         printf 'threading_showcase:lookup:%s:<not-found>\n' "$label"
     fi
-done
+done <"$THREAD_INFO_FILE"
 
 dns_counter=0
-for line in $thread_info_snapshot; do
-    [ -z "$line" ] && continue
-    tid=${line%%|*}
-    rest=${line#*|}
-    [ "$rest" = "$line" ] && continue
-    label=${rest%%|*}
-    kind=${rest#*|}
-
+while IFS='|' read -r tid label kind; do
+    [ -z "$tid" ] && continue
     if WaitForThread "$tid"; then
         join_status=$EXSH_LAST_STATUS
     else
@@ -185,7 +151,7 @@ for line in $thread_info_snapshot; do
             if [ "$dns_counter" -eq 1 ]; then
                 # Two-step collection: read the value, then drop the cached state.
                 result_payload=$(builtin ThreadGetResult "$tid")
-                status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null)
+                status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
                 status_note="status=$status_flag"
             else
                 # Consume the status flag at the same time as the result.
@@ -194,12 +160,12 @@ for line in $thread_info_snapshot; do
             fi
             ;;
         delay_queue|delay_spawn)
-            status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null)
+            status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
             status_note="status=$status_flag"
             result_payload="<void>"
             ;;
         *)
-            status_flag=$(builtin ThreadGetStatus "$tid" bool:true 2>/dev/null)
+            status_flag=$(builtin ThreadGetStatus "$tid" bool:true)
             status_note="status=$status_flag"
             ;;
     esac
@@ -210,8 +176,7 @@ for line in $thread_info_snapshot; do
 
     printf 'threading_showcase:result:%s:join=%s %s value=%s\n' \
         "$label" "$join_status" "$status_note" "$result_payload"
-done
-IFS=$old_IFS
+done <"$THREAD_INFO_FILE"
 
 stats_output=$(builtin ThreadStats 2>/dev/null || printf '')
 if [ -n "$stats_output" ]; then
