@@ -2368,6 +2368,15 @@ Value vmBuiltinSocketPoll(VM* vm, int arg_count, Value* args) {
     return makeInt(out);
 }
 
+static void markDnsLookupFailure(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    if (vm->owningThread) {
+        vm->abort_requested = true;
+    }
+}
+
 Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
         runtimeError(vm, "dnsLookup expects (hostname).");
@@ -2387,6 +2396,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
         }
         if (res) freeaddrinfo(res);
         setSocketAddrInfoError(e);
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     if (!res) {
@@ -2398,6 +2408,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #else
         setSocketAddrInfoError(-1);
 #endif
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     struct addrinfo* first_v4 = NULL;
@@ -2433,6 +2444,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #else
         setSocketError(errno != 0 ? errno : ENOENT);
 #endif
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     g_socket_last_error = 0;
