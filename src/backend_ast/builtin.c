@@ -5244,7 +5244,7 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
     }
 
     bool status_flag = true;
-    if (vmThreadTakeResult(thread_vm, id, NULL, false, &status_flag, false)) {
+    if (vmThreadTakeResult(thread_vm, id, NULL, false, &status_flag, true)) {
         return makeInt(status_flag ? 0 : 1);
     }
 

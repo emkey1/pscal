@@ -863,16 +863,18 @@ add({
           namedId: Integer;
           queueId: Integer;
           lookupId: Integer;
+          namedStatus: Integer;
+          queuedStatus: Integer;
 
         begin
           namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));
-          WaitForThread(namedId);
-          writeln('named_status=', Ord(ThreadStatusOk(namedId, True)));
+          namedStatus := WaitForThread(namedId);
+          writeln('named_status=', Ord(namedStatus = 0));
 
           queueId := ThreadPoolSubmit('delay', 5, ThreadOptionsQueue('pascal_pool'));
-          WaitForThread(queueId);
+          queuedStatus := WaitForThread(queueId);
           lookupId := LookupThreadByName('pascal_pool');
-          writeln('queued_status=', Ord(ThreadStatusOk(queueId, True)));
+          writeln('queued_status=', Ord(queuedStatus = 0));
           writeln('lookup_matches=', Ord(lookupId = queueId));
           writeln('stats_len=', ThreadStatsCount);
         end.

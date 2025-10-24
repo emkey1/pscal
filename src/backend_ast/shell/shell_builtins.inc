@@ -8476,7 +8476,7 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     }
 
     bool status_flag = true;
-    if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, false)) {
+    if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, true)) {
         shellUpdateStatus(status_flag ? 0 : 1);
     } else {
         shellUpdateStatus(0);
