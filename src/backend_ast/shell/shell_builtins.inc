@@ -644,7 +644,6 @@ Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
     (void)arg_count;
     (void)args;
-    shellMaybeResetPipeline();
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }

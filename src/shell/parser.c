@@ -1039,12 +1039,10 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
     while (!parser->had_error) {
         if (parser->current.type == SHELL_TOKEN_WORD && parser->current.lexeme && parser->current.length == 1) {
             char ch = parser->current.lexeme[0];
-            if (ch == ')' || ch == '}') {
-                if ((parser->current.rule_mask & SHELL_LEXER_RULE_1) != 0u) {
-                    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
-                    if (parser->current.type == SHELL_TOKEN_RPAREN || parser->current.type == SHELL_TOKEN_RBRACE) {
-                        break;
-                    }
+            if ((ch == ')' || ch == '}') && !parser->current.single_quoted && !parser->current.double_quoted) {
+                parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+                if (parser->current.type == SHELL_TOKEN_RPAREN || parser->current.type == SHELL_TOKEN_RBRACE) {
+                    break;
                 }
             }
         }
