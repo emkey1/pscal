@@ -259,6 +259,22 @@ static void applyLexicalRules(ShellToken *token) {
     if ((mask & SHELL_LEXER_RULE_6) != 0 && token->reserved_candidate) {
         token->type = token->reserved_type;
     }
+
+    if ((mask & SHELL_LEXER_RULE_1) != 0 && token->lexeme && token->length == 1) {
+        ShellTokenType structural = SHELL_TOKEN_ERROR;
+        switch (token->lexeme[0]) {
+            case '(': structural = SHELL_TOKEN_LPAREN; break;
+            case ')': structural = SHELL_TOKEN_RPAREN; break;
+            case '{': structural = SHELL_TOKEN_LBRACE; break;
+            case '}': structural = SHELL_TOKEN_RBRACE; break;
+            default: break;
+        }
+        if (structural != SHELL_TOKEN_ERROR) {
+            token->type = structural;
+            token->base_type = structural;
+            token->reserved_type = structural;
+        }
+    }
 }
 
 static void shellParserAdvance(ShellParser *parser) {
@@ -1021,6 +1037,17 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
 
     bool seen_word = false;
     while (!parser->had_error) {
+        if (parser->current.type == SHELL_TOKEN_WORD && parser->current.lexeme && parser->current.length == 1) {
+            char ch = parser->current.lexeme[0];
+            if (ch == ')' || ch == '}') {
+                if ((parser->current.rule_mask & SHELL_LEXER_RULE_1) != 0u) {
+                    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+                    if (parser->current.type == SHELL_TOKEN_RPAREN || parser->current.type == SHELL_TOKEN_RBRACE) {
+                        break;
+                    }
+                }
+            }
+        }
         if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD ||
             parser->current.type == SHELL_TOKEN_NAME || parser->current.type == SHELL_TOKEN_PARAMETER) {
             ShellWord *word = parseWordToken(parser, NULL);
@@ -1128,6 +1155,7 @@ static ShellCommand *parseBraceGroup(ShellParser *parser) {
     shellParserAdvance(parser);
     parseLinebreak(parser);
     ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RBRACE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close brace group");
     ShellCommand *command = shellCreateBraceGroupCommand(body);
     if (command) {
@@ -1144,6 +1172,7 @@ static ShellCommand *parseSubshell(ShellParser *parser) {
     shellParserAdvance(parser);
     parseLinebreak(parser);
     ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RPAREN, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
     ShellCommand *command = shellCreateSubshellCommand(body);
     if (command) {
@@ -1160,17 +1189,21 @@ static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType 
         return NULL;
     }
     parseLinebreak(parser);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     while (!parser->had_error && parser->current.type != terminator1 && parser->current.type != terminator2 &&
            parser->current.type != terminator3 && parser->current.type != SHELL_TOKEN_EOF) {
         if (!parseList(parser, program)) {
             break;
         }
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_AMPERSAND) {
             parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
             shellParserAdvance(parser);
             parseLinebreak(parser);
+            parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         }
         parseLinebreak(parser);
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     }
     return program;
 }
