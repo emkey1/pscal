@@ -139,7 +139,7 @@ syntax_check() {
   printf '%s' "$2" > "$script_file"
   script=$script_file
   # shellcheck disable=SC2086
-  error=$(( set -- $shell_cmd; "$@" "$script" ) 2>&1 >/dev/null 3>&1) &&:
+  error=$( ( set -- $shell_cmd; "$@" "$script" ) 2>&1 >/dev/null 3>&1) &&:
   ex=$?
   rm -f "$script_file"
   if [ "$ex" -ne 0 ] || [ "$error" ]; then
