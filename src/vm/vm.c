@@ -2263,6 +2263,45 @@ static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
     return NULL;
 }
 
+static bool symbolIsConstructor(const Symbol* symbol) {
+    if (!symbol || !symbol->name) {
+        return false;
+    }
+
+    const char* last_dot = strrchr(symbol->name, '.');
+    if (!last_dot || last_dot == symbol->name) {
+        return false;
+    }
+
+    const char* method_name = last_dot + 1;
+    if (*method_name == '\0') {
+        return false;
+    }
+
+    const char* class_simple_start = symbol->name;
+    for (const char* scan = last_dot - 1; scan >= symbol->name; --scan) {
+        if (*scan == '.') {
+            class_simple_start = scan + 1;
+            break;
+        }
+        if (scan == symbol->name) {
+            class_simple_start = symbol->name;
+            break;
+        }
+    }
+
+    size_t class_len = (size_t)(last_dot - class_simple_start);
+    if (class_len == 0) {
+        return false;
+    }
+
+    if (strncmp(method_name, class_simple_start, class_len) != 0) {
+        return false;
+    }
+
+    return method_name[class_len] == '\0';
+}
+
 static Symbol* resolveProcedureAlias(Symbol* symbol) {
     if (symbol && symbol->is_alias && symbol->real_symbol) {
         return symbol->real_symbol;
@@ -2347,7 +2386,7 @@ static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address) {
 
 static bool procedureVisibleFromFrames(VM* vm, Symbol* symbol) {
     if (!symbol) return false;
-    if (!symbol->enclosing) return true;
+    if (!symbol->enclosing || symbolIsConstructor(symbol)) return true;
     if (!vm) return false;
 
     for (int fi = vm->frameCount - 1; fi >= 0; fi--) {
