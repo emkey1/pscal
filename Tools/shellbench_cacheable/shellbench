@@ -31,6 +31,37 @@ script_path_for_identifier() {
   printf '%s/%s%s' "$SCRIPT_CACHE_RUN_DIR" "$identifier" "${suffix:+.$suffix}"
 }
 
+hash_identifier_suffix() {
+  payload=$1
+  if [ ! "$payload" ]; then
+    printf '0'
+    return
+  fi
+  checksum=$(printf '%s' "$payload" | cksum)
+  printf '%s' "${checksum%% *}"
+}
+
+identifier_with_hash() {
+  base=$1
+  hash=$2
+  if [ "$hash" ]; then
+    printf '%s-%s' "$base" "$hash"
+  else
+    printf '%s' "$base"
+  fi
+}
+
+bench_identifier() {
+  file_id=$1
+  bench_count=$2
+  suffix=$(printf 'bench%02d' "$bench_count")
+  if [ "$file_id" ]; then
+    printf '%s-%s' "$file_id" "$suffix"
+  else
+    printf '%s' "$suffix"
+  fi
+}
+
 SHELLS=${SHELLBENCH_SHELLS:-sh}
 NUMBER_OF_SHELLS=0
 WARMUP_TIME=${SHELLBENCH_WARMUP_TIME:-1}
@@ -220,7 +251,8 @@ parse_bench_directive() {
 }
 
 exists_shell() {
-  script_file=$(mktemp)
+  shell_identifier=$(sanitize_identifier "probe $1" 0)
+  script_file=$(script_path_for_identifier "$shell_identifier" probe)
   printf '%s' : > "$script_file"
   "$1" "$script_file" 2>/dev/null
   status=$?
@@ -247,23 +279,32 @@ comma() {
 process() {
   initializer=$(read_initializer)
   bench_index=0
+  file_identifier=$(sanitize_identifier "$1" 0)
   while bench=$(read_bench_directive); do
     eval "parse_bench_directive ${bench#@bench}"
     bench_index=$(($bench_index + 1))
-    identifier=$(sanitize_identifier "$name" "$bench_index")
-    printf "%-${NAME_WIDTH}s " "$1: $name"
+    identifier=$(bench_identifier "$file_identifier" "$bench_index")
+    display_name=$name
+    if [ ! "$display_name" ]; then
+      display_name=$(printf 'bench%02d' "$bench_index")
+    fi
+    printf "%-${NAME_WIDTH}s " "$1: $display_name"
 
     chunk=$(printf '%s\n' "$initializer"; read_chunk)
     syntax_check_code=$(printf '%s' "$chunk" | translate_bench_code syntax)
     code=$(printf '%s' "$chunk" | translate_bench_code)
+    syntax_hash=$(hash_identifier_suffix "$syntax_check_code")
+    bench_hash=$(hash_identifier_suffix "$code")
+    syntax_identifier=$(identifier_with_hash "$identifier" "$syntax_hash")
+    bench_identifier_with_hash=$(identifier_with_hash "$identifier" "$bench_hash")
 
     shells="$SHELLS,"
     while [ "$shells" ] && shell=${shells%%,*} && shells=${shells#*,}; do
       result='?' count=0
       if ! exists_shell "$shell"; then
         result="none"
-      elif syntax_check "$shell" "$syntax_check_code" "$identifier"; then
-        count=$(bench "$shell" "$code" "$BENCHMARK_TIME" "$identifier")
+      elif syntax_check "$shell" "$syntax_check_code" "$syntax_identifier"; then
+        count=$(bench "$shell" "$code" "$BENCHMARK_TIME" "$bench_identifier_with_hash")
         if [ "$count" ]; then
           count=$(($count / $BENCHMARK_TIME))
           nullloop=$(get_nullloop "$shell")
