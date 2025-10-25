@@ -107,6 +107,18 @@ Value vmBuiltinQuitrequested(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinVMVersion(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinBytecodeVersion(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinWaitForThread(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadSpawnBuiltin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadPoolSubmit(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadGetResult(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadGetStatus(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadSetName(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadLookup(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadPause(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadResume(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadCancel(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadStats(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinThreadStatsJson(struct VM_s* vm, int arg_count, Value* args);
 
 /* Shell builtins */
 Value vmBuiltinShellExec(struct VM_s* vm, int arg_count, Value* args);
@@ -169,6 +181,7 @@ Value vmBuiltinShellKill(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellWaitForThread(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEcho(struct VM_s* vm, int arg_count, Value* args);

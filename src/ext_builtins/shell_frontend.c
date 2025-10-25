@@ -11,10 +11,12 @@ void registerShellFrontendBuiltins(void) {
     const char *category = "shell";
     const char *runtime_group = "runtime";
     const char *command_group = "commands";
+    const char *thread_group = "threading";
 
     extBuiltinRegisterCategory(category);
     extBuiltinRegisterGroup(category, runtime_group);
     extBuiltinRegisterGroup(category, command_group);
+    extBuiltinRegisterGroup(category, thread_group);
 
     registerShellBuiltin(category, runtime_group, "__shell_exec", vmBuiltinShellExec);
     registerShellBuiltin(category, runtime_group, "__shell_pipeline", vmBuiltinShellPipeline);
@@ -78,6 +80,10 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "fg", vmBuiltinShellFg);
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);
+    registerShellBuiltin(category, command_group, "WaitForThread", vmBuiltinShellWaitForThread);
+    registerShellBuiltin(category, thread_group, "ThreadSpawnBuiltin", vmBuiltinThreadSpawnBuiltin);
+    registerShellBuiltin(category, thread_group, "ThreadGetResult", vmBuiltinThreadGetResult);
+    registerShellBuiltin(category, thread_group, "ThreadGetStatus", vmBuiltinThreadGetStatus);
     registerShellBuiltin(category, command_group, "hash", vmBuiltinShellHash);
     registerShellBuiltin(category, command_group, "enable", vmBuiltinShellEnable);
     registerShellBuiltin(category, command_group, "help", vmBuiltinShellHelp);

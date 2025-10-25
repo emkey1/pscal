@@ -2789,7 +2789,7 @@ int main(int argc, char **argv) {
         return vmExitWithCleanup(EXIT_SUCCESS);
     }
 
-    setenv("PSCALSHELL_LAST_STATUS", "0", 1);
+    setenv("EXSH_LAST_STATUS", "0", 1);
     shellRuntimeInitSignals();
 
     if (path) {

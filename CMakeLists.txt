@@ -341,6 +341,7 @@ set(PSCAL_SOURCES
     src/symbol/symbol.c
     src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
     src/vm/vm.c
@@ -606,6 +607,7 @@ set(CLIKE_SOURCES
     src/clike/parser.c
     src/clike/ast.c
     src/clike/builtins.c
+    src/clike/builtins/thread.c
     src/clike/semantics.c
     src/clike/codegen.c
     src/clike/opt.c
@@ -615,6 +617,8 @@ set(CLIKE_SOURCES
     src/compiler/bytecode.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/thread_wrappers.c
+    src/backend_ast/shell_runtime_stub.c
     src/symbol/symbol.c
     src/clike/stubs.c
 )
@@ -724,6 +728,7 @@ set(REA_SOURCES
     src/rea/lexer.c
     src/rea/parser.c
     src/rea/semantic.c
+    src/rea/builtins/thread.c
     src/Pascal/lexer.c
     src/Pascal/parser.c
     src/ast/ast.c
@@ -733,6 +738,8 @@ set(REA_SOURCES
     src/compiler/compiler.c
     src/vm/vm.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/thread_wrappers.c
+    src/backend_ast/shell_runtime_stub.c
     src/symbol/symbol.c
 )
 
@@ -963,6 +970,7 @@ set(JSON2BC_SOURCES
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
+    src/backend_ast/shell_runtime_stub.c
     src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
     src/symbol/symbol.c
     src/vm/vm.c

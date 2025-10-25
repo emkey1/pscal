@@ -628,15 +628,13 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (!gSdlInitialized || !gSdlWindow) {
-        runtimeError(vm, "Graphics system not initialized for GetScreenSize.");
-        return makeVoid();
-    }
+    int width = 0;
+    int height = 0;
 
-    int width = gSdlWidth;
-    int height = gSdlHeight;
+    if (gSdlInitialized && gSdlWindow) {
+        width = gSdlWidth;
+        height = gSdlHeight;
 
-    if (gSdlWindow) {
         int currentWidth = 0;
         int currentHeight = 0;
         SDL_GetWindowSize(gSdlWindow, &currentWidth, &currentHeight);
@@ -646,13 +644,44 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
         if (currentHeight > 0) {
             height = currentHeight;
         }
-    }
 
-    if (width > 0) {
-        gSdlWidth = width;
-    }
-    if (height > 0) {
-        gSdlHeight = height;
+        if (width > 0) {
+            gSdlWidth = width;
+        }
+        if (height > 0) {
+            gSdlHeight = height;
+        }
+    } else {
+        bool initialized_video = false;
+        Uint32 was_init = SDL_WasInit(SDL_INIT_VIDEO);
+        if ((was_init & SDL_INIT_VIDEO) == 0) {
+            if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+                runtimeError(vm, "Unable to initialize SDL video subsystem for GetScreenSize: %s", SDL_GetError());
+                return makeVoid();
+            }
+            initialized_video = true;
+        }
+
+        SDL_DisplayMode mode;
+        int display_status = SDL_GetDesktopDisplayMode(0, &mode);
+        if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
+            display_status = SDL_GetCurrentDisplayMode(0, &mode);
+        }
+
+        if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
+            if (initialized_video) {
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            }
+            runtimeError(vm, "Unable to query display size for GetScreenSize: %s", SDL_GetError());
+            return makeVoid();
+        }
+
+        width = mode.w;
+        height = mode.h;
+
+        if (initialized_video) {
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
     }
 
     freeValue(width_ptr);

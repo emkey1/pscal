@@ -1,6 +1,8 @@
-echo "case:start"
+#!/usr/bin/env exsh
 
-setenv CASE_SUBJECT foo
+echo "caseb:start"
+
+export CASE_SUBJECT=foo
 case "$CASE_SUBJECT" in
   foo)
     echo "match foo"
@@ -10,8 +12,8 @@ case "$CASE_SUBJECT" in
     ;;
 esac
 
-setenv CASE_SUBJECT baz
-setenv CASE_PATTERN baz
+export CASE_SUBJECT=baz
+export CASE_PATTERN=baz
 case "$CASE_SUBJECT" in
   foo)
     echo "no foo"
@@ -24,8 +26,8 @@ case "$CASE_SUBJECT" in
     ;;
 esac
 
-setenv CASE_SUBJECT qux
-setenv CASE_DEFAULT qux
+export CASE_SUBJECT=qux
+export CASE_DEFAULT=qux
 case "$CASE_SUBJECT" in
   foo|bar)
     echo "unexpected branch"

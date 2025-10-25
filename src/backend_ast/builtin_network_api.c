@@ -50,6 +50,39 @@ typedef struct SocketInfo_s {
 
 static SocketInfo* g_socket_info_list = NULL;
 
+static int stringsEqualIgnoreCase(const char* a, const char* b) {
+    if (!a || !b) {
+        return 0;
+    }
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a++;
+        unsigned char cb = (unsigned char)*b++;
+        if (tolower(ca) != tolower(cb)) {
+            return 0;
+        }
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int isLocalhostName(const char* host) {
+    if (!host) {
+        return 0;
+    }
+    if (stringsEqualIgnoreCase(host, "localhost")) {
+        return 1;
+    }
+    if (stringsEqualIgnoreCase(host, "localhost.")) {
+        return 1;
+    }
+    return 0;
+}
+
+static Value makeLocalhostFallbackResult(void) {
+    g_socket_last_error = 0;
+    g_socket_last_error_msg[0] = '\0';
+    return makeString("127.0.0.1");
+}
+
 static const Value* resolveStringPointer(const Value* value) {
     const Value* current = value;
     int depth = 0;
@@ -2335,6 +2368,15 @@ Value vmBuiltinSocketPoll(VM* vm, int arg_count, Value* args) {
     return makeInt(out);
 }
 
+static void markDnsLookupFailure(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    if (vm->owningThread) {
+        vm->abort_requested = true;
+    }
+}
+
 Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) {
         runtimeError(vm, "dnsLookup expects (hostname).");
@@ -2349,16 +2391,24 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     hints.ai_family = AF_UNSPEC;
     int e = getaddrinfo(host, NULL, &hints, &res);
     if (e != 0) {
+        if (isLocalhostName(host)) {
+            return makeLocalhostFallbackResult();
+        }
         if (res) freeaddrinfo(res);
         setSocketAddrInfoError(e);
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     if (!res) {
+        if (isLocalhostName(host)) {
+            return makeLocalhostFallbackResult();
+        }
 #ifdef EAI_FAIL
         setSocketAddrInfoError(EAI_FAIL);
 #else
         setSocketAddrInfoError(-1);
 #endif
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     struct addrinfo* first_v4 = NULL;
@@ -2384,6 +2434,9 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #endif
     freeaddrinfo(res);
     if (!ip) {
+        if (isLocalhostName(host)) {
+            return makeLocalhostFallbackResult();
+        }
 #ifdef EAI_NONAME
         setSocketAddrInfoError(EAI_NONAME);
 #elif defined(_WIN32)
@@ -2391,6 +2444,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #else
         setSocketError(errno != 0 ? errno : ENOENT);
 #endif
+        markDnsLookupFailure(vm);
         return makeString("");
     }
     g_socket_last_error = 0;

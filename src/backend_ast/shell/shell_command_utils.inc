@@ -3053,6 +3053,12 @@ static bool shellSetTrackedVariable(const char *name, const char *value, bool is
             } else {
                 shellArrayRegistryRemove(name);
             }
+            if (strcmp(name, "EXSH_LAST_STATUS") == 0) {
+                const char *text = value ? value : "";
+                if (setenv(name, text, 1) != 0) {
+                    return false;
+                }
+            }
             return true;
         }
         errno = ENOMEM;

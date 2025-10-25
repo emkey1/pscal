@@ -3,9 +3,9 @@
 The exsh front end ships with a few minimal scripts that are used by the
 regression suite and serve as reference material for new programs. Each script
 lives alongside this README so you can run it directly with the `exsh`
-executable (for example, `build/bin/exsh Examples/exsh/pipeline.psh`).
+executable (for example, `build/bin/exsh Examples/exsh/pipeline`).
 
-## `pipeline.psh`
+## `pipeline`
 
 ```sh
 #!/usr/bin/env exsh
@@ -19,7 +19,7 @@ standard POSIX `|` operator through the builtin pipeline helpers so you can
 combine multiple commands. Additional stages can be appended with more `|`
 operators; each stage runs sequentially within the VM process.
 
-## `conditionals.psh`
+## `conditionals`
 
 ```sh
 #!/usr/bin/env exsh
@@ -37,7 +37,7 @@ VM. Because the current implementation executes helpers sequentially, this
 example uses constant `true`/`false` commands to keep behaviour deterministic.
 Replace them with your own conditions to drive different branches.
 
-## `functions.psh`
+## `functions`
 
 ```sh
 #!/usr/bin/env exsh
@@ -45,21 +45,21 @@ echo "functions:start"
 export GREETING=hello
 printenv GREETING
 false
-printenv PSCALSHELL_LAST_STATUS
+printenv EXSH_LAST_STATUS
 true
-printenv PSCALSHELL_LAST_STATUS
+printenv EXSH_LAST_STATUS
 unset GREETING
 printenv GREETING
 echo "functions:end"
 ```
 
 `exsh` scripts have access to the shared builtin catalog. The `export`/`unset`
-pair mutates the host environment, and `PSCALSHELL_LAST_STATUS` reflects the
+pair mutates the host environment, and `EXSH_LAST_STATUS` reflects the
 result of the most recently executed command or pipeline. You can call any other
 PSCAL builtins (HTTP, JSON, SQLite, etc.) from the same script to orchestrate
 complex workflows.
 
-## `builtins.psh`
+## `builtins`
 
 ```sh
 #!/usr/bin/env exsh
@@ -84,10 +84,55 @@ force other types:
 - `nil` or `nil:` – pass the VM's `nil` value.
 
 When a builtin returns a result the command prints it to `stdout`. Procedures
-that return `void` simply update `PSCALSHELL_LAST_STATUS` to `0` on success so
+that return `void` simply update `EXSH_LAST_STATUS` to `0` on success so
 you can chain them in conditionals.
 
-## `sierpinski_threads.psh`
+## `threading_demo`
+
+```sh
+#!/usr/bin/env exsh
+dns_thread=$(builtin ThreadSpawnBuiltin str:dnslookup str:localhost)
+delay_thread=$(builtin ThreadSpawnBuiltin str:delay int:25)
+WaitForThread "$delay_thread"
+WaitForThread "$dns_thread"
+dns_result=$(builtin ThreadGetResult "$dns_thread")
+dns_status=$(builtin ThreadGetStatus "$dns_thread" bool:true)
+printf "dns:%s (status:%s)\n" "${dns_result:-<empty>}" "$dns_status"
+```
+
+The thread helpers run allow-listed VM builtins on worker threads without
+needing the legacy `ThreadDemo*` helpers. `ThreadSpawnBuiltin` accepts either a
+builtin name or numeric id followed by its arguments, returning a thread handle.
+`WaitForThread` joins the worker and reflects the stored success flag in
+`EXSH_LAST_STATUS`, while `ThreadGetResult`/`ThreadGetStatus` retrieve the
+worker's return value and success bit. The sample script spawns a DNS lookup and
+an asynchronous delay, waits for both handles, and prints the resolved IP and
+status flag.
+
+## `threading_showcase`
+
+```sh
+#!/usr/bin/env exsh
+tid=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$host")
+builtin ThreadSetName "$tid" "str:dns:$host"
+WaitForThread "$tid"
+result=$(builtin ThreadGetResult "$tid" bool:true)
+stats=$(builtin ThreadStats)
+```
+
+`threading_showcase` expands on the basic demo by exercising every worker-pool
+builtin in one run. It spawns multiple DNS lookups, queues a delay via
+`ThreadPoolSubmit`, assigns human-readable names with `ThreadSetName`, and uses
+`ThreadLookup` to show how the names map back to thread handles. After the
+workers finish, the script demonstrates both result-collection styles (`get`
+followed by `status` and the one-shot `get(..., true)`) before dumping the pool
+snapshot provided by `ThreadStats`. Each worker now prints a
+`threading_showcase:result:` line describing the join status, cached success
+flag, and collected payload so the transcript records the full lifecycle for
+every thread before the cached metadata is cleared for reuse. Set
+`THREAD_SHOWCASE_DELAY_MS=<millis>` to adjust the queued delay.
+
+## `sierpinski_threads`
 
 ```sh
 #!/usr/bin/env exsh
@@ -97,18 +142,20 @@ builtin HideCursor
 ```
 
 This port of the Pascal `SierpinskiTriangleThreads` demo renders the fractal
-with three background jobs that share the VM's console helpers. The script
-queries the terminal size, hides the cursor, and then dispatches three recursive
-workers that call `GotoXY`/`Write` to fill the screen. By default it uses level
-13 detail; set `SIERPINSKI_LEVEL` (and optionally `SIERPINSKI_CHAR`) before
-invocation to tweak the recursion depth and drawing character:
+with three VM threads started via the `SierpinskiSpawnWorker` builtin. The
+script queries the terminal size, hides the cursor, and dispatches three
+recursive workers that call `GotoXY`/`Write` to fill the screen. Each thread id
+is joined with the standard `WaitForThread` builtin so the rendering stays
+inside a single exsh process. By default it uses level 13 detail; set
+`SIERPINSKI_LEVEL` (and optionally `SIERPINSKI_CHAR`) before invocation to tweak
+the recursion depth and drawing character:
 
 ```sh
 SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
-    Examples/exsh/sierpinski_threads.psh
+    Examples/exsh/sierpinski_threads
 ```
 
-## `logical.psh`
+## `logical`
 
 ```sh
 #!/usr/bin/env exsh
@@ -124,7 +171,7 @@ echo "logical:end"
 short-circuit based on the status of the previous stage. This sample shows which
 branches execute when paired with the standard `true`/`false` utilities.
 
-## `redirection.psh`
+## `redirection`
 
 ```sh
 #!/usr/bin/env exsh
@@ -140,7 +187,7 @@ Redirections map to the VM's file descriptor helpers. The script writes to a
 temporary file, appends an extra line, reads it back via input redirection, and
 removes the temporary resource.
 
-## `env.psh`
+## `env`
 
 ```sh
 #!/usr/bin/env exsh
@@ -172,7 +219,7 @@ cmake --build build
 You can then run any script directly:
 
 ```sh
-build/bin/exsh Examples/exsh/pipeline.psh
+build/bin/exsh Examples/exsh/pipeline
 ```
 
 Pass additional arguments after the script path to expose them to `$0`, `$1`,

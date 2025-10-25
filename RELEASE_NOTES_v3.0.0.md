@@ -17,6 +17,7 @@ Date: 2025-10-20
 
 ## Improvements
 - Replaced the builtin registry with hash tables and cached procedure lookup metadata, preventing contention and shaving lookups for hot VM paths.
+- Thread helpers grow `ThreadSpawnBuiltin`/`ThreadGetResult`/`ThreadGetStatus`, letting exsh queue allow-listed VM builtins on worker threads while `WaitForThread` reports their stored status codes. Documentation now includes sample transcripts and the explicit allowlist for threaded builtins.
 - Inlined shell loop guards, added owned-string helpers, and deferred exit handling in logical contexts to eliminate performance regressions observed in shellbench.
 - Updated SDL demos with corrected controls, shared font fallbacks, fast landscape rendering validation, and WASD zoom controls for the 3D bouncing balls showcase.
 - Expanded documentation: compiler flags, exsh debugging, and Rea programmer guidance all reflect the new workflows.
@@ -35,6 +36,7 @@ Date: 2025-10-20
 - `Tests/run_all_tests` now defaults to `RUN_NET_TESTS=0`. Export `RUN_NET_TESTS=1` (and optionally `RUN_SDL=1`) before invoking the script to exercise socket and HTTP fixtures as part of release verification.
 - Library regression suites (`Tests/libs/run_all_tests.py`) start local HTTP servers; when running inside restricted environments you may need elevated permissions (passable via `--python` or sandbox approvals).
 - exsh scripts share PSCAL’s builtin catalog; rebuild or redeploy extended modules (SQLite, yyjson, OpenAI, etc.) alongside the VM so optional capabilities remain discoverable via `--dump-ext-builtins`.
+- Threaded scripts should review the new [Docs/threading.md](Docs/threading.md) guide. The worker pool still honours legacy handle-based APIs (`WaitForThread`, `ThreadGetStatus`, etc.), and Pascal’s `Threading` unit remains compatible—existing code keeps working while newer helpers add naming, metrics, and pool-size overrides.
 
 ## Verification Checklist
 1. `cmake -S . -B build && cmake --build build`
@@ -42,7 +44,7 @@ Date: 2025-10-20
 3. `TMPDIR=$PWD/Tests/tmp python3 Tests/libs/run_all_tests.py` *(requires local socket permissions)*
 4. `TMPDIR=$PWD/Tests/tmp python3 Tests/scope_verify/rea/rea_scope_test_harness.py`
 5. Spot-check flagship examples:  
-   - `build/bin/exsh Examples/exsh/pipeline.psh`  
+   - `build/bin/exsh Examples/exsh/pipeline`
    - `build/bin/pascal Examples/pascal/base/ThreadsProcPtrDemo`  
    - `build/bin/clike Examples/clike/base/thread_demo`  
    - `build/bin/rea Examples/rea/base/threads`

@@ -1,0 +1,19 @@
+#!/usr/bin/env exsh
+
+echo "env:start"
+
+export TEST_ENV=alpha
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+
+export TEST_ENV=beta
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+
+# Setting an empty variable in bash:
+export TEST_ENV=
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+
+# Unsetting the variable in bash:
+unset TEST_ENV
+python3 -c 'import os; print(os.getenv("TEST_ENV", "<UNSET>") or "<EMPTY>")'
+
+echo "env:end"

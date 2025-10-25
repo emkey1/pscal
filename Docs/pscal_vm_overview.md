@@ -22,6 +22,16 @@ The VM's architecture is defined by the `VM` struct in `src/vm/vm.h` and consist
 * **Thread Table:** The VM spawns real OS-level threads via `pthread`. Each entry in the `threads` array holds a native thread and its own `VM` instance, allowing bytecode routines to execute in parallel.
 * **Mutex Table:** Runtime-created mutex objects live in the `mutexes` array. Each slot tracks a native `pthread_mutex_t` along with whether it is active, enabling synchronization between threads.
 
+#### **Worker Thread Pool & Lifecycle**
+
+The thread table doubles as a **reusable worker pool**. Worker slots are lazily created up to `VM_MAX_WORKERS` and parked in an internal `ThreadJobQueue` when idle so new jobs reuse existing OS threads before spawning more. Each `Thread` now tracks:
+
+* **Identity:** `name` (set via `vmThreadAssignName`/`vmThreadFindIdByName`) and a `poolGeneration` counter so reused slots remain distinct to debuggers.
+* **Lifecycle flags:** cooperative `paused`, `cancelRequested`, and `killRequested` atomics, plus `awaitingReuse`/`readyForReuse` to gate when the pool may reclaim a worker. Callers may pause/resume/cancel/kill workers through `vmThreadPause`, `vmThreadResume`, `vmThreadCancel`, and `vmThreadKill`.
+* **Timing & metrics:** wall-clock timestamps (`queuedAt`, `startedAt`, `finishedAt`) together with cached CPU/RSS samples stored in `ThreadMetrics`. The helper `vmSnapshotWorkerUsage` gathers non-blocking snapshots for diagnostic tooling.
+
+Jobs publish both a result payload and a success flag; a worker is only released back to the queue once *both* have been consumed. Use `ThreadGetResult(t, /*consumeStatus=*/true)` to clear the result and status in a single call, or pair `ThreadGetResult` with `ThreadGetStatus(t, /*dropResult=*/true)` when you prefer to stream the value first.
+
 #### **Execution Flow**
 
 The VM's execution is driven by the `interpretBytecode` function in `src/vm/vm.c`. This function contains a main loop that repeatedly performs the following steps:

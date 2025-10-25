@@ -16,6 +16,9 @@
 #define RULE_MASK_FUNCTION_NAME (SHELL_LEXER_RULE_8 | SHELL_LEXER_RULE_1)
 #define RULE_MASK_FUNCTION_BODY (SHELL_LEXER_RULE_9)
 
+#define STRUCTURAL_CLOSER_RPAREN (1u << 0)
+#define STRUCTURAL_CLOSER_RBRACE (1u << 1)
+
 typedef struct {
     ShellRedirection *redir;
     char *delimiter;
@@ -39,6 +42,7 @@ static bool parserWordArrayAppend(ShellWordArray *array, ShellWord *word);
 static void parserWordArrayFree(ShellWordArray *array);
 
 static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask);
+static unsigned int parserStructuralCloserBit(ShellTokenType type);
 static void shellParserAdvance(ShellParser *parser);
 static void shellParserConsume(ShellParser *parser, ShellTokenType type, const char *message);
 static bool shellParserCheck(const ShellParser *parser, ShellTokenType type);
@@ -227,6 +231,17 @@ static void parserScheduleRuleMask(ShellParser *parser, unsigned int mask) {
     parser->next_rule_mask = mask;
 }
 
+static unsigned int parserStructuralCloserBit(ShellTokenType type) {
+    switch (type) {
+        case SHELL_TOKEN_RPAREN:
+            return STRUCTURAL_CLOSER_RPAREN;
+        case SHELL_TOKEN_RBRACE:
+            return STRUCTURAL_CLOSER_RBRACE;
+        default:
+            return 0u;
+    }
+}
+
 static void applyLexicalRules(ShellToken *token) {
     if (!token) {
         return;
@@ -258,6 +273,22 @@ static void applyLexicalRules(ShellToken *token) {
 
     if ((mask & SHELL_LEXER_RULE_6) != 0 && token->reserved_candidate) {
         token->type = token->reserved_type;
+    }
+
+    if ((mask & SHELL_LEXER_RULE_1) != 0 && token->lexeme && token->length == 1) {
+        ShellTokenType structural = SHELL_TOKEN_ERROR;
+        switch (token->lexeme[0]) {
+            case '(': structural = SHELL_TOKEN_LPAREN; break;
+            case ')': structural = SHELL_TOKEN_RPAREN; break;
+            case '{': structural = SHELL_TOKEN_LBRACE; break;
+            case '}': structural = SHELL_TOKEN_RBRACE; break;
+            default: break;
+        }
+        if (structural != SHELL_TOKEN_ERROR) {
+            token->type = structural;
+            token->base_type = structural;
+            token->reserved_type = structural;
+        }
     }
 }
 
@@ -1021,6 +1052,21 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
 
     bool seen_word = false;
     while (!parser->had_error) {
+        if (parser->current.type == SHELL_TOKEN_WORD && parser->current.lexeme && parser->current.length == 1) {
+            char ch = parser->current.lexeme[0];
+            bool treat_as_closer = false;
+            if (ch == ')' && (parser->structural_closer_mask & STRUCTURAL_CLOSER_RPAREN)) {
+                treat_as_closer = true;
+            } else if (ch == '}' && (parser->structural_closer_mask & STRUCTURAL_CLOSER_RBRACE)) {
+                treat_as_closer = true;
+            }
+            if (treat_as_closer && !parser->current.single_quoted && !parser->current.double_quoted) {
+                parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
+                if (parser->current.type == SHELL_TOKEN_RPAREN || parser->current.type == SHELL_TOKEN_RBRACE) {
+                    break;
+                }
+            }
+        }
         if (parser->current.type == SHELL_TOKEN_WORD || parser->current.type == SHELL_TOKEN_ASSIGNMENT_WORD ||
             parser->current.type == SHELL_TOKEN_NAME || parser->current.type == SHELL_TOKEN_PARAMETER) {
             ShellWord *word = parseWordToken(parser, NULL);
@@ -1128,6 +1174,7 @@ static ShellCommand *parseBraceGroup(ShellParser *parser) {
     shellParserAdvance(parser);
     parseLinebreak(parser);
     ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RBRACE, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_RBRACE, "Expected '}' to close brace group");
     ShellCommand *command = shellCreateBraceGroupCommand(body);
     if (command) {
@@ -1144,6 +1191,7 @@ static ShellCommand *parseSubshell(ShellParser *parser) {
     shellParserAdvance(parser);
     parseLinebreak(parser);
     ShellProgram *body = parseCompoundListUntil(parser, SHELL_TOKEN_RPAREN, SHELL_TOKEN_EOF, SHELL_TOKEN_EOF);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     shellParserConsume(parser, SHELL_TOKEN_RPAREN, "Expected ')' to close subshell");
     ShellCommand *command = shellCreateSubshellCommand(body);
     if (command) {
@@ -1155,23 +1203,37 @@ static ShellCommand *parseSubshell(ShellParser *parser) {
 
 static ShellProgram *parseCompoundListUntil(ShellParser *parser, ShellTokenType terminator1,
                                            ShellTokenType terminator2, ShellTokenType terminator3) {
+    if (!parser) {
+        return NULL;
+    }
+    unsigned int saved_closer_mask = parser->structural_closer_mask;
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator1);
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator2);
+    parser->structural_closer_mask |= parserStructuralCloserBit(terminator3);
+
     ShellProgram *program = shellCreateProgram();
     if (!program) {
+        parser->structural_closer_mask = saved_closer_mask;
         return NULL;
     }
     parseLinebreak(parser);
+    parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     while (!parser->had_error && parser->current.type != terminator1 && parser->current.type != terminator2 &&
            parser->current.type != terminator3 && parser->current.type != SHELL_TOKEN_EOF) {
         if (!parseList(parser, program)) {
             break;
         }
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         if (parser->current.type == SHELL_TOKEN_SEMICOLON || parser->current.type == SHELL_TOKEN_AMPERSAND) {
             parserScheduleRuleMask(parser, RULE_MASK_COMMAND_START);
             shellParserAdvance(parser);
             parseLinebreak(parser);
+            parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
         }
         parseLinebreak(parser);
+        parserReclassifyCurrentToken(parser, RULE_MASK_COMMAND_START);
     }
+    parser->structural_closer_mask = saved_closer_mask;
     return program;
 }
 

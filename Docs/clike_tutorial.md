@@ -92,6 +92,18 @@ export CLIKE_LIB_DIR=$(pwd)/Examples/clike/base
   - Documentation: `Docs/simple_web_server.md`
   - A basic `htdocs` tree is available in the PSCAL clone at `lib/misc/simple_web_server/htdocs`.
 
+## Thread helpers
+
+CLike maps the VM's worker-pool builtins to lowercase helpers:
+
+- `thread_spawn_named(target, name, ...)` – launches an allow-listed builtin on a worker thread, returning a `Thread` handle. Additional arguments are forwarded to the builtin before an options record that sets the thread name.
+- `thread_pool_submit(target, name, ...)` – queues work on the shared pool without stealing the worker from the caller. The returned handle can be joined with `WaitForThread`.
+- `WaitForThread(handle)` – joins the worker, returning `0` when it reported success and consuming the cached status flag so the slot can be reused immediately if no result value is pending.
+- `thread_set_name(handle, name)` / `thread_lookup(nameOrId)` – rename handles or resolve them by name.
+- `thread_pause`, `thread_resume`, and `thread_cancel` mirror the VM control operations; the helpers return `1` on success and `0` otherwise.
+- `thread_get_result(handle, consumeStatus)` and `thread_get_status(handle, dropResult)` surface the stored payloads and success flags. Pass a non-zero second argument to release the slot after reading when you bypassed `WaitForThread` or still need to drop a cached result value.
+- `thread_stats()` returns an array of records describing each worker participating in the pool so scripts can report metrics or feed dashboards.
+
 ## HTTP networking (sync)
 
 The CLike front end can call VM HTTP builtins directly. Common helpers:

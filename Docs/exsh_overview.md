@@ -12,7 +12,7 @@ Build the project with CMake and invoke the new `exsh` executable:
 ```sh
 cmake -S . -B build
 cmake --build build
-build/bin/exsh script.psh [arguments]
+build/bin/exsh script.exsh [arguments]
 ```
 
 `exsh` accepts the same tracing and bytecode inspection flags as the other front
@@ -88,7 +88,7 @@ The exsh front end honours the standard process environment:
 - Builtins such as `export`, `setenv`, and `unset` mutate the host environment
   for the current process. External utilities like `printenv` observe those changes
   immediately because `exsh` runs everything in-process.
-- `PSCALSHELL_LAST_STATUS` mirrors the most recent exit status observed by the
+- `EXSH_LAST_STATUS` mirrors the most recent exit status observed by the
   runtime and is updated after every builtin or pipeline execution.
 - Caching relies on `$HOME` to locate the cache directory and `$PATH` to resolve
   executables when necessary.
@@ -100,7 +100,7 @@ variables (printing the environment when invoked without arguments), and the
 new `unsetenv` builtin mirrors `unset` for scripts that prefer csh-style
 naming. The VM argument vector (`$0`, `$1` …) maps directly to the parameters
 passed after the script path (`gParamValues` inside the VM), so invoking
-`build/bin/exsh script.psh 1 2 3` exposes `1`, `2`, and `3` to the program.
+`build/bin/exsh script.exsh 1 2 3` exposes `1`, `2`, and `3` to the program.
 
 Interactive sessions also support history expansion beyond `!!`. Numeric
 designators like `!-2` and `!42`, prefix/substring searches (`!foo`, `!?bar?`),
@@ -138,7 +138,7 @@ default; prefix a token with `int:`, `float:`/`double:`/`real:`, `bool:` or
 `str:` to coerce the argument to the corresponding VM type. Supplying `nil` (or
 `nil:`) passes the VM's `nil` value directly. When the target builtin returns a
 value, `builtin` prints it to `stdout`; procedures that return `void` simply set
-`PSCALSHELL_LAST_STATUS` to `0` on success.
+`EXSH_LAST_STATUS` to `0` on success.
 
 High-level control-flow syntax (`if`, `while`/`until`, and `for`) lowers to the
 loop helpers above, which cooperate with real VM jump opcodes. The runtime
