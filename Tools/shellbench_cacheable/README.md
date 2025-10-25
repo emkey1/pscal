@@ -1,6 +1,7 @@
 # ShellBench
 
-A benchmark utility for POSIX shell comparison
+A mosidiws version of the shellbench (https://github.com/shellspec/shellbench) benchmark utility for POSIX shell comparison that allows 
+exsh to using bytecode caching.
 
 ## Usage
 
