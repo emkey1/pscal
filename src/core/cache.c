@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <limits.h>
 
 #define CACHE_ROOT ".pscal"
 #define CACHE_DIR "bc_cache"
@@ -48,6 +49,37 @@ static void fnv1aUpdateInt(uint64_t* hash, int value) {
 
 static void fnv1aUpdateUInt64(uint64_t* hash, uint64_t value) {
     fnv1aUpdate(hash, &value, sizeof(value));
+}
+
+static uint64_t computePathHash(const char* source_path) {
+    uint64_t hash = FNV1A64_OFFSET;
+    if (!source_path || !source_path[0]) {
+        fnv1aUpdate(&hash, "<none>", 6);
+        return hash;
+    }
+
+    const char* path_for_hash = source_path;
+#ifndef _WIN32
+    char* resolved = realpath(source_path, NULL);
+    if (resolved) {
+        path_for_hash = resolved;
+    }
+#else
+    char resolved[_MAX_PATH];
+    if (_fullpath(resolved, source_path, _MAX_PATH)) {
+        path_for_hash = resolved;
+    }
+#endif
+
+    fnv1aUpdate(&hash, path_for_hash, strlen(path_for_hash));
+
+#ifndef _WIN32
+    if (resolved) {
+        free(resolved);
+    }
+#endif
+
+    return hash;
 }
 
 static const char* basenameForPath(const char* path) {
@@ -313,14 +345,18 @@ char* buildCachePath(const char* source_path, const char* compiler_id) {
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
 
-    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
+    uint64_t path_hash = computePathHash(source_path);
+    char path_hex[17];
+    snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
+
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(path_hex) + strlen(source_hex) + 5;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(dir);
         free(sanitized_base);
         return NULL;
     }
-    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+    snprintf(prefix, prefix_len, "%s-%s-%s-%s-", safe_id, sanitized_base, path_hex, source_hex);
 
     size_t candidate_count = 0;
     CacheCandidate* candidates = gatherCacheCandidates(dir, prefix, &candidate_count);
@@ -1220,14 +1256,18 @@ bool loadBytecodeFromCache(const char* source_path,
 
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
-    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
+    uint64_t path_hash = computePathHash(source_path);
+    char path_hex[17];
+    snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
+
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(path_hex) + strlen(source_hex) + 5;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(dir);
         free(sanitized_base);
         return false;
     }
-    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+    snprintf(prefix, prefix_len, "%s-%s-%s-%s-", safe_id, sanitized_base, path_hex, source_hex);
 
     char* resolved_frontend = NULL;
     const char* frontend_for_cache = NULL;
@@ -1257,8 +1297,15 @@ bool loadBytecodeFromCache(const char* source_path,
     for (size_t idx = 0; idx < candidate_count && !ok; ++idx) {
         const char* cache_path = candidates[idx].path;
 
-        if (!isCacheFresh(cache_path, source_path) ||
-            (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache))) {
+        /*
+         * Rely on the source hash encoded in the cache filename/header to
+         * validate the script contents. Tools like shellbench rewrite
+         * temporary scripts for each run, so their file modification times are
+         * always newer than any cached bytecode. Ignoring the source mtime
+         * allows those callers to benefit from caching while still invalidating
+         * entries when the frontend binary changes.
+         */
+        if (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache)) {
             unlink(cache_path);
             continue;
         }
@@ -1834,14 +1881,18 @@ void saveBytecodeToCache(const char* source_path, const char* compiler_id, const
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
     snprintf(combined_hex, sizeof(combined_hex), "%016llx", (unsigned long long)combined_hash);
 
-    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(source_hex) + 4;
+    uint64_t path_hash = computePathHash(source_path);
+    char path_hex[17];
+    snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
+
+    size_t prefix_len = strlen(safe_id) + strlen(sanitized_base) + strlen(path_hex) + strlen(source_hex) + 5;
     char* prefix = (char*)malloc(prefix_len);
     if (!prefix) {
         free(sanitized_base);
         free(dir);
         return;
     }
-    snprintf(prefix, prefix_len, "%s-%s-%s-", safe_id, sanitized_base, source_hex);
+    snprintf(prefix, prefix_len, "%s-%s-%s-%s-", safe_id, sanitized_base, path_hex, source_hex);
 
     size_t path_len = strlen(dir) + strlen(prefix) + strlen(combined_hex) + 5;
     char* cache_path = (char*)malloc(path_len);
