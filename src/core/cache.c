@@ -1257,8 +1257,15 @@ bool loadBytecodeFromCache(const char* source_path,
     for (size_t idx = 0; idx < candidate_count && !ok; ++idx) {
         const char* cache_path = candidates[idx].path;
 
-        if (!isCacheFresh(cache_path, source_path) ||
-            (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache))) {
+        /*
+         * Rely on the source hash encoded in the cache filename/header to
+         * validate the script contents. Tools like shellbench rewrite
+         * temporary scripts for each run, so their file modification times are
+         * always newer than any cached bytecode. Ignoring the source mtime
+         * allows those callers to benefit from caching while still invalidating
+         * entries when the frontend binary changes.
+         */
+        if (frontend_for_cache && !isCacheFresh(cache_path, frontend_for_cache)) {
             unlink(cache_path);
             continue;
         }
