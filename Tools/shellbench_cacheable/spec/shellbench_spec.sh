@@ -221,6 +221,7 @@ Describe "Sample specfile"
   Describe "syntax_check()"
     Parameters
       sh ":" success blank
+      "sh -n" ":" success blank
       sh "{" failure present
     End
 
@@ -240,6 +241,7 @@ Describe "Sample specfile"
   Describe "exists_shell()"
     Parameters
       sh success
+      "sh -n" success
       no-such-a-shell failure
     End
 

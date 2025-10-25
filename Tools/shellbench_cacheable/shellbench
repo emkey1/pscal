@@ -133,9 +133,12 @@ read_chunk() {
 }
 
 syntax_check() {
+  shell_cmd=$1
   script_file=$(mktemp)
   printf '%s' "$2" > "$script_file"
-  error=$("$1" "$script_file" 2>&1 >/dev/null 3>&1) &&:
+  script=$script_file
+  # shellcheck disable=SC2086
+  error=$(( set -- $shell_cmd; "$@" "$script" ) 2>&1 >/dev/null 3>&1) &&:
   ex=$?
   rm -f "$script_file"
   if [ "$ex" -ne 0 ] || [ "$error" ]; then
@@ -145,6 +148,7 @@ syntax_check() {
 }
 
 bench() {
+  shell_cmd=$1
   MAIN_PID=$(exec sh -c 'echo $PPID')
   export MAIN_PID
 
@@ -155,7 +159,9 @@ bench() {
   script_file=$(mktemp)
   printf '%s' "$2" > "$script_file"
 
-  "$1" "$script_file" 3>&1 >/dev/null &
+  script=$script_file
+  # shellcheck disable=SC2086
+  ( set -- $shell_cmd; "$@" "$script" ) 3>&1 >/dev/null &
   bench_pid=$!
   stopper "$3" "$bench_pid" &
 
@@ -192,9 +198,12 @@ parse_bench_directive() {
 }
 
 exists_shell() {
+  shell_cmd=$1
   script_file=$(mktemp)
   printf '%s' : > "$script_file"
-  "$1" "$script_file" 2>/dev/null
+  script=$script_file
+  # shellcheck disable=SC2086
+  ( set -- $shell_cmd; "$@" "$script" ) 2>/dev/null
   status=$?
   rm -f "$script_file"
   return $status
