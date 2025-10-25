@@ -1337,6 +1337,7 @@ static int createThreadJob(VM* vm,
     }
 
     if (spawnNewWorker && assignedThread) {
+        int originalGeneration = assignedThread->poolGeneration;
         assignedThread->inPool = true;
         assignedThread->active = true;
         assignedThread->idle = false;
@@ -1357,7 +1358,20 @@ static int createThreadJob(VM* vm,
             pthread_mutex_lock(&vm->threadRegistryLock);
             vm->workerCount--;
             assignedThread->inPool = false;
+            assignedThread->poolGeneration = originalGeneration;
+            assignedThread->active = false;
+            assignedThread->idle = false;
+            assignedThread->poolWorker = false;
+            assignedThread->awaitingReuse = false;
+            assignedThread->readyForReuse = false;
+            assignedThread->currentJob = NULL;
+            assignedThread->queuedAt = (struct timespec){0, 0};
+            memset(&assignedThread->handle, 0, sizeof(pthread_t));
             pthread_mutex_unlock(&vm->threadRegistryLock);
+            vmThreadResetResult(assignedThread);
+            atomic_store(&assignedThread->cancelRequested, false);
+            atomic_store(&assignedThread->killRequested, false);
+            atomic_store(&assignedThread->paused, false);
             vmThreadJobDestroy(job);
             return -1;
         }
@@ -1372,7 +1386,20 @@ static int createThreadJob(VM* vm,
             pthread_mutex_lock(&vm->threadRegistryLock);
             vm->workerCount--;
             assignedThread->inPool = false;
+            assignedThread->poolGeneration = originalGeneration;
+            assignedThread->active = false;
+            assignedThread->idle = false;
+            assignedThread->poolWorker = false;
+            assignedThread->awaitingReuse = false;
+            assignedThread->readyForReuse = false;
+            assignedThread->currentJob = NULL;
+            assignedThread->queuedAt = (struct timespec){0, 0};
+            memset(&assignedThread->handle, 0, sizeof(pthread_t));
             pthread_mutex_unlock(&vm->threadRegistryLock);
+            vmThreadResetResult(assignedThread);
+            atomic_store(&assignedThread->cancelRequested, false);
+            atomic_store(&assignedThread->killRequested, false);
+            atomic_store(&assignedThread->paused, false);
             vmThreadJobDestroy(job);
             return -1;
         }
