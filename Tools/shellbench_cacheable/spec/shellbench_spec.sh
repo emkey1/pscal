@@ -218,6 +218,39 @@ Describe "Sample specfile"
     End
   End
 
+  Describe "script_path_for_identifier()"
+    prepare_cache_env() {
+      : "${TMPDIR:=/tmp}"
+      SCRIPT_CACHE_ROOT=$(mktemp -d "${TMPDIR%/}/shellbench-cache.XXXXXX")
+      SCRIPT_CACHE_RUN_DIR="$SCRIPT_CACHE_ROOT/run"
+      SCRIPT_CACHE_SEQUENCE=0
+      mkdir -p "$SCRIPT_CACHE_RUN_DIR"
+    }
+
+    cleanup_cache_env() {
+      [ -d "$SCRIPT_CACHE_ROOT" ] && rm -rf "$SCRIPT_CACHE_ROOT"
+    }
+
+    ensure_unique_cache_path() {
+      first=$(script_path_for_identifier cache_test)
+      : > "${first}.bc"
+      second=$(script_path_for_identifier cache_test)
+      [ "$second" != "$first" ] || return 1
+      case $second in
+        "$first"-*) ;;
+        *) return 2 ;;
+      esac
+    }
+
+    BeforeEach 'prepare_cache_env'
+    AfterEach 'cleanup_cache_env'
+
+    It "generates a distinct path when compiled cache exists"
+      When run ensure_unique_cache_path
+      The status should be success
+    End
+  End
+
   Describe "syntax_check()"
     Parameters
       sh ":" success blank
