@@ -3,6 +3,34 @@
 
 set -eu
 
+SCRIPT_CACHE_ROOT="${TMPDIR:-/tmp}/shellbench-cache"
+SCRIPT_CACHE_RUN_DIR="$SCRIPT_CACHE_ROOT/$$"
+mkdir -p "$SCRIPT_CACHE_RUN_DIR"
+
+sanitize_identifier() {
+  label=$1
+  count=$2
+  fallback=$(printf 'bench%02d' "$count")
+
+  if [ ! "$label" ]; then
+    label=$fallback
+  fi
+
+  sanitized=$(printf '%s' "$label" | tr -c '[:alnum:]_.-' '_')
+
+  case $sanitized in
+    ''|.*|-*) sanitized=$fallback ;;
+  esac
+
+  printf '%s' "$sanitized"
+}
+
+script_path_for_identifier() {
+  identifier=$1
+  suffix=${2:-}
+  printf '%s/%s%s' "$SCRIPT_CACHE_RUN_DIR" "$identifier" "${suffix:+.$suffix}"
+}
+
 SHELLS=${SHELLBENCH_SHELLS:-sh}
 NUMBER_OF_SHELLS=0
 WARMUP_TIME=${SHELLBENCH_WARMUP_TIME:-1}
@@ -133,7 +161,7 @@ read_chunk() {
 }
 
 syntax_check() {
-  script_file=$(mktemp)
+  script_file=$(script_path_for_identifier "$3" syntax)
   printf '%s' "$2" > "$script_file"
   error=$("$1" "$script_file" 2>&1 >/dev/null 3>&1) &&:
   ex=$?
@@ -152,7 +180,7 @@ bench() {
   trap 'ready=$(($ready + 1))' HUP
   trap 'kill -TERM -$$' INT
 
-  script_file=$(mktemp)
+  script_file=$(script_path_for_identifier "$4")
   printf '%s' "$2" > "$script_file"
 
   "$1" "$script_file" 3>&1 >/dev/null &
@@ -218,8 +246,11 @@ comma() {
 
 process() {
   initializer=$(read_initializer)
+  bench_index=0
   while bench=$(read_bench_directive); do
     eval "parse_bench_directive ${bench#@bench}"
+    bench_index=$(($bench_index + 1))
+    identifier=$(sanitize_identifier "$name" "$bench_index")
     printf "%-${NAME_WIDTH}s " "$1: $name"
 
     chunk=$(printf '%s\n' "$initializer"; read_chunk)
@@ -231,8 +262,8 @@ process() {
       result='?' count=0
       if ! exists_shell "$shell"; then
         result="none"
-      elif syntax_check "$shell" "$syntax_check_code"; then
-        count=$(bench "$shell" "$code" "$BENCHMARK_TIME")
+      elif syntax_check "$shell" "$syntax_check_code" "$identifier"; then
+        count=$(bench "$shell" "$code" "$BENCHMARK_TIME" "$identifier")
         if [ "$count" ]; then
           count=$(($count / $BENCHMARK_TIME))
           nullloop=$(get_nullloop "$shell")
@@ -278,7 +309,8 @@ measure_nullloop() {
     if exists_shell "$shell"; then
       count=$(get_nullloop "$shell")
       if [ ! "$count" ]; then
-        count=$(bench "$shell" "$code" "$BENCHMARK_TIME")
+        nullloop_identifier=$(sanitize_identifier "null loop $shell" 0)
+        count=$(bench "$shell" "$code" "$BENCHMARK_TIME" "$nullloop_identifier")
         count=$(($count / $BENCHMARK_TIME))
       fi
       nullloop_count="${nullloop_count}${nullloop_count:+,}${shell}:$count"
