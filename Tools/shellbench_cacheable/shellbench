@@ -34,7 +34,7 @@ script_path_for_identifier() {
   extension="${suffix:+.$suffix}"
   path="$base$extension"
 
-  while [ -e "$path" ] || [ -e "$path.bc" ]; do
+  while [ -e "$path" ]; do
     SCRIPT_CACHE_SEQUENCE=$(($SCRIPT_CACHE_SEQUENCE + 1))
     base="$SCRIPT_CACHE_RUN_DIR/$identifier-$SCRIPT_CACHE_SEQUENCE"
     path="$base$extension"

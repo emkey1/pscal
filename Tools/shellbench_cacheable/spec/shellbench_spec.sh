@@ -231,22 +231,18 @@ Describe "Sample specfile"
       [ -d "$SCRIPT_CACHE_ROOT" ] && rm -rf "$SCRIPT_CACHE_ROOT"
     }
 
-    ensure_unique_cache_path() {
+    reuse_cache_path() {
       first=$(script_path_for_identifier cache_test)
       : > "${first}.bc"
       second=$(script_path_for_identifier cache_test)
-      [ "$second" != "$first" ] || return 1
-      case $second in
-        "$first"-*) ;;
-        *) return 2 ;;
-      esac
+      [ "$second" = "$first" ] || return 1
     }
 
     BeforeEach 'prepare_cache_env'
     AfterEach 'cleanup_cache_env'
 
-    It "generates a distinct path when compiled cache exists"
-      When run ensure_unique_cache_path
+    It "reuses the existing path when compiled cache exists"
+      When run reuse_cache_path
       The status should be success
     End
   End
