@@ -251,6 +251,59 @@ Describe "Sample specfile"
     End
   End
 
+  Describe "shell_display_name()"
+    setup_exsh_stub() {
+      SHELL_DISPLAY_TEST_DIR=$(mktemp -d)
+      SHELL_DISPLAY_OLD_PATH=$PATH
+      PATH="$SHELL_DISPLAY_TEST_DIR:$PATH"
+      cat <<'EOS' > "$SHELL_DISPLAY_TEST_DIR/exsh"
+#!/bin/sh
+status=${EXSH_STATUS:-Compilation}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --verbose) shift ;;
+    *) break ;;
+  esac
+done
+printf '%s\n' "$status"
+exit 0
+EOS
+      chmod +x "$SHELL_DISPLAY_TEST_DIR/exsh"
+    }
+
+    cleanup_exsh_stub() {
+      PATH=$SHELL_DISPLAY_OLD_PATH
+      rm -rf "$SHELL_DISPLAY_TEST_DIR"
+      unset SHELL_DISPLAY_TEST_DIR SHELL_DISPLAY_OLD_PATH
+    }
+
+    Before 'setup_exsh_stub'
+    After 'cleanup_exsh_stub'
+
+    It "formats compilation status when verbose"
+      When call shell_display_name "exsh --verbose"
+      The output should eq "exsh(Compilation)"
+    End
+
+    It "formats cached status when verbose"
+      EXSH_STATUS=Cached
+      When call shell_display_name "exsh --verbose"
+      The output should eq "exsh(Cached)"
+    End
+
+    It "returns original command without verbose flag"
+      When call shell_display_name "exsh"
+      The output should eq "exsh"
+    End
+  End
+
+  Describe "build_shell_display_names()"
+    It "collects display names"
+      When call build_shell_display_names "sh,bash"
+      The variable SHELL_DISPLAY_NAMES should eq "sh,bash"
+    End
+  End
+
   Describe "comma()"
     Parameters
       1 1
@@ -400,12 +453,22 @@ Describe "Sample specfile"
 
   Describe "display_header()"
     Before NAME_WIDTH=20 COUNT_WIDTH=8 NUMBER_OF_SHELLS=3
+    Before SHELL_DISPLAY_NAMES=''
 
     It "outputs line"
       When call display_header "sh,bash,zsh"
       The line 1 should eq "-----------------------------------------------"
       The line 2 should eq "name                       sh     bash      zsh"
       The line 3 should eq "-----------------------------------------------"
+    End
+
+    Context "with verbose display names"
+      Before SHELL_DISPLAY_NAMES='exsh(Cached),bash,zsh'
+
+      It "uses precomputed labels"
+        When call display_header "exsh --verbose,bash,zsh"
+        The line 2 should eq "name                 exsh(Cached)     bash      zsh"
+      End
     End
   End
 

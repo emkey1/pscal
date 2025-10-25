@@ -12,6 +12,7 @@ COUNT_WIDTH=${SHELLBENCH_COUNT_WIDTH:-10}
 SHOW_ERROR=''
 CORRECTION_MODE=''
 NULLLOOP_COUNT=''
+SHELL_DISPLAY_NAMES=''
 
 usage() {
 cat<<HERE
@@ -209,6 +210,50 @@ exists_shell() {
   return $status
 }
 
+shell_display_name() {
+  shell_cmd=$1
+  first_word=${shell_cmd%% *}
+  base_name=${first_word##*/}
+
+  case $base_name in
+    exsh)
+      case $shell_cmd in (*--verbose*)
+        script_file=$(mktemp)
+        printf '%s\n' ':' > "$script_file"
+        script=$script_file
+        # shellcheck disable=SC2086
+        output=$( ( set +e; set -- $shell_cmd; "$@" "$script" ) 2>/dev/null || : )
+        rm -f "$script_file"
+        status=''
+        case $output in
+          *Compilation*) status=Compilation ;;
+          *Cached*) status=Cached ;;
+        esac
+        if [ "$status" ]; then
+          printf '%s(%s)\n' "$base_name" "$status"
+          return
+        fi
+      esac
+  esac
+
+  printf '%s\n' "$shell_cmd"
+}
+
+build_shell_display_names() {
+  shells=$1
+  display_names=''
+  shells_list="$shells,"
+  while [ "$shells_list" ] && shell=${shells_list%%,*} && shells_list=${shells_list#*,}; do
+    if [ "$shell" ]; then
+      name=$(shell_display_name "$shell")
+    else
+      name=''
+    fi
+    display_names="${display_names}${display_names:+,}$name"
+  done
+  SHELL_DISPLAY_NAMES=$display_names
+}
+
 comma() {
   eval "set -- $1 \"\${$1}\" \"\" \"\""
   case $2 in (-*)
@@ -321,7 +366,9 @@ count_shells() {
 
 display_header() {
   line $(( $NAME_WIDTH + $NUMBER_OF_SHELLS * ($COUNT_WIDTH + 1) ))
-  set -- "$1," ""
+  shells=$1
+  display_shells=${SHELL_DISPLAY_NAMES:-$shells}
+  set -- "$display_shells," ""
   printf "%-${NAME_WIDTH}s" "name"
   while [ "$1" ]; do
     set -- "${1#*,}" "${1%%,*}"
@@ -372,6 +419,7 @@ eval "set -- $PARAMS"
 [ "$CORRECTION_MODE" ] && NULLLOOP_COUNT=${SHELLBENCH_NULLLOOP_COUNT:-}
 
 count_shells "$SHELLS"
+build_shell_display_names "$SHELLS"
 display_header "$SHELLS"
 [ "$CORRECTION_MODE" ] && measure_nullloop <<HERE
   $(printf '%s\n' '#bench "loop only"' '@begin' '@end' | preprocess)
