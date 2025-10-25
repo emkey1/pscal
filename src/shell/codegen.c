@@ -1481,6 +1481,7 @@ static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function,
                 function->name ? function->name : "<anonymous>");
         return;
     }
+    compiled->magic = SHELL_COMPILED_FUNCTION_MAGIC;
     shellCompile(function->body, &compiled->chunk);
     Value ptr = makePointer(compiled, NULL);
     int ptr_index = addConstantToChunk(chunk, &ptr);
