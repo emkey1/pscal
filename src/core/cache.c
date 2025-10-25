@@ -1596,6 +1596,97 @@ static bool appendEnclosingFixup(EnclosingFixup** fixups,
     return true;
 }
 
+static void ensureProcedureAlias(HashTable* table, const char* alias_name, Symbol* target) {
+    if (!table || !alias_name || !*alias_name || !target) {
+        return;
+    }
+
+    Symbol* existing = hashTableLookup(table, alias_name);
+    if (existing) {
+        if (existing == target) {
+            return;
+        }
+        if (existing->is_alias) {
+            existing->real_symbol = target;
+            existing->type = target->type;
+        }
+        return;
+    }
+
+    Symbol* alias = (Symbol*)calloc(1, sizeof(Symbol));
+    if (!alias) {
+        return;
+    }
+
+    alias->name = strdup(alias_name);
+    if (!alias->name) {
+        free(alias);
+        return;
+    }
+
+    alias->is_alias = true;
+    alias->real_symbol = target;
+    alias->type = target->type;
+    alias->type_def = NULL;
+    alias->value = NULL;
+
+    hashTableInsert(table, alias);
+}
+
+static void restoreConstructorAliases(HashTable* table) {
+    if (!table) {
+        return;
+    }
+
+    for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
+        for (Symbol* sym = table->buckets[bucket]; sym; sym = sym->next) {
+            const char* last_dot = NULL;
+            const char* method_name = NULL;
+            size_t prefix_len = 0;
+            char class_name_buf[MAX_SYMBOL_LENGTH];
+            const char* simple_start = NULL;
+            const char* simple_name = NULL;
+
+            if (!sym || !sym->name || sym->is_alias) {
+                continue;
+            }
+
+            last_dot = strrchr(sym->name, '.');
+            if (!last_dot || last_dot == sym->name) {
+                continue;
+            }
+
+            method_name = last_dot + 1;
+            if (!method_name || *method_name == '\0') {
+                continue;
+            }
+
+            prefix_len = (size_t)(last_dot - sym->name);
+            if (prefix_len == 0 || prefix_len >= MAX_SYMBOL_LENGTH) {
+                continue;
+            }
+
+            memcpy(class_name_buf, sym->name, prefix_len);
+            class_name_buf[prefix_len] = '\0';
+
+            simple_start = strrchr(class_name_buf, '.');
+            simple_name = simple_start ? simple_start + 1 : class_name_buf;
+            if (!simple_name || *simple_name == '\0') {
+                continue;
+            }
+
+            if (strcmp(method_name, simple_name) != 0) {
+                continue;
+            }
+
+            ensureProcedureAlias(table, simple_name, sym);
+            if (strcmp(class_name_buf, simple_name) != 0) {
+                ensureProcedureAlias(table, class_name_buf, sym);
+            }
+        }
+    }
+}
+
 static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_version) {
     EnclosingFixup* fixups = NULL;
     int fixup_count = 0;
@@ -1949,6 +2040,8 @@ bool loadBytecodeFromCache(const char* source_path,
 
         fclose(f);
 
+        restoreConstructorAliases(procedure_table);
+
         ok = true;
     }
 
@@ -2119,6 +2212,10 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
             }
         }
         fclose(f);
+    }
+
+    if (ok) {
+        restoreConstructorAliases(procedure_table);
     }
 
     if (!ok) {
