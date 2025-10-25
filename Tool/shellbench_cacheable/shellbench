@@ -1,0 +1,377 @@
+#!/bin/sh
+# shellcheck disable=SC2004,SC2016
+
+set -eu
+
+SHELLS=${SHELLBENCH_SHELLS:-sh}
+NUMBER_OF_SHELLS=0
+WARMUP_TIME=${SHELLBENCH_WARMUP_TIME:-1}
+BENCHMARK_TIME=${SHELLBENCH_BENCHMARK_TIME:-3}
+NAME_WIDTH=${SHELLBENCH_NAME_WIDTH:-50}
+COUNT_WIDTH=${SHELLBENCH_COUNT_WIDTH:-10}
+SHOW_ERROR=''
+CORRECTION_MODE=''
+NULLLOOP_COUNT=''
+
+usage() {
+cat<<HERE
+Usage: shellbench [options] files...
+
+  -s, --shell SHELL[,SHELL...]  The shell(s) to run the benchmark. [default: sh]
+  -t, --time SECONDS            Benchmark execution time. (SECONDS > 0) [default: 3]
+  -w, --warmup SECONDS          Benchmark preparation time. (SECONDS > 0) [default: 1]
+  -c, --correct                 Enable correction mode to eliminate loop overhead.
+  -e, --error                   Display error details.
+  -h, --help                    You're looking at it.
+HERE
+}
+
+preprocess() {
+  set -- '%s\n'
+  while IFS= read -r line; do
+    case $line in ("#bench" | "#bench"[[:space:]]*)
+      set -- "$@" "#bench"
+      line="@${line#?}"
+    esac
+    set -- "$@" "$line"
+  done
+  # shellcheck disable=SC2059
+  printf "$@"
+}
+
+generate_initialize_helper() {
+  echo 'set -e --'
+  echo 'setup() { :; }'
+  echo 'cleanup() { :; }'
+  echo '__finished() { cleanup; echo $(($__count-1)) >&3 2>/dev/null; }'
+  echo '__count=0'
+  echo 'trap : PIPE'
+  echo 'if [ "${ZSH_VERSION:-}" ]; then'
+  echo '  trap "__finished; __finished() { :; }; exit 1" TERM'
+  echo 'else'
+  echo '  trap "exit 1" TERM'
+  echo 'fi'
+  echo 'trap "__finished" EXIT'
+}
+
+generate_benchmark_begin_helper() {
+  echo '__ready='
+  echo 'trap __ready=1 HUP'
+  echo 'kill -HUP "$MAIN_PID"'
+  echo 'until [ "$__ready" ]; do __dummy=; done'
+  echo 'while __count=$(($__count+1)); do'
+  if [ "$CORRECTION_MODE" ]; then
+    echo '__CORRECTION_MODE='
+  fi
+}
+
+generate_benchmark_end_helper() {
+  echo 'done'
+}
+
+generate_syntax_begin_helper() {
+  echo 'while __count=$(($__count+1)) && [ "$__count" -eq 1 ]; do'
+}
+generate_syntax_end_helper() {
+  echo 'done'
+}
+
+read_initializer() {
+  generate_initialize_helper
+  read_chunk
+  echo "setup"
+}
+
+read_bench_directive() {
+  IFS= read -r line || return 1
+  printf '%s' "$line"
+}
+
+translate_bench_code() {
+  begin="" end="" type=${1:-benchmark}
+
+  set -- '%s\n'
+  while IFS= read -r line || [ "$line" ]; do
+    case ${line#"${line%%[![:space:]]*}"} in
+      @begin)
+        if [ "$begin" ]; then
+          abort "@begin is duplicated"
+        fi
+        begin=1
+        set -- "$@" "$("generate_${type}_begin_helper")" ;;
+      @end)
+        if ! [ "$begin" ]; then
+          abort "@begin is not defined"
+        fi
+        if [ "$end" ]; then
+          abort "@end is duplicated"
+        fi
+        end=1
+        set -- "$@" "$("generate_${type}_end_helper")" ;;
+      *) set -- "$@" "$line"
+    esac
+  done
+
+  if ! [ "$begin" ]; then
+    abort "@begin is not defined"
+  fi
+  if [ ! "$end" ]; then
+    abort "@end is not defined"
+  fi
+  # shellcheck disable=SC2059
+  [ $# -gt 1 ] && printf "$@"
+}
+
+read_chunk() {
+  set -- '%s\n'
+  while IFS= read -r line || [ "$line" ]; do
+    [ "${line#"${line%%[![:space:]]*}"}" = "#bench" ] && break
+    set -- "$@" "$line"
+  done
+  # shellcheck disable=SC2059
+  [ $# -eq 1 ] || printf "$@"
+}
+
+syntax_check() {
+  script_file=$(mktemp)
+  printf '%s' "$2" > "$script_file"
+  error=$("$1" "$script_file" 2>&1 >/dev/null 3>&1) &&:
+  ex=$?
+  rm -f "$script_file"
+  if [ "$ex" -ne 0 ] || [ "$error" ]; then
+    [ "$SHOW_ERROR" ] && printf '\n[ERROR] %s' "$error" >&2
+    return $(($ex == 0 ? 1 : $ex))
+  fi
+}
+
+bench() {
+  MAIN_PID=$(exec sh -c 'echo $PPID')
+  export MAIN_PID
+
+  ready=0
+  trap 'ready=$(($ready + 1))' HUP
+  trap 'kill -TERM -$$' INT
+
+  script_file=$(mktemp)
+  printf '%s' "$2" > "$script_file"
+
+  "$1" "$script_file" 3>&1 >/dev/null &
+  bench_pid=$!
+  stopper "$3" "$bench_pid" &
+
+  # wait for ready
+  while [ "$ready" -lt 2 ]; do dummy=; done
+  sleep "$WARMUP_TIME" &
+  wait "$!" || { rm -f "$script_file"; exit 1; }
+
+  # start benchmark
+  kill -HUP "-$$"
+  if ! wait; then
+    rm -f "$script_file"
+    exit 1
+  fi
+  rm -f "$script_file"
+}
+
+stopper() {
+  ready=''
+  trap 'ready=1' HUP
+  kill -HUP "$MAIN_PID"
+  # shellcheck disable=SC2034
+  until [ "$ready" ]; do dummy=; done
+  sleep "$1"
+  kill -TERM "$2"
+}
+
+parse_bench_directive() {
+  name=""
+  if [ $# -gt 0 ]; then
+    name="$1"
+    shift
+  fi
+}
+
+exists_shell() {
+  script_file=$(mktemp)
+  printf '%s' : > "$script_file"
+  "$1" "$script_file" 2>/dev/null
+  status=$?
+  rm -f "$script_file"
+  return $status
+}
+
+comma() {
+  eval "set -- $1 \"\${$1}\" \"\" \"\""
+  case $2 in (-*)
+    set -- "$1" "${2#-}" "$3" "-"
+  esac
+  while [ ${#2} -gt 3 ]; do
+    set -- "$1" "${2%???}" "$(($2 % 1000))${3:+,}$3" "$4"
+    case ${3%%,*} in
+      ?) set -- "$1" "$2" "00$3" "$4" ;;
+      ??) set -- "$1" "$2" "0$3" "$4" ;;
+    esac
+  done
+  set -- "$1" "" "$4$2${3:+,}$3"
+  eval "$1=\$3"
+}
+
+process() {
+  initializer=$(read_initializer)
+  while bench=$(read_bench_directive); do
+    eval "parse_bench_directive ${bench#@bench}"
+    printf "%-${NAME_WIDTH}s " "$1: $name"
+
+    chunk=$(printf '%s\n' "$initializer"; read_chunk)
+    syntax_check_code=$(printf '%s' "$chunk" | translate_bench_code syntax)
+    code=$(printf '%s' "$chunk" | translate_bench_code)
+
+    shells="$SHELLS,"
+    while [ "$shells" ] && shell=${shells%%,*} && shells=${shells#*,}; do
+      result='?' count=0
+      if ! exists_shell "$shell"; then
+        result="none"
+      elif syntax_check "$shell" "$syntax_check_code"; then
+        count=$(bench "$shell" "$code" "$BENCHMARK_TIME")
+        if [ "$count" ]; then
+          count=$(($count / $BENCHMARK_TIME))
+          nullloop=$(get_nullloop "$shell")
+          count=$(correct "$count" "$nullloop")
+          result="$count"
+          comma result
+        fi
+      else
+        result="error"
+      fi
+      printf "%${COUNT_WIDTH}s " "$result"
+    done
+    echo
+  done
+}
+
+correct() {
+  if [ "$2" ]; then
+    awk "BEGIN { print int($1 / ( 1 - ( $1 * ( 1 / $2 ) ) ) ) }" /dev/null
+  else
+    echo "$1"
+  fi
+}
+
+get_nullloop() {
+  set -- ",$1:" ",$NULLLOOP_COUNT,"
+  case $2 in (*"$1"*)
+    set -- "${2##*"$1"}"
+    echo "${1%%,*}"
+  esac
+}
+
+measure_nullloop() {
+  initializer=$(read_initializer)
+  bench=$(read_bench_directive)
+  chunk=$(read_chunk)
+  code=$(printf '%s\n' "$initializer" "$chunk" | translate_bench_code)
+  printf "%-${NAME_WIDTH}s " "[null loop]"
+
+  shells="$SHELLS," nullloop_count=''
+  while [ "$shells" ] && shell=${shells%%,*} && shells=${shells#*,}; do
+    result="?"
+    if exists_shell "$shell"; then
+      count=$(get_nullloop "$shell")
+      if [ ! "$count" ]; then
+        count=$(bench "$shell" "$code" "$BENCHMARK_TIME")
+        count=$(($count / $BENCHMARK_TIME))
+      fi
+      nullloop_count="${nullloop_count}${nullloop_count:+,}${shell}:$count"
+      result=$count
+      comma result
+    else
+      result="none"
+    fi
+    printf "%${COUNT_WIDTH}s " "$result"
+  done
+  NULLLOOP_COUNT=$nullloop_count
+  echo
+}
+
+line() {
+  set -- "$1" ""
+  while [ "$1" -gt 0 ]; do
+    set -- $(($1 - 1)) "${2}-"
+  done
+  echo "$2"
+}
+
+count_shells() {
+  NUMBER_OF_SHELLS=0
+  set -- "$1,"
+  while [ "$1" ]; do
+    set -- "${1#*,}"
+    NUMBER_OF_SHELLS=$(($NUMBER_OF_SHELLS + 1))
+  done
+}
+
+display_header() {
+  line $(( $NAME_WIDTH + $NUMBER_OF_SHELLS * ($COUNT_WIDTH + 1) ))
+  set -- "$1," ""
+  printf "%-${NAME_WIDTH}s" "name"
+  while [ "$1" ]; do
+    set -- "${1#*,}" "${1%%,*}"
+    printf " %${COUNT_WIDTH}s" "$2"
+  done
+  echo
+  line $(( $NAME_WIDTH + $NUMBER_OF_SHELLS * ($COUNT_WIDTH + 1) ))
+}
+
+display_footer() {
+  line $(( $NAME_WIDTH + $NUMBER_OF_SHELLS * ($COUNT_WIDTH + 1) ))
+  echo "* count: number of executions per second"
+}
+
+PARAMS=''
+
+abort() { echo "$@" >&2; exit 1; }
+unknown() { abort "Unrecognized option '$1'"; }
+required() { [ $# -gt 1 ] || abort "Option '$1' requires an argument"; }
+param() { eval "$1=\$$1\ \\\"\"\\\${$2}\"\\\""; }
+params() { [ "$2" -ge "$3" ] || params_ "$@"; }
+params_() { param "$1" "$2"; params "$1" $(($2 + 1)) "$3"; }
+
+parse_options() {
+  OPTIND=$(($# + 1))
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -s | --shell  ) required "$@" && shift; SHELLS=$1 ;;
+      -t | --time   ) required "$@" && shift; BENCHMARK_TIME=$1 ;;
+      -w | --warmup ) required "$@" && shift; WARMUP_TIME=$1 ;;
+      -c | --correct) CORRECTION_MODE=1 ;;
+      -e | --error  ) SHOW_ERROR=1 ;;
+      -h | --help   ) usage; exit ;;
+      --) shift; params PARAMS $(($OPTIND - $#)) $OPTIND; break ;;
+      -?*) unknown "$@" ;;
+      *) param PARAMS $(($OPTIND - $#))
+    esac
+    shift
+  done
+}
+
+${__SOURCED__:+return}
+
+trap '' HUP
+parse_options "$@"
+eval "set -- $PARAMS"
+
+[ "$CORRECTION_MODE" ] && NULLLOOP_COUNT=${SHELLBENCH_NULLLOOP_COUNT:-}
+
+count_shells "$SHELLS"
+display_header "$SHELLS"
+[ "$CORRECTION_MODE" ] && measure_nullloop <<HERE
+  $(printf '%s\n' '#bench "loop only"' '@begin' '@end' | preprocess)
+HERE
+for file in "$@"; do
+  preprocess < "$file" | process "${file##*/}"
+done
+display_footer
+if [ "$CORRECTION_MODE" ] && [ ! "${SHELLBENCH_NULLLOOP_COUNT:-}" ]; then
+  echo "* To skip null loop measurement, set the environment variable below"
+  echo "export SHELLBENCH_NULLLOOP_COUNT=$NULLLOOP_COUNT"
+fi
