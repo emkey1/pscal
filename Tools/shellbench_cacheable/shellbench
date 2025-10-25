@@ -5,6 +5,7 @@ set -eu
 
 SCRIPT_CACHE_ROOT="${TMPDIR:-/tmp}/shellbench-cache"
 SCRIPT_CACHE_RUN_DIR="$SCRIPT_CACHE_ROOT/$$"
+SCRIPT_CACHE_SEQUENCE=0
 mkdir -p "$SCRIPT_CACHE_RUN_DIR"
 
 sanitize_identifier() {
@@ -28,7 +29,18 @@ sanitize_identifier() {
 script_path_for_identifier() {
   identifier=$1
   suffix=${2:-}
-  printf '%s/%s%s' "$SCRIPT_CACHE_RUN_DIR" "$identifier" "${suffix:+.$suffix}"
+
+  base="$SCRIPT_CACHE_RUN_DIR/$identifier"
+  extension="${suffix:+.$suffix}"
+  path="$base$extension"
+
+  while [ -e "$path" ]; do
+    SCRIPT_CACHE_SEQUENCE=$(($SCRIPT_CACHE_SEQUENCE + 1))
+    base="$SCRIPT_CACHE_RUN_DIR/$identifier-$SCRIPT_CACHE_SEQUENCE"
+    path="$base$extension"
+  done
+
+  printf '%s' "$path"
 }
 
 hash_identifier_suffix() {
