@@ -373,6 +373,20 @@ draw_sierpinski() {
     local y3="$6"
     local level="$7"
 
+    local sanitized_level
+
+    if [ "${level#-}" != "$level" ]; then
+        sanitized_level=${level#-}
+    else
+        sanitized_level=$level
+    fi
+
+    case "$sanitized_level" in
+        ''|*[!0-9]*)
+            level=0
+            ;;
+    esac
+
     if [ "$level" -le 0 ]; then
         draw_point "$x1" "$y1"
         draw_point "$x2" "$y2"
