@@ -5851,6 +5851,63 @@ static void addOrdinalToSetValue(Value* setVal, long long ordinal) {
     setVal->set_val.set_values[setVal->set_val.set_size++] = ordinal;
 }
 
+static bool resolveSetElementOrdinal(AST* member, long long* outOrdinal) {
+    if (!member || !outOrdinal) return false;
+
+    bool success = false;
+    long long ordinal = 0;
+
+    Value elem_val = evaluateCompileTimeValue(member);
+    switch (elem_val.type) {
+        case TYPE_INTEGER:
+            ordinal = elem_val.i_val;
+            success = true;
+            break;
+        case TYPE_CHAR:
+            ordinal = elem_val.c_val;
+            success = true;
+            break;
+        case TYPE_ENUM:
+            ordinal = elem_val.enum_val.ordinal;
+            success = true;
+            break;
+        default:
+            break;
+    }
+    freeValue(&elem_val);
+
+    if (success) {
+        *outOrdinal = ordinal;
+        return true;
+    }
+
+    if (member->type == AST_VARIABLE && member->token && member->token->value) {
+        const char* name = member->token->value;
+        Symbol* sym = lookupLocalSymbol(name);
+        if (!sym) {
+            sym = lookupGlobalSymbol(name);
+        }
+        sym = resolveSymbolAlias(sym);
+        if (sym && sym->value && sym->is_const) {
+            Value* v = sym->value;
+            if (v->type == TYPE_ENUM) {
+                *outOrdinal = v->enum_val.ordinal;
+                return true;
+            }
+            if (v->type == TYPE_INTEGER) {
+                *outOrdinal = v->i_val;
+                return true;
+            }
+            if (v->type == TYPE_CHAR) {
+                *outOrdinal = v->c_val;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -5933,35 +5990,33 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             for (int i = 0; i < node->child_count; i++) {
                 AST* member = node->children[i];
                 if (member->type == AST_SUBRANGE) {
-                    Value start_val = evaluateCompileTimeValue(member->left);
-                    Value end_val = evaluateCompileTimeValue(member->right);
-                    
-                    bool start_ok = (start_val.type == TYPE_INTEGER || start_val.type == TYPE_CHAR || start_val.type == TYPE_ENUM);
-                    bool end_ok = (end_val.type == TYPE_INTEGER || end_val.type == TYPE_CHAR || end_val.type == TYPE_ENUM);
+                    long long start_ord = 0;
+                    long long end_ord = 0;
+                    bool start_ok = resolveSetElementOrdinal(member->left, &start_ord);
+                    bool end_ok = resolveSetElementOrdinal(member->right, &end_ord);
 
                     if (start_ok && end_ok) {
-                        long long start_ord = (start_val.type == TYPE_ENUM) ? start_val.enum_val.ordinal : ((start_val.type == TYPE_INTEGER) ? start_val.i_val : start_val.c_val);
-                        long long end_ord = (end_val.type == TYPE_ENUM) ? end_val.enum_val.ordinal : ((end_val.type == TYPE_INTEGER) ? end_val.i_val : end_val.c_val);
-                        
-                        for (long long j = start_ord; j <= end_ord; j++) {
-                           addOrdinalToSetValue(&set_const_val, j);
+                        if (start_ord <= end_ord) {
+                            for (long long j = start_ord; j <= end_ord; j++) {
+                                addOrdinalToSetValue(&set_const_val, j);
+                            }
+                        } else {
+                            for (long long j = start_ord; j >= end_ord; j--) {
+                                addOrdinalToSetValue(&set_const_val, j);
+                            }
                         }
                     } else {
                         fprintf(stderr, "L%d: Compiler error: Set range bounds must be constant ordinal types.\n", getLine(member));
                         compiler_had_error = true;
                     }
-                    freeValue(&start_val);
-                    freeValue(&end_val);
                 } else {
-                    Value elem_val = evaluateCompileTimeValue(member);
-                    if (elem_val.type == TYPE_INTEGER || elem_val.type == TYPE_CHAR || elem_val.type == TYPE_ENUM) {
-                        long long ord = (elem_val.type == TYPE_ENUM) ? elem_val.enum_val.ordinal : ((elem_val.type == TYPE_INTEGER) ? elem_val.i_val : elem_val.c_val);
+                    long long ord = 0;
+                    if (resolveSetElementOrdinal(member, &ord)) {
                         addOrdinalToSetValue(&set_const_val, ord);
                     } else {
                         fprintf(stderr, "L%d: Compiler error: Set elements must be constant ordinal types.\n", getLine(member));
                         compiler_had_error = true;
                     }
-                    freeValue(&elem_val);
                 }
             }
 
