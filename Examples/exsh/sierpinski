@@ -1,0 +1,417 @@
+#!/usr/bin/env exsh
+# Render the Sierpinski triangle sequentially using the console builtins.
+# This variant mirrors the threaded demo but executes the recursion directly
+# in the foreground so it works on builds without worker support.
+
+have_exsh_builtin() {
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
+
+    case "$#" in
+        0)
+            builtin "$name" >/dev/null 2>&1
+            ;;
+        1)
+            builtin "$name" "$1" >/dev/null 2>&1
+            ;;
+        2)
+            builtin "$name" "$1" "$2" >/dev/null 2>&1
+            ;;
+        3)
+            builtin "$name" "$1" "$2" "$3" >/dev/null 2>&1
+            ;;
+        4)
+            builtin "$name" "$1" "$2" "$3" "$4" >/dev/null 2>&1
+            ;;
+        *)
+            builtin "$name" "$1" "$2" "$3" "$4" "$5" >/dev/null 2>&1
+            ;;
+    esac
+}
+
+run_exsh_builtin() {
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
+
+    case "$#" in
+        0)
+            builtin "$name" 2>/dev/null
+            ;;
+        1)
+            builtin "$name" "$1" 2>/dev/null
+            ;;
+        2)
+            builtin "$name" "$1" "$2" 2>/dev/null
+            ;;
+        3)
+            builtin "$name" "$1" "$2" "$3" 2>/dev/null
+            ;;
+        4)
+            builtin "$name" "$1" "$2" "$3" "$4" 2>/dev/null
+            ;;
+        *)
+            builtin "$name" "$1" "$2" "$3" "$4" "$5" 2>/dev/null
+            ;;
+    esac
+}
+
+run_exsh_builtin_capture() {
+    RUN_EXSH_BUILTIN_STDOUT=""
+
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        case "$1" in
+            ScreenRows)
+                RUN_EXSH_BUILTIN_STDOUT="$HEADLESS_ROWS"
+                ;;
+            ScreenCols)
+                RUN_EXSH_BUILTIN_STDOUT="$HEADLESS_COLS"
+                ;;
+            *)
+                RUN_EXSH_BUILTIN_STDOUT=""
+                ;;
+        esac
+        return 0
+    fi
+
+    if [ "$#" -eq 0 ]; then
+        return 1
+    fi
+
+    local name
+    name="$1"
+    shift
+
+    local output
+    if output=$(builtin "$name" "$@" 2>/dev/null); then
+        RUN_EXSH_BUILTIN_STDOUT="$output"
+        return 0
+    fi
+
+    RUN_EXSH_BUILTIN_STDOUT=""
+    return 1
+}
+
+find_in_path() {
+    local name="$1"
+    local old_ifs dir candidate
+
+    if [ -z "$name" ]; then
+        return 1
+    fi
+
+    old_ifs=$IFS
+    IFS=:
+    for dir in $PATH; do
+        if [ -z "$dir" ]; then
+            dir='.'
+        fi
+        candidate="$dir/$name"
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            IFS=$old_ifs
+            return 0
+        fi
+    done
+
+    IFS=$old_ifs
+    return 1
+}
+
+have_command() {
+    find_in_path "$1" >/dev/null 2>&1
+}
+
+resolve_exsh_binary() {
+    if [ -n "$EXSH_BIN" ] && [ -x "$EXSH_BIN" ]; then
+        RESOLVED_EXSH_PATH="$EXSH_BIN"
+        return 0
+    fi
+
+    if [ -n "$RESOLVED_EXSH_PATH" ] && [ -x "$RESOLVED_EXSH_PATH" ]; then
+        return 0
+    fi
+
+    local path_result
+    path_result=$(find_in_path exsh 2>/dev/null || printf '')
+    if [ -n "$path_result" ]; then
+        EXSH_BIN="$path_result"
+        RESOLVED_EXSH_PATH="$EXSH_BIN"
+        return 0
+    fi
+
+    local script_path script_dir repo_root
+
+    script_path="$0"
+    case "$script_path" in
+        */*)
+            script_dir=${script_path%/*}
+            ;;
+        *)
+            script_path=$(find_in_path "$script_path" 2>/dev/null || printf '')
+            if [ -n "$script_path" ]; then
+                script_dir=${script_path%/*}
+            else
+                script_dir='.'
+            fi
+            ;;
+    esac
+
+    if [ -z "$script_dir" ]; then
+        script_dir='.'
+    fi
+
+    repo_root="$(CDPATH='' cd -- "$script_dir/../.." 2>/dev/null && pwd)"
+    if [ -n "$repo_root" ] && [ -x "$repo_root/build/bin/exsh" ]; then
+        EXSH_BIN="$repo_root/build/bin/exsh"
+        RESOLVED_EXSH_PATH="$EXSH_BIN"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_exsh() {
+    if have_exsh_builtin ScreenRows; then
+        resolve_exsh_binary || :
+        return 0
+    fi
+
+    if resolve_exsh_binary; then
+        if [ -n "$RESOLVED_EXSH_PATH" ]; then
+            exec "$RESOLVED_EXSH_PATH" "$0" "$@"
+        fi
+    fi
+
+    echo "sierpinski: this demo must be run with exsh." >&2
+    echo "Build exsh via CMake and ensure it is on PATH before running the script." >&2
+    exit 1
+}
+
+cleanup() {
+    if [ "$CURSOR_HIDDEN" = "1" ]; then
+        run_exsh_builtin ShowCursor >/dev/null 2>&1 || :
+        CURSOR_HIDDEN=0
+    fi
+}
+
+handle_exit() {
+    local status=$?
+    trap - EXIT INT TERM
+    cleanup
+    exit "$status"
+}
+
+handle_interrupt() {
+    trap - EXIT INT TERM
+    cleanup
+
+    case "$1" in
+        TERM)
+            exit 143
+            ;;
+        *)
+            exit 130
+            ;;
+    esac
+}
+
+RUN_EXSH_BUILTIN_STDOUT=""
+CURSOR_HIDDEN=0
+HEADLESS_MODE=0
+HEADLESS_ROWS=24
+HEADLESS_COLS=80
+RESOLVED_EXSH_PATH=""
+
+case "${SIERPINSKI_HEADLESS:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+        HEADLESS_MODE=1
+        ;;
+    *)
+        HEADLESS_MODE=0
+        ;;
+esac
+HEADLESS_ROWS=${SIERPINSKI_HEADLESS_ROWS:-$HEADLESS_ROWS}
+HEADLESS_COLS=${SIERPINSKI_HEADLESS_COLS:-$HEADLESS_COLS}
+
+ensure_exsh "$@"
+
+trap 'handle_exit' EXIT
+trap 'handle_interrupt INT' INT
+trap 'handle_interrupt TERM' TERM
+
+if [ -z "${CHAR_TO_DRAW+x}" ]; then
+    CHAR_TO_DRAW="${SIERPINSKI_CHAR:-+}"
+fi
+export CHAR_TO_DRAW
+
+MAX_LEVEL_RAW="${SIERPINSKI_LEVEL:-13}"
+case "$MAX_LEVEL_RAW" in
+    ''|*[!0-9]*)
+        MAX_LEVEL=13
+        ;;
+    *)
+        MAX_LEVEL=$MAX_LEVEL_RAW
+        ;;
+esac
+
+if [ "$MAX_LEVEL" -lt 1 ]; then
+    MAX_LEVEL=1
+fi
+
+if [ "$MAX_LEVEL" -gt 13 ]; then
+    MAX_LEVEL=13
+fi
+
+MAX_X=0
+MAX_Y=0
+
+if run_exsh_builtin ClrScr; then
+    :
+else
+    echo "sierpinski: this demo must be run with exsh." >&2
+    exit 1
+fi
+
+if run_exsh_builtin HideCursor; then
+    :
+else
+    echo "sierpinski: failed to hide cursor; ensure exsh console builtins are available." >&2
+    exit 1
+fi
+
+CURSOR_HIDDEN=1
+
+if run_exsh_builtin_capture ScreenRows; then
+    MAX_Y="$RUN_EXSH_BUILTIN_STDOUT"
+fi
+if run_exsh_builtin_capture ScreenCols; then
+    MAX_X="$RUN_EXSH_BUILTIN_STDOUT"
+fi
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    if [ -t 1 ] && have_command stty; then
+        stty_size=$(stty size 2>/dev/null || printf '')
+        if [ -n "$stty_size" ]; then
+            IFS=' ' read stty_rows stty_cols <<EOF
+$stty_size
+EOF
+            if [ -z "$MAX_Y" ] && [ -n "$stty_rows" ]; then
+                MAX_Y="$stty_rows"
+            fi
+            if [ -z "$MAX_X" ] && [ -n "$stty_cols" ]; then
+                MAX_X="$stty_cols"
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    if have_command tput; then
+        if [ -z "$MAX_Y" ]; then
+            MAX_Y="$(tput lines 2>/dev/null || printf '')"
+        fi
+        if [ -z "$MAX_X" ]; then
+            MAX_X="$(tput cols 2>/dev/null || printf '')"
+        fi
+    fi
+fi
+
+if [ -z "$MAX_Y" ] || [ -z "$MAX_X" ]; then
+    MAX_Y=${MAX_Y:-24}
+    MAX_X=${MAX_X:-80}
+fi
+
+run_exsh_builtin Write "int:1" "str:Drawing Sierpinski Triangle (Sequential)..."
+run_exsh_builtin GotoXY "int:1" "int:2"
+run_exsh_builtin Delay int:500
+
+X1=$((MAX_X / 2))
+Y1=2
+X2=2
+Y2=$((MAX_Y - 1))
+X3=$((MAX_X - 1))
+Y3=$((MAX_Y - 1))
+
+draw_point() {
+    local x="$1"
+    local y="$2"
+    if [ "$HEADLESS_MODE" = "1" ]; then
+        return 0
+    fi
+
+    if ! run_exsh_builtin GotoXY "int:$x" "int:$y"; then
+        printf '\033[%d;%dH' "$y" "$x"
+    fi
+
+    printf '%s' "$CHAR_TO_DRAW"
+}
+
+draw_sierpinski() {
+    local x1="$1"
+    local y1="$2"
+    local x2="$3"
+    local y2="$4"
+    local x3="$5"
+    local y3="$6"
+    local level="$7"
+
+    if [ "$level" -le 0 ]; then
+        draw_point "$x1" "$y1"
+        draw_point "$x2" "$y2"
+        draw_point "$x3" "$y3"
+        return
+    fi
+
+    local mx1=$(((x1 + x2) / 2))
+    local my1=$(((y1 + y2) / 2))
+    local mx2=$(((x2 + x3) / 2))
+    local my2=$(((y2 + y3) / 2))
+    local mx3=$(((x3 + x1) / 2))
+    local my3=$(((y3 + y1) / 2))
+    local next_level=$((level - 1))
+
+    draw_sierpinski "$x1" "$y1" "$mx1" "$my1" "$mx3" "$my3" "$next_level"
+    draw_sierpinski "$mx1" "$my1" "$x2" "$y2" "$mx2" "$my2" "$next_level"
+    draw_sierpinski "$mx3" "$my3" "$mx2" "$my2" "$x3" "$y3" "$next_level"
+}
+
+draw_sierpinski "$X1" "$Y1" "$X2" "$Y2" "$X3" "$Y3" "$MAX_LEVEL"
+
+run_exsh_builtin GotoXY "int:1" "int:$MAX_Y"
+run_exsh_builtin ShowCursor
+CURSOR_HIDDEN=0
+run_exsh_builtin Write "int:1" "str:Done. Press any key to exit."
+
+SKIP_WAIT=${SIERPINSKI_SKIP_WAIT:-0}
+if [ "$HEADLESS_MODE" != "1" ] && [ -t 0 ] && [ "$SKIP_WAIT" != "1" ]; then
+    while :; do
+        if ! run_exsh_builtin_capture ReadKey; then
+            break
+        fi
+        if [ -n "${RUN_EXSH_BUILTIN_STDOUT:-}" ]; then
+            break
+        fi
+    done
+fi
+run_exsh_builtin ClrScr
+
+trap - EXIT INT TERM
+cleanup

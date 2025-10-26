@@ -132,6 +132,27 @@ flag, and collected payload so the transcript records the full lifecycle for
 every thread before the cached metadata is cleared for reuse. Set
 `THREAD_SHOWCASE_DELAY_MS=<millis>` to adjust the queued delay.
 
+## `sierpinski`
+
+```sh
+#!/usr/bin/env exsh
+builtin ClrScr
+builtin HideCursor
+# ... see file for the full sequential renderer ...
+```
+
+The sequential variant renders the same fractal without relying on worker
+threads. It shares the threaded demo's helpers for discovering the terminal
+size, hiding the cursor, and recursively drawing the triangle, but runs all of
+the recursion inline so it works on builds that omit the extended worker pool.
+You can customise the recursion depth and drawing character via
+`SIERPINSKI_LEVEL` and `SIERPINSKI_CHAR`:
+
+```sh
+SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
+    Examples/exsh/sierpinski
+```
+
 ## `sierpinski_threads`
 
 ```sh
