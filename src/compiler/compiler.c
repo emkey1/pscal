@@ -3217,12 +3217,20 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             Symbol* ctorSymbol = lookupProcedure(lowerClassName);
-            if (ctorSymbol || node->child_count > 0) {
+            Symbol* resolvedCtor = resolveSymbolAlias(ctorSymbol);
+            const char* ctorLookupName = lowerClassName;
+            if (resolvedCtor && resolvedCtor->name) {
+                ctorLookupName = resolvedCtor->name;
+            } else if (ctorSymbol && ctorSymbol->name) {
+                ctorLookupName = ctorSymbol->name;
+            }
+
+            if (resolvedCtor || ctorSymbol || node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
+                int ctorNameIdx = addStringConstant(chunk, ctorLookupName);
                 writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
@@ -5893,12 +5901,20 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             Symbol* ctorSymbol = lookupProcedure(lowerClassName);
-            if (ctorSymbol || node->child_count > 0) {
+            Symbol* resolvedCtor = resolveSymbolAlias(ctorSymbol);
+            const char* ctorLookupName = lowerClassName;
+            if (resolvedCtor && resolvedCtor->name) {
+                ctorLookupName = resolvedCtor->name;
+            } else if (ctorSymbol && ctorSymbol->name) {
+                ctorLookupName = ctorSymbol->name;
+            }
+
+            if (resolvedCtor || ctorSymbol || node->child_count > 0) {
                 writeBytecodeChunk(chunk, DUP, line);
                 for (int i = 0; i < node->child_count; i++) {
                     compileRValue(node->children[i], chunk, getLine(node->children[i]));
                 }
-                int ctorNameIdx = addStringConstant(chunk, lowerClassName);
+                int ctorNameIdx = addStringConstant(chunk, ctorLookupName);
                 writeBytecodeChunk(chunk, CALL_USER_PROC, line);
                 emitShort(chunk, (uint16_t)ctorNameIdx, line);
                 writeBytecodeChunk(chunk, (uint8_t)(node->child_count + 1), line);
