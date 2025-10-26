@@ -1516,6 +1516,35 @@ static void ensureEnumMemberExported(AST* enum_type_node, AST* value_node, const
 
     const char* member_name = value_node->token->value;
     Symbol* sym = lookupGlobalSymbol(member_name);
+    if (sym) {
+        Symbol* resolved = resolveSymbolAlias(sym);
+        if (resolved) {
+            bool conflict = false;
+            if (resolved->value && resolved->value->base_type_node &&
+                resolved->value->base_type_node != enum_type_node) {
+                conflict = true;
+            } else if (resolved->type != TYPE_ENUM && resolved->type != TYPE_UNKNOWN) {
+                conflict = true;
+            }
+
+            if (conflict) {
+                const char* other_enum_name = NULL;
+                if (resolved->value && resolved->value->enum_val.enum_name) {
+                    other_enum_name = resolved->value->enum_val.enum_name;
+                }
+                fprintf(stderr,
+                        "Error: Enum member '%s' from unit '%s' conflicts with existing symbol from %s%s%s.\n",
+                        member_name,
+                        unit_name ? unit_name : "(unknown)",
+                        other_enum_name ? "enum '" : "unit ",
+                        other_enum_name ? other_enum_name : "(unknown)",
+                        other_enum_name ? "'" : "");
+                EXIT_FAILURE_HANDLER();
+                return;
+            }
+        }
+    }
+
     if (!sym) {
         insertGlobalSymbol(member_name, TYPE_ENUM, enum_type_node);
         sym = lookupGlobalSymbol(member_name);
