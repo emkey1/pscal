@@ -7,6 +7,21 @@ str ConfiguredShotSoundPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/sounds/paddle_h
 str ConfiguredExplodeSoundPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/sounds/wall_hit.wav";
 str ConfiguredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
 
+int tryLoadSound(str path) {
+    /*
+     * Older runtimes can yield NIL from loadsound() when the file is absent.
+     * Guard against that by ensuring the candidate path actually exists
+     * before attempting to load it.
+     */
+    if (length(path) == 0) {
+        return -1;
+    }
+    if (!fileexists(path)) {
+        return -1;
+    }
+    return loadsound(path);
+}
+
 int tryInitFont(str path, int fontSize) {
     /*
      * getenv() may yield NIL when the requested variable is absent (older
@@ -92,8 +107,22 @@ int main() {
     initgraph(ScreenWidth, ScreenHeight, "CLike Space Game");
 
     initsoundsystem();
-    ShotSound = loadsound(ConfiguredShotSoundPath);
-    ExplodeSound = loadsound(ConfiguredExplodeSoundPath);
+    ShotSound = tryLoadSound(ConfiguredShotSoundPath);
+    if (ShotSound == -1) { ShotSound = tryLoadSound("lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../../../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) {
+        printf("Warning: Unable to load paddle_hit.wav. Shot sound disabled.\n");
+    }
+    ExplodeSound = tryLoadSound(ConfiguredExplodeSoundPath);
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../../../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) {
+        printf("Warning: Unable to load wall_hit.wav. Explosion sound disabled.\n");
+    }
 
     PlayerW = 40;
     PlayerH = 20;
