@@ -138,7 +138,12 @@ Value vmBuiltinSierpinskiSpawnWorker(VM *vm, int arg_count, Value *args) {
     task->level = (int)AS_INTEGER(args[6]);
     task->drawChar = (arg_count == 8) ? coerceDrawChar(&args[7]) : '+';
 
-    int id = vmSpawnCallbackThread(vm, sierpinskiThreadEntry, task, sierpinskiThreadCleanup);
+    VM *targetVm = vm;
+    if (targetVm && targetVm->threadOwner) {
+        targetVm = targetVm->threadOwner;
+    }
+
+    int id = vmSpawnCallbackThread(targetVm, sierpinskiThreadEntry, task, sierpinskiThreadCleanup);
     if (id < 0) {
         runtimeError(vm, "SierpinskiSpawnWorker failed to spawn thread.");
         return makeInt(-1);
