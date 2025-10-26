@@ -217,28 +217,6 @@ static char* tokenStringToCString(ClikeToken t) {
     return s;
 }
 
-// Local helper to construct identifier tokens for core AST nodes
-static Token* makeIdentTokenLocal(const char* s) {
-    Token* t = (Token*)malloc(sizeof(Token));
-    t->type = TOKEN_IDENTIFIER;
-    t->value = strdup(s);
-    t->length = t->value ? strlen(t->value) : 0;
-    t->line = 0;
-    t->column = 0;
-    return t;
-}
-
-// Create a core AST node representing a builtin type token
-static AST* makeBuiltinTypeASTFromToken(ClikeToken t) {
-    const char* name = clikeTokenTypeToTypeName(t.type);
-    VarType vt = clikeTokenTypeToVarType(t.type);
-    if (!name) return NULL;
-    Token* tok = makeIdentTokenLocal(name);
-    AST* node = newASTNode(AST_VARIABLE, tok);
-    setTypeAST(node, vt);
-    return node;
-}
-
 static void beginScope(FuncContext* ctx) { ctx->scopeDepth++; }
 
 static void endScope(FuncContext* ctx) {
@@ -734,32 +712,25 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                 free(typeName);
             }
             if (node->var_type == TYPE_POINTER) {
+                int typeNameIdx = -1;
+                if (node->right && node->right->type == TCAST_IDENTIFIER) {
+                    char *typeName = tokenToCString(node->right->token);
+                    if (typeName) {
+                        typeNameIdx = addStringConstant(chunk, typeName);
+                        free(typeName);
+                    }
+                }
+                if (typeNameIdx < 0) {
+                    typeNameIdx = addStringConstant(chunk, "");
+                }
+                writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                emitShort(chunk, (uint16_t)typeNameIdx, node->token.line);
                 if (node->left) {
                     compileExpression(node->left, chunk, ctx);
-                } else {
-                    AST *base = NULL;
-                    if (node->right && node->right->type == TCAST_IDENTIFIER) {
-                        if (node->right->token.type == CLIKE_TOKEN_IDENTIFIER) {
-                            char *tname = tokenToCString(node->right->token);
-                            base = clikeLookupStruct(tname);
-                            if (!base) base = lookupType(tname);
-                            free(tname);
-                        } else {
-                            base = makeBuiltinTypeASTFromToken(node->right->token);
-                        }
-                    }
-                    Value init;
-                    if (base) {
-                        init = makePointer(NULL, base);
-                    } else {
-                        init = makeValueForType(TYPE_POINTER, NULL, NULL);
-                    }
-                    int cidx = addConstantToChunk(chunk, &init);
-                    freeValue(&init);
-                    emitConstantOperand(chunk, cidx, node->token.line);
+                    writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 }
-                writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else if (node->is_array) {
                 int elemNameIdx = addStringConstant(chunk, "");
                 // Compile dynamic dimension sizes before emitting the init opcode
@@ -811,6 +782,23 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                         writeBytecodeChunk(chunk, SET_INDIRECT, node->token.line);
                     }
                     free(str);
+                }
+            } else if (node->var_type == TYPE_STRING) {
+                writeBytecodeChunk(chunk, INIT_LOCAL_STRING, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                writeBytecodeChunk(chunk, 0, node->token.line);
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                    writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                }
+            } else if (node->var_type == TYPE_FILE) {
+                writeBytecodeChunk(chunk, INIT_LOCAL_FILE, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                    writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
+                    writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 }
             } else {
                 if (node->left) {
