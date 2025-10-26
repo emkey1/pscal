@@ -1867,5 +1867,4 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     free(clike_imports);
     clike_imports = NULL;
     clike_import_count = 0;
-    clikeFreeStructs();
 }
