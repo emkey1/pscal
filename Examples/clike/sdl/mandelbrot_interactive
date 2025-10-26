@@ -32,16 +32,24 @@ double minIm = -1.2;
 double maxIm;
 double reFactor;
 double imFactor;
+double pendingMinRe;
+double pendingMaxRe;
+double pendingMinIm;
+double pendingMaxIm;
+int hasPendingBounds = 0;
 
 int textureID;
 int rowMutex;
 int quitMutex;
 int abortMutex;
 int quit = 0;
-int redraw = 1;
+int needRender = 1;
 int prevButtons = 0;
-int clickButton = 0, clickX = 0, clickY = 0;
 int abortRender = 0;
+int computing = 0;
+int nextPresentRow = 0;
+int tid[ThreadCount];
+int textReady = 0;
 
 
 #ifdef SDL_ENABLED
@@ -73,6 +81,63 @@ void setAbortRender(int v) {
     unlock(abortMutex);
 }
 
+void applyViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    minRe = newMinRe;
+    maxRe = newMaxRe;
+    minIm = newMinIm;
+    maxIm = newMaxIm;
+}
+
+void commitPendingViewBounds() {
+    if (hasPendingBounds) {
+        applyViewBounds(pendingMinRe, pendingMaxRe, pendingMinIm, pendingMaxIm);
+        hasPendingBounds = 0;
+    }
+}
+
+void getEffectiveViewBounds(double *outMinRe, double *outMaxRe, double *outMinIm, double *outMaxIm) {
+    if (hasPendingBounds) {
+        *outMinRe = pendingMinRe;
+        *outMaxRe = pendingMaxRe;
+        *outMinIm = pendingMinIm;
+        *outMaxIm = pendingMaxIm;
+    } else {
+        *outMinRe = minRe;
+        *outMaxRe = maxRe;
+        *outMinIm = minIm;
+        *outMaxIm = maxIm;
+    }
+}
+
+int requestViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    double currentMinRe;
+    double currentMaxRe;
+    double currentMinIm;
+    double currentMaxIm;
+
+    getEffectiveViewBounds(&currentMinRe, &currentMaxRe, &currentMinIm, &currentMaxIm);
+    if (newMinRe == currentMinRe &&
+        newMaxRe == currentMaxRe &&
+        newMinIm == currentMinIm &&
+        newMaxIm == currentMaxIm) {
+        return 0;
+    }
+
+    if (computing) {
+        pendingMinRe = newMinRe;
+        pendingMaxRe = newMaxRe;
+        pendingMinIm = newMinIm;
+        pendingMaxIm = newMaxIm;
+        hasPendingBounds = 1;
+        setAbortRender(1);
+    } else {
+        applyViewBounds(newMinRe, newMaxRe, newMinIm, newMaxIm);
+        hasPendingBounds = 0;
+    }
+    needRender = 1;
+    return 1;
+}
+
 int tryInitFont(str path, int fontSize) {
     /*
      * getenv() in the VM returns an empty string when the variable is not
@@ -87,57 +152,225 @@ int tryInitFont(str path, int fontSize) {
 }
 
 /*
- * Poll SDL briefly and detect a fresh left/right click that occurred inside
- * the window. Click coordinates are clamped to [0..Width-1]/[0..Height-1].
- * Sets (clickButton, clickX, clickY) when a new click is found.
+ * Helpers to coordinate the worker threads and process user input events while
+ * keeping the UI responsive.
  */
-void pollMouse() {
-    int x = 0, y = 0, b = 0, insideWindow = 0;
-    graphloop(1);           /* Pump events */
-    getmousestate(&x, &y, &b, &insideWindow);
+void resetThreadIds() {
+    int i;
+    for (i = 0; i < ThreadCount; i++) {
+        tid[i] = -1;
+    }
+}
 
-    if (!insideWindow) {
-        prevButtons = b;
+int zoomAt(int px, int py, double factor) {
+    double baseMinRe;
+    double baseMaxRe;
+    double baseMinIm;
+    double baseMaxIm;
+    double reStep;
+    double imStep;
+    double centerRe;
+    double centerIm;
+    double widthRe;
+    double heightIm;
+
+    getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+    reStep = (baseMaxRe - baseMinRe) / (Width - 1);
+    imStep = (baseMaxIm - baseMinIm) / (Height - 1);
+    centerRe = baseMinRe + (px + 0.5) * reStep;
+    centerIm = baseMaxIm - (py + 0.5) * imStep;
+    widthRe = (baseMaxRe - baseMinRe) * factor;
+    heightIm = (baseMaxIm - baseMinIm) * factor;
+
+    return requestViewBounds(centerRe - widthRe / 2.0,
+                             centerRe + widthRe / 2.0,
+                             centerIm - heightIm / 2.0,
+                             centerIm + heightIm / 2.0);
+}
+
+void joinThreads() {
+    int i;
+    for (i = 0; i < ThreadCount; i++) {
+        if (tid[i] >= 0) {
+            join tid[i];
+            tid[i] = -1;
+        }
+    }
+}
+
+void startRender() {
+    int i, rowsPerThread, extra, startY, endY;
+
+    setAbortRender(0);
+    maxIm = minIm + (maxRe - minRe) * Height / Width;
+    reFactor = (maxRe - minRe) / (Width - 1);
+    imFactor = (maxIm - minIm) / (Height - 1);
+
+    for (i = 0; i < Height; i++) {
+        rowDone[i] = 0;
+    }
+
+    rowsPerThread = Height / ThreadCount;
+    extra = Height % ThreadCount;
+    startY = 0;
+    for (i = 0; i < ThreadCount; i++) {
+        endY = startY + rowsPerThread - 1;
+        if (extra > 0) {
+            endY++;
+            extra--;
+        }
+        threadStart[i] = startY;
+        threadEnd[i] = endY;
+        startY = endY + 1;
+    }
+
+    if (threadStart[0] <= threadEnd[0]) tid[0] = spawn computeRowsThread0(); else tid[0] = -1;
+    if (threadStart[1] <= threadEnd[1]) tid[1] = spawn computeRowsThread1(); else tid[1] = -1;
+    if (threadStart[2] <= threadEnd[2]) tid[2] = spawn computeRowsThread2(); else tid[2] = -1;
+    if (threadStart[3] <= threadEnd[3]) tid[3] = spawn computeRowsThread3(); else tid[3] = -1;
+
+    computing = 1;
+    nextPresentRow = 0;
+}
+
+void updateScreenDuringRender() {
+    updatetexture(textureID, pixelData);
+    cleardevice();
+    rendercopy(textureID);
+    if (textReady) {
+        outtextxy(8, 8, "Rendering...");
+    }
+    updatescreen();
+}
+
+void pollRenderProgress() {
+    int readyRows;
+    int shouldUpdate = 0;
+
+    if (!computing) {
         return;
     }
 
-    /* Fresh press detection: bit goes from 0 -> 1 */
-    int freshLeft  = ((b & ButtonLeft)  != 0) && ((prevButtons & ButtonLeft)  == 0);
-    int freshRight = ((b & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0);
-
-    /* Use actual window dimensions to validate click is inside the window */
-    int winW = getmaxx() + 1;  /* getmaxx returns max index */
-    int winH = getmaxy() + 1;
-    int inside = (x >= 0 && x < winW && y >= 0 && y < winH);
-    if (!inside) {
-        prevButtons = b;
-        return; /* ignore clicks outside */
+    readyRows = nextPresentRow;
+    while (readyRows < Height) {
+        int done;
+        lock(rowMutex);
+        done = rowDone[readyRows];
+        unlock(rowMutex);
+        if (!done) {
+            break;
+        }
+        readyRows++;
+        if (((readyRows % ScreenUpdateInterval) == 0) || readyRows == Height) {
+            shouldUpdate = 1;
+        }
     }
 
-    /* Map from window coordinates to texture coordinates if sizes differ */
-    if (winW != Width && winW > 0) {
-        x = (x * Width) / winW;
-        if (x >= Width) x = Width - 1;
+    if (shouldUpdate) {
+        nextPresentRow = readyRows;
+        updateScreenDuringRender();
+    } else {
+        nextPresentRow = readyRows;
     }
-    if (winH != Height && winH > 0) {
-        y = (y * Height) / winH;
-        if (y >= Height) y = Height - 1;
+
+    if (getAbortRender() || nextPresentRow == Height) {
+        int aborted = getAbortRender();
+        joinThreads();
+        setAbortRender(0);
+        computing = 0;
+        commitPendingViewBounds();
+        nextPresentRow = 0;
+        if (!aborted) {
+            updatetexture(textureID, pixelData);
+            cleardevice();
+            rendercopy(textureID);
+            updatescreen();
+        }
     }
+}
+
+int handleInput() {
+    int changed = 0;
+    int key;
+    int x = 0;
+    int y = 0;
+    int buttons = 0;
+    int insideWindow = 0;
+    int winW;
+    int winH;
+    int freshLeft;
+    int freshRight;
+
+    graphloop(0);
+
+    key = pollkeyany();
+    while (key != 0) {
+        if (key == 'q' || key == 'Q') {
+            setQuit(1);
+            return changed;
+        } else {
+            double baseMinRe;
+            double baseMaxRe;
+            double baseMinIm;
+            double baseMaxIm;
+            double widthRe;
+            double heightIm;
+            double dx;
+            double dy;
+
+            getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+            widthRe = (baseMaxRe - baseMinRe);
+            heightIm = (baseMaxIm - baseMinIm);
+            dx = widthRe * 0.5;
+            dy = heightIm * 0.5;
+            if (key == KEY_LEFT) {
+                changed |= requestViewBounds(baseMinRe - dx, baseMaxRe - dx, baseMinIm, baseMaxIm);
+            } else if (key == KEY_RIGHT) {
+                changed |= requestViewBounds(baseMinRe + dx, baseMaxRe + dx, baseMinIm, baseMaxIm);
+            } else if (key == KEY_UP) {
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm + dy, baseMaxIm + dy);
+            } else if (key == KEY_DOWN) {
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm - dy, baseMaxIm - dy);
+            }
+        }
+        key = pollkeyany();
+    }
+
+    getmousestate(&x, &y, &buttons, &insideWindow);
+    if (!insideWindow) {
+        buttons = 0;
+    }
+
+    winW = getmaxx() + 1;
+    winH = getmaxy() + 1;
+
+    if (insideWindow && winW > 0 && winH > 0) {
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x >= winW) x = winW - 1;
+        if (y >= winH) y = winH - 1;
+        if (winW != Width) {
+            x = (x * Width) / winW;
+            if (x >= Width) x = Width - 1;
+        }
+        if (winH != Height) {
+            y = (y * Height) / winH;
+            if (y >= Height) y = Height - 1;
+        }
+    }
+
+    freshLeft = ((buttons & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0);
+    freshRight = ((buttons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0);
 
     if (freshLeft) {
-        clickButton = ButtonLeft;
-        clickX = x;
-        clickY = y;
-        printf("DBG click: LEFT raw=(%d,%d) win=(%d,%d) scaled=(%d,%d) b=%d prev=%d\n",
-               x, y, winW, winH, clickX, clickY, b, prevButtons);
+        changed |= zoomAt(x, y, 1.0 / ZoomFactor);
     } else if (freshRight) {
-        clickButton = ButtonRight;
-        clickX = x;
-        clickY = y;
-        printf("DBG click: RIGHT raw=(%d,%d) win=(%d,%d) scaled=(%d,%d) b=%d prev=%d\n",
-               x, y, winW, winH, clickX, clickY, b, prevButtons);
+        changed |= zoomAt(x, y, ZoomFactor);
     }
-    prevButtons = b;
+
+    prevButtons = buttons;
+
+    return changed;
 }
 
 void computeRows(int startY, int endY) {
@@ -176,16 +409,11 @@ void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
 
 int main() {
 #ifdef SDL_ENABLED
-    int tid[ThreadCount], i, y, rowsPerThread, extra, startY, endY;
-    int textReady;
     const int fontSize = 18;
     str envFontPath;
-    double reStep, imStep, centerRe, centerIm, zoomScale, newWidth, newHeight;
-    int keyCode;
 
     printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
     initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
-    textReady = 0;
     envFontPath = getenv("PSCAL_FONT_PATH");
     if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
     if (!textReady) textReady = tryInitFont(ConfiguredFontPath, fontSize);
@@ -200,145 +428,27 @@ int main() {
     quitMutex = mutex();
     abortMutex = mutex();
 
+    resetThreadIds();
+
     while (!getQuit()) {
-        pollMouse();
-
-        if (redraw) {
-            setAbortRender(0);
-            maxIm = minIm + (maxRe - minRe) * Height / Width;
-            reFactor = (maxRe - minRe) / (Width - 1);
-            imFactor = (maxIm - minIm) / (Height - 1);
-            for (i = 0; i < Height; i++) rowDone[i] = 0;
-
-            rowsPerThread = Height / ThreadCount;
-            extra = Height % ThreadCount;
-            startY = 0;
-            for (i = 0; i < ThreadCount; i++) {
-                endY = startY + rowsPerThread - 1;
-                if (extra > 0) { 
-                    endY++; 
-                    extra--; 
-                }
-                //printf("Thread(%d): startY: %d endY: %d\n", i, startY, endY);
-                threadStart[i] = startY;
-                threadEnd[i] = endY;
-                startY = endY + 1;
-            }
-
-            tid[0] = spawn computeRowsThread0();
-            tid[1] = spawn computeRowsThread1();
-            tid[2] = spawn computeRowsThread2();
-            tid[3] = spawn computeRowsThread3();
-
-            y = 0;
-            while (y < Height && !getQuit()) {
-                if (getAbortRender()) break;
-                int done = 0;
-                int update = 0;
-                lock(rowMutex);
-                if (rowDone[y]) {
-                    done = 1;
-                    if (((y + 1) % ScreenUpdateInterval) == 0 || y == Height - 1) {
-                        update = 1;
-                    }
-                }
-                unlock(rowMutex);
-
-                if (done)
-                    y++;
-
-                if (update) {
-                    /* Upload pixels after releasing rowMutex so worker threads stay busy. */
-                    updatetexture(textureID, pixelData);
-                    cleardevice();
-                    rendercopy(textureID);
-                    updatescreen();
-                }
-                if (!done || update)
-                    pollMouse();
-                if ((clickButton == ButtonLeft || clickButton == ButtonRight) && !getAbortRender()) {
-                    setAbortRender(1);
-                    break;
-                }
-            }
-
-            for (i = 0; i < ThreadCount; i++)
-                join tid[i];
-
-            {
-                int aborted = getAbortRender();
-                setAbortRender(0);
-
-                if (!getQuit() && !aborted) {
-                    updatetexture(textureID, pixelData);
-                    cleardevice();
-                    rendercopy(textureID);
-                    if (textReady) {
-                        outtextxy(8, 8, "Rendering...");
-                    }
-                    updatescreen();
-                    redraw = 0;
-                }
-            }
+        pollRenderProgress();
+        if (!computing && needRender) {
+            startRender();
+            needRender = 0;
+            updateScreenDuringRender();
         }
-        /* Keyboard controls: Q to quit, arrows to pan by half a screen */
-        {
-            int key = pollkeyany();
-            while (key != 0) {
-                if (key == 'q' || key == 'Q') {
-                    setQuit(1);
-                } else {
-                    double widthRe = (maxRe - minRe);
-                    double heightIm = (maxIm - minIm);
-                    double dx = widthRe * 0.5;
-                    double dy = heightIm * 0.5;
-                    if (key == KEY_LEFT) {
-                        minRe -= dx; maxRe -= dx; redraw = 1;
-                    } else if (key == KEY_RIGHT) {
-                        minRe += dx; maxRe += dx; redraw = 1;
-                    } else if (key == KEY_UP) {
-                        /* Move view up in complex plane: increase both Im bounds */
-                        minIm += dy; maxIm += dy; redraw = 1;
-                    } else if (key == KEY_DOWN) {
-                        /* Move view down: decrease both Im bounds */
-                        minIm -= dy; maxIm -= dy; redraw = 1;
-                    }
-                }
-                key = pollkeyany();
-            }
-        }
+        handleInput();
+        delay(1);
+    }
 
-        if (clickButton == ButtonLeft || clickButton == ButtonRight) {
-            /* Map pixel -> complex plane using current ranges (center of pixel). */
-            reStep = (maxRe - minRe) / (Width - 1);
-            imStep = (maxIm - minIm) / (Height - 1);
-            centerRe = minRe + (clickX + 0.5) * reStep;
-            centerIm = maxIm - (clickY + 0.5) * imStep;
-            zoomScale = (clickButton == ButtonLeft)
-                           ? (1.0 / ZoomFactor)
-                           : ZoomFactor;
-            newWidth = (maxRe - minRe) * zoomScale;
-            newHeight = (maxIm - minIm) * zoomScale;
-
-            printf("DBG zoom: button=%s click=(%d,%d) reStep=%0.9f imStep=%0.9f\n",
-                   (clickButton==ButtonLeft?"LEFT":"RIGHT"), clickX, clickY,
-                   reStep, imStep);
-            printf("DBG zoom: before minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
-                   minRe, maxRe, minIm, maxIm);
-            printf("DBG zoom: centerRe=%0.9f centerIm=%0.9f newWidth=%0.9f newHeight=%0.9f scale=%0.9f\n",
-                   centerRe, centerIm, newWidth, newHeight, zoomScale);
-
-            minRe = centerRe - newWidth / 2.0;
-            maxRe = centerRe + newWidth / 2.0;
-            minIm = centerIm - newHeight / 2.0;
-            maxIm = centerIm + newHeight / 2.0;
-            printf("DBG zoom: after  minRe=%0.9f maxRe=%0.9f minIm=%0.9f maxIm=%0.9f\n",
-                   minRe, maxRe, minIm, maxIm);
-
-            redraw = 1;
-            clickButton = 0; /* consume click */
+    if (computing) {
+        setAbortRender(1);
+        while (computing) {
+            pollRenderProgress();
+            delay(1);
         }
     }
+
     destroytexture(textureID);
     if (textReady) {
         quittextsystem();
