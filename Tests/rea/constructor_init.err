@@ -17,7 +17,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0024    | ALLOC_OBJECT        2 (fields)
 0026    | DUP
 0027    | CONSTANT            5 '5'
-0029    | CALL_USER_PROC       6 'point' @0010 (2 args)
+0029    | CALL_USER_PROC       6 'point.point' @0010 (2 args)
 0033    | SET_GLOBAL          3 'p'
 0035    0 HALT
 == End Disassembly: rea/constructor_init.rea ==
@@ -28,5 +28,5 @@ Constants (7):\n  0000: STR   "myself"
   0003: STR   "p"
   0004: STR   "Point"
   0005: INT   5
-  0006: STR   "point"
+  0006: STR   "point.point"
 

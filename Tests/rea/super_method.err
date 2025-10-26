@@ -40,7 +40,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0083    | GET_GLOBAL_ADDRESS    9 'child_vtable'
 0085    | SET_INDIRECT
 0086    | DUP
-0087    | CALL_USER_PROC      16 'child' @0028 (1 args)
+0087    | CALL_USER_PROC      16 'child.child' @0028 (1 args)
 0091    | SET_GLOBAL         14 'c'
 0093    0 GET_GLOBAL         14 'c'
 0095    | DUP
@@ -76,5 +76,5 @@ Constants (17):\n  0000: STR   "myself"
   0013: STR   "base_vtable"
   0014: STR   "c"
   0015: STR   "Child"
-  0016: STR   "child"
+  0016: STR   "child.child"
 

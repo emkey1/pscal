@@ -495,7 +495,7 @@ def_line = call_line = None
 for idx, line in enumerate(text, 1):
     if def_line is None and "DEFINE_GLOBAL" in line and "'wordrepository_vtable'" in line:
         def_line = idx
-    if call_line is None and "CALL_USER_PROC" in line and "'hangmangame'" in line:
+    if call_line is None and "CALL_USER_PROC" in line and "'hangmangame" in line:
         call_line = idx
 if def_line is None:
     print("Hangman example missing wordrepository vtable definition", file=sys.stderr)
