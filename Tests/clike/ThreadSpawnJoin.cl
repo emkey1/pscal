@@ -3,8 +3,11 @@ void child() {
 }
 
 int main() {
-    int tid = spawn child();
-    join tid;
+    int i;
+    for (i = 0; i < 6; i++) {
+        int tid = spawn child();
+        join tid;
+    }
     printf("parent\n");
     return 0;
 }

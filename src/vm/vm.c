@@ -1584,7 +1584,12 @@ static bool joinThreadInternal(VM* vm, int id) {
 }
 
 static void joinThread(VM* vm, int id) {
-    joinThreadInternal(vm, id);
+    if (!vm) {
+        return;
+    }
+    if (!vmThreadTakeResult(vm, id, NULL, true, NULL, true)) {
+        joinThreadInternal(vm, id);
+    }
 }
 
 bool vmJoinThreadById(VM* vm, int id) {
@@ -6737,7 +6742,9 @@ comparison_error_label:
                     freeValue(&popped_tid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                joinThread(vm, tid);
+                if (!vmThreadTakeResult(vm, tid, NULL, true, NULL, true)) {
+                    joinThreadInternal(vm, tid);
+                }
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);
                 break;
