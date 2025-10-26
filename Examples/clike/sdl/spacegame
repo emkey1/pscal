@@ -8,7 +8,13 @@ str ConfiguredExplodeSoundPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/sounds/wall_
 str ConfiguredFontPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf";
 
 int tryInitFont(str path, int fontSize) {
-    if (strlen(path) == 0) {
+    /*
+     * getenv() may yield NIL when the requested variable is absent (older
+     * runtime builds behaved this way).  length() safely treats NIL as a
+     * zero-length string, so gate all work on that instead of calling strlen
+     * directly which would raise a type mismatch when handed NIL.
+     */
+    if (length(path) == 0) {
         return 0;
     }
     if (!fileexists(path)) {
