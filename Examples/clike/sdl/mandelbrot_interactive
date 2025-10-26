@@ -32,6 +32,11 @@ double minIm = -1.2;
 double maxIm;
 double reFactor;
 double imFactor;
+double pendingMinRe;
+double pendingMaxRe;
+double pendingMinIm;
+double pendingMaxIm;
+int hasPendingBounds = 0;
 
 int textureID;
 int rowMutex;
@@ -76,6 +81,63 @@ void setAbortRender(int v) {
     unlock(abortMutex);
 }
 
+void applyViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    minRe = newMinRe;
+    maxRe = newMaxRe;
+    minIm = newMinIm;
+    maxIm = newMaxIm;
+}
+
+void commitPendingViewBounds() {
+    if (hasPendingBounds) {
+        applyViewBounds(pendingMinRe, pendingMaxRe, pendingMinIm, pendingMaxIm);
+        hasPendingBounds = 0;
+    }
+}
+
+void getEffectiveViewBounds(double *outMinRe, double *outMaxRe, double *outMinIm, double *outMaxIm) {
+    if (hasPendingBounds) {
+        *outMinRe = pendingMinRe;
+        *outMaxRe = pendingMaxRe;
+        *outMinIm = pendingMinIm;
+        *outMaxIm = pendingMaxIm;
+    } else {
+        *outMinRe = minRe;
+        *outMaxRe = maxRe;
+        *outMinIm = minIm;
+        *outMaxIm = maxIm;
+    }
+}
+
+int requestViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    double currentMinRe;
+    double currentMaxRe;
+    double currentMinIm;
+    double currentMaxIm;
+
+    getEffectiveViewBounds(&currentMinRe, &currentMaxRe, &currentMinIm, &currentMaxIm);
+    if (newMinRe == currentMinRe &&
+        newMaxRe == currentMaxRe &&
+        newMinIm == currentMinIm &&
+        newMaxIm == currentMaxIm) {
+        return 0;
+    }
+
+    if (computing) {
+        pendingMinRe = newMinRe;
+        pendingMaxRe = newMaxRe;
+        pendingMinIm = newMinIm;
+        pendingMaxIm = newMaxIm;
+        hasPendingBounds = 1;
+        setAbortRender(1);
+    } else {
+        applyViewBounds(newMinRe, newMaxRe, newMinIm, newMaxIm);
+        hasPendingBounds = 0;
+    }
+    needRender = 1;
+    return 1;
+}
+
 int tryInitFont(str path, int fontSize) {
     /*
      * getenv() in the VM returns an empty string when the variable is not
@@ -100,18 +162,30 @@ void resetThreadIds() {
     }
 }
 
-void zoomAt(int px, int py, double factor) {
-    double reStep = (maxRe - minRe) / (Width - 1);
-    double imStep = (maxIm - minIm) / (Height - 1);
-    double centerRe = minRe + (px + 0.5) * reStep;
-    double centerIm = maxIm - (py + 0.5) * imStep;
-    double widthRe = (maxRe - minRe) * factor;
-    double heightIm = (maxIm - minIm) * factor;
+int zoomAt(int px, int py, double factor) {
+    double baseMinRe;
+    double baseMaxRe;
+    double baseMinIm;
+    double baseMaxIm;
+    double reStep;
+    double imStep;
+    double centerRe;
+    double centerIm;
+    double widthRe;
+    double heightIm;
 
-    minRe = centerRe - widthRe / 2.0;
-    maxRe = centerRe + widthRe / 2.0;
-    minIm = centerIm - heightIm / 2.0;
-    maxIm = centerIm + heightIm / 2.0;
+    getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+    reStep = (baseMaxRe - baseMinRe) / (Width - 1);
+    imStep = (baseMaxIm - baseMinIm) / (Height - 1);
+    centerRe = baseMinRe + (px + 0.5) * reStep;
+    centerIm = baseMaxIm - (py + 0.5) * imStep;
+    widthRe = (baseMaxRe - baseMinRe) * factor;
+    heightIm = (baseMaxIm - baseMinIm) * factor;
+
+    return requestViewBounds(centerRe - widthRe / 2.0,
+                             centerRe + widthRe / 2.0,
+                             centerIm - heightIm / 2.0,
+                             centerIm + heightIm / 2.0);
 }
 
 void joinThreads() {
@@ -204,6 +278,7 @@ void pollRenderProgress() {
         joinThreads();
         setAbortRender(0);
         computing = 0;
+        commitPendingViewBounds();
         nextPresentRow = 0;
         if (!aborted) {
             updatetexture(textureID, pixelData);
@@ -234,26 +309,28 @@ int handleInput() {
             setQuit(1);
             return changed;
         } else {
-            double widthRe = (maxRe - minRe);
-            double heightIm = (maxIm - minIm);
-            double dx = widthRe * 0.5;
-            double dy = heightIm * 0.5;
+            double baseMinRe;
+            double baseMaxRe;
+            double baseMinIm;
+            double baseMaxIm;
+            double widthRe;
+            double heightIm;
+            double dx;
+            double dy;
+
+            getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+            widthRe = (baseMaxRe - baseMinRe);
+            heightIm = (baseMaxIm - baseMinIm);
+            dx = widthRe * 0.5;
+            dy = heightIm * 0.5;
             if (key == KEY_LEFT) {
-                minRe -= dx;
-                maxRe -= dx;
-                changed = 1;
+                changed |= requestViewBounds(baseMinRe - dx, baseMaxRe - dx, baseMinIm, baseMaxIm);
             } else if (key == KEY_RIGHT) {
-                minRe += dx;
-                maxRe += dx;
-                changed = 1;
+                changed |= requestViewBounds(baseMinRe + dx, baseMaxRe + dx, baseMinIm, baseMaxIm);
             } else if (key == KEY_UP) {
-                minIm += dy;
-                maxIm += dy;
-                changed = 1;
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm + dy, baseMaxIm + dy);
             } else if (key == KEY_DOWN) {
-                minIm -= dy;
-                maxIm -= dy;
-                changed = 1;
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm - dy, baseMaxIm - dy);
             }
         }
         key = pollkeyany();
@@ -286,21 +363,12 @@ int handleInput() {
     freshRight = ((buttons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0);
 
     if (freshLeft) {
-        zoomAt(x, y, 1.0 / ZoomFactor);
-        changed = 1;
+        changed |= zoomAt(x, y, 1.0 / ZoomFactor);
     } else if (freshRight) {
-        zoomAt(x, y, ZoomFactor);
-        changed = 1;
+        changed |= zoomAt(x, y, ZoomFactor);
     }
 
     prevButtons = buttons;
-
-    if (changed) {
-        needRender = 1;
-        if (computing) {
-            setAbortRender(1);
-        }
-    }
 
     return changed;
 }
