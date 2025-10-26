@@ -442,7 +442,6 @@ Token *stringLiteral(Lexer *lexer) {
                 case 'a': escaped_char = '\a'; break;
                 case 'e': escaped_char = '\x1B'; break;
                 case '\\': escaped_char = '\\'; break;
-                case '\'': escaped_char = '\''; break;
                 default: recognized = false; break;
             }
 
