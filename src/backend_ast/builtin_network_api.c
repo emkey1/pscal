@@ -2386,6 +2386,9 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #ifdef _WIN32
     ensure_winsock();
 #endif
+    if (isLocalhostName(host)) {
+        return makeLocalhostFallbackResult();
+    }
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;

@@ -1509,6 +1509,111 @@ char *findUnitFile(const char *unit_name) {
     return NULL;
 }
 
+static void ensureEnumMemberExported(AST* enum_type_node, AST* value_node, const char* unit_name) {
+    if (!enum_type_node || !value_node || !value_node->token || !value_node->token->value) {
+        return;
+    }
+
+    const char* member_name = value_node->token->value;
+    Symbol* sym = lookupGlobalSymbol(member_name);
+    if (sym) {
+        Symbol* resolved = resolveSymbolAlias(sym);
+        if (resolved) {
+            bool conflict = false;
+            if (resolved->value && resolved->value->base_type_node &&
+                resolved->value->base_type_node != enum_type_node) {
+                conflict = true;
+            } else if (resolved->type != TYPE_ENUM && resolved->type != TYPE_UNKNOWN) {
+                conflict = true;
+            }
+
+            if (conflict) {
+                const char* other_enum_name = NULL;
+                if (resolved->value && resolved->value->enum_val.enum_name) {
+                    other_enum_name = resolved->value->enum_val.enum_name;
+                }
+                fprintf(stderr,
+                        "Error: Enum member '%s' from unit '%s' conflicts with existing symbol from %s%s%s.\n",
+                        member_name,
+                        unit_name ? unit_name : "(unknown)",
+                        other_enum_name ? "enum '" : "unit ",
+                        other_enum_name ? other_enum_name : "(unknown)",
+                        other_enum_name ? "'" : "");
+                EXIT_FAILURE_HANDLER();
+                return;
+            }
+        }
+    }
+
+    if (!sym) {
+        insertGlobalSymbol(member_name, TYPE_ENUM, enum_type_node);
+        sym = lookupGlobalSymbol(member_name);
+    }
+
+    sym = resolveSymbolAlias(sym);
+    if (!sym) {
+        return;
+    }
+
+    if (!sym->value) {
+        sym->value = malloc(sizeof(Value));
+        if (!sym->value) {
+            fprintf(stderr, "Memory allocation failure while exporting enum member '%s'.\n", member_name);
+            EXIT_FAILURE_HANDLER();
+        }
+        *(sym->value) = makeValueForType(TYPE_ENUM, enum_type_node, sym);
+    }
+
+    sym->type = TYPE_ENUM;
+    sym->is_const = true;
+    sym->value->type = TYPE_ENUM;
+    sym->value->enum_val.ordinal = value_node->i_val;
+    sym->value->base_type_node = enum_type_node;
+
+    const char* enum_name = enum_type_node->token ? enum_type_node->token->value : NULL;
+    if (enum_name) {
+        if (sym->value->enum_val.enum_name) {
+            free(sym->value->enum_val.enum_name);
+        }
+        sym->value->enum_val.enum_name = strdup(enum_name);
+        if (!sym->value->enum_val.enum_name) {
+            fprintf(stderr, "Memory allocation failure while duplicating enum name for '%s'.\n", member_name);
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+
+    if (unit_name && *unit_name) {
+        char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+        snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name, member_name);
+        toLowerString(qualified_name);
+        insertGlobalAlias(qualified_name, sym);
+    }
+}
+
+static void exportEnumMembersFromNode(AST* node, const char* unit_name) {
+    if (!node) return;
+
+    if (node->type == AST_TYPE_DECL) {
+        AST* type_node = node->left;
+        if (type_node && type_node->type == AST_TYPE_REFERENCE && type_node->right) {
+            type_node = type_node->right;
+        }
+        if (type_node && type_node->type == AST_ENUM_TYPE) {
+            for (int i = 0; i < type_node->child_count; i++) {
+                AST* value_node = type_node->children[i];
+                ensureEnumMemberExported(type_node, value_node, unit_name);
+            }
+        }
+    }
+
+    if (node->left) exportEnumMembersFromNode(node->left, unit_name);
+    if (node->right) exportEnumMembersFromNode(node->right, unit_name);
+    if (node->extra) exportEnumMembersFromNode(node->extra, unit_name);
+    for (int i = 0; i < node->child_count; i++) {
+        exportEnumMembersFromNode(node->children[i], unit_name);
+    }
+}
+
 void linkUnit(AST *unit_ast, int recursion_depth) {
     if (!unit_ast) return;
 
@@ -1519,6 +1624,8 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
     }
 
     const char* unit_name_original = unit_ast->token ? unit_ast->token->value : NULL;
+
+    exportEnumMembersFromNode(unit_ast->left, unit_name_original);
 
     // Walk the unit's symbol list and merge ONLY variables/constants into globals.
     Symbol *unit_symbol = unit_ast->symbol_table;
