@@ -25,6 +25,8 @@ void registerUserBuiltins(void) {
                                "LandscapeBakeVertexData");
     extBuiltinRegisterFunction(category, "demos",
                                "SierpinskiSpawnWorker");
+    extBuiltinRegisterFunction(category, "demos",
+                               "SierpinskiReleaseWorkers");
 
     registerLandscapeBuiltins();
     registerSierpinskiBuiltins();
