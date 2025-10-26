@@ -39,6 +39,169 @@ int tryInitFont(str path, int fontSize) {
     return 1;
 }
 
+#ifdef SDL_ENABLED
+void drawPlayerShip(int x, int y, int w, int h, int invincibleTicks) {
+    int fuselageWidth;
+    int fuselageLeft;
+    int fuselageRight;
+    int wingTop;
+    int thrusterHalfWidth;
+    int thrusterHeight;
+    int thrusterTop;
+    int innerHalfWidth;
+    int innerBottom;
+    int canopyRadius;
+
+    fuselageWidth = w / 3;
+    if (fuselageWidth < 8) {
+        fuselageWidth = 8;
+    }
+    if (fuselageWidth > w) {
+        fuselageWidth = w;
+    }
+    fuselageLeft = x + (w - fuselageWidth) / 2;
+    fuselageRight = fuselageLeft + fuselageWidth - 1;
+    wingTop = y + h / 2;
+    if (wingTop > y + h - 1) {
+        wingTop = y + h - 1;
+    }
+
+    setrgbcolor(10, 90, 10);
+    fillrect(x, wingTop, x + w - 1, y + h - 1);
+
+    setrgbcolor(30, invincibleTicks > 0 ? 255 : 200, 60);
+    fillrect(fuselageLeft, y, fuselageRight, y + h - 1);
+
+    setrgbcolor(120, 220, 120);
+    fillrect(fuselageLeft + fuselageWidth / 4,
+             y + h / 6,
+             fuselageRight - fuselageWidth / 4,
+             wingTop);
+
+    canopyRadius = h / 4;
+    if (canopyRadius < 2) {
+        canopyRadius = 2;
+    }
+    setrgbcolor(180, 220, 255);
+    fillcircle(x + w / 2, y + h / 3, canopyRadius);
+
+    thrusterHalfWidth = w / 6;
+    if (thrusterHalfWidth < 2) {
+        thrusterHalfWidth = 2;
+    }
+    thrusterHeight = h / 3;
+    if (thrusterHeight < 4) {
+        thrusterHeight = 4;
+    }
+    thrusterTop = y + h - thrusterHeight;
+    if (thrusterTop < y) {
+        thrusterTop = y;
+    }
+    setrgbcolor(255, 180, 0);
+    fillrect(x + w / 2 - thrusterHalfWidth,
+             thrusterTop,
+             x + w / 2 + thrusterHalfWidth,
+             y + h - 1);
+
+    innerHalfWidth = thrusterHalfWidth / 2;
+    if (innerHalfWidth < 1) {
+        innerHalfWidth = 1;
+    }
+    innerBottom = thrusterTop + thrusterHeight / 2;
+    if (innerBottom > y + h - 1) {
+        innerBottom = y + h - 1;
+    }
+    setrgbcolor(255, 240, 150);
+    fillrect(x + w / 2 - innerHalfWidth,
+             thrusterTop,
+             x + w / 2 + innerHalfWidth,
+             innerBottom);
+}
+
+void drawAlienShip(int x, int y, int w, int h, int isDiving) {
+    int bodyTop;
+    int domeBaseTop;
+    int domeBaseBottom;
+    int domeRadius;
+    int eyeRadius;
+    int eyeOffset;
+    int lightY;
+    int lights;
+    int lightSpacing;
+    int i;
+
+    bodyTop = y + h / 3;
+    if (bodyTop > y + h - 1) {
+        bodyTop = y + h - 1;
+    }
+    domeBaseTop = bodyTop - h / 4;
+    if (domeBaseTop < y) {
+        domeBaseTop = y;
+    }
+    domeBaseBottom = bodyTop + h / 6;
+    if (domeBaseBottom > y + h - 1) {
+        domeBaseBottom = y + h - 1;
+    }
+
+    setrgbcolor(80, 0, 120);
+    fillrect(x, bodyTop, x + w - 1, y + h - 1);
+
+    setrgbcolor(140, 0, 190);
+    fillrect(x + w / 8, domeBaseTop, x + w - w / 8 - 1, domeBaseBottom);
+
+    domeRadius = h / 3;
+    if (domeRadius < 3) {
+        domeRadius = 3;
+    }
+    setrgbcolor(200, 80, 220);
+    fillcircle(x + w / 2, y + h / 3, domeRadius);
+
+    eyeRadius = h / 10;
+    if (eyeRadius < 1) {
+        eyeRadius = 1;
+    }
+    eyeOffset = w / 4;
+    if (eyeOffset < 4) {
+        eyeOffset = 4;
+    }
+    setrgbcolor(255, 255, 255);
+    fillcircle(x + w / 2 - eyeOffset, y + h / 3, eyeRadius + 1);
+    fillcircle(x + w / 2 + eyeOffset, y + h / 3, eyeRadius + 1);
+
+    setrgbcolor(0, 0, 0);
+    fillcircle(x + w / 2 - eyeOffset, y + h / 3, eyeRadius / 2 + 1);
+    fillcircle(x + w / 2 + eyeOffset, y + h / 3, eyeRadius / 2 + 1);
+
+    lightY = y + h - h / 6;
+    if (lightY > y + h - 1) {
+        lightY = y + h - 1;
+    }
+    lights = 4;
+    lightSpacing = w / (lights + 1);
+    if (lightSpacing < 4) {
+        lightSpacing = 4;
+    }
+    i = 1;
+    while (i <= lights) {
+        int lightX;
+        lightX = x + i * lightSpacing;
+        if (lightX < x) {
+            lightX = x;
+        }
+        if (lightX > x + w - 1) {
+            lightX = x + w - 1;
+        }
+        if (isDiving) {
+            setrgbcolor(255, 100 + i * 20, 0);
+        } else {
+            setrgbcolor(0, 220, 180);
+        }
+        fillcircle(lightX, lightY, eyeRadius);
+        i = i + 1;
+    }
+}
+#endif
+
 int main() {
 #ifdef SDL_ENABLED
     int ScreenWidth;
@@ -443,18 +606,16 @@ int main() {
 
         cleardevice();
         if (PlayerInvincibleTicks % 20 < 10 || PlayerInvincibleTicks == 0) {
-            setrgbcolor(0, 255, 0);
-            fillrect(PlayerX, PlayerY, PlayerX + PlayerW - 1, PlayerY + PlayerH - 1);
+            drawPlayerShip(PlayerX, PlayerY, PlayerW, PlayerH, PlayerInvincibleTicks);
         }
         if (BulletActive) {
             setrgbcolor(255, 255, 0);
             fillrect(BulletX, BulletY, BulletX + BulletW - 1, BulletY + BulletH - 1);
         }
-        setrgbcolor(255, 0, 0);
         i = 1;
         while (i <= AlienCount) {
             if (AlienAlive[i]) {
-                fillrect(AlienX[i], AlienY[i], AlienX[i] + AlienW - 1, AlienY[i] + AlienH - 1);
+                drawAlienShip(AlienX[i], AlienY[i], AlienW, AlienH, AlienDiving[i]);
             }
             i = i + 1;
         }
