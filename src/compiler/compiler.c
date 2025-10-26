@@ -5851,6 +5851,34 @@ static void addOrdinalToSetValue(Value* setVal, long long ordinal) {
     setVal->set_val.set_values[setVal->set_val.set_size++] = ordinal;
 }
 
+static bool lookupEnumMemberOrdinal(const char* name, long long* outOrdinal) {
+    if (!name || !outOrdinal) return false;
+
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        if (!entry->typeAST) continue;
+
+        AST* enum_ast = entry->typeAST;
+        if (enum_ast->type == AST_TYPE_REFERENCE && enum_ast->right) {
+            enum_ast = enum_ast->right;
+        }
+
+        if (!enum_ast || enum_ast->type != AST_ENUM_TYPE) continue;
+
+        for (int i = 0; i < enum_ast->child_count; i++) {
+            AST* value_node = enum_ast->children[i];
+            if (!value_node || !value_node->token || !value_node->token->value) {
+                continue;
+            }
+            if (strcasecmp(value_node->token->value, name) == 0) {
+                *outOrdinal = value_node->i_val;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static bool resolveSetElementOrdinal(AST* member, long long* outOrdinal) {
     if (!member || !outOrdinal) return false;
 
@@ -5902,6 +5930,9 @@ static bool resolveSetElementOrdinal(AST* member, long long* outOrdinal) {
                 *outOrdinal = v->c_val;
                 return true;
             }
+        }
+        if (lookupEnumMemberOrdinal(name, outOrdinal)) {
+            return true;
         }
     }
 
