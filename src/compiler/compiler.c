@@ -6001,8 +6001,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                                 addOrdinalToSetValue(&set_const_val, j);
                             }
                         } else {
-                            for (long long j = start_ord; j >= end_ord; j--) {
+                            long long j = start_ord;
+                            while (true) {
                                 addOrdinalToSetValue(&set_const_val, j);
+                                if (j == end_ord) {
+                                    break;
+                                }
+                                if (j == LLONG_MIN) {
+                                    fprintf(stderr, "L%d: Compiler error: Set range lower bound underflows ordinal minimum.\\n", getLine(member));
+                                    compiler_had_error = true;
+                                    break;
+                                }
+                                j--;
                             }
                         }
                     } else {
