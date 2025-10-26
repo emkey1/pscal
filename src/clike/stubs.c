@@ -7,25 +7,65 @@
 #include <string.h>
 #include <strings.h>
 
+static AST* ensureBuiltinType(VarType type, AST** cache) {
+    if (!*cache) {
+        AST* node = newASTNode(AST_VARIABLE, NULL);
+        if (!node) {
+            return NULL;
+        }
+        setTypeAST(node, type);
+        *cache = node;
+    }
+    return *cache;
+}
+
 AST* lookupType(const char* name) {
     // First, see if this name refers to a previously-declared struct.
     AST* type = clikeLookupStruct(name);
     if (type) return type;
 
-    // Otherwise, create a simple AST node for one of the builtin types.
-    type = newASTNode(AST_VARIABLE, NULL);
-    if (!type) return NULL;
+    static AST* int32Type = NULL;
+    static AST* doubleType = NULL;
+    static AST* floatType = NULL;
+    static AST* charType = NULL;
+    static AST* stringType = NULL;
+    static AST* booleanType = NULL;
+    static AST* byteType = NULL;
+    static AST* wordType = NULL;
+    static AST* int64Type = NULL;
+    static AST* voidType = NULL;
 
-    if      (strcasecmp(name, "integer") == 0) setTypeAST(type, TYPE_INTEGER);
-    else if (strcasecmp(name, "real")    == 0) setTypeAST(type, TYPE_REAL);
-    else if (strcasecmp(name, "char")    == 0) setTypeAST(type, TYPE_CHAR);
-    else if (strcasecmp(name, "string")  == 0) setTypeAST(type, TYPE_STRING);
-    else if (strcasecmp(name, "boolean") == 0) setTypeAST(type, TYPE_BOOLEAN);
-    else if (strcasecmp(name, "byte")    == 0) setTypeAST(type, TYPE_BYTE);
-    else if (strcasecmp(name, "word")    == 0) setTypeAST(type, TYPE_WORD);
-    else { freeAST(type); return NULL; }
+    struct BuiltinEntry {
+        const char* name;
+        AST** cache;
+        VarType type;
+    };
 
-    return type;
+    const struct BuiltinEntry builtinTypes[] = {
+        {"integer", &int32Type, TYPE_INT32},
+        {"int", &int32Type, TYPE_INT32},
+        {"real", &doubleType, TYPE_DOUBLE},
+        {"double", &doubleType, TYPE_DOUBLE},
+        {"single", &floatType, TYPE_FLOAT},
+        {"float", &floatType, TYPE_FLOAT},
+        {"char", &charType, TYPE_CHAR},
+        {"string", &stringType, TYPE_STRING},
+        {"boolean", &booleanType, TYPE_BOOLEAN},
+        {"bool", &booleanType, TYPE_BOOLEAN},
+        {"byte", &byteType, TYPE_BYTE},
+        {"word", &wordType, TYPE_WORD},
+        {"int64", &int64Type, TYPE_INT64},
+        {"longint", &int64Type, TYPE_INT64},
+        {"void", &voidType, TYPE_VOID},
+    };
+
+    for (size_t i = 0; i < sizeof(builtinTypes) / sizeof(builtinTypes[0]); ++i) {
+        if (strcasecmp(name, builtinTypes[i].name) == 0) {
+            return ensureBuiltinType(builtinTypes[i].type, builtinTypes[i].cache);
+        }
+    }
+
+    return NULL;
 }
 
 Value evaluateCompileTimeValue(AST* node) { (void)node; return makeNil(); }
