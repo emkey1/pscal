@@ -834,13 +834,28 @@ set(PSCAL_CONFIGURED_EXAMPLES
     Examples/rea/sdl/mandelbrot_interactive_ext)
 list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
 set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
+set(PSCAL_CONFIGURE_EXAMPLE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/ConfigureExampleFile.cmake")
+set(PSCAL_CONFIGURED_EXAMPLE_OUTPUTS)
 foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
     set(src "${CMAKE_SOURCE_DIR}/${example}")
     set(dst "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}")
     get_filename_component(dst_dir "${dst}" DIRECTORY)
-    file(MAKE_DIRECTORY "${dst_dir}")
-    configure_file("${src}" "${dst}" @ONLY)
+    add_custom_command(
+        OUTPUT "${dst}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_dir}"
+        COMMAND ${CMAKE_COMMAND}
+            -DINPUT_FILE=${src}
+            -DOUTPUT_FILE=${dst}
+            -DPSCAL_INSTALL_ROOT_RESOLVED=${PSCAL_INSTALL_ROOT_RESOLVED}
+            -P ${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}
+        DEPENDS "${src}" "${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}"
+        COMMENT "Configuring example ${example}"
+        VERBATIM
+    )
+    list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
 endforeach()
+add_custom_target(configured_examples ALL
+    DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
 
 # ---- optional install ----
 include(GNUInstallDirs)
