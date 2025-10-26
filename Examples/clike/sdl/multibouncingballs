@@ -75,14 +75,25 @@ int main() {
     }
 
     quit = 0;
-    printf("Multi Bouncing Balls... Press Q in the console to quit.\n");
+    printf("Multi Bouncing Balls... Press Q to quit.\n");
     while (!quit) {
-        if (keypressed()) {
-            char c;
-            c = readkey();
-            if (toupper(c) == 'Q') {
+        int keyCode;
+
+        if (quitrequested()) {
+            quit = 1;
+            break;
+        }
+        keyCode = pollkeyany();
+        while (keyCode != 0) {
+            if (keyCode == 'q' || keyCode == 'Q') {
                 quit = 1;
+                break;
             }
+            keyCode = pollkeyany();
+        }
+
+        if (quit) {
+            break;
         }
 
         i = 1;
