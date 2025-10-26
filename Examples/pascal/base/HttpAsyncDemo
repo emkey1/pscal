@@ -1,33 +1,54 @@
 #!/usr/bin/env pascal
 program HttpAsyncDemo;
 
+uses SysUtils;
+
 var s, id, code: integer;
     ms: mstream;
-    cwd, url, line: string;
+    workDir, srcPath, dstPath, url, line: string;
     f: text;
+
+function ResolveWorkDir: string;
 begin
+  Result := GetEnv('TMPDIR');
+  if Result = '' then Result := GetEnv('TEMP');
+  if Result = '' then Result := GetEnv('TMP');
+  if Result = '' then Result := GetEnv('PWD');
+  if Result = '' then Result := GetCurrentDir;
+end;
+
+function NormalizeForUrl(const path: string): string;
+begin
+  Result := StringReplace(path, '\', '/', [rfReplaceAll]);
+end;
+begin
+  workDir := IncludeTrailingPathDelimiter(ResolveWorkDir);
+  srcPath := workDir + 'http_async_src.txt';
+  dstPath := workDir + 'http_async_dst.txt';
+
   { Create local file to fetch via file:// }
-  assign(f, 'async_src.txt');
+  assign(f, srcPath);
   rewrite(f);
   writeln(f, 'HelloAsync');
   close(f);
 
-  cwd := GetEnv('PWD');
-  url := 'file://' + cwd + '/async_src.txt';
+  url := 'file://' + NormalizeForUrl(srcPath);
 
   s := HttpSession();
-  id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'async_dst.txt');
+  id := HttpRequestAsyncToFile(s, 'GET', url, nil, dstPath);
   while HttpIsDone(id) = 0 do Delay(10);
 
   ms := mstreamcreate();
   code := HttpAwait(id, ms);
   writeln('Status: ', code);
 
-  assign(f, 'async_dst.txt');
+  assign(f, dstPath);
   reset(f); readln(f, line); close(f);
   writeln('File: ', line);
 
   mstreamfree(ms);
   HttpClose(s);
+  DeleteFile(dstPath);
+  DeleteFile(srcPath);
 end.
 
