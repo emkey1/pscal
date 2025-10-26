@@ -2,6 +2,10 @@ unit SysUtils;
 
 interface
 
+type
+  TReplaceFlag = (rfReplaceAll, rfIgnoreCase);
+  TReplaceFlags = set of TReplaceFlag;
+
 // --- String Manipulation ---
 function UpperCase(S: string): string;
 function LowerCase(S: string): string;
@@ -9,6 +13,8 @@ function Trim(S: string): string;
 function TrimLeft(S: string): string;
 function TrimRight(S: string): string;
 function QuotedStr(S: string): string; // Simplified: Doesn't handle internal quotes
+function StringReplace(const S, OldPattern, NewPattern: string;
+  Flags: TReplaceFlags): string;
 
 // --- File System ---
 // FileExists is provided as a VM builtin.
@@ -145,6 +151,73 @@ end;
 function QuotedStr(S: string): string;
 begin
   QuotedStr := '''' + S + ''''; // Basic concatenation
+end;
+
+function StringReplace(const S, OldPattern, NewPattern: string;
+  Flags: TReplaceFlags): string;
+var
+  SourceLen, PatternLen: Integer;
+  I: Integer;
+  Buffer, Slice, PatternToMatch: string;
+  DoReplaceAll, DoIgnoreCase: Boolean;
+begin
+  PatternLen := Length(OldPattern);
+  SourceLen := Length(S);
+
+  if PatternLen = 0 then
+  begin
+    StringReplace := S;
+    exit;
+  end;
+
+  DoReplaceAll := rfReplaceAll in Flags;
+  DoIgnoreCase := rfIgnoreCase in Flags;
+
+  if DoIgnoreCase then
+    PatternToMatch := LowerCase(OldPattern)
+  else
+    PatternToMatch := OldPattern;
+
+  Buffer := '';
+  I := 1;
+
+  while I <= SourceLen do
+  begin
+    Slice := Copy(S, I, PatternLen);
+
+    if DoIgnoreCase then
+    begin
+      if LowerCase(Slice) = PatternToMatch then
+      begin
+        Buffer := Buffer + NewPattern;
+        Inc(I, PatternLen);
+        if not DoReplaceAll then
+        begin
+          Buffer := Buffer + Copy(S, I, SourceLen - I + 1);
+          StringReplace := Buffer;
+          exit;
+        end;
+        continue;
+      end;
+    end
+    else if Slice = PatternToMatch then
+    begin
+      Buffer := Buffer + NewPattern;
+      Inc(I, PatternLen);
+      if not DoReplaceAll then
+      begin
+        Buffer := Buffer + Copy(S, I, SourceLen - I + 1);
+        StringReplace := Buffer;
+        exit;
+      end;
+      continue;
+    end;
+
+    Buffer := Buffer + S[I];
+    Inc(I);
+  end;
+
+  StringReplace := Buffer;
 end;
 
 
