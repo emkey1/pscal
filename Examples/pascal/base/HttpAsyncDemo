@@ -9,20 +9,54 @@ var s, id, code: integer;
     f: text;
 
 function ResolveWorkDir: string;
+var
+  candidate: string;
 begin
-  Result := GetEnv('TMPDIR');
-  if Result = '' then Result := GetEnv('TEMP');
-  if Result = '' then Result := GetEnv('TMP');
-  if Result = '' then Result := GetEnv('PWD');
-  if Result = '' then Result := GetCurrentDir;
+  candidate := GetCurrentDir();
+  candidate := candidate + '';
+  if candidate = '' then
+    candidate := GetEnv('PWD');
+  candidate := candidate + '';
+  if candidate = '' then
+    candidate := GetEnv('HOME') + '';
+  if candidate = '' then
+    candidate := '/tmp';
+  ResolveWorkDir := candidate;
 end;
 
 function NormalizeForUrl(const path: string): string;
+var
+  i: integer;
+  tmp: string;
 begin
-  Result := StringReplace(path, '\', '/', [rfReplaceAll]);
+  tmp := path;
+  for i := 1 to Length(tmp) do
+  begin
+    if tmp[i] = '\' then
+      tmp[i] := '/';
+  end;
+  NormalizeForUrl := tmp;
+end;
+
+function AppendTrailingSlash(const path: string): string;
+var
+  tmp: string;
+  lastChar: char;
+begin
+  tmp := path + '';
+  if tmp = '' then
+  begin
+    AppendTrailingSlash := '';
+    exit;
+  end;
+  lastChar := tmp[Length(tmp)];
+  if (lastChar <> '/') and (lastChar <> '\') then
+    AppendTrailingSlash := tmp + '/'
+  else
+    AppendTrailingSlash := tmp;
 end;
 begin
-  workDir := IncludeTrailingPathDelimiter(ResolveWorkDir);
+  workDir := AppendTrailingSlash(ResolveWorkDir);
   srcPath := workDir + 'http_async_src.txt';
   dstPath := workDir + 'http_async_dst.txt';
 
@@ -48,7 +82,14 @@ begin
 
   mstreamfree(ms);
   HttpClose(s);
-  DeleteFile(dstPath);
-  DeleteFile(srcPath);
+  if FileExists(dstPath) then
+  begin
+    assign(f, dstPath);
+    erase(f);
+  end;
+  if FileExists(srcPath) then
+  begin
+    assign(f, srcPath);
+    erase(f);
+  end;
 end.
-
