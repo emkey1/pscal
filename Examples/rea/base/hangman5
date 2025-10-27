@@ -436,6 +436,8 @@ class HangmanView {
   }
 
   void render(str display, str guessed, int wrong) {
+    TextBackground(CRT.Black);
+    TextColor(CRT.White);
     ClrScr();
     my.drawBorder();
     int pad;
