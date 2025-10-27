@@ -276,6 +276,10 @@ class SolarSystemApp3D {
   float cameraPitch;
   float cameraDistance;
   float cameraYawVelocity;
+  bool pauseKeyWasDown;
+  bool slowKeyWasDown;
+  bool fastKeyWasDown;
+  bool resetKeyWasDown;
   float elapsedSeconds;
   int nextMonthAnnouncement;
 
@@ -746,21 +750,65 @@ class SolarSystemApp3D {
     if (my.cameraDistance < MinCameraDistance) my.cameraDistance = MinCameraDistance;
     if (my.cameraDistance > MaxCameraDistance) my.cameraDistance = MaxCameraDistance;
 
+    bool handledPause = false;
+    bool handledSlow = false;
+    bool handledFast = false;
+    bool handledReset = false;
+
+    bool pauseDown = IsKeyDown("p");
+    if (pauseDown && !my.pauseKeyWasDown) {
+      my.orbitPaused = !my.orbitPaused;
+      handledPause = true;
+    }
+    my.pauseKeyWasDown = pauseDown;
+
+    bool slowDown = IsKeyDown("-");
+    if (slowDown && !my.slowKeyWasDown) {
+      my.timeScale = my.timeScale - TimeScaleStep;
+      if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
+      handledSlow = true;
+    }
+    my.slowKeyWasDown = slowDown;
+
+    bool speedUp = IsKeyDown("=");
+    if (speedUp && !my.fastKeyWasDown) {
+      my.timeScale = my.timeScale + TimeScaleStep;
+      if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
+      handledFast = true;
+    }
+    my.fastKeyWasDown = speedUp;
+
+    bool resetDown = IsKeyDown("r");
+    if (resetDown && !my.resetKeyWasDown) {
+      my.cameraPitch = InitialCameraPitch;
+      my.cameraDistance = InitialCameraDistance;
+      handledReset = true;
+    }
+    my.resetKeyWasDown = resetDown;
+
+    if (IsKeyDown("q")) {
+      my.quit = true;
+    }
+
     int keyCode = pollkeyany();
     while (keyCode != 0) {
       if (keyCode == 'q' || keyCode == 'Q') {
         my.quit = true;
-      } else if (keyCode == 'p' || keyCode == 'P') {
+      } else if (!handledPause && (keyCode == 'p' || keyCode == 'P')) {
         my.orbitPaused = !my.orbitPaused;
-      } else if (keyCode == '-' || keyCode == '_') {
+        handledPause = true;
+      } else if (!handledSlow && (keyCode == '-' || keyCode == '_')) {
         my.timeScale = my.timeScale - TimeScaleStep;
         if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
-      } else if (keyCode == '=' || keyCode == '+') {
+        handledSlow = true;
+      } else if (!handledFast && (keyCode == '=' || keyCode == '+')) {
         my.timeScale = my.timeScale + TimeScaleStep;
         if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
-      } else if (keyCode == 'r' || keyCode == 'R') {
+        handledFast = true;
+      } else if (!handledReset && (keyCode == 'r' || keyCode == 'R')) {
         my.cameraPitch = InitialCameraPitch;
         my.cameraDistance = InitialCameraDistance;
+        handledReset = true;
       }
       keyCode = pollkeyany();
     }
@@ -801,6 +849,10 @@ class SolarSystemApp3D {
     my.cameraYawVelocity = AutoOrbitSpeed;
     my.orbitPaused = false;
     my.timeScale = 1.0;
+    my.pauseKeyWasDown = false;
+    my.slowKeyWasDown = false;
+    my.fastKeyWasDown = false;
+    my.resetKeyWasDown = false;
     my.quit = false;
     my.elapsedSeconds = 0.0;
     my.nextMonthAnnouncement = 1;
