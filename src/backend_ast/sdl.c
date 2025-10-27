@@ -64,6 +64,8 @@ static bool gX11WmAtomsInitialized = false;
 static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
+static Uint8 gKeyboardStateSnapshot[SDL_NUM_SCANCODES];
+static bool gKeyboardStateSnapshotValid = false;
 
 static void enqueuePendingKeycode(SDL_Keycode code) {
     if (gPendingKeyCount == MAX_PENDING_KEYCODES) {
@@ -145,6 +147,66 @@ static bool hasPendingKeycode(void) {
 static void resetPendingKeycodes(void) {
     gPendingKeyStart = 0;
     gPendingKeyCount = 0;
+}
+
+static void resetKeyboardStateTracking(void) {
+    memset(gKeyboardStateSnapshot, 0, sizeof(gKeyboardStateSnapshot));
+    gKeyboardStateSnapshotValid = false;
+}
+
+static bool collectNewlyPressedKeysFromState(void) {
+    if (!sdlIsGraphicsActive()) {
+        return false;
+    }
+
+    SDL_PumpEvents();
+
+    int numKeys = 0;
+    const Uint8* currentState = SDL_GetKeyboardState(&numKeys);
+    if (!currentState) {
+        return false;
+    }
+
+    size_t limit = (size_t)numKeys;
+    if (limit > SDL_NUM_SCANCODES) {
+        limit = SDL_NUM_SCANCODES;
+    }
+
+    if (!gKeyboardStateSnapshotValid) {
+        if (limit > 0) {
+            memcpy(gKeyboardStateSnapshot, currentState, limit);
+        }
+        if (limit < SDL_NUM_SCANCODES) {
+            memset(gKeyboardStateSnapshot + limit, 0, SDL_NUM_SCANCODES - limit);
+        }
+        gKeyboardStateSnapshotValid = true;
+        return false;
+    }
+
+    bool enqueued = false;
+    for (size_t i = 0; i < limit; ++i) {
+        if (currentState[i] && !gKeyboardStateSnapshot[i]) {
+            SDL_Scancode sc = (SDL_Scancode)i;
+            SDL_Keycode code = SDL_GetKeyFromScancode(sc);
+            if (code == SDLK_UNKNOWN) {
+                continue;
+            }
+            if (code == SDLK_q || code == SDLK_Q || code == SDLK_ESCAPE) {
+                atomic_store(&break_requested, 1);
+            }
+            enqueuePendingKeycode(code);
+            enqueued = true;
+        }
+    }
+
+    if (limit > 0) {
+        memcpy(gKeyboardStateSnapshot, currentState, limit);
+    }
+    if (limit < SDL_NUM_SCANCODES) {
+        memset(gKeyboardStateSnapshot + limit, 0, SDL_NUM_SCANCODES - limit);
+    }
+
+    return enqueued;
 }
 
 static int sdlInputWatch(void* userdata, SDL_Event* event) {
@@ -305,11 +367,13 @@ void sdlEnsureInputWatch(void) {
     if (!gSdlInputWatchInstalled) {
         SDL_AddEventWatch(sdlInputWatch, NULL);
         gSdlInputWatchInstalled = true;
+        resetKeyboardStateTracking();
     }
 }
 
 void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
+    resetKeyboardStateTracking();
 
     if (gSdlGLContext) {
         cleanupBalls3DRenderingResources();
@@ -1457,6 +1521,11 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
         }
     }
 
+    if (collectNewlyPressedKeysFromState() && dequeuePendingKeycode(&queuedCode)) {
+        *outCode = queuedCode;
+        return true;
+    }
+
     return false;
 }
 
@@ -1646,6 +1715,8 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 }
             }
 
+            collectNewlyPressedKeysFromState();
+
             if (break_requested) {
                 return makeVoid();
             }
@@ -1696,7 +1767,19 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
 }
 
 bool sdlIsGraphicsActive(void) {
-    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+    if (!gSdlInitialized || gSdlWindow == NULL) {
+        return false;
+    }
+
+    if (gSdlRenderer != NULL) {
+        return true;
+    }
+
+    if (gSdlGLContext != NULL) {
+        return true;
+    }
+
+    return false;
 }
 
 static void pumpKeyEvents(void) {
@@ -1727,6 +1810,8 @@ static void pumpKeyEvents(void) {
             enqueuePendingKeycode(event.key.keysym.sym);
         }
     }
+
+    collectNewlyPressedKeysFromState();
 }
 
 bool sdlHasPendingKeycode(void) {
@@ -1749,6 +1834,10 @@ SDL_Keycode sdlWaitNextKeycode(void) {
 
     SDL_Keycode code;
     if (dequeuePendingKeycode(&code)) {
+        return code;
+    }
+
+    if (collectNewlyPressedKeysFromState() && dequeuePendingKeycode(&code)) {
         return code;
     }
 
@@ -1778,6 +1867,10 @@ SDL_Keycode sdlWaitNextKeycode(void) {
             if (dequeuePendingKeycode(&code)) {
                 return code;
             }
+        }
+
+        if (collectNewlyPressedKeysFromState() && dequeuePendingKeycode(&code)) {
+            return code;
         }
     }
 
