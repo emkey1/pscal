@@ -109,6 +109,7 @@ const float LightDirZ = 0.78;
 const float AUScale = 260.0;   // world units per AU for orbits
 const float SunMinRadius = 22.0;
 const float PlanetMinRadius = 2.0;
+const float SmallBodyMinRadius = 0.6;
 
 const float AsteroidInnerAU = 2.2;
 const float AsteroidOuterAU = 3.2;
@@ -332,6 +333,7 @@ class SolarSystemApp3D {
   int cameraLockPlanet;
 
   float sunRadius;
+  float planetRadiusScale;
   Planet3D planets[NumPlanets + 1];
   bool hasEarthMoon;
   Moon3D earthMoon;
@@ -376,10 +378,10 @@ class SolarSystemApp3D {
     GLMaterialf("front", "shininess", 36.0);
   }
 
-  float resolvePlanetRadius(float planetRadiusAU) {
-    float radius = my.sunRadius * planetRadiusAU / SunRadiusAU;
-    if (radius < PlanetMinRadius) radius = PlanetMinRadius;
-    return radius;
+  float resolvePlanetRadius(float rawRadius) {
+    float scaled = rawRadius * my.planetRadiusScale;
+    if (scaled < SmallBodyMinRadius) scaled = SmallBodyMinRadius;
+    return scaled;
   }
 
   void initPlanets() {
@@ -393,17 +395,33 @@ class SolarSystemApp3D {
     my.hasEarthMoon = false;
     my.hasJupiterMoons = false;
 
+    float mercuryRawRadius = my.sunRadius * MercuryRadiusAU / SunRadiusAU;
+    float venusRawRadius = my.sunRadius * VenusRadiusAU / SunRadiusAU;
+    float earthRawRadius = my.sunRadius * EarthRadiusAU / SunRadiusAU;
+    float marsRawRadius = my.sunRadius * MarsRadiusAU / SunRadiusAU;
+    float jupiterRawRadius = my.sunRadius * JupiterRadiusAU / SunRadiusAU;
+
+    float scale = 1.0;
+    if (earthRawRadius > 0.0) {
+      scale = PlanetMinRadius / earthRawRadius;
+      if (scale < 1.0) scale = 1.0;
+    }
+    my.planetRadiusScale = scale;
+
+    float mercuryRadiusWorld = resolvePlanetRadius(mercuryRawRadius);
+    float venusRadiusWorld = resolvePlanetRadius(venusRawRadius);
+    float earthRadiusWorld = resolvePlanetRadius(earthRawRadius);
+
     my.planets[1] = new Planet3D();
-    my.planets[1].init(AUScale * MercuryOrbitAU, resolvePlanetRadius(MercuryRadiusAU),
+    my.planets[1].init(AUScale * MercuryOrbitAU, mercuryRadiusWorld,
                     4.7, MercuryInclination, 48.0,
                     169, 169, 169);
 
     my.planets[2] = new Planet3D();
-    my.planets[2].init(AUScale * VenusOrbitAU, resolvePlanetRadius(VenusRadiusAU),
+    my.planets[2].init(AUScale * VenusOrbitAU, venusRadiusWorld,
                     3.5, VenusInclination, 76.0,
                     218, 165, 32);
 
-    float earthRadiusWorld = resolvePlanetRadius(EarthRadiusAU);
     my.planets[3] = new Planet3D();
     my.planets[3].init(AUScale * EarthOrbitAU, earthRadiusWorld,
                     3.0, EarthInclination, 0.0,
@@ -425,23 +443,26 @@ class SolarSystemApp3D {
                                 my.planets[3].getPosZ());
     my.hasEarthMoon = true;
 
+    float marsRadiusWorld = resolvePlanetRadius(marsRawRadius);
+
     my.planets[4] = new Planet3D();
-    my.planets[4].init(AUScale * MarsOrbitAU, resolvePlanetRadius(MarsRadiusAU),
+    my.planets[4].init(AUScale * MarsOrbitAU, marsRadiusWorld,
                     2.4, MarsInclination, 49.0,
                     188, 39, 50);
 
-    float jupiterRadiusWorld = resolvePlanetRadius(JupiterRadiusAU);
+    float jupiterRadiusWorld = resolvePlanetRadius(jupiterRawRadius);
     my.planets[5] = new Planet3D();
     my.planets[5].init(AUScale * JupiterOrbitAU, jupiterRadiusWorld,
                     1.3, JupiterInclination, 100.0,
                     205, 133, 63);
 
     float minJupiterMoonOrbit = jupiterRadiusWorld * JupiterMoonOrbitMinMultiplier;
+    float scaledJupiterMoonMinRadius = JupiterMoonMinRadius * my.planetRadiusScale;
 
     float ioOrbitWorld = AUScale * IoOrbitAU;
     if (ioOrbitWorld < minJupiterMoonOrbit) ioOrbitWorld = minJupiterMoonOrbit;
     float ioRadiusWorld = jupiterRadiusWorld * IoRadiusRatio;
-    if (ioRadiusWorld < JupiterMoonMinRadius) ioRadiusWorld = JupiterMoonMinRadius;
+    if (ioRadiusWorld < scaledJupiterMoonMinRadius) ioRadiusWorld = scaledJupiterMoonMinRadius;
     my.jupiterMoons[1] = new Moon3D();
     my.jupiterMoons[1].init(ioOrbitWorld, ioRadiusWorld, IoSpeedDeg,
                          IoInclination, IoNode,
@@ -454,7 +475,7 @@ class SolarSystemApp3D {
     float europaOrbitWorld = AUScale * EuropaOrbitAU;
     if (europaOrbitWorld < minJupiterMoonOrbit) europaOrbitWorld = minJupiterMoonOrbit;
     float europaRadiusWorld = jupiterRadiusWorld * EuropaRadiusRatio;
-    if (europaRadiusWorld < JupiterMoonMinRadius) europaRadiusWorld = JupiterMoonMinRadius;
+    if (europaRadiusWorld < scaledJupiterMoonMinRadius) europaRadiusWorld = scaledJupiterMoonMinRadius;
     my.jupiterMoons[2] = new Moon3D();
     my.jupiterMoons[2].init(europaOrbitWorld, europaRadiusWorld, EuropaSpeedDeg,
                          EuropaInclination, EuropaNode,
@@ -467,7 +488,7 @@ class SolarSystemApp3D {
     float ganymedeOrbitWorld = AUScale * GanymedeOrbitAU;
     if (ganymedeOrbitWorld < minJupiterMoonOrbit) ganymedeOrbitWorld = minJupiterMoonOrbit;
     float ganymedeRadiusWorld = jupiterRadiusWorld * GanymedeRadiusRatio;
-    if (ganymedeRadiusWorld < JupiterMoonMinRadius) ganymedeRadiusWorld = JupiterMoonMinRadius;
+    if (ganymedeRadiusWorld < scaledJupiterMoonMinRadius) ganymedeRadiusWorld = scaledJupiterMoonMinRadius;
     my.jupiterMoons[3] = new Moon3D();
     my.jupiterMoons[3].init(ganymedeOrbitWorld, ganymedeRadiusWorld, GanymedeSpeedDeg,
                          GanymedeInclination, GanymedeNode,
@@ -480,7 +501,7 @@ class SolarSystemApp3D {
     float callistoOrbitWorld = AUScale * CallistoOrbitAU;
     if (callistoOrbitWorld < minJupiterMoonOrbit) callistoOrbitWorld = minJupiterMoonOrbit;
     float callistoRadiusWorld = jupiterRadiusWorld * CallistoRadiusRatio;
-    if (callistoRadiusWorld < JupiterMoonMinRadius) callistoRadiusWorld = JupiterMoonMinRadius;
+    if (callistoRadiusWorld < scaledJupiterMoonMinRadius) callistoRadiusWorld = scaledJupiterMoonMinRadius;
     my.jupiterMoons[4] = new Moon3D();
     my.jupiterMoons[4].init(callistoOrbitWorld, callistoRadiusWorld, CallistoSpeedDeg,
                          CallistoInclination, CallistoNode,
