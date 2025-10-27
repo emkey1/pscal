@@ -50,9 +50,6 @@ str resolveTempDir() {
   candidate = getenv("TEMP");
   if (isValidTempDir(candidate)) return candidate;
 
-  candidate = getenv("PWD");
-  if (isValidTempDir(candidate)) return candidate;
-
   candidate = getenv("HOME");
   if (isValidTempDir(candidate)) return candidate;
 
