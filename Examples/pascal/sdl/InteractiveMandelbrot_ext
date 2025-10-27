@@ -13,7 +13,7 @@ CONST
   MandelZoomFactor    = 2.0;
   MandelBytesPerPixel = 4;
   MandelTextureUpdateIntervalRows = 1;
-  ThreadCount = 4;
+  ThreadCount = 6;
 
   InitialMinRe  = -2.0;
   InitialMaxRe  =  1.0;
