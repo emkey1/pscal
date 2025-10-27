@@ -277,6 +277,7 @@ Value vmBuiltinLn(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTan(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinAtan2(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinArctan(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinArcsin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinArccos(struct VM_s* vm, int arg_count, Value* args);

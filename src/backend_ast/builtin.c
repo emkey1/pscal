@@ -475,6 +475,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"arcsin", vmBuiltinArcsin},
     {"arctan", vmBuiltinArctan},
     {"assign", vmBuiltinAssign},
+    {"atan2", vmBuiltinAtan2},
     {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
@@ -3010,6 +3011,19 @@ Value vmBuiltinTan(VM* vm, int arg_count, Value* args) {
     Value arg = args[0];
     double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(tan(x));
+}
+
+Value vmBuiltinAtan2(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "atan2 expects 2 arguments.");
+        return makeReal(0.0);
+    }
+
+    Value yArg = args[0];
+    Value xArg = args[1];
+    double y = IS_INTLIKE(yArg) ? (double)AS_INTEGER(yArg) : (double)AS_REAL(yArg);
+    double x = IS_INTLIKE(xArg) ? (double)AS_INTEGER(xArg) : (double)AS_REAL(xArg);
+    return makeReal(atan2(y, x));
 }
 
 Value vmBuiltinArctan(VM* vm, int arg_count, Value* args) {
