@@ -712,6 +712,10 @@ class SolarSystemApp3D {
   }
 
   void handleInput() {
+    // Pump SDL events before sampling keyboard state so IsKeyDown reflects the
+    // latest transitions even if the window lost focus briefly.
+    GraphLoop(0);
+
     float deltaTime = my.DeltaTime;
     float yawInput = 0.0;
     bool leftDown = IsKeyDown(ScanCodeLeft);
@@ -750,39 +754,32 @@ class SolarSystemApp3D {
     if (my.cameraDistance < MinCameraDistance) my.cameraDistance = MinCameraDistance;
     if (my.cameraDistance > MaxCameraDistance) my.cameraDistance = MaxCameraDistance;
 
-    bool handledPause = false;
-    bool handledSlow = false;
-    bool handledFast = false;
-    bool handledReset = false;
+    bool pauseTriggered = false;
+    bool slowTriggered = false;
+    bool fastTriggered = false;
+    bool resetTriggered = false;
 
     bool pauseDown = IsKeyDown("p");
     if (pauseDown && !my.pauseKeyWasDown) {
-      my.orbitPaused = !my.orbitPaused;
-      handledPause = true;
+      pauseTriggered = true;
     }
     my.pauseKeyWasDown = pauseDown;
 
-    bool slowDown = IsKeyDown("-");
+    bool slowDown = IsKeyDown("minus");
     if (slowDown && !my.slowKeyWasDown) {
-      my.timeScale = my.timeScale - TimeScaleStep;
-      if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
-      handledSlow = true;
+      slowTriggered = true;
     }
     my.slowKeyWasDown = slowDown;
 
-    bool speedUp = IsKeyDown("=");
+    bool speedUp = IsKeyDown("equals");
     if (speedUp && !my.fastKeyWasDown) {
-      my.timeScale = my.timeScale + TimeScaleStep;
-      if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
-      handledFast = true;
+      fastTriggered = true;
     }
     my.fastKeyWasDown = speedUp;
 
     bool resetDown = IsKeyDown("r");
     if (resetDown && !my.resetKeyWasDown) {
-      my.cameraPitch = InitialCameraPitch;
-      my.cameraDistance = InitialCameraDistance;
-      handledReset = true;
+      resetTriggered = true;
     }
     my.resetKeyWasDown = resetDown;
 
@@ -794,23 +791,32 @@ class SolarSystemApp3D {
     while (keyCode != 0) {
       if (keyCode == 'q' || keyCode == 'Q') {
         my.quit = true;
-      } else if (!handledPause && (keyCode == 'p' || keyCode == 'P')) {
-        my.orbitPaused = !my.orbitPaused;
-        handledPause = true;
-      } else if (!handledSlow && (keyCode == '-' || keyCode == '_')) {
-        my.timeScale = my.timeScale - TimeScaleStep;
-        if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
-        handledSlow = true;
-      } else if (!handledFast && (keyCode == '=' || keyCode == '+')) {
-        my.timeScale = my.timeScale + TimeScaleStep;
-        if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
-        handledFast = true;
-      } else if (!handledReset && (keyCode == 'r' || keyCode == 'R')) {
-        my.cameraPitch = InitialCameraPitch;
-        my.cameraDistance = InitialCameraDistance;
-        handledReset = true;
+      } else if (keyCode == 'p' || keyCode == 'P') {
+        pauseTriggered = true;
+      } else if (keyCode == '-' || keyCode == '_') {
+        slowTriggered = true;
+      } else if (keyCode == '=' || keyCode == '+') {
+        fastTriggered = true;
+      } else if (keyCode == 'r' || keyCode == 'R') {
+        resetTriggered = true;
       }
       keyCode = pollkeyany();
+    }
+
+    if (pauseTriggered) {
+      my.orbitPaused = !my.orbitPaused;
+    }
+    if (slowTriggered) {
+      my.timeScale = my.timeScale - TimeScaleStep;
+      if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
+    }
+    if (fastTriggered) {
+      my.timeScale = my.timeScale + TimeScaleStep;
+      if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
+    }
+    if (resetTriggered) {
+      my.cameraPitch = InitialCameraPitch;
+      my.cameraDistance = InitialCameraDistance;
     }
   }
 
