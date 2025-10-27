@@ -2,7 +2,7 @@
 
 // Simple CLike web server
 // - Listens on port 5555 by default
-// - Creates /tmp/htdocs.[PID] and populates it with default assets
+// - Creates a temporary htdocs directory under TMPDIR (or /tmp) and populates it with default assets
 // - Multithreaded: spawns a handler thread per connection
 // - Note: current socketBind binds all interfaces; by default we only advertise
 //   localhost. Serving is minimal and for demo/testing.
@@ -31,6 +31,24 @@ int GDropped = 0;
 int GServed = 0;
 
 // Helpers
+str resolveTempDir() {
+  str dir = getenv("TMPDIR");
+  if (dir == "") dir = getenv("TMP");
+  if (dir == "") dir = getenv("TEMP");
+  if (dir == "") dir = getenv("PWD");
+  if (dir == "") dir = getenv("HOME");
+  if (dir == "") dir = "/tmp";
+  return dir;
+}
+
+str ensureTrailingSlash(str path) {
+  int len = length(path);
+  if (len == 0) return "/tmp/";
+  str last = copy(path, len, 1);
+  if (last == "/" || last == "\\") return path;
+  return path + "/";
+}
+
 int endswith(str s, str suffix) {
   int ls = length(s);
   int lf = length(suffix);
@@ -461,7 +479,8 @@ str fsDefaultInstallRoot() {
 void initFiles() {
   int pid = getpid();
   str pidStr = inttostr(pid);
-  RootDir = "/tmp/htdocs." + pidStr;
+  str base = ensureTrailingSlash(resolveTempDir());
+  RootDir = base + "htdocs." + pidStr;
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";

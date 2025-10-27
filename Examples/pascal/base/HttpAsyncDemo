@@ -3,26 +3,46 @@ program HttpAsyncDemo;
 
 uses SysUtils;
 
+function ResolveTempDir: string;
+var
+  candidate: string;
+begin
+  candidate := GetEnv('TMPDIR');
+  candidate := candidate + '';
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TEMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetCurrentDir();
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('PWD');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('HOME');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+    candidate := '/tmp';
+  ResolveTempDir := candidate;
+end;
+
 var s, id, code: integer;
     ms: mstream;
     workDir, srcPath, dstPath, url, line: string;
     f: text;
-
-function ResolveWorkDir: string;
-var
-  candidate: string;
-begin
-  candidate := GetCurrentDir();
-  candidate := candidate + '';
-  if candidate = '' then
-    candidate := GetEnv('PWD');
-  candidate := candidate + '';
-  if candidate = '' then
-    candidate := GetEnv('HOME') + '';
-  if candidate = '' then
-    candidate := '/tmp';
-  ResolveWorkDir := candidate;
-end;
 
 function NormalizeForUrl(const path: string): string;
 var
@@ -56,7 +76,7 @@ begin
     AppendTrailingSlash := tmp;
 end;
 begin
-  workDir := AppendTrailingSlash(ResolveWorkDir);
+  workDir := AppendTrailingSlash(ResolveTempDir);
   srcPath := workDir + 'http_async_src.txt';
   dstPath := workDir + 'http_async_dst.txt';
 

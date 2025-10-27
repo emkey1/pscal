@@ -1,6 +1,61 @@
 #!/usr/bin/env pascal
 program PerformanceBenchmark;
 
+uses SysUtils;
+
+function ResolveTempDir: string;
+var
+  candidate: string;
+begin
+  candidate := GetEnv('TMPDIR');
+  candidate := candidate + '';
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TEMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetCurrentDir();
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('PWD');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('HOME');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+    candidate := '/tmp';
+  ResolveTempDir := candidate;
+end;
+
+function ResolveTempPath(const name: string): string;
+var
+  base: string;
+  lastChar: char;
+begin
+  base := ResolveTempDir;
+  if Length(base) > 0 then
+  begin
+    lastChar := base[Length(base)];
+    if (lastChar <> '/') and (lastChar <> '\') then
+      base := base + '/';
+  end
+  else
+    base := '/tmp/';
+  ResolveTempPath := base + name;
+end;
+
 const
   // Workload sizes tuned to exercise the VM for a noticeably longer duration.
   MATRIX_SIZE = 64;
@@ -11,7 +66,7 @@ const
   LIST_SIZE = 150000;
   PRIME_LIMIT = 60000;
   SET_ITERATIONS = 48000;
-  FILE_PATH = '/tmp/pscal_performance_dataset.txt';
+  DATASET_BASENAME = 'pscal_performance_dataset.txt';
 
   RNG_MOD = 32749;
   RNG_MULT = 125;
@@ -592,6 +647,8 @@ var
   fileChecksum: longint;
   combined: real;
   initialSeed: longint;
+  filePath: string;
+  cleanupFile: text;
 begin
   writeln('--- PSCAL VM Performance Benchmark ---');
   initialSeed := 12345;
@@ -614,7 +671,14 @@ begin
   fibScore := RunRecursiveMath;
 
   listChecksum := RunLinkedList(LIST_SIZE);
-  fileChecksum := RunFileIOBenchmark(FILE_PATH, numbers);
+  filePath := ResolveTempPath(DATASET_BASENAME);
+  fileChecksum := RunFileIOBenchmark(filePath, numbers);
+
+  if FileExists(filePath) then
+  begin
+    assign(cleanupFile, filePath);
+    erase(cleanupFile);
+  end;
 
   combined := matrixScore + recordScore + setScore + primeCount + primeChecksum +
               fibScore + listChecksum + fileChecksum + stringScore + sortChecksum;
