@@ -94,12 +94,18 @@ const int FlybyModeOrbit = 2;
 const int FlybyModeFinalLock = 3;
 const int MaxFlybySteps = NumPlanets * 2 + 2;
 
-const int ScanCodeLeft = 79;      // SDL_SCANCODE_LEFT
-const int ScanCodeRight = 80;     // SDL_SCANCODE_RIGHT
-const int ScanCodeUp = 82;        // SDL_SCANCODE_UP
-const int ScanCodeDown = 81;      // SDL_SCANCODE_DOWN
-const int ScanCodeForward = 26;   // SDL_SCANCODE_W
-const int ScanCodeBackward = 22;  // SDL_SCANCODE_S
+const int ScanCodeLeft = 79;       // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 80;      // SDL_SCANCODE_RIGHT
+const int ScanCodeUp = 82;         // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;       // SDL_SCANCODE_DOWN
+const int ScanCodeForward = 26;    // SDL_SCANCODE_W
+const int ScanCodeBackward = 22;   // SDL_SCANCODE_S
+const int ScanCodePause = 19;      // SDL_SCANCODE_P
+const int ScanCodeSlow = 45;       // SDL_SCANCODE_MINUS
+const int ScanCodeFast = 46;       // SDL_SCANCODE_EQUALS
+const int ScanCodeReset = 21;      // SDL_SCANCODE_R
+const int ScanCodeFlyby = 9;       // SDL_SCANCODE_F
+const int ScanCodeQuit = 20;       // SDL_SCANCODE_Q
 
 const float AmbientLevel = 0.16;
 const float LightDirX = -0.55;
@@ -1097,37 +1103,37 @@ class SolarSystemApp3D {
     bool resetTriggered = false;
     bool flybyTriggered = false;
 
-    bool pauseDown = IsKeyDown("p");
+    bool pauseDown = IsKeyDown(ScanCodePause);
     if (pauseDown && !my.pauseKeyWasDown) {
       pauseTriggered = true;
     }
     my.pauseKeyWasDown = pauseDown;
 
-    bool slowDown = IsKeyDown("minus");
+    bool slowDown = IsKeyDown(ScanCodeSlow);
     if (slowDown && !my.slowKeyWasDown) {
       slowTriggered = true;
     }
     my.slowKeyWasDown = slowDown;
 
-    bool speedUp = IsKeyDown("equals");
+    bool speedUp = IsKeyDown(ScanCodeFast);
     if (speedUp && !my.fastKeyWasDown) {
       fastTriggered = true;
     }
     my.fastKeyWasDown = speedUp;
 
-    bool resetDown = IsKeyDown("r");
+    bool resetDown = IsKeyDown(ScanCodeReset);
     if (resetDown && !my.resetKeyWasDown) {
       resetTriggered = true;
     }
     my.resetKeyWasDown = resetDown;
 
-    bool flybyDown = IsKeyDown("f");
+    bool flybyDown = IsKeyDown(ScanCodeFlyby);
     if (flybyDown && !my.flybyKeyWasDown) {
       flybyTriggered = true;
     }
     my.flybyKeyWasDown = flybyDown;
 
-    if (IsKeyDown("q")) {
+    if (IsKeyDown(ScanCodeQuit)) {
       my.quit = true;
     }
 
