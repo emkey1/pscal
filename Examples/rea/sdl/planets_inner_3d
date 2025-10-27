@@ -33,6 +33,14 @@ const float EarthInclination = 0.0;
 const float MarsInclination = 1.85;
 const float JupiterInclination = 1.3;
 
+const float MoonRadiusRatio = 0.2724;
+const float MoonOrbitAU = 0.00257;
+const float MoonInclination = 5.15;
+const float MoonNode = 125.08;
+const float MoonSpeedDeg = 13.0;
+const float MoonMinRadius = 1.1;
+const float MoonOrbitMinMultiplier = 4.0;
+
 const float AutoOrbitSpeed = 4.5;
 const float ManualYawSpeed = 55.0;
 const float ManualPitchSpeed = 32.0;
@@ -146,6 +154,86 @@ class Planet3D {
     drawUnitSphere();
     GLPopMatrix();
   }
+
+  float getPosX() {
+    return my.posX;
+  }
+
+  float getPosY() {
+    return my.posY;
+  }
+
+  float getPosZ() {
+    return my.posZ;
+  }
+
+  float getRadius() {
+    return my.radius;
+  }
+}
+
+class Moon3D {
+  float orbitRadius;
+  float radius;
+  float speed;
+  float tiltSin;
+  float tiltCos;
+  float nodeSin;
+  float nodeCos;
+  float colorR;
+  float colorG;
+  float colorB;
+  float angle;
+  float posX;
+  float posY;
+  float posZ;
+
+  Moon3D init(float orbitDistance, float radiusWorld, float spdDeg,
+              float tiltDeg, float nodeDeg,
+              int red, int green, int blue) {
+    my.orbitRadius = orbitDistance;
+    my.radius = radiusWorld;
+    my.speed = spdDeg * DegToRad;
+    float tiltRadians = tiltDeg * DegToRad;
+    my.tiltSin = sin(tiltRadians);
+    my.tiltCos = cos(tiltRadians);
+    float nodeRadians = nodeDeg * DegToRad;
+    my.nodeSin = sin(nodeRadians);
+    my.nodeCos = cos(nodeRadians);
+    my.colorR = red / 255.0;
+    my.colorG = green / 255.0;
+    my.colorB = blue / 255.0;
+    my.angle = random(360) * DegToRad;
+    my.posX = 0.0;
+    my.posY = 0.0;
+    my.posZ = 0.0;
+    return my;
+  }
+
+  void updatePosition(float deltaScale, float parentX, float parentY, float parentZ) {
+    my.angle = my.angle + my.speed * deltaScale;
+    if (my.angle >= TwoPi) {
+      my.angle = my.angle - TwoPi;
+    }
+    float baseX = cos(my.angle) * my.orbitRadius;
+    float baseY = sin(my.angle) * my.orbitRadius;
+    float tiltedY = baseY * my.tiltCos;
+    float tiltedZ = baseY * my.tiltSin;
+    float rotatedX = baseX * my.nodeCos - tiltedZ * my.nodeSin;
+    float rotatedZ = baseX * my.nodeSin + tiltedZ * my.nodeCos;
+    my.posX = parentX + rotatedX;
+    my.posY = parentY + tiltedY;
+    my.posZ = parentZ + rotatedZ;
+  }
+
+  void draw() {
+    GLPushMatrix();
+    GLTranslatef(my.posX, my.posY, my.posZ);
+    GLScalef(my.radius, my.radius, my.radius);
+    GLColor3f(my.colorR, my.colorG, my.colorB);
+    drawUnitSphere();
+    GLPopMatrix();
+  }
 }
 
 class SolarSystemApp3D {
@@ -165,6 +253,8 @@ class SolarSystemApp3D {
 
   float sunRadius;
   Planet3D planets[NumPlanets + 1];
+  bool hasEarthMoon;
+  Moon3D earthMoon;
 
   float asteroidRadius[NumAsteroids + 1];
   float asteroidAngle[NumAsteroids + 1];
@@ -218,6 +308,8 @@ class SolarSystemApp3D {
       my.sunRadius = sunCandidate;
     }
 
+    my.hasEarthMoon = false;
+
     my.planets[1] = new Planet3D();
     my.planets[1].init(AUScale * MercuryOrbitAU, resolvePlanetRadius(MercuryRadiusAU),
                     4.7, MercuryInclination, 48.0,
@@ -228,11 +320,27 @@ class SolarSystemApp3D {
                     3.5, VenusInclination, 76.0,
                     218, 165, 32);
 
+    float earthRadiusWorld = resolvePlanetRadius(EarthRadiusAU);
     my.planets[3] = new Planet3D();
-    my.planets[3].init(AUScale * EarthOrbitAU, resolvePlanetRadius(EarthRadiusAU),
+    my.planets[3].init(AUScale * EarthOrbitAU, earthRadiusWorld,
                     3.0, EarthInclination, 0.0,
                     0, 102, 255);
     my.planets[3].isEarth = 1;
+
+    float moonOrbitWorld = AUScale * MoonOrbitAU;
+    float minMoonOrbit = earthRadiusWorld * MoonOrbitMinMultiplier;
+    if (moonOrbitWorld < minMoonOrbit) moonOrbitWorld = minMoonOrbit;
+    float moonRadiusWorld = earthRadiusWorld * MoonRadiusRatio;
+    if (moonRadiusWorld < MoonMinRadius) moonRadiusWorld = MoonMinRadius;
+    my.earthMoon = new Moon3D();
+    my.earthMoon.init(moonOrbitWorld, moonRadiusWorld, MoonSpeedDeg,
+                   MoonInclination, MoonNode,
+                   205, 205, 210);
+    my.earthMoon.updatePosition(0.0,
+                                my.planets[3].getPosX(),
+                                my.planets[3].getPosY(),
+                                my.planets[3].getPosZ());
+    my.hasEarthMoon = true;
 
     my.planets[4] = new Planet3D();
     my.planets[4].init(AUScale * MarsOrbitAU, resolvePlanetRadius(MarsRadiusAU),
@@ -344,6 +452,12 @@ class SolarSystemApp3D {
       my.planets[i].updatePosition(deltaScale);
       if (my.planets[i].isEarth) {
         earthMonths = earthMonths + (my.planets[i].speed / TwoPi) * 12.0 * deltaScale;
+        if (my.hasEarthMoon) {
+          my.earthMoon.updatePosition(deltaScale,
+                                      my.planets[i].getPosX(),
+                                      my.planets[i].getPosY(),
+                                      my.planets[i].getPosZ());
+        }
       }
       i = i + 1;
     }
@@ -476,6 +590,9 @@ class SolarSystemApp3D {
     int i = 1;
     while (i <= NumPlanets) {
       my.planets[i].draw();
+      if (my.planets[i].isEarth && my.hasEarthMoon) {
+        my.earthMoon.draw();
+      }
       i = i + 1;
     }
   }
@@ -594,6 +711,7 @@ class SolarSystemApp3D {
     my.elapsedSeconds = 0.0;
     my.nextMonthAnnouncement = 1;
     earthMonths = 0.0;
+    my.hasEarthMoon = false;
 
     randomize();
     initPlanets();
