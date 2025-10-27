@@ -69,6 +69,9 @@ const float AutoOrbitSpeed = 4.5;
 const float ManualYawSpeed = 55.0;
 const float ManualPitchSpeed = 32.0;
 const float ManualZoomSpeed = 620.0;
+const float MinTimeScale = 0.1;
+const float MaxTimeScale = 5.0;
+const float TimeScaleStep = 0.1;
 const float MinCameraPitch = -45.0;
 const float MaxCameraPitch = -6.0;
 const float MinCameraDistance = 380.0;
@@ -268,6 +271,7 @@ class SolarSystemApp3D {
   float DeltaTime;
   bool quit;
   bool orbitPaused;
+  float timeScale;
   float cameraYaw;
   float cameraPitch;
   float cameraDistance;
@@ -721,7 +725,7 @@ class SolarSystemApp3D {
     } else if (my.orbitPaused) {
       my.cameraYawVelocity = 0.0;
     } else {
-      my.cameraYawVelocity = AutoOrbitSpeed;
+      my.cameraYawVelocity = AutoOrbitSpeed * my.timeScale;
     }
 
     if (upDown && !downDown) {
@@ -746,8 +750,14 @@ class SolarSystemApp3D {
     while (keyCode != 0) {
       if (keyCode == 'q' || keyCode == 'Q') {
         my.quit = true;
-      } else if (keyCode == ' ') {
+      } else if (keyCode == 'p' || keyCode == 'P') {
         my.orbitPaused = !my.orbitPaused;
+      } else if (keyCode == '-' || keyCode == '_') {
+        my.timeScale = my.timeScale - TimeScaleStep;
+        if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
+      } else if (keyCode == '=' || keyCode == '+') {
+        my.timeScale = my.timeScale + TimeScaleStep;
+        if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
       } else if (keyCode == 'r' || keyCode == 'R') {
         my.cameraPitch = InitialCameraPitch;
         my.cameraDistance = InitialCameraDistance;
@@ -757,14 +767,17 @@ class SolarSystemApp3D {
   }
 
   void updateSimulation() {
-    float deltaTime = my.DeltaTime;
-    float deltaScale = deltaTime * TargetFPS;
-    updatePlanets(deltaScale);
-    updateAsteroids(deltaScale);
-    my.cameraYaw = my.cameraYaw + deltaTime * my.cameraYawVelocity;
+    float baseDeltaTime = my.DeltaTime;
+    float simulationDeltaTime = baseDeltaTime * my.timeScale;
+    if (!my.orbitPaused) {
+      float deltaScale = simulationDeltaTime * TargetFPS;
+      updatePlanets(deltaScale);
+      updateAsteroids(deltaScale);
+      my.elapsedSeconds = my.elapsedSeconds + simulationDeltaTime;
+    }
+    my.cameraYaw = my.cameraYaw + baseDeltaTime * my.cameraYawVelocity;
     if (my.cameraYaw >= 360.0) my.cameraYaw = my.cameraYaw - 360.0;
     if (my.cameraYaw < 0.0) my.cameraYaw = my.cameraYaw + 360.0;
-    my.elapsedSeconds = my.elapsedSeconds + deltaTime;
   }
 
   void initApp() {
@@ -787,6 +800,7 @@ class SolarSystemApp3D {
     my.cameraDistance = InitialCameraDistance;
     my.cameraYawVelocity = AutoOrbitSpeed;
     my.orbitPaused = false;
+    my.timeScale = 1.0;
     my.quit = false;
     my.elapsedSeconds = 0.0;
     my.nextMonthAnnouncement = 1;
@@ -802,7 +816,7 @@ class SolarSystemApp3D {
 
   void run() {
     initApp();
-    writeln("Inner solar system 3D simulation running. Press Q to quit, Space to pause the camera orbit.");
+    writeln("Inner solar system 3D simulation running. Press Q to quit, P to pause/resume, -/= to adjust speed.");
     while (!my.quit) {
       if (QuitRequested()) {
         my.quit = true;
