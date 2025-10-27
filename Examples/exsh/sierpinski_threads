@@ -1,4 +1,5 @@
 #!/usr/bin/env exsh
+# DOES NOT WORK CURRENTLY.  WILL WORK ON FOR NEXT RELEASE
 # Render the Sierpinski triangle using concurrent shell jobs that call PSCAL
 # console builtins. Inspired by Examples/pascal/base/SierpinskiTriangleThreads.
 

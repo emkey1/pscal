@@ -1,4 +1,5 @@
 #!/usr/bin/env exsh
+# DOES NOT WORK CURRENTLY.  WILL WORK ON FOR NEXT RELEASE
 # Render the Sierpinski triangle sequentially using the console builtins.
 # This variant mirrors the threaded demo but executes the recursion directly
 # in the foreground so it works on builds without worker support.
