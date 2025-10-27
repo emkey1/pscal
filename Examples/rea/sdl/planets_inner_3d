@@ -82,12 +82,12 @@ const float InitialCameraPitch = -24.0;
 
 const float FlybyTransitionSeconds = 4.0;
 const float FlybyHoldSeconds = 2.5;
-const float FlybyRadiusMultiplier = 3.0;
-const float FlybyOffsetDistance = 36.0;
-const float FlybyOrbitSeconds = 16.0;
-const float FlybyOrbitTotalDegrees = 720.0;
+const float FlybyRadiusMultiplier = 0.02;
+const float FlybyOffsetDistance = 0.1;
+const float FlybyOrbitSeconds = 4.0;
+const float FlybyOrbitTotalDegrees = 120.0;
 const float FlybyOrbitPitchAmplitude = 6.0;
-const float FlybyOrbitDistanceAmplitude = 60.0;
+const float FlybyOrbitDistanceAmplitude = 0.6;
 
 const int FlybyModeApproach = 1;
 const int FlybyModeOrbit = 2;
