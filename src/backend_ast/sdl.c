@@ -65,6 +65,71 @@ static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
 
+static SDL_Keycode normalizeKeycode(const SDL_Keysym* keysym) {
+    if (!keysym) {
+        return SDLK_UNKNOWN;
+    }
+
+    SDL_Keycode keycode = keysym->sym;
+    if (keycode != SDLK_UNKNOWN && keycode != 0) {
+        return keycode;
+    }
+
+    SDL_Keycode fromScancode = SDL_GetKeyFromScancode(keysym->scancode);
+    if (fromScancode != SDLK_UNKNOWN) {
+        return fromScancode;
+    }
+
+    return (SDL_Keycode)(keysym->scancode | SDLK_SCANCODE_MASK);
+}
+
+static bool decodeNextUtf8Codepoint(const char** text, Uint32* outCodepoint) {
+    if (!text || !*text || !outCodepoint) {
+        return false;
+    }
+
+    const unsigned char* s = (const unsigned char*)*text;
+    if (*s == 0) {
+        return false;
+    }
+
+    Uint32 codepoint = 0;
+    size_t length = 0;
+
+    if (*s < 0x80) {
+        codepoint = *s;
+        length = 1;
+    } else if ((*s & 0xE0) == 0xC0) {
+        if ((s[1] & 0xC0) != 0x80) {
+            (*text)++;
+            return false;
+        }
+        codepoint = ((*s & 0x1F) << 6) | (s[1] & 0x3F);
+        length = 2;
+    } else if ((*s & 0xF0) == 0xE0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80) {
+            (*text)++;
+            return false;
+        }
+        codepoint = ((*s & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+        length = 3;
+    } else if ((*s & 0xF8) == 0xF0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80) {
+            (*text)++;
+            return false;
+        }
+        codepoint = ((*s & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+        length = 4;
+    } else {
+        (*text)++;
+        return false;
+    }
+
+    *text += length;
+    *outCodepoint = codepoint;
+    return true;
+}
+
 static void enqueuePendingKeycode(SDL_Keycode code) {
     if (gPendingKeyCount == MAX_PENDING_KEYCODES) {
         gPendingKeyStart = (gPendingKeyStart + 1) % MAX_PENDING_KEYCODES;
@@ -74,6 +139,43 @@ static void enqueuePendingKeycode(SDL_Keycode code) {
     int tail = (gPendingKeyStart + gPendingKeyCount) % MAX_PENDING_KEYCODES;
     gPendingKeycodes[tail] = code;
     gPendingKeyCount++;
+}
+
+static bool peekLastPendingKeycode(SDL_Keycode* outCode) {
+    if (gPendingKeyCount == 0) {
+        return false;
+    }
+
+    int lastIndex = (gPendingKeyStart + gPendingKeyCount - 1 + MAX_PENDING_KEYCODES) % MAX_PENDING_KEYCODES;
+    if (outCode) {
+        *outCode = gPendingKeycodes[lastIndex];
+    }
+    return true;
+}
+
+static void enqueueTextInput(const SDL_TextInputEvent* textEvent) {
+    if (!textEvent) {
+        return;
+    }
+
+    const char* text = textEvent->text;
+    while (text && *text) {
+        const char* cursor = text;
+        Uint32 codepoint = 0;
+        if (!decodeNextUtf8Codepoint(&cursor, &codepoint)) {
+            text++;
+            continue;
+        }
+        text = cursor;
+        if (codepoint == 0) {
+            continue;
+        }
+        SDL_Keycode lastCode;
+        if (peekLastPendingKeycode(&lastCode) && lastCode == (SDL_Keycode)codepoint) {
+            continue;
+        }
+        enqueuePendingKeycode((SDL_Keycode)codepoint);
+    }
 }
 
 static void handleSysWmEvent(const SDL_Event* event) {
@@ -163,6 +265,9 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
         break_requested = 1;
     } else if (event->type == SDL_KEYDOWN) {
         SDL_Keycode sym = event->key.keysym.sym;
+        if (sym == SDLK_UNKNOWN || sym == 0) {
+            sym = normalizeKeycode(&event->key.keysym);
+        }
         if (sym == SDLK_ESCAPE || sym == SDLK_q) {
             break_requested = 1;
         }
@@ -310,6 +415,10 @@ void sdlEnsureInputWatch(void) {
 
 void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
+
+    if (gSdlWindow) {
+        SDL_StopTextInput();
+    }
 
     if (gSdlGLContext) {
         cleanupBalls3DRenderingResources();
@@ -495,6 +604,7 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #if SDL_VERSION_ATLEAST(2,0,5)
     SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
 #endif
+    SDL_StartTextInput();
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
@@ -1429,32 +1539,14 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
         return true;
     }
 
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_SYSWMEVENT) {
-            handleSysWmEvent(&event);
-            continue;
-        }
+    pumpKeyEvents();
 
-        if (event.type == SDL_QUIT) {
+    if (dequeuePendingKeycode(&queuedCode)) {
+        if (queuedCode == SDLK_q) {
             atomic_store(&break_requested, 1);
-            return false;
         }
-
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
-            continue;
-        }
-
-        if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
-            }
-            enqueuePendingKeycode(event.key.keysym.sym);
-            if (dequeuePendingKeycode(&queuedCode)) {
-                *outCode = queuedCode;
-                return true;
-            }
-        }
+        *outCode = queuedCode;
+        return true;
     }
 
     return false;
@@ -1500,7 +1592,14 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
             } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
                 continue;
             } else if (event.type == SDL_KEYDOWN) {
-                enqueuePendingKeycode(event.key.keysym.sym);
+                SDL_Keycode normalized = normalizeKeycode(&event.key.keysym);
+                if (normalized == SDLK_q) {
+                    atomic_store(&break_requested, 1);
+                }
+                enqueuePendingKeycode(normalized);
+                waiting = 0;
+            } else if (event.type == SDL_TEXTINPUT) {
+                enqueueTextInput(&event.text);
                 waiting = 0;
             }
         } else {
@@ -1642,7 +1741,13 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 }
 
                 if (event.type == SDL_KEYDOWN) {
-                    enqueuePendingKeycode(event.key.keysym.sym);
+                    SDL_Keycode normalized = normalizeKeycode(&event.key.keysym);
+                    if (normalized == SDLK_q) {
+                        atomic_store(&break_requested, 1);
+                    }
+                    enqueuePendingKeycode(normalized);
+                } else if (event.type == SDL_TEXTINPUT) {
+                    enqueueTextInput(&event.text);
                 }
             }
 
@@ -1696,7 +1801,19 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
 }
 
 bool sdlIsGraphicsActive(void) {
-    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+    if (!gSdlInitialized || gSdlWindow == NULL) {
+        return false;
+    }
+
+    if (gSdlRenderer != NULL) {
+        return true;
+    }
+
+    if (gSdlGLContext != NULL) {
+        return true;
+    }
+
+    return false;
 }
 
 static void pumpKeyEvents(void) {
@@ -1721,10 +1838,13 @@ static void pumpKeyEvents(void) {
         }
 
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
+            SDL_Keycode normalized = normalizeKeycode(&event.key.keysym);
+            if (normalized == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
-            enqueuePendingKeycode(event.key.keysym.sym);
+            enqueuePendingKeycode(normalized);
+        } else if (event.type == SDL_TEXTINPUT) {
+            enqueueTextInput(&event.text);
         }
     }
 }
@@ -1769,12 +1889,18 @@ SDL_Keycode sdlWaitNextKeycode(void) {
         }
 
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
+            SDL_Keycode normalized = normalizeKeycode(&event.key.keysym);
+            if (normalized == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
 
-            enqueuePendingKeycode(event.key.keysym.sym);
+            enqueuePendingKeycode(normalized);
 
+            if (dequeuePendingKeycode(&code)) {
+                return code;
+            }
+        } else if (event.type == SDL_TEXTINPUT) {
+            enqueueTextInput(&event.text);
             if (dequeuePendingKeycode(&code)) {
                 return code;
             }
