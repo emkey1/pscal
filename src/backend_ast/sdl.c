@@ -208,6 +208,12 @@ static SDL_Scancode resolveScancodeFromName(const char* name) {
     if (strcmp(compact, "enter") == 0 || strcmp(compact, "return") == 0) {
         return SDL_SCANCODE_RETURN;
     }
+    if (strcmp(compact, "minus") == 0 || strcmp(compact, "hyphen") == 0) {
+        return SDL_SCANCODE_MINUS;
+    }
+    if (strcmp(compact, "equals") == 0 || strcmp(compact, "equal") == 0) {
+        return SDL_SCANCODE_EQUALS;
+    }
 
     char normalized[64];
     size_t normLen = srcLen;
