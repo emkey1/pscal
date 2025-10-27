@@ -84,6 +84,15 @@ const float FlybyTransitionSeconds = 4.0;
 const float FlybyHoldSeconds = 2.5;
 const float FlybyRadiusMultiplier = 12.0;
 const float FlybyOffsetDistance = 240.0;
+const float FlybyOrbitSeconds = 16.0;
+const float FlybyOrbitTotalDegrees = 720.0;
+const float FlybyOrbitPitchAmplitude = 6.0;
+const float FlybyOrbitDistanceAmplitude = 140.0;
+
+const int FlybyModeApproach = 1;
+const int FlybyModeOrbit = 2;
+const int FlybyModeFinalLock = 3;
+const int MaxFlybySteps = NumPlanets * 2 + 2;
 
 const int ScanCodeLeft = 79;      // SDL_SCANCODE_LEFT
 const int ScanCodeRight = 80;     // SDL_SCANCODE_RIGHT
@@ -281,6 +290,9 @@ class SolarSystemApp3D {
   float cameraYaw;
   float cameraPitch;
   float cameraDistance;
+  float cameraTargetX;
+  float cameraTargetY;
+  float cameraTargetZ;
   float cameraYawVelocity;
   bool pauseKeyWasDown;
   bool slowKeyWasDown;
@@ -290,7 +302,9 @@ class SolarSystemApp3D {
   bool flybyActive;
   bool flybyInTransition;
   int flybyStage;
-  int flybySequence[NumPlanets];
+  int flybyStepCount;
+  int flybyStepPlanet[MaxFlybySteps];
+  int flybyStepMode[MaxFlybySteps];
   float flybyTimer;
   float flybyTransitionDuration;
   float flybyHoldDuration;
@@ -300,8 +314,22 @@ class SolarSystemApp3D {
   float flybyTargetYaw;
   float flybyTargetPitch;
   float flybyTargetDistance;
+  float flybyTargetPosX;
+  float flybyTargetPosY;
+  float flybyTargetPosZ;
+  int flybyCurrentPlanet;
+  int flybyCurrentMode;
+  bool flybyOrbiting;
+  float flybyOrbitElapsed;
+  float flybyOrbitDuration;
+  float flybyOrbitBaseYaw;
+  float flybyOrbitBasePitch;
+  float flybyOrbitBaseDistance;
   float elapsedSeconds;
   int nextMonthAnnouncement;
+
+  bool cameraLockActive;
+  int cameraLockPlanet;
 
   float sunRadius;
   Planet3D planets[NumPlanets + 1];
@@ -539,12 +567,27 @@ class SolarSystemApp3D {
     }
   }
 
+  void addFlybyStep(int planetIndex, int mode) {
+    if (my.flybyStepCount >= MaxFlybySteps) return;
+    my.flybyStepPlanet[my.flybyStepCount] = planetIndex;
+    my.flybyStepMode[my.flybyStepCount] = mode;
+    my.flybyStepCount = my.flybyStepCount + 1;
+  }
+
   void initFlybySequence() {
-    my.flybySequence[0] = 5; // Jupiter
-    my.flybySequence[1] = 4; // Mars
-    my.flybySequence[2] = 3; // Earth
-    my.flybySequence[3] = 2; // Venus
-    my.flybySequence[4] = 1; // Mercury
+    my.flybyStepCount = 0;
+    my.addFlybyStep(5, FlybyModeApproach); // Jupiter
+    my.addFlybyStep(5, FlybyModeOrbit);
+    my.addFlybyStep(4, FlybyModeApproach); // Mars
+    my.addFlybyStep(4, FlybyModeOrbit);
+    my.addFlybyStep(3, FlybyModeApproach); // Earth (first pass)
+    my.addFlybyStep(3, FlybyModeOrbit);
+    my.addFlybyStep(2, FlybyModeApproach); // Venus
+    my.addFlybyStep(2, FlybyModeOrbit);
+    my.addFlybyStep(1, FlybyModeApproach); // Mercury
+    my.addFlybyStep(1, FlybyModeOrbit);
+    my.addFlybyStep(3, FlybyModeApproach); // Return to Earth
+    my.addFlybyStep(3, FlybyModeFinalLock);
   }
 
   float normalizeAngle(float angle) {
@@ -570,6 +613,21 @@ class SolarSystemApp3D {
     return t * t * (3.0 - 2.0 * t);
   }
 
+  void resetCameraTarget() {
+    my.cameraTargetX = 0.0;
+    my.cameraTargetY = 0.0;
+    my.cameraTargetZ = 0.0;
+  }
+
+  void updateCameraLockTarget() {
+    if (!my.cameraLockActive) return;
+    int planetIndex = my.cameraLockPlanet;
+    if (planetIndex < 1 || planetIndex > NumPlanets) return;
+    my.cameraTargetX = my.planets[planetIndex].getPosX();
+    my.cameraTargetY = my.planets[planetIndex].getPosY();
+    my.cameraTargetZ = my.planets[planetIndex].getPosZ();
+  }
+
   void computeFlybyTarget(int planetIndex) {
     float posX = my.planets[planetIndex].getPosX();
     float posY = my.planets[planetIndex].getPosY();
@@ -593,26 +651,55 @@ class SolarSystemApp3D {
     my.flybyTargetYaw = yawDegrees;
     my.flybyTargetPitch = pitchDegrees;
     my.flybyTargetDistance = desiredDistance;
+    my.flybyTargetPosX = posX;
+    my.flybyTargetPosY = posY;
+    my.flybyTargetPosZ = posZ;
   }
 
   void beginFlybyTransition() {
-    if (my.flybyStage >= NumPlanets) {
-      my.stopFlyby();
+    if (my.flybyStage >= my.flybyStepCount) {
+      my.completeFlybyWithLock();
       return;
     }
-    int planetIndex = my.flybySequence[my.flybyStage];
-    my.flybyStartYaw = my.cameraYaw;
-    my.flybyStartPitch = my.cameraPitch;
-    my.flybyStartDistance = my.cameraDistance;
-    my.computeFlybyTarget(planetIndex);
-    my.flybyInTransition = true;
-    my.flybyTimer = 0.0;
+    int planetIndex = my.flybyStepPlanet[my.flybyStage];
+    int mode = my.flybyStepMode[my.flybyStage];
+    my.flybyCurrentPlanet = planetIndex;
+    my.flybyCurrentMode = mode;
+    if (mode == FlybyModeOrbit) {
+      my.computeFlybyTarget(planetIndex);
+      my.flybyOrbitBaseYaw = my.flybyTargetYaw;
+      my.flybyOrbitBasePitch = my.flybyTargetPitch;
+      my.flybyOrbitBaseDistance = my.flybyTargetDistance;
+      my.flybyOrbitElapsed = 0.0;
+      my.flybyOrbitDuration = FlybyOrbitSeconds;
+      if (my.flybyOrbitDuration <= 0.0) my.flybyOrbitDuration = FlybyOrbitSeconds;
+      my.flybyOrbiting = true;
+      my.flybyInTransition = false;
+      my.flybyTimer = 0.0;
+      my.cameraYaw = my.flybyOrbitBaseYaw;
+      my.cameraPitch = my.flybyOrbitBasePitch;
+      my.cameraDistance = my.flybyOrbitBaseDistance;
+      my.cameraTargetX = my.flybyTargetPosX;
+      my.cameraTargetY = my.flybyTargetPosY;
+      my.cameraTargetZ = my.flybyTargetPosZ;
+    } else {
+      my.flybyOrbiting = false;
+      my.flybyStartYaw = my.cameraYaw;
+      my.flybyStartPitch = my.cameraPitch;
+      my.flybyStartDistance = my.cameraDistance;
+      my.computeFlybyTarget(planetIndex);
+      my.flybyInTransition = true;
+      my.flybyTimer = 0.0;
+      my.cameraTargetX = my.flybyTargetPosX;
+      my.cameraTargetY = my.flybyTargetPosY;
+      my.cameraTargetZ = my.flybyTargetPosZ;
+    }
   }
 
   void advanceFlybyStage() {
     my.flybyStage = my.flybyStage + 1;
-    if (my.flybyStage >= NumPlanets) {
-      my.stopFlyby();
+    if (my.flybyStage >= my.flybyStepCount) {
+      my.completeFlybyWithLock();
     } else {
       my.beginFlybyTransition();
     }
@@ -623,8 +710,13 @@ class SolarSystemApp3D {
     if (my.flybyHoldDuration <= 0.0) my.flybyHoldDuration = FlybyHoldSeconds;
     my.flybyActive = true;
     my.flybyInTransition = false;
+    my.flybyOrbiting = false;
     my.flybyStage = 0;
+    my.flybyCurrentPlanet = 0;
+    my.flybyCurrentMode = FlybyModeApproach;
     my.flybyTimer = 0.0;
+    my.cameraLockActive = false;
+    my.resetCameraTarget();
     my.beginFlybyTransition();
   }
 
@@ -632,12 +724,64 @@ class SolarSystemApp3D {
     my.flybyActive = false;
     my.flybyInTransition = false;
     my.flybyTimer = 0.0;
+    my.flybyOrbiting = false;
+    my.cameraLockActive = false;
+    my.flybyStage = 0;
+    my.resetCameraTarget();
+  }
+
+  void completeFlybyWithLock() {
+    my.flybyActive = false;
+    my.flybyInTransition = false;
+    my.flybyOrbiting = false;
+    my.flybyTimer = 0.0;
+    my.flybyStage = my.flybyStepCount;
+    my.cameraLockActive = true;
+    my.cameraLockPlanet = 3; // Earth
+    my.updateCameraLockTarget();
   }
 
   void updateFlyby(float deltaTime) {
     if (!my.flybyActive) return;
     my.cameraYawVelocity = 0.0;
+    if (my.flybyOrbiting) {
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
+      my.flybyOrbitElapsed = my.flybyOrbitElapsed + deltaTime;
+      float progress = 0.0;
+      if (my.flybyOrbitDuration > 0.0) {
+        progress = my.flybyOrbitElapsed / my.flybyOrbitDuration;
+      }
+      if (progress >= 1.0) {
+        my.flybyOrbiting = false;
+        my.advanceFlybyStage();
+        return;
+      }
+      float orbitDegrees = FlybyOrbitTotalDegrees * progress;
+      float orbitRadians = orbitDegrees * DegToRad;
+      float yaw = normalizeAngle(my.flybyOrbitBaseYaw + orbitDegrees);
+      float pitchOffset = sin(orbitRadians) * FlybyOrbitPitchAmplitude;
+      float pitch = my.flybyOrbitBasePitch + pitchOffset;
+      if (pitch > MaxCameraPitch) pitch = MaxCameraPitch;
+      if (pitch < MinCameraPitch) pitch = MinCameraPitch;
+      float distanceOffset = sin(orbitRadians * 0.5) * FlybyOrbitDistanceAmplitude;
+      float distance = my.flybyOrbitBaseDistance + distanceOffset;
+      if (distance < MinCameraDistance) distance = MinCameraDistance;
+      if (distance > MaxCameraDistance) distance = MaxCameraDistance;
+      my.cameraYaw = yaw;
+      my.cameraPitch = pitch;
+      my.cameraDistance = distance;
+      return;
+    }
     if (my.flybyInTransition) {
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
       float progress = my.flybyTimer / my.flybyTransitionDuration;
       if (progress >= 1.0) {
         my.cameraYaw = my.flybyTargetYaw;
@@ -657,7 +801,18 @@ class SolarSystemApp3D {
       my.cameraPitch = my.flybyTargetPitch;
       my.cameraDistance = my.flybyTargetDistance;
       my.flybyTimer = my.flybyTimer + deltaTime;
-      if (my.flybyTimer >= my.flybyHoldDuration) {
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
+      float holdDuration = my.flybyHoldDuration;
+      if (holdDuration <= 0.0) holdDuration = FlybyHoldSeconds;
+      if (my.flybyCurrentMode == FlybyModeFinalLock) {
+        holdDuration = my.flybyHoldDuration;
+        if (holdDuration <= 0.0) holdDuration = FlybyHoldSeconds;
+      }
+      if (my.flybyTimer >= holdDuration) {
         my.flybyTimer = 0.0;
         my.advanceFlybyStage();
       }
@@ -844,6 +999,7 @@ class SolarSystemApp3D {
     GLTranslatef(0.0, 0.0, -my.cameraDistance);
     GLRotatef(my.cameraPitch, 1.0, 0.0, 0.0);
     GLRotatef(my.cameraYaw, 0.0, 1.0, 0.0);
+    GLTranslatef(-my.cameraTargetX, -my.cameraTargetY, -my.cameraTargetZ);
 
     GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
 
@@ -869,6 +1025,7 @@ class SolarSystemApp3D {
     bool downDown = IsKeyDown(ScanCodeDown);
     bool forwardDown = IsKeyDown(ScanCodeForward);
     bool backwardDown = IsKeyDown(ScanCodeBackward);
+    bool manualOverride = false;
 
     if (!my.flybyActive) {
       if (leftDown) yawInput = yawInput - 1.0;
@@ -876,6 +1033,7 @@ class SolarSystemApp3D {
 
       if (yawInput != 0.0) {
         my.cameraYawVelocity = yawInput * ManualYawSpeed;
+        manualOverride = true;
       } else if (my.orbitPaused) {
         my.cameraYawVelocity = 0.0;
       } else {
@@ -884,8 +1042,10 @@ class SolarSystemApp3D {
 
       if (upDown && !downDown) {
         my.cameraPitch = my.cameraPitch + deltaTime * ManualPitchSpeed;
+        manualOverride = true;
       } else if (downDown && !upDown) {
         my.cameraPitch = my.cameraPitch - deltaTime * ManualPitchSpeed;
+        manualOverride = true;
       }
 
       if (my.cameraPitch > MaxCameraPitch) my.cameraPitch = MaxCameraPitch;
@@ -893,14 +1053,21 @@ class SolarSystemApp3D {
 
       if (forwardDown && !backwardDown) {
         my.cameraDistance = my.cameraDistance - deltaTime * ManualZoomSpeed;
+        manualOverride = true;
       } else if (backwardDown && !forwardDown) {
         my.cameraDistance = my.cameraDistance + deltaTime * ManualZoomSpeed;
+        manualOverride = true;
       }
 
       if (my.cameraDistance < MinCameraDistance) my.cameraDistance = MinCameraDistance;
       if (my.cameraDistance > MaxCameraDistance) my.cameraDistance = MaxCameraDistance;
     } else {
       my.cameraYawVelocity = 0.0;
+    }
+
+    if (manualOverride && my.cameraLockActive) {
+      my.cameraLockActive = false;
+      my.resetCameraTarget();
     }
 
     bool pauseTriggered = false;
@@ -975,6 +1142,8 @@ class SolarSystemApp3D {
     if (resetTriggered) {
       my.cameraPitch = InitialCameraPitch;
       my.cameraDistance = InitialCameraDistance;
+      my.cameraLockActive = false;
+      my.resetCameraTarget();
     }
     if (flybyTriggered) {
       my.startFlyby();
@@ -993,9 +1162,22 @@ class SolarSystemApp3D {
     if (my.flybyActive) {
       my.updateFlyby(baseDeltaTime);
     } else {
-      my.cameraYaw = my.cameraYaw + baseDeltaTime * my.cameraYawVelocity;
-      if (my.cameraYaw >= 360.0) my.cameraYaw = my.cameraYaw - 360.0;
-      if (my.cameraYaw < 0.0) my.cameraYaw = my.cameraYaw + 360.0;
+      if (my.cameraLockActive) {
+        my.updateCameraLockTarget();
+        my.computeFlybyTarget(my.cameraLockPlanet);
+        my.cameraYaw = my.flybyTargetYaw;
+        my.cameraPitch = my.flybyTargetPitch;
+        my.cameraDistance = my.flybyTargetDistance;
+        my.cameraTargetX = my.flybyTargetPosX;
+        my.cameraTargetY = my.flybyTargetPosY;
+        my.cameraTargetZ = my.flybyTargetPosZ;
+        my.cameraYawVelocity = 0.0;
+      } else {
+        my.resetCameraTarget();
+        my.cameraYaw = my.cameraYaw + baseDeltaTime * my.cameraYawVelocity;
+        if (my.cameraYaw >= 360.0) my.cameraYaw = my.cameraYaw - 360.0;
+        if (my.cameraYaw < 0.0) my.cameraYaw = my.cameraYaw + 360.0;
+      }
     }
   }
 
@@ -1017,6 +1199,9 @@ class SolarSystemApp3D {
     my.cameraYaw = 0.0;
     my.cameraPitch = InitialCameraPitch;
     my.cameraDistance = InitialCameraDistance;
+    my.cameraTargetX = 0.0;
+    my.cameraTargetY = 0.0;
+    my.cameraTargetZ = 0.0;
     my.cameraYawVelocity = AutoOrbitSpeed;
     my.orbitPaused = false;
     my.timeScale = 1.0;
@@ -1027,16 +1212,28 @@ class SolarSystemApp3D {
     my.flybyKeyWasDown = false;
     my.flybyActive = false;
     my.flybyInTransition = false;
+    my.flybyOrbiting = false;
     my.flybyStage = 0;
+    my.flybyStepCount = 0;
     my.flybyTimer = 0.0;
     my.flybyTransitionDuration = FlybyTransitionSeconds;
     my.flybyHoldDuration = FlybyHoldSeconds;
+    my.flybyCurrentPlanet = 0;
+    my.flybyCurrentMode = FlybyModeApproach;
+    my.flybyOrbitElapsed = 0.0;
+    my.flybyOrbitDuration = FlybyOrbitSeconds;
+    my.flybyOrbitBaseYaw = 0.0;
+    my.flybyOrbitBasePitch = InitialCameraPitch;
+    my.flybyOrbitBaseDistance = InitialCameraDistance;
     my.quit = false;
     my.elapsedSeconds = 0.0;
     my.nextMonthAnnouncement = 1;
     earthMonths = 0.0;
     my.hasEarthMoon = false;
     my.hasJupiterMoons = false;
+
+    my.cameraLockActive = false;
+    my.cameraLockPlanet = 0;
 
     randomize();
     initFlybySequence();
