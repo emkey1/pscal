@@ -443,9 +443,10 @@ static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
 }
 
 // The new dispatch table for the VM - MUST be defined before the function that uses it
-// This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
-// SDL/graphics builtins use NULL placeholders; registerGraphicsBuiltins() overrides them
-// when SDL support is enabled so legacy builtin IDs remain stable.
+// Legacy entries remain sorted alphabetically by name (lowercase). Append new builtins above
+// the placeholder block at the end of the array to avoid shifting established builtin IDs.
+// SDL/graphics builtins use NULL placeholders; registerGraphicsBuiltins() overrides them when
+// SDL support is enabled so legacy builtin IDs remain stable.
 static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"apiReceive", vmBuiltinApiReceive},
@@ -475,7 +476,6 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"arcsin", vmBuiltinArcsin},
     {"arctan", vmBuiltinArctan},
     {"assign", vmBuiltinAssign},
-    {"atan2", vmBuiltinAtan2},
     {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
@@ -706,6 +706,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadsetname", vmBuiltinThreadSetName},
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
+    {"atan2", vmBuiltinAtan2},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
