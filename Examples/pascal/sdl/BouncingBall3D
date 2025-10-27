@@ -1,0 +1,786 @@
+#!/usr/bin/env pascal
+program AmigaBoingBall3D;
+
+const
+  ScreenWidth   = 1280;
+  ScreenHeight  = 720;
+  PiConst       = 3.14159265358979323846;
+  FieldOfView   = 55.0;
+  NearClip      = 0.1;
+  FarClip       = 100.0;
+  FloorHalfSize = 6.0;
+  FloorLevel    = -2.6;
+  BallRadius    = 1.1;
+  Gravity       = -18.5;
+  BounceLoss    = 0.82;
+  SphereStacks  = 28;
+  SphereSlices  = 40;
+  ShadowSlices  = 48;
+  MouseButtonLeft   = 1;
+  MouseButtonMiddle = 2;
+  MouseButtonRight  = 4;
+  CameraRotateSpeed = 0.22;
+  CameraZoomSpeed   = 0.05;
+  CameraPanBase     = 0.012;
+  CameraMinHeight   = FloorLevel + 0.4;
+  CameraMaxHeight   = 12.0;
+  KeyboardMoveSpeed = 6.5;
+  KeyboardFastMultiplier = 1.8;
+  CameraIdleDelay   = 2.0;
+  CameraIdleMaxAngle = 4.0;
+  KeyForwardScanCode  = 22;  // SDL_SCANCODE_S
+  KeyBackwardScanCode = 26;  // SDL_SCANCODE_W
+  KeyLeftScanCode     = 4;   // SDL_SCANCODE_A
+  KeyRightScanCode    = 7;   // SDL_SCANCODE_D
+  KeyAscendScanCode   = 9;  // SDL_SCANCODE_F
+  KeyDescendScanCode  = 21;   // SDL_SCANCODE_R
+  KeyBoostScanCode    = 225; // SDL_SCANCODE_LSHIFT
+  KeyJumpScanCode     = 44;  // SDL_SCANCODE_SPACE
+
+var
+  LastTicks         : integer;
+  BallPosX          : Real;
+  BallPosY          : Real;
+  BallPosZ          : Real;
+  BallVelX          : Real;
+  BallVelY          : Real;
+  BallVelZ          : Real;
+  BallRotationAngle : Real;
+  BallAxisX         : Real;
+  BallAxisY         : Real;
+  BallAxisZ         : Real;
+  ElapsedSeconds    : Real;
+  CameraPosX        : Real;
+  CameraPosY        : Real;
+  CameraPosZ        : Real;
+  CameraYaw         : Real;
+  CameraPitch       : Real;
+  MouseX            : Integer;
+  MouseY            : Integer;
+  PrevMouseX        : Integer;
+  PrevMouseY        : Integer;
+  MouseButtons      : Integer;
+  PrevMouseButtons  : Integer;
+  MouseInsideWindow : Integer;
+  MouseInitialized  : Boolean;
+  UserQuit          : Boolean;
+  LastCameraInputTime : Real;
+
+function Clamp(value, minValue, maxValue: Real): Real;
+begin
+  if value < minValue then
+    value := minValue
+  else if value > maxValue then
+    value := maxValue;
+  Clamp := value;
+end;
+
+procedure NormalizeVector(var x, y, z: Real);
+var
+  len : Real;
+begin
+  len := sqrt(x * x + y * y + z * z);
+  if len > 0.00001 then
+  begin
+    x := x / len;
+    y := y / len;
+    z := z / len;
+  end
+  else
+  begin
+    x := 0.0;
+    y := 1.0;
+    z := 0.0;
+  end;
+end;
+
+procedure ComputeCameraBasis(var forwardX, forwardY, forwardZ,
+                             rightX, rightY, rightZ,
+                             upX, upY, upZ: Real);
+var
+  yawRad   : Real;
+  pitchRad : Real;
+begin
+  yawRad := CameraYaw * PiConst / 180.0;
+  pitchRad := CameraPitch * PiConst / 180.0;
+
+  forwardX := sin(yawRad) * cos(pitchRad);
+  forwardY := sin(pitchRad);
+  forwardZ := cos(yawRad) * cos(pitchRad);
+  NormalizeVector(forwardX, forwardY, forwardZ);
+
+  rightX := cos(yawRad);
+  rightY := 0.0;
+  rightZ := -sin(yawRad);
+  NormalizeVector(rightX, rightY, rightZ);
+
+  upX := rightY * forwardZ - rightZ * forwardY;
+  upY := rightZ * forwardX - rightX * forwardZ;
+  upZ := rightX * forwardY - rightY * forwardX;
+  NormalizeVector(upX, upY, upZ);
+end;
+
+procedure SetupProjection(width, height: integer);
+var
+  aspect : Real;
+begin
+  if height = 0 then height := 1;
+  aspect := width / height;
+  GLViewport(0, 0, width, height);
+  GLMatrixMode('projection');
+  GLLoadIdentity();
+  GLPerspective(FieldOfView, aspect, NearClip, FarClip);
+  GLMatrixMode('modelview');
+end;
+
+procedure SetupLighting;
+begin
+  GLClearDepth(1.0);
+  GLDepthTest(true);
+  GLEnable('lighting');
+  GLEnable('light0');
+  GLEnable('color_material');
+  GLEnable('normalize');
+  GLShadeModel('smooth');
+  GLColorMaterial('front', 'ambient_and_diffuse');
+
+  GLLightfv('light0', 'ambient', 0.12, 0.10, 0.18, 1.0);
+  GLLightfv('light0', 'diffuse', 0.95, 0.85, 0.80, 1.0);
+  GLLightfv('light0', 'specular', 0.95, 0.90, 0.88, 1.0);
+  GLMaterialfv('front', 'specular', 0.80, 0.85, 0.92, 1.0);
+  GLMaterialf('front', 'shininess', 54.0);
+end;
+
+procedure ApplyCameraView;
+begin
+  GLRotatef(-CameraPitch, 1.0, 0.0, 0.0);
+  GLRotatef(-CameraYaw, 0.0, 1.0, 0.0);
+  GLTranslatef(-CameraPosX, -CameraPosY, -CameraPosZ);
+end;
+
+procedure DrawBackdrop;
+begin
+  GLMatrixMode('projection');
+  GLPushMatrix();
+  GLLoadIdentity();
+  GLMatrixMode('modelview');
+  GLPushMatrix();
+  GLLoadIdentity();
+
+  GLDepthTest(false);
+  GLDisable('lighting');
+
+  GLBegin('quads');
+    GLColor3f(0.03, 0.06, 0.12);
+    GLVertex3f(-1.0, -1.0, 0.0);
+    GLVertex3f( 1.0, -1.0, 0.0);
+    GLColor3f(0.10, 0.14, 0.28);
+    GLVertex3f( 1.0,  1.0, 0.0);
+    GLVertex3f(-1.0,  1.0, 0.0);
+  GLEnd();
+
+  GLDepthTest(true);
+  GLPopMatrix();
+  GLMatrixMode('projection');
+  GLPopMatrix();
+  GLMatrixMode('modelview');
+  GLEnable('lighting');
+end;
+
+procedure DrawFloorSurface;
+var
+  glowAlpha : Real;
+begin
+  GLDisable('lighting');
+  GLEnable('blend');
+  GLBlendFunc('src_alpha', 'one_minus_src_alpha');
+
+  GLColor4f(0.08, 0.10, 0.18, 0.85);
+  GLBegin('quads');
+    GLVertex3f(-FloorHalfSize, FloorLevel,  FloorHalfSize);
+    GLVertex3f( FloorHalfSize, FloorLevel,  FloorHalfSize);
+    GLVertex3f( FloorHalfSize, FloorLevel, -FloorHalfSize * 1.4);
+    GLVertex3f(-FloorHalfSize, FloorLevel, -FloorHalfSize * 1.4);
+  GLEnd();
+
+  glowAlpha := 0.35;
+  GLColor4f(0.35, 0.08, 0.48, glowAlpha);
+  GLBegin('quads');
+    GLVertex3f(-FloorHalfSize, FloorLevel + 0.01,  FloorHalfSize);
+    GLVertex3f( FloorHalfSize, FloorLevel + 0.01,  FloorHalfSize);
+    GLVertex3f( FloorHalfSize, FloorLevel + 0.01, -FloorHalfSize * 1.4);
+    GLVertex3f(-FloorHalfSize, FloorLevel + 0.01, -FloorHalfSize * 1.4);
+  GLEnd();
+
+  GLDisable('blend');
+  GLEnable('lighting');
+end;
+
+procedure DrawRetroGrid;
+var
+  i          : integer;
+  stepSize   : Real;
+  fadeFactor : Real;
+  zExtent    : Real;
+  colorBase  : Real;
+begin
+  GLDisable('lighting');
+  GLEnable('blend');
+  GLBlendFunc('src_alpha', 'one_minus_src_alpha');
+
+  stepSize := 0.6;
+  zExtent := FloorHalfSize * 1.4;
+  colorBase := 0.30;
+
+  GLBegin('lines');
+  for i := -12 to 12 do
+  begin
+    fadeFactor := 1.0 - Clamp(abs(i) / 12.0, 0.0, 1.0);
+    GLColor4f(0.35 + fadeFactor * 0.35, 0.10 + fadeFactor * 0.20, 0.60, 0.22 + fadeFactor * 0.35);
+    GLVertex3f(i * stepSize, FloorLevel + 0.015,  zExtent);
+    GLVertex3f(i * stepSize, FloorLevel + 0.015, -zExtent);
+  end;
+
+  for i := 0 to 16 do
+  begin
+    fadeFactor := 1.0 - (i / 16.0);
+    GLColor4f(0.42, 0.16 + fadeFactor * 0.20, 0.70, 0.25 + fadeFactor * 0.35);
+    GLVertex3f(-FloorHalfSize, FloorLevel + 0.015, -i * stepSize);
+    GLVertex3f( FloorHalfSize, FloorLevel + 0.015, -i * stepSize);
+  end;
+  GLEnd();
+
+  GLDisable('blend');
+  GLEnable('lighting');
+end;
+
+procedure EmitSphereVertex(radius, phi, theta: Real);
+var
+  nx, ny, nz : Real;
+  px, py, pz : Real;
+begin
+  nx := sin(phi) * cos(theta);
+  ny := cos(phi);
+  nz := sin(phi) * sin(theta);
+  px := nx * radius;
+  py := ny * radius;
+  pz := nz * radius;
+  GLNormal3f(nx, ny, nz);
+  GLVertex3f(px, py, pz);
+end;
+
+procedure DrawCheckeredSphere(radius: Real; stacks, slices: integer);
+var
+  lat, lon : integer;
+  phi0, phi1 : Real;
+  theta0, theta1 : Real;
+  isRed : boolean;
+begin
+  for lat := 0 to stacks - 1 do
+  begin
+    phi0 := PiConst * (lat / stacks);
+    phi1 := PiConst * ((lat + 1) / stacks);
+
+    GLBegin('quads');
+    for lon := 0 to slices - 1 do
+    begin
+      theta0 := 2.0 * PiConst * (lon / slices);
+      theta1 := 2.0 * PiConst * ((lon + 1) / slices);
+
+      isRed := ((lat + lon) mod 2) = 0;
+      if isRed then
+        GLColor3f(0.86, 0.18, 0.18)
+      else
+        GLColor3f(0.96, 0.96, 0.96);
+
+      EmitSphereVertex(radius, phi0, theta0);
+      EmitSphereVertex(radius, phi1, theta0);
+      EmitSphereVertex(radius, phi1, theta1);
+      EmitSphereVertex(radius, phi0, theta1);
+    end;
+    GLEnd();
+  end;
+end;
+
+procedure DrawShadow(heightFactor: Real);
+var
+  i     : integer;
+  angle : Real;
+  radiusScale : Real;
+  alpha : Real;
+begin
+  GLDisable('lighting');
+  GLEnable('blend');
+  GLBlendFunc('src_alpha', 'one_minus_src_alpha');
+
+  GLPushMatrix();
+  GLTranslatef(BallPosX, FloorLevel + 0.01, BallPosZ);
+  GLScalef(1.2, 1.0, 1.2);
+
+  radiusScale := BallRadius * (1.0 + heightFactor * 0.25);
+  alpha := Clamp(0.55 - heightFactor * 0.45, 0.12, 0.55);
+
+  GLBegin('triangle_fan');
+    GLColor4f(0.0, 0.0, 0.0, alpha);
+    GLVertex3f(0.0, 0.0, 0.0);
+    for i := 0 to ShadowSlices do
+    begin
+      angle := (2.0 * PiConst * i) / ShadowSlices;
+      GLColor4f(0.0, 0.0, 0.0, 0.0);
+      GLVertex3f(cos(angle) * radiusScale, 0.0, sin(angle) * radiusScale * 0.6);
+    end;
+  GLEnd();
+
+  GLPopMatrix();
+  GLDisable('blend');
+  GLEnable('lighting');
+end;
+
+procedure DrawBall;
+var
+  speed : Real;
+begin
+  GLPushMatrix();
+  GLTranslatef(BallPosX, BallPosY, BallPosZ);
+
+  speed := sqrt(BallVelX * BallVelX + BallVelZ * BallVelZ);
+  if speed > 0.01 then
+  begin
+    GLRotatef(BallRotationAngle, BallAxisX, BallAxisY, BallAxisZ);
+  end
+  else
+  begin
+    GLRotatef(BallRotationAngle, 0.0, 1.0, 0.0);
+  end;
+
+  DrawCheckeredSphere(BallRadius, SphereStacks, SphereSlices);
+  GLPopMatrix();
+end;
+
+procedure DrawBloomHalo(heightFactor: Real);
+var
+  haloSize : Real;
+  i        : integer;
+  angle    : Real;
+  ringAlpha: Real;
+begin
+  GLDisable('lighting');
+  GLEnable('blend');
+  GLBlendFunc('src_alpha', 'one');
+
+  haloSize := BallRadius * (1.6 + heightFactor * 0.4);
+  ringAlpha := 0.18 + heightFactor * 0.12;
+
+  GLPushMatrix();
+  GLTranslatef(BallPosX, BallPosY, BallPosZ);
+  GLRotatef(-90.0, 1.0, 0.0, 0.0);
+
+  GLBegin('triangle_fan');
+    GLColor4f(0.95, 0.35, 0.60, ringAlpha);
+    GLVertex3f(0.0, 0.0, 0.0);
+    for i := 0 to 64 do
+    begin
+      angle := (2.0 * PiConst * i) / 64;
+      GLColor4f(0.50, 0.10, 0.60, 0.0);
+      GLVertex3f(cos(angle) * haloSize, sin(angle) * haloSize, 0.0);
+    end;
+  GLEnd();
+
+  GLPopMatrix();
+  GLDisable('blend');
+  GLEnable('lighting');
+end;
+
+procedure ProcessInput(deltaTime, absoluteTime: Real);
+var
+  keyCode           : Integer;
+  forwardX          : Real;
+  forwardY          : Real;
+  forwardZ          : Real;
+  rightX            : Real;
+  rightY            : Real;
+  rightZ            : Real;
+  upX               : Real;
+  upY               : Real;
+  upZ               : Real;
+  deltaX            : Integer;
+  deltaY            : Integer;
+  moveAmount        : Real;
+  zoomMove          : Real;
+  panScale          : Real;
+  distanceToCenter  : Real;
+  cameraChanged     : Boolean;
+begin
+  cameraChanged := False;
+
+  keyCode := PollKeyAny();
+  while keyCode <> 0 do
+  begin
+    if (keyCode = Ord('q')) or (keyCode = Ord('Q')) then
+    begin
+      UserQuit := True;
+      Exit;
+    end
+    else if keyCode = 27 then
+    begin
+      UserQuit := True;
+      Exit;
+    end;
+    keyCode := PollKeyAny();
+  end;
+
+  if QuitRequested then
+  begin
+    UserQuit := True;
+    Exit;
+  end;
+
+  GetMouseState(MouseX, MouseY, MouseButtons, MouseInsideWindow);
+
+  if not MouseInitialized then
+  begin
+    PrevMouseX := MouseX;
+    PrevMouseY := MouseY;
+    PrevMouseButtons := MouseButtons;
+    MouseInitialized := True;
+  end;
+
+  deltaX := MouseX - PrevMouseX;
+  deltaY := MouseY - PrevMouseY;
+
+  ComputeCameraBasis(forwardX, forwardY, forwardZ,
+                     rightX, rightY, rightZ,
+                     upX, upY, upZ);
+
+  if (MouseButtons and MouseButtonLeft) <> 0 then
+  begin
+    if (deltaX <> 0) or (deltaY <> 0) then
+      cameraChanged := True;
+    CameraYaw := CameraYaw + deltaX * CameraRotateSpeed;
+    CameraPitch := CameraPitch + deltaY * CameraRotateSpeed;
+    CameraPitch := Clamp(CameraPitch, -70.0, 60.0);
+  end;
+
+  if (MouseButtons and MouseButtonRight) <> 0 then
+  begin
+    if deltaY <> 0 then
+      cameraChanged := True;
+    zoomMove := -deltaY * CameraZoomSpeed;
+    CameraPosX := CameraPosX + forwardX * zoomMove;
+    CameraPosY := CameraPosY + forwardY * zoomMove;
+    CameraPosZ := CameraPosZ + forwardZ * zoomMove;
+  end;
+
+  if (MouseButtons and MouseButtonMiddle) <> 0 then
+  begin
+    if (deltaX <> 0) or (deltaY <> 0) then
+      cameraChanged := True;
+    distanceToCenter := sqrt(sqr(CameraPosX) +
+                             sqr(CameraPosY - (FloorLevel + BallRadius)) +
+                             sqr(CameraPosZ));
+    if distanceToCenter < 1.0 then
+      distanceToCenter := 1.0;
+    panScale := CameraPanBase * distanceToCenter;
+    CameraPosX := CameraPosX - rightX * deltaX * panScale + upX * deltaY * panScale;
+    CameraPosY := CameraPosY - rightY * deltaX * panScale + upY * deltaY * panScale;
+    CameraPosZ := CameraPosZ - rightZ * deltaX * panScale + upZ * deltaY * panScale;
+  end;
+
+  PrevMouseX := MouseX;
+  PrevMouseY := MouseY;
+  PrevMouseButtons := MouseButtons;
+
+  moveAmount := KeyboardMoveSpeed * deltaTime;
+  if IsKeyDown(KeyBoostScanCode) then
+    moveAmount := moveAmount * KeyboardFastMultiplier;
+
+  if IsKeyDown(KeyForwardScanCode) then
+  begin
+    CameraPosX := CameraPosX + forwardX * moveAmount;
+    CameraPosY := CameraPosY + forwardY * moveAmount;
+    CameraPosZ := CameraPosZ + forwardZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown(KeyBackwardScanCode) then
+  begin
+    CameraPosX := CameraPosX - forwardX * moveAmount;
+    CameraPosY := CameraPosY - forwardY * moveAmount;
+    CameraPosZ := CameraPosZ - forwardZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown(KeyLeftScanCode) then
+  begin
+    CameraPosX := CameraPosX - rightX * moveAmount;
+    CameraPosY := CameraPosY - rightY * moveAmount;
+    CameraPosZ := CameraPosZ - rightZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown(KeyRightScanCode) then
+  begin
+    CameraPosX := CameraPosX + rightX * moveAmount;
+    CameraPosY := CameraPosY + rightY * moveAmount;
+    CameraPosZ := CameraPosZ + rightZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown(KeyAscendScanCode) or IsKeyDown(KeyJumpScanCode) then
+  begin
+    CameraPosX := CameraPosX + upX * moveAmount;
+    CameraPosY := CameraPosY + upY * moveAmount;
+    CameraPosZ := CameraPosZ + upZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown(KeyDescendScanCode) then
+  begin
+    CameraPosX := CameraPosX - upX * moveAmount;
+    CameraPosY := CameraPosY - upY * moveAmount;
+    CameraPosZ := CameraPosZ - upZ * moveAmount;
+    cameraChanged := True;
+  end;
+
+  if IsKeyDown('escape') then
+  begin
+    UserQuit := True;
+    Exit;
+  end;
+
+  if CameraPosY < CameraMinHeight then
+    CameraPosY := CameraMinHeight;
+  if CameraPosY > CameraMaxHeight then
+    CameraPosY := CameraMaxHeight;
+
+  if CameraYaw > 360.0 then
+    CameraYaw := CameraYaw - 360.0
+  else if CameraYaw < -360.0 then
+    CameraYaw := CameraYaw + 360.0;
+
+  if cameraChanged then
+    LastCameraInputTime := absoluteTime;
+end;
+
+procedure UpdateBall(deltaTime: Real);
+var
+  speed        : Real;
+  axisX, axisZ : Real;
+  horizontalLimitZ : Real;
+  rotationStep : Real;
+  surfaceSpeed : Real;
+  heightAbove  : Real;
+begin
+  BallPosX := BallPosX + BallVelX * deltaTime;
+  BallPosZ := BallPosZ + BallVelZ * deltaTime;
+
+  BallVelY := BallVelY + Gravity * deltaTime;
+  BallPosY := BallPosY + BallVelY * deltaTime;
+
+  if BallPosY - BallRadius < FloorLevel then
+  begin
+    BallPosY := FloorLevel + BallRadius;
+    if BallVelY < 0.0 then
+    begin
+      BallVelY := -BallVelY * BounceLoss;
+      if abs(BallVelY) < 2.2 then
+        BallVelY := 8.0;
+    end;
+  end;
+
+  if BallPosY - BallRadius <= FloorLevel + 0.02 then
+    BallVelY := BallVelY - BallVelY * deltaTime * 0.5;
+
+  if BallPosX - BallRadius < -FloorHalfSize then
+  begin
+    BallPosX := -FloorHalfSize + BallRadius;
+    BallVelX := -BallVelX;
+  end
+  else if BallPosX + BallRadius > FloorHalfSize then
+  begin
+    BallPosX := FloorHalfSize - BallRadius;
+    BallVelX := -BallVelX;
+  end;
+
+  horizontalLimitZ := FloorHalfSize * 0.9;
+  if BallPosZ - BallRadius < -horizontalLimitZ then
+  begin
+    BallPosZ := -horizontalLimitZ + BallRadius;
+    BallVelZ := -BallVelZ;
+  end
+  else if BallPosZ + BallRadius > horizontalLimitZ * 0.6 then
+  begin
+    BallPosZ := horizontalLimitZ * 0.6 - BallRadius;
+    BallVelZ := -BallVelZ;
+  end;
+
+  speed := sqrt(BallVelX * BallVelX + BallVelZ * BallVelZ);
+  if speed > 0.001 then
+  begin
+    rotationStep := (speed / BallRadius) * (deltaTime * 180.0 / PiConst);
+    BallRotationAngle := BallRotationAngle + rotationStep;
+    if BallRotationAngle >= 360.0 then BallRotationAngle := BallRotationAngle - 360.0;
+
+    axisX := -BallVelZ;
+    axisZ := BallVelX;
+    BallAxisX := axisX;
+    BallAxisY := 0.0;
+    BallAxisZ := axisZ;
+    NormalizeVector(BallAxisX, BallAxisY, BallAxisZ);
+  end
+  else
+  begin
+    BallRotationAngle := BallRotationAngle + deltaTime * 40.0;
+    if BallRotationAngle >= 360.0 then BallRotationAngle := BallRotationAngle - 360.0;
+    BallAxisX := 0.0;
+    BallAxisY := 1.0;
+    BallAxisZ := 0.0;
+  end;
+
+  surfaceSpeed := 2.4;
+  if speed < surfaceSpeed then
+  begin
+    BallVelX := BallVelX * (0.98 + deltaTime * 0.4);
+    BallVelZ := BallVelZ * (0.98 + deltaTime * 0.4);
+  end
+  else
+  begin
+    BallVelX := BallVelX * (0.99 - deltaTime * 0.2);
+    BallVelZ := BallVelZ * (0.99 - deltaTime * 0.2);
+  end;
+
+  heightAbove := BallPosY - BallRadius - FloorLevel;
+  if heightAbove < 0.0 then heightAbove := 0.0;
+
+  BallVelX := BallVelX + sin(ElapsedSeconds * 0.45) * deltaTime * 0.6;
+  BallVelZ := BallVelZ + cos(ElapsedSeconds * 0.35) * deltaTime * 0.4;
+
+  if BallVelX > 4.5 then BallVelX := 4.5;
+  if BallVelX < -4.5 then BallVelX := -4.5;
+  if BallVelZ > 3.6 then BallVelZ := 3.6;
+  if BallVelZ < -3.6 then BallVelZ := -3.6;
+end;
+
+procedure RenderScene;
+var
+  lightAngle        : Real;
+  lightX            : Real;
+  lightY            : Real;
+  lightZ            : Real;
+  heightAbove       : Real;
+  timeSinceInput    : Real;
+  idleBlend         : Real;
+  idleRotationAngle : Real;
+begin
+  GLClearColor(0.02, 0.02, 0.04, 1.0);
+  GLClear();
+
+  DrawBackdrop;
+
+  GLMatrixMode('modelview');
+  GLLoadIdentity();
+
+  ApplyCameraView;
+
+  timeSinceInput := ElapsedSeconds - LastCameraInputTime;
+  idleRotationAngle := 0.0;
+  if timeSinceInput > CameraIdleDelay then
+  begin
+    idleBlend := Clamp((timeSinceInput - CameraIdleDelay) / CameraIdleDelay, 0.0, 1.0);
+    idleRotationAngle := sin(ElapsedSeconds * 0.35) * CameraIdleMaxAngle * idleBlend;
+    GLRotatef(idleRotationAngle, 0.0, 1.0, 0.0);
+  end;
+
+  lightAngle := ElapsedSeconds * 0.85;
+  lightX := cos(lightAngle) * 6.5;
+  lightY := 6.0;
+  lightZ := sin(lightAngle) * 4.0;
+  GLLightfv('light0', 'position', lightX, lightY, lightZ, 1.0);
+
+  DrawFloorSurface;
+  DrawRetroGrid;
+
+  heightAbove := BallPosY - BallRadius - FloorLevel;
+  if heightAbove < 0.0 then heightAbove := 0.0;
+  heightAbove := Clamp(heightAbove / 6.0, 0.0, 1.0);
+
+  DrawShadow(heightAbove);
+  DrawBall;
+  DrawBloomHalo(heightAbove);
+end;
+
+procedure InitializeScene;
+begin
+  InitGraph3D(ScreenWidth, ScreenHeight, 'Boing Ball 3D - PASCAL SDL', 24, 8);
+  GLSetSwapInterval(1);
+  SetupProjection(ScreenWidth, ScreenHeight);
+  SetupLighting;
+
+  BallPosX := -FloorHalfSize * 0.6;
+  BallPosY := FloorLevel + BallRadius + 0.2;
+  BallPosZ := FloorHalfSize * 0.4;
+  BallVelX := 3.2;
+  BallVelY := 12.5;
+  BallVelZ := -2.4;
+  BallRotationAngle := 0.0;
+  BallAxisX := 0.0;
+  BallAxisY := 1.0;
+  BallAxisZ := 0.0;
+
+  CameraPosX := 0.0;
+  CameraPosY := 0.8;
+  CameraPosZ := 12.0;
+  CameraYaw := 0.0;
+  CameraPitch := -15.0;
+  MouseInitialized := False;
+  MouseButtons := 0;
+  PrevMouseButtons := 0;
+  UserQuit := False;
+  LastCameraInputTime := -CameraIdleDelay * 2.0;
+
+  LastTicks := GetTicks;
+  ElapsedSeconds := 0.0;
+end;
+
+procedure MainLoop;
+var
+  currentTicks : integer;
+  deltaMs      : integer;
+  deltaTime    : Real;
+  frameTime    : Real;
+begin
+  while (not QuitRequested) and (not UserQuit) do
+  begin
+    currentTicks := GetTicks;
+    deltaMs := currentTicks - LastTicks;
+    if deltaMs < 1 then deltaMs := 1;
+    LastTicks := currentTicks;
+
+    deltaTime := deltaMs / 1000.0;
+    if deltaTime > 0.05 then deltaTime := 0.05;
+
+    frameTime := ElapsedSeconds + deltaTime;
+    ProcessInput(deltaTime, frameTime);
+    if UserQuit then break;
+
+    ElapsedSeconds := frameTime;
+
+    UpdateBall(deltaTime);
+    RenderScene;
+
+    GLSwapWindow();
+    GraphLoop(1);
+  end;
+end;
+
+begin
+  InitializeScene;
+  writeln('Controls:');
+  writeln('  Q / Esc - Quit (works even when the window is unfocused)');
+  writeln('  Left mouse drag - Orbit the camera');
+  writeln('  Right mouse drag - Zoom / dolly the camera');
+  writeln('  Middle mouse drag - Pan across the scene');
+  writeln('  WASD - Strafe / move, R to rise, F or space to descend');
+  MainLoop;
+  CloseGraph3D;
+end.
