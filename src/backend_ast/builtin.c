@@ -6262,6 +6262,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcSin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcTan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ArcTan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Beep", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Byte", AST_FUNCTION_DECL, NULL);
