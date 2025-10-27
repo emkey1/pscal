@@ -6156,8 +6156,47 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
             if (call->child_count == 0) {
-                writeBytecodeChunk(chunk, THREAD_CREATE, line);
-                emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
+                bool needs_wrapper = false;
+                if (proc_symbol) {
+                    if (proc_symbol->locals_count > 0 || proc_symbol->upvalue_count > 0) {
+                        needs_wrapper = true;
+                    }
+                }
+
+                if (!needs_wrapper) {
+                    writeBytecodeChunk(chunk, THREAD_CREATE, line);
+                    emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
+                } else {
+                    const char *callee_name = NULL;
+                    if (call->token && call->token->value) {
+                        callee_name = call->token->value;
+                    } else if (proc_symbol && proc_symbol->name) {
+                        callee_name = proc_symbol->name;
+                    } else {
+                        callee_name = "";
+                    }
+
+                    writeBytecodeChunk(chunk, THREAD_CREATE, line);
+                    int spawn_target_patch = chunk->count;
+                    emitShort(chunk, 0xFFFF, line);
+
+                    writeBytecodeChunk(chunk, JUMP, line);
+                    int skip_wrapper_patch = chunk->count;
+                    emitShort(chunk, 0xFFFF, line);
+
+                    int wrapper_address = chunk->count;
+                    int name_index = addStringConstant(chunk, callee_name);
+                    writeBytecodeChunk(chunk, CALL_USER_PROC, line);
+                    emitShort(chunk, (uint16_t)name_index, line);
+                    writeBytecodeChunk(chunk,
+                                       (uint8_t)(proc_symbol ? proc_symbol->arity : 0),
+                                       line);
+                    writeBytecodeChunk(chunk, RETURN, line);
+
+                    patchShort(chunk, spawn_target_patch, (uint16_t)wrapper_address);
+                    patchShort(chunk, skip_wrapper_patch,
+                               (uint16_t)(chunk->count - (skip_wrapper_patch + 2)));
+                }
             } else {
                 // Support spawning with multiple arguments (including receiver for methods).
                 // Stack layout for host: [addr, arg0, arg1, ..., argc]
