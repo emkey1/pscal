@@ -832,7 +832,17 @@ set(PSCAL_CONFIGURED_EXAMPLES
     Examples/rea/sdl/block_game
     Examples/rea/sdl/mandelbrot_interactive
     Examples/rea/sdl/mandelbrot_interactive_ext)
-list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
+
+set(PSCAL_CONFIGURED_EXAMPLES_FILTERED)
+foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/${example}")
+        list(APPEND PSCAL_CONFIGURED_EXAMPLES_FILTERED "${example}")
+    else()
+        message(WARNING "Configured example ${example} not found; skipping.")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES_FILTERED)
+set(PSCAL_CONFIGURED_EXAMPLES ${PSCAL_CONFIGURED_EXAMPLES_FILTERED})
 set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
 set(PSCAL_CONFIGURE_EXAMPLE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/ConfigureExampleFile.cmake")
 set(PSCAL_CONFIGURED_EXAMPLE_OUTPUTS)
