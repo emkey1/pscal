@@ -27,6 +27,7 @@ TYPE
   PixelBuffer = ARRAY OF Byte;
   RowStateBuffer = ARRAY OF Integer;
   MandelRowIterations = ARRAY OF Integer;
+  PWorkerArg = ^Integer;
 
 VAR
   MinRe, MaxRe, MinIm, MaxIm : Real;
@@ -49,6 +50,7 @@ VAR
   ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
   RowDone : RowStateBuffer;
   RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
+  WorkerArgs : ARRAY[0..ThreadCount - 1] OF Integer;
   WorkReady : ARRAY[0..ThreadCount - 1] OF Integer;
   WorkerShutdown : Boolean;
   RowMutex : Integer;
@@ -235,6 +237,8 @@ BEGIN
   FOR idx := 0 TO ThreadCount - 1 DO
     WorkReady[idx] := 0;
   unlock(WorkMutex);
+  FOR idx := 0 TO ThreadCount - 1 DO
+    RenderThreadIDs[idx] := -1;
 END;
 
 PROCEDURE PublishWork(id, startY, endY: Integer);
@@ -291,15 +295,24 @@ BEGIN
   END;
 END;
 
-PROCEDURE SpawnWorker(id: Integer);
-VAR WorkerIdCopy: Integer;
-  PROCEDURE WorkerEntry;
-  BEGIN
-    WorkerLoop(WorkerIdCopy);
-  END;
+PROCEDURE WorkerEntry(argPtr: PWorkerArg);
+VAR workerId: Integer;
 BEGIN
-  WorkerIdCopy := id;
-  RenderThreadIDs[id] := spawn WorkerEntry;
+  IF argPtr = NIL THEN
+    EXIT;
+  workerId := argPtr^;
+  WorkerLoop(workerId);
+END;
+
+PROCEDURE SpawnWorker(id: Integer);
+VAR handle: Integer;
+BEGIN
+  WorkerArgs[id] := id;
+  handle := CreateThread(@WorkerEntry, @WorkerArgs[id]);
+  IF handle >= 0 THEN
+    RenderThreadIDs[id] := handle
+  ELSE
+    RenderThreadIDs[id] := -1;
 END;
 
 PROCEDURE ScheduleZoomRequest(clickX, clickY: Integer);
@@ -530,7 +543,9 @@ BEGIN // Main Program
   END; // WHILE
 
   SetWorkerShutdown(True);
-  FOR i := 0 TO ThreadCount - 1 DO join RenderThreadIDs[i];
+  FOR i := 0 TO ThreadCount - 1 DO
+    IF RenderThreadIDs[i] >= 0 THEN
+      WaitForThread(RenderThreadIDs[i]);
 
   DestroyTexture(MandelTextureID); CloseGraph;
   destroy(RowMutex);
