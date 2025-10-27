@@ -38,7 +38,8 @@ bool sdlCachedKeyDown(SDL_Scancode sc);
 bool sdlIsGraphicsActive(void);
 bool sdlHasPendingKeycode(void);
 SDL_Keycode sdlWaitNextKeycode(void);
-bool sdlPollNextKey(SDL_Keycode* outCode);
+bool sdlPollNextKey(SDL_Keycode* outCode, bool allowPrintable);
+bool sdlPollNextText(int* outCode);
 
 
 // System Functions

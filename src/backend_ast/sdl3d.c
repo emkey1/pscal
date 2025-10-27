@@ -83,6 +83,9 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
 #if SDL_VERSION_ATLEAST(2,0,5)
     SDL_SetWindowInputFocus(gSdlWindow);
 #endif
+    if (!SDL_IsTextInputActive()) {
+        SDL_StartTextInput();
+    }
     sdlEnsureInputWatch();
 
     return makeVoid();

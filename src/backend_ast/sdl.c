@@ -24,6 +24,8 @@
 #include <math.h>
 #include <string.h>
 #include <strings.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef ENABLE_EXT_BUILTIN_3D
 extern void cleanupBalls3DRenderingResources(void);
@@ -65,6 +67,16 @@ static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
 
+#define MAX_PENDING_TEXTINPUT 256
+
+static int gPendingTextInput[MAX_PENDING_TEXTINPUT];
+static int gPendingTextStart = 0;
+static int gPendingTextCount = 0;
+
+static int gPrintableSkipCodes[MAX_PENDING_TEXTINPUT];
+static int gPrintableSkipStart = 0;
+static int gPrintableSkipCount = 0;
+
 static void enqueuePendingKeycode(SDL_Keycode code) {
     if (gPendingKeyCount == MAX_PENDING_KEYCODES) {
         gPendingKeyStart = (gPendingKeyStart + 1) % MAX_PENDING_KEYCODES;
@@ -74,6 +86,39 @@ static void enqueuePendingKeycode(SDL_Keycode code) {
     int tail = (gPendingKeyStart + gPendingKeyCount) % MAX_PENDING_KEYCODES;
     gPendingKeycodes[tail] = code;
     gPendingKeyCount++;
+}
+
+static void enqueuePendingTextCodepoint(int codepoint) {
+    if (codepoint <= 0) {
+        return;
+    }
+
+    if (gPendingTextCount == MAX_PENDING_TEXTINPUT) {
+        gPendingTextStart = (gPendingTextStart + 1) % MAX_PENDING_TEXTINPUT;
+        gPendingTextCount--;
+    }
+
+    int tail = (gPendingTextStart + gPendingTextCount) % MAX_PENDING_TEXTINPUT;
+    gPendingTextInput[tail] = codepoint;
+    gPendingTextCount++;
+}
+
+static bool dequeuePendingTextCodepoint(int* outCode) {
+    if (gPendingTextCount == 0) {
+        return false;
+    }
+
+    if (outCode) {
+        *outCode = gPendingTextInput[gPendingTextStart];
+    }
+
+    gPendingTextStart = (gPendingTextStart + 1) % MAX_PENDING_TEXTINPUT;
+    gPendingTextCount--;
+    return true;
+}
+
+static bool hasPendingTextCodepoint(void) {
+    return gPendingTextCount > 0;
 }
 
 static void handleSysWmEvent(const SDL_Event* event) {
@@ -145,6 +190,198 @@ static bool hasPendingKeycode(void) {
 static void resetPendingKeycodes(void) {
     gPendingKeyStart = 0;
     gPendingKeyCount = 0;
+}
+
+static void resetPendingTextCodepoints(void) {
+    gPendingTextStart = 0;
+    gPendingTextCount = 0;
+}
+
+static void resetPrintableSkips(void) {
+    gPrintableSkipStart = 0;
+    gPrintableSkipCount = 0;
+}
+
+static void enqueuePrintableSkip(int codepoint) {
+    if (codepoint < 32 || codepoint > 126) {
+        return;
+    }
+
+    if (gPrintableSkipCount == MAX_PENDING_TEXTINPUT) {
+        gPrintableSkipStart = (gPrintableSkipStart + 1) % MAX_PENDING_TEXTINPUT;
+        gPrintableSkipCount--;
+    }
+
+    int tail = (gPrintableSkipStart + gPrintableSkipCount) % MAX_PENDING_TEXTINPUT;
+    gPrintableSkipCodes[tail] = codepoint;
+    gPrintableSkipCount++;
+}
+
+static bool consumePrintableSkip(SDL_Keycode code) {
+    if (gPrintableSkipCount == 0) {
+        return false;
+    }
+
+    int ascii = (int)code;
+    if (ascii < 32 || ascii > 126) {
+        return false;
+    }
+
+    int head = gPrintableSkipCodes[gPrintableSkipStart];
+    if (head != ascii) {
+        return false;
+    }
+
+    gPrintableSkipStart = (gPrintableSkipStart + 1) % MAX_PENDING_TEXTINPUT;
+    gPrintableSkipCount--;
+    return true;
+}
+
+static uint32_t decodeNextUtf8Codepoint(const char* text, size_t length, size_t* advance) {
+    if (!text || length == 0) {
+        if (advance) {
+            *advance = 0;
+        }
+        return 0;
+    }
+
+    const unsigned char* bytes = (const unsigned char*)text;
+    unsigned char b0 = bytes[0];
+
+    if (b0 < 0x80) {
+        if (advance) {
+            *advance = 1;
+        }
+        return (uint32_t)b0;
+    }
+
+    if ((b0 & 0xE0) == 0xC0) {
+        if (length < 2) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        unsigned char b1 = bytes[1];
+        if ((b1 & 0xC0) != 0x80) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        uint32_t cp = ((uint32_t)(b0 & 0x1F) << 6) | (uint32_t)(b1 & 0x3F);
+        if (cp < 0x80) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        if (advance) {
+            *advance = 2;
+        }
+        return cp;
+    }
+
+    if ((b0 & 0xF0) == 0xE0) {
+        if (length < 3) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        unsigned char b1 = bytes[1];
+        unsigned char b2 = bytes[2];
+        if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        uint32_t cp = ((uint32_t)(b0 & 0x0F) << 12) |
+                       ((uint32_t)(b1 & 0x3F) << 6) |
+                       (uint32_t)(b2 & 0x3F);
+        if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        if (advance) {
+            *advance = 3;
+        }
+        return cp;
+    }
+
+    if ((b0 & 0xF8) == 0xF0) {
+        if (length < 4) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        unsigned char b1 = bytes[1];
+        unsigned char b2 = bytes[2];
+        unsigned char b3 = bytes[3];
+        if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        uint32_t cp = ((uint32_t)(b0 & 0x07) << 18) |
+                       ((uint32_t)(b1 & 0x3F) << 12) |
+                       ((uint32_t)(b2 & 0x3F) << 6) |
+                       (uint32_t)(b3 & 0x3F);
+        if (cp < 0x10000 || cp > 0x10FFFF) {
+            if (advance) {
+                *advance = 1;
+            }
+            return '?';
+        }
+        if (advance) {
+            *advance = 4;
+        }
+        return cp;
+    }
+
+    if (advance) {
+        *advance = 1;
+    }
+    return '?';
+}
+
+static void enqueueUtf8Text(const char* text) {
+    if (!text) {
+        return;
+    }
+
+    size_t length = strlen(text);
+    size_t index = 0;
+    while (index < length) {
+        size_t advance = 0;
+        uint32_t cp = decodeNextUtf8Codepoint(text + index, length - index, &advance);
+        if (advance == 0) {
+            break;
+        }
+        enqueuePendingTextCodepoint((int)cp);
+        if (cp >= 32 && cp <= 126) {
+            enqueuePrintableSkip((int)cp);
+        }
+        index += advance;
+    }
+}
+
+static void handleKeydownEvent(const SDL_KeyboardEvent* keyEvent) {
+    if (!keyEvent) {
+        return;
+    }
+
+    SDL_Keycode sym = keyEvent->keysym.sym;
+    if (sym == SDLK_q) {
+        atomic_store(&break_requested, 1);
+    }
+
+    enqueuePendingKeycode(sym);
 }
 
 static int sdlInputWatch(void* userdata, SDL_Event* event) {
@@ -310,6 +547,8 @@ void sdlEnsureInputWatch(void) {
 
 void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
+    resetPendingTextCodepoints();
+    resetPrintableSkips();
 
     if (gSdlGLContext) {
         cleanupBalls3DRenderingResources();
@@ -329,9 +568,12 @@ void cleanupSdlWindowResources(void) {
     if (gSdlWindow) {
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
-        #ifdef DEBUG
+#ifdef DEBUG
         fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
-        #endif
+#endif
+    }
+    if (SDL_WasInit(SDL_INIT_VIDEO) != 0 && SDL_IsTextInputActive()) {
+        SDL_StopTextInput();
     }
     gSdlWidth = 0;
     gSdlHeight = 0;
@@ -495,6 +737,10 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
 #if SDL_VERSION_ATLEAST(2,0,5)
     SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
 #endif
+
+    if (!SDL_IsTextInputActive()) {
+        SDL_StartTextInput();
+    }
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
@@ -1415,15 +1661,18 @@ Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
     return makeBoolean(state[sc] != 0);
 }
 
-bool sdlPollNextKey(SDL_Keycode* outCode) {
+bool sdlPollNextKey(SDL_Keycode* outCode, bool allowPrintable) {
     if (!outCode || !sdlIsGraphicsActive()) {
         return false;
     }
 
     SDL_Keycode queuedCode;
-    if (dequeuePendingKeycode(&queuedCode)) {
-        if (queuedCode == SDLK_q) {
-            atomic_store(&break_requested, 1);
+    while (dequeuePendingKeycode(&queuedCode)) {
+        if (!allowPrintable && consumePrintableSkip(queuedCode)) {
+            continue;
+        }
+        if (allowPrintable) {
+            (void)consumePrintableSkip(queuedCode);
         }
         *outCode = queuedCode;
         return true;
@@ -1445,15 +1694,67 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
             continue;
         }
 
+        if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
+            continue;
+        }
+
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
-            }
-            enqueuePendingKeycode(event.key.keysym.sym);
-            if (dequeuePendingKeycode(&queuedCode)) {
+            handleKeydownEvent(&event.key);
+            while (dequeuePendingKeycode(&queuedCode)) {
+                if (!allowPrintable && consumePrintableSkip(queuedCode)) {
+                    continue;
+                }
+                if (allowPrintable) {
+                    (void)consumePrintableSkip(queuedCode);
+                }
                 *outCode = queuedCode;
                 return true;
             }
+        }
+    }
+
+    return false;
+}
+
+bool sdlPollNextText(int* outCode) {
+    if (!outCode || !sdlIsGraphicsActive()) {
+        return false;
+    }
+
+    int codepoint;
+    if (dequeuePendingTextCodepoint(&codepoint)) {
+        *outCode = codepoint;
+        return true;
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_SYSWMEVENT) {
+            handleSysWmEvent(&event);
+            continue;
+        }
+
+        if (event.type == SDL_QUIT) {
+            atomic_store(&break_requested, 1);
+            return false;
+        }
+
+        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            continue;
+        }
+
+        if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
+            if (dequeuePendingTextCodepoint(&codepoint)) {
+                *outCode = codepoint;
+                return true;
+            }
+            continue;
+        }
+
+        if (event.type == SDL_KEYDOWN) {
+            handleKeydownEvent(&event.key);
         }
     }
 
@@ -1471,7 +1772,7 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
     }
 
     SDL_Keycode code;
-    if (sdlPollNextKey(&code)) {
+    if (sdlPollNextKey(&code, true)) {
         return makeInt((int)code);
     }
     return makeInt(0);
@@ -1481,7 +1782,7 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
 
-    if (hasPendingKeycode()) {
+    if (hasPendingKeycode() || hasPendingTextCodepoint()) {
         return makeVoid();
     }
 
@@ -1499,8 +1800,11 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
                 waiting = 0;
             } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
                 continue;
+            } else if (event.type == SDL_TEXTINPUT) {
+                enqueueUtf8Text(event.text.text);
+                waiting = 0;
             } else if (event.type == SDL_KEYDOWN) {
-                enqueuePendingKeycode(event.key.keysym.sym);
+                handleKeydownEvent(&event.key);
                 waiting = 0;
             }
         } else {
@@ -1641,8 +1945,13 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                     continue;
                 }
 
+                if (event.type == SDL_TEXTINPUT) {
+                    enqueueUtf8Text(event.text.text);
+                    continue;
+                }
+
                 if (event.type == SDL_KEYDOWN) {
-                    enqueuePendingKeycode(event.key.keysym.sym);
+                    handleKeydownEvent(&event.key);
                 }
             }
 
@@ -1696,7 +2005,19 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
 }
 
 bool sdlIsGraphicsActive(void) {
-    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+    if (!gSdlInitialized || gSdlWindow == NULL) {
+        return false;
+    }
+
+    if (gSdlRenderer != NULL) {
+        return true;
+    }
+
+    if (gSdlGLContext != NULL) {
+        return true;
+    }
+
+    return false;
 }
 
 static void pumpKeyEvents(void) {
@@ -1720,11 +2041,13 @@ static void pumpKeyEvents(void) {
             continue;
         }
 
+        if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
+            continue;
+        }
+
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
-            }
-            enqueuePendingKeycode(event.key.keysym.sym);
+            handleKeydownEvent(&event.key);
         }
     }
 }
@@ -1734,12 +2057,12 @@ bool sdlHasPendingKeycode(void) {
         return false;
     }
 
-    if (hasPendingKeycode()) {
+    if (hasPendingKeycode() || hasPendingTextCodepoint()) {
         return true;
     }
 
     pumpKeyEvents();
-    return hasPendingKeycode();
+    return hasPendingKeycode() || hasPendingTextCodepoint();
 }
 
 SDL_Keycode sdlWaitNextKeycode(void) {
@@ -1768,12 +2091,13 @@ SDL_Keycode sdlWaitNextKeycode(void) {
             continue;
         }
 
-        if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
-            }
+        if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
+            continue;
+        }
 
-            enqueuePendingKeycode(event.key.keysym.sym);
+        if (event.type == SDL_KEYDOWN) {
+            handleKeydownEvent(&event.key);
 
             if (dequeuePendingKeycode(&code)) {
                 return code;

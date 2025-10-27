@@ -2505,8 +2505,13 @@ Value vmBuiltinPollkeyany(VM* vm, int arg_count, Value* args) {
     }
 
 #ifdef SDL
+    int text_codepoint;
+    if (sdlPollNextText(&text_codepoint)) {
+        return makeInt(text_codepoint);
+    }
+
     SDL_Keycode sdl_code;
-    if (sdlPollNextKey(&sdl_code)) {
+    if (sdlPollNextKey(&sdl_code, false)) {
         return makeInt((int)sdl_code);
     }
 #endif
