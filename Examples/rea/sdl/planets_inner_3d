@@ -11,6 +11,7 @@ const int NumStars = 2861;
 const float TargetFPS = 60.0;
 
 const float Pi = 3.141592653589793;
+const float HalfPi = 1.5707963267948966;
 const float TwoPi = 6.283185307179586;
 const float DegToRad = 0.017453292519943295;
 
