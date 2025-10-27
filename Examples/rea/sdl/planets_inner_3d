@@ -6,7 +6,7 @@
 
 const int NumPlanets = 5;
 const int NumAsteroids = 0;
-const int NumStars = 2361;
+const int NumStars = 2861;
 
 const float TargetFPS = 60.0;
 
@@ -47,8 +47,8 @@ const float ManualPitchSpeed = 32.0;
 const float ManualZoomSpeed = 620.0;
 const float MinCameraPitch = -45.0;
 const float MaxCameraPitch = -6.0;
-const float MinCameraDistance = 780.0;
-const float MaxCameraDistance = 2600.0;
+const float MinCameraDistance = 380.0;
+const float MaxCameraDistance = 3600.0;
 const float InitialCameraDistance = 1500.0;
 const float InitialCameraPitch = -24.0;
 
@@ -461,11 +461,11 @@ class SolarSystemApp3D {
       }
       i = i + 1;
     }
-    int wholeMonths = trunc(earthMonths);
-    if (wholeMonths >= my.nextMonthAnnouncement) {
-      writeln("Earth months elapsed: " + inttostr(wholeMonths));
-      my.nextMonthAnnouncement = wholeMonths + 1;
-    }
+//    int wholeMonths = trunc(earthMonths);
+//    if (wholeMonths >= my.nextMonthAnnouncement) {
+//      writeln("Earth months elapsed: " + inttostr(wholeMonths));
+//      my.nextMonthAnnouncement = wholeMonths + 1;
+//    }
   }
 
   void drawStarField() {
