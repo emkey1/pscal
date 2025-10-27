@@ -7,7 +7,9 @@ CONST
   MandelWindowWidth   = 1024;
   MandelWindowHeight  = 768;
   MandelWindowTitle   = 'Mandelbrot (Builtin Row - LMB:Zoom, RMB:Reset, Q:Quit)';
-  MandelMaxIterations = 50;
+  BaseIterations      = 50;
+  IterationStep       = 50;
+  MaxIterationCap     = 1000;
   MandelZoomFactor    = 2.0;
   MandelBytesPerPixel = 4;
   MandelTextureUpdateIntervalRows = 1;
@@ -34,6 +36,9 @@ VAR
   ViewPixelWidth, ViewPixelHeight : Integer;
   ReRange, ImRange           : Real;
   ScaleRe, ScaleIm           : Real;
+
+  InitialSpanRe : Real;
+  CurrentMaxIterations : Integer;
 
   MandelTextureID : Integer;
   PixelData, DisplayPixelData : PixelBuffer;
@@ -76,6 +81,34 @@ BEGIN
     SetLength(RowDone, ViewPixelHeight);
 END;
 
+PROCEDURE RecomputeMaxIterations;
+VAR
+  spanRe, baseSpan, zoomRatio : Real;
+  zoomSteps : Integer;
+BEGIN
+  baseSpan := InitialSpanRe;
+  IF baseSpan <= 0.0 THEN
+    baseSpan := MaxRe - MinRe;
+
+  spanRe := MaxRe - MinRe;
+  IF spanRe <= 0.0 THEN
+    spanRe := baseSpan;
+
+  zoomSteps := 0;
+  IF (spanRe > 0.0) AND (baseSpan > 0.0) THEN BEGIN
+    zoomRatio := baseSpan / spanRe;
+    IF zoomRatio > 0.0 THEN
+      zoomSteps := Trunc(Ln(zoomRatio) / Ln(2.0));
+  END;
+
+  IF zoomSteps < 0 THEN
+    zoomSteps := 0;
+
+  CurrentMaxIterations := BaseIterations + (zoomSteps * IterationStep);
+  IF CurrentMaxIterations > MaxIterationCap THEN
+    CurrentMaxIterations := MaxIterationCap;
+END;
+
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
 PROCEDURE UpdateScalingAndDependentViewParams;
 BEGIN
@@ -98,10 +131,12 @@ BEGIN
   ELSE IF ViewPixelHeight = 1 THEN ScaleIm := ImRange
   ELSE ScaleIm := 0;
 
+  RecomputeMaxIterations;
+
   // Update console display
   GotoXY(1, 2); ClrEol; Write('View: Re[', MinRe:0:4,'..',MaxRe:0:4,'], Im[',MinIm:0:4,'..',MaxIm:0:4,']');
   GotoXY(1, ControlsStartY + 4); ClrEol;
-  Write('Max Iter: ', MandelMaxIterations, ', Zoom Factor: ', MandelZoomFactor:0:1, ', Texture ID: ', MandelTextureID); ClrEol;
+  Write('Max Iter: ', CurrentMaxIterations, ', Zoom Factor: ', MandelZoomFactor:0:1, ', Texture ID: ', MandelTextureID); ClrEol;
   EnsurePixelBuffersSized;
 END;
 
@@ -110,6 +145,8 @@ BEGIN
   MinRe := InitialMinRe;
   MaxRe := InitialMaxRe;
   MinIm := InitialMinIm;
+  InitialSpanRe := MaxRe - MinRe;
+  RecomputeMaxIterations;
   UpdateScalingAndDependentViewParams; // Now calculate MaxIm and scales for these initial values
 END;
 
@@ -165,10 +202,10 @@ BEGIN
       BREAK;
     END;
     y0 := MaxIm - (LocalPy * ScaleIm);
-    MandelbrotRow(MinRe, ScaleRe, y0, MandelMaxIterations, ViewPixelWidth - 1, RowIterations);
+    MandelbrotRow(MinRe, ScaleRe, y0, CurrentMaxIterations, ViewPixelWidth - 1, RowIterations);
     FOR LocalPx := 0 TO ViewPixelWidth - 1 DO BEGIN
       Iteration := RowIterations[LocalPx];
-      IF Iteration = MandelMaxIterations THEN BEGIN
+      IF Iteration = CurrentMaxIterations THEN BEGIN
         R_calc := Byte(0);
         G_calc := Byte(0);
         B_calc := Byte(0);
@@ -349,6 +386,7 @@ BEGIN
     MinRe := InitialMinRe;
     MaxRe := InitialMaxRe;
     MinIm := InitialMinIm;
+    RecomputeMaxIterations;
     UpdateScalingAndDependentViewParams;
     RedrawNeeded := True;
     GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
