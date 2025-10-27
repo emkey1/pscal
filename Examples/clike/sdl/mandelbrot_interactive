@@ -6,7 +6,9 @@
 
 const int Width = 1200;
 const int Height = 900;
-const int MaxIterations = 200;
+const int BaseIterations = 200;
+const int IterationStep = 50;
+const int MaxIterationCap = 1000;
 const int BytesPerPixel = 4;
 const int ScreenUpdateInterval = 1; /* update every row for responsiveness */
 const double ZoomFactor = 2.0;
@@ -50,9 +52,39 @@ int computing = 0;
 int nextPresentRow = 0;
 int tid[ThreadCount];
 int textReady = 0;
+int currentIterations = BaseIterations;
+double initialSpanRe = 0.0;
 
 
 #ifdef SDL_ENABLED
+void updateIterationLimit(double span) {
+    double baseSpan = initialSpanRe;
+    double localSpan = span;
+    int zoomSteps = 0;
+    if (baseSpan <= 0.0) {
+        baseSpan = localSpan;
+    }
+    if (localSpan <= 0.0) {
+        localSpan = baseSpan;
+    }
+    if (baseSpan > 0.0 && localSpan > 0.0) {
+        double ratio = baseSpan / localSpan;
+        if (ratio > 1.0) {
+            while (ratio >= 2.0 && (BaseIterations + (zoomSteps + 1) * IterationStep) <= MaxIterationCap) {
+                zoomSteps++;
+                ratio /= 2.0;
+            }
+        }
+    }
+    if (zoomSteps < 0) {
+        zoomSteps = 0;
+    }
+    currentIterations = BaseIterations + zoomSteps * IterationStep;
+    if (currentIterations > MaxIterationCap) {
+        currentIterations = MaxIterationCap;
+    }
+}
+
 int getQuit() {
     int q;
     lock(quitMutex);
@@ -86,11 +118,13 @@ void applyViewBounds(double newMinRe, double newMaxRe, double newMinIm, double n
     maxRe = newMaxRe;
     minIm = newMinIm;
     maxIm = newMaxIm;
+    updateIterationLimit(maxRe - minRe);
 }
 
 void commitPendingViewBounds() {
     if (hasPendingBounds) {
         applyViewBounds(pendingMinRe, pendingMaxRe, pendingMinIm, pendingMaxIm);
+        updateIterationLimit(maxRe - minRe);
         hasPendingBounds = 0;
     }
 }
@@ -379,11 +413,11 @@ void computeRows(int startY, int endY) {
     for (y = startY; y <= endY && !getQuit(); y++) {
         if (getAbortRender()) break;
         c_im = maxIm - y * imFactor;
-        mandelbrotrow(minRe, reFactor, c_im, MaxIterations, Width - 1, &row);
+        mandelbrotrow(minRe, reFactor, c_im, currentIterations, Width - 1, &row);
         idx = y * Width * BytesPerPixel;
         for (x = 0; x < Width; x++) {
             n = row[x];
-            if (n == MaxIterations) { R = G = B = 0; }
+            if (n == currentIterations) { R = G = B = 0; }
             else {
                 R = (n * 5) % 256;
                 G = (n * 7 + 85) % 256;
@@ -429,6 +463,12 @@ int main() {
     abortMutex = mutex();
 
     resetThreadIds();
+
+    initialSpanRe = maxRe - minRe;
+    if (initialSpanRe <= 0.0) {
+        initialSpanRe = 1.0;
+    }
+    updateIterationLimit(maxRe - minRe);
 
     while (!getQuit()) {
         pollRenderProgress();
