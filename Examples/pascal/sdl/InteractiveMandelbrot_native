@@ -40,6 +40,10 @@ VAR
   MouseX, MouseY, MouseButtons : Integer;
   PrevMouseButtons : Integer; // Track previous mouse button state to detect fresh clicks
 
+  PendingZoom, PendingReset : Boolean;
+  PendingMinRe, PendingMaxRe, PendingMinIm : Real;
+  PendingMouseX, PendingMouseY : Integer;
+
   ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
   RowDone : ARRAY[0..MandelWindowHeight - 1] OF Integer;
   RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
@@ -47,11 +51,7 @@ VAR
   WorkerShutdown : Boolean;
   RowMutex : Integer;
 
-  NewCenterX, NewCenterY          : Real;
-  CurrentViewWidthRe, CurrentViewHeightIm : Real;
-  NewViewWidthRe, NewViewHeightIm     : Real;
   PercentDone : Integer;
-  MouseThreadID, KeyboardThreadID : Integer;
   i : Integer;
 
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
@@ -151,6 +151,85 @@ PROCEDURE WorkerThread1; BEGIN WorkerLoop(1); END;
 PROCEDURE WorkerThread2; BEGIN WorkerLoop(2); END;
 PROCEDURE WorkerThread3; BEGIN WorkerLoop(3); END;
 
+PROCEDURE ScheduleZoomRequest(clickX, clickY: Integer);
+VAR
+  LocalCenterX, LocalCenterY       : Real;
+  LocalViewWidthRe, LocalViewHeightIm : Real;
+  LocalNewViewWidthRe, LocalNewViewHeightIm : Real;
+BEGIN
+  LocalCenterX := MinRe + (clickX * ScaleRe);
+  LocalCenterY := MaxIm - (clickY * ScaleIm);
+  LocalViewWidthRe  := MaxRe - MinRe;
+  LocalViewHeightIm := MaxIm - MinIm;
+  LocalNewViewWidthRe  := LocalViewWidthRe / MandelZoomFactor;
+  LocalNewViewHeightIm := LocalViewHeightIm / MandelZoomFactor;
+
+  PendingMinRe := LocalCenterX - (LocalNewViewWidthRe / 2.0);
+  PendingMaxRe := LocalCenterX + (LocalNewViewWidthRe / 2.0);
+  PendingMinIm := LocalCenterY - (LocalNewViewHeightIm / 2.0);
+  PendingMouseX := clickX;
+  PendingMouseY := clickY;
+  PendingZoom := True;
+  PendingReset := False;
+END;
+
+PROCEDURE ApplyPendingViewChanges;
+BEGIN
+  IF RenderInProgress THEN EXIT;
+
+  IF PendingReset THEN BEGIN
+    MinRe := InitialMinRe;
+    MaxRe := InitialMaxRe;
+    MinIm := InitialMinIm;
+    UpdateScalingAndDependentViewParams;
+    RedrawNeeded := True;
+    GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
+    PendingReset := False;
+    PendingZoom := False;
+  END ELSE IF PendingZoom THEN BEGIN
+    MinRe := PendingMinRe;
+    MaxRe := PendingMaxRe;
+    MinIm := PendingMinIm;
+    UpdateScalingAndDependentViewParams;
+    RedrawNeeded := True;
+    GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', PendingMouseX, ',', PendingMouseY, ')');
+    PendingZoom := False;
+  END;
+END;
+
+PROCEDURE ProcessInput;
+VAR
+  KeyCode: Integer;
+BEGIN
+  KeyCode := PollKeyAny();
+  WHILE KeyCode <> 0 DO BEGIN
+    IF (KeyCode >= 0) AND (KeyCode <= $FF) THEN BEGIN
+      IF UpCase(Chr(KeyCode)) = 'Q' THEN BEGIN
+        QuitProgram := True;
+        BREAK;
+      END;
+    END;
+    KeyCode := PollKeyAny();
+  END;
+
+  IF QuitRequested THEN QuitProgram := True;
+
+  GetMouseState(MouseX, MouseY, MouseButtons);
+  IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
+    IF NOT RedrawNeeded THEN BEGIN
+      ScheduleZoomRequest(MouseX, MouseY);
+    END;
+  END ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
+    IF NOT RedrawNeeded THEN BEGIN
+      PendingReset := True;
+      PendingZoom := False;
+    END;
+  END;
+  PrevMouseButtons := MouseButtons;
+
+  ApplyPendingViewChanges;
+END;
+
 PROCEDURE FillPixelDataAndDisplayProgressively;
   VAR i, startY, endY, rowsPerThread, extra, y, bufferIdx, rowBytes, k, displayedRows : Integer;
       copied : Boolean;
@@ -181,7 +260,10 @@ BEGIN
   END;
 
   displayedRows := 0;
-  WHILE displayedRows < ViewPixelHeight DO BEGIN
+  WHILE (displayedRows < ViewPixelHeight) AND (NOT QuitProgram) DO BEGIN
+    ProcessInput;
+    IF QuitProgram THEN BREAK;
+
     copied := False;
     // Copy at most a chunk of completed rows per pass to keep the UI responsive
     lock(RowMutex);
@@ -208,68 +290,25 @@ BEGIN
     END ELSE BEGIN
       GraphLoop(0);
     END;
+
+    ProcessInput;
   END;
 
   FOR i := 0 TO ThreadCount - 1 DO
     WHILE WorkReady[i] <> 0 DO Delay(0);
 
-  // Make sure the final frame is copied to the SDL texture and shown.
-  // Without this call, the window may stay black once rendering finishes
-  // because the last few rows might not yet have been uploaded to the GPU
-  // when the worker threads complete.
-  UpdateAndDisplayTextureInProgress;
+  IF NOT QuitProgram THEN BEGIN
+    // Make sure the final frame is copied to the SDL texture and shown.
+    // Without this call, the window may stay black once rendering finishes
+    // because the last few rows might not yet have been uploaded to the GPU
+    // when the worker threads complete.
+    UpdateAndDisplayTextureInProgress;
 
-  GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+    GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+  END;
   RedrawNeeded := False;
   RenderInProgress := False;
-END;
-
-PROCEDURE KeyboardInputThread;
-VAR
-  KeyCode: Integer;
-BEGIN
-  WHILE NOT QuitProgram DO BEGIN
-    KeyCode := PollKeyAny();
-    WHILE KeyCode <> 0 DO BEGIN
-      IF (KeyCode >= 0) AND (KeyCode <= $FF) THEN BEGIN
-        IF UpCase(Chr(KeyCode)) = 'Q' THEN BEGIN
-          QuitProgram := True;
-          BREAK;
-        END;
-      END;
-      KeyCode := PollKeyAny();
-    END;
-    IF QuitRequested THEN QuitProgram := True;
-  END;
-END;
-
-PROCEDURE MouseInputThread;
-BEGIN
-  WHILE NOT QuitProgram DO BEGIN
-    GetMouseState(MouseX, MouseY, MouseButtons);
-    IF ((MouseButtons AND ButtonLeft) <> 0) AND ((PrevMouseButtons AND ButtonLeft) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        WHILE RenderInProgress DO Delay(0);
-        NewCenterX := MinRe + (MouseX * ScaleRe); NewCenterY := MaxIm - (MouseY * ScaleIm);
-        CurrentViewWidthRe  := MaxRe - MinRe; CurrentViewHeightIm := MaxIm - MinIm;
-        NewViewWidthRe  := CurrentViewWidthRe / MandelZoomFactor; NewViewHeightIm := CurrentViewHeightIm / MandelZoomFactor;
-        MinRe := NewCenterX - (NewViewWidthRe / 2.0); MaxRe := NewCenterX + (NewViewWidthRe / 2.0);
-        MinIm := NewCenterY - (NewViewHeightIm / 2.0);
-        UpdateScalingAndDependentViewParams;
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', MouseX, ',', MouseY, ')');
-      END;
-    END
-    ELSE IF ((MouseButtons AND ButtonRight) <> 0) AND ((PrevMouseButtons AND ButtonRight) = 0) THEN BEGIN
-      IF NOT RedrawNeeded THEN BEGIN
-        WHILE RenderInProgress DO Delay(0);
-        ResetViewToInitial;
-        RedrawNeeded := True;
-        GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
-      END;
-    END;
-    PrevMouseButtons := MouseButtons;
-  END;
+  ApplyPendingViewChanges;
 END;
 
 BEGIN // Main Program
@@ -282,8 +321,6 @@ BEGIN // Main Program
   GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
-  MouseThreadID := spawn MouseInputThread;
-  KeyboardThreadID := spawn KeyboardInputThread;
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
   IF MandelTextureID < 0 THEN
   BEGIN
@@ -308,20 +345,25 @@ BEGIN // Main Program
   QuitProgram  := False;
   PrevMouseButtons := 0;
   RenderInProgress := False;
+  PendingZoom := False;
+  PendingReset := False;
 
   WHILE NOT QuitProgram DO BEGIN
+    ProcessInput;
+    IF QuitProgram THEN BREAK;
+
     IF RedrawNeeded THEN BEGIN
       FillPixelDataAndDisplayProgressively;
     END ELSE BEGIN // If not redrawing, ensure screen is still updated and events processed
       ClearDevice; RenderCopy(MandelTextureID); UpdateScreen;
       GraphLoop(20);
+      ProcessInput;
+      IF QuitProgram THEN BREAK;
     END;
   END; // WHILE
 
   WorkerShutdown := True;
   FOR i := 0 TO ThreadCount - 1 DO join RenderThreadIDs[i];
-  join MouseThreadID;
-  join KeyboardThreadID;
 
   DestroyTexture(MandelTextureID); CloseGraph;
   GotoXY(1, StatusLineY + 8);
