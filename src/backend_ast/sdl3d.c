@@ -85,6 +85,10 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
 #endif
     sdlEnsureInputWatch();
 
+    if (!SDL_IsTextInputActive()) {
+        SDL_StartTextInput();
+    }
+
     return makeVoid();
 }
 

@@ -65,6 +65,10 @@ static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
 
+static bool isPrintableKeycode(SDL_Keycode code) {
+    return code >= 32 && code <= 126;
+}
+
 static void enqueuePendingKeycode(SDL_Keycode code) {
     if (gPendingKeyCount == MAX_PENDING_KEYCODES) {
         gPendingKeyStart = (gPendingKeyStart + 1) % MAX_PENDING_KEYCODES;
@@ -74,6 +78,69 @@ static void enqueuePendingKeycode(SDL_Keycode code) {
     int tail = (gPendingKeyStart + gPendingKeyCount) % MAX_PENDING_KEYCODES;
     gPendingKeycodes[tail] = code;
     gPendingKeyCount++;
+}
+
+static void enqueueUtf8Text(const char* text) {
+    if (!text || *text == '\0') {
+        return;
+    }
+
+    const unsigned char* bytes = (const unsigned char*)text;
+    size_t length = strlen(text);
+    size_t index = 0;
+
+    while (index < length) {
+        unsigned char byte = bytes[index];
+        Uint32 codepoint = 0;
+        size_t advance = 1;
+
+        if ((byte & 0x80u) == 0) {
+            codepoint = byte;
+        } else if ((byte & 0xE0u) == 0xC0u && index + 1 < length) {
+            unsigned char byte2 = bytes[index + 1];
+            if ((byte2 & 0xC0u) != 0x80u) {
+                index += advance;
+                continue;
+            }
+            codepoint = ((Uint32)(byte & 0x1Fu) << 6) | (Uint32)(byte2 & 0x3Fu);
+            advance = 2;
+        } else if ((byte & 0xF0u) == 0xE0u && index + 2 < length) {
+            unsigned char byte2 = bytes[index + 1];
+            unsigned char byte3 = bytes[index + 2];
+            if (((byte2 & 0xC0u) != 0x80u) || ((byte3 & 0xC0u) != 0x80u)) {
+                index += advance;
+                continue;
+            }
+            codepoint = ((Uint32)(byte & 0x0Fu) << 12) |
+                ((Uint32)(byte2 & 0x3Fu) << 6) |
+                (Uint32)(byte3 & 0x3Fu);
+            advance = 3;
+        } else if ((byte & 0xF8u) == 0xF0u && index + 3 < length) {
+            unsigned char byte2 = bytes[index + 1];
+            unsigned char byte3 = bytes[index + 2];
+            unsigned char byte4 = bytes[index + 3];
+            if (((byte2 & 0xC0u) != 0x80u) ||
+                ((byte3 & 0xC0u) != 0x80u) ||
+                ((byte4 & 0xC0u) != 0x80u)) {
+                index += advance;
+                continue;
+            }
+            codepoint = ((Uint32)(byte & 0x07u) << 18) |
+                ((Uint32)(byte2 & 0x3Fu) << 12) |
+                ((Uint32)(byte3 & 0x3Fu) << 6) |
+                (Uint32)(byte4 & 0x3Fu);
+            advance = 4;
+        } else {
+            index += advance;
+            continue;
+        }
+
+        if (codepoint <= 0x10FFFFu) {
+            enqueuePendingKeycode((SDL_Keycode)codepoint);
+        }
+
+        index += advance;
+    }
 }
 
 static void handleSysWmEvent(const SDL_Event* event) {
@@ -311,6 +378,10 @@ void sdlEnsureInputWatch(void) {
 void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
 
+    if (gSdlInitialized && SDL_IsTextInputActive()) {
+        SDL_StopTextInput();
+    }
+
     if (gSdlGLContext) {
         cleanupBalls3DRenderingResources();
         SDL_GL_DeleteContext(gSdlGLContext);
@@ -499,6 +570,10 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
     sdlEnsureInputWatch();
+
+    if (!SDL_IsTextInputActive()) {
+        SDL_StartTextInput();
+    }
 
     return makeVoid();
 }
@@ -1446,10 +1521,22 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
         }
 
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
-            enqueuePendingKeycode(event.key.keysym.sym);
+
+            bool textActive = SDL_IsTextInputActive();
+            if (!textActive || !isPrintableKeycode(sym)) {
+                enqueuePendingKeycode(sym);
+            }
+
+            if (dequeuePendingKeycode(&queuedCode)) {
+                *outCode = queuedCode;
+                return true;
+            }
+        } else if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
             if (dequeuePendingKeycode(&queuedCode)) {
                 *outCode = queuedCode;
                 return true;
@@ -1500,7 +1587,18 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
             } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
                 continue;
             } else if (event.type == SDL_KEYDOWN) {
-                enqueuePendingKeycode(event.key.keysym.sym);
+                SDL_Keycode sym = event.key.keysym.sym;
+                if (sym == SDLK_q) {
+                    atomic_store(&break_requested, 1);
+                }
+
+                bool textActive = SDL_IsTextInputActive();
+                if (!textActive || !isPrintableKeycode(sym)) {
+                    enqueuePendingKeycode(sym);
+                    waiting = 0;
+                }
+            } else if (event.type == SDL_TEXTINPUT) {
+                enqueueUtf8Text(event.text.text);
                 waiting = 0;
             }
         } else {
@@ -1642,7 +1740,17 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 }
 
                 if (event.type == SDL_KEYDOWN) {
-                    enqueuePendingKeycode(event.key.keysym.sym);
+                    SDL_Keycode sym = event.key.keysym.sym;
+                    if (sym == SDLK_q) {
+                        atomic_store(&break_requested, 1);
+                    }
+
+                    bool textActive = SDL_IsTextInputActive();
+                    if (!textActive || !isPrintableKeycode(sym)) {
+                        enqueuePendingKeycode(sym);
+                    }
+                } else if (event.type == SDL_TEXTINPUT) {
+                    enqueueUtf8Text(event.text.text);
                 }
             }
 
@@ -1696,7 +1804,19 @@ Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
 }
 
 bool sdlIsGraphicsActive(void) {
-    return gSdlInitialized && gSdlWindow != NULL && gSdlRenderer != NULL;
+    if (!gSdlInitialized || gSdlWindow == NULL) {
+        return false;
+    }
+
+    if (gSdlRenderer != NULL) {
+        return true;
+    }
+
+    if (gSdlGLContext != NULL) {
+        return true;
+    }
+
+    return false;
 }
 
 static void pumpKeyEvents(void) {
@@ -1721,10 +1841,17 @@ static void pumpKeyEvents(void) {
         }
 
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
-            enqueuePendingKeycode(event.key.keysym.sym);
+
+            bool textActive = SDL_IsTextInputActive();
+            if (!textActive || !isPrintableKeycode(sym)) {
+                enqueuePendingKeycode(sym);
+            }
+        } else if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
         }
     }
 }
@@ -1769,12 +1896,21 @@ SDL_Keycode sdlWaitNextKeycode(void) {
         }
 
         if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_q) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) {
                 atomic_store(&break_requested, 1);
             }
 
-            enqueuePendingKeycode(event.key.keysym.sym);
+            bool textActive = SDL_IsTextInputActive();
+            if (!textActive || !isPrintableKeycode(sym)) {
+                enqueuePendingKeycode(sym);
+            }
 
+            if (dequeuePendingKeycode(&code)) {
+                return code;
+            }
+        } else if (event.type == SDL_TEXTINPUT) {
+            enqueueUtf8Text(event.text.text);
             if (dequeuePendingKeycode(&code)) {
                 return code;
             }
