@@ -8,6 +8,7 @@ const str CSV_BASENAME = "spotify_songs.csv";
 const str DB_BASENAME = "spotify_songs.sqlite";
 const int EXPECTED_FIELD_COUNT = 23;
 
+bool isValidTempDir(str path);
 str resolveTempDir();
 str resolveTempPath(str name);
 bool ensureDataset(str path);
@@ -25,14 +26,43 @@ void showReleaseYearSummary(int db);
 void showGenreBreakdown(int db);
 void runMenu(int db);
 
+bool isValidTempDir(str path) {
+  if (path == "") {
+    return false;
+  }
+  int attr = getfattr(path);
+  if ((attr & 16) == 0) {
+    return false;
+  }
+  if ((attr & 1) != 0) {
+    return false;
+  }
+  return true;
+}
+
 str resolveTempDir() {
   str candidate = getenv("TMPDIR");
-  if (candidate == "") candidate = getenv("TMP");
-  if (candidate == "") candidate = getenv("TEMP");
-  if (candidate == "") candidate = getenv("PWD");
-  if (candidate == "") candidate = getenv("HOME");
-  if (candidate == "") candidate = "/tmp";
-  return candidate;
+  if (isValidTempDir(candidate)) return candidate;
+
+  candidate = getenv("TMP");
+  if (isValidTempDir(candidate)) return candidate;
+
+  candidate = getenv("TEMP");
+  if (isValidTempDir(candidate)) return candidate;
+
+  candidate = getenv("PWD");
+  if (isValidTempDir(candidate)) return candidate;
+
+  candidate = getenv("HOME");
+  if (isValidTempDir(candidate)) return candidate;
+
+  if (isValidTempDir("/tmp")) {
+    return "/tmp";
+  }
+  if (isValidTempDir("/tmp/")) {
+    return "/tmp/";
+  }
+  return "/tmp/";
 }
 
 str resolveTempPath(str name) {
