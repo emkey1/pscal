@@ -64,6 +64,7 @@ void clikeRegisterBuiltins(void) {
 
     /* Math helpers */
     registerBuiltinFunction("arctan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("atan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("arcsin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("arccos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("cotan", AST_FUNCTION_DECL, NULL);

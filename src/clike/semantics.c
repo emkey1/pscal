@@ -76,7 +76,7 @@ static VarType builtinReturnType(const char* name) {
 
     static const char *const doubleFuncs[] = {
         "cos", "sin", "tan", "ln", "exp", "real", "cosh", "sinh", "tanh",
-        "cotan", "arccos", "arcsin", "arctan", "double", "todouble",
+        "cotan", "arccos", "arcsin", "arctan", "atan2", "double", "todouble",
         "realtimeclock"
     };
     if (builtinMatches(name, doubleFuncs, sizeof(doubleFuncs) / sizeof(doubleFuncs[0]))) {
