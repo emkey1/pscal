@@ -75,19 +75,19 @@ const float MaxTimeScale = 5.0;
 const float TimeScaleStep = 0.1;
 const float MinCameraPitch = -45.0;
 const float MaxCameraPitch = -6.0;
-const float MinCameraDistance = 380.0;
+const float MinCameraDistance = 120.0;
 const float MaxCameraDistance = 3600.0;
 const float InitialCameraDistance = 1500.0;
 const float InitialCameraPitch = -24.0;
 
 const float FlybyTransitionSeconds = 4.0;
 const float FlybyHoldSeconds = 2.5;
-const float FlybyRadiusMultiplier = 12.0;
-const float FlybyOffsetDistance = 240.0;
+const float FlybyRadiusMultiplier = 3.0;
+const float FlybyOffsetDistance = 36.0;
 const float FlybyOrbitSeconds = 16.0;
 const float FlybyOrbitTotalDegrees = 720.0;
 const float FlybyOrbitPitchAmplitude = 6.0;
-const float FlybyOrbitDistanceAmplitude = 140.0;
+const float FlybyOrbitDistanceAmplitude = 60.0;
 
 const int FlybyModeApproach = 1;
 const int FlybyModeOrbit = 2;
@@ -115,7 +115,7 @@ const float AsteroidOuterAU = 3.2;
 const float AsteroidSpeedMinDeg = 0.65;
 const float AsteroidSpeedMaxDeg = 2.5;
 
-const float StarInnerRadiusScale = 1.9;
+const float StarInnerRadiusScale = 2.0;
 const float StarOuterRadiusScale = 3.6;
 const float LightStarSize = 28.0;
 const float LightStarBrightness = 1.05;
