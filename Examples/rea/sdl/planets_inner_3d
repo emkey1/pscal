@@ -41,6 +41,30 @@ const float MoonSpeedDeg = 13.0;
 const float MoonMinRadius = 1.1;
 const float MoonOrbitMinMultiplier = 4.0;
 
+const int NumJupiterMoons = 4;
+const float IoOrbitAU = 0.00282;
+const float EuropaOrbitAU = 0.00449;
+const float GanymedeOrbitAU = 0.00716;
+const float CallistoOrbitAU = 0.01258;
+const float IoRadiusRatio = 0.0260;
+const float EuropaRadiusRatio = 0.0230;
+const float GanymedeRadiusRatio = 0.0380;
+const float CallistoRadiusRatio = 0.0350;
+const float IoInclination = 0.04;
+const float EuropaInclination = 0.47;
+const float GanymedeInclination = 0.20;
+const float CallistoInclination = 0.28;
+const float IoNode = 43.97;
+const float EuropaNode = 219.11;
+const float GanymedeNode = 63.55;
+const float CallistoNode = 298.85;
+const float IoSpeedDeg = 26.0;
+const float EuropaSpeedDeg = 18.0;
+const float GanymedeSpeedDeg = 12.5;
+const float CallistoSpeedDeg = 9.0;
+const float JupiterMoonMinRadius = 0.8;
+const float JupiterMoonOrbitMinMultiplier = 3.0;
+
 const float AutoOrbitSpeed = 4.5;
 const float ManualYawSpeed = 55.0;
 const float ManualPitchSpeed = 32.0;
@@ -255,6 +279,8 @@ class SolarSystemApp3D {
   Planet3D planets[NumPlanets + 1];
   bool hasEarthMoon;
   Moon3D earthMoon;
+  bool hasJupiterMoons;
+  Moon3D jupiterMoons[NumJupiterMoons + 1];
 
   float asteroidRadius[NumAsteroids + 1];
   float asteroidAngle[NumAsteroids + 1];
@@ -309,6 +335,7 @@ class SolarSystemApp3D {
     }
 
     my.hasEarthMoon = false;
+    my.hasJupiterMoons = false;
 
     my.planets[1] = new Planet3D();
     my.planets[1].init(AUScale * MercuryOrbitAU, resolvePlanetRadius(MercuryRadiusAU),
@@ -347,10 +374,66 @@ class SolarSystemApp3D {
                     2.4, MarsInclination, 49.0,
                     188, 39, 50);
 
+    float jupiterRadiusWorld = resolvePlanetRadius(JupiterRadiusAU);
     my.planets[5] = new Planet3D();
-    my.planets[5].init(AUScale * JupiterOrbitAU, resolvePlanetRadius(JupiterRadiusAU),
+    my.planets[5].init(AUScale * JupiterOrbitAU, jupiterRadiusWorld,
                     1.3, JupiterInclination, 100.0,
                     205, 133, 63);
+
+    float minJupiterMoonOrbit = jupiterRadiusWorld * JupiterMoonOrbitMinMultiplier;
+
+    float ioOrbitWorld = AUScale * IoOrbitAU;
+    if (ioOrbitWorld < minJupiterMoonOrbit) ioOrbitWorld = minJupiterMoonOrbit;
+    float ioRadiusWorld = jupiterRadiusWorld * IoRadiusRatio;
+    if (ioRadiusWorld < JupiterMoonMinRadius) ioRadiusWorld = JupiterMoonMinRadius;
+    my.jupiterMoons[1] = new Moon3D();
+    my.jupiterMoons[1].init(ioOrbitWorld, ioRadiusWorld, IoSpeedDeg,
+                         IoInclination, IoNode,
+                         221, 181, 101);
+    my.jupiterMoons[1].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float europaOrbitWorld = AUScale * EuropaOrbitAU;
+    if (europaOrbitWorld < minJupiterMoonOrbit) europaOrbitWorld = minJupiterMoonOrbit;
+    float europaRadiusWorld = jupiterRadiusWorld * EuropaRadiusRatio;
+    if (europaRadiusWorld < JupiterMoonMinRadius) europaRadiusWorld = JupiterMoonMinRadius;
+    my.jupiterMoons[2] = new Moon3D();
+    my.jupiterMoons[2].init(europaOrbitWorld, europaRadiusWorld, EuropaSpeedDeg,
+                         EuropaInclination, EuropaNode,
+                         194, 197, 206);
+    my.jupiterMoons[2].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float ganymedeOrbitWorld = AUScale * GanymedeOrbitAU;
+    if (ganymedeOrbitWorld < minJupiterMoonOrbit) ganymedeOrbitWorld = minJupiterMoonOrbit;
+    float ganymedeRadiusWorld = jupiterRadiusWorld * GanymedeRadiusRatio;
+    if (ganymedeRadiusWorld < JupiterMoonMinRadius) ganymedeRadiusWorld = JupiterMoonMinRadius;
+    my.jupiterMoons[3] = new Moon3D();
+    my.jupiterMoons[3].init(ganymedeOrbitWorld, ganymedeRadiusWorld, GanymedeSpeedDeg,
+                         GanymedeInclination, GanymedeNode,
+                         166, 150, 137);
+    my.jupiterMoons[3].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float callistoOrbitWorld = AUScale * CallistoOrbitAU;
+    if (callistoOrbitWorld < minJupiterMoonOrbit) callistoOrbitWorld = minJupiterMoonOrbit;
+    float callistoRadiusWorld = jupiterRadiusWorld * CallistoRadiusRatio;
+    if (callistoRadiusWorld < JupiterMoonMinRadius) callistoRadiusWorld = JupiterMoonMinRadius;
+    my.jupiterMoons[4] = new Moon3D();
+    my.jupiterMoons[4].init(callistoOrbitWorld, callistoRadiusWorld, CallistoSpeedDeg,
+                         CallistoInclination, CallistoNode,
+                         118, 110, 102);
+    my.jupiterMoons[4].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+    my.hasJupiterMoons = true;
   }
 
   void initAsteroids() {
@@ -459,6 +542,16 @@ class SolarSystemApp3D {
                                       my.planets[i].getPosZ());
         }
       }
+      if (i == 5 && my.hasJupiterMoons) {
+        int m = 1;
+        while (m <= NumJupiterMoons) {
+          my.jupiterMoons[m].updatePosition(deltaScale,
+                                           my.planets[i].getPosX(),
+                                           my.planets[i].getPosY(),
+                                           my.planets[i].getPosZ());
+          m = m + 1;
+        }
+      }
       i = i + 1;
     }
 //    int wholeMonths = trunc(earthMonths);
@@ -558,32 +651,12 @@ class SolarSystemApp3D {
 
   void drawSun() {
     GLDisable("lighting");
-    GLEnable("blend");
-    GLBlendFunc("src_alpha", "one");
-    float haloRadius = my.sunRadius * 2.8;
-    GLBegin("triangle_fan");
-      GLColor4f(0.95, 0.78, 0.28, 0.85);
-      GLVertex3f(0.0, 0.0, 0.0);
-      int slices = 36;
-      int i = 0;
-      while (i <= slices) {
-        float angle = (TwoPi * i) / slices;
-        float x = cos(angle) * haloRadius;
-        float z = sin(angle) * haloRadius;
-        GLColor4f(0.95, 0.78, 0.28, 0.0);
-        GLVertex3f(x, 0.0, z);
-        i = i + 1;
-      }
-    GLEnd();
-    GLBlendFunc("src_alpha", "one_minus_src_alpha");
-    GLDisable("blend");
-    GLEnable("lighting");
-
     GLPushMatrix();
     GLScalef(my.sunRadius, my.sunRadius, my.sunRadius);
     GLColor3f(1.0, 0.88, 0.32);
     drawUnitSphere();
     GLPopMatrix();
+    GLEnable("lighting");
   }
 
   void drawPlanets() {
@@ -592,6 +665,13 @@ class SolarSystemApp3D {
       my.planets[i].draw();
       if (my.planets[i].isEarth && my.hasEarthMoon) {
         my.earthMoon.draw();
+      }
+      if (i == 5 && my.hasJupiterMoons) {
+        int m = 1;
+        while (m <= NumJupiterMoons) {
+          my.jupiterMoons[m].draw();
+          m = m + 1;
+        }
       }
       i = i + 1;
     }
@@ -712,6 +792,7 @@ class SolarSystemApp3D {
     my.nextMonthAnnouncement = 1;
     earthMonths = 0.0;
     my.hasEarthMoon = false;
+    my.hasJupiterMoons = false;
 
     randomize();
     initPlanets();
