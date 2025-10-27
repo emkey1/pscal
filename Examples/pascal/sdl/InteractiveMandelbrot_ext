@@ -4,8 +4,8 @@ PROGRAM TextureMandelbrotZoomBuiltin;
 USES CRT;
 
 CONST
-  MandelWindowWidth   = 800;
-  MandelWindowHeight  = 600;
+  MandelWindowWidth   = 1024;
+  MandelWindowHeight  = 768;
   MandelWindowTitle   = 'Mandelbrot (Builtin Row - LMB:Zoom, RMB:Reset, Q:Quit)';
   MandelMaxIterations = 50;
   MandelZoomFactor    = 2.0;
@@ -24,8 +24,9 @@ CONST
   StatusLineY    = 10;
 
 TYPE
-  FlatPixelBuffer = ARRAY[0..(MandelWindowWidth * MandelWindowHeight * MandelBytesPerPixel) - 1] OF Byte;
-  MandelRowIterations = ARRAY[0..MandelWindowWidth - 1] OF Integer;
+  PixelBuffer = ARRAY OF Byte;
+  RowStateBuffer = ARRAY OF Integer;
+  MandelRowIterations = ARRAY OF Integer;
 
 VAR
   MinRe, MaxRe, MinIm, MaxIm : Real;
@@ -34,7 +35,7 @@ VAR
   ScaleRe, ScaleIm           : Real;
 
   MandelTextureID : Integer;
-  PixelData, DisplayPixelData : FlatPixelBuffer;
+  PixelData, DisplayPixelData : PixelBuffer;
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
   RenderInProgress : Boolean;
@@ -46,7 +47,7 @@ VAR
   PendingMouseX, PendingMouseY : Integer;
 
   ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
-  RowDone : ARRAY[0..MandelWindowHeight - 1] OF Integer;
+  RowDone : RowStateBuffer;
   RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
   WorkReady : ARRAY[0..ThreadCount - 1] OF Integer;
   WorkerShutdown : Boolean;
@@ -57,6 +58,21 @@ VAR
 
   PercentDone : Integer;
   i : Integer;
+
+PROCEDURE EnsurePixelBuffersSized;
+VAR
+  RequiredPixels, RequiredBytes: Integer;
+BEGIN
+  RequiredPixels := ViewPixelWidth * ViewPixelHeight;
+  RequiredBytes := RequiredPixels * MandelBytesPerPixel;
+
+  IF Length(PixelData) <> RequiredBytes THEN
+    SetLength(PixelData, RequiredBytes);
+  IF Length(DisplayPixelData) <> RequiredBytes THEN
+    SetLength(DisplayPixelData, RequiredBytes);
+  IF Length(RowDone) <> ViewPixelHeight THEN
+    SetLength(RowDone, ViewPixelHeight);
+END;
 
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
 PROCEDURE UpdateScalingAndDependentViewParams;
@@ -84,6 +100,7 @@ BEGIN
   GotoXY(1, 2); ClrEol; Write('View: Re[', MinRe:0:4,'..',MaxRe:0:4,'], Im[',MinIm:0:4,'..',MaxIm:0:4,']');
   GotoXY(1, ControlsStartY + 4); ClrEol;
   Write('Max Iter: ', MandelMaxIterations, ', Zoom Factor: ', MandelZoomFactor:0:1, ', Texture ID: ', MandelTextureID); ClrEol;
+  EnsurePixelBuffersSized;
 END;
 
 PROCEDURE ResetViewToInitial;
@@ -139,6 +156,7 @@ VAR LocalPy, LocalPx, BufferBaseIdx, Iteration: Integer;
     Cancelled: Boolean;
 BEGIN
   Cancelled := False;
+  SetLength(RowIterations, ViewPixelWidth);
   FOR LocalPy := startY TO endY DO BEGIN
     IF RenderCancellationRequested THEN BEGIN
       Cancelled := True;
@@ -175,7 +193,7 @@ VAR canCopy: Boolean;
 BEGIN
   canCopy := False;
   lock(RowMutex);
-  IF RowDone[y] = 1 THEN BEGIN
+  IF (y >= 0) AND (y < Length(RowDone)) AND (RowDone[y] = 1) THEN BEGIN
     RowDone[y] := 2;
     canCopy := True;
   END;
@@ -186,6 +204,8 @@ END;
 PROCEDURE ResetRowState;
 VAR y: Integer;
 BEGIN
+  IF Length(RowDone) <> ViewPixelHeight THEN
+    SetLength(RowDone, ViewPixelHeight);
   lock(RowMutex);
   FOR y := 0 TO ViewPixelHeight - 1 DO
     RowDone[y] := 0;
@@ -271,10 +291,16 @@ BEGIN
   END;
 END;
 
-PROCEDURE WorkerThread0; BEGIN WorkerLoop(0); END;
-PROCEDURE WorkerThread1; BEGIN WorkerLoop(1); END;
-PROCEDURE WorkerThread2; BEGIN WorkerLoop(2); END;
-PROCEDURE WorkerThread3; BEGIN WorkerLoop(3); END;
+PROCEDURE SpawnWorker(id: Integer);
+VAR WorkerIdCopy: Integer;
+  PROCEDURE WorkerEntry;
+  BEGIN
+    WorkerLoop(WorkerIdCopy);
+  END;
+BEGIN
+  WorkerIdCopy := id;
+  RenderThreadIDs[id] := spawn WorkerEntry;
+END;
 
 PROCEDURE ScheduleZoomRequest(clickX, clickY: Integer);
 VAR
@@ -369,6 +395,7 @@ BEGIN
   ClearRenderCancellation;
   GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
 
+  EnsurePixelBuffersSized;
   ResetRowState;
   rowBytes := ViewPixelWidth * MandelBytesPerPixel;
   // Avoid clearing the entire display buffer each redraw; rows will overwrite
@@ -379,10 +406,10 @@ BEGIN
   extra := ViewPixelHeight MOD ThreadCount;
   startY := 0;
   FOR i := 0 TO ThreadCount - 1 DO BEGIN
-    gotoxy(1,12 + i);
-    writeln('Setup Render Thread: ', i, ', endY = ', endY);
     endY := startY + rowsPerThread - 1;
     IF extra > 0 THEN BEGIN endY := endY + 1; extra := extra - 1; END;
+    gotoxy(1,12 + i);
+    writeln('Setup Render Thread: ', i, ', endY = ', endY);
     PublishWork(i, startY, endY);
     startY := endY + 1;
   END;
@@ -477,10 +504,8 @@ BEGIN // Main Program
 
   SetWorkerShutdown(False);
   ClearWorkerAssignments;
-  RenderThreadIDs[0] := spawn WorkerThread0;
-  RenderThreadIDs[1] := spawn WorkerThread1;
-  RenderThreadIDs[2] := spawn WorkerThread2;
-  RenderThreadIDs[3] := spawn WorkerThread3;
+  FOR i := 0 TO ThreadCount - 1 DO
+    SpawnWorker(i);
 
   ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
   RedrawNeeded := True;
