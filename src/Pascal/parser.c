@@ -1474,6 +1474,12 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         // *** Pointer type successfully parsed, RETURN IMMEDIATELY ***
         return node;
 
+    } else if (initialTokenType == TOKEN_POINTER) {
+        AST *pointerNode = newASTNode(AST_POINTER_TYPE, initialToken);
+        eat(parser, TOKEN_POINTER);
+        setTypeAST(pointerNode, TYPE_POINTER);
+        return pointerNode;
+
     } else if (initialTokenType == TOKEN_RECORD) {
         // Use the initialToken captured at the start
         node = newASTNode(AST_RECORD_TYPE, initialToken);

@@ -153,6 +153,7 @@ static Keyword keywords[] = {
     {"interface", TOKEN_INTERFACE}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
     {"out", TOKEN_OUT}, // Added OUT
+    {"pointer", TOKEN_POINTER},
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
     {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
     {"record", TOKEN_RECORD}, {"repeat", TOKEN_REPEAT},
