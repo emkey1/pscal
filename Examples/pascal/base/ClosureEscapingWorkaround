@@ -1,0 +1,81 @@
+#!/usr/bin/env pascal
+program ClosureEscapingWorkaround;
+
+// Run with: pascal Examples/pascal/base/ClosureEscapingWorkaround
+// Expected: runs both delayed reports successfully across two dispatch rounds.
+// Instead of capturing a stack variable, we store heap-allocated payloads and
+// pass them to a global handler, allowing stateful callbacks without tripping
+// the closure check.
+
+type
+  TTaskHandler = procedure(Data: pointer);
+  TTask = record
+    Handler: TTaskHandler;
+    Data: pointer;
+  end;
+
+  PReport = ^TReport;
+  TReport = record
+    Message: string;
+    Occurrences: integer;
+  end;
+
+var
+  Tasks: array[1..4] of TTask;
+  TaskCount: integer = 0;
+
+procedure RunReport(Data: pointer);
+var
+  Report: PReport;
+begin
+  Report := PReport(Data);
+  Report^.Occurrences := Report^.Occurrences + 1;
+  WriteLn('[delayed] ', Report^.Message, ' (run #', Report^.Occurrences, ')');
+end;
+
+procedure EnqueueReport(const Message: string);
+var
+  Report: PReport;
+begin
+  if TaskCount = High(Tasks) then
+  begin
+    WriteLn('queue full');
+    exit;
+  end;
+
+  New(Report);
+  Report^.Message := Message;
+  Report^.Occurrences := 0;
+
+  Inc(TaskCount);
+  Tasks[TaskCount].Handler := @RunReport;
+  Tasks[TaskCount].Data := Report;
+end;
+
+procedure DrainQueue;
+var
+  Round, I: integer;
+  Report: PReport;
+begin
+  for Round := 1 to 2 do
+  begin
+    WriteLn('--- Dispatch round ', Round, ' ---');
+    for I := 1 to TaskCount do
+      Tasks[I].Handler(Tasks[I].Data);
+  end;
+
+  for I := 1 to TaskCount do
+  begin
+    Report := PReport(Tasks[I].Data);
+    Dispose(Report);
+    Tasks[I].Data := nil;
+  end;
+
+  TaskCount := 0;
+end;
+
+begin
+  EnqueueReport('Daily rollup');
+  EnqueueReport('After-hours summary');
+  DrainQueue;
+end.

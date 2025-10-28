@@ -1,0 +1,66 @@
+#!/usr/bin/env pascal
+program ClosureSafeCapture;
+
+// Run with: pascal Examples/pascal/base/ClosureSafeCapture
+// Expected: prints per-match updates and a final summary. The nested
+// procedures `RecordWin` and `PrintSummary` capture state from `RunLeague`
+// but execute synchronously, so they remain within scope and compile.
+
+type
+  TTeam = record
+    Name: string;
+    Score: integer;
+  end;
+
+procedure RunLeague;
+var
+  Teams: array[1..3] of TTeam;
+  TotalScore: integer;
+
+  procedure InitTeams;
+  begin
+    Teams[1].Name := 'Firebirds'; Teams[1].Score := 0;
+    Teams[2].Name := 'Storm';     Teams[2].Score := 0;
+    Teams[3].Name := 'Glaciers';  Teams[3].Score := 0;
+    TotalScore := 0;
+  end;
+
+  procedure RecordWin(const TeamName: string; Points: integer);
+  var
+    I: integer;
+  begin
+    for I := Low(Teams) to High(Teams) do
+      if Teams[I].Name = TeamName then
+      begin
+        Teams[I].Score := Teams[I].Score + Points;
+        TotalScore := TotalScore + Points;
+        WriteLn(TeamName, ' earns ', Points, ' point(s); running total = ',
+          Teams[I].Score);
+        exit;
+      end;
+  end;
+
+  procedure PrintSummary;
+  var
+    I: integer;
+  begin
+    WriteLn('--- Final standings ---');
+    for I := Low(Teams) to High(Teams) do
+      WriteLn(Teams[I].Name, ': ', Teams[I].Score, ' point(s)');
+    WriteLn('League-wide points awarded: ', TotalScore);
+  end;
+
+begin
+  InitTeams;
+
+  RecordWin('Firebirds', 3);
+  RecordWin('Storm', 2);
+  RecordWin('Glaciers', 1);
+  RecordWin('Firebirds', 2);
+
+  PrintSummary;
+end;
+
+begin
+  RunLeague;
+end.

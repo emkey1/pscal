@@ -24,6 +24,15 @@ Examples
 - See `Examples/pascal/base/ThreadsProcPtrDemo` for a compact demonstration of:
   - Procedure/function pointers (including indirect calls), and
   - `CreateThread(@Worker, argPtr)`/`WaitForThread(t)` passing a pointer argument.
+- `Examples/pascal/base/ClosureSafeCapture` walks through a mini league table
+  where nested procedures track team scores while staying inside the defining
+  scope, so the compiler accepts the captures.
+- `Examples/pascal/base/ClosureEscapeError` intentionally fails to compile,
+  demonstrating the "closure captures a local value that would escape its
+  lifetime" diagnostic when a delayed callback keeps stack-allocated state.
+- `Examples/pascal/base/ClosureEscapingWorkaround` shows how to enqueue
+  stateful callbacks safely by boxing the payload on the heap and passing it to
+  a global handler instead of capturing local variables.
 
 Example program:
 
