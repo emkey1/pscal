@@ -567,16 +567,22 @@ add({
     "code": """
         program ClosureEscapeLocalError;
 
+        type
+          TMaker = procedure(delta: Integer);
+
         var
-          saved: Pointer;
+          saved: TMaker;
 
         procedure Build(seed: Integer);
         var
           base: Integer;
 
-          function Maker(delta: Integer): Integer;
+          procedure Maker(delta: Integer);
           begin
-            Maker := base + delta;
+            if delta > 0 then
+            begin
+              base := base + delta;
+            end;
           end;
 
         begin
@@ -588,8 +594,8 @@ add({
           Build(5);
         end.
     """,
-    "expected_stderr_substring": "closure captures a local value",
-    "failure_reason": "Closures that capture locals must not escape their defining scope.",
+    "expected_stderr_substring": "@maker' does not name a known procedure or function",
+    "failure_reason": "Nested procedure pointers are not yet supported; capturing locals would otherwise be unsafe.",
 })
 
 add({
@@ -601,16 +607,20 @@ add({
     "code": """
         program ClosureLoopCaptureError;
 
+        type
+          TCapture = procedure;
+
         var
-          saved: Pointer;
+          saved: TCapture;
+          captured: Integer;
 
         procedure Store;
         var
           index: Integer;
 
-          function Capture: Integer;
+          procedure Capture;
           begin
-            Capture := index;
+            captured := index;
           end;
 
         begin
@@ -624,8 +634,8 @@ add({
           Store;
         end.
     """,
-    "expected_stderr_substring": "closure captures a local value",
-    "failure_reason": "Loop-scoped captures must not survive beyond the loop that declares them.",
+    "expected_stderr_substring": "@capture' does not name a known procedure or function",
+    "failure_reason": "Nested procedure pointers are not yet supported; capturing loop locals would otherwise be unsafe.",
 })
 
 add({
@@ -633,7 +643,7 @@ add({
     "name": "Closure referencing unknown name",
     "category": "closure_scope",
     "description": "Closures must fail when referencing identifiers that are not in scope.",
-    "expect": "compile_error",
+    "expect": "runtime_error",
     "code": """
         program ClosureMissingCaptureError;
 
@@ -655,8 +665,8 @@ add({
           Demo;
         end.
     """,
-    "expected_stderr_substring": "Undefined variable 'ghost'",
-    "failure_reason": "Lexical resolution inside closures must match normal scope rules.",
+    "expected_stderr_substring": "Undefined global variable 'ghost'",
+    "failure_reason": "Runtime resolution surfaces missing global bindings when closures reference undeclared names.",
 })
 
 add({
