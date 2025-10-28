@@ -5,6 +5,7 @@
 #include "core/utils.h"
 #include "rea/parser.h"
 #include "ast/ast.h"
+#include "ast/closure_registry.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -2024,78 +2025,42 @@ static void ensureExceptionGlobals(AST *root) {
     }
 }
 
-typedef struct {
-    AST **functions;
-    bool *captures_outer_scope;
-    size_t count;
-    size_t capacity;
-} ClosureCaptureRegistry;
+static ClosureCaptureRegistry gClosureRegistry;
+static bool gClosureRegistryInitialized = false;
 
-static ClosureCaptureRegistry gClosureRegistry = {0};
-
-static void clearClosureRegistry(void) {
-    free(gClosureRegistry.functions);
-    free(gClosureRegistry.captures_outer_scope);
-    gClosureRegistry.functions = NULL;
-    gClosureRegistry.captures_outer_scope = NULL;
-    gClosureRegistry.count = 0;
-    gClosureRegistry.capacity = 0;
+static void ensureClosureRegistry(void) {
+    if (!gClosureRegistryInitialized) {
+        closureRegistryInit(&gClosureRegistry);
+        gClosureRegistryInitialized = true;
+    }
 }
 
-static bool ensureClosureRegistryCapacity(size_t needed) {
-    if (gClosureRegistry.capacity >= needed) {
-        return true;
-    }
-    size_t newCap = gClosureRegistry.capacity ? gClosureRegistry.capacity * 2 : 16;
-    while (newCap < needed) {
-        newCap *= 2;
-    }
+static void resetClosureRegistry(void) {
+    ensureClosureRegistry();
+    closureRegistryReset(&gClosureRegistry);
+}
 
-    AST **newFuncs = (AST **)malloc(newCap * sizeof(AST *));
-    bool *newCaptures = (bool *)malloc(newCap * sizeof(bool));
-    if (!newFuncs || !newCaptures) {
-        free(newFuncs);
-        free(newCaptures);
-        return false;
+static void destroyClosureRegistry(void) {
+    if (!gClosureRegistryInitialized) {
+        return;
     }
-
-    if (gClosureRegistry.count > 0) {
-        memcpy(newFuncs, gClosureRegistry.functions, gClosureRegistry.count * sizeof(AST *));
-        memcpy(newCaptures, gClosureRegistry.captures_outer_scope, gClosureRegistry.count * sizeof(bool));
-    }
-
-    free(gClosureRegistry.functions);
-    free(gClosureRegistry.captures_outer_scope);
-    gClosureRegistry.functions = newFuncs;
-    gClosureRegistry.captures_outer_scope = newCaptures;
-    gClosureRegistry.capacity = newCap;
-    return true;
+    closureRegistryDestroy(&gClosureRegistry);
+    gClosureRegistryInitialized = false;
 }
 
 static void recordClosureCapture(AST *func, bool captures) {
-    if (!func) return;
-    for (size_t i = 0; i < gClosureRegistry.count; i++) {
-        if (gClosureRegistry.functions[i] == func) {
-            if (captures) gClosureRegistry.captures_outer_scope[i] = true;
-            return;
-        }
-    }
-    if (!ensureClosureRegistryCapacity(gClosureRegistry.count + 1)) {
+    if (!func) {
         return;
     }
-    gClosureRegistry.functions[gClosureRegistry.count] = func;
-    gClosureRegistry.captures_outer_scope[gClosureRegistry.count] = captures;
-    gClosureRegistry.count++;
+    ensureClosureRegistry();
+    closureRegistryRecord(&gClosureRegistry, func, captures);
 }
 
 static bool closureCapturesOuterScope(AST *func) {
-    if (!func) return false;
-    for (size_t i = 0; i < gClosureRegistry.count; i++) {
-        if (gClosureRegistry.functions[i] == func) {
-            return gClosureRegistry.captures_outer_scope[i];
-        }
+    if (!gClosureRegistryInitialized || !func) {
+        return false;
     }
-    return false;
+    return closureRegistryCaptures(&gClosureRegistry, func);
 }
 
 static AST *findEnclosingFunction(AST *node) {
@@ -3685,7 +3650,7 @@ static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings
     ReaModuleBindingList *previous = gActiveBindings;
     gActiveBindings = bindings;
     gProgramRoot = root;
-    clearClosureRegistry();
+    resetClosureRegistry();
     collectClasses(root);
     collectMethods(root);
     linkParents();
@@ -3693,7 +3658,7 @@ static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings
     addInheritedMethodAliases();
     analyzeClosureCaptures(root);
     validateNodeInternal(root, NULL);
-    clearClosureRegistry();
+    destroyClosureRegistry();
     refreshProcedureMethodCopies();
     freeClassTable();
     gActiveBindings = previous;

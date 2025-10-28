@@ -26,6 +26,7 @@
 
 #include "lexer.h"
 #include "parser.h"
+#include "Pascal/semantic.h"
 #include "ast/ast.h"
 #include "opt.h"
 #include "core/types.h"
@@ -186,7 +187,11 @@ int runProgram(const char *source, const char *programName, const char *frontend
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
         annotateTypes(GlobalAST, NULL, GlobalAST);
-        if ((pascal_semantic_error_count > 0 || pascal_parser_error_count > 0) && !dump_ast_json_flag) {
+        int semantic_errors_before = pascal_semantic_error_count;
+        pascalPerformSemanticAnalysis(GlobalAST);
+        bool semantic_errors_increased = pascal_semantic_error_count > semantic_errors_before;
+        if ((pascal_semantic_error_count > 0 || pascal_parser_error_count > 0 || semantic_errors_increased) &&
+            !dump_ast_json_flag) {
             fprintf(stderr, "Compilation failed with errors.\n");
             overall_success_status = false;
         } else if (dump_ast_json_flag) {
