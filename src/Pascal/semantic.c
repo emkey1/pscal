@@ -132,12 +132,19 @@ static void checkClosureEscapes(AST *node) {
             if (closureRegistryCaptures(&gClosureRegistry, decl)) {
                 AST *parent = node->parent;
                 bool partOfCall = false;
+                bool assigningFunctionResult = false;
                 if (parent && parent->type == AST_PROCEDURE_CALL && parent->token && parent->token->value &&
                     node->token && node->token->value &&
                     strcasecmp(parent->token->value, node->token->value) == 0) {
                     partOfCall = true;
                 }
-                if (!partOfCall) {
+                if (!partOfCall && parent && parent->type == AST_ASSIGN && parent->left == node) {
+                    AST *enclosing = findEnclosingFunction(node);
+                    if (enclosing == decl) {
+                        assigningFunctionResult = true;
+                    }
+                }
+                if (!partOfCall && !assigningFunctionResult) {
                     reportIllegalEscape(node);
                 }
             }
