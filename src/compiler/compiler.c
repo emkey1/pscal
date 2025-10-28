@@ -1132,8 +1132,12 @@ static void emitGlobalVarDefinition(AST* var_decl,
         const char* type_name = "";
         if (var_decl->var_type == TYPE_POINTER) {
             AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
-            if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE && ptr_ast->right && ptr_ast->right->token) {
-                type_name = ptr_ast->right->token->value;
+            if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE) {
+                if (ptr_ast->right && ptr_ast->right->token) {
+                    type_name = ptr_ast->right->token->value;
+                } else if (ptr_ast->token && ptr_ast->token->value) {
+                    type_name = ptr_ast->token->value;
+                }
             }
         }
         if (type_name[0] == '\0' && type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
@@ -4117,6 +4121,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             AST* base = ptr_ast->right;
                             if (base && base->token && base->token->value) {
                                 type_name = base->token->value;
+                            } else if (ptr_ast->token && ptr_ast->token->value) {
+                                type_name = ptr_ast->token->value;
                             }
                         }
                         if (type_name[0] == '\0') {

@@ -129,6 +129,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_OUT:           return "OUT";
         case TOKEN_SET:           return "SET";
+        case TOKEN_POINTER:       return "POINTER";
         case TOKEN_CARET:         return "CARET";
         case TOKEN_NIL:           return "NIL";
         case TOKEN_INLINE:       return "INLINE";
