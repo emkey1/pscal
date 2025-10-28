@@ -5782,13 +5782,48 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     writeBytecodeChunk(chunk, CALL_HOST, line);
                     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_WAIT_THREAD, line);
                 } else {
-                    // Indirect call through a procedure pointer variable: arguments are already on stack.
-                    // Push callee address value and emit indirect call-for-statement.
-                    AST tmpVar;
-                    memset(&tmpVar, 0, sizeof(AST));
-                    tmpVar.type = AST_VARIABLE;
-                    tmpVar.token = node->token; // reference only; compileRValue copies token if needed
-                    compileRValue(&tmpVar, chunk, line);
+                    // Indirect call through a procedure pointer expression: arguments are already on stack.
+                    AST calleeExpr;
+                    memset(&calleeExpr, 0, sizeof(AST));
+                    AST *exprToCompile = NULL;
+
+                    if (node->left) {
+                        if (node->token) {
+                            calleeExpr.type = AST_FIELD_ACCESS;
+                            calleeExpr.token = node->token;
+                            calleeExpr.left = node->left;
+                            calleeExpr.var_type = node->var_type;
+                            calleeExpr.type_def = node->type_def;
+                            exprToCompile = &calleeExpr;
+                        } else {
+                            exprToCompile = node->left;
+                        }
+                    } else {
+                        calleeExpr.type = AST_VARIABLE;
+                        calleeExpr.token = node->token;
+                        calleeExpr.var_type = node->var_type;
+                        calleeExpr.type_def = node->type_def;
+                        exprToCompile = &calleeExpr;
+                    }
+
+                    if (!exprToCompile) {
+                        fprintf(stderr, "L%d: Compiler error: Unable to resolve procedure pointer call target.\n", line);
+                        compiler_had_error = true;
+                        break;
+                    }
+
+                    AST *savedParent = NULL;
+                    if (exprToCompile == &calleeExpr && calleeExpr.left) {
+                        savedParent = calleeExpr.left->parent;
+                        calleeExpr.left->parent = &calleeExpr;
+                    }
+
+                    compileRValue(exprToCompile, chunk, line);
+
+                    if (savedParent) {
+                        calleeExpr.left->parent = savedParent;
+                    }
+
                     writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
                     writeBytecodeChunk(chunk, (uint8_t)call_arg_count, line);
                 }
@@ -6983,6 +7018,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 AST* recv_node = node->children[0];
                 compileRValue(recv_node, chunk, getLine(recv_node));
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
+            }
+
+            if (!func_symbol) {
+                AST* castType = lookupType(functionName);
+                if (castType) {
+                    if (call_arg_count != 1) {
+                        fprintf(stderr, "L%d: Compiler Error: Type cast '%s' expects exactly 1 argument (got %d).\n",
+                                line, functionName, call_arg_count);
+                        compiler_had_error = true;
+                        for (uint8_t i = 0; i < call_arg_count; ++i) {
+                            writeBytecodeChunk(chunk, POP, line);
+                        }
+                        emitConstant(chunk, addNilConstant(chunk), line);
+                    }
+                    break;
+                }
             }
 
             if (!func_symbol && isBuiltin(functionName)) {
