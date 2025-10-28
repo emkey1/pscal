@@ -54,12 +54,12 @@ end;
 
 procedure DrainQueue;
 var
-  Round, I: integer;
+  RoundIndex, I: integer;
   Report: PReport;
 begin
-  for Round := 1 to 2 do
+  for RoundIndex := 1 to 2 do
   begin
-    WriteLn('--- Dispatch round ', Round, ' ---');
+    WriteLn('--- Dispatch round ', RoundIndex, ' ---');
     for I := 1 to TaskCount do
       Tasks[I].Handler(Tasks[I].Data);
   end;
