@@ -1,0 +1,25 @@
+program ThreadSpawnNestedCaptureTest;
+
+procedure RunNested;
+var
+  count: integer;
+  tid: integer;
+
+  procedure Worker;
+  begin
+    count := count + 1;
+  end;
+
+begin
+  count := 41;
+  tid := spawn Worker;
+  join tid;
+  if count = 42 then
+    writeln('captured=42')
+  else
+    writeln('captured=', count);
+end;
+
+begin
+  RunNested;
+end.
