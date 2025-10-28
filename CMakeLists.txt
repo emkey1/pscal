@@ -733,6 +733,7 @@ set(REA_SOURCES
     src/Pascal/lexer.c
     src/Pascal/parser.c
     src/ast/ast.c
+    src/ast/closure_registry.c
     src/Pascal/globals.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c
