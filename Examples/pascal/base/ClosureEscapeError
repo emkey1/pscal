@@ -1,0 +1,49 @@
+#!/usr/bin/env pascal
+program ClosureEscapeError;
+
+// Run with: pascal Examples/pascal/base/ClosureEscapeError
+// Expected: compiler error "closure captures a local value that would escape its
+// lifetime." Registering @Reporter stores a closure that still refers to
+// stack-allocated values (Message and Occurrences), so the compiler rejects it.
+
+type
+  TProc = procedure();
+
+var
+  Pending: array[1..2] of TProc;
+  PendingCount: integer = 0;
+
+procedure RegisterDelayedReport(const Message: string);
+var
+  Occurrences: integer;
+
+  procedure Reporter;
+  begin
+    Occurrences := Occurrences + 1;
+    WriteLn('[delayed] ', Message, ' (run #', Occurrences, ')');
+  end;
+
+begin
+  if PendingCount = High(Pending) then
+  begin
+    WriteLn('queue full');
+    exit;
+  end;
+
+  Inc(PendingCount);
+  Pending[PendingCount] := @Reporter; // Illegal escaping closure.
+end;
+
+procedure RunAll;
+var
+  I: integer;
+begin
+  for I := 1 to PendingCount do
+    Pending[I]();
+end;
+
+begin
+  RegisterDelayedReport('Daily rollup');
+  RegisterDelayedReport('After-hours summary');
+  RunAll;
+end.
