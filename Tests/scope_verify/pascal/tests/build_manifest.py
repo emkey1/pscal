@@ -174,10 +174,10 @@ add({
 
 add({
     "id": "routine_nested_function_leak_error",
-    "name": "Nested function remains private at runtime",
+    "name": "Nested function cannot escape its scope",
     "category": "routine_scope",
-    "description": "Attempting to call a nested helper from the outer scope fails at runtime in the current front-end.",
-    "expect": "runtime_error",
+    "description": "Calling a nested helper from the outer scope now raises a semantic error instead of failing at runtime.",
+    "expect": "compile_error",
     "code": """
         program RoutineNestedFunctionLeak;
 
@@ -195,8 +195,8 @@ add({
           writeln(Hidden(3));
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable",
-    "failure_reason": "Nested functions remain private; calling them from the outer scope triggers a runtime failure.",
+    "expected_stderr_substring": "closure captures a local value",
+    "failure_reason": "Nested functions that capture locals are rejected when referenced outside their defining scope.",
 })
 
 
@@ -453,6 +453,211 @@ add({
 # ---------------------------------------------------------------------------
 # Constant scope tests
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Closure scope tests
+# ---------------------------------------------------------------------------
+
+add({
+    "id": "closure_reference_capture_runtime",
+    "name": "Closure sees updated outer value",
+    "category": "closure_scope",
+    "description": "Nested functions observe updated locals when invoked multiple times within the same activation.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureReferenceCapture;
+
+        procedure Demo;
+        var
+          base: Integer;
+
+          function Add(delta: Integer): Integer;
+          begin
+            Add := base + delta;
+          end;
+
+        begin
+          base := 3;
+          writeln('first=', Add(2));
+          base := 10;
+          writeln('second=', Add(1));
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        first=5
+        second=11
+    """,
+})
+
+add({
+    "id": "closure_incrementer_stateful",
+    "name": "Closure keeps private counter",
+    "category": "closure_scope",
+    "description": "A nested function mutates a captured local on each invocation.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureIncrementerStateful;
+
+        procedure Demo;
+        var
+          counter: Integer;
+
+          function Next: Integer;
+          begin
+            counter := counter + 1;
+            Next := counter;
+          end;
+
+        begin
+          counter := 0;
+          writeln('inc1=', Next());
+          writeln('inc2=', Next());
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        inc1=1
+        inc2=2
+    """,
+})
+
+add({
+    "id": "closure_nested_capture",
+    "name": "Nested closures capture multiple levels",
+    "category": "closure_scope",
+    "description": "Inner nested functions see both their parent's locals and outer lexical bindings.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureNestedCapture;
+
+        function Outer(n: Integer): Integer;
+        var
+          factor: Integer;
+
+          function Inner(m: Integer): Integer;
+          begin
+            Inner := (n + m) * factor;
+          end;
+
+        begin
+          factor := 2;
+          Outer := Inner(3);
+        end;
+
+        begin
+          writeln('combo=', Outer(4));
+        end.
+    """,
+    "expected_stdout": "combo=14",
+})
+
+add({
+    "id": "closure_escape_local_error",
+    "name": "Escaping closure cannot capture locals",
+    "category": "closure_scope",
+    "description": "Taking the address of a nested function that captures locals should be rejected.",
+    "expect": "compile_error",
+    "code": """
+        program ClosureEscapeLocalError;
+
+        var
+          saved: Pointer;
+
+        procedure Build(seed: Integer);
+        var
+          base: Integer;
+
+          function Maker(delta: Integer): Integer;
+          begin
+            Maker := base + delta;
+          end;
+
+        begin
+          base := seed;
+          saved := @Maker;
+        end;
+
+        begin
+          Build(5);
+        end.
+    """,
+    "expected_stderr_substring": "closure captures a local value",
+    "failure_reason": "Closures that capture locals must not escape their defining scope.",
+})
+
+add({
+    "id": "closure_loop_capture_error",
+    "name": "Loop-assigned closure cannot escape",
+    "category": "closure_scope",
+    "description": "Capturing loop indices and storing the closure for later use is rejected.",
+    "expect": "compile_error",
+    "code": """
+        program ClosureLoopCaptureError;
+
+        var
+          saved: Pointer;
+
+        procedure Store;
+        var
+          index: Integer;
+
+          function Capture: Integer;
+          begin
+            Capture := index;
+          end;
+
+        begin
+          for index := 1 to 2 do
+          begin
+            saved := @Capture;
+          end;
+        end;
+
+        begin
+          Store;
+        end.
+    """,
+    "expected_stderr_substring": "closure captures a local value",
+    "failure_reason": "Loop-scoped captures must not survive beyond the loop that declares them.",
+})
+
+add({
+    "id": "closure_missing_capture_error",
+    "name": "Closure referencing unknown name",
+    "category": "closure_scope",
+    "description": "Closures must fail when referencing identifiers that are not in scope.",
+    "expect": "compile_error",
+    "code": """
+        program ClosureMissingCaptureError;
+
+        procedure Demo;
+        var
+          outer: Integer;
+
+          function Inner: Integer;
+          begin
+            Inner := ghost + outer;
+          end;
+
+        begin
+          outer := 3;
+          writeln('value=', Inner());
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stderr_substring": "Undefined variable 'ghost'",
+    "failure_reason": "Lexical resolution inside closures must match normal scope rules.",
+})
 
 add({
     "id": "const_shadow_local_overrides_global",

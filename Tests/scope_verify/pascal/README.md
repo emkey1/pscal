@@ -63,7 +63,15 @@ Each manifest entry specifies:
 ## Pascal scoping assumptions exercised
 
 - **Routine scope:** Procedure/function parameters and locals shadow outer
-  bindings without mutating them. Nested routines capture enclosing variables.
+  bindings without mutating them. Nested routines capture enclosing variables,
+  but helpers that capture locals remain private to their defining routine.
+- **Closure capture:** The semantic pass records whether nested procedures or
+  functions capture outer locals. Capturing helpers may be invoked while their
+  enclosing routine is active, but any attempt to take their address or refer
+  to them outside that scope triggers `closure captures a local value that would
+  escape its lifetime.` Positive coverage exercises repeated invocations and
+  multi-level captures, while negative fixtures mirror Rea's escaping-closure
+  checks.
 - **Constant scope:** Constants declared in a block are visible only within that
   block; inner declarations may shadow outer ones.
 - **Type scope:** Type declarations follow block scope. Local type aliases do
