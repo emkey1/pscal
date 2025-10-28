@@ -540,6 +540,12 @@ else
     harness_report FAIL "pascal_cli_vm_trace" "pascal --vm-trace-head produces trace" "$details"
 fi
 
+if details=$(python3 "$SCRIPT_DIR/compiler/pascal/run_compiler_tests.py"); then
+    harness_report PASS "pascal_compiler_suite" "Pascal compiler regression suite"
+else
+    harness_report FAIL "pascal_compiler_suite" "Pascal compiler regression suite" "$details"
+fi
+
 shopt -s nullglob
 for src in "$SCRIPT_DIR"/Pascal/*; do
     test_name=$(basename "$src")
