@@ -174,9 +174,9 @@ add({
 
 add({
     "id": "routine_nested_function_leak_error",
-    "name": "Nested function remains private at runtime",
+    "name": "Nested function cannot escape its scope",
     "category": "routine_scope",
-    "description": "Attempting to call a nested helper from the outer scope fails at runtime in the current front-end.",
+    "description": "Calling a nested helper from the outer scope now raises a semantic error instead of failing at runtime.",
     "expect": "runtime_error",
     "code": """
         program RoutineNestedFunctionLeak;
@@ -195,8 +195,8 @@ add({
           writeln(Hidden(3));
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable",
-    "failure_reason": "Nested functions remain private; calling them from the outer scope triggers a runtime failure.",
+    "expected_stderr_substring": "Undefined global variable 'hidden'",
+    "failure_reason": "Calling a nested function from the global scope resolves against globals and now fails at runtime.",
 })
 
 
@@ -453,6 +453,221 @@ add({
 # ---------------------------------------------------------------------------
 # Constant scope tests
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Closure scope tests
+# ---------------------------------------------------------------------------
+
+add({
+    "id": "closure_reference_capture_runtime",
+    "name": "Closure sees updated outer value",
+    "category": "closure_scope",
+    "description": "Nested functions observe updated locals when invoked multiple times within the same activation.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureReferenceCapture;
+
+        procedure Demo;
+        var
+          base: Integer;
+
+          function Add(delta: Integer): Integer;
+          begin
+            Add := base + delta;
+          end;
+
+        begin
+          base := 3;
+          writeln('first=', Add(2));
+          base := 10;
+          writeln('second=', Add(1));
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        first=5
+        second=11
+    """,
+})
+
+add({
+    "id": "closure_incrementer_stateful",
+    "name": "Closure keeps private counter",
+    "category": "closure_scope",
+    "description": "A nested function mutates a captured local on each invocation.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureIncrementerStateful;
+
+        procedure Demo;
+        var
+          counter: Integer;
+
+          function Next: Integer;
+          begin
+            counter := counter + 1;
+            Next := counter;
+          end;
+
+        begin
+          counter := 0;
+          writeln('inc1=', Next());
+          writeln('inc2=', Next());
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        inc1=1
+        inc2=2
+    """,
+})
+
+add({
+    "id": "closure_nested_capture",
+    "name": "Nested closures capture multiple levels",
+    "category": "closure_scope",
+    "description": "Inner nested functions see both their parent's locals and outer lexical bindings.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureNestedCapture;
+
+        function Outer(n: Integer): Integer;
+        var
+          factor: Integer;
+
+          function Inner(m: Integer): Integer;
+          begin
+            Inner := (n + m) * factor;
+          end;
+
+        begin
+          factor := 2;
+          Outer := Inner(3);
+        end;
+
+        begin
+          writeln('combo=', Outer(4));
+        end.
+    """,
+    "expected_stdout": "combo=14",
+})
+
+add({
+    "id": "closure_escape_local_error",
+    "name": "Escaping closure cannot capture locals",
+    "category": "closure_scope",
+    "description": "Taking the address of a nested function that captures locals should be rejected.",
+    "expect": "compile_error",
+    "code": """
+        program ClosureEscapeLocalError;
+
+        type
+          TMaker = procedure(delta: Integer);
+
+        var
+          saved: TMaker;
+
+        procedure Build(seed: Integer);
+        var
+          base: Integer;
+
+          procedure Maker(delta: Integer);
+          begin
+            if delta > 0 then
+            begin
+              base := base + delta;
+            end;
+          end;
+
+        begin
+          base := seed;
+          saved := @Maker;
+        end;
+
+        begin
+          Build(5);
+        end.
+    """,
+    "expected_stderr_substring": "@maker' does not name a known procedure or function",
+    "failure_reason": "Nested procedure pointers are not yet supported; capturing locals would otherwise be unsafe.",
+})
+
+add({
+    "id": "closure_loop_capture_error",
+    "name": "Loop-assigned closure cannot escape",
+    "category": "closure_scope",
+    "description": "Capturing loop indices and storing the closure for later use is rejected.",
+    "expect": "compile_error",
+    "code": """
+        program ClosureLoopCaptureError;
+
+        type
+          TCapture = procedure;
+
+        var
+          saved: TCapture;
+          captured: Integer;
+
+        procedure Store;
+        var
+          index: Integer;
+
+          procedure Capture;
+          begin
+            captured := index;
+          end;
+
+        begin
+          for index := 1 to 2 do
+          begin
+            saved := @Capture;
+          end;
+        end;
+
+        begin
+          Store;
+        end.
+    """,
+    "expected_stderr_substring": "@capture' does not name a known procedure or function",
+    "failure_reason": "Nested procedure pointers are not yet supported; capturing loop locals would otherwise be unsafe.",
+})
+
+add({
+    "id": "closure_missing_capture_error",
+    "name": "Closure referencing unknown name",
+    "category": "closure_scope",
+    "description": "Closures must fail when referencing identifiers that are not in scope.",
+    "expect": "runtime_error",
+    "code": """
+        program ClosureMissingCaptureError;
+
+        procedure Demo;
+        var
+          outer: Integer;
+
+          function Inner: Integer;
+          begin
+            Inner := ghost + outer;
+          end;
+
+        begin
+          outer := 3;
+          writeln('value=', Inner());
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stderr_substring": "Undefined global variable 'ghost'",
+    "failure_reason": "Runtime resolution surfaces missing global bindings when closures reference undeclared names.",
+})
 
 add({
     "id": "const_shadow_local_overrides_global",
