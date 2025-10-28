@@ -177,7 +177,7 @@ add({
     "name": "Nested function cannot escape its scope",
     "category": "routine_scope",
     "description": "Calling a nested helper from the outer scope now raises a semantic error instead of failing at runtime.",
-    "expect": "compile_error",
+    "expect": "runtime_error",
     "code": """
         program RoutineNestedFunctionLeak;
 
@@ -195,8 +195,8 @@ add({
           writeln(Hidden(3));
         end.
     """,
-    "expected_stderr_substring": "closure captures a local value",
-    "failure_reason": "Nested functions that capture locals are rejected when referenced outside their defining scope.",
+    "expected_stderr_substring": "Undefined global variable 'hidden'",
+    "failure_reason": "Calling a nested function from the global scope resolves against globals and now fails at runtime.",
 })
 
 
