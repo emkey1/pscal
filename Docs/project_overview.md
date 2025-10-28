@@ -4,11 +4,14 @@ PSCAL is an extensible virtual machine and compiler suite implemented in C. The 
 
 * **Pascal compiler**: A frontend for a Pascal-like language with a hand-written lexer and parser.
 * **Clike compiler**: A compact, C-style language frontend that includes its own preprocessor and a REPL for interactive sessions.
+* **Rea compiler**: An object-oriented language with classes, inheritance, and closures.
+* **exsh shell**: A Bash-compatible shell frontend that orchestrates processes and VM builtins.
 * **Tiny compiler**: An educational frontend written in Python.
 
-Detailed descriptions of the Pascal and C-like front ends can be found in
-[`pascal_overview.md`](pascal_overview.md) and
-[`clike_overview.md`](clike_overview.md). The virtual machine is covered in
+Detailed descriptions of the Pascal, C-like, Rea, and exsh front ends can be
+found in [`pascal_overview.md`](pascal_overview.md),
+[`clike_overview.md`](clike_overview.md), [`rea_overview.md`](rea_overview.md),
+and [`exsh_overview.md`](exsh_overview.md). The virtual machine is covered in
 [`pscal_vm_overview.md`](pscal_vm_overview.md), and instructions for building
 custom front ends or extending VM builtins are in
 [`standalone_vm_frontends.md`](standalone_vm_frontends.md) and
@@ -22,7 +25,7 @@ All frontends generate a compact bytecode stream that is executed by the VM. Thi
 
 The project follows a classic compiler and virtual machine design:
 
-* **Frontends**: Each frontend is responsible for parsing its respective language (Pascal-like or C-like) and constructing an Abstract Syntax Tree (AST).
+* **Frontends**: Each frontend is responsible for parsing its respective language (Pascal, C-like, Rea, exsh scripts, or Tiny) and constructing an Abstract Syntax Tree (or shell command graph).
 * **Compiler**: A compiler processes the AST, performs semantic analysis (for the C-like language), and generates bytecode. The C-like frontend also includes an optimization pass to improve the generated code.
 * **Symbol Table**: A hash table-based symbol table manages variables, functions, and types during compilation.
 * **Virtual Machine (VM)**: A stack-based VM executes the bytecode, providing a portable runtime environment.
@@ -31,7 +34,7 @@ The project follows a classic compiler and virtual machine design:
 
 ## Key Features and Capabilities
 
-* **Three Language Support**: The ability to compile  `Pascal`, a `C-like` language and an OOP (Object Oriented Programing) language called `Rea` to the same bytecode is a major feature.
+* **Multiple Front Ends**: Pascal, CLike, Rea, exsh, and the Tiny reference compiler all target the same VM bytecode so teams can pick the syntax that fits their workflow without losing runtime parity.
 * **Rich Type System**: Signed and unsigned integers from 8 to 64 bits and floating-point types up to extended precision.
 * **Graphics and Audio**: Through SDL bindings, the language supports creating graphical applications with audio capabilities, including window creation, shape and text rendering, and sound playback.
 * **Networking**: HTTP helpers via `libcurl` plus low-level TCP/UDP sockets with DNS utilities.
@@ -40,7 +43,7 @@ The project follows a classic compiler and virtual machine design:
     * Math (`sin`, `cos`, `sqrt`, `factorial`, `fibonacci`, `chudnovsky`).
     * String manipulation (`copy`, `pos`, `length`).
     * System interaction (`getpid`, `dosExec`).
-* **Multithreading**: Lightweight threads can be created with `spawn` and synchronized with `join` for concurrent execution within the VM.
+* **Multithreading**: Lightweight threads can be created with `spawn`/`join`, the higher-level `CreateThread` helpers, or the worker-pool builtins (`ThreadSpawnBuiltin`, `ThreadPoolSubmit`, `ThreadSetName`, `ThreadLookup`, `ThreadGetResult`, `ThreadGetStatus`, `ThreadPause`, `ThreadResume`, `ThreadCancel`, `ThreadStats`) for asynchronous builtins and background jobs.
 * **Bytecode Caching**: To speed up subsequent runs, the compiler can cache bytecode for source files that have not been modified. Cached bytecode carries a version tag; programs can query `VMVersion` and `BytecodeVersion` to decide how to handle mismatches. Set `PSCAL_STRICT_VM=1` to have the VM abort when bytecode targets a newer VM.
   Example programs demonstrating these builtins are `Examples/pascal/base/VMVersionDemo`
   and `Examples/clike/base/vm_version_demo`.
@@ -68,14 +71,14 @@ The project follows a classic compiler and virtual machine design:
 ## Building
 
 ```sh
-cmake -B build          # add -DSDL=ON to enable SDL support
+cmake -S . -B build     # add -DSDL=ON to enable SDL support, add -DRELEASE_BUILD=ON for release packaging toggles
 cmake --build build
 ```
 
 To explicitly disable SDL support:
 
 ```sh
-cmake -B build -DSDL=OFF
+cmake -S . -B build -DSDL=OFF
 cmake --build build
 ```
 
@@ -86,8 +89,12 @@ cmake --build build
 After compiling, run the regression suite:
 
 ```sh
-cd Tests; ./run_all_tests
+./Tests/run_all_tests
 ```
+
+The harness now auto-selects a writable temporary directory and honours
+`RUN_NET_TESTS=1` / `RUN_SDL=1` when you want to exercise network or graphics
+suites.
 
 ---
 

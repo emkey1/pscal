@@ -27,10 +27,9 @@ The directive works with `//`, `{ ... }`, or `(* ... *)` comment styles. If you 
 The following are reserved keywords and cannot be used as identifiers:
 
 * `and`, `array`, `begin`, `break`
-* `case`, `const`, `div`, `do`, `downto`
-* `else`, `end`, `enum`
-* `false`, `for`, `function`
-* `if`, `implementation`, `in`, `inline`, `initialization`, `interface`, `join`
+* `case`, `const`, `do`, `div`, `downto`
+* `else`, `end`, `enum`, `false`, `for`, `function`, `goto`
+* `if`, `implementation`, `in`, `inline`, `initialization`, `interface`, `join`, `label`
 * `mod`, `nil`, `not`
 * `of`, `or`, `out`
 * `procedure`, `program`
@@ -118,6 +117,10 @@ The language supports a standard set of operators with Pascal-like precedence.
 | 3 | `+`, `-`, `or`, `xor` | Additive operators |
 | 4 | `=`, `<>`, `<`, `<=`, `>`, `>=`, `in` | Relational operators |
 
+Compound assignments combine arithmetic with assignment. The parser recognises
+`+=` and `-=` and lowers them to `lhs := lhs + rhs` and `lhs := lhs - rhs`
+respectively; both forms require a numeric left-hand side.
+
 ### **Statements**
 
 * **Assignment Statement:** `variable := expression;`
@@ -159,6 +162,38 @@ The language supports a standard set of operators with Pascal-like precedence.
     end;
     ```
 * **`break`:** Exits the current loop.
+* **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
+* **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
+
+#### Labels and `goto`
+
+Labels let you mark positions inside a routine for `goto` statements. Declare
+them near the top of the routine (or nested block) using a `label` section, then
+attach the label with `LabelName:` immediately before a statement. `goto` may
+target identifier-based labels or numeric labels, but the destination must live
+inside the same procedure or function.
+
+```pascal
+procedure Scanner;
+label Retry, Done;
+var
+  ch: Char;
+begin
+  Retry:
+    Read(ch);
+    if ch = '#' then
+      goto Retry;
+    if ch = '.' then
+      goto Done;
+    writeln('token=', ch);
+    goto Retry;
+  Done:
+    writeln('scanner finished');
+end;
+```
+
+Each label can be referenced more than once, but `goto` cannot cross routine
+boundaries.
 
 ### **Procedures and Functions**
 

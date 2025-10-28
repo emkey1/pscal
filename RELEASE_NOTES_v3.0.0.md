@@ -17,7 +17,7 @@ Date: 2025-10-20
 
 ## Improvements
 - Replaced the builtin registry with hash tables and cached procedure lookup metadata, preventing contention and shaving lookups for hot VM paths.
-- Thread helpers grow `ThreadSpawnBuiltin`/`ThreadGetResult`/`ThreadGetStatus`, letting exsh queue allow-listed VM builtins on worker threads while `WaitForThread` reports their stored status codes. Documentation now includes sample transcripts and the explicit allowlist for threaded builtins.
+- Thread helpers grow `ThreadSpawnBuiltin`, `ThreadPoolSubmit`, `ThreadGetResult`, `ThreadGetStatus`, `ThreadSetName`, `ThreadLookup`, `ThreadStats`, `ThreadPause`, `ThreadResume`, and `ThreadCancel`, letting exsh queue allow-listed VM builtins on worker threads while `WaitForThread` and the new worker-lookup helpers report their cached status codes. Documentation now includes sample transcripts and the explicit allowlist for threaded builtins.
 - Inlined shell loop guards, added owned-string helpers, and deferred exit handling in logical contexts to eliminate performance regressions observed in shellbench.
 - Updated SDL demos with corrected controls, shared font fallbacks, fast landscape rendering validation, and WASD zoom controls for the 3D bouncing balls showcase.
 - Expanded documentation: compiler flags, exsh debugging, and Rea programmer guidance all reflect the new workflows.
@@ -45,6 +45,7 @@ Date: 2025-10-20
 4. `TMPDIR=$PWD/Tests/tmp python3 Tests/scope_verify/rea/rea_scope_test_harness.py`
 5. Spot-check flagship examples:  
    - `build/bin/exsh Examples/exsh/pipeline`
+   - `build/bin/exsh Examples/exsh/parallel-check github.com example.com`
    - `build/bin/pascal Examples/pascal/base/ThreadsProcPtrDemo`  
    - `build/bin/clike Examples/clike/base/thread_demo`  
    - `build/bin/rea Examples/rea/base/threads`

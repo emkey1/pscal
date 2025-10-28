@@ -323,7 +323,7 @@ See `Examples/rea/base/threads` for the full program and additional commentary.
 
 Higher-level async patterns are built from the primitives above. Examples include:
 
-- Network access via `httpGet` and friends (`Examples/rea/base/openweather_forecast`).
+- Network access via `httpGet` and friends (`Examples/rea/base/openai_chat_demo`; the earlier `openweather_forecast` script remains available in the repository history if you need a weather API template).
 - Background computation using `spawn` with a shared queue, guarded by mutexes.
 - Timed loops that combine `sleep` with SDL frame updates in `Examples/rea/sdl/multibouncingballs`.
 
@@ -390,7 +390,7 @@ Explore `Examples/rea/base/method_demo`, `inheritance_and_constructor`, and `pol
 
 ### 9.4 Data and External Integrations
 
-`Examples/rea/base/sqlite_spotify_demo` shows how to call VM-provided database helpers, while `openweather_forecast` highlights HTTP integrations powered by libcurl. Treat these samples as templates when binding additional services.
+`Examples/rea/base/sqlite_spotify_demo` shows how to call VM-provided database helpers, while `openai_chat_demo` highlights HTTP integrations powered by libcurl and the extended OpenAI-compatible helpers. The previous `openweather_forecast` sample is kept in the project history if you prefer the weather-service walkthrough as a starting point. Treat these programs as templates when binding additional services.
 
 ## 10. Maintenance and Contribution Workflow
 
@@ -454,4 +454,3 @@ Before cutting a release candidate:
 - **Module** – Compilation unit wrapped in `module Name { ... }` with explicit exports.
 - **V-table** – Per-class table of method pointers used for dynamic dispatch.
 - **VM** – PSCAL virtual machine that executes bytecode emitted by all front ends.
-

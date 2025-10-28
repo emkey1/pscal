@@ -153,10 +153,10 @@ int main() {
 }
 ```
 
-The repository includes `Examples/rea/sdl/3demo`, which expands this into a
-complete rotating cube rendered with per-face colors, depth testing, and periodic
-swap-interval toggling. `Examples/rea/sdl/landscape` builds on the same helpers
-to generate a seeded terrain height field and lets you roam it with `IsKeyDown`
+The repository includes `Examples/rea/sdl/multibouncingballs_3d`, which expands
+this into a full 3D physics demo with per-face colors, depth testing, and
+camera controls. `Examples/rea/sdl/landscape` builds on the same helpers to
+generate a seeded terrain height field and lets you roam it with `IsKeyDown`
 and `GLPerspective` for a first-person view.
 
 ### **Example**

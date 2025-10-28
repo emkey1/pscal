@@ -23,6 +23,12 @@ Fields such as `paused`, `cancel_requested`, and `ready_for_reuse` mirror the
 flags stored in the VM’s thread table, allowing monitoring dashboards to mirror
 what the runtime observes.【F:src/backend_ast/builtin.c†L5057-L5104】
 
+Use `ThreadSetName(threadId, "label")` to assign human-readable identifiers to
+workers and `ThreadLookup("label")` when you need to map those labels back to
+handles from another part of the program. Both helpers fall back to the slot
+owner when the caller executes inside an embedded VM so names remain visible to
+all front ends.【F:src/backend_ast/builtin.c†L5677-L5751】
+
 ## Pool sizing and environment overrides
 
 The VM lazily grows the worker pool up to `VM_MAX_WORKERS` (15 workers plus the
@@ -78,10 +84,10 @@ bench run:
 - Run `build/bin/exsh Examples/exsh/threading_demo` to confirm thread names,
   status handling, and cooperative cancellation behave as expected for the
   builtins allowed on worker threads.【F:Examples/exsh/threading_demo†L1-L30】
-- Run `build/bin/exsh Examples/exsh/threading_showcase` to exercise
-  `ThreadSpawnBuiltin`, `ThreadPoolSubmit`, naming/lookup helpers, result
-  collection, and the `ThreadStats` snapshot in a single transcript before
-  landing worker-pool changes.【F:Examples/exsh/threading_showcase†L1-L135】
+- Run `build/bin/exsh Examples/exsh/parallel-check github.com example.com` to
+  queue DNS probes in parallel, tag workers with `ThreadSetName`, and release
+  cached status/result pairs via `ThreadGetResult(..., true)` while the shell
+  keeps running foreground commands.【F:Examples/exsh/parallel-check†L1-L74】
 - Execute `build/bin/pascal Examples/pascal/base/docs_examples/threading_config`
   after exporting `PSCAL_THREAD_POOL_SIZE=<n>` to verify Pascal observes the
   configured limit and reports worker usage through `ThreadStatsCount`.

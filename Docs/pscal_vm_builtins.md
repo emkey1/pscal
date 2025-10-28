@@ -92,11 +92,12 @@ VM. For instructions on adding your own routines, see
 
 | Name | Parameters | Returns | Description |
 | ---- | ---------- | ------- | ----------- |
-| mstreamcreate | () | MStream | Create memory stream. |
-| mstreamloadfromfile | (ms: MStream, file: String) | Boolean | Load file into memory stream. |
-| mstreamsavetofile | (ms: MStream, file: String) | Boolean | Save memory stream to file. |
-| mstreamfree | (ms: MStream) | void | Release memory stream. |
-| mstreambuffer | (ms: MStream) | String | Return contents as string. |
+| MStreamCreate | () | MStream | Create a memory stream. |
+| MStreamFromString | (text: String) | MStream | Create and populate a memory stream from the given string. |
+| MStreamLoadFromFile | (ms: MStream, file: String) | Boolean | Load file contents into a memory stream. |
+| MStreamSaveToFile | (ms: MStream, file: String) | Boolean | Persist a memory stream to disk. |
+| MStreamFree | (ms: MStream) | void | Release a memory stream instance. |
+| MStreamBuffer | (ms: MStream) | String | Return stream contents as a string. |
 
 ## Threading and Synchronization
 
@@ -107,8 +108,15 @@ VM. For instructions on adding your own routines, see
 | CreateThread | (procAddr: Pointer, arg: Pointer = nil) | Thread | Start a new thread invoking the given routine with `arg`. Backward-compatible with 1-arg form. |
 | WaitForThread | (t: Thread) | Integer | Wait for the given thread handle to complete, returning `0` on success and `1` when the worker reported a failure. Consumes the stored status flag so idle workers without cached results immediately return to the pool. |
 | ThreadSpawnBuiltin | (target: String/Integer, args: Value...) | Thread | Spawn an allow-listed VM builtin on a worker thread and return its handle. |
+| ThreadPoolSubmit | (target: String/Integer, args: Value...) | Thread | Queue an allow-listed builtin on the worker pool without blocking the caller; the thread handle can be joined later. |
 | ThreadGetResult | (t: Thread, consumeStatus: Boolean = false) | Any | Retrieve the stored result for a builtin worker. When `consumeStatus` is true the cached status flag is also cleared. |
 | ThreadGetStatus | (t: Thread, dropResult: Boolean = false) | Boolean | Read the stored success flag for a worker thread. Passing `dropResult = true` clears any cached return value. |
+| ThreadSetName | (t: Thread, name: String) | Boolean | Assign a human-readable label to a worker slot; returns `true` when the rename succeeded. |
+| ThreadLookup | (nameOrId: String/Integer) | Thread | Resolve a worker by name or id; returns `-1` if no matching slot is active. |
+| ThreadPause | (t: Thread) | Boolean | Request that a worker pause cooperatively. |
+| ThreadResume | (t: Thread) | Boolean | Clear a pending pause request so the worker can continue. |
+| ThreadCancel | (t: Thread) | Boolean | Request that a worker cancel itself at the next safe poll point. |
+| ThreadStats | () | Array<Record> | Produce an array of per-worker records describing pool utilisation, lifecycle flags, timing, and metrics. |
 | mutex | () | Integer | Create a standard mutex and return its identifier. |
 | rcmutex | () | Integer | Create a recursive mutex and return its identifier. |
 | lock | (mid: Integer) | void | Acquire the mutex with the given identifier. |
