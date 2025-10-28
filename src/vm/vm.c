@@ -569,6 +569,8 @@ typedef struct ThreadJob {
     int builtin_id;
     char* builtin_name;
     VM* parentVm;
+    Value** capturedUpvalues;
+    uint8_t capturedUpvalueCount;
     Thread* assignedThread;
     int assignedThreadId;
     bool assignmentSatisfied;
@@ -596,6 +598,8 @@ typedef struct {
     int threadId;
     ThreadJob* initialJob;
 } ThreadStartArgs;
+
+static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job);
 
 static ThreadJobQueue* vmThreadJobQueueCreate(void) {
     ThreadJobQueue* queue = (ThreadJobQueue*)calloc(1, sizeof(ThreadJobQueue));
@@ -699,6 +703,10 @@ static void vmThreadJobDestroy(ThreadJob* job) {
         pthread_mutex_destroy(&job->assignmentMutex);
         pthread_cond_destroy(&job->assignmentCond);
         job->assignmentSyncInitialized = false;
+    }
+    if (job->capturedUpvalues) {
+        free(job->capturedUpvalues);
+        job->capturedUpvalues = NULL;
     }
     if (job->args) {
         for (int i = 0; i < job->argc; ++i) {
@@ -807,6 +815,8 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
     job->builtin_id = builtin_id;
     job->builtin_name = builtin_name ? strdup(builtin_name) : NULL;
     job->parentVm = vm;
+    job->capturedUpvalues = NULL;
+    job->capturedUpvalueCount = 0;
     job->assignedThread = NULL;
     job->assignedThreadId = -1;
     job->assignmentSatisfied = false;
@@ -847,6 +857,11 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
         snprintf(job->name, sizeof(job->name), "thread-%d", builtin_id >= 0 ? builtin_id : 0);
     }
 
+    if (!vmThreadCaptureUpvaluesForJob(vm, job)) {
+        vmThreadJobDestroy(job);
+        return NULL;
+    }
+
     return job;
 }
 
@@ -855,6 +870,76 @@ static void push(VM* vm, Value value);
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address);
 static void vmPopulateProcedureAddressCache(VM* vm);
 static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address);
+
+static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job) {
+    if (!vm || !job || job->kind != THREAD_JOB_BYTECODE) {
+        return true;
+    }
+
+    Symbol* proc_symbol = vmGetProcedureByAddress(vm, job->entry);
+    if (!proc_symbol || proc_symbol->upvalue_count == 0) {
+        return true;
+    }
+
+    const char* proc_name = proc_symbol->name ? proc_symbol->name : "<anonymous>";
+    CallFrame* parent_frame = NULL;
+
+    if (proc_symbol->enclosing) {
+        for (int fi = vm->frameCount - 1; fi >= 0 && !parent_frame; --fi) {
+            CallFrame* candidate = &vm->frames[fi];
+            Symbol* frame_symbol = candidate->function_symbol;
+            while (frame_symbol) {
+                if (frame_symbol == proc_symbol->enclosing) {
+                    parent_frame = candidate;
+                    break;
+                }
+                frame_symbol = frame_symbol->enclosing;
+            }
+        }
+    } else if (vm->frameCount > 0) {
+        parent_frame = &vm->frames[vm->frameCount - 1];
+    }
+
+    if (!parent_frame) {
+        runtimeError(vm, "VM Error: Cannot spawn nested procedure '%s' without active parent frame.", proc_name);
+        return false;
+    }
+
+    job->capturedUpvalueCount = proc_symbol->upvalue_count;
+    job->capturedUpvalues = (Value**)calloc(job->capturedUpvalueCount, sizeof(Value*));
+    if (!job->capturedUpvalues) {
+        job->capturedUpvalueCount = 0;
+        runtimeError(vm, "VM Error: Out of memory capturing upvalues for thread spawn of '%s'.", proc_name);
+        return false;
+    }
+
+    for (int i = 0; i < proc_symbol->upvalue_count; ++i) {
+        Value* slot_ptr = NULL;
+        if (proc_symbol->upvalues[i].isLocal) {
+            uint8_t slot_index = proc_symbol->upvalues[i].index;
+            if (parent_frame->slots && slot_index < parent_frame->slotCount) {
+                slot_ptr = parent_frame->slots + slot_index;
+            }
+        } else if (parent_frame->upvalues) {
+            uint8_t up_index = proc_symbol->upvalues[i].index;
+            if (up_index < parent_frame->upvalue_count) {
+                slot_ptr = parent_frame->upvalues[up_index];
+            }
+        }
+
+        if (!slot_ptr) {
+            runtimeError(vm, "VM Error: Failed to capture lexical variable for thread spawn of '%s'.", proc_name);
+            free(job->capturedUpvalues);
+            job->capturedUpvalues = NULL;
+            job->capturedUpvalueCount = 0;
+            return false;
+        }
+
+        job->capturedUpvalues[i] = slot_ptr;
+    }
+
+    return true;
+}
 
 static void vmThreadAssignInternalName(Thread* thread, int threadId, const char* requestedName) {
     if (!thread) {
@@ -1216,7 +1301,39 @@ static void* threadStart(void* arg) {
                         frame->slotCount = (uint16_t)pushed_args;
                     }
 
-                    interpretBytecode(workerVm, workerVm->chunk, workerVm->vmGlobalSymbols, workerVm->vmConstGlobalSymbols, workerVm->procedureTable, job->entry);
+                    bool ready_for_execution = true;
+                    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+                        if (!frame->upvalues || !job->capturedUpvalues ||
+                            job->capturedUpvalueCount != proc_symbol->upvalue_count) {
+                            runtimeError(workerVm,
+                                         "VM Error: Missing lexical context for thread entry '%s'.",
+                                         proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                            ready_for_execution = false;
+                        } else {
+                            for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                                frame->upvalues[i] = job->capturedUpvalues[i];
+                                if (!frame->upvalues[i]) {
+                                    runtimeError(workerVm,
+                                                 "VM Error: Incomplete lexical capture for thread entry '%s'.",
+                                                 proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                                    ready_for_execution = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!ready_for_execution) {
+                        if (frame->upvalues) {
+                            free(frame->upvalues);
+                            frame->upvalues = NULL;
+                        }
+                        workerVm->frameCount--;
+                        vmThreadStoreResultDirect(thread, NULL, false);
+                    } else {
+                        interpretBytecode(workerVm, workerVm->chunk, workerVm->vmGlobalSymbols,
+                                          workerVm->vmConstGlobalSymbols, workerVm->procedureTable, job->entry);
+                    }
                 } else {
                     vmThreadStoreResultDirect(thread, NULL, false);
                 }
@@ -1584,7 +1701,12 @@ static bool joinThreadInternal(VM* vm, int id) {
 }
 
 static void joinThread(VM* vm, int id) {
-    joinThreadInternal(vm, id);
+    if (!vm) {
+        return;
+    }
+    if (!vmThreadTakeResult(vm, id, NULL, true, NULL, true)) {
+        joinThreadInternal(vm, id);
+    }
 }
 
 bool vmJoinThreadById(VM* vm, int id) {
@@ -6714,7 +6836,9 @@ comparison_error_label:
                 uint16_t entry = READ_SHORT(vm);
                 int id = createThread(vm, entry);
                 if (id < 0) {
-                    runtimeError(vm, "Thread limit exceeded.");
+                    if (!vm->abort_requested) {
+                        runtimeError(vm, "Thread limit exceeded.");
+                    }
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, makeInt(id));
@@ -6737,7 +6861,9 @@ comparison_error_label:
                     freeValue(&popped_tid);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                joinThread(vm, tid);
+                if (!vmThreadTakeResult(vm, tid, NULL, true, NULL, true)) {
+                    joinThreadInternal(vm, tid);
+                }
                 Value popped_tid = pop(vm);
                 freeValue(&popped_tid);
                 break;

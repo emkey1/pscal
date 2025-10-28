@@ -2,6 +2,7 @@
 #include "ext_builtins/registry.h"
 
 void registerFileExistsBuiltin(void);
+void registerGetCurrentDirBuiltin(void);
 void registerGetPidBuiltin(void);
 void registerRealTimeClockBuiltin(void);
 void registerSwapBuiltin(void);
@@ -14,11 +15,13 @@ void registerSystemBuiltins(void) {
   extBuiltinRegisterGroup(category, "timing");
   extBuiltinRegisterGroup(category, "utility");
   extBuiltinRegisterFunction(category, "filesystem", "FileExists");
+  extBuiltinRegisterFunction(category, "filesystem", "GetCurrentDir");
   extBuiltinRegisterFunction(category, "process", "GetPid");
   extBuiltinRegisterFunction(category, "timing", "RealTimeClock");
   extBuiltinRegisterFunction(category, "utility", "Swap");
 
   registerFileExistsBuiltin();
+  registerGetCurrentDirBuiltin();
   registerGetPidBuiltin();
   registerRealTimeClockBuiltin();
   registerSwapBuiltin();

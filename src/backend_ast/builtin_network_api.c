@@ -2386,14 +2386,55 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
 #ifdef _WIN32
     ensure_winsock();
 #endif
+    if (isLocalhostName(host)) {
+        return makeLocalhostFallbackResult();
+    }
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    int e = getaddrinfo(host, NULL, &hints, &res);
-    if (e != 0) {
+
+    const int max_attempts = 3;
+    int attempt = 0;
+    int e = 0;
+    do {
+        if (res) {
+            freeaddrinfo(res);
+            res = NULL;
+        }
+        e = getaddrinfo(host, NULL, &hints, &res);
+        if (e == 0) {
+            break;
+        }
+
         if (isLocalhostName(host)) {
+            if (res) freeaddrinfo(res);
             return makeLocalhostFallbackResult();
         }
+
+        bool transient = false;
+#ifdef EAI_AGAIN
+        if (e == EAI_AGAIN) {
+            transient = true;
+        }
+#endif
+#ifdef EAI_FAIL
+        if (e == EAI_FAIL) {
+            transient = true;
+        }
+#endif
+#ifdef EAI_SYSTEM
+        if (e == EAI_SYSTEM && (errno == EINTR || errno == EAGAIN)) {
+            transient = true;
+        }
+#endif
+        if (!transient || attempt + 1 >= max_attempts) {
+            break;
+        }
+        attempt++;
+        sleep_ms(25 * attempt);
+    } while (attempt < max_attempts);
+
+    if (e != 0) {
         if (res) freeaddrinfo(res);
         setSocketAddrInfoError(e);
         markDnsLookupFailure(vm);

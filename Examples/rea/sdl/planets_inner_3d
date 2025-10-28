@@ -1,0 +1,1291 @@
+#!/usr/bin/env rea
+// SDL Inner Solar System 3D Simulation in Rea using OpenGL helpers.
+// The planets orbit the sun in slightly tilted planes while a camera
+// slowly glides around the system. Requires PSCAL to be built with
+// SDL/OpenGL support (-DSDL=ON).
+
+const int NumPlanets = 5;
+const int NumAsteroids = 0;
+const int NumStars = 2861;
+
+const float TargetFPS = 60.0;
+
+const float Pi = 3.141592653589793;
+const float HalfPi = 1.5707963267948966;
+const float TwoPi = 6.283185307179586;
+const float DegToRad = 0.017453292519943295;
+
+const float SunRadiusAU = 0.00465;
+const float MercuryRadiusAU = 0.0000163;
+const float VenusRadiusAU = 0.0000405;
+const float EarthRadiusAU = 0.0000426;
+const float MarsRadiusAU = 0.0000226;
+const float JupiterRadiusAU = 0.000477;
+
+const float MercuryOrbitAU = 0.39;
+const float VenusOrbitAU = 0.72;
+const float EarthOrbitAU = 1.00;
+const float MarsOrbitAU = 1.52;
+const float JupiterOrbitAU = 5.20;
+
+const float MercuryInclination = 7.0;
+const float VenusInclination = 3.4;
+const float EarthInclination = 0.0;
+const float MarsInclination = 1.85;
+const float JupiterInclination = 1.3;
+
+const float MoonRadiusRatio = 0.2724;
+const float MoonOrbitAU = 0.00257;
+const float MoonInclination = 5.15;
+const float MoonNode = 125.08;
+const float MoonSpeedDeg = 13.0;
+const float MoonMinRadius = 1.1;
+const float MoonOrbitMinMultiplier = 4.0;
+
+const int NumJupiterMoons = 4;
+const float IoOrbitAU = 0.00282;
+const float EuropaOrbitAU = 0.00449;
+const float GanymedeOrbitAU = 0.00716;
+const float CallistoOrbitAU = 0.01258;
+const float IoRadiusRatio = 0.0260;
+const float EuropaRadiusRatio = 0.0230;
+const float GanymedeRadiusRatio = 0.0380;
+const float CallistoRadiusRatio = 0.0350;
+const float IoInclination = 0.04;
+const float EuropaInclination = 0.47;
+const float GanymedeInclination = 0.20;
+const float CallistoInclination = 0.28;
+const float IoNode = 43.97;
+const float EuropaNode = 219.11;
+const float GanymedeNode = 63.55;
+const float CallistoNode = 298.85;
+const float IoSpeedDeg = 26.0;
+const float EuropaSpeedDeg = 18.0;
+const float GanymedeSpeedDeg = 12.5;
+const float CallistoSpeedDeg = 9.0;
+const float JupiterMoonMinRadius = 0.8;
+const float JupiterMoonOrbitMinMultiplier = 3.0;
+
+const float AutoOrbitSpeed = 4.5;
+const float ManualYawSpeed = 55.0;
+const float ManualPitchSpeed = 32.0;
+const float ManualZoomSpeed = 620.0;
+const float MinTimeScale = 0.1;
+const float MaxTimeScale = 5.0;
+const float TimeScaleStep = 0.1;
+const float MinCameraPitch = -45.0;
+const float MaxCameraPitch = -6.0;
+const float MinCameraDistance = 120.0;
+const float MaxCameraDistance = 3600.0;
+const float InitialCameraDistance = 1500.0;
+const float InitialCameraPitch = -24.0;
+
+const float FlybyTransitionSeconds = 4.0;
+const float FlybyHoldSeconds = 2.5;
+const float FlybyRadiusMultiplier = 0.02;
+const float FlybyOffsetDistance = 0.1;
+const float FlybyOrbitSeconds = 4.0;
+const float FlybyOrbitTotalDegrees = 120.0;
+const float FlybyOrbitPitchAmplitude = 6.0;
+const float FlybyOrbitDistanceAmplitude = 0.6;
+
+const int FlybyModeApproach = 1;
+const int FlybyModeOrbit = 2;
+const int FlybyModeFinalLock = 3;
+const int MaxFlybySteps = NumPlanets * 2 + 2;
+
+const int ScanCodeLeft = 79;       // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 80;      // SDL_SCANCODE_RIGHT
+const int ScanCodeUp = 82;         // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;       // SDL_SCANCODE_DOWN
+const int ScanCodeForward = 26;    // SDL_SCANCODE_W
+const int ScanCodeBackward = 22;   // SDL_SCANCODE_S
+const int ScanCodePause = 19;      // SDL_SCANCODE_P
+const int ScanCodeSlow = 45;       // SDL_SCANCODE_MINUS
+const int ScanCodeFast = 46;       // SDL_SCANCODE_EQUALS
+const int ScanCodeReset = 21;      // SDL_SCANCODE_R
+const int ScanCodeFlyby = 9;       // SDL_SCANCODE_F
+const int ScanCodeQuit = 20;       // SDL_SCANCODE_Q
+
+const float AmbientLevel = 0.16;
+const float LightDirX = -0.55;
+const float LightDirY = -0.35;
+const float LightDirZ = 0.78;
+
+const float AUScale = 260.0;   // world units per AU for orbits
+const float SunMinRadius = 22.0;
+const float PlanetMinRadius = 2.0;
+const float SmallBodyMinRadius = 0.6;
+
+const float AsteroidInnerAU = 2.2;
+const float AsteroidOuterAU = 3.2;
+const float AsteroidSpeedMinDeg = 0.65;
+const float AsteroidSpeedMaxDeg = 2.5;
+
+const float StarInnerRadiusScale = 2.0;
+const float StarOuterRadiusScale = 3.6;
+const float LightStarSize = 28.0;
+const float LightStarBrightness = 1.05;
+const float LightStarTwinkleRate = 0.24;
+
+const int SphereStacks = 24;
+const int SphereSlices = 40;
+
+float earthMonths = 0.0;
+
+float randomUnit() {
+  return random(10000) / 10000.0;
+}
+
+void drawUnitSphere() {
+  BouncingBalls3DDrawUnitSphereFast(SphereStacks, SphereSlices);
+}
+
+class Planet3D {
+  float orbitRadius;
+  float radius;
+  float speed;
+  float tiltSin;
+  float tiltCos;
+  float nodeSin;
+  float nodeCos;
+  float colorR;
+  float colorG;
+  float colorB;
+  float angle;
+  float posX;
+  float posY;
+  float posZ;
+  int isEarth;
+
+  Planet3D init(float orbitDistance, float radiusWorld, float spdDeg,
+                float tiltDeg, float nodeDeg,
+                int red, int green, int blue) {
+    my.orbitRadius = orbitDistance;
+    my.radius = radiusWorld;
+    my.speed = spdDeg * DegToRad;
+    float tiltRadians = tiltDeg * DegToRad;
+    my.tiltSin = sin(tiltRadians);
+    my.tiltCos = cos(tiltRadians);
+    float nodeRadians = nodeDeg * DegToRad;
+    my.nodeSin = sin(nodeRadians);
+    my.nodeCos = cos(nodeRadians);
+    my.colorR = red / 255.0;
+    my.colorG = green / 255.0;
+    my.colorB = blue / 255.0;
+    my.angle = random(360) * DegToRad;
+    my.isEarth = 0;
+    my.updatePosition(0.0);
+    return my;
+  }
+
+  void updatePosition(float deltaScale) {
+    my.angle = my.angle + my.speed * deltaScale;
+    if (my.angle >= TwoPi) {
+      my.angle = my.angle - TwoPi;
+    }
+    float baseX = cos(my.angle) * my.orbitRadius;
+    float baseY = sin(my.angle) * my.orbitRadius;
+    float tiltedY = baseY * my.tiltCos;
+    float tiltedZ = baseY * my.tiltSin;
+    float rotatedX = baseX * my.nodeCos - tiltedZ * my.nodeSin;
+    float rotatedZ = baseX * my.nodeSin + tiltedZ * my.nodeCos;
+    my.posX = rotatedX;
+    my.posY = tiltedY;
+    my.posZ = rotatedZ;
+  }
+
+  void draw() {
+    GLPushMatrix();
+    GLTranslatef(my.posX, my.posY, my.posZ);
+    GLScalef(my.radius, my.radius, my.radius);
+    GLColor3f(my.colorR, my.colorG, my.colorB);
+    drawUnitSphere();
+    GLPopMatrix();
+  }
+
+  float getPosX() {
+    return my.posX;
+  }
+
+  float getPosY() {
+    return my.posY;
+  }
+
+  float getPosZ() {
+    return my.posZ;
+  }
+
+  float getRadius() {
+    return my.radius;
+  }
+}
+
+class Moon3D {
+  float orbitRadius;
+  float radius;
+  float speed;
+  float tiltSin;
+  float tiltCos;
+  float nodeSin;
+  float nodeCos;
+  float colorR;
+  float colorG;
+  float colorB;
+  float angle;
+  float posX;
+  float posY;
+  float posZ;
+
+  Moon3D init(float orbitDistance, float radiusWorld, float spdDeg,
+              float tiltDeg, float nodeDeg,
+              int red, int green, int blue) {
+    my.orbitRadius = orbitDistance;
+    my.radius = radiusWorld;
+    my.speed = spdDeg * DegToRad;
+    float tiltRadians = tiltDeg * DegToRad;
+    my.tiltSin = sin(tiltRadians);
+    my.tiltCos = cos(tiltRadians);
+    float nodeRadians = nodeDeg * DegToRad;
+    my.nodeSin = sin(nodeRadians);
+    my.nodeCos = cos(nodeRadians);
+    my.colorR = red / 255.0;
+    my.colorG = green / 255.0;
+    my.colorB = blue / 255.0;
+    my.angle = random(360) * DegToRad;
+    my.posX = 0.0;
+    my.posY = 0.0;
+    my.posZ = 0.0;
+    return my;
+  }
+
+  void updatePosition(float deltaScale, float parentX, float parentY, float parentZ) {
+    my.angle = my.angle + my.speed * deltaScale;
+    if (my.angle >= TwoPi) {
+      my.angle = my.angle - TwoPi;
+    }
+    float baseX = cos(my.angle) * my.orbitRadius;
+    float baseY = sin(my.angle) * my.orbitRadius;
+    float tiltedY = baseY * my.tiltCos;
+    float tiltedZ = baseY * my.tiltSin;
+    float rotatedX = baseX * my.nodeCos - tiltedZ * my.nodeSin;
+    float rotatedZ = baseX * my.nodeSin + tiltedZ * my.nodeCos;
+    my.posX = parentX + rotatedX;
+    my.posY = parentY + tiltedY;
+    my.posZ = parentZ + rotatedZ;
+  }
+
+  void draw() {
+    GLPushMatrix();
+    GLTranslatef(my.posX, my.posY, my.posZ);
+    GLScalef(my.radius, my.radius, my.radius);
+    GLColor3f(my.colorR, my.colorG, my.colorB);
+    drawUnitSphere();
+    GLPopMatrix();
+  }
+}
+
+class SolarSystemApp3D {
+  const int WindowWidth = 1600;
+  const int WindowHeight = 1000;
+
+  int FrameDelay;
+  float DeltaTime;
+  bool quit;
+  bool orbitPaused;
+  float timeScale;
+  float cameraYaw;
+  float cameraPitch;
+  float cameraDistance;
+  float cameraTargetX;
+  float cameraTargetY;
+  float cameraTargetZ;
+  float cameraYawVelocity;
+  bool pauseKeyWasDown;
+  bool slowKeyWasDown;
+  bool fastKeyWasDown;
+  bool resetKeyWasDown;
+  bool flybyKeyWasDown;
+  bool flybyActive;
+  bool flybyInTransition;
+  int flybyStage;
+  int flybyStepCount;
+  int flybyStepPlanet[MaxFlybySteps];
+  int flybyStepMode[MaxFlybySteps];
+  float flybyTimer;
+  float flybyTransitionDuration;
+  float flybyHoldDuration;
+  float flybyStartYaw;
+  float flybyStartPitch;
+  float flybyStartDistance;
+  float flybyTargetYaw;
+  float flybyTargetPitch;
+  float flybyTargetDistance;
+  float flybyTargetPosX;
+  float flybyTargetPosY;
+  float flybyTargetPosZ;
+  int flybyCurrentPlanet;
+  int flybyCurrentMode;
+  bool flybyOrbiting;
+  float flybyOrbitElapsed;
+  float flybyOrbitDuration;
+  float flybyOrbitBaseYaw;
+  float flybyOrbitBasePitch;
+  float flybyOrbitBaseDistance;
+  float elapsedSeconds;
+  int nextMonthAnnouncement;
+
+  bool cameraLockActive;
+  int cameraLockPlanet;
+
+  float sunRadius;
+  float planetRadiusScale;
+  Planet3D planets[NumPlanets + 1];
+  bool hasEarthMoon;
+  Moon3D earthMoon;
+  bool hasJupiterMoons;
+  Moon3D jupiterMoons[NumJupiterMoons + 1];
+
+  float asteroidRadius[NumAsteroids + 1];
+  float asteroidAngle[NumAsteroids + 1];
+  float asteroidSpeed[NumAsteroids + 1];
+  float asteroidTiltSin[NumAsteroids + 1];
+  float asteroidTiltCos[NumAsteroids + 1];
+  float asteroidNodeSin[NumAsteroids + 1];
+  float asteroidNodeCos[NumAsteroids + 1];
+  float asteroidSize[NumAsteroids + 1];
+  float asteroidPosX[NumAsteroids + 1];
+  float asteroidPosY[NumAsteroids + 1];
+  float asteroidPosZ[NumAsteroids + 1];
+
+  float starX[NumStars];
+  float starY[NumStars];
+  float starZ[NumStars];
+  float starSize[NumStars];
+  float starBaseBrightness[NumStars];
+  float starTwinkleRate[NumStars];
+  float starPhase[NumStars];
+
+  void setupLighting() {
+    GLClearDepth(1.0);
+    GLDepthTest(true);
+    GLEnable("lighting");
+    GLEnable("light0");
+    GLEnable("color_material");
+    GLEnable("normalize");
+    GLShadeModel("smooth");
+    GLColorMaterial("front", "ambient_and_diffuse");
+
+    float ambient = AmbientLevel;
+    GLLightfv("light0", "ambient", ambient, ambient, ambient, 1.0);
+    GLLightfv("light0", "diffuse", 0.92, 0.88, 0.78, 1.0);
+    GLLightfv("light0", "specular", 0.85, 0.90, 0.95, 1.0);
+    GLMaterialfv("front", "specular", 0.45, 0.48, 0.55, 1.0);
+    GLMaterialf("front", "shininess", 36.0);
+  }
+
+  float resolvePlanetRadius(float rawRadius) {
+    float scaled = rawRadius * my.planetRadiusScale;
+    if (scaled < SmallBodyMinRadius) scaled = SmallBodyMinRadius;
+    return scaled;
+  }
+
+  void initPlanets() {
+    float sunCandidate = AUScale * SunRadiusAU;
+    if (sunCandidate < SunMinRadius) {
+      my.sunRadius = SunMinRadius;
+    } else {
+      my.sunRadius = sunCandidate;
+    }
+
+    my.hasEarthMoon = false;
+    my.hasJupiterMoons = false;
+
+    float mercuryRawRadius = my.sunRadius * MercuryRadiusAU / SunRadiusAU;
+    float venusRawRadius = my.sunRadius * VenusRadiusAU / SunRadiusAU;
+    float earthRawRadius = my.sunRadius * EarthRadiusAU / SunRadiusAU;
+    float marsRawRadius = my.sunRadius * MarsRadiusAU / SunRadiusAU;
+    float jupiterRawRadius = my.sunRadius * JupiterRadiusAU / SunRadiusAU;
+
+    float scale = 1.0;
+    if (earthRawRadius > 0.0) {
+      scale = PlanetMinRadius / earthRawRadius;
+      if (scale < 1.0) scale = 1.0;
+    }
+    my.planetRadiusScale = scale;
+
+    float mercuryRadiusWorld = resolvePlanetRadius(mercuryRawRadius);
+    float venusRadiusWorld = resolvePlanetRadius(venusRawRadius);
+    float earthRadiusWorld = resolvePlanetRadius(earthRawRadius);
+
+    my.planets[1] = new Planet3D();
+    my.planets[1].init(AUScale * MercuryOrbitAU, mercuryRadiusWorld,
+                    4.7, MercuryInclination, 48.0,
+                    169, 169, 169);
+
+    my.planets[2] = new Planet3D();
+    my.planets[2].init(AUScale * VenusOrbitAU, venusRadiusWorld,
+                    3.5, VenusInclination, 76.0,
+                    218, 165, 32);
+
+    my.planets[3] = new Planet3D();
+    my.planets[3].init(AUScale * EarthOrbitAU, earthRadiusWorld,
+                    3.0, EarthInclination, 0.0,
+                    0, 102, 255);
+    my.planets[3].isEarth = 1;
+
+    float moonOrbitWorld = AUScale * MoonOrbitAU;
+    float minMoonOrbit = earthRadiusWorld * MoonOrbitMinMultiplier;
+    if (moonOrbitWorld < minMoonOrbit) moonOrbitWorld = minMoonOrbit;
+    float moonRadiusWorld = earthRadiusWorld * MoonRadiusRatio;
+    if (moonRadiusWorld < MoonMinRadius) moonRadiusWorld = MoonMinRadius;
+    my.earthMoon = new Moon3D();
+    my.earthMoon.init(moonOrbitWorld, moonRadiusWorld, MoonSpeedDeg,
+                   MoonInclination, MoonNode,
+                   205, 205, 210);
+    my.earthMoon.updatePosition(0.0,
+                                my.planets[3].getPosX(),
+                                my.planets[3].getPosY(),
+                                my.planets[3].getPosZ());
+    my.hasEarthMoon = true;
+
+    float marsRadiusWorld = resolvePlanetRadius(marsRawRadius);
+
+    my.planets[4] = new Planet3D();
+    my.planets[4].init(AUScale * MarsOrbitAU, marsRadiusWorld,
+                    2.4, MarsInclination, 49.0,
+                    188, 39, 50);
+
+    float jupiterRadiusWorld = resolvePlanetRadius(jupiterRawRadius);
+    my.planets[5] = new Planet3D();
+    my.planets[5].init(AUScale * JupiterOrbitAU, jupiterRadiusWorld,
+                    1.3, JupiterInclination, 100.0,
+                    205, 133, 63);
+
+    float minJupiterMoonOrbit = jupiterRadiusWorld * JupiterMoonOrbitMinMultiplier;
+    float scaledJupiterMoonMinRadius = JupiterMoonMinRadius * my.planetRadiusScale;
+
+    float ioOrbitWorld = AUScale * IoOrbitAU;
+    if (ioOrbitWorld < minJupiterMoonOrbit) ioOrbitWorld = minJupiterMoonOrbit;
+    float ioRadiusWorld = jupiterRadiusWorld * IoRadiusRatio;
+    if (ioRadiusWorld < scaledJupiterMoonMinRadius) ioRadiusWorld = scaledJupiterMoonMinRadius;
+    my.jupiterMoons[1] = new Moon3D();
+    my.jupiterMoons[1].init(ioOrbitWorld, ioRadiusWorld, IoSpeedDeg,
+                         IoInclination, IoNode,
+                         221, 181, 101);
+    my.jupiterMoons[1].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float europaOrbitWorld = AUScale * EuropaOrbitAU;
+    if (europaOrbitWorld < minJupiterMoonOrbit) europaOrbitWorld = minJupiterMoonOrbit;
+    float europaRadiusWorld = jupiterRadiusWorld * EuropaRadiusRatio;
+    if (europaRadiusWorld < scaledJupiterMoonMinRadius) europaRadiusWorld = scaledJupiterMoonMinRadius;
+    my.jupiterMoons[2] = new Moon3D();
+    my.jupiterMoons[2].init(europaOrbitWorld, europaRadiusWorld, EuropaSpeedDeg,
+                         EuropaInclination, EuropaNode,
+                         194, 197, 206);
+    my.jupiterMoons[2].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float ganymedeOrbitWorld = AUScale * GanymedeOrbitAU;
+    if (ganymedeOrbitWorld < minJupiterMoonOrbit) ganymedeOrbitWorld = minJupiterMoonOrbit;
+    float ganymedeRadiusWorld = jupiterRadiusWorld * GanymedeRadiusRatio;
+    if (ganymedeRadiusWorld < scaledJupiterMoonMinRadius) ganymedeRadiusWorld = scaledJupiterMoonMinRadius;
+    my.jupiterMoons[3] = new Moon3D();
+    my.jupiterMoons[3].init(ganymedeOrbitWorld, ganymedeRadiusWorld, GanymedeSpeedDeg,
+                         GanymedeInclination, GanymedeNode,
+                         166, 150, 137);
+    my.jupiterMoons[3].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+
+    float callistoOrbitWorld = AUScale * CallistoOrbitAU;
+    if (callistoOrbitWorld < minJupiterMoonOrbit) callistoOrbitWorld = minJupiterMoonOrbit;
+    float callistoRadiusWorld = jupiterRadiusWorld * CallistoRadiusRatio;
+    if (callistoRadiusWorld < scaledJupiterMoonMinRadius) callistoRadiusWorld = scaledJupiterMoonMinRadius;
+    my.jupiterMoons[4] = new Moon3D();
+    my.jupiterMoons[4].init(callistoOrbitWorld, callistoRadiusWorld, CallistoSpeedDeg,
+                         CallistoInclination, CallistoNode,
+                         118, 110, 102);
+    my.jupiterMoons[4].updatePosition(0.0,
+                                      my.planets[5].getPosX(),
+                                      my.planets[5].getPosY(),
+                                      my.planets[5].getPosZ());
+    my.hasJupiterMoons = true;
+  }
+
+  void initAsteroids() {
+    int i = 1;
+    while (i <= NumAsteroids) {
+      float radiusMin = AUScale * AsteroidInnerAU;
+      float radiusMax = AUScale * AsteroidOuterAU;
+      float orbitRadius = radiusMin + randomUnit() * (radiusMax - radiusMin);
+      my.asteroidRadius[i] = orbitRadius;
+      my.asteroidAngle[i] = random(360) * DegToRad;
+      float speedDeg = AsteroidSpeedMinDeg + randomUnit() * (AsteroidSpeedMaxDeg - AsteroidSpeedMinDeg);
+      my.asteroidSpeed[i] = speedDeg * DegToRad;
+      float tiltDeg = (random(80) - 40) * 0.1; // +/- 4 degrees
+      float tiltRad = tiltDeg * DegToRad;
+      my.asteroidTiltSin[i] = sin(tiltRad);
+      my.asteroidTiltCos[i] = cos(tiltRad);
+      float nodeDeg = random(360);
+      float nodeRad = nodeDeg * DegToRad;
+      my.asteroidNodeSin[i] = sin(nodeRad);
+      my.asteroidNodeCos[i] = cos(nodeRad);
+      my.asteroidSize[i] = 4.5 + randomUnit() * 3.0;
+      my.asteroidPosX[i] = 0.0;
+      my.asteroidPosY[i] = 0.0;
+      my.asteroidPosZ[i] = 0.0;
+      i = i + 1;
+    }
+  }
+
+  void initStars() {
+    int i = 0;
+    float systemRadius = AUScale * JupiterOrbitAU * StarOuterRadiusScale;
+    float innerRadius = AUScale * JupiterOrbitAU * StarInnerRadiusScale;
+    if (innerRadius < my.cameraDistance * 1.2) {
+      innerRadius = my.cameraDistance * 1.2;
+    }
+    float outerRadius = systemRadius;
+    if (outerRadius < innerRadius + 100.0) {
+      outerRadius = innerRadius + 100.0;
+    }
+
+    float lightDirLength = sqrt(LightDirX * LightDirX + LightDirY * LightDirY + LightDirZ * LightDirZ);
+    if (lightDirLength < 0.0001) lightDirLength = 1.0;
+    float highlightDistance = innerRadius + 0.75 * (outerRadius - innerRadius);
+    float highlightScale = highlightDistance / lightDirLength;
+
+    my.starX[0] = -LightDirX * highlightScale;
+    my.starY[0] = -LightDirY * highlightScale;
+    my.starZ[0] = -LightDirZ * highlightScale;
+    my.starSize[0] = LightStarSize;
+    my.starBaseBrightness[0] = LightStarBrightness;
+    my.starTwinkleRate[0] = LightStarTwinkleRate;
+    my.starPhase[0] = 0.0;
+
+    i = 1;
+    while (i < NumStars) {
+      float cosTheta = 2.0 * randomUnit() - 1.0;
+      if (cosTheta > 1.0) cosTheta = 1.0;
+      if (cosTheta < -1.0) cosTheta = -1.0;
+      float sinSq = 1.0 - cosTheta * cosTheta;
+      if (sinSq < 0.0) sinSq = 0.0;
+      float sinTheta = sqrt(sinSq);
+      float phi = randomUnit() * TwoPi;
+      float dirX = sinTheta * cos(phi);
+      float dirY = sinTheta * sin(phi);
+      float dirZ = cosTheta;
+      float distance = innerRadius + randomUnit() * (outerRadius - innerRadius);
+      my.starX[i] = dirX * distance;
+      my.starY[i] = dirY * distance;
+      my.starZ[i] = dirZ * distance;
+      my.starSize[i] = 8.0 + randomUnit() * 10.0;
+      my.starBaseBrightness[i] = 0.35 + randomUnit() * 0.6;
+      my.starTwinkleRate[i] = 0.5 + randomUnit() * 1.4;
+      my.starPhase[i] = randomUnit() * TwoPi;
+      i = i + 1;
+    }
+  }
+
+  void addFlybyStep(int planetIndex, int mode) {
+    if (my.flybyStepCount >= MaxFlybySteps) return;
+    my.flybyStepPlanet[my.flybyStepCount] = planetIndex;
+    my.flybyStepMode[my.flybyStepCount] = mode;
+    my.flybyStepCount = my.flybyStepCount + 1;
+  }
+
+  void initFlybySequence() {
+    my.flybyStepCount = 0;
+    my.addFlybyStep(5, FlybyModeApproach); // Jupiter
+    my.addFlybyStep(5, FlybyModeOrbit);
+    my.addFlybyStep(4, FlybyModeApproach); // Mars
+    my.addFlybyStep(4, FlybyModeOrbit);
+    my.addFlybyStep(3, FlybyModeApproach); // Earth (first pass)
+    my.addFlybyStep(3, FlybyModeOrbit);
+    my.addFlybyStep(2, FlybyModeApproach); // Venus
+    my.addFlybyStep(2, FlybyModeOrbit);
+    my.addFlybyStep(1, FlybyModeApproach); // Mercury
+    my.addFlybyStep(1, FlybyModeOrbit);
+    my.addFlybyStep(3, FlybyModeApproach); // Return to Earth
+    my.addFlybyStep(3, FlybyModeFinalLock);
+  }
+
+  float normalizeAngle(float angle) {
+    while (angle < 0.0) angle = angle + 360.0;
+    while (angle >= 360.0) angle = angle - 360.0;
+    return angle;
+  }
+
+  float lerp(float a, float b, float t) {
+    return a + (b - a) * t;
+  }
+
+  float lerpAngle(float fromAngle, float toAngle, float t) {
+    float delta = toAngle - fromAngle;
+    while (delta > 180.0) delta = delta - 360.0;
+    while (delta < -180.0) delta = delta + 360.0;
+    return normalizeAngle(fromAngle + delta * t);
+  }
+
+  float smoothStep(float t) {
+    if (t <= 0.0) return 0.0;
+    if (t >= 1.0) return 1.0;
+    return t * t * (3.0 - 2.0 * t);
+  }
+
+  void resetCameraTarget() {
+    my.cameraTargetX = 0.0;
+    my.cameraTargetY = 0.0;
+    my.cameraTargetZ = 0.0;
+  }
+
+  void updateCameraLockTarget() {
+    if (!my.cameraLockActive) return;
+    int planetIndex = my.cameraLockPlanet;
+    if (planetIndex < 1 || planetIndex > NumPlanets) return;
+    my.cameraTargetX = my.planets[planetIndex].getPosX();
+    my.cameraTargetY = my.planets[planetIndex].getPosY();
+    my.cameraTargetZ = my.planets[planetIndex].getPosZ();
+  }
+
+  void computeFlybyTarget(int planetIndex) {
+    float posX = my.planets[planetIndex].getPosX();
+    float posY = my.planets[planetIndex].getPosY();
+    float posZ = my.planets[planetIndex].getPosZ();
+    float horizontalDistance = sqrt(posX * posX + posZ * posZ);
+    if (horizontalDistance < 0.0001) horizontalDistance = 0.0001;
+    float yawRadians = atan2(posX, posZ);
+    float pitchRadians = -atan2(posY, horizontalDistance);
+    float yawDegrees = yawRadians * 180.0 / Pi;
+    float pitchDegrees = pitchRadians * 180.0 / Pi;
+    yawDegrees = normalizeAngle(yawDegrees);
+    if (pitchDegrees > MaxCameraPitch) pitchDegrees = MaxCameraPitch;
+    if (pitchDegrees < MinCameraPitch) pitchDegrees = MinCameraPitch;
+
+    float planetDistance = sqrt(posX * posX + posY * posY + posZ * posZ);
+    float planetRadius = my.planets[planetIndex].getRadius();
+    float desiredDistance = planetDistance + planetRadius * FlybyRadiusMultiplier + FlybyOffsetDistance;
+    if (desiredDistance < MinCameraDistance) desiredDistance = MinCameraDistance;
+    if (desiredDistance > MaxCameraDistance) desiredDistance = MaxCameraDistance;
+
+    my.flybyTargetYaw = yawDegrees;
+    my.flybyTargetPitch = pitchDegrees;
+    my.flybyTargetDistance = desiredDistance;
+    my.flybyTargetPosX = posX;
+    my.flybyTargetPosY = posY;
+    my.flybyTargetPosZ = posZ;
+  }
+
+  void beginFlybyTransition() {
+    if (my.flybyStage >= my.flybyStepCount) {
+      my.completeFlybyWithLock();
+      return;
+    }
+    int planetIndex = my.flybyStepPlanet[my.flybyStage];
+    int mode = my.flybyStepMode[my.flybyStage];
+    my.flybyCurrentPlanet = planetIndex;
+    my.flybyCurrentMode = mode;
+    if (mode == FlybyModeOrbit) {
+      my.computeFlybyTarget(planetIndex);
+      my.flybyOrbitBaseYaw = my.flybyTargetYaw;
+      my.flybyOrbitBasePitch = my.flybyTargetPitch;
+      my.flybyOrbitBaseDistance = my.flybyTargetDistance;
+      my.flybyOrbitElapsed = 0.0;
+      my.flybyOrbitDuration = FlybyOrbitSeconds;
+      if (my.flybyOrbitDuration <= 0.0) my.flybyOrbitDuration = FlybyOrbitSeconds;
+      my.flybyOrbiting = true;
+      my.flybyInTransition = false;
+      my.flybyTimer = 0.0;
+      my.cameraYaw = my.flybyOrbitBaseYaw;
+      my.cameraPitch = my.flybyOrbitBasePitch;
+      my.cameraDistance = my.flybyOrbitBaseDistance;
+      my.cameraTargetX = my.flybyTargetPosX;
+      my.cameraTargetY = my.flybyTargetPosY;
+      my.cameraTargetZ = my.flybyTargetPosZ;
+    } else {
+      my.flybyOrbiting = false;
+      my.flybyStartYaw = my.cameraYaw;
+      my.flybyStartPitch = my.cameraPitch;
+      my.flybyStartDistance = my.cameraDistance;
+      my.computeFlybyTarget(planetIndex);
+      my.flybyInTransition = true;
+      my.flybyTimer = 0.0;
+      my.cameraTargetX = my.flybyTargetPosX;
+      my.cameraTargetY = my.flybyTargetPosY;
+      my.cameraTargetZ = my.flybyTargetPosZ;
+    }
+  }
+
+  void advanceFlybyStage() {
+    my.flybyStage = my.flybyStage + 1;
+    if (my.flybyStage >= my.flybyStepCount) {
+      my.completeFlybyWithLock();
+    } else {
+      my.beginFlybyTransition();
+    }
+  }
+
+  void startFlyby() {
+    if (my.flybyTransitionDuration <= 0.0) my.flybyTransitionDuration = FlybyTransitionSeconds;
+    if (my.flybyHoldDuration <= 0.0) my.flybyHoldDuration = FlybyHoldSeconds;
+    my.flybyActive = true;
+    my.flybyInTransition = false;
+    my.flybyOrbiting = false;
+    my.flybyStage = 0;
+    my.flybyCurrentPlanet = 0;
+    my.flybyCurrentMode = FlybyModeApproach;
+    my.flybyTimer = 0.0;
+    my.cameraLockActive = false;
+    my.resetCameraTarget();
+    my.beginFlybyTransition();
+  }
+
+  void stopFlyby() {
+    my.flybyActive = false;
+    my.flybyInTransition = false;
+    my.flybyTimer = 0.0;
+    my.flybyOrbiting = false;
+    my.cameraLockActive = false;
+    my.flybyStage = 0;
+    my.resetCameraTarget();
+  }
+
+  void completeFlybyWithLock() {
+    my.flybyActive = false;
+    my.flybyInTransition = false;
+    my.flybyOrbiting = false;
+    my.flybyTimer = 0.0;
+    my.flybyStage = my.flybyStepCount;
+    my.cameraLockActive = true;
+    my.cameraLockPlanet = 3; // Earth
+    my.updateCameraLockTarget();
+  }
+
+  void updateFlyby(float deltaTime) {
+    if (!my.flybyActive) return;
+    my.cameraYawVelocity = 0.0;
+    if (my.flybyOrbiting) {
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
+      my.flybyOrbitElapsed = my.flybyOrbitElapsed + deltaTime;
+      float progress = 0.0;
+      if (my.flybyOrbitDuration > 0.0) {
+        progress = my.flybyOrbitElapsed / my.flybyOrbitDuration;
+      }
+      if (progress >= 1.0) {
+        my.flybyOrbiting = false;
+        my.advanceFlybyStage();
+        return;
+      }
+      float orbitDegrees = FlybyOrbitTotalDegrees * progress;
+      float orbitRadians = orbitDegrees * DegToRad;
+      float yaw = normalizeAngle(my.flybyOrbitBaseYaw + orbitDegrees);
+      float pitchOffset = sin(orbitRadians) * FlybyOrbitPitchAmplitude;
+      float pitch = my.flybyOrbitBasePitch + pitchOffset;
+      if (pitch > MaxCameraPitch) pitch = MaxCameraPitch;
+      if (pitch < MinCameraPitch) pitch = MinCameraPitch;
+      float distanceOffset = sin(orbitRadians * 0.5) * FlybyOrbitDistanceAmplitude;
+      float distance = my.flybyOrbitBaseDistance + distanceOffset;
+      if (distance < MinCameraDistance) distance = MinCameraDistance;
+      if (distance > MaxCameraDistance) distance = MaxCameraDistance;
+      my.cameraYaw = yaw;
+      my.cameraPitch = pitch;
+      my.cameraDistance = distance;
+      return;
+    }
+    if (my.flybyInTransition) {
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
+      float progress = my.flybyTimer / my.flybyTransitionDuration;
+      if (progress >= 1.0) {
+        my.cameraYaw = my.flybyTargetYaw;
+        my.cameraPitch = my.flybyTargetPitch;
+        my.cameraDistance = my.flybyTargetDistance;
+        my.flybyInTransition = false;
+        my.flybyTimer = 0.0;
+      } else {
+        float eased = smoothStep(progress);
+        my.cameraYaw = lerpAngle(my.flybyStartYaw, my.flybyTargetYaw, eased);
+        my.cameraPitch = lerp(my.flybyStartPitch, my.flybyTargetPitch, eased);
+        my.cameraDistance = lerp(my.flybyStartDistance, my.flybyTargetDistance, eased);
+        my.flybyTimer = my.flybyTimer + deltaTime;
+      }
+    } else {
+      my.cameraYaw = my.flybyTargetYaw;
+      my.cameraPitch = my.flybyTargetPitch;
+      my.cameraDistance = my.flybyTargetDistance;
+      my.flybyTimer = my.flybyTimer + deltaTime;
+      if (my.flybyCurrentPlanet >= 1 && my.flybyCurrentPlanet <= NumPlanets) {
+        my.cameraTargetX = my.planets[my.flybyCurrentPlanet].getPosX();
+        my.cameraTargetY = my.planets[my.flybyCurrentPlanet].getPosY();
+        my.cameraTargetZ = my.planets[my.flybyCurrentPlanet].getPosZ();
+      }
+      float holdDuration = my.flybyHoldDuration;
+      if (holdDuration <= 0.0) holdDuration = FlybyHoldSeconds;
+      if (my.flybyCurrentMode == FlybyModeFinalLock) {
+        holdDuration = my.flybyHoldDuration;
+        if (holdDuration <= 0.0) holdDuration = FlybyHoldSeconds;
+      }
+      if (my.flybyTimer >= holdDuration) {
+        my.flybyTimer = 0.0;
+        my.advanceFlybyStage();
+      }
+    }
+  }
+
+  void updateAsteroids(float deltaScale) {
+    int i = 1;
+    while (i <= NumAsteroids) {
+      my.asteroidAngle[i] = my.asteroidAngle[i] + my.asteroidSpeed[i] * deltaScale;
+      if (my.asteroidAngle[i] >= TwoPi) my.asteroidAngle[i] = my.asteroidAngle[i] - TwoPi;
+      float baseX = cos(my.asteroidAngle[i]) * my.asteroidRadius[i];
+      float baseY = sin(my.asteroidAngle[i]) * my.asteroidRadius[i];
+      float tiltedY = baseY * my.asteroidTiltCos[i];
+      float tiltedZ = baseY * my.asteroidTiltSin[i];
+      float rotatedX = baseX * my.asteroidNodeCos[i] - tiltedZ * my.asteroidNodeSin[i];
+      float rotatedZ = baseX * my.asteroidNodeSin[i] + tiltedZ * my.asteroidNodeCos[i];
+      my.asteroidPosX[i] = rotatedX;
+      my.asteroidPosY[i] = tiltedY;
+      my.asteroidPosZ[i] = rotatedZ;
+      i = i + 1;
+    }
+  }
+
+  void updatePlanets(float deltaScale) {
+    int i = 1;
+    while (i <= NumPlanets) {
+      my.planets[i].updatePosition(deltaScale);
+      if (my.planets[i].isEarth) {
+        earthMonths = earthMonths + (my.planets[i].speed / TwoPi) * 12.0 * deltaScale;
+        if (my.hasEarthMoon) {
+          my.earthMoon.updatePosition(deltaScale,
+                                      my.planets[i].getPosX(),
+                                      my.planets[i].getPosY(),
+                                      my.planets[i].getPosZ());
+        }
+      }
+      if (i == 5 && my.hasJupiterMoons) {
+        int m = 1;
+        while (m <= NumJupiterMoons) {
+          my.jupiterMoons[m].updatePosition(deltaScale,
+                                           my.planets[i].getPosX(),
+                                           my.planets[i].getPosY(),
+                                           my.planets[i].getPosZ());
+          m = m + 1;
+        }
+      }
+      i = i + 1;
+    }
+//    int wholeMonths = trunc(earthMonths);
+//    if (wholeMonths >= my.nextMonthAnnouncement) {
+//      writeln("Earth months elapsed: " + inttostr(wholeMonths));
+//      my.nextMonthAnnouncement = wholeMonths + 1;
+//    }
+  }
+
+  void drawStarField() {
+    float time = my.elapsedSeconds;
+    GLDisable("lighting");
+    GLDepthTest(false);
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one");
+    GLBegin("lines");
+      int i = 0;
+      while (i < NumStars) {
+        float sparklePhase = my.starPhase[i] + time * my.starTwinkleRate[i];
+        float sparkle = 0.55 + 0.45 * sin(sparklePhase);
+        if (sparkle < 0.0) sparkle = 0.0;
+        float brightness = my.starBaseBrightness[i] * sparkle;
+        float alpha = 0.32 + 0.48 * sparkle;
+        if (alpha > 1.0) alpha = 1.0;
+        float size = my.starSize[i];
+        float depthSize = size * 0.7;
+        GLColor4f(brightness, brightness, brightness + 0.08, alpha);
+        GLVertex3f(my.starX[i] - size, my.starY[i], my.starZ[i]);
+        GLVertex3f(my.starX[i] + size, my.starY[i], my.starZ[i]);
+        GLVertex3f(my.starX[i], my.starY[i] - size, my.starZ[i]);
+        GLVertex3f(my.starX[i], my.starY[i] + size, my.starZ[i]);
+        GLVertex3f(my.starX[i], my.starY[i], my.starZ[i] - depthSize);
+        GLVertex3f(my.starX[i], my.starY[i], my.starZ[i] + depthSize);
+        i = i + 1;
+      }
+    GLEnd();
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLDisable("blend");
+    GLDepthTest(true);
+    GLEnable("lighting");
+  }
+
+  void drawOrbitRings() {
+    int segments = 160;
+    GLDisable("lighting");
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLColor4f(0.25, 0.32, 0.48, 0.35);
+    int i = 1;
+    while (i <= NumPlanets) {
+      float radius = my.planets[i].orbitRadius;
+      float tiltSin = my.planets[i].tiltSin;
+      float tiltCos = my.planets[i].tiltCos;
+      float nodeSin = my.planets[i].nodeSin;
+      float nodeCos = my.planets[i].nodeCos;
+      GLBegin("line_loop");
+        int s = 0;
+        while (s < segments) {
+          float angle = (TwoPi * s) / segments;
+          float baseX = cos(angle) * radius;
+          float baseY = sin(angle) * radius;
+          float tiltedY = baseY * tiltCos;
+          float tiltedZ = baseY * tiltSin;
+          float rotatedX = baseX * nodeCos - tiltedZ * nodeSin;
+          float rotatedZ = baseX * nodeSin + tiltedZ * nodeCos;
+          GLVertex3f(rotatedX, tiltedY, rotatedZ);
+          s = s + 1;
+        }
+      GLEnd();
+      i = i + 1;
+    }
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLDisable("blend");
+    GLEnable("lighting");
+  }
+
+  void drawAsteroids() {
+    GLDisable("lighting");
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLBegin("lines");
+      int i = 1;
+      while (i <= NumAsteroids) {
+        float size = my.asteroidSize[i] * 0.5;
+        GLColor4f(0.72, 0.72, 0.72, 0.55);
+        GLVertex3f(my.asteroidPosX[i] - size, my.asteroidPosY[i], my.asteroidPosZ[i]);
+        GLVertex3f(my.asteroidPosX[i] + size, my.asteroidPosY[i], my.asteroidPosZ[i]);
+        GLVertex3f(my.asteroidPosX[i], my.asteroidPosY[i] - size, my.asteroidPosZ[i]);
+        GLVertex3f(my.asteroidPosX[i], my.asteroidPosY[i] + size, my.asteroidPosZ[i]);
+        i = i + 1;
+      }
+    GLEnd();
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    GLDisable("blend");
+    GLEnable("lighting");
+  }
+
+  void drawSun() {
+    GLDisable("lighting");
+    GLPushMatrix();
+    GLScalef(my.sunRadius, my.sunRadius, my.sunRadius);
+    GLColor3f(1.0, 0.88, 0.32);
+    drawUnitSphere();
+    GLPopMatrix();
+    GLEnable("lighting");
+  }
+
+  void drawPlanets() {
+    int i = 1;
+    while (i <= NumPlanets) {
+      my.planets[i].draw();
+      if (my.planets[i].isEarth && my.hasEarthMoon) {
+        my.earthMoon.draw();
+      }
+      if (i == 5 && my.hasJupiterMoons) {
+        int m = 1;
+        while (m <= NumJupiterMoons) {
+          my.jupiterMoons[m].draw();
+          m = m + 1;
+        }
+      }
+      i = i + 1;
+    }
+  }
+
+  void drawScene() {
+    GLClearColor(0.02, 0.03, 0.07, 1.0);
+    GLClear();
+
+    GLMatrixMode("projection");
+    GLLoadIdentity();
+    float aspect = WindowWidth * 1.0 / WindowHeight;
+    GLPerspective(55.0, aspect, 24.0, 12000.0);
+
+    GLMatrixMode("modelview");
+    GLLoadIdentity();
+    GLTranslatef(0.0, 0.0, -my.cameraDistance);
+    GLRotatef(my.cameraPitch, 1.0, 0.0, 0.0);
+    GLRotatef(my.cameraYaw, 0.0, 1.0, 0.0);
+    GLTranslatef(-my.cameraTargetX, -my.cameraTargetY, -my.cameraTargetZ);
+
+    GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
+
+    drawStarField();
+    drawOrbitRings();
+    drawAsteroids();
+    drawSun();
+    drawPlanets();
+
+    GLSwapWindow();
+  }
+
+  void handleInput() {
+    // Pump SDL events before sampling keyboard state so IsKeyDown reflects the
+    // latest transitions even if the window lost focus briefly.
+    GraphLoop(0);
+
+    float deltaTime = my.DeltaTime;
+    float yawInput = 0.0;
+    bool leftDown = IsKeyDown(ScanCodeLeft);
+    bool rightDown = IsKeyDown(ScanCodeRight);
+    bool upDown = IsKeyDown(ScanCodeUp);
+    bool downDown = IsKeyDown(ScanCodeDown);
+    bool forwardDown = IsKeyDown(ScanCodeForward);
+    bool backwardDown = IsKeyDown(ScanCodeBackward);
+    bool manualOverride = false;
+
+    if (!my.flybyActive) {
+      if (leftDown) yawInput = yawInput - 1.0;
+      if (rightDown) yawInput = yawInput + 1.0;
+
+      if (yawInput != 0.0) {
+        my.cameraYawVelocity = yawInput * ManualYawSpeed;
+        manualOverride = true;
+      } else if (my.orbitPaused) {
+        my.cameraYawVelocity = 0.0;
+      } else {
+        my.cameraYawVelocity = AutoOrbitSpeed * my.timeScale;
+      }
+
+      if (upDown && !downDown) {
+        my.cameraPitch = my.cameraPitch + deltaTime * ManualPitchSpeed;
+        manualOverride = true;
+      } else if (downDown && !upDown) {
+        my.cameraPitch = my.cameraPitch - deltaTime * ManualPitchSpeed;
+        manualOverride = true;
+      }
+
+      if (my.cameraPitch > MaxCameraPitch) my.cameraPitch = MaxCameraPitch;
+      if (my.cameraPitch < MinCameraPitch) my.cameraPitch = MinCameraPitch;
+
+      if (forwardDown && !backwardDown) {
+        my.cameraDistance = my.cameraDistance - deltaTime * ManualZoomSpeed;
+        manualOverride = true;
+      } else if (backwardDown && !forwardDown) {
+        my.cameraDistance = my.cameraDistance + deltaTime * ManualZoomSpeed;
+        manualOverride = true;
+      }
+
+      if (my.cameraDistance < MinCameraDistance) my.cameraDistance = MinCameraDistance;
+      if (my.cameraDistance > MaxCameraDistance) my.cameraDistance = MaxCameraDistance;
+    } else {
+      my.cameraYawVelocity = 0.0;
+    }
+
+    if (manualOverride && my.cameraLockActive) {
+      my.cameraLockActive = false;
+      my.resetCameraTarget();
+    }
+
+    bool pauseTriggered = false;
+    bool slowTriggered = false;
+    bool fastTriggered = false;
+    bool resetTriggered = false;
+    bool flybyTriggered = false;
+
+    bool pauseDown = IsKeyDown(ScanCodePause);
+    if (pauseDown && !my.pauseKeyWasDown) {
+      pauseTriggered = true;
+    }
+    my.pauseKeyWasDown = pauseDown;
+
+    bool slowDown = IsKeyDown(ScanCodeSlow);
+    if (slowDown && !my.slowKeyWasDown) {
+      slowTriggered = true;
+    }
+    my.slowKeyWasDown = slowDown;
+
+    bool speedUp = IsKeyDown(ScanCodeFast);
+    if (speedUp && !my.fastKeyWasDown) {
+      fastTriggered = true;
+    }
+    my.fastKeyWasDown = speedUp;
+
+    bool resetDown = IsKeyDown(ScanCodeReset);
+    if (resetDown && !my.resetKeyWasDown) {
+      resetTriggered = true;
+    }
+    my.resetKeyWasDown = resetDown;
+
+    bool flybyDown = IsKeyDown(ScanCodeFlyby);
+    if (flybyDown && !my.flybyKeyWasDown) {
+      flybyTriggered = true;
+    }
+    my.flybyKeyWasDown = flybyDown;
+
+    if (IsKeyDown(ScanCodeQuit)) {
+      my.quit = true;
+    }
+
+    int keyCode = pollkeyany();
+    while (keyCode != 0) {
+      if (keyCode == 'q' || keyCode == 'Q') {
+        my.quit = true;
+      } else if (keyCode == 'p' || keyCode == 'P') {
+        pauseTriggered = true;
+      } else if (keyCode == '-' || keyCode == '_') {
+        slowTriggered = true;
+      } else if (keyCode == '=' || keyCode == '+') {
+        fastTriggered = true;
+      } else if (keyCode == 'r' || keyCode == 'R') {
+        resetTriggered = true;
+      } else if (keyCode == 'f' || keyCode == 'F') {
+        flybyTriggered = true;
+      }
+      keyCode = pollkeyany();
+    }
+
+    if (pauseTriggered) {
+      my.orbitPaused = !my.orbitPaused;
+    }
+    if (slowTriggered) {
+      my.timeScale = my.timeScale - TimeScaleStep;
+      if (my.timeScale < MinTimeScale) my.timeScale = MinTimeScale;
+    }
+    if (fastTriggered) {
+      my.timeScale = my.timeScale + TimeScaleStep;
+      if (my.timeScale > MaxTimeScale) my.timeScale = MaxTimeScale;
+    }
+    if (resetTriggered) {
+      my.cameraPitch = InitialCameraPitch;
+      my.cameraDistance = InitialCameraDistance;
+      my.cameraLockActive = false;
+      my.resetCameraTarget();
+    }
+    if (flybyTriggered) {
+      my.startFlyby();
+    }
+  }
+
+  void updateSimulation() {
+    float baseDeltaTime = my.DeltaTime;
+    float simulationDeltaTime = baseDeltaTime * my.timeScale;
+    if (!my.orbitPaused) {
+      float deltaScale = simulationDeltaTime * TargetFPS;
+      updatePlanets(deltaScale);
+      updateAsteroids(deltaScale);
+      my.elapsedSeconds = my.elapsedSeconds + simulationDeltaTime;
+    }
+    if (my.flybyActive) {
+      my.updateFlyby(baseDeltaTime);
+    } else {
+      if (my.cameraLockActive) {
+        my.updateCameraLockTarget();
+        my.computeFlybyTarget(my.cameraLockPlanet);
+        my.cameraYaw = my.flybyTargetYaw;
+        my.cameraPitch = my.flybyTargetPitch;
+        my.cameraDistance = my.flybyTargetDistance;
+        my.cameraTargetX = my.flybyTargetPosX;
+        my.cameraTargetY = my.flybyTargetPosY;
+        my.cameraTargetZ = my.flybyTargetPosZ;
+        my.cameraYawVelocity = 0.0;
+      } else {
+        my.resetCameraTarget();
+        my.cameraYaw = my.cameraYaw + baseDeltaTime * my.cameraYawVelocity;
+        if (my.cameraYaw >= 360.0) my.cameraYaw = my.cameraYaw - 360.0;
+        if (my.cameraYaw < 0.0) my.cameraYaw = my.cameraYaw + 360.0;
+      }
+    }
+  }
+
+  void initApp() {
+    InitGraph3D(WindowWidth, WindowHeight, "Rea Inner Planets 3D", 24, 8);
+    bool gpuAccelerated = GLIsHardwareAccelerated();
+    if (gpuAccelerated) {
+      writeln("OpenGL acceleration: hardware (GPU).");
+    } else {
+      writeln("OpenGL acceleration: software fallback.");
+    }
+    GLViewport(0, 0, WindowWidth, WindowHeight);
+    GLSetSwapInterval(1);
+    setupLighting();
+
+    my.FrameDelay = trunc(1000 / TargetFPS);
+    my.DeltaTime = 1.0 / TargetFPS;
+
+    my.cameraYaw = 0.0;
+    my.cameraPitch = InitialCameraPitch;
+    my.cameraDistance = InitialCameraDistance;
+    my.cameraTargetX = 0.0;
+    my.cameraTargetY = 0.0;
+    my.cameraTargetZ = 0.0;
+    my.cameraYawVelocity = AutoOrbitSpeed;
+    my.orbitPaused = false;
+    my.timeScale = 1.0;
+    my.pauseKeyWasDown = false;
+    my.slowKeyWasDown = false;
+    my.fastKeyWasDown = false;
+    my.resetKeyWasDown = false;
+    my.flybyKeyWasDown = false;
+    my.flybyActive = false;
+    my.flybyInTransition = false;
+    my.flybyOrbiting = false;
+    my.flybyStage = 0;
+    my.flybyStepCount = 0;
+    my.flybyTimer = 0.0;
+    my.flybyTransitionDuration = FlybyTransitionSeconds;
+    my.flybyHoldDuration = FlybyHoldSeconds;
+    my.flybyCurrentPlanet = 0;
+    my.flybyCurrentMode = FlybyModeApproach;
+    my.flybyOrbitElapsed = 0.0;
+    my.flybyOrbitDuration = FlybyOrbitSeconds;
+    my.flybyOrbitBaseYaw = 0.0;
+    my.flybyOrbitBasePitch = InitialCameraPitch;
+    my.flybyOrbitBaseDistance = InitialCameraDistance;
+    my.quit = false;
+    my.elapsedSeconds = 0.0;
+    my.nextMonthAnnouncement = 1;
+    earthMonths = 0.0;
+    my.hasEarthMoon = false;
+    my.hasJupiterMoons = false;
+
+    my.cameraLockActive = false;
+    my.cameraLockPlanet = 0;
+
+    randomize();
+    initFlybySequence();
+    initPlanets();
+    initAsteroids();
+    initStars();
+  }
+
+  void run() {
+    initApp();
+    writeln("Inner solar system 3D simulation running. Press Q to quit, P to pause/resume, -/= to adjust speed, F for a planet flyby.");
+    while (!my.quit) {
+      if (QuitRequested()) {
+        my.quit = true;
+        break;
+      }
+      handleInput();
+      updateSimulation();
+      drawScene();
+      GraphLoop(my.FrameDelay);
+    }
+    CloseGraph3D();
+    writeln("Simulation finished.");
+  }
+}
+
+SolarSystemApp3D app = new SolarSystemApp3D();
+app.run();

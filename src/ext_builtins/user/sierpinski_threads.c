@@ -4,6 +4,7 @@
 #include "Pascal/globals.h"
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -19,6 +20,29 @@ typedef struct {
 } SierpinskiWorkerTask;
 
 static pthread_mutex_t gSierpinskiMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t gSierpinskiStartMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gSierpinskiStartCond = PTHREAD_COND_INITIALIZER;
+static int gSierpinskiPendingWorkers = 0;
+static bool gSierpinskiWorkersReleased = false;
+
+static void sierpinskiWorkerAwaitRelease(void) {
+    pthread_mutex_lock(&gSierpinskiStartMutex);
+    while (!gSierpinskiWorkersReleased) {
+        pthread_cond_wait(&gSierpinskiStartCond, &gSierpinskiStartMutex);
+    }
+    pthread_mutex_unlock(&gSierpinskiStartMutex);
+}
+
+static void sierpinskiWorkerFinished(void) {
+    pthread_mutex_lock(&gSierpinskiStartMutex);
+    if (gSierpinskiPendingWorkers > 0) {
+        gSierpinskiPendingWorkers--;
+        if (gSierpinskiPendingWorkers == 0) {
+            gSierpinskiWorkersReleased = false;
+        }
+    }
+    pthread_mutex_unlock(&gSierpinskiStartMutex);
+}
 
 static void sierpinskiDrawPoint(VM *vm, int x, int y, char drawChar) {
     if (!vm) {
@@ -78,6 +102,8 @@ static void sierpinskiThreadEntry(VM *threadVm, void *user_data) {
         return;
     }
 
+    sierpinskiWorkerAwaitRelease();
+
     int level = task->level >= 0 ? task->level : 0;
     sierpinskiDrawRecursive(threadVm,
                             task->x1,
@@ -88,6 +114,8 @@ static void sierpinskiThreadEntry(VM *threadVm, void *user_data) {
                             task->y3,
                             level,
                             task->drawChar);
+
+    sierpinskiWorkerFinished();
 }
 
 static void sierpinskiThreadCleanup(void *user_data) {
@@ -138,16 +166,49 @@ Value vmBuiltinSierpinskiSpawnWorker(VM *vm, int arg_count, Value *args) {
     task->level = (int)AS_INTEGER(args[6]);
     task->drawChar = (arg_count == 8) ? coerceDrawChar(&args[7]) : '+';
 
-    int id = vmSpawnCallbackThread(vm, sierpinskiThreadEntry, task, sierpinskiThreadCleanup);
+    VM *targetVm = vm;
+    if (targetVm && targetVm->threadOwner) {
+        targetVm = targetVm->threadOwner;
+    }
+
+    pthread_mutex_lock(&gSierpinskiStartMutex);
+    if (gSierpinskiPendingWorkers == 0) {
+        gSierpinskiWorkersReleased = false;
+    }
+    pthread_mutex_unlock(&gSierpinskiStartMutex);
+
+    int id = vmSpawnCallbackThread(targetVm, sierpinskiThreadEntry, task, sierpinskiThreadCleanup);
     if (id < 0) {
         runtimeError(vm, "SierpinskiSpawnWorker failed to spawn thread.");
         return makeInt(-1);
     }
 
+    pthread_mutex_lock(&gSierpinskiStartMutex);
+    gSierpinskiPendingWorkers++;
+    pthread_mutex_unlock(&gSierpinskiStartMutex);
+
     return makeInt(id);
+}
+
+Value vmBuiltinSierpinskiReleaseWorkers(VM *vm, int arg_count, Value *args) {
+    (void)args;
+
+    if (arg_count != 0) {
+        runtimeError(vm, "SierpinskiReleaseWorkers expects no arguments.");
+        return makeVoid();
+    }
+
+    pthread_mutex_lock(&gSierpinskiStartMutex);
+    gSierpinskiWorkersReleased = true;
+    pthread_cond_broadcast(&gSierpinskiStartCond);
+    pthread_mutex_unlock(&gSierpinskiStartMutex);
+
+    return makeVoid();
 }
 
 void registerSierpinskiBuiltins(void) {
     registerVmBuiltin("SierpinskiSpawnWorker", vmBuiltinSierpinskiSpawnWorker,
                       BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("SierpinskiReleaseWorkers", vmBuiltinSierpinskiReleaseWorkers,
+                      BUILTIN_TYPE_PROCEDURE, NULL);
 }

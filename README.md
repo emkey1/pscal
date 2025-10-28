@@ -39,7 +39,7 @@ sudo apt-get install build-essential cmake libcurl4-openssl-dev \
 git clone https://github.com/emkey1/pscal.git
 cd pscal
 mkdir build && cd build
-cmake ..            # add -DSDL=ON to enable SDL support, add -Drelease=on to enable SDL and all possible extended builtins 
+cmake ..            # add -DSDL=ON to enable SDL support, add -DRELEASE_BUILD=ON to append _REL and keep optional extended builtins enabled
 make
 ```
 
@@ -59,8 +59,12 @@ cmake -DSDL=OFF ..
 After building, run the regression suite:
 
 ```sh
-cd Tests;./run_all_tests
+./Tests/run_all_tests
 ```
+
+The harness auto-selects a writable `TMPDIR` so it can be launched from any
+working directory. Export `RUN_NET_TESTS=1` or `RUN_SDL=1` when you want to
+exercise network or graphics fixtures.
 
 - Headless defaults: when SDL is enabled at build time, the test runners default to dummy SDL drivers in headless/CI environments to avoid GUI requirements and noise. SDL-dependent tests are skipped in this mode.
 - Force SDL tests: to exercise windowed graphics and input, run with a real video/audio driver and set `RUN_SDL=1`:
@@ -105,10 +109,9 @@ to launch allow-listed VM builtins on worker threads with
 `ThreadSpawnBuiltin`/`WaitForThread`/`ThreadGetResult`. The script resolves
 `localhost` on a background worker, joins both the DNS lookup and a timer, and
 prints the stored result via the new helpers. For a fuller tour, run
-`Examples/exsh/threading_showcase` to see `ThreadPoolSubmit`,
-`ThreadSetName`/`ThreadLookup`, the alternate `ThreadGetResult(..., true)`
-path, and a `ThreadStats` snapshot; set `THREAD_SHOWCASE_DELAY_MS` to tweak the
-queued delay.
+`Examples/exsh/parallel-check github.com example.com` to queue DNS lookups in
+parallel, tag workers with `ThreadSetName`, and clear cached statuses via
+`ThreadGetResult(..., true)` before reporting the pass/fail summary.
 
 ## Tiny language front end (Written in Python)
 

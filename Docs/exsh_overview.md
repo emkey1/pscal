@@ -166,6 +166,32 @@ category/group/function listing used by other front ends.【F:src/shell/main.c�
 Available categories include math, system, SQLite, graphics, yyjson, and other
 optional modules controlled by the `-DENABLE_EXT_BUILTIN_*` CMake flags.【F:Docs/extended_builtins.md†L15-L44】
 
+## Worker threads and builtin orchestration
+
+`ThreadSpawnBuiltin` lets shell scripts queue allow-listed VM builtins—such as
+`dnslookup`, the asynchronous HTTP helpers, and `delay`—onto the shared worker
+pool. Pass either the builtin name or numeric id followed by any arguments; the
+call returns a thread handle. Pair it with `WaitForThread` to block until the
+worker finishes and surface its status through `EXSH_LAST_STATUS`, or call
+`ThreadGetResult(handle, true)` to read and immediately clear any cached
+payload/status pair so the slot can be reused.【F:Examples/exsh/threading_demo†L1-L30】
+
+`ThreadPoolSubmit` exposes the same interface but marks the call as
+submit-only so interactive scripts can continue processing foreground commands.
+Use `ThreadSetName` to attach descriptive labels to workers and
+`ThreadLookup("label")` to map those names back to handles from other parts of
+the script. `ThreadPause`, `ThreadResume`, and `ThreadCancel` expose cooperative
+control over long-running assignments, while `ThreadStats` produces a JSON-ready
+snapshot of pool usage for dashboards and logs.【F:src/backend_ast/builtin.c†L4930-L5794】
+
+The bundled examples demonstrate these helpers in practice:
+
+- `Examples/exsh/threading_demo` runs a DNS lookup alongside a timer and prints
+  the stored result.
+- `Examples/exsh/parallel-check` scales the pattern across an arbitrary host
+  list, tagging each slot via `ThreadSetName` before reporting success and
+  failure counts.
+
 ## Grammar coverage
 
 The parser now accepts the broader POSIX grammar expected by automation-heavy

@@ -1,33 +1,115 @@
 #!/usr/bin/env pascal
 program HttpAsyncDemo;
 
+uses SysUtils;
+
+function ResolveTempDir: string;
+var
+  candidate: string;
+begin
+  candidate := GetEnv('TMPDIR');
+  candidate := candidate + '';
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TEMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetCurrentDir();
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('PWD');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('HOME');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+    candidate := '/tmp';
+  ResolveTempDir := candidate;
+end;
+
 var s, id, code: integer;
     ms: mstream;
-    cwd, url, line: string;
+    workDir, srcPath, dstPath, url, line: string;
     f: text;
+
+function NormalizeForUrl(const path: string): string;
+var
+  i: integer;
+  tmp: string;
 begin
+  tmp := path;
+  for i := 1 to Length(tmp) do
+  begin
+    if tmp[i] = '\' then
+      tmp[i] := '/';
+  end;
+  NormalizeForUrl := tmp;
+end;
+
+function AppendTrailingSlash(const path: string): string;
+var
+  tmp: string;
+  lastChar: char;
+begin
+  tmp := path + '';
+  if tmp = '' then
+  begin
+    AppendTrailingSlash := '';
+    exit;
+  end;
+  lastChar := tmp[Length(tmp)];
+  if (lastChar <> '/') and (lastChar <> '\') then
+    AppendTrailingSlash := tmp + '/'
+  else
+    AppendTrailingSlash := tmp;
+end;
+begin
+  workDir := AppendTrailingSlash(ResolveTempDir);
+  srcPath := workDir + 'http_async_src.txt';
+  dstPath := workDir + 'http_async_dst.txt';
+
   { Create local file to fetch via file:// }
-  assign(f, 'async_src.txt');
+  assign(f, srcPath);
   rewrite(f);
   writeln(f, 'HelloAsync');
   close(f);
 
-  cwd := GetEnv('PWD');
-  url := 'file://' + cwd + '/async_src.txt';
+  url := 'file://' + NormalizeForUrl(srcPath);
 
   s := HttpSession();
-  id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'async_dst.txt');
+  id := HttpRequestAsyncToFile(s, 'GET', url, nil, dstPath);
   while HttpIsDone(id) = 0 do Delay(10);
 
   ms := mstreamcreate();
   code := HttpAwait(id, ms);
   writeln('Status: ', code);
 
-  assign(f, 'async_dst.txt');
+  assign(f, dstPath);
   reset(f); readln(f, line); close(f);
   writeln('File: ', line);
 
   mstreamfree(ms);
   HttpClose(s);
+  if FileExists(dstPath) then
+  begin
+    assign(f, dstPath);
+    erase(f);
+  end;
+  if FileExists(srcPath) then
+  begin
+    assign(f, srcPath);
+    erase(f);
+  end;
 end.
-

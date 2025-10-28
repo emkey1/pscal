@@ -24,7 +24,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0036    | ALLOC_OBJECT        3 (fields)
 0038    | DUP
 0039    | CONSTANT            6 '42'
-0041    | CALL_USER_PROC       7 'child' @0022 (2 args)
+0041    | CALL_USER_PROC       7 'child.child' @0022 (2 args)
 0045    | SET_GLOBAL          4 'c'
 0047    4 CONSTANT            8 '1'
 0049    | GET_GLOBAL          4 'c'
@@ -40,7 +40,7 @@ Constants (10):\n  0000: STR   "myself"
   0004: STR   "c"
   0005: STR   "Child"
   0006: INT   42
-  0007: STR   "child"
+  0007: STR   "child.child"
   0008: INT   1
   0009: STR   "write"
 

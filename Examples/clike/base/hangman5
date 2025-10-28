@@ -103,9 +103,10 @@ void show_guesses_bar(int wrong, int max_wrong) {
     printf(" [%d/%d]", remaining, max_wrong);
 }
 
-void sort_string(str s) {
+void sort_string(str* sp) {
     int i, j, len;
     char tmp;
+    str s = *sp;
     len = strlen(s);
     i = 1;
     while (i <= len) {
@@ -120,6 +121,7 @@ void sort_string(str s) {
         }
         i++;
     }
+    *sp = s;
 }
 
 struct WordNode {
@@ -310,7 +312,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
             continue;
         }
         guessed = guessed + ch;
-        sort_string(guessed);
+        sort_string(&guessed);
         found = 0; len = strlen(secret); i = 1;
         while (i <= len) { if (secret[i] == ch) { so_far[i] = ch; found = 1; } i++; }
         if (!found) { wrong++; }

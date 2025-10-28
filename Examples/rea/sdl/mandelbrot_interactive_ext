@@ -25,7 +25,6 @@ str resolveFontPath() {
 class MandelbrotApp {
   const int Width = 1024;
   const int Height = 768;
-  const int MaxIterations = 100;
   const int BytesPerPixel = 4;
   const int ScreenUpdateInterval = 1;
   const int UpdateQuantum = 4;
@@ -58,6 +57,37 @@ class MandelbrotApp {
   int tids[ThreadCount];
   int lastUpdatedRows;
   int pollCounter;
+  int baseIterations;
+  int iterationStep;
+  int maxIterationCap;
+  int currentIterations;
+  double initialSpanRe;
+
+  str renderStatusLabel() {
+    return "Rendering... (max " + inttostr(myself.currentIterations) + ")";
+  }
+
+  void updateIterationLimit() {
+    double baseSpan = myself.initialSpanRe;
+    double span = myself.maxRe - myself.minRe;
+    int zoomSteps = 0;
+    if (baseSpan <= 0.0) { baseSpan = span; }
+    if (span <= 0.0) { span = baseSpan; }
+    if (baseSpan > 0.0 && span > 0.0) {
+      double ratio = baseSpan / span;
+      if (ratio > 1.0) {
+        while (ratio >= 2.0 && (myself.baseIterations + (zoomSteps + 1) * myself.iterationStep) <= myself.maxIterationCap) {
+          zoomSteps = zoomSteps + 1;
+          ratio = ratio / 2.0;
+        }
+      }
+    }
+    if (zoomSteps < 0) zoomSteps = 0;
+    myself.currentIterations = myself.baseIterations + zoomSteps * myself.iterationStep;
+    if (myself.currentIterations > myself.maxIterationCap) {
+      myself.currentIterations = myself.maxIterationCap;
+    }
+  }
 
   void init() {
     myself.minRe = -2.0;
@@ -80,6 +110,13 @@ class MandelbrotApp {
     for (i = 0; i < myself.ThreadCount; i = i + 1) { myself.tids[i] = -1; }
     myself.lastUpdatedRows = 0;
     myself.pollCounter = 0;
+    myself.baseIterations = 100;
+    myself.iterationStep = 50;
+    myself.maxIterationCap = 1000;
+    myself.currentIterations = myself.baseIterations;
+    myself.initialSpanRe = myself.maxRe - myself.minRe;
+    if (myself.initialSpanRe <= 0.0) { myself.initialSpanRe = 1.0; }
+    myself.updateIterationLimit();
   }
 
   int getQuit() {
@@ -101,11 +138,11 @@ class MandelbrotApp {
     double c_im;
     for (y = startY; y <= endY && !myself.getQuit() && !myself.getCancel(); y = y + 1) {
       c_im = myself.maxIm - y * myself.imFactor;
-      mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.MaxIterations, myself.Width - 1, row);
+      mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.currentIterations, myself.Width - 1, row);
       idx = y * myself.Width * myself.BytesPerPixel;
       for (x = 0; x < myself.Width; x = x + 1) {
         n = row[x];
-        if (n == myself.MaxIterations) { R = G = B = 0; }
+        if (n == myself.currentIterations) { R = G = B = 0; }
         else { R = (n * 5) % 256; G = (n * 7 + 85) % 256; B = (n * 11 + 170) % 256; }
         myself.pixels[idx + 0] = char(R);
         myself.pixels[idx + 1] = char(G);
@@ -188,14 +225,14 @@ class MandelbrotApp {
     shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
     if (shouldUpdate) {
       updatetexture(myself.textureID, myself.pixels);
-      cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
+      cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
       myself.lastUpdatedRows = doneCount;
     }
     // Finalize when all rows are done or cancelled
     if ((doneCount == myself.Height) || myself.getCancel()) {
       if (doneCount > myself.lastUpdatedRows) {
         updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, "Rendering..."); updatescreen();
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
         myself.lastUpdatedRows = doneCount;
       }
       myself.finishThreads();
@@ -215,11 +252,13 @@ class MandelbrotApp {
     myself.maxRe = centerRe + widthRe / 2.0;
     myself.minIm = centerIm - heightIm / 2.0;
     myself.maxIm = centerIm + heightIm / 2.0;
+    myself.updateIterationLimit();
   }
 
   bool handleInput() {
     graphloop(0);
     bool changed = false;
+    bool keyboardChanged = false;
     int key = pollkeyany();
     while (key != 0) {
       if (key == 'q' || key == 'Q') {
@@ -230,10 +269,10 @@ class MandelbrotApp {
       double heightIm = (myself.maxIm - myself.minIm);
       double dx = widthRe * 0.5;
       double dy = heightIm * 0.5;
-      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; changed = true; }
-      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; changed = true; }
-      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; }
-      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; }
+      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; keyboardChanged = true; }
       key = pollkeyany();
     }
     int x = 0;
@@ -260,6 +299,9 @@ class MandelbrotApp {
       changed = true;
     }
     myself.prevButtons = b;
+    if (keyboardChanged) {
+      myself.updateIterationLimit();
+    }
     return changed;
   }
 
@@ -283,7 +325,7 @@ class MandelbrotApp {
         myself.setCancel(false);
         needRender = true;
         updatetexture(myself.textureID, myself.pixels);
-        cleardevice(); rendercopy(myself.textureID); updatescreen();
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
       }
     }
     if (myself.computing) {

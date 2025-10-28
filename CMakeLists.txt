@@ -808,39 +808,46 @@ endif()
 # ---- Examples ----
 add_subdirectory(Examples)
 
-set(PSCAL_CONFIGURED_EXAMPLES
-    Examples/pascal/base/hangman
-    Examples/pascal/base/hangman2
-    Examples/pascal/base/hangman3
-    Examples/pascal/base/hangman4
-    Examples/pascal/base/hangman5
-    Examples/pascal/base/weather
-    Examples/pascal/base/weather_json
-    Examples/pascal/sdl/mando
-    Examples/pascal/sdl/mando_Linux
-    Examples/pascal/sdl/SoundSimplePong
-    Examples/pascal/sdl/FireWorks
-    Examples/clike/base/hangman5
-    Examples/clike/base/simple_web_server
-    Examples/clike/sdl/mandelbrot_interactive
-    Examples/clike/sdl/spacegame
-    Examples/rea/base/hangman5
-    Examples/rea/base/openweather_forecast
-    Examples/rea/sdl/planets
-    Examples/rea/sdl/planets_inner
-    Examples/rea/sdl/planets_earth
-    Examples/rea/sdl/block_game
-    Examples/rea/sdl/mandelbrot_interactive
-    Examples/rea/sdl/mandelbrot_interactive_ext)
+file(GLOB_RECURSE PSCAL_ALL_EXAMPLE_FILES
+    LIST_DIRECTORIES false
+    RELATIVE "${CMAKE_SOURCE_DIR}"
+    "Examples/*")
+
+set(PSCAL_CONFIGURED_EXAMPLES)
+foreach(example IN LISTS PSCAL_ALL_EXAMPLE_FILES)
+    unset(PSCAL_CONFIG_MARKER)
+    file(STRINGS "${CMAKE_SOURCE_DIR}/${example}" PSCAL_CONFIG_MARKER
+        REGEX "@PSCAL_INSTALL_ROOT")
+    if(PSCAL_CONFIG_MARKER)
+        list(APPEND PSCAL_CONFIGURED_EXAMPLES "${example}")
+    endif()
+endforeach()
+
 list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
+list(SORT PSCAL_CONFIGURED_EXAMPLES)
 set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
+set(PSCAL_CONFIGURE_EXAMPLE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/ConfigureExampleFile.cmake")
+set(PSCAL_CONFIGURED_EXAMPLE_OUTPUTS)
 foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
     set(src "${CMAKE_SOURCE_DIR}/${example}")
     set(dst "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}")
     get_filename_component(dst_dir "${dst}" DIRECTORY)
-    file(MAKE_DIRECTORY "${dst_dir}")
-    configure_file("${src}" "${dst}" @ONLY)
+    add_custom_command(
+        OUTPUT "${dst}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_dir}"
+        COMMAND ${CMAKE_COMMAND}
+            -DINPUT_FILE=${src}
+            -DOUTPUT_FILE=${dst}
+            -DPSCAL_INSTALL_ROOT_RESOLVED=${PSCAL_INSTALL_ROOT_RESOLVED}
+            -P ${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}
+        DEPENDS "${src}" "${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}"
+        COMMENT "Configuring example ${example}"
+        VERBATIM
+    )
+    list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
 endforeach()
+add_custom_target(configured_examples ALL
+    DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
 
 # ---- optional install ----
 include(GNUInstallDirs)

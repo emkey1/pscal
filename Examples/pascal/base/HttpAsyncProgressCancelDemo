@@ -1,26 +1,98 @@
 #!/usr/bin/env pascal
 program HttpAsyncProgressCancelDemo;
 
-var s, id, code: integer;
-    ms: mstream;
-    cwd, url: string;
-    f: text;
-    i: integer;
+uses SysUtils;
+
+function ResolveTempDir: string;
+var
+  candidate: string;
 begin
-  { Create a moderately large file (~1MB) }
-  assign(f, 'big_src.txt');
+  candidate := GetEnv('TMPDIR');
+  candidate := candidate + '';
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('TEMP');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetCurrentDir();
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('PWD');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+  begin
+    candidate := GetEnv('HOME');
+    candidate := candidate + '';
+  end;
+  if candidate = '' then
+    candidate := '/tmp';
+  ResolveTempDir := candidate;
+end;
+
+function NormalizeForUrl(const path: string): string;
+var
+  i: integer;
+  tmp: string;
+begin
+  tmp := path;
+  for i := 1 to Length(tmp) do
+  begin
+    if tmp[i] = '\\' then
+      tmp[i] := '/';
+  end;
+  NormalizeForUrl := tmp;
+end;
+
+function AppendTrailingSlash(const path: string): string;
+var
+  tmp: string;
+  lastChar: char;
+begin
+  tmp := path + '';
+  if tmp = '' then
+    AppendTrailingSlash := ''
+  else
+  begin
+    lastChar := tmp[Length(tmp)];
+    if (lastChar <> '/') and (lastChar <> '\\') then
+      tmp := tmp + '/';
+    AppendTrailingSlash := tmp;
+  end;
+end;
+
+var
+  s, id, code: integer;
+  ms: mstream;
+  baseDir, srcPath, dstPath, url: string;
+  f: text;
+  i: integer;
+begin
+  baseDir := AppendTrailingSlash(ResolveTempDir);
+  srcPath := baseDir + 'http_async_big_src.txt';
+  dstPath := baseDir + 'http_async_big_dst.txt';
+
+  assign(f, srcPath);
   rewrite(f);
-  for i := 1 to 65536 do writeln(f, 'xxxxxxxxxxxxxxxx');  { 16 bytes per line }
+  for i := 1 to 65536 do
+    writeln(f, 'xxxxxxxxxxxxxxxx');
   close(f);
 
-  cwd := GetEnv('PWD');
-  url := 'file://' + cwd + '/big_src.txt';
+  url := 'file://' + NormalizeForUrl(srcPath);
 
   s := HttpSession();
-  HttpSetOption(s, 'max_recv_speed', 500000); { throttle to ~500 KB/s so cancellation can trigger }
-  id := HttpRequestAsyncToFile(s, 'GET', url, nil, 'big_dst.txt');
+  HttpSetOption(s, 'max_recv_speed', 500000);
+  id := HttpRequestAsyncToFile(s, 'GET', url, nil, dstPath);
 
-  { Poll progress and cancel when some bytes have arrived }
   while HttpIsDone(id) = 0 do
   begin
     if HttpGetAsyncProgress(id) > 50000 then
@@ -33,10 +105,21 @@ begin
 
   ms := mstreamcreate();
   code := HttpTryAwait(id, ms);
-  if code = -2 then code := HttpAwait(id, ms);
+  if code = -2 then
+    code := HttpAwait(id, ms);
   writeln('Final status: ', code, ' (expect -1 when canceled)');
 
   mstreamfree(ms);
   HttpClose(s);
-end.
 
+  if FileExists(dstPath) then
+  begin
+    assign(f, dstPath);
+    erase(f);
+  end;
+  if FileExists(srcPath) then
+  begin
+    assign(f, srcPath);
+    erase(f);
+  end;
+end.

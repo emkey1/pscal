@@ -443,9 +443,10 @@ static Value vmBuiltinToBool(VM* vm, int arg_count, Value* args) {
 }
 
 // The new dispatch table for the VM - MUST be defined before the function that uses it
-// This list MUST BE SORTED ALPHABETICALLY BY NAME (lowercase).
-// SDL/graphics builtins use NULL placeholders; registerGraphicsBuiltins() overrides them
-// when SDL support is enabled so legacy builtin IDs remain stable.
+// Legacy entries remain sorted alphabetically by name (lowercase). Append new builtins above
+// the placeholder block at the end of the array to avoid shifting established builtin IDs.
+// SDL/graphics builtins use NULL placeholders; registerGraphicsBuiltins() overrides them when
+// SDL support is enabled so legacy builtin IDs remain stable.
 static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"abs", vmBuiltinAbs},
     {"apiReceive", vmBuiltinApiReceive},
@@ -705,6 +706,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadsetname", vmBuiltinThreadSetName},
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
+    {"atan2", vmBuiltinAtan2},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -3010,6 +3012,19 @@ Value vmBuiltinTan(VM* vm, int arg_count, Value* args) {
     Value arg = args[0];
     double x = IS_INTLIKE(arg) ? (double)AS_INTEGER(arg) : (double)AS_REAL(arg);
     return makeReal(tan(x));
+}
+
+Value vmBuiltinAtan2(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "atan2 expects 2 arguments.");
+        return makeReal(0.0);
+    }
+
+    Value yArg = args[0];
+    Value xArg = args[1];
+    double y = IS_INTLIKE(yArg) ? (double)AS_INTEGER(yArg) : (double)AS_REAL(yArg);
+    double x = IS_INTLIKE(xArg) ? (double)AS_INTEGER(xArg) : (double)AS_REAL(xArg);
+    return makeReal(atan2(y, x));
 }
 
 Value vmBuiltinArctan(VM* vm, int arg_count, Value* args) {
@@ -6248,6 +6263,8 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcSin", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcTan", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("ArcTan2", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("atan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Beep", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Byte", AST_FUNCTION_DECL, NULL);

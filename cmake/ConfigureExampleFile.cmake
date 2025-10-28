@@ -1,0 +1,11 @@
+if(NOT DEFINED INPUT_FILE)
+    message(FATAL_ERROR "INPUT_FILE is not defined")
+endif()
+if(NOT DEFINED OUTPUT_FILE)
+    message(FATAL_ERROR "OUTPUT_FILE is not defined")
+endif()
+if(NOT DEFINED PSCAL_INSTALL_ROOT_RESOLVED)
+    message(FATAL_ERROR "PSCAL_INSTALL_ROOT_RESOLVED is not defined")
+endif()
+
+configure_file("${INPUT_FILE}" "${OUTPUT_FILE}" @ONLY)

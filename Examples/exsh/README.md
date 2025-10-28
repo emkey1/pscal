@@ -109,28 +109,45 @@ worker's return value and success bit. The sample script spawns a DNS lookup and
 an asynchronous delay, waits for both handles, and prints the resolved IP and
 status flag.
 
-## `threading_showcase`
+## `parallel-check`
 
 ```sh
 #!/usr/bin/env exsh
+set -o pipefail
+
 tid=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$host")
-builtin ThreadSetName "$tid" "str:dns:$host"
+builtin ThreadSetName "$tid" "str:check:$host"
 WaitForThread "$tid"
-result=$(builtin ThreadGetResult "$tid" bool:true)
-stats=$(builtin ThreadStats)
+builtin ThreadGetResult "$tid" bool:true >/dev/null 2>&1 || true
 ```
 
-`threading_showcase` expands on the basic demo by exercising every worker-pool
-builtin in one run. It spawns multiple DNS lookups, queues a delay via
-`ThreadPoolSubmit`, assigns human-readable names with `ThreadSetName`, and uses
-`ThreadLookup` to show how the names map back to thread handles. After the
-workers finish, the script demonstrates both result-collection styles (`get`
-followed by `status` and the one-shot `get(..., true)`) before dumping the pool
-snapshot provided by `ThreadStats`. Each worker now prints a
-`threading_showcase:result:` line describing the join status, cached success
-flag, and collected payload so the transcript records the full lifecycle for
-every thread before the cached metadata is cleared for reuse. Set
-`THREAD_SHOWCASE_DELAY_MS=<millis>` to adjust the queued delay.
+`parallel-check` queues DNS lookups for each host provided on the command line
+and reports whether they resolved. It tags every worker with `ThreadSetName`
+for easier logging, waits on each handle, and releases the cached status/value
+pair with `ThreadGetResult(handle, true)` (the `bool:true` argument) before
+printing the summary. Run `build/bin/exsh Examples/exsh/parallel-check \
+github.com example.com` to see the concurrent transcript.
+
+## `sierpinski`
+
+```sh
+#!/usr/bin/env exsh
+builtin ClrScr
+builtin HideCursor
+# ... see file for the full sequential renderer ...
+```
+
+The sequential variant renders the same fractal without relying on worker
+threads. It shares the threaded demo's helpers for discovering the terminal
+size, hiding the cursor, and recursively drawing the triangle, but runs all of
+the recursion inline so it works on builds that omit the extended worker pool.
+You can customise the recursion depth and drawing character via
+`SIERPINSKI_LEVEL` and `SIERPINSKI_CHAR`:
+
+```sh
+SIERPINSKI_LEVEL=9 SIERPINSKI_CHAR="#" build/bin/exsh \
+    Examples/exsh/sierpinski
+```
 
 ## `sierpinski_threads`
 

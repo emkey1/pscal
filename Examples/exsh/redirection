@@ -1,7 +1,9 @@
 #!/usr/bin/env exsh
+tmpdir="${TMPDIR:-/tmp}"
+tmpfile="$tmpdir/tmp_exsh_redirection.txt"
 echo "redirection:start"
-echo "alpha" > tmp_exsh_redirection.txt
-echo "beta" >> tmp_exsh_redirection.txt
-cat < tmp_exsh_redirection.txt
-rm -f tmp_exsh_redirection.txt
+echo "alpha" > "$tmpfile"
+echo "beta" >> "$tmpfile"
+cat < "$tmpfile"
+rm -f "$tmpfile"
 echo "redirection:end"

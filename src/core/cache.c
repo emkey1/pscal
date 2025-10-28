@@ -31,6 +31,12 @@ typedef struct {
     time_t mtime;
 } CacheCandidate;
 
+typedef struct {
+    const BytecodeChunk** items;
+    size_t count;
+    size_t capacity;
+} ChunkHashContext;
+
 static void fnv1aUpdate(uint64_t* hash, const void* data, size_t len) {
     if (!hash || !data) return;
     const unsigned char* bytes = (const unsigned char*)data;
@@ -52,31 +58,130 @@ static void fnv1aUpdateUInt64(uint64_t* hash, uint64_t value) {
     fnv1aUpdate(hash, &value, sizeof(value));
 }
 
-static uint64_t computePathHash(const char* source_path) {
-    uint64_t hash = FNV1A64_OFFSET;
-    if (!source_path || !source_path[0]) {
-        fnv1aUpdate(&hash, "<none>", 6);
-        return hash;
+static bool hasPathPrefix(const char* path, const char* prefix) {
+    if (!path || !prefix) {
+        return false;
     }
-
-    const char* path_for_hash = source_path;
+    size_t prefix_len = strlen(prefix);
+    while (prefix_len > 0) {
 #ifndef _WIN32
-    char* resolved = realpath(source_path, NULL);
-    if (resolved) {
-        path_for_hash = resolved;
-    }
+        if (prefix[prefix_len - 1] != '/') {
+            break;
+        }
 #else
-    char resolved[_MAX_PATH];
-    if (_fullpath(resolved, source_path, _MAX_PATH)) {
-        path_for_hash = resolved;
-    }
+        if (prefix[prefix_len - 1] != '/' && prefix[prefix_len - 1] != '\\') {
+            break;
+        }
 #endif
+        prefix_len--;
+    }
+    if (prefix_len == 0) {
+        return false;
+    }
+    if (strncmp(path, prefix, prefix_len) != 0) {
+        return false;
+    }
+#ifndef _WIN32
+    char next = path[prefix_len];
+    return next == '/' || next == '\0';
+#else
+    char next = path[prefix_len];
+    return next == '/' || next == '\\' || next == '\0';
+#endif
+}
 
-    fnv1aUpdate(&hash, path_for_hash, strlen(path_for_hash));
+static bool isLikelyTemporaryPath(const char* path) {
+    if (!path || !path[0]) {
+        return false;
+    }
+
+    const char* candidates[8];
+    size_t candidate_count = 0;
+
+    const char* env_tmp = getenv("TMPDIR");
+    if (env_tmp && env_tmp[0]) {
+        candidates[candidate_count++] = env_tmp;
+    }
+    env_tmp = getenv("TEMP");
+    if (env_tmp && env_tmp[0]) {
+        candidates[candidate_count++] = env_tmp;
+    }
+    env_tmp = getenv("TMP");
+    if (env_tmp && env_tmp[0]) {
+        bool duplicate = false;
+        for (size_t i = 0; i < candidate_count; ++i) {
+            if (strcmp(candidates[i], env_tmp) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            candidates[candidate_count++] = env_tmp;
+        }
+    }
 
 #ifndef _WIN32
-    if (resolved) {
-        free(resolved);
+    const char* defaults[] = { "/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp", "/dev/shm" };
+#else
+    const char* defaults[] = { "C\\Windows\\Temp", "C:/Windows/Temp", "C\\Temp", "C:/Temp" };
+#endif
+    for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); ++i) {
+        bool duplicate = false;
+        for (size_t j = 0; j < candidate_count; ++j) {
+            if (strcmp(candidates[j], defaults[i]) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            candidates[candidate_count++] = defaults[i];
+        }
+    }
+
+    for (size_t i = 0; i < candidate_count; ++i) {
+        if (hasPathPrefix(path, candidates[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t computePathHash(const char* source_path, const char* sanitized_base) {
+    uint64_t hash = FNV1A64_OFFSET;
+    const char* path_for_hash = NULL;
+
+    if (source_path && source_path[0]) {
+#ifndef _WIN32
+        char* resolved = realpath(source_path, NULL);
+        if (resolved) {
+            path_for_hash = resolved;
+        } else {
+            path_for_hash = source_path;
+        }
+#else
+        char resolved[_MAX_PATH];
+        if (_fullpath(resolved, source_path, _MAX_PATH)) {
+            path_for_hash = resolved;
+        } else {
+            path_for_hash = source_path;
+        }
+#endif
+    }
+
+    bool treat_as_temp = isLikelyTemporaryPath(path_for_hash);
+    if (!treat_as_temp && path_for_hash && path_for_hash[0]) {
+        fnv1aUpdate(&hash, path_for_hash, strlen(path_for_hash));
+    } else if (sanitized_base && sanitized_base[0]) {
+        fnv1aUpdate(&hash, sanitized_base, strlen(sanitized_base));
+    } else if (path_for_hash && path_for_hash[0]) {
+        fnv1aUpdate(&hash, path_for_hash, strlen(path_for_hash));
+    } else {
+        fnv1aUpdate(&hash, "<none>", 6);
+    }
+
+#ifndef _WIN32
+    if (path_for_hash && path_for_hash != source_path) {
+        free((void*)path_for_hash);
     }
 #endif
 
@@ -159,11 +264,75 @@ static bool readValue(FILE* f, Value* out);
 static void countProceduresRecursive(HashTable* table, int* count);
 static bool writeProcedureEntriesRecursive(FILE* f, HashTable* table);
 static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_version);
-static void hashValue(uint64_t* hash, const Value* v);
+static void hashValue(uint64_t* hash, const Value* v, ChunkHashContext* ctx);
+static uint64_t computeChunkHashInternal(const BytecodeChunk* chunk, ChunkHashContext* ctx);
+static bool chunkHashContextContains(const ChunkHashContext* ctx, const BytecodeChunk* chunk);
+static bool chunkHashContextPush(ChunkHashContext* ctx, const BytecodeChunk* chunk);
+static void chunkHashContextPop(ChunkHashContext* ctx);
 
 static uint64_t computeChunkHash(const BytecodeChunk* chunk) {
+    ChunkHashContext ctx = {0};
+    uint64_t hash = computeChunkHashInternal(chunk, &ctx);
+    free(ctx.items);
+    return hash;
+}
+
+static bool chunkHashContextContains(const ChunkHashContext* ctx, const BytecodeChunk* chunk) {
+    if (!ctx || !chunk || ctx->count == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < ctx->count; ++i) {
+        if (ctx->items[i] == chunk) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool chunkHashContextPush(ChunkHashContext* ctx, const BytecodeChunk* chunk) {
+    if (!ctx || !chunk) {
+        return true;
+    }
+    if (chunkHashContextContains(ctx, chunk)) {
+        return true;
+    }
+    if (ctx->count == ctx->capacity) {
+        size_t new_capacity = ctx->capacity ? ctx->capacity * 2 : 8;
+        const BytecodeChunk** new_items = (const BytecodeChunk**)realloc(ctx->items, new_capacity * sizeof(const BytecodeChunk*));
+        if (!new_items) {
+            return false;
+        }
+        ctx->items = new_items;
+        ctx->capacity = new_capacity;
+    }
+    ctx->items[ctx->count++] = chunk;
+    return true;
+}
+
+static void chunkHashContextPop(ChunkHashContext* ctx) {
+    if (!ctx || ctx->count == 0) {
+        return;
+    }
+    ctx->count--;
+}
+
+static uint64_t computeChunkHashInternal(const BytecodeChunk* chunk, ChunkHashContext* ctx) {
     uint64_t hash = FNV1A64_OFFSET;
-    if (!chunk) return hash;
+    if (!chunk) {
+        return hash;
+    }
+
+    if (chunkHashContextContains(ctx, chunk)) {
+        fnv1aUpdateUInt64(&hash, (uint64_t)(uintptr_t)chunk);
+        return hash;
+    }
+
+    bool pushed = chunkHashContextPush(ctx, chunk);
+    if (!pushed) {
+        fnv1aUpdateUInt64(&hash, (uint64_t)(uintptr_t)chunk);
+        return hash;
+    }
+
     fnv1aUpdateUInt32(&hash, chunk->version);
     fnv1aUpdateInt(&hash, chunk->count);
     if (chunk->code && chunk->count > 0) {
@@ -175,8 +344,12 @@ static uint64_t computeChunkHash(const BytecodeChunk* chunk) {
     }
     if (chunk->constants && chunk->constants_count > 0) {
         for (int i = 0; i < chunk->constants_count; ++i) {
-            hashValue(&hash, &chunk->constants[i]);
+            hashValue(&hash, &chunk->constants[i], ctx);
         }
+    }
+
+    if (ctx) {
+        chunkHashContextPop(ctx);
     }
     return hash;
 }
@@ -359,7 +532,7 @@ char* buildCachePath(const char* source_path, const char* compiler_id) {
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
 
-    uint64_t path_hash = computePathHash(source_path);
+    uint64_t path_hash = computePathHash(source_path, sanitized_base);
     char path_hex[17];
     snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
 
@@ -458,7 +631,7 @@ static bool writeSourcePath(FILE* f, const char* source_path) {
     return ok;
 }
 
-static bool verifySourcePath(FILE* f, const char* source_path) {
+static bool verifySourcePath(FILE* f, const char* source_path, bool strict) {
     long pos = ftell(f);
     int stored = 0;
     if (fread(&stored, sizeof(stored), 1, f) != 1) return false;
@@ -476,8 +649,12 @@ static bool verifySourcePath(FILE* f, const char* source_path) {
     const char* src = abs ? abs : source_path;
     bool match = (strcmp(buf, src) == 0);
     if (abs) free(abs);
+    if (!match && strict) {
+        free(buf);
+        return false;
+    }
     free(buf);
-    return match;
+    return true;
 }
 
 static void skipSourcePath(FILE* f) {
@@ -992,8 +1169,8 @@ static bool writePointerValue(FILE* f, const Value* v) {
     }
 
     ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
-    if (!compiled) {
-        return fwrite(&kind, sizeof(kind), 1, f) == 1;
+    if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
+        return false;
     }
 
     kind = 1;
@@ -1028,6 +1205,7 @@ static bool readPointerValue(FILE* f, Value* out) {
     if (!compiled) {
         return false;
     }
+    compiled->magic = SHELL_COMPILED_FUNCTION_MAGIC;
     initBytecodeChunk(&compiled->chunk);
 
     uint32_t version = 0;
@@ -1049,7 +1227,7 @@ static bool readPointerValue(FILE* f, Value* out) {
     return true;
 }
 
-static void hashValue(uint64_t* hash, const Value* v) {
+static void hashValue(uint64_t* hash, const Value* v, ChunkHashContext* ctx) {
     if (!hash) return;
     if (!v) {
         int marker = -1;
@@ -1129,12 +1307,26 @@ static void hashValue(uint64_t* hash, const Value* v) {
             }
             if (total > 0 && v->array_val) {
                 for (int i = 0; i < total; ++i) {
-                    hashValue(hash, &v->array_val[i]);
+                    hashValue(hash, &v->array_val[i], ctx);
                 }
             }
             break;
         }
-        case TYPE_POINTER:
+        case TYPE_POINTER: {
+            if (!v->ptr_val) {
+                fnv1aUpdateUInt64(hash, 0);
+                break;
+            }
+            ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
+            if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
+                fnv1aUpdateUInt64(hash, (uint64_t)(uintptr_t)v->ptr_val);
+                break;
+            }
+            fnv1aUpdateUInt32(hash, compiled->chunk.version);
+            uint64_t nested = computeChunkHashInternal(&compiled->chunk, ctx);
+            fnv1aUpdateUInt64(hash, nested);
+            break;
+        }
         case TYPE_FILE:
         case TYPE_MEMORYSTREAM:
         case TYPE_THREAD:
@@ -1404,6 +1596,97 @@ static bool appendEnclosingFixup(EnclosingFixup** fixups,
     return true;
 }
 
+static void ensureProcedureAlias(HashTable* table, const char* alias_name, Symbol* target) {
+    if (!table || !alias_name || !*alias_name || !target) {
+        return;
+    }
+
+    Symbol* existing = hashTableLookup(table, alias_name);
+    if (existing) {
+        if (existing == target) {
+            return;
+        }
+        if (existing->is_alias) {
+            existing->real_symbol = target;
+            existing->type = target->type;
+        }
+        return;
+    }
+
+    Symbol* alias = (Symbol*)calloc(1, sizeof(Symbol));
+    if (!alias) {
+        return;
+    }
+
+    alias->name = strdup(alias_name);
+    if (!alias->name) {
+        free(alias);
+        return;
+    }
+
+    alias->is_alias = true;
+    alias->real_symbol = target;
+    alias->type = target->type;
+    alias->type_def = NULL;
+    alias->value = NULL;
+
+    hashTableInsert(table, alias);
+}
+
+static void restoreConstructorAliases(HashTable* table) {
+    if (!table) {
+        return;
+    }
+
+    for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
+        for (Symbol* sym = table->buckets[bucket]; sym; sym = sym->next) {
+            const char* last_dot = NULL;
+            const char* method_name = NULL;
+            size_t prefix_len = 0;
+            char class_name_buf[MAX_SYMBOL_LENGTH];
+            const char* simple_start = NULL;
+            const char* simple_name = NULL;
+
+            if (!sym || !sym->name || sym->is_alias) {
+                continue;
+            }
+
+            last_dot = strrchr(sym->name, '.');
+            if (!last_dot || last_dot == sym->name) {
+                continue;
+            }
+
+            method_name = last_dot + 1;
+            if (!method_name || *method_name == '\0') {
+                continue;
+            }
+
+            prefix_len = (size_t)(last_dot - sym->name);
+            if (prefix_len == 0 || prefix_len >= MAX_SYMBOL_LENGTH) {
+                continue;
+            }
+
+            memcpy(class_name_buf, sym->name, prefix_len);
+            class_name_buf[prefix_len] = '\0';
+
+            simple_start = strrchr(class_name_buf, '.');
+            simple_name = simple_start ? simple_start + 1 : class_name_buf;
+            if (!simple_name || *simple_name == '\0') {
+                continue;
+            }
+
+            if (strcmp(method_name, simple_name) != 0) {
+                continue;
+            }
+
+            ensureProcedureAlias(table, simple_name, sym);
+            if (strcmp(class_name_buf, simple_name) != 0) {
+                ensureProcedureAlias(table, class_name_buf, sym);
+            }
+        }
+    }
+}
+
 static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_version) {
     EnclosingFixup* fixups = NULL;
     int fixup_count = 0;
@@ -1640,7 +1923,7 @@ bool loadBytecodeFromCache(const char* source_path,
 
     char source_hex[17];
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
-    uint64_t path_hash = computePathHash(source_path);
+    uint64_t path_hash = computePathHash(source_path, sanitized_base);
     char path_hex[17];
     snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
 
@@ -1743,7 +2026,7 @@ bool loadBytecodeFromCache(const char* source_path,
         }
 
         chunk->version = ver;
-        if (!verifySourcePath(f, source_path)) {
+        if (!verifySourcePath(f, source_path, strict)) {
             fclose(f);
             unlink(cache_path);
             continue;
@@ -1756,6 +2039,8 @@ bool loadBytecodeFromCache(const char* source_path,
         }
 
         fclose(f);
+
+        restoreConstructorAliases(procedure_table);
 
         ok = true;
     }
@@ -1929,6 +2214,10 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
         fclose(f);
     }
 
+    if (ok) {
+        restoreConstructorAliases(procedure_table);
+    }
+
     if (!ok) {
         for (int i = 0; i < read_consts; ++i) {
             freeValue(&chunk->constants[i]);
@@ -1982,7 +2271,7 @@ void saveBytecodeToCache(const char* source_path, const char* compiler_id, const
     snprintf(source_hex, sizeof(source_hex), "%016llx", (unsigned long long)source_hash);
     snprintf(combined_hex, sizeof(combined_hex), "%016llx", (unsigned long long)combined_hash);
 
-    uint64_t path_hash = computePathHash(source_path);
+    uint64_t path_hash = computePathHash(source_path, sanitized_base);
     char path_hex[17];
     snprintf(path_hex, sizeof(path_hex), "%016llx", (unsigned long long)path_hash);
 
