@@ -529,6 +529,95 @@ add({
 })
 
 add({
+    "id": "closure_return_function_runtime",
+    "name": "Capturing function can be returned",
+    "category": "closure_scope",
+    "description": "Returning a nested function that captures locals keeps its environment alive for later calls.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureReturnFunctionRuntime;
+
+        type
+          TAdder = function(delta: Integer): Integer;
+
+        function MakeAdder(start: Integer): TAdder;
+        var
+          total: Integer;
+
+          function Add(delta: Integer): Integer;
+          begin
+            total := total + delta;
+            Add := total;
+          end;
+
+        begin
+          total := start;
+          MakeAdder := Add;
+        end;
+
+        var
+          add: TAdder;
+
+        begin
+          add := MakeAdder(10);
+          writeln('first=', add(1));
+          writeln('second=', add(2));
+        end.
+    """,
+    "expected_stdout": """
+        first=11
+        second=13
+    """,
+})
+
+add({
+    "id": "closure_store_runtime",
+    "name": "Stored closure updates captured locals",
+    "category": "closure_scope",
+    "description": "Assigning a capturing nested procedure to a global variable keeps its captured locals alive across calls.",
+    "expect": "runtime_ok",
+    "code": """
+        program ClosureStoreRuntime;
+
+        type
+          TStep = procedure(amount: Integer);
+
+        var
+          saved: TStep;
+          mirror: Integer;
+
+        procedure Build(start: Integer);
+        var
+          total: Integer;
+
+          procedure Step(amount: Integer);
+          begin
+            total := total + amount;
+            mirror := total;
+          end;
+
+        begin
+          total := start;
+          saved := Step;
+          Step(0);
+        end;
+
+        begin
+          mirror := 0;
+          Build(5);
+          saved(2);
+          writeln('after_first=', mirror);
+          saved(3);
+          writeln('after_second=', mirror);
+        end.
+    """,
+    "expected_stdout": """
+        after_first=7
+        after_second=10
+    """,
+})
+
+add({
     "id": "closure_nested_capture",
     "name": "Nested closures capture multiple levels",
     "category": "closure_scope",

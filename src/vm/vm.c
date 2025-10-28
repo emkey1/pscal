@@ -3220,6 +3220,8 @@ static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_f
                            // If VM needs to know about them, another mechanism or flag is needed.
     sym->is_local_var = false;
     sym->is_inline = false;
+    sym->closure_captures = false;
+    sym->closure_escapes = false;
     sym->next = NULL;
     sym->enclosing = NULL;
     sym->upvalue_count = 0;

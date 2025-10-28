@@ -934,6 +934,8 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
     sym->is_alias = false;
     sym->is_local_var = false;
     sym->is_inline = proc_decl_ast_original->is_inline;
+    sym->closure_captures = false;
+    sym->closure_escapes = false;
     sym->next = NULL;
     sym->enclosing = NULL;
     sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
