@@ -337,7 +337,8 @@ endif()
 set(PSCAL_SOURCES
     src/Pascal/main.c src/Pascal/globals.c
     src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
-    src/Pascal/lexer.c src/Pascal/parser.c src/ast/ast.c src/Pascal/opt.c
+    src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/semantic.c
+    src/ast/ast.c src/ast/closure_registry.c src/Pascal/opt.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
     src/backend_ast/builtin_network_api.c
