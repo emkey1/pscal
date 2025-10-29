@@ -2709,6 +2709,190 @@ static Value vmHostCreateClosure(VM* vm) {
     return closure;
 }
 
+static Value vmHostBoxInterface(VM* vm) {
+    if (!vm) {
+        return makeNil();
+    }
+
+    Value typeNameVal = pop(vm);
+    Value receiverVal = pop(vm);
+    Value tablePtrVal = pop(vm);
+
+    if (typeNameVal.type != TYPE_STRING || !typeNameVal.s_val) {
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Interface cast requires interface type name string.");
+        return makeNil();
+    }
+
+    AST* interfaceType = lookupType(typeNameVal.s_val);
+    if (!interfaceType) {
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Unknown interface type '%s'.", typeNameVal.s_val);
+        return makeNil();
+    }
+
+    ClosureEnvPayload* payload = createClosureEnv(2);
+    if (!payload) {
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Out of memory creating interface payload.");
+        return makeNil();
+    }
+
+    Value* receiverCell = (Value*)malloc(sizeof(Value));
+    Value* tableCell = (Value*)malloc(sizeof(Value));
+    if (!receiverCell || !tableCell) {
+        if (receiverCell) free(receiverCell);
+        if (tableCell) free(tableCell);
+        releaseClosureEnv(payload);
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Out of memory capturing interface payload.");
+        return makeNil();
+    }
+
+    *receiverCell = makeCopyOfValue(&receiverVal);
+    *tableCell = makeCopyOfValue(&tablePtrVal);
+    payload->slots[0] = receiverCell;
+    payload->slots[1] = tableCell;
+    payload->symbol = NULL;
+
+    Value iface = makeInterface(interfaceType, payload);
+
+    releaseClosureEnv(payload);
+    freeValue(&typeNameVal);
+    freeValue(&receiverVal);
+    freeValue(&tablePtrVal);
+    return iface;
+}
+
+static Value vmHostInterfaceLookup(VM* vm) {
+    if (!vm) {
+        return makeNil();
+    }
+
+    Value methodIndexVal = pop(vm);
+    Value ifaceVal = pop(vm);
+
+    if (ifaceVal.type != TYPE_INTERFACE) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface dispatch requires interface value.");
+        return makeNil();
+    }
+
+    if (!IS_INTLIKE(methodIndexVal)) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface dispatch slot must be an integer.");
+        return makeNil();
+    }
+
+    ClosureEnvPayload* payload = ifaceVal.interface.payload;
+    if (!payload || payload->slot_count < 2) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing receiver data.");
+        return makeNil();
+    }
+
+    Value* receiverCell = payload->slots[0];
+    Value* tableCell = payload->slots[1];
+    if (!receiverCell || !tableCell) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing receiver or table.");
+        return makeNil();
+    }
+
+    Value* tableValue = tableCell;
+    if (tableCell->type == TYPE_POINTER) {
+        if (!tableCell->ptr_val) {
+            freeValue(&methodIndexVal);
+            freeValue(&ifaceVal);
+            runtimeError(vm, "VM Error: Interface method table pointer is nil.");
+            return makeNil();
+        }
+        tableValue = (Value*)tableCell->ptr_val;
+    }
+
+    if (!tableValue || tableValue->type != TYPE_ARRAY || !tableValue->array_val) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method table is not an array.");
+        return makeNil();
+    }
+
+    if (tableValue->dimensions <= 0) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method table is empty.");
+        return makeNil();
+    }
+
+    if (tableValue->dimensions != 1) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method table must be one-dimensional.");
+        return makeNil();
+    }
+
+    if (!tableValue->lower_bounds || !tableValue->upper_bounds) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method table missing bounds metadata.");
+        return makeNil();
+    }
+
+    int lower = tableValue->lower_bounds[0];
+    int upper = tableValue->upper_bounds[0];
+    int total = calculateArrayTotalSize(tableValue);
+    if (total <= 0 || upper < lower) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method table has invalid bounds.");
+        return makeNil();
+    }
+
+    int methodIndex = (int)AS_INTEGER(methodIndexVal);
+    if (methodIndex < lower || methodIndex > upper) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method slot %d out of range.", methodIndex);
+        return makeNil();
+    }
+
+    int offset = methodIndex - lower;
+    if (offset < 0 || offset >= total) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method slot %d out of range.", methodIndex);
+        return makeNil();
+    }
+
+    Value entry = tableValue->array_val[offset];
+    if (!IS_INTLIKE(entry)) {
+        freeValue(&methodIndexVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface method entry must be an address.");
+        return makeNil();
+    }
+
+    push(vm, copyValueForStack(receiverCell));
+
+    uint16_t target_address = (uint16_t)AS_INTEGER(entry);
+
+    freeValue(&methodIndexVal);
+    freeValue(&ifaceVal);
+    return makeInt(target_address);
+}
+
 static Value vmHostWaitThread(VM* vm) {
     // Expects top of stack: integer thread id
     Value tidVal = pop(vm);
@@ -3185,6 +3369,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_IS_READY, vmHostShellLoopIsReadyHost);
     registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
+    registerHostFunction(vm, HOST_FN_BOX_INTERFACE, vmHostBoxInterface);
+    registerHostFunction(vm, HOST_FN_INTERFACE_LOOKUP, vmHostInterfaceLookup);
 
     // Default: tracing disabled
     vm->trace_head_instructions = 0;

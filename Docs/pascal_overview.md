@@ -73,6 +73,40 @@ begin
 end.
 ```
 
+### Interfaces and Virtual Dispatch
+
+Interfaces capture the receiver pointer and a method table so concrete records
+with virtual methods can be passed around abstractly. Casting a record pointer
+to an interface boxes the object alongside its V-table; later calls route
+through the stored table using the existing indirect-call machinery.【F:src/compiler/compiler.c†L7026-L7076】【F:src/compiler/compiler.c†L7223-L7260】【F:src/vm/vm.c†L2704-L2885】
+
+```pascal
+program InterfaceDemo;
+
+type
+  ILogger = interface
+    procedure Log(const msg: string);
+  end;
+
+  TConsoleLogger = record
+    procedure Log(const msg: string); virtual;
+  end;
+
+procedure TConsoleLogger.Log(const msg: string);
+begin
+  writeln('[console] ', msg);
+end;
+
+var
+  logger: ILogger;
+  concrete: ^TConsoleLogger;
+begin
+  new(concrete);
+  logger := ILogger(concrete);
+  logger.Log('ready');
+end.
+```
+
 ## Builtins
 
 Builtins are implemented in C and exposed to Pascal through a lookup table【F:src/backend_ast/builtin.c†L35-L176】. They cover:
