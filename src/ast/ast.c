@@ -35,6 +35,52 @@ static AST* resolveTypeAlias(AST* type_node) {
     return type_node;
 }
 
+static Symbol *lookupProcedureInAncestors(const char *loweredName, AST *scope) {
+    for (AST *curr = scope; curr; curr = curr->parent) {
+        if (!curr->symbol_table) {
+            continue;
+        }
+        HashTable *table = (HashTable *)curr->symbol_table;
+        Symbol *sym = hashTableLookup(table, loweredName);
+        if (!sym) {
+            continue;
+        }
+        return resolveSymbolAlias(sym);
+    }
+    return NULL;
+}
+
+Symbol *resolveProcedureSymbolInScope(const char *name, AST *referenceNode, AST *globalProgramNode) {
+    if (!name) {
+        return NULL;
+    }
+
+    char lowered[MAX_SYMBOL_LENGTH];
+    strncpy(lowered, name, sizeof(lowered) - 1);
+    lowered[sizeof(lowered) - 1] = '\0';
+    toLowerString(lowered);
+
+    Symbol *sym = lookupProcedure(lowered);
+    if (!sym) {
+        sym = lookupGlobalSymbol(lowered);
+    }
+    if (sym) {
+        return resolveSymbolAlias(sym);
+    }
+
+    sym = lookupProcedureInAncestors(lowered, referenceNode);
+    if (!sym && globalProgramNode) {
+        sym = lookupProcedureInAncestors(lowered, globalProgramNode);
+    }
+    if (!sym) {
+        AST *decl = findStaticDeclarationInAST(name, referenceNode, globalProgramNode);
+        if (decl) {
+            sym = lookupProcedureInAncestors(lowered, decl);
+        }
+    }
+    return sym ? resolveSymbolAlias(sym) : NULL;
+}
+
 static bool compareProcPointerParams(AST* lhsParams, AST* rhsParams, const char* rhsName) {
     int lhsCount = lhsParams ? lhsParams->child_count : 0;
     int rhsCount = rhsParams ? rhsParams->child_count : 0;
@@ -1361,15 +1407,18 @@ resolved_field: ;
                     AST* lhs = node->left;
                     AST* rhs = node->right;
                     AST* lhsType = resolveTypeAlias(lhs->type_def);
+                    if (!lhsType && lhs->token && lhs->token->value) {
+                        Symbol *lhsProc = resolveProcedureSymbolInScope(lhs->token->value, node, globalProgramNode);
+                        if (lhsProc && lhsProc->type_def) {
+                            AST *retType = lhsProc->type_def->right;
+                            lhsType = resolveTypeAlias(retType);
+                        }
+                    }
                     if (lhsType && lhsType->type == AST_PROC_PTR_TYPE) {
                         bool rhsIsProcPointer = false;
                         if (rhs->type == AST_ADDR_OF && rhs->left && rhs->left->token) {
                             const char* pname = rhs->left->token->value;
-                            Symbol* psym = lookupProcedure(pname);
-                            if (psym) {
-                                Symbol* resolved = resolveSymbolAlias(psym);
-                                if (resolved) psym = resolved;
-                            }
+                            Symbol* psym = resolveProcedureSymbolInScope(pname, node, globalProgramNode);
                             if (psym && psym->type_def) {
                                 rhsIsProcPointer = true;
                                 verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname);
@@ -1385,22 +1434,32 @@ resolved_field: ;
                                     rhsType = resolveTypeAlias(rhsSym->type_def);
                                 }
                             }
-                            if (!rhsType && rhs->token && rhs->token->value && rhs->type == AST_PROCEDURE_CALL) {
-                                Symbol* rhsProc = lookupProcedure(rhs->token->value);
-                                if (rhsProc) {
-                                    Symbol* resolved = resolveSymbolAlias(rhsProc);
-                                    if (resolved) rhsProc = resolved;
+
+                            if (!rhsType && rhs->token && rhs->token->value && rhs->type == AST_PROCEDURE_CALL && rhs->child_count == 0) {
+                                const char *callName = rhs->token->value;
+                                Symbol* rhsProc = resolveProcedureSymbolInScope(callName, node, globalProgramNode);
+                            if (rhsProc && rhsProc->type_def) {
+                                rhsIsProcPointer = true;
+                                verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                AST *designator = newASTNode(AST_VARIABLE, rhs->token);
+                                if (rhs->token) {
+                                    freeToken(rhs->token);
+                                    rhs->token = NULL;
                                 }
-                                if (rhsProc && rhsProc->type_def && rhsProc->type_def->right) {
-                                    rhsType = resolveTypeAlias(rhsProc->type_def->right);
-                                }
+                                rhs->type = AST_ADDR_OF;
+                                rhs->var_type = TYPE_POINTER;
+                                rhs->type_def = lhsType;
+                                setLeft(rhs, designator);
+                            }
                             }
 
-                            if (rhsType && rhsType->type == AST_PROC_PTR_TYPE) {
-                                rhsIsProcPointer = true;
-                                verifyProcPointerTypesCompatible(lhsType, rhsType);
-                            } else if (rhs->var_type == TYPE_POINTER) {
-                                rhsIsProcPointer = true;
+                            if (!rhsIsProcPointer) {
+                                if (rhsType && rhsType->type == AST_PROC_PTR_TYPE) {
+                                    rhsIsProcPointer = true;
+                                    verifyProcPointerTypesCompatible(lhsType, rhsType);
+                                } else if (rhs->var_type == TYPE_POINTER) {
+                                    rhsIsProcPointer = true;
+                                }
                             }
                         }
 
