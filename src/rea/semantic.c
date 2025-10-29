@@ -2053,7 +2053,7 @@ static void recordClosureCapture(AST *func, bool captures) {
         return;
     }
     ensureClosureRegistry();
-    closureRegistryRecord(&gClosureRegistry, func, captures);
+    closureRegistryRecord(&gClosureRegistry, func, captures, NULL, 0, false);
 }
 
 static bool closureCapturesOuterScope(AST *func) {

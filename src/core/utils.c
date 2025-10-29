@@ -1839,6 +1839,8 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                 sym->is_alias = false;
                 sym->is_local_var = false;
                 sym->is_inline = false;
+                sym->closure_captures = false;
+                sym->closure_escapes = false;
                 sym->next = NULL;
                 sym->enclosing = NULL;
                 freeValue(&v); // Free the temporary value from eval
@@ -1864,6 +1866,8 @@ Symbol *buildUnitSymbolTable(AST *interface_ast) {
                      varSym->is_alias = false;
                      varSym->is_local_var = false; // Not local to the unit's execution scope yet
                      varSym->is_inline = false;
+                     varSym->closure_captures = false;
+                     varSym->closure_escapes = false;
                      varSym->next = NULL;
                      varSym->enclosing = NULL;
 

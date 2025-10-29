@@ -151,6 +151,24 @@
       "expected_stdout": "inc1=1\ninc2=2"
     },
     {
+      "id": "closure_return_function_runtime",
+      "name": "Capturing function can be returned",
+      "category": "closure_scope",
+      "description": "Returning a nested function that captures locals keeps its environment alive for later calls.",
+      "expect": "runtime_ok",
+      "code": "program ClosureReturnFunctionRuntime;\n\ntype\n  TAdder = function(delta: Integer): Integer;\n\nfunction MakeAdder(start: Integer): TAdder;\nvar\n  total: Integer;\n\n  function Add(delta: Integer): Integer;\n  begin\n    total := total + delta;\n    Add := total;\n  end;\n\nbegin\n  total := start;\n  MakeAdder := Add;\nend;\n\nvar\n  add: TAdder;\n\nbegin\n  add := MakeAdder(10);\n  writeln('first=', add(1));\n  writeln('second=', add(2));\nend.",
+      "expected_stdout": "first=11\nsecond=13"
+    },
+    {
+      "id": "closure_store_runtime",
+      "name": "Stored closure updates captured locals",
+      "category": "closure_scope",
+      "description": "Assigning a capturing nested procedure to a global variable keeps its captured locals alive across calls.",
+      "expect": "runtime_ok",
+      "code": "program ClosureStoreRuntime;\n\ntype\n  TStep = procedure(amount: Integer);\n\nvar\n  saved: TStep;\n  mirror: Integer;\n\nprocedure Build(start: Integer);\nvar\n  total: Integer;\n\n  procedure Step(amount: Integer);\n  begin\n    total := total + amount;\n    mirror := total;\n  end;\n\nbegin\n  total := start;\n  saved := Step;\n  Step(0);\nend;\n\nbegin\n  mirror := 0;\n  Build(5);\n  saved(2);\n  writeln('after_first=', mirror);\n  saved(3);\n  writeln('after_second=', mirror);\nend.",
+      "expected_stdout": "after_first=7\nafter_second=10"
+    },
+    {
       "id": "closure_nested_capture",
       "name": "Nested closures capture multiple levels",
       "category": "closure_scope",

@@ -2,13 +2,86 @@
 
 #include "Pascal/globals.h"
 #include "ast/closure_registry.h"
+#include "core/utils.h"
+#include "symbol/symbol.h"
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 
 static AST *gProgramRoot = NULL;
 static ClosureCaptureRegistry gClosureRegistry;
 static bool gRegistryInitialized = false;
+
+typedef struct {
+    AST *declaration;
+    bool is_by_ref;
+} CaptureInfo;
+
+typedef struct {
+    CaptureInfo *items;
+    size_t count;
+    size_t capacity;
+} CaptureCollection;
+
+#define MAX_CLOSURE_CAPTURES (sizeof(((Symbol *)0)->upvalues) / sizeof(((Symbol *)0)->upvalues[0]))
+
+static void captureCollectionInit(CaptureCollection *collection) {
+    if (!collection) {
+        return;
+    }
+    collection->items = NULL;
+    collection->count = 0;
+    collection->capacity = 0;
+}
+
+static void captureCollectionFree(CaptureCollection *collection) {
+    if (!collection) {
+        return;
+    }
+    free(collection->items);
+    collection->items = NULL;
+    collection->count = 0;
+    collection->capacity = 0;
+}
+
+static bool captureCollectionAdd(CaptureCollection *collection, AST *decl, bool is_by_ref) {
+    if (!collection || !decl) {
+        return false;
+    }
+
+    for (size_t i = 0; i < collection->count; i++) {
+        if (collection->items[i].declaration == decl) {
+            if (is_by_ref) {
+                collection->items[i].is_by_ref = true;
+            }
+            return true;
+        }
+    }
+
+    if (collection->count >= MAX_CLOSURE_CAPTURES) {
+        return false;
+    }
+
+    if (collection->count == collection->capacity) {
+        size_t new_capacity = collection->capacity ? collection->capacity * 2 : 8;
+        if (new_capacity > MAX_CLOSURE_CAPTURES) {
+            new_capacity = MAX_CLOSURE_CAPTURES;
+        }
+        CaptureInfo *resized = (CaptureInfo *)realloc(collection->items, new_capacity * sizeof(CaptureInfo));
+        if (!resized) {
+            return false;
+        }
+        collection->items = resized;
+        collection->capacity = new_capacity;
+    }
+
+    collection->items[collection->count].declaration = decl;
+    collection->items[collection->count].is_by_ref = is_by_ref;
+    collection->count++;
+    return true;
+}
 
 static void ensureRegistry(void) {
     if (!gRegistryInitialized) {
@@ -45,48 +118,125 @@ static AST *getRoutineBody(AST *routine) {
     return NULL;
 }
 
-static bool functionCapturesOuterVisitor(AST *node, AST *func) {
-    if (!node || !func) {
-        return false;
+static void collectCapturesVisitor(AST *node, AST *func, CaptureCollection *captures) {
+    if (!node || !func || !captures) {
+        return;
     }
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
-        return false;
+        return;
     }
 
     if (node->type == AST_VARIABLE && node->token && node->token->value) {
         const char *name = node->token->value;
         AST *decl = findStaticDeclarationInAST(name, node, gProgramRoot);
-        if (decl && (decl->type == AST_VAR_DECL || decl->type == AST_CONST_DECL)) {
+        if (decl && decl->type == AST_VAR_DECL) {
             AST *owner = findEnclosingFunction(decl);
             if (owner && owner != func) {
-                return true;
+                bool is_by_ref = decl->by_ref != 0;
+                captureCollectionAdd(captures, decl, is_by_ref);
             }
         }
     }
 
-    if (node->left && functionCapturesOuterVisitor(node->left, func)) {
-        return true;
+    if (node->left) {
+        collectCapturesVisitor(node->left, func, captures);
     }
-    if (node->right && functionCapturesOuterVisitor(node->right, func)) {
-        return true;
+    if (node->right) {
+        collectCapturesVisitor(node->right, func, captures);
     }
-    if (node->extra && functionCapturesOuterVisitor(node->extra, func)) {
-        return true;
+    if (node->extra) {
+        collectCapturesVisitor(node->extra, func, captures);
     }
     for (int i = 0; i < node->child_count; i++) {
-        if (functionCapturesOuterVisitor(node->children[i], func)) {
-            return true;
-        }
+        collectCapturesVisitor(node->children[i], func, captures);
     }
-    return false;
 }
 
-static bool functionCapturesOuter(AST *func) {
-    AST *body = getRoutineBody(func);
-    if (!body) {
+static bool collectFunctionCaptureDescriptors(AST *func,
+                                              ClosureCaptureDescriptor **out_descriptors,
+                                              size_t *out_count) {
+    if (out_descriptors) {
+        *out_descriptors = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!func) {
         return false;
     }
-    return functionCapturesOuterVisitor(body, func);
+
+    AST *body = getRoutineBody(func);
+    if (!body) {
+        return true;
+    }
+
+    CaptureCollection captures;
+    captureCollectionInit(&captures);
+    collectCapturesVisitor(body, func, &captures);
+
+    if (captures.count == 0) {
+        captureCollectionFree(&captures);
+        return true;
+    }
+
+    size_t count = captures.count;
+    ClosureCaptureDescriptor *descriptors = (ClosureCaptureDescriptor *)calloc(count, sizeof(ClosureCaptureDescriptor));
+    if (!descriptors) {
+        captureCollectionFree(&captures);
+        return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        descriptors[i].slot_index = (uint8_t)i;
+        descriptors[i].is_by_ref = captures.items[i].is_by_ref;
+    }
+
+    captureCollectionFree(&captures);
+
+    if (out_descriptors) {
+        *out_descriptors = descriptors;
+    } else {
+        free(descriptors);
+    }
+    if (out_count) {
+        *out_count = count;
+    }
+    return true;
+}
+
+static void applyCaptureLayoutToSymbol(Symbol *sym,
+                                       const ClosureCaptureDescriptor *descriptors,
+                                       size_t descriptor_count) {
+    if (!sym) {
+        return;
+    }
+    size_t limit = descriptor_count;
+    if (limit > MAX_CLOSURE_CAPTURES) {
+        limit = MAX_CLOSURE_CAPTURES;
+    }
+    sym->upvalue_count = (uint8_t)limit;
+    for (size_t i = 0; i < limit; i++) {
+        uint8_t slot = descriptors ? descriptors[i].slot_index : (uint8_t)i;
+        sym->upvalues[i].index = slot;
+        sym->upvalues[i].isLocal = false;
+        sym->upvalues[i].is_ref = descriptors ? descriptors[i].is_by_ref : false;
+    }
+    sym->closure_captures = limit > 0;
+}
+
+static Symbol *symbolForRoutine(AST *routine) {
+    if (!routine || !routine->token || !routine->token->value) {
+        return NULL;
+    }
+    char lowered[MAX_SYMBOL_LENGTH];
+    strncpy(lowered, routine->token->value, MAX_SYMBOL_LENGTH - 1);
+    lowered[MAX_SYMBOL_LENGTH - 1] = '\0';
+    toLowerString(lowered);
+    Symbol *sym = lookupProcedure(lowered);
+    if (!sym) {
+        sym = lookupGlobalSymbol(lowered);
+    }
+    return sym;
 }
 
 static void analyzeClosureCaptures(AST *node) {
@@ -94,8 +244,22 @@ static void analyzeClosureCaptures(AST *node) {
         return;
     }
     if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) {
-        bool captures = functionCapturesOuter(node);
-        closureRegistryRecord(&gClosureRegistry, node, captures);
+        ClosureCaptureDescriptor *descriptors = NULL;
+        size_t descriptor_count = 0;
+        collectFunctionCaptureDescriptors(node, &descriptors, &descriptor_count);
+        bool captures = descriptor_count > 0;
+        closureRegistryRecord(&gClosureRegistry, node, captures, descriptors, descriptor_count, false);
+        Symbol *sym = symbolForRoutine(node);
+        if (sym) {
+            if (captures) {
+                applyCaptureLayoutToSymbol(sym, descriptors, descriptor_count);
+            } else {
+                sym->closure_captures = false;
+                sym->upvalue_count = 0;
+            }
+            sym->closure_escapes = false;
+        }
+        free(descriptors);
     }
     if (node->left) {
         analyzeClosureCaptures(node->left);
@@ -111,13 +275,25 @@ static void analyzeClosureCaptures(AST *node) {
     }
 }
 
-static void reportIllegalEscape(AST *node) {
-    if (!node || !node->token) {
+static void noteClosureEscape(AST *decl) {
+    if (!decl) {
         return;
     }
-    fprintf(stderr, "L%d: closure captures a local value that would escape its lifetime.\n",
-            node->token->line);
-    pascal_semantic_error_count++;
+    bool captures = closureRegistryCaptures(&gClosureRegistry, decl);
+    closureRegistryRecord(&gClosureRegistry, decl, captures, NULL, 0, true);
+    Symbol *sym = symbolForRoutine(decl);
+    if (!sym) {
+        return;
+    }
+    sym->closure_escapes = true;
+    if (captures && sym->upvalue_count == 0) {
+        size_t descriptor_count = 0;
+        const ClosureCaptureDescriptor *descriptors =
+            closureRegistryGetDescriptors(&gClosureRegistry, decl, &descriptor_count);
+        if (descriptors && descriptor_count > 0) {
+            applyCaptureLayoutToSymbol(sym, descriptors, descriptor_count);
+        }
+    }
 }
 
 static void checkClosureEscapes(AST *node) {
@@ -145,7 +321,7 @@ static void checkClosureEscapes(AST *node) {
                     }
                 }
                 if (!partOfCall && !assigningFunctionResult) {
-                    reportIllegalEscape(node);
+                    noteClosureEscape(decl);
                 }
             }
         }

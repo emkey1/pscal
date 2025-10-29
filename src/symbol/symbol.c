@@ -275,6 +275,8 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->is_const = false;
     new_symbol->is_local_var = false; // Globals aren't local vars
     new_symbol->is_inline = false;
+    new_symbol->closure_captures = false;
+    new_symbol->closure_escapes = false;
     new_symbol->next = NULL; // Will be linked by hashTableInsert
     new_symbol->enclosing = NULL;
     new_symbol->type_def = type_def ? copyAST(type_def) : NULL; // Store a DEEP COPY of the type definition
@@ -368,6 +370,8 @@ void insertGlobalAlias(const char *name, Symbol *target) {
     alias->is_const = resolved->is_const;
     alias->is_local_var = false;
     alias->is_inline = resolved->is_inline;
+    alias->closure_captures = resolved->closure_captures;
+    alias->closure_escapes = resolved->closure_escapes;
     alias->type_def = resolved->type_def;
     alias->next = NULL;
     alias->enclosing = NULL;
@@ -419,6 +423,8 @@ void insertConstGlobalSymbol(const char *name, Value val) {
     new_symbol->is_const = true;
     new_symbol->is_local_var = false;
     new_symbol->is_inline = false;
+    new_symbol->closure_captures = false;
+    new_symbol->closure_escapes = false;
     new_symbol->next = NULL;
     new_symbol->type_def = NULL;
     new_symbol->enclosing = NULL;
@@ -471,6 +477,8 @@ void insertConstSymbolIn(HashTable *table, const char *name, Value val) {
     new_symbol->is_const = true;
     new_symbol->is_local_var = false;
     new_symbol->is_inline = false;
+    new_symbol->closure_captures = false;
+    new_symbol->closure_escapes = false;
     new_symbol->next = NULL;
     new_symbol->type_def = NULL;
     new_symbol->enclosing = NULL;
@@ -568,6 +576,8 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
     sym->is_local_var = is_variable_declaration; // Mark as local variable for correct cleanup
     sym->is_const = false; // Local variables are not constants initially
     sym->is_inline = false;
+    sym->closure_captures = false;
+    sym->closure_escapes = false;
     sym->next = NULL; // Will be linked by hashTableInsert
     sym->enclosing = NULL;
     sym->upvalue_count = 0;
