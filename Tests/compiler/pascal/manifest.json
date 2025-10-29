@@ -3,6 +3,7 @@
     {
       "id": "closure_capture_escape_error",
       "path": "Tests/compiler/pascal/cases/closure_capture_escape_error.pas",
+      "expect": "compile_success",
       "stdout_substring": "PASS: capturing closure escapes and retains state"
     },
     {
