@@ -5381,7 +5381,15 @@ comparison_error_label:
                 }
 
                 CallFrame *frame = NULL;
-                if (vm->frameCount > 0) {
+                Symbol *enclosing_symbol = closure->function_symbol ? closure->function_symbol->enclosing : NULL;
+                if (enclosing_symbol) {
+                    for (int fi = vm->frameCount - 1; fi >= 0; fi--) {
+                        if (vm->frames[fi].function_symbol == enclosing_symbol) {
+                            frame = &vm->frames[fi];
+                            break;
+                        }
+                    }
+                } else if (vm->frameCount > 0) {
                     frame = &vm->frames[vm->frameCount - 1];
                 }
 
