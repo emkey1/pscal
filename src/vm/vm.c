@@ -146,6 +146,31 @@ typedef struct {
 
 #define VM_CLOSURE_MAGIC 0x434C5352u
 
+static void freeClosureCaptureStorage(ClosureInstance *closure, uint8_t filled_count) {
+    if (!closure) {
+        return;
+    }
+
+    if (closure->captured_values && closure->owns_value) {
+        for (uint8_t i = 0; i < filled_count; i++) {
+            if (closure->owns_value[i] && closure->captured_values[i]) {
+                freeValue(closure->captured_values[i]);
+                free(closure->captured_values[i]);
+                closure->captured_values[i] = NULL;
+            }
+        }
+    }
+
+    if (closure->captured_values) {
+        free(closure->captured_values);
+        closure->captured_values = NULL;
+    }
+    if (closure->owns_value) {
+        free(closure->owns_value);
+        closure->owns_value = NULL;
+    }
+}
+
 static VmShellBuiltinProfileEntry *gVmShellBuiltinProfiles = NULL;
 static size_t gVmShellBuiltinProfileCount = 0;
 static size_t gVmShellBuiltinProfileCapacity = 0;
@@ -5372,8 +5397,7 @@ comparison_error_label:
                     closure->captured_values = calloc(capture_count, sizeof(Value*));
                     closure->owns_value = calloc(capture_count, sizeof(bool));
                     if (!closure->captured_values || !closure->owns_value) {
-                        free(closure->captured_values);
-                        free(closure->owns_value);
+                        freeClosureCaptureStorage(closure, 0);
                         free(closure);
                         runtimeError(vm, "VM Error: Failed to allocate closure captures.");
                         return INTERPRET_RUNTIME_ERROR;
@@ -5393,6 +5417,7 @@ comparison_error_label:
                     frame = &vm->frames[vm->frameCount - 1];
                 }
 
+                uint8_t filled_captures = 0;
                 for (uint8_t i = 0; i < capture_count; i++) {
                     uint8_t flags = READ_BYTE();
                     uint8_t slot = READ_BYTE();
@@ -5401,9 +5426,7 @@ comparison_error_label:
 
                     if (!frame) {
                         runtimeError(vm, "VM Error: Closure capture outside of function context.");
-                        if (closure->captured_values) {
-                            free(closure->captured_values);
-                        }
+                        freeClosureCaptureStorage(closure, filled_captures);
                         free(closure);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -5412,9 +5435,7 @@ comparison_error_label:
                     if (from_local) {
                         if (frame->slotCount > 0 && slot >= frame->slotCount) {
                             runtimeError(vm, "VM Error: Closure capture local slot out of range.");
-                            if (closure->captured_values) {
-                                free(closure->captured_values);
-                            }
+                            freeClosureCaptureStorage(closure, filled_captures);
                             free(closure);
                             return INTERPRET_RUNTIME_ERROR;
                         }
@@ -5422,10 +5443,7 @@ comparison_error_label:
                     } else {
                         if (!frame->upvalues || slot >= frame->upvalue_count) {
                             runtimeError(vm, "VM Error: Closure capture upvalue index out of range.");
-                            if (closure->captured_values) {
-                                free(closure->captured_values);
-                                free(closure->owns_value);
-                            }
+                            freeClosureCaptureStorage(closure, filled_captures);
                             free(closure);
                             return INTERPRET_RUNTIME_ERROR;
                         }
@@ -5434,10 +5452,7 @@ comparison_error_label:
 
                     if (!source) {
                         runtimeError(vm, "VM Error: Closure capture source unavailable.");
-                        if (closure->captured_values) {
-                            free(closure->captured_values);
-                            free(closure->owns_value);
-                        }
+                        freeClosureCaptureStorage(closure, filled_captures);
                         free(closure);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -5451,15 +5466,7 @@ comparison_error_label:
                         Value *copy = malloc(sizeof(Value));
                         if (!copy) {
                             runtimeError(vm, "VM Error: Failed to allocate closure capture copy.");
-                            if (closure->captured_values && closure->owns_value) {
-                                for (uint8_t j = 0; j < i; j++) {
-                                    if (closure->owns_value[j] && closure->captured_values[j]) {
-                                        free(closure->captured_values[j]);
-                                    }
-                                }
-                                free(closure->captured_values);
-                                free(closure->owns_value);
-                            }
+                            freeClosureCaptureStorage(closure, filled_captures);
                             free(closure);
                             return INTERPRET_RUNTIME_ERROR;
                         }
@@ -5469,6 +5476,7 @@ comparison_error_label:
                             closure->owns_value[i] = true;
                         }
                     }
+                    filled_captures++;
                 }
 
                 Value closureValue = makePointer(closure, NULL);

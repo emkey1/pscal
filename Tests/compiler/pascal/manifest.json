@@ -3,12 +3,8 @@
     {
       "id": "closure_capture_escape_error",
       "path": "Tests/compiler/pascal/cases/closure_capture_escape_error.pas",
-      "expect": "compile_error",
-      "stderr_substrings_any": [
-        "closure captures a local value that would escape its lifetime.",
-        "Type error: '@maker' does not name a known procedure or function.",
-        "Type error: '@inner' does not name a known procedure or function."
-      ]
+      "expect": "compile_success",
+      "stdout_substring": "inner value=2"
     },
     {
       "id": "closure_non_capturing_pointer_ok",

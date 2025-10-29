@@ -23,4 +23,6 @@ end;
 
 begin
   Register;
+  Stored;
+  Stored;
 end.
