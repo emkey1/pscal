@@ -13,7 +13,10 @@ var
   procedure Inner;
   begin
     Value := Value + 1;
-    writeln('inner value=', Value);
+    if Value = 2 then
+      writeln('PASS: capturing closure escapes and retains state')
+    else
+      writeln('inner value=', Value);
   end;
 
 begin
@@ -23,4 +26,6 @@ end;
 
 begin
   Register;
+  Stored();
+  Stored();
 end.
