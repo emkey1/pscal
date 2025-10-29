@@ -21,6 +21,12 @@
       "path": "Tests/compiler/pascal/cases/closure_capturing_store_return.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: capturing closure stored and returned"
+    },
+    {
+      "id": "closure_capturing_proc_store",
+      "path": "Tests/compiler/pascal/cases/closure_capturing_proc_store.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: capturing procedure closure stored and invoked"
     }
   ]
 }

@@ -382,6 +382,58 @@ static void printEscapedChar(char c) {
     }
 }
 
+static void printConstantValue(const Value* value) {
+    if (!value) {
+        fprintf(stderr, "<NULL>");
+        return;
+    }
+
+    switch (value->type) {
+        case TYPE_INTEGER:
+            fprintf(stderr, "%lld", value->i_val);
+            break;
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            fprintf(stderr, "%Lf", AS_REAL(*value));
+            break;
+        case TYPE_STRING:
+            if (value->s_val) {
+                printEscapedString(value->s_val);
+            } else {
+                fprintf(stderr, "NULL_STR");
+            }
+            break;
+        case TYPE_CHAR:
+            printEscapedChar(value->c_val);
+            break;
+        case TYPE_BOOLEAN:
+            fprintf(stderr, "%s", value->i_val ? "true" : "false");
+            break;
+        case TYPE_NIL:
+            fprintf(stderr, "nil");
+            break;
+        case TYPE_CLOSURE: {
+            fprintf(stderr, "closure(entry=%u", value->closure.entry_offset);
+            if (value->closure.symbol && value->closure.symbol->name) {
+                fprintf(stderr, ", symbol=%s", value->closure.symbol->name);
+            }
+            if (value->closure.env) {
+                fprintf(stderr, ", env=%p, slots=%u, ref=%u)",
+                        (void*)value->closure.env,
+                        (unsigned)value->closure.env->slot_count,
+                        (unsigned)value->closure.env->refcount);
+            } else {
+                fprintf(stderr, ", env=NULL)");
+            }
+            break;
+        }
+        default:
+            fprintf(stderr, "Value type %s", varTypeToString(value->type));
+            break;
+    }
+}
+
 // This is the function declared in bytecode.h and called by disassembleBytecodeChunk
 // It was already non-static in your provided bytecode.c
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable) {
@@ -407,25 +459,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             fprintf(stderr, "'");
             Value constantValue = chunk->constants[constant_index];
-            switch(constantValue.type) {
-                case TYPE_INTEGER: fprintf(stderr, "%lld", constantValue.i_val); break;
-                case TYPE_FLOAT:
-                case TYPE_DOUBLE:
-                case TYPE_LONG_DOUBLE: fprintf(stderr, "%Lf", AS_REAL(constantValue)); break;
-                case TYPE_STRING:
-                    if (constantValue.s_val) {
-                        printEscapedString(constantValue.s_val);
-                    } else {
-                        fprintf(stderr, "NULL_STR");
-                    }
-                    break;
-                case TYPE_CHAR:
-                    printEscapedChar(constantValue.c_val);
-                    break;
-                case TYPE_BOOLEAN: fprintf(stderr, "%s", constantValue.i_val ? "true" : "false"); break;
-                case TYPE_NIL:     fprintf(stderr, "nil"); break;
-                default:           fprintf(stderr, "Value type %s", varTypeToString(constantValue.type)); break;
-            }
+            printConstantValue(&constantValue);
             fprintf(stderr, "'\n");
             return offset + 2;
         }
@@ -438,25 +472,7 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             fprintf(stderr, "'");
             Value constantValue = chunk->constants[constant_index];
-            switch(constantValue.type) {
-                case TYPE_INTEGER: fprintf(stderr, "%lld", constantValue.i_val); break;
-                case TYPE_FLOAT:
-                case TYPE_DOUBLE:
-                case TYPE_LONG_DOUBLE: fprintf(stderr, "%Lf", AS_REAL(constantValue)); break;
-                case TYPE_STRING:
-                    if (constantValue.s_val) {
-                        printEscapedString(constantValue.s_val);
-                    } else {
-                        fprintf(stderr, "NULL_STR");
-                    }
-                    break;
-                case TYPE_CHAR:
-                    printEscapedChar(constantValue.c_val);
-                    break;
-                case TYPE_BOOLEAN: fprintf(stderr, "%s", constantValue.i_val ? "true" : "false"); break;
-                case TYPE_NIL:     fprintf(stderr, "nil"); break;
-                default:           fprintf(stderr, "Value type %s", varTypeToString(constantValue.type)); break;
-            }
+            printConstantValue(&constantValue);
             fprintf(stderr, "'\n");
             return offset + 3;
         }
@@ -1082,11 +1098,16 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
                 case TYPE_BOOLEAN:
                     fprintf(stderr, "BOOL  %s\n", constantValue.i_val ? "true" : "false");
                     break;
+                case TYPE_CLOSURE:
+                    fprintf(stderr, "CLOS  ");
+                    printConstantValue(&constantValue);
+                    fprintf(stderr, "\n");
+                    break;
                 case TYPE_NIL:
                     fprintf(stderr, "NIL\n");
                     break;
                 default:
-            fprintf(stderr, "Value type %s\n", varTypeToString(constantValue.type));
+                    fprintf(stderr, "Value type %s\n", varTypeToString(constantValue.type));
                     break;
             }
         }
