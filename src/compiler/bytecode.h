@@ -85,9 +85,10 @@ typedef enum {
     GET_CHAR_ADDRESS, // NEW: Gets address of char in string for s[i] := 'X'
     SET_INDIRECT,
     GET_INDIRECT,
-    
+    MAKE_CLOSURE,
+
     IN, // For set membership
-    
+
     GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 
     // --- Object support --------------------------------------------------

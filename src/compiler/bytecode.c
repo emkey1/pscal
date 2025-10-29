@@ -844,6 +844,14 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case GET_INDIRECT:
             fprintf(stderr, "GET_INDIRECT\n");
             return offset + 1;
+        case MAKE_CLOSURE: {
+            uint16_t addr = (uint16_t)((chunk->code[offset + 1] << 8) |
+                                       chunk->code[offset + 2]);
+            uint8_t count = chunk->code[offset + 3];
+            fprintf(stderr, "%-16s %04u captures=%u\n", "MAKE_CLOSURE", addr, count);
+            int descriptor_bytes = count * 2;
+            return offset + 4 + descriptor_bytes;
+        }
         case IN:
             fprintf(stderr, "IN\n");
             return offset + 1;

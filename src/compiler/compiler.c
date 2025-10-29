@@ -2283,6 +2283,35 @@ static int resolveUpvalue(FunctionCompilerState* fc, const char* name) {
     return -1;
 }
 
+static void emitMakeClosure(BytecodeChunk* chunk, Symbol* func_symbol, int line) {
+    if (!chunk || !func_symbol) {
+        return;
+    }
+
+    if (!func_symbol->is_defined && func_symbol->type_def) {
+        compileDefinedFunction(func_symbol->type_def, chunk, getLine(func_symbol->type_def));
+    }
+
+    uint16_t address = (uint16_t)func_symbol->bytecode_address;
+    writeBytecodeChunk(chunk, MAKE_CLOSURE, line);
+    emitShort(chunk, address, line);
+
+    uint8_t capture_count = func_symbol->upvalue_count;
+    writeBytecodeChunk(chunk, capture_count, line);
+
+    for (uint8_t i = 0; i < capture_count; i++) {
+        uint8_t flags = 0;
+        if (func_symbol->upvalues[i].isLocal) {
+            flags |= 0x01;
+        }
+        if (func_symbol->upvalues[i].is_ref) {
+            flags |= 0x02;
+        }
+        writeBytecodeChunk(chunk, flags, line);
+        writeBytecodeChunk(chunk, func_symbol->upvalues[i].index, line);
+    }
+}
+
 // Helper to add a constant during compilation
 void addCompilerConstant(const char* name_original_case, const Value* value, int line) {
     if (compilerConstantCount >= MAX_COMPILER_CONSTANTS) {
@@ -6165,12 +6194,21 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
         case AST_ADDR_OF: {
             if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                 const char* pname = node->left->token->value;
-                Symbol* psym = lookupProcedure(pname);
+                char lower_name[MAX_SYMBOL_LENGTH];
+                strncpy(lower_name, pname, sizeof(lower_name) - 1);
+                lower_name[sizeof(lower_name) - 1] = '\0';
+                toLowerString(lower_name);
+
+                Symbol* psym = lookupProcedure(lower_name);
                 if (psym) {
                     int addr = psym->bytecode_address;
-                    int constIndex = addIntConstant(chunk, addr);
-                    recordAddressConstant(constIndex, addr);
-                    emitConstant(chunk, constIndex, line);
+                    if (psym->upvalue_count > 0) {
+                        emitMakeClosure(chunk, psym, line);
+                    } else {
+                        int constIndex = addIntConstant(chunk, addr);
+                        recordAddressConstant(constIndex, addr);
+                        emitConstant(chunk, constIndex, line);
+                    }
                     break;
                 }
             }
@@ -6852,6 +6890,62 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
+
+            bool pointer_expression = (node->var_type == TYPE_POINTER);
+            if (!pointer_expression && node->type_def) {
+                AST *type_hint = node->type_def;
+                while (type_hint && type_hint->type == AST_TYPE_REFERENCE && type_hint->right) {
+                    type_hint = type_hint->right;
+                }
+                if (type_hint) {
+                    if (type_hint->type == AST_POINTER_TYPE) {
+                        pointer_expression = true;
+                    } else if (type_hint->var_type == TYPE_POINTER) {
+                        pointer_expression = true;
+                    }
+                }
+            }
+
+            if (!pointer_expression && node->i_val == 1) {
+                pointer_expression = true;
+            }
+
+            if (!pointer_expression) {
+                AST *parent = node->parent;
+                if (parent && parent->type == AST_ASSIGN) {
+                    AST *lhs = parent->left;
+                    AST *lhs_type = lhs ? lhs->type_def : NULL;
+                    while (lhs_type && lhs_type->type == AST_TYPE_REFERENCE && lhs_type->right) {
+                        lhs_type = lhs_type->right;
+                    }
+                    if ((lhs && lhs->var_type == TYPE_POINTER) ||
+                        (lhs_type && (lhs_type->type == AST_POINTER_TYPE || lhs_type->var_type == TYPE_POINTER))) {
+                        pointer_expression = true;
+                    }
+                }
+            }
+
+            if (pointer_expression && node->child_count == receiver_offset) {
+
+                if (!func_symbol) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: Unable to resolve procedure pointer '%s'.\n",
+                            line, functionName ? functionName : "<unknown>");
+                    compiler_had_error = true;
+                    emitConstant(chunk, addNilConstant(chunk), line);
+                    break;
+                }
+
+                if (func_symbol->upvalue_count > 0) {
+                    emitMakeClosure(chunk, func_symbol, line);
+                } else {
+                    uint16_t address = (uint16_t)func_symbol->bytecode_address;
+                    int constIndex = addIntConstant(chunk, address);
+                    recordAddressConstant(constIndex, address);
+                    emitConstant(chunk, constIndex, line);
+                }
+                break;
+            }
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {

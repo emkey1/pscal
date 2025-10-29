@@ -391,6 +391,11 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
                 if (sibling->type == AST_VAR_DECL) {
                     AST* found = matchVarDecl(sibling, varName);
                     if (found) return found;
+                } else if (sibling->type == AST_PROCEDURE_DECL || sibling->type == AST_FUNCTION_DECL) {
+                    if (sibling->token && sibling->token->value &&
+                        strcasecmp(sibling->token->value, varName) == 0) {
+                        return sibling;
+                    }
                 } else if (constDeclMatches(sibling, varName)) {
                     return sibling;
                 }
@@ -529,6 +534,18 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
                                 break;
                             }
                         }
+                    } else if (varDeclGroup->type == AST_PROCEDURE_DECL ||
+                               varDeclGroup->type == AST_FUNCTION_DECL) {
+                        if (varDeclGroup->token && varDeclGroup->token->value &&
+                            strcasecmp(varDeclGroup->token->value, varName) == 0) {
+                            if (referenceLine > 0) {
+                                int declLine = declarationLine(varDeclGroup);
+                                if (declLine > referenceLine) {
+                                    continue;
+                                }
+                            }
+                            foundDecl = varDeclGroup;
+                        }
                     } else if (constDeclMatches(varDeclGroup, varName)) {
                         foundDecl = varDeclGroup;
                     }
@@ -560,6 +577,16 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
                                     if (declLine > referenceLine) continue;
                                 }
                                 foundDecl = sibling; break;
+                            }
+                        } else if (sibling->type == AST_PROCEDURE_DECL || sibling->type == AST_FUNCTION_DECL) {
+                            if (sibling->token && sibling->token->value &&
+                                strcasecmp(sibling->token->value, varName) == 0) {
+                                if (referenceLine > 0) {
+                                    int declLine = declarationLine(sibling);
+                                    if (declLine > referenceLine) continue;
+                                }
+                                foundDecl = sibling;
+                                break;
                             }
                         } else if (constDeclMatches(sibling, varName)) {
                             if (referenceLine > 0) {
@@ -637,6 +664,34 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
 // Backwards-compatible wrapper retained for existing call sites.
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode) {
     return findStaticDeclarationInASTWithRef(varName, currentScopeNode, currentScopeNode, globalProgramNode);
+}
+
+static AST *resolveRoutineReference(const char *name,
+                                    AST *scopeNode,
+                                    AST *referenceNode,
+                                    AST *globalProgramNode,
+                                    Symbol **outSymbol) {
+    if (outSymbol) {
+        *outSymbol = NULL;
+    }
+    if (!name) {
+        return NULL;
+    }
+
+    Symbol *procSym = lookupProcedure(name);
+    if (procSym && procSym->type_def) {
+        if (outSymbol) {
+            *outSymbol = procSym;
+        }
+        return procSym->type_def;
+    }
+
+    AST *decl = findStaticDeclarationInASTWithRef(name, scopeNode, referenceNode ? referenceNode : scopeNode, globalProgramNode);
+    if (decl && (decl->type == AST_PROCEDURE_DECL || decl->type == AST_FUNCTION_DECL)) {
+        return decl;
+    }
+
+    return NULL;
 }
 
 void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
@@ -1237,32 +1292,49 @@ resolved_field: ;
             case AST_ASSIGN: {
                 // Minimal semantic check: procedure-pointer assignment
                 if (node->left && node->right) {
-                    AST* lhs = node->left;
-                    AST* rhs = node->right;
-                    AST* lhsType = resolveTypeAlias(lhs->type_def);
+                    AST *lhs = node->left;
+                    AST *rhs = node->right;
+                    AST *lhsType = resolveTypeAlias(lhs->type_def);
                     if (lhsType && lhsType->type == AST_PROC_PTR_TYPE) {
+                        const char *pname = NULL;
+                        AST *referenceNode = NULL;
+                        bool usedAddressOf = false;
+
                         if (rhs->type == AST_ADDR_OF && rhs->left && rhs->left->token) {
-                            const char* pname = rhs->left->token->value;
-                            Symbol* psym = lookupProcedure(pname);
-                            if (psym && psym->type_def) {
-                                // Compare signatures: param count and simple VarType equality
-                                AST* decl = psym->type_def; // PROCEDURE_DECL or FUNCTION_DECL
+                            pname = rhs->left->token->value;
+                            referenceNode = rhs->left;
+                            usedAddressOf = true;
+                        } else if (rhs->type == AST_VARIABLE && rhs->token) {
+                            pname = rhs->token->value;
+                            referenceNode = rhs;
+                        } else if (rhs->type == AST_PROCEDURE_CALL && rhs->token && rhs->child_count == 0) {
+                            pname = rhs->token->value;
+                            referenceNode = rhs;
+                        }
+
+                        if (pname) {
+                            AST *decl = resolveRoutineReference(pname, currentScopeNode, referenceNode, globalProgramNode, NULL);
+                            if (decl) {
                                 int declParamCount = decl->child_count;
-                                AST* paramsList = (lhsType->child_count > 0) ? lhsType->children[0] : NULL; // AST_LIST
+                                AST *paramsList = (lhsType->child_count > 0) ? lhsType->children[0] : NULL; // AST_LIST
                                 int ptrParamCount = paramsList ? paramsList->child_count : 0;
                                 if (declParamCount != ptrParamCount) {
-                                    fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                                    fprintf(stderr,
+                                            "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
                                             pname, ptrParamCount, declParamCount);
                                     pascal_semantic_error_count++;
                                 } else {
                                     for (int i = 0; i < declParamCount; ++i) {
-                                        AST* dparam = decl->children[i];
-                                        AST* tparam = paramsList ? paramsList->children[i] : NULL;
-                                        if (!dparam || !tparam) continue;
+                                        AST *dparam = decl->children[i];
+                                        AST *tparam = paramsList ? paramsList->children[i] : NULL;
+                                        if (!dparam || !tparam) {
+                                            continue;
+                                        }
                                         VarType dt = dparam->var_type;
                                         VarType tt = tparam->var_type;
                                         if (dt != tt) {
-                                            fprintf(stderr, "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                                            fprintf(stderr,
+                                                    "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
                                                     (long long)i + 1, pname,
                                                     varTypeToString(tt), varTypeToString(dt));
                                             pascal_semantic_error_count++;
@@ -1270,25 +1342,43 @@ resolved_field: ;
                                         }
                                     }
                                 }
-                                // Return type for function pointers
-                                AST* lhsRet = lhsType->right; // may be NULL for procedure
+
+                                AST *lhsRet = lhsType->right; // may be NULL for procedure
                                 if (lhsRet) {
-                                    AST* declRet = decl->right; // may be NULL for procedure
+                                    AST *declRet = decl->right; // may be NULL for procedure
                                     VarType lrt = lhsRet->var_type;
                                     VarType drt = declRet ? declRet->var_type : TYPE_VOID;
                                     if (lrt != drt) {
-                                        fprintf(stderr, "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                                        fprintf(stderr,
+                                                "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
                                                 pname, varTypeToString(lrt), varTypeToString(drt));
                                         pascal_semantic_error_count++;
                                     }
                                 }
+
+                                if (rhs->type == AST_VARIABLE ||
+                                    rhs->type == AST_ADDR_OF ||
+                                    (rhs->type == AST_PROCEDURE_CALL && rhs->child_count == 0)) {
+                                    rhs->var_type = TYPE_POINTER;
+                                    if (!rhs->type_def) {
+                                        rhs->type_def = lhs->type_def;
+                                    }
+                                    if (rhs->type == AST_PROCEDURE_CALL && rhs->child_count == 0) {
+                                        rhs->i_val = 1;
+                                    }
+                                }
                             } else {
-                                fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
+                                if (usedAddressOf) {
+                                    fprintf(stderr,
+                                            "Type error: '@%s' does not name a known procedure or function.\n",
+                                            pname);
+                                } else {
+                                    fprintf(stderr,
+                                            "Type error: '%s' does not name a known procedure or function.\n",
+                                            pname);
+                                }
                                 pascal_semantic_error_count++;
                             }
-                        } else {
-                            fprintf(stderr, "Type error: expected '@proc' on right-hand side of proc pointer assignment.\n");
-                            pascal_semantic_error_count++;
                         }
                     }
                 }

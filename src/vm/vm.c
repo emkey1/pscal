@@ -93,6 +93,7 @@
     X(GET_CHAR_ADDRESS) \
     X(SET_INDIRECT) \
     X(GET_INDIRECT) \
+    X(MAKE_CLOSURE) \
     X(IN) \
     X(GET_CHAR_FROM_STRING) \
     X(ALLOC_OBJECT) \
@@ -133,6 +134,17 @@ typedef struct {
     char *name;
     unsigned long long count;
 } VmShellBuiltinProfileEntry;
+
+typedef struct {
+    uint32_t magic;
+    uint16_t address;
+    uint8_t capture_count;
+    Symbol *function_symbol;
+    Value **captured_values;
+    bool *owns_value;
+} ClosureInstance;
+
+#define VM_CLOSURE_MAGIC 0x434C5352u
 
 static VmShellBuiltinProfileEntry *gVmShellBuiltinProfiles = NULL;
 static size_t gVmShellBuiltinProfileCount = 0;
@@ -5339,6 +5351,123 @@ comparison_error_label:
                 break;
             }
 
+            case MAKE_CLOSURE: {
+                uint16_t target_address = READ_SHORT(vm);
+                uint8_t capture_count = READ_BYTE();
+
+                ClosureInstance *closure = malloc(sizeof(ClosureInstance));
+                if (!closure) {
+                    runtimeError(vm, "VM Error: Failed to allocate closure instance.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                closure->magic = VM_CLOSURE_MAGIC;
+                closure->address = target_address;
+                closure->capture_count = capture_count;
+                closure->function_symbol = vmGetProcedureByAddress(vm, target_address);
+                closure->captured_values = NULL;
+                closure->owns_value = NULL;
+
+                if (capture_count > 0) {
+                    closure->captured_values = calloc(capture_count, sizeof(Value*));
+                    closure->owns_value = calloc(capture_count, sizeof(bool));
+                    if (!closure->captured_values || !closure->owns_value) {
+                        free(closure->captured_values);
+                        free(closure->owns_value);
+                        free(closure);
+                        runtimeError(vm, "VM Error: Failed to allocate closure captures.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                }
+
+                CallFrame *frame = NULL;
+                if (vm->frameCount > 0) {
+                    frame = &vm->frames[vm->frameCount - 1];
+                }
+
+                for (uint8_t i = 0; i < capture_count; i++) {
+                    uint8_t flags = READ_BYTE();
+                    uint8_t slot = READ_BYTE();
+                    bool from_local = (flags & 0x01u) != 0u;
+                    bool is_ref = (flags & 0x02u) != 0u;
+
+                    if (!frame) {
+                        runtimeError(vm, "VM Error: Closure capture outside of function context.");
+                        if (closure->captured_values) {
+                            free(closure->captured_values);
+                        }
+                        free(closure);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    Value *source = NULL;
+                    if (from_local) {
+                        if (frame->slotCount > 0 && slot >= frame->slotCount) {
+                            runtimeError(vm, "VM Error: Closure capture local slot out of range.");
+                            if (closure->captured_values) {
+                                free(closure->captured_values);
+                            }
+                            free(closure);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        source = frame->slots + slot;
+                    } else {
+                        if (!frame->upvalues || slot >= frame->upvalue_count) {
+                            runtimeError(vm, "VM Error: Closure capture upvalue index out of range.");
+                            if (closure->captured_values) {
+                                free(closure->captured_values);
+                                free(closure->owns_value);
+                            }
+                            free(closure);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        source = frame->upvalues[slot];
+                    }
+
+                    if (!source) {
+                        runtimeError(vm, "VM Error: Closure capture source unavailable.");
+                        if (closure->captured_values) {
+                            free(closure->captured_values);
+                            free(closure->owns_value);
+                        }
+                        free(closure);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    if (is_ref) {
+                        closure->captured_values[i] = source;
+                        if (closure->owns_value) {
+                            closure->owns_value[i] = false;
+                        }
+                    } else {
+                        Value *copy = malloc(sizeof(Value));
+                        if (!copy) {
+                            runtimeError(vm, "VM Error: Failed to allocate closure capture copy.");
+                            if (closure->captured_values && closure->owns_value) {
+                                for (uint8_t j = 0; j < i; j++) {
+                                    if (closure->owns_value[j] && closure->captured_values[j]) {
+                                        free(closure->captured_values[j]);
+                                    }
+                                }
+                                free(closure->captured_values);
+                                free(closure->owns_value);
+                            }
+                            free(closure);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                        *copy = makeCopyOfValue(source);
+                        closure->captured_values[i] = copy;
+                        if (closure->owns_value) {
+                            closure->owns_value[i] = true;
+                        }
+                    }
+                }
+
+                Value closureValue = makePointer(closure, NULL);
+                push(vm, closureValue);
+                break;
+            }
+
             case GET_CHAR_FROM_STRING: {
                  Value index_val = pop(vm);
                  Value base_val = pop(vm); // Can be string or char
@@ -6514,15 +6643,30 @@ comparison_error_label:
             }
             case CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
-                // Stack layout expected: [... args] [addr]
+                // Stack layout expected: [... args] [addr or closure]
                 Value addrVal = pop(vm);
-                if (!IS_INTLIKE(addrVal)) {
+                uint16_t target_address = 0;
+                ClosureInstance *closure = NULL;
+
+                if (addrVal.type == TYPE_POINTER && addrVal.ptr_val) {
+                    ClosureInstance *candidate = (ClosureInstance*)addrVal.ptr_val;
+                    if (candidate->magic == VM_CLOSURE_MAGIC) {
+                        closure = candidate;
+                        target_address = candidate->address;
+                    } else {
+                        freeValue(&addrVal);
+                        runtimeError(vm, "VM Error: Indirect call requires a procedure pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                     freeValue(&addrVal);
-                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                } else if (IS_INTLIKE(addrVal)) {
+                    target_address = (uint16_t)AS_INTEGER(addrVal);
+                    freeValue(&addrVal);
+                } else {
+                    freeValue(&addrVal);
+                    runtimeError(vm, "VM Error: Indirect call requires integer address or closure on stack.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
-                freeValue(&addrVal);
 
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");
@@ -6540,7 +6684,8 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
+                Symbol* proc_symbol = closure && closure->function_symbol ? closure->function_symbol
+                                                                         : vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
@@ -6568,28 +6713,40 @@ comparison_error_label:
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
-                    CallFrame* parent_frame = NULL;
-                    if (proc_symbol->enclosing) {
-                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
-                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
-                                parent_frame = &vm->frames[fi];
-                                break;
-                            }
-                        }
-                    } else if (vm->frameCount >= 2) {
-                        parent_frame = &vm->frames[vm->frameCount - 2];
-                    }
-
-                    if (!parent_frame) {
-                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                    if (!frame->upvalues) {
+                        runtimeError(vm, "VM Error: Failed to allocate upvalue array for closure call.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
-                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
-                        if (proc_symbol->upvalues[i].isLocal) {
-                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
-                        } else {
-                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                    if (closure && closure->captured_values) {
+                        for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                            frame->upvalues[i] = closure->captured_values[i];
+                        }
+                        frame->upvalue_count = proc_symbol->upvalue_count;
+                    } else {
+                        CallFrame* parent_frame = NULL;
+                        if (proc_symbol->enclosing) {
+                            for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                                if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                    parent_frame = &vm->frames[fi];
+                                    break;
+                                }
+                            }
+                        } else if (vm->frameCount >= 2) {
+                            parent_frame = &vm->frames[vm->frameCount - 2];
+                        }
+
+                        if (!parent_frame) {
+                            runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                            if (proc_symbol->upvalues[i].isLocal) {
+                                frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                            } else {
+                                frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                            }
                         }
                     }
                 }
@@ -6723,17 +6880,30 @@ comparison_error_label:
             }
             case PROC_CALL_INDIRECT: {
                 uint8_t declared_arity = READ_BYTE();
-                // Reuse CALL_INDIRECT machinery by rewinding ip to interpret the common path,
-                // but we need to know when to discard a return value. Implement inline duplication instead.
 
                 Value addrVal = pop(vm);
-                if (!IS_INTLIKE(addrVal)) {
+                uint16_t target_address = 0;
+                ClosureInstance *closure = NULL;
+
+                if (addrVal.type == TYPE_POINTER && addrVal.ptr_val) {
+                    ClosureInstance *candidate = (ClosureInstance*)addrVal.ptr_val;
+                    if (candidate->magic == VM_CLOSURE_MAGIC) {
+                        closure = candidate;
+                        target_address = candidate->address;
+                    } else {
+                        freeValue(&addrVal);
+                        runtimeError(vm, "VM Error: Indirect call requires a procedure pointer.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
                     freeValue(&addrVal);
-                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                } else if (IS_INTLIKE(addrVal)) {
+                    target_address = (uint16_t)AS_INTEGER(addrVal);
+                    freeValue(&addrVal);
+                } else {
+                    freeValue(&addrVal);
+                    runtimeError(vm, "VM Error: Indirect call requires integer address or closure on stack.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
-                freeValue(&addrVal);
 
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
                     runtimeError(vm, "VM Error: Call stack overflow.");
@@ -6750,7 +6920,8 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
+                Symbol* proc_symbol = closure && closure->function_symbol ? closure->function_symbol
+                                                                         : vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
@@ -6778,26 +6949,40 @@ comparison_error_label:
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
-                    CallFrame* parent_frame = NULL;
-                    if (proc_symbol->enclosing) {
-                        for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
-                            if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
-                                parent_frame = &vm->frames[fi];
-                                break;
-                            }
-                        }
-                    } else if (vm->frameCount >= 2) {
-                        parent_frame = &vm->frames[vm->frameCount - 2];
-                    }
-                    if (!parent_frame) {
-                        runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                    if (!frame->upvalues) {
+                        runtimeError(vm, "VM Error: Failed to allocate upvalue array for closure call.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    for (int i = 0; i < proc_symbol->upvalue_count; i++) {
-                        if (proc_symbol->upvalues[i].isLocal) {
-                            frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
-                        } else {
-                            frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+
+                    if (closure && closure->captured_values) {
+                        for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                            frame->upvalues[i] = closure->captured_values[i];
+                        }
+                        frame->upvalue_count = proc_symbol->upvalue_count;
+                    } else {
+                        CallFrame* parent_frame = NULL;
+                        if (proc_symbol->enclosing) {
+                            for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
+                                if (vm->frames[fi].function_symbol == proc_symbol->enclosing) {
+                                    parent_frame = &vm->frames[fi];
+                                    break;
+                                }
+                            }
+                        } else if (vm->frameCount >= 2) {
+                            parent_frame = &vm->frames[vm->frameCount - 2];
+                        }
+
+                        if (!parent_frame) {
+                            runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+
+                        for (int i = 0; i < proc_symbol->upvalue_count; i++) {
+                            if (proc_symbol->upvalues[i].isLocal) {
+                                frame->upvalues[i] = parent_frame->slots + proc_symbol->upvalues[i].index;
+                            } else {
+                                frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
+                            }
                         }
                     }
                 }
@@ -6810,11 +6995,6 @@ comparison_error_label:
 
                 vm->ip = vm->chunk->code + target_address;
 
-                // After the callee returns, if it is a function, its result will be on the stack.
-                // Since this opcode is for statement context, discard it to keep the stack balanced.
-                // This block will run when the frame unwinds back here.
-                // Note: actual popping occurs after the callee returns to this frame.
-                // The main interpreter loop continues; no action needed here now.
                 break;
             }
 
