@@ -35,6 +35,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
         case TYPE_SET:          return "SET";
         case TYPE_POINTER:      return "POINTER";
+        case TYPE_CLOSURE:      return "CLOSURE";
         case TYPE_INT8:         return "INT8";
         case TYPE_UINT8:        return "UINT8";
         case TYPE_INT16:        return "INT16";
@@ -991,6 +992,73 @@ Value makePointer(void* address, AST* base_type_node) {
     return v;
 }
 
+ClosureEnvPayload* createClosureEnv(uint16_t slot_count) {
+    ClosureEnvPayload* env = (ClosureEnvPayload*)calloc(1, sizeof(ClosureEnvPayload));
+    if (!env) {
+        fprintf(stderr, "FATAL: Memory allocation failed in createClosureEnv\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    env->refcount = 1;
+    env->slot_count = slot_count;
+    if (slot_count > 0) {
+        env->slots = (Value**)calloc(slot_count, sizeof(Value*));
+        if (!env->slots) {
+            fprintf(stderr, "FATAL: Memory allocation failed in createClosureEnv slots\n");
+            free(env);
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    return env;
+}
+
+void retainClosureEnv(ClosureEnvPayload* env) {
+    if (!env) {
+        return;
+    }
+    env->refcount++;
+}
+
+void releaseClosureEnv(ClosureEnvPayload* env) {
+    if (!env) {
+        return;
+    }
+    if (env->refcount == 0) {
+        return;
+    }
+    env->refcount--;
+    if (env->refcount != 0) {
+        return;
+    }
+
+    if (env->slot_count > 0 && env->slots) {
+        for (uint16_t i = 0; i < env->slot_count; ++i) {
+            Value* cell = env->slots[i];
+            if (!cell) {
+                continue;
+            }
+            if (!env->symbol || i >= env->symbol->upvalue_count || !env->symbol->upvalues[i].is_ref) {
+                freeValue(cell);
+                free(cell);
+            }
+        }
+        free(env->slots);
+    }
+    free(env);
+}
+
+Value makeClosure(uint32_t entry_offset, struct Symbol_s* symbol, ClosureEnvPayload* env) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_CLOSURE;
+    v.closure.entry_offset = entry_offset;
+    v.closure.symbol = symbol;
+    v.closure.env = env;
+    if (env) {
+        retainClosureEnv(env);
+    }
+    return v;
+}
+
 
 // Token
 /* Create a new token */
@@ -1277,6 +1345,14 @@ void freeValue(Value *v) {
             v->set_val.set_size = 0;
             // v.max_length for sets was used for capacity tracking by addOrdinalToResultSet,
             // not a dynamically allocated string, so no free needed for max_length itself.
+            break;
+        case TYPE_CLOSURE:
+            if (v->closure.env) {
+                releaseClosureEnv(v->closure.env);
+                v->closure.env = NULL;
+            }
+            v->closure.symbol = NULL;
+            v->closure.entry_offset = 0;
             break;
         // Add other types if they allocate memory pointed to by Value struct members
         default:
@@ -2289,6 +2365,11 @@ Value makeCopyOfValue(const Value *src) {
                 }
                 memcpy(v.set_val.set_values, src->set_val.set_values, array_size_bytes);
                 v.set_val.set_size = src->set_val.set_size;
+            }
+            break;
+        case TYPE_CLOSURE:
+            if (v.closure.env) {
+                retainClosureEnv(v.closure.env);
             }
             break;
         default:

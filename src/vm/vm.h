@@ -59,6 +59,7 @@ typedef enum {
     HOST_FN_SHELL_LOOP_ADVANCE,
     HOST_FN_SHELL_POLL_JOBS,
     HOST_FN_SHELL_LOOP_IS_READY,
+    HOST_FN_CREATE_CLOSURE,
     // ... add other host function IDs here ...
     HOST_FN_COUNT
 } HostFunctionID;
@@ -80,6 +81,8 @@ typedef struct {
     uint8_t locals_count;       // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
+    bool owns_upvalues;
+    ClosureEnvPayload* closureEnv;
     bool discard_result_on_return; // If true, drop any function result on return
     Value* vtable;               // Reference to class V-table when executing a method
 } CallFrame;

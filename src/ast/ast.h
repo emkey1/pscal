@@ -47,6 +47,7 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
 AST* findStaticDeclarationInAST(const char* varName, AST* currentScopeNode, AST* globalProgramNode);
 VarType getBuiltinReturnType(const char* name);
 void dumpASTJSON(AST *node, FILE *outFile);
+Symbol *resolveProcedureSymbolInScope(const char *name, AST *referenceNode, AST *globalProgramNode);
 
 // Threading helpers
 AST *newThreadSpawn(AST *call);

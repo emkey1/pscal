@@ -957,6 +957,52 @@ static void emitVTables(BytecodeChunk* chunk) {
 static int getLine(AST* node);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 
+static bool emitClosureLiteral(Symbol *psym, BytecodeChunk *chunk, int line) {
+    if (!psym) {
+        return false;
+    }
+
+    int capture_count = psym->upvalue_count;
+    if (capture_count > 0 && !current_function_compiler) {
+        fprintf(stderr, "L%d: Compiler error: capturing closure cannot escape global scope.\n", line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    for (int i = 0; i < capture_count; i++) {
+        uint8_t slot_index = psym->upvalues[i].index;
+        bool isLocal = psym->upvalues[i].isLocal;
+        bool is_ref = psym->upvalues[i].is_ref;
+
+        if (isLocal) {
+            if (is_ref) {
+                writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
+            } else {
+                writeBytecodeChunk(chunk, GET_LOCAL, line);
+            }
+            writeBytecodeChunk(chunk, slot_index, line);
+        } else {
+            if (is_ref) {
+                writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
+            } else {
+                writeBytecodeChunk(chunk, GET_UPVALUE, line);
+            }
+            writeBytecodeChunk(chunk, slot_index, line);
+        }
+    }
+
+    int countConst = addIntConstant(chunk, capture_count);
+    emitConstant(chunk, countConst, line);
+
+    int addrConst = addIntConstant(chunk, psym->bytecode_address);
+    recordAddressConstant(addrConst, psym->bytecode_address);
+    emitConstant(chunk, addrConst, line);
+
+    writeBytecodeChunk(chunk, CALL_HOST, line);
+    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_CLOSURE, line);
+    return true;
+}
+
 static void queueDeferredGlobalInitializer(AST* var_decl) {
     if (!var_decl) return;
     for (int i = 0; i < deferred_global_initializer_count; i++) {
@@ -5313,6 +5359,35 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             break;
         }
         case AST_PROCEDURE_CALL: {
+            bool treat_as_literal = false;
+            if (node->child_count == 0 && node->token && node->token->value) {
+                if (node->var_type == TYPE_POINTER) {
+                    treat_as_literal = true;
+                } else if (node->type_def &&
+                           (node->type_def->type == AST_PROC_PTR_TYPE ||
+                            (node->type_def->type == AST_TYPE_REFERENCE && node->type_def->right &&
+                             node->type_def->right->type == AST_PROC_PTR_TYPE))) {
+                    treat_as_literal = true;
+                } else if (node->parent && node->parent->type == AST_ASSIGN && node->parent->left) {
+                    AST *lhs = node->parent->left;
+                    AST *lhsType = lhs->type_def;
+                    if ((lhsType && (lhsType->type == AST_PROC_PTR_TYPE ||
+                                     (lhsType->type == AST_TYPE_REFERENCE && lhsType->right &&
+                                      lhsType->right->type == AST_PROC_PTR_TYPE))) ||
+                        lhs->var_type == TYPE_POINTER) {
+                        treat_as_literal = true;
+                    }
+                }
+            }
+            if (treat_as_literal) {
+                Symbol *closure_sym = resolveProcedureSymbolInScope(node->token->value, node, gCurrentProgramRoot);
+                if (closure_sym) {
+                    if (!emitClosureLiteral(closure_sym, chunk, line)) {
+                        break;
+                    }
+                    break;
+                }
+            }
             const char* calleeName = node->token->value;
             bool usesReceiverGlobal = false;
 
@@ -6163,23 +6238,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ADDR_OF: {
-            if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
-                const char* pname = node->left->token->value;
-                Symbol* psym = lookupProcedure(pname);
-                if (psym) {
-                    int addr = psym->bytecode_address;
-                    int constIndex = addIntConstant(chunk, addr);
-                    recordAddressConstant(constIndex, addr);
-                    emitConstant(chunk, constIndex, line);
-                    break;
-                }
-            }
-            if (!node->left) {
+            if (!node->left || node->left->type != AST_VARIABLE || !node->left->token || !node->left->token->value) {
                 fprintf(stderr, "L%d: Compiler error: '@' requires addressable operand.\n", line);
                 compiler_had_error = true;
                 break;
             }
-            compileLValue(node->left, chunk, line);
+
+            const char* pname = node->left->token->value;
+            Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
+            if (!psym) {
+                compileLValue(node->left, chunk, line);
+                break;
+            }
+
+            if (!emitClosureLiteral(psym, chunk, line)) {
+                break;
+            }
             break;
         }
         case AST_THREAD_SPAWN: {
