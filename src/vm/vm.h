@@ -50,7 +50,6 @@ typedef Value (*HostFn)(struct VM_s* vm);
 typedef enum {
     HOST_FN_QUIT_REQUESTED,
     HOST_FN_CREATE_THREAD_ADDR,
-    HOST_FN_CREATE_CLOSURE,
     HOST_FN_WAIT_THREAD,
     HOST_FN_PRINTF,
     HOST_FN_SHELL_LAST_STATUS,
@@ -60,6 +59,7 @@ typedef enum {
     HOST_FN_SHELL_LOOP_ADVANCE,
     HOST_FN_SHELL_POLL_JOBS,
     HOST_FN_SHELL_LOOP_IS_READY,
+    HOST_FN_CREATE_CLOSURE,
     // ... add other host function IDs here ...
     HOST_FN_COUNT
 } HostFunctionID;

@@ -2561,8 +2561,33 @@ static Value vmHostCreateThreadAddr(VM* vm) {
         }
         Value addrVal = pop(vm);
         uint16_t entry = 0;
-        if (IS_INTLIKE(addrVal)) entry = (uint16_t)AS_INTEGER(addrVal);
+        bool validEntry = false;
+        bool hasCapturedEnv = false;
+        if (addrVal.type == TYPE_CLOSURE) {
+            entry = (uint16_t)addrVal.closure.entry_offset;
+            validEntry = true;
+            if (addrVal.closure.env && addrVal.closure.env->slot_count > 0) {
+                hasCapturedEnv = true;
+            }
+        } else if (IS_INTLIKE(addrVal)) {
+            entry = (uint16_t)AS_INTEGER(addrVal);
+            validEntry = true;
+        }
         freeValue(&addrVal);
+
+        if (!validEntry || hasCapturedEnv) {
+            for (int i = 0; i < argc && i < 8; ++i) {
+                freeValue(&args[i]);
+            }
+            if (!validEntry) {
+                runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure without captures.");
+            } else {
+                runtimeError(vm, "VM Error: CreateThread does not yet support capturing closures.");
+            }
+            freeValue(&argcVal);
+            return makeInt(-1);
+        }
+
         int id = createThreadWithArgs(vm, entry, argc, args);
         return makeInt(id < 0 ? -1 : id);
     } else {
@@ -2570,8 +2595,30 @@ static Value vmHostCreateThreadAddr(VM* vm) {
         Value argVal = argcVal; // already popped
         Value addrVal = pop(vm);
         uint16_t entry = 0;
-        if (IS_INTLIKE(addrVal)) entry = (uint16_t)AS_INTEGER(addrVal);
+        bool validEntry = false;
+        bool hasCapturedEnv = false;
+        if (addrVal.type == TYPE_CLOSURE) {
+            entry = (uint16_t)addrVal.closure.entry_offset;
+            validEntry = true;
+            if (addrVal.closure.env && addrVal.closure.env->slot_count > 0) {
+                hasCapturedEnv = true;
+            }
+        } else if (IS_INTLIKE(addrVal)) {
+            entry = (uint16_t)AS_INTEGER(addrVal);
+            validEntry = true;
+        }
         freeValue(&addrVal);
+
+        if (!validEntry || hasCapturedEnv) {
+            if (!validEntry) {
+                runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure without captures.");
+            } else {
+                runtimeError(vm, "VM Error: CreateThread does not yet support capturing closures.");
+            }
+            freeValue(&argVal);
+            return makeInt(-1);
+        }
+
         int id = createThreadWithArgs(vm, entry, 1, &argVal);
         return makeInt(id < 0 ? -1 : id);
     }
@@ -3120,7 +3167,6 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         EXIT_FAILURE_HANDLER();
     }
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
-    registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
     registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
@@ -3130,6 +3176,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_ADVANCE, vmHostShellLoopAdvanceHost);
     registerHostFunction(vm, HOST_FN_SHELL_POLL_JOBS, vmHostShellPollJobsHost);
     registerHostFunction(vm, HOST_FN_SHELL_LOOP_IS_READY, vmHostShellLoopIsReadyHost);
+    registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
 
     // Default: tracing disabled
     vm->trace_head_instructions = 0;
