@@ -1446,6 +1446,57 @@ static AST* resolveTypeAlias(AST* type_node) {
     return type_node;
 }
 
+static AST* getInterfaceTypeFromExpression(AST* expr) {
+    if (!expr) {
+        return NULL;
+    }
+
+    AST* type_node = resolveTypeAlias(expr->type_def);
+    if (!type_node && expr->type == AST_VARIABLE && expr->token && expr->token->value) {
+        Symbol* sym = lookupSymbol(expr->token->value);
+        if (sym && sym->type_def) {
+            type_node = resolveTypeAlias(sym->type_def);
+        }
+    }
+
+    if (type_node && type_node->var_type == TYPE_POINTER && type_node->right) {
+        AST* pointed = resolveTypeAlias(type_node->right);
+        if (pointed) {
+            type_node = pointed;
+        }
+    }
+
+    if (type_node && type_node->var_type == TYPE_INTERFACE) {
+        return type_node;
+    }
+
+    return NULL;
+}
+
+static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName) {
+    interfaceType = resolveTypeAlias(interfaceType);
+    if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
+        return -1;
+    }
+
+    int slot = 0;
+    int foundSlot = -1;
+    for (int i = 0; i < interfaceType->child_count; i++) {
+        AST* child = interfaceType->children[i];
+        if (!child) continue;
+        if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
+            child->i_val = slot;
+            if (child->token && child->token->value &&
+                strcasecmp(child->token->value, methodName) == 0) {
+                foundSlot = child->i_val;
+            }
+            slot++;
+        }
+    }
+
+    return foundSlot;
+}
+
 // --- Object layout helpers -------------------------------------------------
 
 // Recursively count fields in a record, including inherited ones.
@@ -6747,15 +6798,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (line <= 0) line = current_line_approx;
 
             const char* functionName = NULL;
+            const char* methodIdentifier = NULL;
             bool isCallQualified = false;
             bool usesReceiverGlobal = false;
 
             if (node->left &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
+                methodIdentifier = node->token->value;
                 isCallQualified = true;
             } else if (node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
+                methodIdentifier = node->token->value;
                 isCallQualified = false;
             } else {
                 fprintf(stderr, "L%d: Compiler error: Invalid callee in AST_PROCEDURE_CALL (expression).\n", line);
@@ -6924,6 +6978,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+            bool isInterfaceDispatch = isCallQualified && node->child_count > 0 &&
+                                       node->children[0] && node->children[0]->var_type == TYPE_INTERFACE;
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
@@ -6965,6 +7021,60 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
                     break;
                 }
+            }
+
+            if (isInterfaceDispatch) {
+                if (!func_symbol || !func_symbol->type_def) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: Unable to resolve interface method '%s'.\n",
+                            line, functionName ? functionName : "<anonymous>");
+                    compiler_had_error = true;
+                    emitConstant(chunk, addNilConstant(chunk), line);
+                    break;
+                }
+
+                int method_slot = func_symbol->type_def->i_val;
+                AST* interfaceType = getInterfaceTypeFromExpression(node->children[0]);
+                const char* slotName = methodIdentifier ? methodIdentifier : functionName;
+                int resolved_slot = ensureInterfaceMethodSlot(interfaceType, slotName);
+                if (resolved_slot >= 0) {
+                    method_slot = resolved_slot;
+                    func_symbol->type_def->i_val = method_slot;
+                }
+                if (method_slot < 0) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: Interface method '%s' missing slot index.\n",
+                            line, functionName ? functionName : "<anonymous>");
+                    compiler_had_error = true;
+                    emitConstant(chunk, addNilConstant(chunk), line);
+                    break;
+                }
+
+                AST* recv = node->children[0];
+                compileRValue(recv, chunk, getLine(recv));
+                int slotConst = addIntConstant(chunk, method_slot);
+                emitConstant(chunk, slotConst, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
+
+                for (int i = 1; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    bool is_var_param = false;
+                    if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
+                        AST* param_node = func_symbol->type_def->children[i];
+                        if (param_node && param_node->by_ref) is_var_param = true;
+                    }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                    }
+                    writeBytecodeChunk(chunk, SWAP, line);
+                }
+
+                writeBytecodeChunk(chunk, CALL_INDIRECT, line);
+                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                break;
             }
 
             bool emittedLowHighArg = false;
@@ -7059,7 +7169,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emittedLowHighArg = emittedValue;
             }
 
-            if (!isLowHighBuiltin || !emittedLowHighArg) {
+            if (!isInterfaceDispatch && (!isLowHighBuiltin || !emittedLowHighArg)) {
                 for (int i = receiver_offset; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     if (!arg_node) continue;
@@ -7097,6 +7207,59 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (!func_symbol) {
                 AST* castType = lookupType(functionName);
                 if (castType) {
+                    AST* resolvedCast = resolveTypeAlias(castType);
+                    if (resolvedCast && resolvedCast->var_type == TYPE_INTERFACE) {
+                        if (call_arg_count != 1) {
+                            fprintf(stderr, "L%d: Compiler Error: Interface cast '%s' expects exactly 1 argument (got %d).\n",
+                                    line, functionName, call_arg_count);
+                            compiler_had_error = true;
+                            for (uint8_t i = 0; i < call_arg_count; ++i) {
+                                writeBytecodeChunk(chunk, POP, line);
+                            }
+                            emitConstant(chunk, addNilConstant(chunk), line);
+                            break;
+                        }
+
+                        AST* argNode = (receiver_offset < node->child_count) ? node->children[receiver_offset] : NULL;
+                        AST* argType = argNode ? resolveTypeAlias(argNode->type_def) : NULL;
+                        AST* recordType = NULL;
+                        if (argType && argType->type == AST_POINTER_TYPE) {
+                            recordType = resolveTypeAlias(argType->right);
+                        } else {
+                            recordType = argType;
+                        }
+
+                        if (!recordType || recordType->type != AST_RECORD_TYPE || !recordTypeHasVTable(recordType)) {
+                            fprintf(stderr,
+                                    "L%d: Compiler Error: Only class records with virtual methods can be cast to interface '%s'.\n",
+                                    line,
+                                    functionName ? functionName : "<anonymous>");
+                            compiler_had_error = true;
+                            writeBytecodeChunk(chunk, POP, line);
+                            emitConstant(chunk, addNilConstant(chunk), line);
+                            break;
+                        }
+
+                        writeBytecodeChunk(chunk, DUP, line);
+                        writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                        writeBytecodeChunk(chunk, (uint8_t)0, line);
+                        writeBytecodeChunk(chunk, SWAP, line);
+
+                        const char* ifaceName = getTypeNameFromAST(resolvedCast);
+                        if ((!ifaceName || ifaceName[0] == '\0') && resolvedCast->token && resolvedCast->token->value) {
+                            ifaceName = resolvedCast->token->value;
+                        }
+                        if (!ifaceName) {
+                            ifaceName = functionName ? functionName : "";
+                        }
+
+                        int typeNameIndex = addStringConstant(chunk, ifaceName);
+                        emitConstant(chunk, typeNameIndex, line);
+
+                        writeBytecodeChunk(chunk, CALL_HOST, line);
+                        writeBytecodeChunk(chunk, (uint8_t)HOST_FN_BOX_INTERFACE, line);
+                        break;
+                    }
                     if (call_arg_count != 1) {
                         fprintf(stderr, "L%d: Compiler Error: Type cast '%s' expects exactly 1 argument (got %d).\n",
                                 line, functionName, call_arg_count);
