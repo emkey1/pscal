@@ -6505,10 +6505,8 @@ comparison_error_label:
                             frame->upvalues = NULL;
                             frame->owns_upvalues = false;
                         }
-                        if (captured_env) {
-                            releaseClosureEnv(captured_env);
-                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
@@ -6576,6 +6574,8 @@ comparison_error_label:
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->owns_upvalues = false;
+                frame->closureEnv = NULL;
                 frame->discard_result_on_return = false;
                 frame->vtable = NULL;
                 frame->vtable = NULL;
@@ -6600,10 +6600,8 @@ comparison_error_label:
                             frame->upvalues = NULL;
                             frame->owns_upvalues = false;
                         }
-                        if (captured_env) {
-                            releaseClosureEnv(captured_env);
-                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
@@ -6709,6 +6707,7 @@ comparison_error_label:
                         releaseClosureEnv(captured_env);
                         runtimeError(vm, "VM Error: Closure environment mismatch for '%s'.",
                                      proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     frame->closureEnv = captured_env;
@@ -6738,6 +6737,7 @@ comparison_error_label:
                             releaseClosureEnv(captured_env);
                         }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
 
@@ -6967,6 +6967,7 @@ comparison_error_label:
                         releaseClosureEnv(captured_env);
                         runtimeError(vm, "VM Error: Closure environment mismatch for '%s'.",
                                      proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     frame->closureEnv = captured_env;
@@ -6995,6 +6996,7 @@ comparison_error_label:
                             releaseClosureEnv(captured_env);
                         }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
+                        vm->frameCount--;
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     for (int i = 0; i < proc_symbol->upvalue_count; i++) {
