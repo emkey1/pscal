@@ -35,6 +35,7 @@ const char *varTypeToString(VarType type) {
         case TYPE_MEMORYSTREAM: return "MEMORY_STREAM";
         case TYPE_SET:          return "SET";
         case TYPE_POINTER:      return "POINTER";
+        case TYPE_INTERFACE:    return "INTERFACE";
         case TYPE_CLOSURE:      return "CLOSURE";
         case TYPE_INT8:         return "INT8";
         case TYPE_UINT8:        return "UINT8";
@@ -958,6 +959,10 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_POINTER:
             v.ptr_val = NULL;
             break;
+        case TYPE_INTERFACE:
+            v.interface.type_def = actual_type_def ? actual_type_def : type_def_param;
+            v.interface.payload = NULL;
+            break;
         case TYPE_NIL:
             return makeNil();
         case TYPE_VOID:
@@ -1055,6 +1060,18 @@ Value makeClosure(uint32_t entry_offset, struct Symbol_s* symbol, ClosureEnvPayl
     v.closure.env = env;
     if (env) {
         retainClosureEnv(env);
+    }
+    return v;
+}
+
+Value makeInterface(AST* interfaceType, ClosureEnvPayload* payload) {
+    Value v;
+    memset(&v, 0, sizeof(Value));
+    v.type = TYPE_INTERFACE;
+    v.interface.type_def = interfaceType;
+    v.interface.payload = payload;
+    if (payload) {
+        retainClosureEnv(payload);
     }
     return v;
 }
@@ -1345,6 +1362,13 @@ void freeValue(Value *v) {
             v->set_val.set_size = 0;
             // v.max_length for sets was used for capacity tracking by addOrdinalToResultSet,
             // not a dynamically allocated string, so no free needed for max_length itself.
+            break;
+        case TYPE_INTERFACE:
+            if (v->interface.payload) {
+                releaseClosureEnv(v->interface.payload);
+                v->interface.payload = NULL;
+            }
+            v->interface.type_def = NULL;
             break;
         case TYPE_CLOSURE:
             if (v->closure.env) {
@@ -2130,6 +2154,14 @@ void printValueToStream(Value v, FILE *stream) {
             }
             fprintf(stream, ")");
             break;
+        case TYPE_INTERFACE: {
+            const char* name = "<anonymous interface>";
+            if (v.interface.type_def && v.interface.type_def->token && v.interface.type_def->token->value) {
+                name = v.interface.type_def->token->value;
+            }
+            fprintf(stream, "INTERFACE(%s)", name);
+            break;
+        }
         case TYPE_ARRAY:
             // Your `v.array_val` is a `Value*` pointing to the first element.
             // The other array metadata (dimensions, bounds, element_type) is directly in `v`.
@@ -2365,6 +2397,11 @@ Value makeCopyOfValue(const Value *src) {
                 }
                 memcpy(v.set_val.set_values, src->set_val.set_values, array_size_bytes);
                 v.set_val.set_size = src->set_val.set_size;
+            }
+            break;
+        case TYPE_INTERFACE:
+            if (v.interface.payload) {
+                retainClosureEnv(v.interface.payload);
             }
             break;
         case TYPE_CLOSURE:

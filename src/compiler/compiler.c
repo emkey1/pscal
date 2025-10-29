@@ -7243,6 +7243,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, DUP, line);
                         writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                         writeBytecodeChunk(chunk, (uint8_t)0, line);
+                        writeBytecodeChunk(chunk, GET_INDIRECT, line);
                         writeBytecodeChunk(chunk, SWAP, line);
 
                         const char* ifaceName = getTypeNameFromAST(resolvedCast);

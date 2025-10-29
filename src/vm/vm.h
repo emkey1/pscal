@@ -60,6 +60,8 @@ typedef enum {
     HOST_FN_SHELL_POLL_JOBS,
     HOST_FN_SHELL_LOOP_IS_READY,
     HOST_FN_CREATE_CLOSURE,
+    HOST_FN_BOX_INTERFACE,
+    HOST_FN_INTERFACE_LOOKUP,
     // ... add other host function IDs here ...
     HOST_FN_COUNT
 } HostFunctionID;

@@ -50,6 +50,7 @@ typedef enum {
     TYPE_MEMORYSTREAM,
     TYPE_SET,
     TYPE_POINTER,
+    TYPE_INTERFACE,
     TYPE_CLOSURE,
     /* Extended integer and floating-point types */
     TYPE_INT8,
@@ -122,6 +123,10 @@ typedef struct ValueStruct {
             struct Symbol_s *symbol;
             ClosureEnvPayload *env;
         } closure;
+        struct {
+            struct AST *type_def;
+            ClosureEnvPayload *payload;
+        } interface;
     };
     AST *base_type_node; // AST node defining the type this pointer points to
                          // Needed for new(), dispose(), dereferencing type checks.
