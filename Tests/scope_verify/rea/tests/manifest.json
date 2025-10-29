@@ -272,23 +272,21 @@
     },
     {
       "id": "closure_escape_local_error",
-      "name": "Escaping closure cannot capture locals",
+      "name": "Escaping closure carries its locals",
       "category": "closure_scope",
-      "description": "Returning a closure that captures a local should be rejected for safety.",
-      "expect": "compile_error",
-      "code": "int (*makeAdder(int seed))(int) {\n    int base = seed;\n    int inner(int delta) {\n        return base + delta;\n    }\n    return inner;\n}\nint main() {\n    int (*adder)(int) = makeAdder(5);\n    return adder(1);\n}",
-      "expected_stderr_substring": "lifetime",
-      "failure_reason": "Closures that capture locals must not escape their defining scope."
+      "description": "Returning a closure that captures a local now yields a callable value that updates its environment.",
+      "expect": "runtime_ok",
+      "code": "int (*makeAdder(int seed))(int) {\n    int base = seed;\n    int inner(int delta) {\n        base = base + delta;\n        return base;\n    }\n    return inner;\n}\nint main() {\n    int (*adder)(int) = makeAdder(5);\n    writeln(\"first=\", adder(2));\n    writeln(\"second=\", adder(3));\n    return 0;\n}",
+      "expected_stdout": "first=7\nsecond=10"
     },
     {
       "id": "closure_loop_capture_error",
-      "name": "Loop capture invoked after iteration",
+      "name": "Loop capture survives past the loop",
       "category": "closure_scope",
-      "description": "Closures capturing loop indices cannot be called after the loop completes if the binding expired.",
-      "expect": "compile_error",
-      "code": "int (*saved)(void);\nint main() {\n    for (int i = 0; i < 2; i = i + 1) {\n        int capture(void) {\n            return i;\n        }\n        saved = capture;\n    }\n    return saved();\n}",
-      "expected_stderr_substring": "lifetime",
-      "failure_reason": "Loop-scoped captures must not survive beyond the loop."
+      "description": "Closures capturing loop indices can be stored and invoked after the loop completes.",
+      "expect": "runtime_ok",
+      "code": "int (*saved)(void);\nint main() {\n    for (int i = 1; i <= 3; i = i + 1) {\n        int capture(void) {\n            return i;\n        }\n        saved = capture;\n    }\n    writeln(\"value=\", saved());\n    writeln(\"again=\", saved());\n    return 0;\n}",
+      "expected_stdout": "value=3\nagain=3"
     },
     {
       "id": "closure_missing_capture_error",
@@ -1100,7 +1098,7 @@
       "category": "integration",
       "description": "thread_spawn_named and thread_pool_submit wrap the VM worker pool with JSON-friendly helpers.",
       "expect": "runtime_ok",
-      "code": "        int main() {\n            int named = thread_spawn_named(\"delay\", \"rea_worker\", 5);\n            int named_wait = WaitForThread(named);\n            int named_ok = (named_wait == 0) ? 1 : 0;\n\n            int pooled = thread_pool_submit(\"delay\", \"rea_pool\", 5);\n            int pooled_wait = WaitForThread(pooled);\n            int lookup = thread_lookup(\"rea_pool\");\n            int pooled_ok = (pooled_wait == 0) ? 1 : 0;\n            int lookup_match = (lookup == pooled) ? 1 : 0;\n            int stats_len = length(thread_stats());\n\n            printf(\"named_status=%d\\n\", named_ok);\n            printf(\"pooled_status=%d lookup_match=%d stats=%d\\n\", pooled_ok, lookup_match, stats_len);\n            return 0;\n        }",
+      "code": "int main() {\n    int named = thread_spawn_named(\"delay\", \"rea_worker\", 5);\n    int named_wait = WaitForThread(named);\n    int named_ok = (named_wait == 0) ? 1 : 0;\n\n    int pooled = thread_pool_submit(\"delay\", \"rea_pool\", 5);\n    int pooled_wait = WaitForThread(pooled);\n    int lookup = thread_lookup(\"rea_pool\");\n    int pooled_ok = (pooled_wait == 0) ? 1 : 0;\n    int lookup_match = (lookup == pooled) ? 1 : 0;\n    int stats_len = length(thread_stats());\n\n    printf(\"named_status=%d\\n\", named_ok);\n    printf(\"pooled_status=%d lookup_match=%d stats=%d\\n\", pooled_ok, lookup_match, stats_len);\n    return 0;\n}",
       "expected_stdout": "named_status=1\npooled_status=1 lookup_match=1 stats=1"
     }
   ]

@@ -487,47 +487,50 @@ add({
 
 add({
     "id": "closure_escape_local_error",
-    "name": "Escaping closure cannot capture locals",
+    "name": "Escaping closure carries its locals",
     "category": "closure_scope",
-    "description": "Returning a closure that captures a local should be rejected for safety.",
-    "expect": "compile_error",
+    "description": "Returning a closure that captures a local now yields a callable value that updates its environment.",
+    "expect": "runtime_ok",
     "code": """
         int (*makeAdder(int seed))(int) {
             int base = seed;
             int inner(int delta) {
-                return base + delta;
+                base = base + delta;
+                return base;
             }
             return inner;
         }
         int main() {
             int (*adder)(int) = makeAdder(5);
-            return adder(1);
+            writeln("first=", adder(2));
+            writeln("second=", adder(3));
+            return 0;
         }
     """,
-    "expected_stderr_substring": "lifetime",
-    "failure_reason": "Closures that capture locals must not escape their defining scope.",
+    "expected_stdout": "first=7\nsecond=10",
 })
 
 add({
     "id": "closure_loop_capture_error",
-    "name": "Loop capture invoked after iteration",
+    "name": "Loop capture survives past the loop",
     "category": "closure_scope",
-    "description": "Closures capturing loop indices cannot be called after the loop completes if the binding expired.",
-    "expect": "compile_error",
+    "description": "Closures capturing loop indices can be stored and invoked after the loop completes.",
+    "expect": "runtime_ok",
     "code": """
         int (*saved)(void);
         int main() {
-            for (int i = 0; i < 2; i = i + 1) {
+            for (int i = 1; i <= 3; i = i + 1) {
                 int capture(void) {
                     return i;
                 }
                 saved = capture;
             }
-            return saved();
+            writeln("value=", saved());
+            writeln("again=", saved());
+            return 0;
         }
     """,
-    "expected_stderr_substring": "lifetime",
-    "failure_reason": "Loop-scoped captures must not survive beyond the loop.",
+    "expected_stdout": "value=3\nagain=3",
 })
 
 add({

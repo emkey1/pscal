@@ -649,18 +649,19 @@ add({
 
 add({
     "id": "closure_escape_local_error",
-    "name": "Escaping closure cannot capture locals",
+    "name": "Escaping closure keeps captured locals alive",
     "category": "closure_scope",
-    "description": "Taking the address of a nested function that captures locals should be rejected.",
-    "expect": "compile_error",
+    "description": "Taking the address of a nested function that captures locals now produces a working closure.",
+    "expect": "runtime_ok",
     "code": """
-        program ClosureEscapeLocalError;
+        program ClosureEscapeLocal;
 
         type
           TMaker = procedure(delta: Integer);
 
         var
           saved: TMaker;
+          mirror: Integer;
 
         procedure Build(seed: Integer);
         var
@@ -668,10 +669,8 @@ add({
 
           procedure Maker(delta: Integer);
           begin
-            if delta > 0 then
-            begin
-              base := base + delta;
-            end;
+            base := base + delta;
+            mirror := base;
           end;
 
         begin
@@ -680,21 +679,28 @@ add({
         end;
 
         begin
+          mirror := 0;
           Build(5);
+          saved(2);
+          writeln('after_first=', mirror);
+          saved(3);
+          writeln('after_second=', mirror);
         end.
     """,
-    "expected_stderr_substring": "@maker' does not name a known procedure or function",
-    "failure_reason": "Nested procedure pointers are not yet supported; capturing locals would otherwise be unsafe.",
+    "expected_stdout": """
+        after_first=7
+        after_second=10
+    """,
 })
 
 add({
     "id": "closure_loop_capture_error",
-    "name": "Loop-assigned closure cannot escape",
+    "name": "Loop-assigned closure retains loop index",
     "category": "closure_scope",
-    "description": "Capturing loop indices and storing the closure for later use is rejected.",
-    "expect": "compile_error",
+    "description": "Closures assigned inside loops preserve the final loop variable once the loop ends.",
+    "expect": "runtime_ok",
     "code": """
-        program ClosureLoopCaptureError;
+        program ClosureLoopCapture;
 
         type
           TCapture = procedure;
@@ -713,18 +719,20 @@ add({
           end;
 
         begin
-          for index := 1 to 2 do
+          for index := 1 to 3 do
           begin
             saved := @Capture;
           end;
         end;
 
         begin
+          captured := 0;
           Store;
+          saved();
+          writeln('captured=', captured);
         end.
     """,
-    "expected_stderr_substring": "@capture' does not name a known procedure or function",
-    "failure_reason": "Nested procedure pointers are not yet supported; capturing loop locals would otherwise be unsafe.",
+    "expected_stdout": "captured=3",
 })
 
 add({

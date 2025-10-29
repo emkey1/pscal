@@ -179,23 +179,21 @@
     },
     {
       "id": "closure_escape_local_error",
-      "name": "Escaping closure cannot capture locals",
+      "name": "Escaping closure keeps captured locals alive",
       "category": "closure_scope",
-      "description": "Taking the address of a nested function that captures locals should be rejected.",
-      "expect": "compile_error",
-      "code": "program ClosureEscapeLocalError;\n\ntype\n  TMaker = procedure(delta: Integer);\n\nvar\n  saved: TMaker;\n\nprocedure Build(seed: Integer);\nvar\n  base: Integer;\n\n  procedure Maker(delta: Integer);\n  begin\n    if delta > 0 then\n    begin\n      base := base + delta;\n    end;\n  end;\n\nbegin\n  base := seed;\n  saved := @Maker;\nend;\n\nbegin\n  Build(5);\nend.",
-      "expected_stderr_substring": "@maker' does not name a known procedure or function",
-      "failure_reason": "Nested procedure pointers are not yet supported; capturing locals would otherwise be unsafe."
+      "description": "Taking the address of a nested function that captures locals now produces a working closure.",
+      "expect": "runtime_ok",
+      "code": "program ClosureEscapeLocal;\n\ntype\n  TMaker = procedure(delta: Integer);\n\nvar\n  saved: TMaker;\n  mirror: Integer;\n\nprocedure Build(seed: Integer);\nvar\n  base: Integer;\n\n  procedure Maker(delta: Integer);\n  begin\n    base := base + delta;\n    mirror := base;\n  end;\n\nbegin\n  base := seed;\n  saved := @Maker;\nend;\n\nbegin\n  mirror := 0;\n  Build(5);\n  saved(2);\n  writeln('after_first=', mirror);\n  saved(3);\n  writeln('after_second=', mirror);\nend.",
+      "expected_stdout": "after_first=7\nafter_second=10"
     },
     {
       "id": "closure_loop_capture_error",
-      "name": "Loop-assigned closure cannot escape",
+      "name": "Loop-assigned closure retains loop index",
       "category": "closure_scope",
-      "description": "Capturing loop indices and storing the closure for later use is rejected.",
-      "expect": "compile_error",
-      "code": "program ClosureLoopCaptureError;\n\ntype\n  TCapture = procedure;\n\nvar\n  saved: TCapture;\n  captured: Integer;\n\nprocedure Store;\nvar\n  index: Integer;\n\n  procedure Capture;\n  begin\n    captured := index;\n  end;\n\nbegin\n  for index := 1 to 2 do\n  begin\n    saved := @Capture;\n  end;\nend;\n\nbegin\n  Store;\nend.",
-      "expected_stderr_substring": "@capture' does not name a known procedure or function",
-      "failure_reason": "Nested procedure pointers are not yet supported; capturing loop locals would otherwise be unsafe."
+      "description": "Closures assigned inside loops preserve the final loop variable once the loop ends.",
+      "expect": "runtime_ok",
+      "code": "program ClosureLoopCapture;\n\ntype\n  TCapture = procedure;\n\nvar\n  saved: TCapture;\n  captured: Integer;\n\nprocedure Store;\nvar\n  index: Integer;\n\n  procedure Capture;\n  begin\n    captured := index;\n  end;\n\nbegin\n  for index := 1 to 3 do\n  begin\n    saved := @Capture;\n  end;\nend;\n\nbegin\n  captured := 0;\n  Store;\n  saved();\n  writeln('captured=', captured);\nend.",
+      "expected_stdout": "captured=3"
     },
     {
       "id": "closure_missing_capture_error",
