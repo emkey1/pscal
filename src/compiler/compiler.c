@@ -4821,6 +4821,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             writeBytecodeChunk(chunk, RETURN, line);
             break;
         }
+        case AST_PROCEDURE_DECL:
+        case AST_FUNCTION_DECL: {
+            compileNode(node, chunk, line);
+            break;
+        }
         case AST_LABEL: {
             if (node->token) {
                 defineLabel(node->token, chunk, line);
@@ -6353,6 +6358,37 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (const_val_ptr) {
                             emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                         } else {
+                            Symbol *proc_symbol = NULL;
+                            char lower_name[MAX_SYMBOL_LENGTH];
+                            strncpy(lower_name, varName, sizeof(lower_name) - 1);
+                            lower_name[sizeof(lower_name) - 1] = '\0';
+                            toLowerString(lower_name);
+                            proc_symbol = lookupProcedure(lower_name);
+                            if (!proc_symbol && current_compilation_unit_name) {
+                                char qualified[MAX_SYMBOL_LENGTH * 2 + 2];
+                                snprintf(qualified, sizeof(qualified), "%s.%s",
+                                         current_compilation_unit_name, lower_name);
+                                toLowerString(qualified);
+                                proc_symbol = lookupProcedure(qualified);
+                            }
+                            if (!proc_symbol) {
+                                const char *dot = strrchr(lower_name, '.');
+                                if (dot && *(dot + 1)) {
+                                    proc_symbol = lookupProcedure(dot + 1);
+                                }
+                            }
+                            if (proc_symbol) {
+                                if (proc_symbol->upvalue_count > 0) {
+                                    emitMakeClosure(chunk, proc_symbol, line);
+                                } else {
+                                    int addr = proc_symbol->bytecode_address;
+                                    int constIndex = addIntConstant(chunk, addr);
+                                    recordAddressConstant(constIndex, addr);
+                                    emitConstant(chunk, constIndex, line);
+                                }
+                                break;
+                            }
+
                             DBG_PRINTF("[dbg] RV %s -> global line=%d\n", varName, line);
                             int nameIndex = addStringConstant(chunk, varName);
                             emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,

@@ -599,25 +599,27 @@ add({
 
 add({
     "id": "closure_random_escape_error",
-    "name": "Randomised escaping closure rejected",
+    "name": "Randomised escaping closure retains state",
     "category": "closure_scope",
-    "description": "Random identifiers still cannot allow a closure that captures locals to escape.",
-    "expect": "compile_error",
+    "description": "Random identifiers still produce working escaping closures that update their captured locals.",
+    "expect": "runtime_ok",
     "code": """
         int (*{{maker_name}}(int seed))(int) {
             int {{captured_name}} = seed;
             int {{inner_name}}(int delta) {
-                return {{captured_name}} + delta;
+                {{captured_name}} = {{captured_name}} + delta;
+                return {{captured_name}};
             }
             return {{inner_name}};
         }
         int main() {
             int (*{{alias_name}})(int) = {{maker_name}}(2);
-            return {{alias_name}}(1);
+            writeln("first=", {{alias_name}}(1));
+            writeln("second=", {{alias_name}}(2));
+            return 0;
         }
     """,
-    "expected_stderr_substring": "lifetime",
-    "failure_reason": "Escaping closures must fail regardless of identifier spelling.",
+    "expected_stdout": "first=3\nsecond=5",
     "placeholders": {
         "maker_name": {"type": "identifier", "min_length": 5},
         "captured_name": {"type": "identifier", "min_length": 5},

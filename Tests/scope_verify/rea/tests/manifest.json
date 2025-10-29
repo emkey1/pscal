@@ -350,13 +350,12 @@
     },
     {
       "id": "closure_random_escape_error",
-      "name": "Randomised escaping closure rejected",
+      "name": "Randomised escaping closure retains state",
       "category": "closure_scope",
-      "description": "Random identifiers still cannot allow a closure that captures locals to escape.",
-      "expect": "compile_error",
-      "code": "int (*{{maker_name}}(int seed))(int) {\n    int {{captured_name}} = seed;\n    int {{inner_name}}(int delta) {\n        return {{captured_name}} + delta;\n    }\n    return {{inner_name}};\n}\nint main() {\n    int (*{{alias_name}})(int) = {{maker_name}}(2);\n    return {{alias_name}}(1);\n}",
-      "expected_stderr_substring": "lifetime",
-      "failure_reason": "Escaping closures must fail regardless of identifier spelling.",
+      "description": "Random identifiers still produce working escaping closures that update their captured locals.",
+      "expect": "runtime_ok",
+      "code": "int (*{{maker_name}}(int seed))(int) {\n    int {{captured_name}} = seed;\n    int {{inner_name}}(int delta) {\n        {{captured_name}} = {{captured_name}} + delta;\n        return {{captured_name}};\n    }\n    return {{inner_name}};\n}\nint main() {\n    int (*{{alias_name}})(int) = {{maker_name}}(2);\n    writeln(\"first=\", {{alias_name}}(1));\n    writeln(\"second=\", {{alias_name}}(2));\n    return 0;\n}",
+      "expected_stdout": "first=3\nsecond=5",
       "placeholders": {
         "maker_name": {
           "type": "identifier",
