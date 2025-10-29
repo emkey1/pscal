@@ -2364,6 +2364,14 @@ static Value copyValueForStack(const Value* src) {
         return alias;
     }
 
+    if (src->type == TYPE_CLOSURE) {
+        Value alias = *src;
+        if (alias.closure.env) {
+            retainClosureEnv(alias.closure.env);
+        }
+        return alias;
+    }
+
     return makeCopyOfValue(src);
 }
 

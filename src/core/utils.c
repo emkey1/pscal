@@ -2211,6 +2211,21 @@ void printValueToStream(Value v, FILE *stream) {
         case TYPE_WORD:
             fprintf(stream, "%lld", v.i_val & 0xFFFF);
             break;
+        case TYPE_CLOSURE: {
+            fprintf(stream, "CLOSURE(entry=%u", v.closure.entry_offset);
+            if (v.closure.symbol && v.closure.symbol->name) {
+                fprintf(stream, ", symbol=%s", v.closure.symbol->name);
+            }
+            if (v.closure.env) {
+                fprintf(stream, ", env=%p, slots=%u, ref=%u)",
+                        (void*)v.closure.env,
+                        (unsigned)v.closure.env->slot_count,
+                        (unsigned)v.closure.env->refcount);
+            } else {
+                fprintf(stream, ", env=NULL)");
+            }
+            break;
+        }
         case TYPE_THREAD:
             fprintf(stream, "%lld", v.i_val);
             break;
