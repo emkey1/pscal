@@ -50,6 +50,7 @@ typedef Value (*HostFn)(struct VM_s* vm);
 typedef enum {
     HOST_FN_QUIT_REQUESTED,
     HOST_FN_CREATE_THREAD_ADDR,
+    HOST_FN_CREATE_CLOSURE,
     HOST_FN_WAIT_THREAD,
     HOST_FN_PRINTF,
     HOST_FN_SHELL_LAST_STATUS,
@@ -80,6 +81,8 @@ typedef struct {
     uint8_t locals_count;       // Number of local variables (excluding params)
     uint8_t upvalue_count;
     Value** upvalues;
+    bool owns_upvalues;
+    ClosureEnvPayload* closureEnv;
     bool discard_result_on_return; // If true, drop any function result on return
     Value* vtable;               // Reference to class V-table when executing a method
 } CallFrame;

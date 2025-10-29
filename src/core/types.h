@@ -22,7 +22,16 @@ typedef struct TypeEntry_s { // Use a named tag for robustness
     struct TypeEntry_s *next;
 } TypeEntry;
 
+struct ValueStruct;
 typedef struct FieldValue FieldValue;
+struct Symbol_s;
+
+typedef struct ClosureEnvPayload {
+    uint32_t refcount;
+    uint16_t slot_count;
+    struct Symbol_s *symbol;
+    struct ValueStruct **slots;
+} ClosureEnvPayload;
 
 typedef enum {
     TYPE_UNKNOWN = 0,
@@ -41,6 +50,7 @@ typedef enum {
     TYPE_MEMORYSTREAM,
     TYPE_SET,
     TYPE_POINTER,
+    TYPE_CLOSURE,
     /* Extended integer and floating-point types */
     TYPE_INT8,
     TYPE_UINT8,
@@ -107,6 +117,11 @@ typedef struct ValueStruct {
             int ordinal;     // Ordinal value
         } enum_val;
         struct ValueStruct *ptr_val; // Pointer to another Value (for heap data)
+        struct {
+            uint32_t entry_offset;
+            struct Symbol_s *symbol;
+            ClosureEnvPayload *env;
+        } closure;
     };
     AST *base_type_node; // AST node defining the type this pointer points to
                          // Needed for new(), dispose(), dereferencing type checks.

@@ -15,6 +15,12 @@
       "path": "Tests/compiler/pascal/cases/closure_non_capturing_pointer_ok.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: non-capturing closure stored"
+    },
+    {
+      "id": "closure_capturing_store_return",
+      "path": "Tests/compiler/pascal/cases/closure_capturing_store_return.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: capturing closure stored and returned"
     }
   ]
 }

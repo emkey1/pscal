@@ -1259,11 +1259,14 @@ static void* threadStart(void* arg) {
                     frame->locals_count = proc_symbol ? proc_symbol->locals_count : 0;
                     frame->upvalue_count = proc_symbol ? proc_symbol->upvalue_count : 0;
                     frame->upvalues = NULL;
+                    frame->owns_upvalues = false;
+                    frame->closureEnv = NULL;
                     frame->discard_result_on_return = false;
                     frame->vtable = NULL;
 
                     if (proc_symbol && proc_symbol->upvalue_count > 0) {
                         frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
+                        frame->owns_upvalues = frame->upvalues != NULL;
                         if (frame->upvalues) {
                             for (int i = 0; i < proc_symbol->upvalue_count; i++) {
                                 frame->upvalues[i] = NULL;
@@ -1324,10 +1327,14 @@ static void* threadStart(void* arg) {
                     }
 
                     if (!ready_for_execution) {
-                        if (frame->upvalues) {
+                        if (frame->closureEnv) {
+                            releaseClosureEnv(frame->closureEnv);
+                            frame->closureEnv = NULL;
+                        } else if (frame->owns_upvalues && frame->upvalues) {
                             free(frame->upvalues);
                             frame->upvalues = NULL;
                         }
+                        frame->owns_upvalues = false;
                         workerVm->frameCount--;
                         vmThreadStoreResultDirect(thread, NULL, false);
                     } else {
@@ -2570,6 +2577,83 @@ static Value vmHostCreateThreadAddr(VM* vm) {
     }
 }
 
+static Value vmHostCreateClosure(VM* vm) {
+    Value entryVal = pop(vm);
+    if (!IS_INTLIKE(entryVal)) {
+        freeValue(&entryVal);
+        runtimeError(vm, "VM Error: Closure creation requires integer entry address.");
+        return makeNil();
+    }
+    uint16_t entry = (uint16_t)AS_INTEGER(entryVal);
+    freeValue(&entryVal);
+
+    Value countVal = pop(vm);
+    int capture_count = 0;
+    if (IS_INTLIKE(countVal)) {
+        capture_count = (int)AS_INTEGER(countVal);
+    }
+    freeValue(&countVal);
+    if (capture_count < 0) {
+        runtimeError(vm, "VM Error: Closure capture count cannot be negative.");
+        return makeNil();
+    }
+
+    Symbol* proc_symbol = vmGetProcedureByAddress(vm, entry);
+    if (!proc_symbol) {
+        for (int i = 0; i < capture_count; ++i) {
+            Value discard = pop(vm);
+            freeValue(&discard);
+        }
+        runtimeError(vm, "VM Error: Unknown procedure for closure entry %u.", entry);
+        return makeNil();
+    }
+
+    if (capture_count != proc_symbol->upvalue_count) {
+        for (int i = 0; i < capture_count; ++i) {
+            Value discard = pop(vm);
+            freeValue(&discard);
+        }
+        runtimeError(vm,
+                     "VM Error: Closure capture count mismatch for '%s' (expected %d, got %d).",
+                     proc_symbol->name ? proc_symbol->name : "<anonymous>",
+                     proc_symbol->upvalue_count, capture_count);
+        return makeNil();
+    }
+
+    ClosureEnvPayload* env = createClosureEnv((uint16_t)capture_count);
+    env->symbol = proc_symbol;
+
+    for (int i = capture_count - 1; i >= 0; --i) {
+        Value captured = pop(vm);
+        bool is_ref = proc_symbol->upvalues[i].is_ref;
+        if (is_ref) {
+            if (captured.type != TYPE_POINTER || captured.ptr_val == NULL) {
+                freeValue(&captured);
+                releaseClosureEnv(env);
+                runtimeError(vm, "VM Error: Expected pointer for captured VAR parameter in closure.");
+                return makeNil();
+            }
+            env->slots[i] = (Value*)captured.ptr_val;
+            freeValue(&captured);
+        } else {
+            Value* cell = (Value*)malloc(sizeof(Value));
+            if (!cell) {
+                freeValue(&captured);
+                releaseClosureEnv(env);
+                runtimeError(vm, "VM Error: Out of memory initialising closure environment.");
+                return makeNil();
+            }
+            *cell = makeCopyOfValue(&captured);
+            env->slots[i] = cell;
+            freeValue(&captured);
+        }
+    }
+
+    Value closure = makeClosure(entry, proc_symbol, env);
+    releaseClosureEnv(env);
+    return closure;
+}
+
 static Value vmHostWaitThread(VM* vm) {
     // Expects top of stack: integer thread id
     Value tidVal = pop(vm);
@@ -2894,10 +2978,14 @@ void vmResetExecutionState(VM* vm) {
     // Release resources held by call frames from prior executions.
     for (int i = 0; i < vm->frameCount; ++i) {
         CallFrame* frame = &vm->frames[i];
-        if (frame->upvalues) {
+        if (frame->closureEnv) {
+            releaseClosureEnv(frame->closureEnv);
+            frame->closureEnv = NULL;
+        } else if (frame->owns_upvalues && frame->upvalues) {
             free(frame->upvalues);
-            frame->upvalues = NULL;
         }
+        frame->upvalues = NULL;
+        frame->owns_upvalues = false;
         frame->return_address = NULL;
         frame->slots = NULL;
         frame->function_symbol = NULL;
@@ -3032,6 +3120,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
         EXIT_FAILURE_HANDLER();
     }
     registerHostFunction(vm, HOST_FN_CREATE_THREAD_ADDR, vmHostCreateThreadAddr);
+    registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
     registerHostFunction(vm, HOST_FN_WAIT_THREAD, vmHostWaitThread);
     registerHostFunction(vm, HOST_FN_PRINTF, vmHostPrintf);
     registerHostFunction(vm, HOST_FN_SHELL_LAST_STATUS, vmHostShellLastStatusHost);
@@ -3151,10 +3240,15 @@ static InterpretResult returnFromCall(VM* vm, bool* halted) {
     vm->stackTop = currentFrame->slots;
     currentFrame->slotCount = 0;
 
-    if (currentFrame->upvalues) {
+    if (currentFrame->closureEnv) {
+        releaseClosureEnv(currentFrame->closureEnv);
+        currentFrame->closureEnv = NULL;
+        currentFrame->upvalues = NULL;
+    } else if (currentFrame->owns_upvalues && currentFrame->upvalues) {
         free(currentFrame->upvalues);
         currentFrame->upvalues = NULL;
     }
+    currentFrame->owns_upvalues = false;
     vm->frameCount--;
 
     if (has_result && !currentFrame->discard_result_on_return) {
@@ -6385,11 +6479,14 @@ comparison_error_label:
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->owns_upvalues = false;
+                frame->closureEnv = NULL;
                 frame->discard_result_on_return = false;
                 frame->vtable = NULL;
 
                 if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    frame->owns_upvalues = true;
                     CallFrame* parent_frame = NULL;
                     if (proc_symbol->enclosing) {
                         for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
@@ -6403,6 +6500,14 @@ comparison_error_label:
                     }
 
                     if (!parent_frame) {
+                        if (frame->owns_upvalues && frame->upvalues) {
+                            free(frame->upvalues);
+                            frame->upvalues = NULL;
+                            frame->owns_upvalues = false;
+                        }
+                        if (captured_env) {
+                            releaseClosureEnv(captured_env);
+                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -6490,6 +6595,14 @@ comparison_error_label:
                     }
 
                     if (!parent_frame) {
+                        if (frame->owns_upvalues && frame->upvalues) {
+                            free(frame->upvalues);
+                            frame->upvalues = NULL;
+                            frame->owns_upvalues = false;
+                        }
+                        if (captured_env) {
+                            releaseClosureEnv(captured_env);
+                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -6516,20 +6629,38 @@ comparison_error_label:
                 uint8_t declared_arity = READ_BYTE();
                 // Stack layout expected: [... args] [addr]
                 Value addrVal = pop(vm);
-                if (!IS_INTLIKE(addrVal)) {
+                ClosureEnvPayload* captured_env = NULL;
+                Symbol* proc_symbol = NULL;
+                uint16_t target_address = 0;
+
+                if (addrVal.type == TYPE_CLOSURE) {
+                    target_address = (uint16_t)addrVal.closure.entry_offset;
+                    captured_env = addrVal.closure.env;
+                    if (captured_env) {
+                        retainClosureEnv(captured_env);
+                    }
+                    proc_symbol = addrVal.closure.symbol;
+                } else if (IS_INTLIKE(addrVal)) {
+                    target_address = (uint16_t)AS_INTEGER(addrVal);
+                } else {
                     freeValue(&addrVal);
-                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                    runtimeError(vm, "VM Error: Indirect call requires procedure pointer.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
                 freeValue(&addrVal);
 
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
                 if (vm->stackTop - vm->stack < declared_arity) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: Stack underflow for indirect call arguments. Expected %d, have %ld.",
                                  declared_arity, (long)(vm->stackTop - vm->stack));
                     return INTERPRET_RUNTIME_ERROR;
@@ -6540,8 +6671,13 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
+                    proc_symbol = vmGetProcedureByAddress(vm, target_address);
+                }
+                if (!proc_symbol) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
@@ -6564,10 +6700,22 @@ comparison_error_label:
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->owns_upvalues = false;
+                frame->closureEnv = NULL;
                 frame->discard_result_on_return = false;
 
-                if (proc_symbol->upvalue_count > 0) {
+                if (captured_env) {
+                    if (captured_env->slot_count != proc_symbol->upvalue_count) {
+                        releaseClosureEnv(captured_env);
+                        runtimeError(vm, "VM Error: Closure environment mismatch for '%s'.",
+                                     proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    frame->closureEnv = captured_env;
+                    frame->upvalues = captured_env->slots;
+                } else if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    frame->owns_upvalues = true;
                     CallFrame* parent_frame = NULL;
                     if (proc_symbol->enclosing) {
                         for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
@@ -6581,6 +6729,14 @@ comparison_error_label:
                     }
 
                     if (!parent_frame) {
+                        if (frame->owns_upvalues && frame->upvalues) {
+                            free(frame->upvalues);
+                            frame->upvalues = NULL;
+                            frame->owns_upvalues = false;
+                        }
+                        if (captured_env) {
+                            releaseClosureEnv(captured_env);
+                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -6592,6 +6748,8 @@ comparison_error_label:
                             frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
                         }
                     }
+                } else if (captured_env) {
+                    releaseClosureEnv(captured_env);
                 }
 
                 for (int i = 0; i < proc_symbol->locals_count; i++) {
@@ -6684,10 +6842,13 @@ comparison_error_label:
                 frame->locals_count = method_symbol->locals_count;
                 frame->upvalue_count = method_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->owns_upvalues = false;
+                frame->closureEnv = NULL;
                 frame->discard_result_on_return = false;
 
                 if (method_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * method_symbol->upvalue_count);
+                    frame->owns_upvalues = true;
                     CallFrame* parent_frame = NULL;
                     if (method_symbol->enclosing) {
                         for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
@@ -6727,19 +6888,37 @@ comparison_error_label:
                 // but we need to know when to discard a return value. Implement inline duplication instead.
 
                 Value addrVal = pop(vm);
-                if (!IS_INTLIKE(addrVal)) {
+                ClosureEnvPayload* captured_env = NULL;
+                Symbol* proc_symbol = NULL;
+                uint16_t target_address = 0;
+
+                if (addrVal.type == TYPE_CLOSURE) {
+                    target_address = (uint16_t)addrVal.closure.entry_offset;
+                    captured_env = addrVal.closure.env;
+                    if (captured_env) {
+                        retainClosureEnv(captured_env);
+                    }
+                    proc_symbol = addrVal.closure.symbol;
+                } else if (IS_INTLIKE(addrVal)) {
+                    target_address = (uint16_t)AS_INTEGER(addrVal);
+                } else {
                     freeValue(&addrVal);
-                    runtimeError(vm, "VM Error: Indirect call requires integer address on stack.");
+                    runtimeError(vm, "VM Error: Indirect call requires procedure pointer.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                uint16_t target_address = (uint16_t)AS_INTEGER(addrVal);
                 freeValue(&addrVal);
 
                 if (vm->frameCount >= VM_CALL_STACK_MAX) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: Call stack overflow.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 if (vm->stackTop - vm->stack < declared_arity) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: Stack underflow for indirect call arguments. Expected %d, have %ld.",
                                  declared_arity, (long)(vm->stackTop - vm->stack));
                     return INTERPRET_RUNTIME_ERROR;
@@ -6750,8 +6929,13 @@ comparison_error_label:
                 frame->slots = vm->stackTop - declared_arity;
                 frame->slotCount = 0;
 
-                Symbol* proc_symbol = vmGetProcedureByAddress(vm, target_address);
                 if (!proc_symbol) {
+                    proc_symbol = vmGetProcedureByAddress(vm, target_address);
+                }
+                if (!proc_symbol) {
+                    if (captured_env) {
+                        releaseClosureEnv(captured_env);
+                    }
                     runtimeError(vm, "VM Error: No procedure found at address %04d for indirect call.", target_address);
                     vm->frameCount--;
                     return INTERPRET_RUNTIME_ERROR;
@@ -6773,11 +6957,23 @@ comparison_error_label:
                 frame->locals_count = proc_symbol->locals_count;
                 frame->upvalue_count = proc_symbol->upvalue_count;
                 frame->upvalues = NULL;
+                frame->owns_upvalues = false;
+                frame->closureEnv = NULL;
                 frame->discard_result_on_return = true;
                 frame->vtable = NULL;
 
-                if (proc_symbol->upvalue_count > 0) {
+                if (captured_env) {
+                    if (captured_env->slot_count != proc_symbol->upvalue_count) {
+                        releaseClosureEnv(captured_env);
+                        runtimeError(vm, "VM Error: Closure environment mismatch for '%s'.",
+                                     proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    frame->closureEnv = captured_env;
+                    frame->upvalues = captured_env->slots;
+                } else if (proc_symbol->upvalue_count > 0) {
                     frame->upvalues = malloc(sizeof(Value*) * proc_symbol->upvalue_count);
+                    frame->owns_upvalues = true;
                     CallFrame* parent_frame = NULL;
                     if (proc_symbol->enclosing) {
                         for (int fi = vm->frameCount - 2; fi >= 0; fi--) {
@@ -6790,6 +6986,14 @@ comparison_error_label:
                         parent_frame = &vm->frames[vm->frameCount - 2];
                     }
                     if (!parent_frame) {
+                        if (frame->owns_upvalues && frame->upvalues) {
+                            free(frame->upvalues);
+                            frame->upvalues = NULL;
+                            frame->owns_upvalues = false;
+                        }
+                        if (captured_env) {
+                            releaseClosureEnv(captured_env);
+                        }
                         runtimeError(vm, "VM Error: Enclosing frame not found for '%s'.", proc_symbol->name);
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -6800,6 +7004,8 @@ comparison_error_label:
                             frame->upvalues[i] = parent_frame->upvalues[proc_symbol->upvalues[i].index];
                         }
                     }
+                } else if (captured_env) {
+                    releaseClosureEnv(captured_env);
                 }
 
                 for (int i = 0; i < proc_symbol->locals_count; i++) {

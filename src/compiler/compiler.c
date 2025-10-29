@@ -6163,23 +6163,57 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ADDR_OF: {
-            if (node->left && node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
-                const char* pname = node->left->token->value;
-                Symbol* psym = lookupProcedure(pname);
-                if (psym) {
-                    int addr = psym->bytecode_address;
-                    int constIndex = addIntConstant(chunk, addr);
-                    recordAddressConstant(constIndex, addr);
-                    emitConstant(chunk, constIndex, line);
-                    break;
-                }
-            }
-            if (!node->left) {
+            if (!node->left || node->left->type != AST_VARIABLE || !node->left->token || !node->left->token->value) {
                 fprintf(stderr, "L%d: Compiler error: '@' requires addressable operand.\n", line);
                 compiler_had_error = true;
                 break;
             }
-            compileLValue(node->left, chunk, line);
+
+            const char* pname = node->left->token->value;
+            Symbol* psym = lookupProcedure(pname);
+            if (!psym) {
+                compileLValue(node->left, chunk, line);
+                break;
+            }
+
+            int capture_count = psym->upvalue_count;
+            if (capture_count > 0 && !current_function_compiler) {
+                fprintf(stderr, "L%d: Compiler error: capturing closure cannot escape global scope.\n", line);
+                compiler_had_error = true;
+                break;
+            }
+
+            for (int i = 0; i < capture_count; i++) {
+                uint8_t slot_index = psym->upvalues[i].index;
+                bool isLocal = psym->upvalues[i].isLocal;
+                bool is_ref = psym->upvalues[i].is_ref;
+
+                if (isLocal) {
+                    if (is_ref) {
+                        writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
+                    } else {
+                        writeBytecodeChunk(chunk, GET_LOCAL, line);
+                    }
+                    writeBytecodeChunk(chunk, slot_index, line);
+                } else {
+                    if (is_ref) {
+                        writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
+                    } else {
+                        writeBytecodeChunk(chunk, GET_UPVALUE, line);
+                    }
+                    writeBytecodeChunk(chunk, slot_index, line);
+                }
+            }
+
+            int countConst = addIntConstant(chunk, capture_count);
+            emitConstant(chunk, countConst, line);
+
+            int addrConst = addIntConstant(chunk, psym->bytecode_address);
+            recordAddressConstant(addrConst, psym->bytecode_address);
+            emitConstant(chunk, addrConst, line);
+
+            writeBytecodeChunk(chunk, CALL_HOST, line);
+            writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_CLOSURE, line);
             break;
         }
         case AST_THREAD_SPAWN: {

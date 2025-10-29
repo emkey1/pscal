@@ -220,6 +220,10 @@ Value makeRecord(FieldValue *rec);
 Value makeMStream(MStream *ms);
 Value makeVoid(void);
 Value makeValueForType(VarType type, AST *type_def, Symbol* context_symbol);
+ClosureEnvPayload* createClosureEnv(uint16_t slot_count);
+void retainClosureEnv(ClosureEnvPayload* env);
+void releaseClosureEnv(ClosureEnvPayload* env);
+Value makeClosure(uint32_t entry_offset, struct Symbol_s* symbol, ClosureEnvPayload* env);
 
 // Token
 Token *newToken(TokenType type, const char *value, int line, int column);
