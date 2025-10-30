@@ -1510,7 +1510,7 @@ static int getRecordFieldCount(AST* recordType) {
         if (!decl) continue;
         if (decl->type == AST_VAR_DECL) {
             count += decl->child_count; // each child is a field name
-        } else if (decl->token) {
+        } else if (decl->token && decl->type != AST_PROCEDURE_DECL && decl->type != AST_FUNCTION_DECL) {
             // Some passes may have flattened fields directly into the record.
             count++;
         }
@@ -1548,7 +1548,7 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
                 }
                 offset++;
             }
-        } else if (decl->token) {
+        } else if (decl->token && decl->type != AST_PROCEDURE_DECL && decl->type != AST_FUNCTION_DECL) {
             if (strcmp(decl->token->value, fieldName) == 0) {
                 return offset;
             }
@@ -1577,7 +1577,7 @@ static AST* findRecordTypeByFieldName(const char* fieldName) {
                         return rec;
                     }
                 }
-            } else if (decl->token) {
+            } else if (decl->token && decl->type != AST_PROCEDURE_DECL && decl->type != AST_FUNCTION_DECL) {
                 if (strcasecmp(decl->token->value, fieldName) == 0) return rec;
             }
         }
