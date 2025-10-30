@@ -2,6 +2,7 @@
 #include "Pascal/globals.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <assert.h>
 #include <ctype.h>
 #include "ast/ast.h"
@@ -288,6 +289,97 @@ FieldValue *copyRecord(FieldValue *orig) {
     return new_head;
 }
 
+static AST* resolveTypeAliasForRecord(AST* typeNode) {
+    AST* last = NULL;
+    while (typeNode && typeNode != last) {
+        last = typeNode;
+        if ((typeNode->type == AST_TYPE_REFERENCE || typeNode->type == AST_VARIABLE) &&
+            typeNode->token && typeNode->token->value) {
+            AST* looked = lookupType(typeNode->token->value);
+            if (!looked || looked == typeNode) {
+                break;
+            }
+            typeNode = looked;
+            continue;
+        }
+        if (typeNode->type == AST_TYPE_DECL && typeNode->left) {
+            typeNode = typeNode->left;
+            continue;
+        }
+        break;
+    }
+    return typeNode;
+}
+
+static const char* getTypeNameForRecord(AST* typeAst) {
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        if (entry->typeAST == typeAst) {
+            return entry->name;
+        }
+    }
+    return NULL;
+}
+
+static bool recordTypeNeedsVTableSlot(AST* recordType) {
+    recordType = resolveTypeAliasForRecord(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return false;
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* member = recordType->children[i];
+        if (!member) continue;
+        if ((member->type == AST_PROCEDURE_DECL || member->type == AST_FUNCTION_DECL) &&
+            member->is_virtual) {
+            return true;
+        }
+    }
+
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        if (parent && parent != recordType && recordTypeNeedsVTableSlot(parent)) {
+            return true;
+        }
+    }
+
+    const char* name = getTypeNameForRecord(recordType);
+    if (!name || !procedure_table) {
+        return false;
+    }
+
+    size_t len = strlen(name);
+    for (int bucket = 0; bucket < HASHTABLE_SIZE; bucket++) {
+        for (Symbol* sym = procedure_table->buckets[bucket]; sym; sym = sym->next) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (!base || !base->name || !base->type_def || !base->type_def->is_virtual) {
+                continue;
+            }
+            if (strncasecmp(base->name, name, len) != 0 || base->name[len] != '.') {
+                continue;
+            }
+
+            AST* func = base->type_def;
+            if (func->child_count <= 0) {
+                continue;
+            }
+
+            AST* firstParam = func->children[0];
+            AST* paramType = resolveTypeAliasForRecord(firstParam ? firstParam->right : NULL);
+            if (!paramType || paramType->type != AST_POINTER_TYPE) {
+                continue;
+            }
+
+            AST* target = resolveTypeAliasForRecord(paramType->right);
+            const char* targetName = getTypeNameForRecord(target);
+            if (targetName && strcasecmp(targetName, name) == 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 FieldValue *createEmptyRecord(AST *recordType) {
     // Resolve type references if necessary
     if (recordType && recordType->type == AST_TYPE_REFERENCE) {
@@ -309,6 +401,25 @@ FieldValue *createEmptyRecord(AST *recordType) {
 
     FieldValue *head = NULL, **ptr = &head; // Use pointer-to-pointer for easy list building
 
+    bool needsVTableSlot = recordTypeNeedsVTableSlot(recordType);
+    if (needsVTableSlot) {
+        FieldValue *vtableField = malloc(sizeof(FieldValue));
+        if (!vtableField) {
+             fprintf(stderr, "FATAL: malloc failed for hidden vtable field in createEmptyRecord.\n");
+             EXIT_FAILURE_HANDLER();
+        }
+        vtableField->name = strdup("__vtable");
+        if (!vtableField->name) {
+             fprintf(stderr, "FATAL: strdup failed for hidden vtable field name in createEmptyRecord.\n");
+             free(vtableField);
+             EXIT_FAILURE_HANDLER();
+        }
+        vtableField->value = makeNil();
+        vtableField->next = NULL;
+        *ptr = vtableField;
+        ptr = &vtableField->next;
+    }
+
     // Iterate through the children of the RECORD_TYPE node (these should be VAR_DECLs for fields)
     for (int i = 0; i < recordType->child_count; i++) {
         AST *fieldDecl = recordType->children[i]; // Should be VAR_DECL for the field group
@@ -319,9 +430,12 @@ FieldValue *createEmptyRecord(AST *recordType) {
              continue; // Skip this invalid entry
         }
         if (fieldDecl->type != AST_VAR_DECL) {
-             fprintf(stderr, "Warning: Expected VAR_DECL for field group at index %d in createEmptyRecord, found %s.\n",
-                     i, astTypeToString(fieldDecl->type));
-             continue; // Skip invalid entry
+            if (fieldDecl->type != AST_PROCEDURE_DECL && fieldDecl->type != AST_FUNCTION_DECL) {
+                fprintf(stderr,
+                        "Warning: Expected VAR_DECL for field group at index %d in createEmptyRecord, found %s.\n",
+                        i, astTypeToString(fieldDecl->type));
+            }
+            continue; // Skip invalid entry
         }
         // ---
 
