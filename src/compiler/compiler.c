@@ -1732,7 +1732,23 @@ static const char* getTypeNameFromAST(AST* typeAst) {
 // Check if a record type defines methods and therefore reserves a vtable slot.
 static bool recordTypeHasVTable(AST* recordType) {
     recordType = resolveTypeAlias(recordType);
+    if (!recordType) return false;
+
+    if (recordType->type == AST_TYPE_DECL && recordType->left) {
+        recordType = resolveTypeAlias(recordType->left);
+    }
+
     if (!recordType || recordType->type != AST_RECORD_TYPE) return false;
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* member = recordType->children[i];
+        if (!member) continue;
+        if ((member->type == AST_PROCEDURE_DECL || member->type == AST_FUNCTION_DECL) &&
+            member->is_virtual) {
+            return true;
+        }
+    }
+
     const char* name = getTypeNameFromAST(recordType);
     if (!name) return false;
     size_t len = strlen(name);
