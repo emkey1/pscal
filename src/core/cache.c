@@ -2100,6 +2100,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
     bool ok = false;
     int const_count = 0;
     int read_consts = 0;
+    uint32_t prev_ast_version = g_astCacheVersion;
 
     FILE* f = fopen(file_path, "rb");
     if (f) {
@@ -2119,6 +2120,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                             "Bytecode requires VM version %u but this VM only supports version %u\\n",
                             ver, vm_ver);
                     fclose(f);
+                    g_astCacheVersion = prev_ast_version;
                     return false;
                 } else {
                     fprintf(stderr,
@@ -2127,6 +2129,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
                 }
             }
             chunk->version = ver;
+            g_astCacheVersion = ver;
             skipSourcePath(f);
             int count = 0;
             if (fread(&count, sizeof(count), 1, f) == 1 &&
@@ -2249,6 +2252,8 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
         }
         fclose(f);
     }
+
+    g_astCacheVersion = prev_ast_version;
 
     if (ok) {
         restoreConstructorAliases(procedure_table);
