@@ -22,6 +22,8 @@
 #define CACHE_DIR "bc_cache"
 #define CACHE_MAGIC 0x50534232 /* 'PSB2' */
 
+static uint32_t g_astCacheVersion = 0;
+
 #define FNV1A64_OFFSET 1469598103934665603ULL
 #define FNV1A64_PRIME 1099511628211ULL
 
@@ -733,6 +735,14 @@ static bool writeAst(FILE* f, const AST* node) {
     if (!has) return true;
     fwrite(&node->type, sizeof(node->type), 1, f);
     fwrite(&node->var_type, sizeof(node->var_type), 1, f);
+    if (g_astCacheVersion >= 9) {
+        uint8_t flags = 0;
+        if (node->by_ref) flags |= 0x01;
+        if (node->is_inline) flags |= 0x02;
+        if (node->is_virtual) flags |= 0x04;
+        if (node->is_global_scope) flags |= 0x08;
+        fwrite(&flags, sizeof(flags), 1, f);
+    }
     writeToken(f, node->token);
     fwrite(&node->i_val, sizeof(node->i_val), 1, f);
     writeAst(f, node->left);
@@ -753,6 +763,10 @@ static AST* readAst(FILE* f) {
     VarType vt;
     if (fread(&t, sizeof(t), 1, f) != 1) return NULL;
     if (fread(&vt, sizeof(vt), 1, f) != 1) return NULL;
+    uint8_t flags = 0;
+    if (g_astCacheVersion >= 9) {
+        if (fread(&flags, sizeof(flags), 1, f) != 1) return NULL;
+    }
     Token* tok = readToken(f);
     int i_val = 0;
     if (fread(&i_val, sizeof(i_val), 1, f) != 1) { if (tok) freeToken(tok); return NULL; }
@@ -760,6 +774,12 @@ static AST* readAst(FILE* f) {
     if (node) {
         setTypeAST(node, vt);
         node->i_val = i_val;
+        if (g_astCacheVersion >= 9) {
+            node->by_ref = (flags & 0x01) != 0;
+            node->is_inline = (flags & 0x02) != 0;
+            node->is_virtual = (flags & 0x04) != 0;
+            node->is_global_scope = (flags & 0x08) != 0;
+        }
         node->left = readAst(f); if (node->left) node->left->parent = node;
         node->right = readAst(f); if (node->right) node->right->parent = node;
         node->extra = readAst(f); if (node->extra) node->extra->parent = node;
@@ -865,18 +885,22 @@ static bool writeChunkCore(FILE* f, const BytecodeChunk* chunk) {
         return false;
     }
 
-    if (fwrite(&chunk->count, sizeof(chunk->count), 1, f) != 1) return false;
-    if (fwrite(&chunk->constants_count, sizeof(chunk->constants_count), 1, f) != 1) return false;
+    uint32_t prev_version = g_astCacheVersion;
+    g_astCacheVersion = chunk->version;
+    bool success = false;
+
+    if (fwrite(&chunk->count, sizeof(chunk->count), 1, f) != 1) goto cleanup;
+    if (fwrite(&chunk->constants_count, sizeof(chunk->constants_count), 1, f) != 1) goto cleanup;
 
     if (chunk->count > 0) {
-        if (!chunk->code || !chunk->lines) return false;
-        if (fwrite(chunk->code, 1, (size_t)chunk->count, f) != (size_t)chunk->count) return false;
-        if (fwrite(chunk->lines, sizeof(int), (size_t)chunk->count, f) != (size_t)chunk->count) return false;
+        if (!chunk->code || !chunk->lines) goto cleanup;
+        if (fwrite(chunk->code, 1, (size_t)chunk->count, f) != (size_t)chunk->count) goto cleanup;
+        if (fwrite(chunk->lines, sizeof(int), (size_t)chunk->count, f) != (size_t)chunk->count) goto cleanup;
     }
 
     for (int i = 0; i < chunk->constants_count; ++i) {
         if (!writeValue(f, &chunk->constants[i])) {
-            return false;
+            goto cleanup;
         }
     }
 
@@ -889,13 +913,13 @@ static bool writeChunkCore(FILE* f, const BytecodeChunk* chunk) {
             }
         }
     }
-    if (fwrite(&builtin_map_count, sizeof(builtin_map_count), 1, f) != 1) return false;
+    if (fwrite(&builtin_map_count, sizeof(builtin_map_count), 1, f) != 1) goto cleanup;
     if (chunk->builtin_lowercase_indices) {
         for (int i = 0; i < chunk->constants_count; ++i) {
             int lower_idx = chunk->builtin_lowercase_indices[i];
             if (lower_idx >= 0 && lower_idx < chunk->constants_count) {
-                if (fwrite(&i, sizeof(i), 1, f) != 1) return false;
-                if (fwrite(&lower_idx, sizeof(lower_idx), 1, f) != 1) return false;
+                if (fwrite(&i, sizeof(i), 1, f) != 1) goto cleanup;
+                if (fwrite(&lower_idx, sizeof(lower_idx), 1, f) != 1) goto cleanup;
             }
         }
     }
@@ -903,9 +927,9 @@ static bool writeChunkCore(FILE* f, const BytecodeChunk* chunk) {
     int proc_count = 0;
     countProceduresRecursive(procedure_table, &proc_count);
     int stored_proc_count = -(proc_count + 1);
-    if (fwrite(&stored_proc_count, sizeof(stored_proc_count), 1, f) != 1) return false;
+    if (fwrite(&stored_proc_count, sizeof(stored_proc_count), 1, f) != 1) goto cleanup;
     if (!writeProcedureEntriesRecursive(f, procedure_table)) {
-        return false;
+        goto cleanup;
     }
 
     int const_sym_count = 0;
@@ -917,20 +941,20 @@ static bool writeChunkCore(FILE* f, const BytecodeChunk* chunk) {
             }
         }
     }
-    if (fwrite(&const_sym_count, sizeof(const_sym_count), 1, f) != 1) return false;
+    if (fwrite(&const_sym_count, sizeof(const_sym_count), 1, f) != 1) goto cleanup;
     if (globalSymbols) {
         for (int i = 0; i < HASHTABLE_SIZE; i++) {
             for (Symbol* sym = globalSymbols->buckets[i]; sym; sym = sym->next) {
                 if (sym->is_alias || !sym->is_const) continue;
                 int name_len = (int)strlen(sym->name);
-                if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) return false;
-                if (fwrite(sym->name, 1, (size_t)name_len, f) != (size_t)name_len) return false;
-                if (fwrite(&sym->type, sizeof(sym->type), 1, f) != 1) return false;
+                if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) goto cleanup;
+                if (fwrite(sym->name, 1, (size_t)name_len, f) != (size_t)name_len) goto cleanup;
+                if (fwrite(&sym->type, sizeof(sym->type), 1, f) != 1) goto cleanup;
                 if (sym->value) {
-                    if (!writeValue(f, sym->value)) return false;
+                    if (!writeValue(f, sym->value)) goto cleanup;
                 } else {
                     Value tmp = makeVoid();
-                    if (!writeValue(f, &tmp)) return false;
+                    if (!writeValue(f, &tmp)) goto cleanup;
                 }
             }
         }
@@ -938,15 +962,19 @@ static bool writeChunkCore(FILE* f, const BytecodeChunk* chunk) {
 
     int type_count = 0;
     for (TypeEntry* entry = type_table; entry; entry = entry->next) type_count++;
-    if (fwrite(&type_count, sizeof(type_count), 1, f) != 1) return false;
+    if (fwrite(&type_count, sizeof(type_count), 1, f) != 1) goto cleanup;
     for (TypeEntry* entry = type_table; entry; entry = entry->next) {
         int name_len = (int)strlen(entry->name);
-        if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) return false;
-        if (fwrite(entry->name, 1, (size_t)name_len, f) != (size_t)name_len) return false;
+        if (fwrite(&name_len, sizeof(name_len), 1, f) != 1) goto cleanup;
+        if (fwrite(entry->name, 1, (size_t)name_len, f) != (size_t)name_len) goto cleanup;
         writeAst(f, entry->typeAST);
     }
 
-    return true;
+    success = true;
+
+cleanup:
+    g_astCacheVersion = prev_version;
+    return success;
 }
 
 static bool readChunkCore(FILE* f,
@@ -971,13 +999,17 @@ static bool readChunkCore(FILE* f,
     chunk->constants = NULL;
     chunk->builtin_lowercase_indices = NULL;
 
+    uint32_t prev_version = g_astCacheVersion;
+    g_astCacheVersion = version;
+#define RETURN_FALSE do { g_astCacheVersion = prev_version; return false; } while (0)
+
     if (count > 0) {
         chunk->code = (uint8_t*)malloc((size_t)count);
         chunk->lines = (int*)malloc(sizeof(int) * (size_t)count);
         if (!chunk->code || !chunk->lines) {
             free(chunk->code);
             free(chunk->lines);
-            return false;
+            RETURN_FALSE;
         }
     }
 
@@ -986,7 +1018,7 @@ static bool readChunkCore(FILE* f,
         if (!chunk->constants) {
             free(chunk->code);
             free(chunk->lines);
-            return false;
+            RETURN_FALSE;
         }
     }
 
@@ -999,7 +1031,7 @@ static bool readChunkCore(FILE* f,
         if (fread(chunk->code, 1, (size_t)count, f) != (size_t)count ||
             fread(chunk->lines, sizeof(int), (size_t)count, f) != (size_t)count) {
             resetChunk(chunk, 0);
-            return false;
+            RETURN_FALSE;
         }
     }
 
@@ -1007,7 +1039,7 @@ static bool readChunkCore(FILE* f,
     for (; read_consts < const_count; ++read_consts) {
         if (!readValue(f, &chunk->constants[read_consts])) {
             resetChunk(chunk, read_consts);
-            return false;
+            RETURN_FALSE;
         }
     }
 
@@ -1015,7 +1047,7 @@ static bool readChunkCore(FILE* f,
         chunk->builtin_lowercase_indices = (int*)malloc(sizeof(int) * (size_t)const_count);
         if (!chunk->builtin_lowercase_indices) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         for (int i = 0; i < const_count; ++i) {
             chunk->builtin_lowercase_indices[i] = -1;
@@ -1026,7 +1058,7 @@ static bool readChunkCore(FILE* f,
         int builtin_map_count = 0;
         if (fread(&builtin_map_count, sizeof(builtin_map_count), 1, f) != 1) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         for (int i = 0; i < builtin_map_count; ++i) {
             int original_idx = 0;
@@ -1034,7 +1066,7 @@ static bool readChunkCore(FILE* f,
             if (fread(&original_idx, sizeof(original_idx), 1, f) != 1 ||
                 fread(&lower_idx, sizeof(lower_idx), 1, f) != 1) {
                 resetChunk(chunk, const_count);
-                return false;
+                RETURN_FALSE;
             }
             if (chunk->builtin_lowercase_indices &&
                 original_idx >= 0 && original_idx < chunk->constants_count) {
@@ -1045,7 +1077,7 @@ static bool readChunkCore(FILE* f,
         int dummy = 0;
         if (fread(&dummy, sizeof(dummy), 1, f) != 1) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
     }
 
@@ -1053,46 +1085,46 @@ static bool readChunkCore(FILE* f,
         uint64_t computed = computeCombinedHash(source_hash, chunk);
         if (computed != expected_combined_hash) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
     }
 
     int stored_proc_count = 0;
     if (fread(&stored_proc_count, sizeof(stored_proc_count), 1, f) != 1) {
         resetChunk(chunk, const_count);
-        return false;
+        RETURN_FALSE;
     }
     if (stored_proc_count < 0) {
         int proc_count = -stored_proc_count - 1;
         if (!loadProceduresFromStream(f, proc_count, version)) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
     } else {
         resetChunk(chunk, const_count);
-        return false;
+        RETURN_FALSE;
     }
 
     int const_sym_count = 0;
     if (fread(&const_sym_count, sizeof(const_sym_count), 1, f) != 1) {
         resetChunk(chunk, const_count);
-        return false;
+        RETURN_FALSE;
     }
     for (int i = 0; i < const_sym_count; ++i) {
         int name_len = 0;
         if (fread(&name_len, sizeof(name_len), 1, f) != 1) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         char* name = (char*)malloc((size_t)name_len + 1);
         if (!name) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         if (fread(name, 1, (size_t)name_len, f) != (size_t)name_len) {
             free(name);
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         name[name_len] = '\0';
 
@@ -1100,14 +1132,14 @@ static bool readChunkCore(FILE* f,
         if (fread(&type, sizeof(type), 1, f) != 1) {
             free(name);
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
 
         Value val = {0};
         if (!readValue(f, &val)) {
             free(name);
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
 
         insertGlobalSymbol(name, type, NULL);
@@ -1125,35 +1157,39 @@ static bool readChunkCore(FILE* f,
     int type_count = 0;
     if (fread(&type_count, sizeof(type_count), 1, f) != 1) {
         resetChunk(chunk, const_count);
-        return false;
+        RETURN_FALSE;
     }
     for (int i = 0; i < type_count; ++i) {
         int name_len = 0;
         if (fread(&name_len, sizeof(name_len), 1, f) != 1) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         char* name = (char*)malloc((size_t)name_len + 1);
         if (!name) {
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         if (fread(name, 1, (size_t)name_len, f) != (size_t)name_len) {
             free(name);
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         name[name_len] = '\0';
         AST* type_ast = readAst(f);
         if (!type_ast) {
             free(name);
             resetChunk(chunk, const_count);
-            return false;
+            RETURN_FALSE;
         }
         insertType(name, type_ast);
         freeAST(type_ast);
         free(name);
     }
+
+    g_astCacheVersion = prev_version;
+
+#undef RETURN_FALSE
 
     return true;
 }
