@@ -63,6 +63,7 @@ static bool tokenIsIdentifierLike(const Token *token);
 static bool currentTokenIsIdentifierLike(Parser *parser);
 static AST *parseInterfaceType(Parser *parser);
 static AST *parseInterfaceMethod(Parser *parser, bool isFunction);
+static void registerRecordMethods(Parser *parser, const char *recordName, AST *recordType);
 static void adoptRoutineParameters(AST *routine, AST *params);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
@@ -723,6 +724,59 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
     }
 
     return routine;
+}
+
+static void registerRecordMethodPrototype(Parser *parser, const char *recordName, AST *method) {
+    if (!parser || !recordName || !method || !method->token || !method->token->value) {
+        return;
+    }
+
+    if (!current_procedure_table) {
+        return;
+    }
+
+    AST *methodCopy = copyAST(method);
+    if (!methodCopy) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    if (methodCopy->token && methodCopy->token->value) {
+        size_t recordLen = strlen(recordName);
+        size_t methodLen = strlen(methodCopy->token->value);
+        size_t qualifiedLen = recordLen + 1 + methodLen;
+        char *qualifiedName = malloc(qualifiedLen + 1);
+        if (!qualifiedName) {
+            freeAST(methodCopy);
+            EXIT_FAILURE_HANDLER();
+        }
+
+        memcpy(qualifiedName, recordName, recordLen);
+        qualifiedName[recordLen] = '.';
+        memcpy(qualifiedName + recordLen + 1, methodCopy->token->value, methodLen + 1);
+
+        free(methodCopy->token->value);
+        methodCopy->token->value = qualifiedName;
+        methodCopy->token->length = qualifiedLen;
+    }
+
+    addProcedure(parser, methodCopy, NULL, current_procedure_table);
+    freeAST(methodCopy);
+}
+
+static void registerRecordMethods(Parser *parser, const char *recordName, AST *recordType) {
+    if (!parser || !recordName || !recordType || recordType->type != AST_RECORD_TYPE) {
+        return;
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST *child = recordType->children[i];
+        if (!child) {
+            continue;
+        }
+        if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
+            registerRecordMethodPrototype(parser, recordName, child);
+        }
+    }
 }
 
 static AST *parseInterfaceType(Parser *parser) {
@@ -2039,6 +2093,9 @@ AST *typeDeclaration(Parser *parser) {
     setLeft(node, typeDefNode); // Link the actual type definition (enum, record, etc.)
     // Register the type using the value from the copied token
     insertType(copiedTypeNameToken->value, typeDefNode);
+    if (typeDefNode && typeDefNode->type == AST_RECORD_TYPE) {
+        registerRecordMethods(parser, copiedTypeNameToken->value, typeDefNode);
+    }
 
     eat(parser, TOKEN_SEMICOLON);
 
