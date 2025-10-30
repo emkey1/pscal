@@ -2,6 +2,7 @@
 #include "Pascal/globals.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <assert.h>
 #include <ctype.h>
 #include "ast/ast.h"
@@ -288,24 +289,40 @@ FieldValue *copyRecord(FieldValue *orig) {
     return new_head;
 }
 
-static bool recordTypeNeedsVTableSlot(AST* recordType) {
-    if (!recordType) {
-        return false;
+static AST* resolveTypeAliasForRecord(AST* typeNode) {
+    AST* last = NULL;
+    while (typeNode && typeNode != last) {
+        last = typeNode;
+        if ((typeNode->type == AST_TYPE_REFERENCE || typeNode->type == AST_VARIABLE) &&
+            typeNode->token && typeNode->token->value) {
+            AST* looked = lookupType(typeNode->token->value);
+            if (!looked || looked == typeNode) {
+                break;
+            }
+            typeNode = looked;
+            continue;
+        }
+        if (typeNode->type == AST_TYPE_DECL && typeNode->left) {
+            typeNode = typeNode->left;
+            continue;
+        }
+        break;
     }
+    return typeNode;
+}
 
-    if (recordType->type == AST_TYPE_REFERENCE && recordType->token && recordType->token->value) {
-        AST* resolved = lookupType(recordType->token->value);
-        if (resolved && resolved != recordType) {
-            return recordTypeNeedsVTableSlot(resolved);
+static const char* getTypeNameForRecord(AST* typeAst) {
+    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
+        if (entry->typeAST == typeAst) {
+            return entry->name;
         }
     }
+    return NULL;
+}
 
-    // Follow aliases produced by TYPE_DECL nodes so we inspect the actual record.
-    if (recordType->type == AST_TYPE_DECL && recordType->left) {
-        return recordTypeNeedsVTableSlot(recordType->left);
-    }
-
-    if (recordType->type != AST_RECORD_TYPE) {
+static bool recordTypeNeedsVTableSlot(AST* recordType) {
+    recordType = resolveTypeAliasForRecord(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
         return false;
     }
 
@@ -320,8 +337,43 @@ static bool recordTypeNeedsVTableSlot(AST* recordType) {
 
     if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
         AST* parent = lookupType(recordType->extra->token->value);
-        if (parent && parent != recordType) {
-            return recordTypeNeedsVTableSlot(parent);
+        if (parent && parent != recordType && recordTypeNeedsVTableSlot(parent)) {
+            return true;
+        }
+    }
+
+    const char* name = getTypeNameForRecord(recordType);
+    if (!name || !procedure_table) {
+        return false;
+    }
+
+    size_t len = strlen(name);
+    for (int bucket = 0; bucket < HASHTABLE_SIZE; bucket++) {
+        for (Symbol* sym = procedure_table->buckets[bucket]; sym; sym = sym->next) {
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (!base || !base->name || !base->type_def || !base->type_def->is_virtual) {
+                continue;
+            }
+            if (strncasecmp(base->name, name, len) != 0 || base->name[len] != '.') {
+                continue;
+            }
+
+            AST* func = base->type_def;
+            if (func->child_count <= 0) {
+                continue;
+            }
+
+            AST* firstParam = func->children[0];
+            AST* paramType = resolveTypeAliasForRecord(firstParam ? firstParam->right : NULL);
+            if (!paramType || paramType->type != AST_POINTER_TYPE) {
+                continue;
+            }
+
+            AST* target = resolveTypeAliasForRecord(paramType->right);
+            const char* targetName = getTypeNameForRecord(target);
+            if (targetName && strcasecmp(targetName, name) == 0) {
+                return true;
+            }
         }
     }
 
