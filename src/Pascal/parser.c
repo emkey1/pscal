@@ -61,6 +61,9 @@ static bool tokenTerminatesStatement(TokenType type);
 static bool tokenTypeIsIdentifierLike(TokenType type);
 static bool tokenIsIdentifierLike(const Token *token);
 static bool currentTokenIsIdentifierLike(Parser *parser);
+static AST *parseInterfaceType(Parser *parser);
+static AST *parseInterfaceMethod(Parser *parser, bool isFunction);
+static void adoptRoutineParameters(AST *routine, AST *params);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -603,6 +606,212 @@ AST *parseArrayType(Parser *parser) {
     freeAST(indexList); // Free the temporary AST_COMPOUND wrapper struct (not its children)
 
     setRight(node, elemType); // Link to the element type AST
+
+    return node;
+}
+
+static void adoptRoutineParameters(AST *routine, AST *params) {
+    if (!routine || !params) {
+        return;
+    }
+
+    if (params->type == AST_COMPOUND && params->child_count > 0) {
+        routine->children = params->children;
+        routine->child_count = params->child_count;
+        routine->child_capacity = params->child_capacity;
+        for (int i = 0; i < routine->child_count; i++) {
+            if (routine->children[i]) {
+                routine->children[i]->parent = routine;
+            }
+        }
+        params->children = NULL;
+        params->child_count = 0;
+        params->child_capacity = 0;
+    }
+
+    freeAST(params);
+}
+
+static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
+    TokenType keyword = isFunction ? TOKEN_FUNCTION : TOKEN_PROCEDURE;
+    eat(parser, keyword);
+
+    if (!currentTokenIsIdentifierLike(parser)) {
+        errorParser(parser, isFunction ? "Expected function name after FUNCTION" :
+                                         "Expected procedure name after PROCEDURE");
+        return NULL;
+    }
+
+    Token *originalName = parser->current_token;
+    Token *copiedName = copyToken(originalName);
+    if (!copiedName) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    eat(parser, originalName->type);
+
+    AST *routine = newASTNode(isFunction ? AST_FUNCTION_DECL : AST_PROCEDURE_DECL, copiedName);
+    freeToken(copiedName);
+
+    AST *params = NULL;
+    if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+        eat(parser, TOKEN_LPAREN);
+        if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+            params = paramList(parser);
+            if (!params) {
+                freeAST(routine);
+                return NULL;
+            }
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' after parameter list");
+            freeAST(params);
+            freeAST(routine);
+            return NULL;
+        }
+        eat(parser, TOKEN_RPAREN);
+    }
+
+    adoptRoutineParameters(routine, params);
+
+    if (isFunction) {
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' before function return type");
+            freeAST(routine);
+            return NULL;
+        }
+        eat(parser, TOKEN_COLON);
+        AST *returnType = typeSpecifier(parser, 0);
+        if (!returnType) {
+            freeAST(routine);
+            return NULL;
+        }
+        setRight(routine, returnType);
+        routine->var_type = returnType->var_type;
+    } else {
+        setTypeAST(routine, TYPE_VOID);
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        errorParser(parser, "Expected ';' after routine declaration");
+        freeAST(routine);
+        return NULL;
+    }
+    eat(parser, TOKEN_SEMICOLON);
+
+    while (parser->current_token) {
+        TokenType t = parser->current_token->type;
+        if (t == TOKEN_IDENTIFIER) {
+            if (parser->current_token->value &&
+                strcasecmp(parser->current_token->value, "virtual") == 0) {
+                routine->is_virtual = true;
+            }
+            eat(parser, TOKEN_IDENTIFIER);
+        } else if (t == TOKEN_INLINE) {
+            routine->is_inline = true;
+            eat(parser, TOKEN_INLINE);
+        } else {
+            break;
+        }
+
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        } else {
+            break;
+        }
+    }
+
+    return routine;
+}
+
+static AST *parseInterfaceType(Parser *parser) {
+    AST *node = newASTNode(AST_INTERFACE, parser->current_token);
+    eat(parser, TOKEN_INTERFACE);
+    setTypeAST(node, TYPE_INTERFACE);
+
+    if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+        eat(parser, TOKEN_LPAREN);
+        AST *baseList = newASTNode(AST_LIST, NULL);
+        while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+            AST *baseType = typeSpecifier(parser, 0);
+            if (!baseType) {
+                freeAST(baseList);
+                freeAST(node);
+                return NULL;
+            }
+            addChild(baseList, baseType);
+            if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+                eat(parser, TOKEN_COMMA);
+            } else {
+                break;
+            }
+        }
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' after interface ancestor list");
+            freeAST(baseList);
+            freeAST(node);
+            return NULL;
+        }
+        eat(parser, TOKEN_RPAREN);
+        if (baseList->child_count > 0) {
+            setExtra(node, baseList);
+        } else {
+            freeAST(baseList);
+        }
+    }
+
+    while (parser->current_token && parser->current_token->type == TOKEN_LBRACKET) {
+        eat(parser, TOKEN_LBRACKET);
+        while (parser->current_token && parser->current_token->type != TOKEN_RBRACKET) {
+            AST *attr = expression(parser);
+            if (attr) {
+                freeAST(attr);
+            }
+            if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+                eat(parser, TOKEN_COMMA);
+            } else {
+                break;
+            }
+        }
+        if (!parser->current_token || parser->current_token->type != TOKEN_RBRACKET) {
+            errorParser(parser, "Expected ']' after interface attribute block");
+            freeAST(node);
+            return NULL;
+        }
+        eat(parser, TOKEN_RBRACKET);
+    }
+
+    while (parser->current_token && parser->current_token->type != TOKEN_END) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        if (parser->current_token->type == TOKEN_PROCEDURE ||
+            parser->current_token->type == TOKEN_FUNCTION) {
+            bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
+            AST *method = parseInterfaceMethod(parser, isFunction);
+            if (!method) {
+                freeAST(node);
+                return NULL;
+            }
+            method->is_virtual = true;
+            addChild(node, method);
+            continue;
+        }
+
+        errorParser(parser, "Expected method declaration in interface type");
+        freeAST(node);
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_END) {
+        errorParser(parser, "Expected END to close interface type");
+        freeAST(node);
+        return NULL;
+    }
+    eat(parser, TOKEN_END);
 
     return node;
 }
@@ -1502,6 +1711,13 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         eat(parser, TOKEN_END);
         setTypeAST(node, TYPE_RECORD);
         // Flow continues to the end, return node
+
+    } else if (initialTokenType == TOKEN_INTERFACE) {
+        node = parseInterfaceType(parser);
+        if (!node) {
+            return NULL;
+        }
+        setTypeAST(node, TYPE_INTERFACE);
 
     } else if (initialTokenType == TOKEN_ARRAY) {
         // ARRAY logic (parseArrayType consumes tokens)
