@@ -7121,11 +7121,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
+                int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
-                    if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                        AST* param_node = func_symbol->type_def->children[i];
+                    int meta_index = i + metadataOffset;
+                    if (func_symbol->type_def &&
+                        meta_index >= 0 && meta_index < func_symbol->type_def->child_count) {
+                        AST* param_node = func_symbol->type_def->children[meta_index];
                         if (param_node && param_node->by_ref) is_var_param = true;
                     }
                     if (is_var_param) {
