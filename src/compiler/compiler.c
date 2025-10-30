@@ -6474,13 +6474,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             // a real record field.  Otherwise the regular record lookup path
             // below fires and produces an "Unknown field" error because
             // interfaces do not expose concrete fields.
+            AST* interfaceRecv = NULL;
             if (node->parent && node->parent->type == AST_PROCEDURE_CALL &&
                 node->parent->child_count > 0 &&
                 node->parent->children[0] == node) {
-                AST* recvExpr = node->parent->left;
-                AST* ifaceType = getInterfaceTypeFromExpression(recvExpr);
+                interfaceRecv = node->parent->left;
+            }
+            if (!interfaceRecv && node->left) {
+                interfaceRecv = node->left;
+            }
+            if (interfaceRecv) {
+                AST* ifaceType = getInterfaceTypeFromExpression(interfaceRecv);
                 if (ifaceType) {
-                    compileRValue(recvExpr, chunk, getLine(recvExpr));
+                    compileRValue(interfaceRecv, chunk, getLine(interfaceRecv));
                     break;
                 }
             }
@@ -7011,9 +7017,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
+            AST* interfaceReceiver = NULL;
+            AST* interfaceType = NULL;
+            int interfaceArgStart = 0;
+
+            if (isCallQualified) {
+                if (node->child_count > 0) {
+                    AST* candidate = node->children[0];
+                    AST* candidateType = getInterfaceTypeFromExpression(candidate);
+                    if (candidateType || candidate->var_type == TYPE_INTERFACE) {
+                        interfaceReceiver = candidate;
+                        interfaceType = candidateType;
+                        interfaceArgStart = 1;
+                    }
+                }
+                if (!interfaceReceiver && node->left) {
+                    AST* candidateType = getInterfaceTypeFromExpression(node->left);
+                    if (candidateType || node->left->var_type == TYPE_INTERFACE) {
+                        interfaceReceiver = node->left;
+                        interfaceType = candidateType;
+                        interfaceArgStart = 0;
+                    }
+                }
+            }
+
             bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
-            bool isInterfaceDispatch = isCallQualified && node->child_count > 0 &&
-                                       node->children[0] && node->children[0]->var_type == TYPE_INTERFACE;
+            bool isInterfaceDispatch = isCallQualified && interfaceReceiver != NULL;
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
@@ -7068,12 +7097,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
 
                 int method_slot = func_symbol->type_def->i_val;
-                AST* interfaceType = getInterfaceTypeFromExpression(node->children[0]);
                 const char* slotName = methodIdentifier ? methodIdentifier : functionName;
-                int resolved_slot = ensureInterfaceMethodSlot(interfaceType, slotName);
-                if (resolved_slot >= 0) {
-                    method_slot = resolved_slot;
-                    func_symbol->type_def->i_val = method_slot;
+                if (interfaceType) {
+                    int resolved_slot = ensureInterfaceMethodSlot(interfaceType, slotName);
+                    if (resolved_slot >= 0) {
+                        method_slot = resolved_slot;
+                        func_symbol->type_def->i_val = method_slot;
+                    }
                 }
                 if (method_slot < 0) {
                     fprintf(stderr,
@@ -7084,18 +7114,21 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     break;
                 }
 
-                AST* recv = node->children[0];
+                AST* recv = interfaceReceiver;
                 compileRValue(recv, chunk, getLine(recv));
                 int slotConst = addIntConstant(chunk, method_slot);
                 emitConstant(chunk, slotConst, line);
                 writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
-                for (int i = 1; i < node->child_count; i++) {
+                int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
+                for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
-                    if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                        AST* param_node = func_symbol->type_def->children[i];
+                    int meta_index = i + metadataOffset;
+                    if (func_symbol->type_def &&
+                        meta_index >= 0 && meta_index < func_symbol->type_def->child_count) {
+                        AST* param_node = func_symbol->type_def->children[meta_index];
                         if (param_node && param_node->by_ref) is_var_param = true;
                     }
                     if (is_var_param) {
@@ -7107,7 +7140,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
 
                 writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                int total_args = node->child_count - interfaceArgStart + 1;
+                if (total_args < 0) total_args = 0;
+                writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
             }
 
