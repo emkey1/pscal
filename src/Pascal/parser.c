@@ -65,6 +65,7 @@ static AST *parseInterfaceType(Parser *parser);
 static AST *parseInterfaceMethod(Parser *parser, bool isFunction);
 static void registerRecordMethods(Parser *parser, const char *recordName, AST *recordType);
 static void adoptRoutineParameters(AST *routine, AST *params);
+static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -631,6 +632,59 @@ static void adoptRoutineParameters(AST *routine, AST *params) {
     }
 
     freeAST(params);
+}
+
+static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError) {
+    if (!parser) {
+        return NULL;
+    }
+
+    if (!currentTokenIsIdentifierLike(parser)) {
+        if (missingNameError) {
+            errorParser(parser, missingNameError);
+        }
+        return NULL;
+    }
+
+    Token *qualified = copyToken(parser->current_token);
+    if (!qualified) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    size_t currentLen = qualified->value ? strlen(qualified->value) : 0;
+    TokenType partType = parser->current_token->type;
+    eat(parser, partType);
+
+    while (parser->current_token && parser->current_token->type == TOKEN_PERIOD) {
+        eat(parser, TOKEN_PERIOD);
+
+        if (!currentTokenIsIdentifierLike(parser)) {
+            freeToken(qualified);
+            errorParser(parser, "Expected identifier after '.' in routine name");
+            return NULL;
+        }
+
+        const char *segment = parser->current_token->value ? parser->current_token->value : "";
+        size_t segmentLen = strlen(segment);
+        size_t newLen = currentLen + 1 + segmentLen;
+
+        char *newValue = realloc(qualified->value, newLen + 1);
+        if (!newValue) {
+            freeToken(qualified);
+            EXIT_FAILURE_HANDLER();
+        }
+
+        newValue[currentLen] = '.';
+        memcpy(newValue + currentLen + 1, segment, segmentLen + 1);
+        qualified->value = newValue;
+        qualified->length = newLen;
+        currentLen = newLen;
+
+        partType = parser->current_token->type;
+        eat(parser, partType);
+    }
+
+    return qualified;
 }
 
 static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
@@ -1463,13 +1517,10 @@ static bool tokenTerminatesStatement(TokenType type) {
 
 AST *procedureDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_PROCEDURE);
-    Token *originalProcNameToken = parser->current_token;
-    if (!tokenIsIdentifierLike(originalProcNameToken)) {
-        errorParser(parser, "Expected procedure name after PROCEDURE");
+    Token *copiedProcNameToken = parseQualifiedRoutineName(parser, "Expected procedure name after PROCEDURE");
+    if (!copiedProcNameToken) {
         return newASTNode(AST_NOOP, NULL);
     }
-    Token *copiedProcNameToken = copyToken(originalProcNameToken);
-    eat(parser, originalProcNameToken->type); // Consumes procedure name
     AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken);
     // freeToken(copiedProcNameToken); // Already handled if newASTNode copies
 
@@ -2226,16 +2277,11 @@ AST *varDeclaration(Parser *parser, bool isGlobal /* Not used here, but kept */)
 
 AST *functionDeclaration(Parser *parser, bool in_interface) {
     eat(parser, TOKEN_FUNCTION);
-    Token *originalFuncNameToken = parser->current_token;
-    if (!tokenIsIdentifierLike(originalFuncNameToken)) {
-        errorParser(parser,"Expected function name after FUNCTION");
+    Token *copiedFuncNameToken = parseQualifiedRoutineName(parser, "Expected function name after FUNCTION");
+    if (!copiedFuncNameToken) {
         return newASTNode(AST_NOOP, NULL);
     }
-    Token *copiedFuncNameToken = copyToken(originalFuncNameToken);
-    if (!copiedFuncNameToken) { /* Malloc error */ EXIT_FAILURE_HANDLER(); }
-    
-    eat(parser, originalFuncNameToken->type); // Consumes function name
-    
+
     AST *node = newASTNode(AST_FUNCTION_DECL, copiedFuncNameToken);
     // newASTNode makes its own copy, so we can free copiedFuncNameToken after node creation
     // BUT we assign node->token to copiedFuncNameToken in newASTNode, so freeToken(copiedFuncNameToken)

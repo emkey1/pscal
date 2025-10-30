@@ -1,0 +1,15 @@
+program RecordMethodDispatch;
+
+type
+  TConsoleLogger = record
+    procedure Log(const msg: string); virtual;
+  end;
+
+procedure TConsoleLogger.Log(const msg: string);
+begin
+  writeln('[console] ', msg);
+end;
+
+begin
+  writeln('ready');
+end.
