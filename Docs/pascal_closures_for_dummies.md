@@ -49,7 +49,7 @@ writeln(Stored()); // prints 3 on the first call
 Because the closure owns its environment, using it after `MakeCounter` has returned is safe and produces the expected sequence.【F:Tests/compiler/pascal/cases/closure_capturing_store_return.pas†L19-L34】
 
 ### Limitations to Remember
-- **Threads still expect raw procedure pointers.** `CreateThread` currently rejects closures that capture locals, so use helper records if you need to shuttle state into a thread entry point.【F:src/vm/vm.c†L2600-L2628】
+- **Threads now retain closure environments.** `CreateThread` accepts capturing closures, keeps their environments alive until the worker finishes, and releases them automatically; the `Threading` unit’s `SpawnProcedure` helper lets Pascal code forward nested routines without building custom payload records.【F:src/vm/vm.c†L2588-L2676】【F:lib/pascal/threading.pl†L11-L61】
 - **Global scope cannot host capturing closures.** Attempting to take the address of a capturing routine declared at the top level still produces a compiler error.【F:src/compiler/compiler.c†L965-L1003】
 
 ## Interface Payloads Without Boilerplate

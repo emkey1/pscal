@@ -571,6 +571,8 @@ typedef struct ThreadJob {
     VM* parentVm;
     Value** capturedUpvalues;
     uint8_t capturedUpvalueCount;
+    ClosureEnvPayload* closureEnv;
+    Symbol* closureSymbol;
     Thread* assignedThread;
     int assignedThreadId;
     bool assignmentSatisfied;
@@ -600,6 +602,7 @@ typedef struct {
 } ThreadStartArgs;
 
 static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job);
+static void vmThreadJobDestroy(ThreadJob* job);
 
 static ThreadJobQueue* vmThreadJobQueueCreate(void) {
     ThreadJobQueue* queue = (ThreadJobQueue*)calloc(1, sizeof(ThreadJobQueue));
@@ -628,19 +631,7 @@ static void vmThreadJobQueueDestroy(ThreadJobQueue* queue) {
     pthread_mutex_unlock(&queue->mutex);
     while (job) {
         ThreadJob* next = job->next;
-        if (job->assignmentSyncInitialized) {
-            pthread_mutex_destroy(&job->assignmentMutex);
-            pthread_cond_destroy(&job->assignmentCond);
-            job->assignmentSyncInitialized = false;
-        }
-        if (job->args) {
-            for (int i = 0; i < job->argc; ++i) {
-                freeValue(&job->args[i]);
-            }
-            free(job->args);
-        }
-        free(job->builtin_name);
-        free(job);
+        vmThreadJobDestroy(job);
         job = next;
     }
     pthread_mutex_destroy(&queue->mutex);
@@ -703,6 +694,10 @@ static void vmThreadJobDestroy(ThreadJob* job) {
         pthread_mutex_destroy(&job->assignmentMutex);
         pthread_cond_destroy(&job->assignmentCond);
         job->assignmentSyncInitialized = false;
+    }
+    if (job->closureEnv) {
+        releaseClosureEnv(job->closureEnv);
+        job->closureEnv = NULL;
     }
     if (job->capturedUpvalues) {
         free(job->capturedUpvalues);
@@ -788,6 +783,8 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
                                     ThreadJobKind kind,
                                     BytecodeChunk* chunk,
                                     uint16_t entry,
+                                    ClosureEnvPayload* closureEnv,
+                                    Symbol* closureSymbol,
                                     int argc,
                                     const Value* argv,
                                     VMThreadCallback callback,
@@ -817,6 +814,8 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
     job->parentVm = vm;
     job->capturedUpvalues = NULL;
     job->capturedUpvalueCount = 0;
+    job->closureEnv = NULL;
+    job->closureSymbol = closureSymbol;
     job->assignedThread = NULL;
     job->assignedThreadId = -1;
     job->assignmentSatisfied = false;
@@ -833,6 +832,11 @@ static ThreadJob* vmThreadJobCreate(VM* vm,
     if (!job->assignmentSyncInitialized) {
         vmThreadJobDestroy(job);
         return NULL;
+    }
+
+    if (closureEnv) {
+        job->closureEnv = closureEnv;
+        retainClosureEnv(job->closureEnv);
     }
 
     if (argc > 0 && argv) {
@@ -873,6 +877,10 @@ static Symbol* vmGetProcedureByAddress(VM* vm, uint16_t address);
 
 static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job) {
     if (!vm || !job || job->kind != THREAD_JOB_BYTECODE) {
+        return true;
+    }
+
+    if (job->closureEnv) {
         return true;
     }
 
@@ -1250,7 +1258,8 @@ static void* threadStart(void* arg) {
             }
             case THREAD_JOB_BYTECODE: {
                 if (!canceled && !killed && workerVm) {
-                    Symbol* proc_symbol = vmGetProcedureByAddress(workerVm, job->entry);
+                    Symbol* proc_symbol = job->closureSymbol ? job->closureSymbol
+                                                            : vmGetProcedureByAddress(workerVm, job->entry);
                     CallFrame* frame = &workerVm->frames[workerVm->frameCount++];
                     frame->return_address = NULL;
                     frame->slots = workerVm->stack;
@@ -1264,7 +1273,26 @@ static void* threadStart(void* arg) {
                     frame->discard_result_on_return = false;
                     frame->vtable = NULL;
 
-                    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+                    bool ready_for_execution = true;
+
+                    if (job->closureEnv) {
+                        if (!proc_symbol) {
+                            runtimeError(workerVm,
+                                         "VM Error: Missing symbol for closure thread entry at %u.",
+                                         job->entry);
+                            ready_for_execution = false;
+                        } else if (job->closureEnv->slot_count != proc_symbol->upvalue_count) {
+                            runtimeError(workerVm,
+                                         "VM Error: Closure environment mismatch for thread entry '%s'.",
+                                         proc_symbol->name ? proc_symbol->name : "<anonymous>");
+                            ready_for_execution = false;
+                        } else {
+                            frame->closureEnv = job->closureEnv;
+                            retainClosureEnv(frame->closureEnv);
+                            frame->upvalues = frame->closureEnv->slots;
+                            frame->owns_upvalues = false;
+                        }
+                    } else if (proc_symbol && proc_symbol->upvalue_count > 0) {
                         frame->upvalues = calloc(proc_symbol->upvalue_count, sizeof(Value*));
                         frame->owns_upvalues = frame->upvalues != NULL;
                         if (frame->upvalues) {
@@ -1304,8 +1332,7 @@ static void* threadStart(void* arg) {
                         frame->slotCount = (uint16_t)pushed_args;
                     }
 
-                    bool ready_for_execution = true;
-                    if (proc_symbol && proc_symbol->upvalue_count > 0) {
+                    if (ready_for_execution && proc_symbol && proc_symbol->upvalue_count > 0 && !job->closureEnv) {
                         if (!frame->upvalues || !job->capturedUpvalues ||
                             job->capturedUpvalueCount != proc_symbol->upvalue_count) {
                             runtimeError(workerVm,
@@ -1418,6 +1445,8 @@ static int createThreadJob(VM* vm,
                            ThreadJobKind kind,
                            BytecodeChunk* chunk,
                            uint16_t entry,
+                           ClosureEnvPayload* closureEnv,
+                           Symbol* closureSymbol,
                            int argc,
                            const Value* argv,
                            VMThreadCallback callback,
@@ -1432,7 +1461,8 @@ static int createThreadJob(VM* vm,
         return -1;
     }
 
-    ThreadJob* job = vmThreadJobCreate(vm, kind, chunk, entry, argc, argv, callback, cleanup, user_data, builtin, builtin_id, builtin_name, submitOnly, threadName);
+    ThreadJob* job = vmThreadJobCreate(vm, kind, chunk, entry, closureEnv, closureSymbol, argc, argv, callback, cleanup, user_data,
+                                       builtin, builtin_id, builtin_name, submitOnly, threadName);
     if (!job) {
         return -1;
     }
@@ -1555,13 +1585,19 @@ static int createThreadJob(VM* vm,
     return assignedThread ? assignedId : -1;
 }
 
-static int createThreadWithArgs(VM* vm, uint16_t entry, int argc, const Value* argv) {
-    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, argc, argv, NULL, NULL, NULL, NULL, -1, NULL, false, NULL);
+static int createThreadWithArgs(VM* vm,
+                                uint16_t entry,
+                                ClosureEnvPayload* closureEnv,
+                                Symbol* closureSymbol,
+                                int argc,
+                                const Value* argv) {
+    return createThreadJob(vm, THREAD_JOB_BYTECODE, vm ? vm->chunk : NULL, entry, closureEnv, closureSymbol, argc, argv, NULL,
+                           NULL, NULL, NULL, -1, NULL, false, NULL);
 }
 
 // Backward-compatible helper: no argument provided, pass NIL
 static int createThread(VM* vm, uint16_t entry) {
-    return createThreadWithArgs(vm, entry, 0, NULL);
+    return createThreadWithArgs(vm, entry, NULL, NULL, 0, NULL);
 }
 
 int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VMThreadCleanup cleanup) {
@@ -1571,7 +1607,7 @@ int vmSpawnCallbackThread(VM* vm, VMThreadCallback callback, void* user_data, VM
         }
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL, false, NULL);
+    return createThreadJob(vm, THREAD_JOB_CALLBACK, vm->chunk, 0, NULL, NULL, 0, NULL, callback, cleanup, user_data, NULL, -1, NULL, false, NULL);
 }
 
 int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int argCount,
@@ -1583,7 +1619,7 @@ int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int arg
     if (!handler) {
         return -1;
     }
-    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, argCount, args, NULL, NULL, NULL,
+    return createThreadJob(vm, THREAD_JOB_BUILTIN, vm->chunk, 0, NULL, NULL, argCount, args, NULL, NULL, NULL,
                            handler, builtinId, builtinName, submitOnly, threadName);
 }
 
@@ -2570,33 +2606,38 @@ static Value vmHostCreateThreadAddr(VM* vm) {
         Value addrVal = pop(vm);
         uint16_t entry = 0;
         bool validEntry = false;
-        bool hasCapturedEnv = false;
+        ClosureEnvPayload* closureEnv = NULL;
+        Symbol* closureSymbol = NULL;
         if (addrVal.type == TYPE_CLOSURE) {
             entry = (uint16_t)addrVal.closure.entry_offset;
-            validEntry = true;
-            if (addrVal.closure.env && addrVal.closure.env->slot_count > 0) {
-                hasCapturedEnv = true;
+            closureEnv = addrVal.closure.env;
+            closureSymbol = addrVal.closure.symbol;
+            if (closureEnv) {
+                retainClosureEnv(closureEnv);
             }
+            validEntry = true;
         } else if (IS_INTLIKE(addrVal)) {
             entry = (uint16_t)AS_INTEGER(addrVal);
             validEntry = true;
         }
         freeValue(&addrVal);
 
-        if (!validEntry || hasCapturedEnv) {
+        if (!validEntry) {
             for (int i = 0; i < argc && i < 8; ++i) {
                 freeValue(&args[i]);
             }
-            if (!validEntry) {
-                runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure without captures.");
-            } else {
-                runtimeError(vm, "VM Error: CreateThread does not yet support capturing closures.");
+            if (closureEnv) {
+                releaseClosureEnv(closureEnv);
             }
+            runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure.");
             freeValue(&argcVal);
             return makeInt(-1);
         }
 
-        int id = createThreadWithArgs(vm, entry, argc, args);
+        int id = createThreadWithArgs(vm, entry, closureEnv, closureSymbol, argc, args);
+        if (closureEnv) {
+            releaseClosureEnv(closureEnv);
+        }
         return makeInt(id < 0 ? -1 : id);
     } else {
         // Backwards-compatible path: [addr, arg]
@@ -2604,30 +2645,35 @@ static Value vmHostCreateThreadAddr(VM* vm) {
         Value addrVal = pop(vm);
         uint16_t entry = 0;
         bool validEntry = false;
-        bool hasCapturedEnv = false;
+        ClosureEnvPayload* closureEnv = NULL;
+        Symbol* closureSymbol = NULL;
         if (addrVal.type == TYPE_CLOSURE) {
             entry = (uint16_t)addrVal.closure.entry_offset;
-            validEntry = true;
-            if (addrVal.closure.env && addrVal.closure.env->slot_count > 0) {
-                hasCapturedEnv = true;
+            closureEnv = addrVal.closure.env;
+            closureSymbol = addrVal.closure.symbol;
+            if (closureEnv) {
+                retainClosureEnv(closureEnv);
             }
+            validEntry = true;
         } else if (IS_INTLIKE(addrVal)) {
             entry = (uint16_t)AS_INTEGER(addrVal);
             validEntry = true;
         }
         freeValue(&addrVal);
 
-        if (!validEntry || hasCapturedEnv) {
-            if (!validEntry) {
-                runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure without captures.");
-            } else {
-                runtimeError(vm, "VM Error: CreateThread does not yet support capturing closures.");
-            }
+        if (!validEntry) {
+            runtimeError(vm, "VM Error: CreateThread requires a procedure pointer or closure.");
             freeValue(&argVal);
+            if (closureEnv) {
+                releaseClosureEnv(closureEnv);
+            }
             return makeInt(-1);
         }
 
-        int id = createThreadWithArgs(vm, entry, 1, &argVal);
+        int id = createThreadWithArgs(vm, entry, closureEnv, closureSymbol, 1, &argVal);
+        if (closureEnv) {
+            releaseClosureEnv(closureEnv);
+        }
         return makeInt(id < 0 ? -1 : id);
     }
 }

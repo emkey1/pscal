@@ -1,0 +1,37 @@
+program CreateThreadClosurePointerTest;
+uses Threading;
+
+type
+  PInteger = ^Integer;
+
+procedure Run;
+var
+  base: integer;
+  data: PInteger;
+  tid: integer;
+  status: integer;
+
+  procedure Worker(param: pointer);
+  var
+    p: PInteger;
+  begin
+    p := PInteger(param);
+    if p <> nil then
+      p^ := p^ + base;
+  end;
+
+begin
+  base := 5;
+  New(data);
+  data^ := 37;
+  tid := CreateThread(@Worker, data);
+  status := WaitForThread(tid);
+  writeln('status=', status);
+  writeln('heap=', data^);
+  writeln('stats=', ThreadStatsCount);
+  Dispose(data);
+end;
+
+begin
+  Run;
+end.
