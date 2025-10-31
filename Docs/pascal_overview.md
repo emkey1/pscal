@@ -34,7 +34,7 @@ Examples
   stateful callbacks safely by boxing the payload on the heap and passing it to
   a global handler instead of capturing local variables.
 
-Example program:
+Example programs: (Examples in this document can be found in Examples/Pascal/base/docs_examples)
 
 ```pascal
 program Demo;
@@ -128,7 +128,7 @@ Builtins are implemented in C and exposed to Pascal through a lookup table【F:s
 Example:
 
 ```pascal
-program randomize;
+program Randomize;
 
 var
   n: integer;
