@@ -116,6 +116,12 @@ Pascal uses the Pascal-cased names shown above.  The C-like and Rea front ends
 expose the same helpers with lowercase identifiers (for example,
 `extbuiltincategorycount()`).
 
+Complete runnable examples that exercise these helpers live under
+`Examples/pascal/base/DumpExtBuiltins`,
+`Examples/clike/base/DumpExtBuiltins`,
+`Examples/rea/base/dump_ext_builtins`, and
+`Examples/exsh/dump_ext_builtins`.
+
 Example Pascal snippet that lists the available routines when the category is
 present:
 

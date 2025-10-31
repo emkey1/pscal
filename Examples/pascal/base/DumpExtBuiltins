@@ -1,0 +1,31 @@
+#!/usr/bin/env pascal
+program DumpExtBuiltins;
+var
+  catCount, groupCount, fnCount, groupFnCount: integer;
+  i, j, k: integer;
+  catName, groupName, fnName: string;
+begin
+  writeln('Extended builtin inventory');
+  catCount := ExtBuiltinCategoryCount();
+  for i := 0 to catCount - 1 do
+  begin
+    catName := ExtBuiltinCategoryName(i);
+    writeln('Category: ', catName);
+    fnCount := ExtBuiltinFunctionCount(catName);
+    groupCount := ExtBuiltinGroupCount(catName);
+    for j := 0 to groupCount - 1 do
+    begin
+      groupName := ExtBuiltinGroupName(catName, j);
+      writeln('  Group: ', groupName);
+      groupFnCount := ExtBuiltinGroupFunctionCount(catName, groupName);
+      for k := 0 to groupFnCount - 1 do
+      begin
+        fnName := ExtBuiltinGroupFunctionName(catName, groupName, k);
+        writeln('    ', fnName);
+      end;
+    end;
+    writeln('  Total functions: ', fnCount);
+    writeln;
+  end;
+  writeln('Has system/GetPid: ', HasExtBuiltin('system', 'GetPid'));
+end.

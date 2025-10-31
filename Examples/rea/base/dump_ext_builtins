@@ -1,0 +1,34 @@
+#!/usr/bin/env rea
+
+int dump() {
+  int categoryCount = extbuiltincategorycount();
+  writeln("Extended builtin inventory");
+  int i = 0;
+  while (i < categoryCount) {
+    str category = extbuiltincategoryname(i);
+    writeln("Category: ", category);
+    int totalFns = extbuiltinfunctioncount(category);
+    int groupCount = extbuiltingroupcount(category);
+    int j = 0;
+    while (j < groupCount) {
+      str group = extbuiltingroupname(category, j);
+      writeln("  Group: ", group);
+      int groupFnCount = extbuiltingroupfunctioncount(category, group);
+      int k = 0;
+      while (k < groupFnCount) {
+        str fn = extbuiltingroupfunctionname(category, group, k);
+        writeln("    ", fn);
+        k = k + 1;
+      }
+      j = j + 1;
+    }
+    writeln("  Total functions: ", totalFns);
+    writeln("");
+    i = i + 1;
+  }
+  bool hasPid = hasextbuiltin("system", "GetPid");
+  writeln("Has system/GetPid: ", hasPid ? "true" : "false");
+  return 0;
+}
+
+dump();
