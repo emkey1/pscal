@@ -6402,25 +6402,54 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
-                int metadataOffset = 1 - interfaceArgStart;
-                if (metadataOffset < 0) metadataOffset = 0;
+                MethodParameter* ifaceParams = NULL;
+                int ifaceParamCount = 0;
+                bool haveParamMetadata = false;
+                if (methodSignature &&
+                    (methodSignature->type == AST_PROCEDURE_DECL ||
+                     methodSignature->type == AST_FUNCTION_DECL)) {
+                    if (buildMethodParameterList(methodSignature, &ifaceParams, &ifaceParamCount)) {
+                        haveParamMetadata = true;
+                    } else {
+                        ifaceParams = NULL;
+                        ifaceParamCount = 0;
+                    }
+                }
+
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
-                    int meta_index = i + metadataOffset;
-                    if (methodSignature &&
-                        meta_index >= 0 && meta_index < methodSignature->child_count) {
-                        AST* param_node = methodSignature->children[meta_index];
-                        if (param_node && param_node->by_ref) {
-                            is_var_param = true;
+
+                    if (haveParamMetadata) {
+                        int arg_index = i - interfaceArgStart;
+                        if (arg_index >= 0 && arg_index < ifaceParamCount) {
+                            AST* paramGroup = ifaceParams[arg_index].group;
+                            if (paramGroup && paramGroup->by_ref) {
+                                is_var_param = true;
+                            }
+                        }
+                    } else if (methodSignature) {
+                        int metadataOffset = 1 - interfaceArgStart;
+                        if (metadataOffset < 0) metadataOffset = 0;
+                        int meta_index = i + metadataOffset;
+                        if (meta_index >= 0 && meta_index < methodSignature->child_count) {
+                            AST* param_node = methodSignature->children[meta_index];
+                            if (param_node && param_node->by_ref) {
+                                is_var_param = true;
+                            }
                         }
                     }
+
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
                         compileRValue(arg_node, chunk, getLine(arg_node));
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
+                }
+
+                if (haveParamMetadata) {
+                    free(ifaceParams);
                 }
 
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
