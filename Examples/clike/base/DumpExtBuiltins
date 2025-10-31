@@ -1,0 +1,30 @@
+#!/usr/bin/env clike
+int main() {
+    int categoryCount = extbuiltincategorycount();
+    printf("Extended builtin inventory\n");
+    int i = 0;
+    while (i < categoryCount) {
+        str category = extbuiltincategoryname(i);
+        printf("Category: %s\n", category);
+        int totalFns = extbuiltinfunctioncount(category);
+        int groupCount = extbuiltingroupcount(category);
+        int j = 0;
+        while (j < groupCount) {
+            str group = extbuiltingroupname(category, j);
+            printf("  Group: %s\n", group);
+            int groupFnCount = extbuiltingroupfunctioncount(category, group);
+            int k = 0;
+            while (k < groupFnCount) {
+                str fn = extbuiltingroupfunctionname(category, group, k);
+                printf("    %s\n", fn);
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        printf("  Total functions: %d\n\n", totalFns);
+        i = i + 1;
+    }
+    int hasPid = hasextbuiltin("system", "GetPid");
+    printf("Has system/GetPid: %s\n", hasPid ? "true" : "false");
+    return 0;
+}

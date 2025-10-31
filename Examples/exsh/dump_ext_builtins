@@ -1,0 +1,44 @@
+#!/usr/bin/env exsh
+# Enumerate the VM's extended builtin categories, groups, and functions.
+
+category_count=$(builtin ExtBuiltinCategoryCount)
+if [ -z "$category_count" ]; then
+    echo "No extended builtin information available." >&2
+    exit 1
+fi
+
+echo "Extended builtin inventory"
+
+i=0
+while [ "$i" -lt "$category_count" ]; do
+    category=$(builtin ExtBuiltinCategoryName "int:$i")
+    echo "Category: $category"
+    total_fns=$(builtin ExtBuiltinFunctionCount "str:$category")
+    group_count=$(builtin ExtBuiltinGroupCount "str:$category")
+    j=0
+    while [ "$j" -lt "$group_count" ]; do
+        group=$(builtin ExtBuiltinGroupName "str:$category" "int:$j")
+        echo "  Group: $group"
+        group_fn_count=$(builtin ExtBuiltinGroupFunctionCount "str:$category" "str:$group")
+        k=0
+        while [ "$k" -lt "$group_fn_count" ]; do
+            fn=$(builtin ExtBuiltinGroupFunctionName "str:$category" "str:$group" "int:$k")
+            echo "    $fn"
+            k=$((k + 1))
+        done
+        j=$((j + 1))
+    done
+    echo "  Total functions: $total_fns"
+    echo
+    i=$((i + 1))
+done
+
+result=$(builtin HasExtBuiltin "str:system" "str:GetPid")
+case "$result" in
+    true|TRUE|1)
+        echo "Has system/GetPid: true"
+        ;;
+    *)
+        echo "Has system/GetPid: false"
+        ;;
+esac
