@@ -1,0 +1,2 @@
+L22: Compiler Error: Method 'add' on record 'tbadadder' must take 2 parameter(s) to satisfy interface 'iadder' (found 1).
+Compilation failed with errors.
