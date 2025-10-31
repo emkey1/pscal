@@ -1457,19 +1457,36 @@ resolved_field: ;
                             if (!rhsType && rhs->token && rhs->token->value && rhs->type == AST_PROCEDURE_CALL && rhs->child_count == 0) {
                                 const char *callName = rhs->token->value;
                                 Symbol* rhsProc = resolveProcedureSymbolInScope(callName, node, globalProgramNode);
-                            if (rhsProc && rhsProc->type_def) {
-                                rhsIsProcPointer = true;
-                                verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
-                                AST *designator = newASTNode(AST_VARIABLE, rhs->token);
-                                if (rhs->token) {
-                                    freeToken(rhs->token);
-                                    rhs->token = NULL;
+                                if (rhsProc && rhsProc->type_def) {
+                                    AST *resolvedProcType = resolveTypeAlias(rhsProc->type_def);
+                                    AST *resolvedReturnType = resolvedProcType ?
+                                            resolveTypeAlias(resolvedProcType->right) : NULL;
+
+                                    bool returnIsProcPointer = resolvedReturnType &&
+                                            resolvedReturnType->type == AST_PROC_PTR_TYPE;
+
+                                    if (!returnIsProcPointer) {
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                    }
+
+                                    if (returnIsProcPointer) {
+                                        rhsIsProcPointer = true;
+                                        rhs->var_type = TYPE_POINTER;
+                                        rhs->type_def = resolvedReturnType;
+                                        verifyProcPointerTypesCompatible(lhsType, resolvedReturnType);
+                                    } else {
+                                        rhsIsProcPointer = true;
+                                        AST *designator = newASTNode(AST_VARIABLE, rhs->token);
+                                        if (rhs->token) {
+                                            freeToken(rhs->token);
+                                            rhs->token = NULL;
+                                        }
+                                        rhs->type = AST_ADDR_OF;
+                                        rhs->var_type = TYPE_POINTER;
+                                        rhs->type_def = lhsType;
+                                        setLeft(rhs, designator);
+                                    }
                                 }
-                                rhs->type = AST_ADDR_OF;
-                                rhs->var_type = TYPE_POINTER;
-                                rhs->type_def = lhsType;
-                                setLeft(rhs, designator);
-                            }
                             }
 
                             if (!rhsIsProcPointer) {
