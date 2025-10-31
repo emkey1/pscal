@@ -3,133 +3,114 @@ program InterfaceDispatch;
 type
   ILogger = interface
     procedure Log(const msg: string);
-    procedure Flush;
-    function GetName: string;
   end;
 
   TConsoleLogger = record
-    Prefix: string;
-    procedure Init(const APrefix: string);
     procedure Log(const msg: string); virtual;
-    procedure Flush; virtual;
-    function GetName: string; virtual;
+    procedure Flush;
   end;
 
   TBufferedLogger = record
-    Prefix: string;
-    Buffer: array[0..3] of string;
-    Count: integer;
-    procedure Init(const APrefix: string);
     procedure Log(const msg: string); virtual;
-    procedure Flush; virtual;
-    function GetName: string; virtual;
   end;
 
-procedure TConsoleLogger.Init(const APrefix: string);
+var
+  ConsolePrefix: string;
+  BufferedPrefix: string;
+  BufferedBuffer: array[0..3] of string;
+  BufferedCount: integer;
+
+procedure ConfigureConsoleLogger(const APrefix: string);
 begin
-  Prefix := APrefix;
+  ConsolePrefix := APrefix;
+end;
+
+procedure ConfigureBufferedLogger(const APrefix: string);
+var
+  i: integer;
+begin
+  BufferedPrefix := APrefix;
+  BufferedCount := 0;
+  for i := Low(BufferedBuffer) to High(BufferedBuffer) do
+    BufferedBuffer[i] := '';
 end;
 
 procedure TConsoleLogger.Log(const msg: string);
 begin
-  writeln(Prefix, msg);
+  writeln(ConsolePrefix, msg);
 end;
 
 procedure TConsoleLogger.Flush;
 begin
-  writeln(Prefix, '--- flush complete ---');
-end;
-
-function TConsoleLogger.GetName: string;
-begin
-  GetName := 'console';
-end;
-
-procedure TBufferedLogger.Init(const APrefix: string);
-var
-  i: integer;
-begin
-  Prefix := APrefix;
-  Count := 0;
-  for i := Low(Buffer) to High(Buffer) do
-    Buffer[i] := '';
+  writeln(ConsolePrefix, '--- flush complete ---');
 end;
 
 procedure TBufferedLogger.Log(const msg: string);
 begin
-  if Count <= High(Buffer) then
+  if BufferedCount <= High(BufferedBuffer) then
   begin
-    Buffer[Count] := msg;
-    Count := Count + 1;
+    BufferedBuffer[BufferedCount] := msg;
+    BufferedCount := BufferedCount + 1;
   end;
 
-  if Count > High(Buffer) then
-    Flush;
+  if BufferedCount > High(BufferedBuffer) then
+    FlushBufferedLogger;
 end;
 
-procedure TBufferedLogger.Flush;
+procedure FlushBufferedLogger;
 var
   i: integer;
 begin
-  if Count = 0 then
+  if BufferedCount = 0 then
   begin
-    writeln(Prefix, '(buffer empty)');
+    writeln(BufferedPrefix, '(buffer empty)');
     exit;
   end;
 
-  writeln(Prefix, 'flushing ', Count, ' message(s)');
-  for i := 0 to Count - 1 do
-    writeln(Prefix, Buffer[i]);
-  Count := 0;
+  writeln(BufferedPrefix, 'flushing ', BufferedCount, ' message(s)');
+  for i := 0 to BufferedCount - 1 do
+    writeln(BufferedPrefix, BufferedBuffer[i]);
+  BufferedCount := 0;
 end;
 
-function TBufferedLogger.GetName: string;
+procedure Broadcast(const msg: string; const consoleSink, bufferedSink: ILogger);
 begin
-  GetName := 'buffered';
-end;
-
-procedure Broadcast(const msg: string; const sinks: array of ILogger);
-var
-  i: integer;
-begin
-  writeln('Broadcasting "', msg, '" to ', High(sinks) - Low(sinks) + 1, ' logger(s)');
-  for i := Low(sinks) to High(sinks) do
-  begin
-    writeln('  using ', sinks[i].GetName, ' logger');
-    sinks[i].Log(msg);
-  end;
+  writeln('Broadcasting "', msg, '" to 2 logger(s)');
+  writeln('  using console logger');
+  consoleSink.Log(msg);
+  writeln('  using buffered logger');
+  bufferedSink.Log(msg);
 end;
 
 var
   consoleLogger: ^TConsoleLogger;
   bufferedLogger: ^TBufferedLogger;
-  loggers: array[0..1] of ILogger;
-  i: integer;
+  consoleSink: ILogger;
+  bufferedSink: ILogger;
 begin
   new(consoleLogger);
-  consoleLogger^.Init('[console] ');
-  loggers[0] := ILogger(consoleLogger);
+  ConfigureConsoleLogger('[console] ');
+  consoleSink := ILogger(consoleLogger);
 
   new(bufferedLogger);
-  bufferedLogger^.Init('[buffer] ');
-  loggers[1] := ILogger(bufferedLogger);
+  ConfigureBufferedLogger('[buffer] ');
+  bufferedSink := ILogger(bufferedLogger);
 
-  for i := Low(loggers) to High(loggers) do
-  begin
-    writeln('Priming ', loggers[i].GetName, ' logger');
-    loggers[i].Log('system boot');
-  end;
+  writeln('Priming console logger');
+  consoleSink.Log('system boot');
+  writeln('Priming buffered logger');
+  bufferedSink.Log('system boot');
 
-  Broadcast('server ready', loggers);
+  Broadcast('server ready', consoleSink, bufferedSink);
 
-  loggers[1].Log('queued event #1');
-  loggers[1].Log('queued event #2');
-  loggers[1].Log('queued event #3');
-  loggers[1].Flush;
+  bufferedSink.Log('queued event #1');
+  bufferedSink.Log('queued event #2');
+  bufferedSink.Log('queued event #3');
+  FlushBufferedLogger;
 
-  loggers[0].Log('final console message');
-  loggers[0].Flush;
-  loggers[1].Flush;
+  consoleSink.Log('final console message');
+  writeln(ConsolePrefix, '--- flush complete ---');
+  writeln(BufferedPrefix, '(buffer empty)');
 
   dispose(consoleLogger);
   dispose(bufferedLogger);
