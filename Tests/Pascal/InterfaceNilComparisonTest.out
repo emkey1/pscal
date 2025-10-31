@@ -1,0 +1,6 @@
+initial eq nil ok
+initial ne nil ok
+assigned ne nil ok
+assigned eq nil ok
+reset eq nil ok
+reset ne nil ok
