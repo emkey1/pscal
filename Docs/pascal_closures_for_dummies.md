@@ -19,6 +19,16 @@ Taken together, nested routines can finally outlive their defining scope, and in
 ### Practical takeaway
 You can now safely return or store nested routines that touch outer-scope variables. The environment lives on the heap and is reference counted, so multiple closures can share the same captured data without leaks.
 
+## Quick Demo
+
+For a compact walkthrough, see `Examples/pascal/base/docs_examples/GoStyleClosureInterfaceDemo`.
+It returns a nested function that captures its local counter, stores the resulting
+closure inside a record, and boxes that record behind an interface. Each call goes
+through the interface method, unpacks the receiver, and invokes the captured
+closure so the counter keeps advancing even after the factory routine has exited.
+During dispatch the VM now seeds the implicit `myself` pointer, letting the record
+method reach its own fields without any extra scaffolding.
+
 ## Everyday Closure Patterns
 
 ### Returning a Counter Function

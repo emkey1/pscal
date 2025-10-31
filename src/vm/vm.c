@@ -3238,7 +3238,18 @@ static Value vmHostInterfaceLookup(VM* vm) {
         return makeNil();
     }
 
-    push(vm, copyValueForStack(receiverCell));
+    Value receiverCopy = copyValueForStack(receiverCell);
+
+    if (vm->vmGlobalSymbols) {
+        pthread_mutex_lock(&globals_mutex);
+        Symbol* myselfSym = hashTableLookup(vm->vmGlobalSymbols, "myself");
+        if (myselfSym) {
+            updateSymbol("myself", copyValueForStack(receiverCell));
+        }
+        pthread_mutex_unlock(&globals_mutex);
+    }
+
+    push(vm, receiverCopy);
 
     uint16_t target_address = (uint16_t)AS_INTEGER(entry);
 

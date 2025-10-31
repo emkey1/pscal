@@ -1,0 +1,62 @@
+program GoStyleClosureInterfaceDemo;
+
+// Demonstrates Go-style closures that escape their defining scope and
+// interface boxing that carries a receiver pointer plus its method table.
+
+type
+    TCounterFactory = function: integer;
+
+    IRunnable = interface
+        procedure Run;
+    end;
+
+    TClosureRunner = record
+        labelText: string;
+        nextValue: TCounterFactory;
+        procedure Run; virtual;
+    end;
+
+procedure TClosureRunner.Run;
+var
+    value: integer;
+    runner: ^TClosureRunner;
+    next: TCounterFactory;
+begin
+    runner := myself;
+    next := runner^.nextValue;
+    value := next();
+    writeln(runner^.labelText, ' tick=', value);
+end;
+
+function MakeRunner(const name: string; start, step: integer): IRunnable;
+var
+    current: integer;
+    runner: ^TClosureRunner;
+
+    function Next: integer;
+    begin
+        current := current + step;
+        Next := current;
+    end;
+begin
+    new(runner);
+    current := start;
+    runner^.labelText := name;
+    runner^.nextValue := @Next;
+    MakeRunner := IRunnable(runner);
+end;
+
+var
+    fast, slow: IRunnable;
+    i: integer;
+begin
+    fast := MakeRunner('fast', 0, 2);
+    slow := MakeRunner('slow', 10, -1);
+
+    for i := 1 to 3 do
+        fast.Run;
+
+    slow.Run;
+    fast.Run;
+    slow.Run;
+end.
