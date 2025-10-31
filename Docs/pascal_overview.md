@@ -113,6 +113,29 @@ Running the program prints the log message instead of the boxed receiver pointer
 [console] ready
 ```
 
+### Interface assertions
+
+Boxed interface values retain the identity of the concrete record they wrap.
+You can recover the underlying receiver (or fail fast) with the new assertion
+syntax:
+
+```pascal
+var
+  logger: ILogger;
+  concrete: ^TConsoleLogger;
+begin
+  new(concrete);
+  logger := ILogger(concrete);
+  concrete := logger as TConsoleLogger; { raises an error if the receiver is not TConsoleLogger }
+  concrete^.Log('asserted receiver');
+end.
+```
+
+Both `expr as TRecord` and `expr is TRecord` perform the same runtime check.
+The compiler emits the interface value and target type name, then invokes a VM
+helper that compares the stored class identity. If they match the receiver is
+returned; otherwise a descriptive runtime error is raised.【F:src/Pascal/parser.c†L365-L417】【F:src/compiler/compiler.c†L6843-L6881】【F:src/vm/vm.c†L3043-L3166】
+
 ## Builtins
 
 Builtins are implemented in C and exposed to Pascal through a lookup table【F:src/backend_ast/builtin.c†L35-L176】. They cover:

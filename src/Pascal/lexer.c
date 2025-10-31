@@ -140,7 +140,7 @@ static void handleCommentDirective(Lexer *lexer, const char *comment_text, size_
 }
 
 static Keyword keywords[] = {
-    {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"begin", TOKEN_BEGIN},
+    {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"as", TOKEN_AS}, {"begin", TOKEN_BEGIN},
     {"break", TOKEN_BREAK}, // Added break here alphabetically
     {"case", TOKEN_CASE}, {"const", TOKEN_CONST}, {"do", TOKEN_DO},
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
@@ -150,7 +150,7 @@ static Keyword keywords[] = {
     {"in", TOKEN_IN}, // Added IN
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
-    {"interface", TOKEN_INTERFACE}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
+    {"interface", TOKEN_INTERFACE}, {"is", TOKEN_IS}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
     {"out", TOKEN_OUT}, // Added OUT
     {"pointer", TOKEN_POINTER},

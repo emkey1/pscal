@@ -3016,7 +3016,7 @@ static Value vmHostBoxInterface(VM* vm) {
     }
     tableValuePtr = resolvedTablePtr;
 
-    ClosureEnvPayload* payload = createClosureEnv(2);
+    ClosureEnvPayload* payload = createClosureEnv(3);
     if (!payload) {
         freeValue(&classNameVal);
         freeValue(&typeNameVal);
@@ -3028,9 +3028,11 @@ static Value vmHostBoxInterface(VM* vm) {
 
     Value* receiverCell = (Value*)malloc(sizeof(Value));
     Value* tableCell = (Value*)malloc(sizeof(Value));
-    if (!receiverCell || !tableCell) {
+    Value* classCell = (Value*)malloc(sizeof(Value));
+    if (!receiverCell || !tableCell || !classCell) {
         if (receiverCell) free(receiverCell);
         if (tableCell) free(tableCell);
+        if (classCell) free(classCell);
         releaseClosureEnv(payload);
         freeValue(&classNameVal);
         freeValue(&typeNameVal);
@@ -3042,8 +3044,30 @@ static Value vmHostBoxInterface(VM* vm) {
 
     *receiverCell = makeCopyOfValue(&receiverVal);
     *tableCell = makePointer(tableValuePtr, NULL);
+    const char* class_identity_source = class_name_str ? class_name_str : "";
+    size_t class_identity_len = strlen(class_identity_source);
+    char* lowered_identity = (char*)malloc(class_identity_len + 1);
+    if (!lowered_identity) {
+        free(receiverCell);
+        free(tableCell);
+        free(classCell);
+        releaseClosureEnv(payload);
+        freeValue(&classNameVal);
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Out of memory normalising class identity for interface payload.");
+        return makeNil();
+    }
+    for (size_t i = 0; i < class_identity_len; ++i) {
+        lowered_identity[i] = (char)tolower((unsigned char)class_identity_source[i]);
+    }
+    lowered_identity[class_identity_len] = '\0';
+    *classCell = makeString(lowered_identity);
+    free(lowered_identity);
     payload->slots[0] = receiverCell;
     payload->slots[1] = tableCell;
+    payload->slots[2] = classCell;
     payload->symbol = NULL;
 
     Value iface = makeInterface(interfaceType, payload);
@@ -3175,6 +3199,84 @@ static Value vmHostInterfaceLookup(VM* vm) {
     freeValue(&methodIndexVal);
     freeValue(&ifaceVal);
     return makeInt(target_address);
+}
+
+static Value vmHostInterfaceAssert(VM* vm) {
+    if (!vm) {
+        return makeNil();
+    }
+
+    Value targetTypeVal = pop(vm);
+    Value ifaceVal = pop(vm);
+
+    if (ifaceVal.type != TYPE_INTERFACE) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface assertion requires interface value.");
+        return makeNil();
+    }
+
+    if (targetTypeVal.type != TYPE_STRING || !targetTypeVal.s_val) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface assertion requires target type name string.");
+        return makeNil();
+    }
+
+    ClosureEnvPayload* payload = ifaceVal.interface.payload;
+    if (!payload || payload->slot_count < 2) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing receiver metadata.");
+        return makeNil();
+    }
+
+    Value* receiverCell = payload->slots[0];
+    Value* classCell = (payload->slot_count >= 3) ? payload->slots[2] : NULL;
+    if (!receiverCell) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing receiver value.");
+        return makeNil();
+    }
+
+    if (!classCell || classCell->type != TYPE_STRING || !classCell->s_val) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing class identity.");
+        return makeNil();
+    }
+
+    size_t type_len = strlen(targetTypeVal.s_val);
+    char* lowered_target = (char*)malloc(type_len + 1);
+    if (!lowered_target) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Out of memory during interface assertion.");
+        return makeNil();
+    }
+    for (size_t i = 0; i < type_len; ++i) {
+        lowered_target[i] = (char)tolower((unsigned char)targetTypeVal.s_val[i]);
+    }
+    lowered_target[type_len] = '\0';
+
+    bool matches = (strcmp(lowered_target, classCell->s_val) == 0);
+    free(lowered_target);
+
+    if (!matches) {
+        const char* actual = classCell->s_val ? classCell->s_val : "<unknown>";
+        runtimeError(vm, "VM Error: Interface assertion expected '%s' but receiver is '%s'.",
+                     targetTypeVal.s_val, actual);
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        return makeNil();
+    }
+
+    Value result = copyValueForStack(receiverCell);
+
+    freeValue(&targetTypeVal);
+    freeValue(&ifaceVal);
+    return result;
 }
 
 static Value vmHostWaitThread(VM* vm) {
@@ -3655,6 +3757,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
     registerHostFunction(vm, HOST_FN_BOX_INTERFACE, vmHostBoxInterface);
     registerHostFunction(vm, HOST_FN_INTERFACE_LOOKUP, vmHostInterfaceLookup);
+    registerHostFunction(vm, HOST_FN_INTERFACE_ASSERT, vmHostInterfaceAssert);
 
     // Default: tracing disabled
     vm->trace_head_instructions = 0;
@@ -7564,6 +7667,10 @@ comparison_error_label:
                 // or that start threads which immediately need to access globals during VM init.
                 // Individual host functions should lock as needed.
                 Value result = func(vm);
+                if (vm->abort_requested) {
+                    freeValue(&result);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 push(vm, result);
                 break;
             }

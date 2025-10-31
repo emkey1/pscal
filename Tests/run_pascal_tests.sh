@@ -68,6 +68,10 @@ normalise_pascal_stderr() {
     mv "$path.clean" "$path"
     perl -ne 'print unless /Warning: user-defined .* overrides builtin/' "$path" > "$path.clean"
     mv "$path.clean" "$path"
+    perl -0 -pe 's/--- VM Crash Context ---.*?--------------------------\n//s' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
+    perl -0 -pe 's/^--- VM execution Failed.*\z//ms' "$path" > "$path.clean"
+    mv "$path.clean" "$path"
     perl -ne 'print unless /Compiler warning: assigning .* may lose precision/' "$path" > "$path.clean"
     mv "$path.clean" "$path"
 }

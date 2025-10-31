@@ -109,6 +109,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_RBRACKET:      return "RBRACKET";
         case TOKEN_DOTDOT:        return "DOTDOT";
         case TOKEN_ARRAY:         return "ARRAY";
+        case TOKEN_AS:            return "AS";
         case TOKEN_OF:            return "OF";
         case TOKEN_AND:           return "AND";
         case TOKEN_OR:            return "OR";
@@ -128,6 +129,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_IMPLEMENTATION:return "IMPLEMENTATION";
         case TOKEN_INITIALIZATION:return "INITIALIZATION";
         case TOKEN_IN:            return "IN";
+        case TOKEN_IS:            return "IS";
         case TOKEN_BREAK:         return "BREAK";
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_OUT:           return "OUT";
@@ -190,6 +192,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_FORMATTED_EXPR: return "FORMATTED_EXPR";
         case AST_TYPE_REFERENCE: return "TYPE_REFERENCE";
         case AST_TYPE_IDENTIFIER:return "TYPE_IDENTIFIER";
+        case AST_TYPE_ASSERT:    return "TYPE_ASSERT";
         case AST_SUBRANGE:       return "SUBRANGE";
         case AST_USES_CLAUSE:    return "USES_CLAUSE";
         case AST_IMPORT:         return "IMPORT";
