@@ -5108,6 +5108,23 @@ dispatch_switch:
                     }
                     comparison_succeeded = true;
                 }
+                // Interface and NIL comparison
+                else if ((a_val.type == TYPE_INTERFACE || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_INTERFACE || b_val.type == TYPE_NIL)) {
+                    ClosureEnvPayload* payload_a = (a_val.type == TYPE_INTERFACE) ? a_val.interface.payload : NULL;
+                    ClosureEnvPayload* payload_b = (b_val.type == TYPE_INTERFACE) ? b_val.interface.payload : NULL;
+                    bool interfaces_equal = (payload_a == payload_b);
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(interfaces_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!interfaces_equal);
+                    } else {
+                        runtimeError(vm, "Runtime Error: Invalid operator for interface comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
                 // Pointer and NIL comparison
                 else if ((a_val.type == TYPE_POINTER || a_val.type == TYPE_NIL) &&
                          (b_val.type == TYPE_POINTER || b_val.type == TYPE_NIL)) {
