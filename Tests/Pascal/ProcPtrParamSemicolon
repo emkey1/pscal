@@ -1,0 +1,26 @@
+program ProcPtrParamSemicolon;
+
+type
+  TMixedProc = procedure(var a: Integer; const b: Real; c: Boolean);
+
+procedure Impl(var a: Integer; const b: Real; c: Boolean);
+begin
+  if c then
+    a := a + 1;
+  if b > 0.0 then
+    a := a + 1;
+end;
+
+var
+  handler: TMixedProc;
+  value: Integer;
+begin
+  handler := @Impl;
+  value := 2;
+  { Ensure the routine identifier also parses with matching modifiers }
+  Impl(value, 3.0, True);
+  if value <> 4 then
+    writeln('unexpected result: ', value);
+  { Keep the pointer in scope so the parser must handle the semicolon-separated modifiers }
+  handler := @Impl;
+end.
