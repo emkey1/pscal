@@ -230,7 +230,7 @@ end.
 ```
 
 ```
-mke@MacBook-Pro-M1 docs_examples % pascal check_file 
+% pascal CheckFile 
 FILE NOT FOUND
 % touch data.txt
 % pascal check_file
