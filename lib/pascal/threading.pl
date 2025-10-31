@@ -12,6 +12,8 @@ function ThreadOptionsNamed(const ThreadName: string): ThreadRequestOptions;
 function ThreadOptionsQueue(const ThreadName: string): ThreadRequestOptions;
 function ThreadOptionsQueueOnly: ThreadRequestOptions;
 
+function SpawnProcedure(const Proc: Pointer; Arg: Pointer): Integer;
+
 function SpawnBuiltinNamed(const BuiltinName, ThreadName: string): Integer;
 function PoolSubmitNamed(const BuiltinName, ThreadName: string): Integer;
 function SpawnBuiltinWithOptions(const BuiltinName: string; const Options: ThreadRequestOptions): Integer;
@@ -51,6 +53,11 @@ begin
   Options.Name := '';
   Options.SubmitOnly := True;
   ThreadOptionsQueueOnly := Options;
+end;
+
+function SpawnProcedure(const Proc: Pointer; Arg: Pointer): Integer;
+begin
+  SpawnProcedure := CreateThread(Proc, Arg);
 end;
 
 function SpawnBuiltinNamed(const BuiltinName, ThreadName: string): Integer;

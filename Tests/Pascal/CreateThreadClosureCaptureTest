@@ -1,0 +1,34 @@
+program CreateThreadClosureCaptureTest;
+uses Threading;
+
+type
+  PInteger = ^Integer;
+
+procedure Run;
+var
+  seed: integer;
+  observed: PInteger;
+  tid: integer;
+  status: integer;
+
+  procedure Worker(arg: pointer);
+  begin
+    if observed <> nil then
+      observed^ := seed;
+  end;
+
+begin
+  seed := 41;
+  New(observed);
+  observed^ := 0;
+  tid := SpawnProcedure(@Worker, observed);
+  status := WaitForThread(tid);
+  writeln('status=', status);
+  writeln('observed=', observed^);
+  writeln('stats=', ThreadStatsCount);
+  Dispose(observed);
+end;
+
+begin
+  Run;
+end.
