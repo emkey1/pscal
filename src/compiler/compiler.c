@@ -5919,8 +5919,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
 
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
-                int total_args = node->child_count - interfaceArgStart;
-                if (total_args < 0) total_args = 0;
+                int total_args = node->child_count - interfaceArgStart + 1; // +receiver
+                if (total_args < 1) total_args = 1;
                 writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
             }
@@ -7285,8 +7285,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
 
                 writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                int total_args = node->child_count - interfaceArgStart;
-                if (total_args < 0) total_args = 0;
+                int total_args = node->child_count - interfaceArgStart + 1; // +receiver
+                if (total_args < 1) total_args = 1;
                 writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
             }
