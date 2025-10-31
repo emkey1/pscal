@@ -1,0 +1,24 @@
+program InterfaceDispatch;
+
+type
+  ILogger = interface
+    procedure Log(const msg: string);
+  end;
+
+  TConsoleLogger = record
+    procedure Log(const msg: string); virtual;
+  end;
+
+procedure TConsoleLogger.Log(const msg: string);
+begin
+  writeln('[console] ', msg);
+end;
+
+var
+  logger: ILogger;
+  concrete: ^TConsoleLogger;
+begin
+  new(concrete);
+  logger := ILogger(concrete);
+  logger.Log('ready');
+end.

@@ -107,6 +107,12 @@ begin
 end.
 ```
 
+Running the program prints the log message instead of the boxed receiver pointer:
+
+```
+[console] ready
+```
+
 ## Builtins
 
 Builtins are implemented in C and exposed to Pascal through a lookup table【F:src/backend_ast/builtin.c†L35-L176】. They cover:
