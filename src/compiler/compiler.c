@@ -1632,6 +1632,79 @@ static const char* getReadableTypeName(AST* typeAst) {
     return "<anonymous>";
 }
 
+typedef struct {
+    AST* group;
+    AST* identifier;
+} MethodParameter;
+
+static bool buildMethodParameterList(AST* method, MethodParameter** outParams, int* outCount) {
+    if (!outParams || !outCount) {
+        return false;
+    }
+
+    *outParams = NULL;
+    *outCount = 0;
+
+    if (!method) {
+        return true;
+    }
+
+    int total = 0;
+    for (int i = 0; i < method->child_count; i++) {
+        AST* paramGroup = method->children[i];
+        if (!paramGroup) continue;
+
+        if (paramGroup->type == AST_VAR_DECL) {
+            if (paramGroup->child_count > 0) {
+                total += paramGroup->child_count;
+            } else {
+                total++;
+            }
+        } else {
+            total++;
+        }
+    }
+
+    if (total == 0) {
+        return true;
+    }
+
+    MethodParameter* params = calloc((size_t)total, sizeof(MethodParameter));
+    if (!params) {
+        fprintf(stderr, "Compiler error: Out of memory while validating method parameters.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    int index = 0;
+    for (int i = 0; i < method->child_count; i++) {
+        AST* paramGroup = method->children[i];
+        if (!paramGroup) continue;
+
+        if (paramGroup->type == AST_VAR_DECL) {
+            if (paramGroup->child_count == 0) {
+                params[index].group = paramGroup;
+                params[index].identifier = NULL;
+                index++;
+            } else {
+                for (int j = 0; j < paramGroup->child_count && index < total; j++) {
+                    params[index].group = paramGroup;
+                    params[index].identifier = paramGroup->children[j];
+                    index++;
+                }
+            }
+        } else {
+            params[index].group = paramGroup;
+            params[index].identifier = NULL;
+            index++;
+        }
+    }
+
+    *outParams = params;
+    *outCount = index;
+    return true;
+}
+
 static bool compareMethodSignatures(AST* ifaceMethod, AST* recordMethod,
                                     const char* recordName, const char* interfaceName,
                                     int line) {
@@ -1654,47 +1727,65 @@ static bool compareMethodSignatures(AST* ifaceMethod, AST* recordMethod,
         return false;
     }
 
-    if (ifaceMethod->child_count != recordMethod->child_count) {
+    MethodParameter* ifaceParams = NULL;
+    MethodParameter* recordParams = NULL;
+    int ifaceParamCount = 0;
+    int recordParamCount = 0;
+
+    if (!buildMethodParameterList(ifaceMethod, &ifaceParams, &ifaceParamCount) ||
+        !buildMethodParameterList(recordMethod, &recordParams, &recordParamCount)) {
+        free(ifaceParams);
+        free(recordParams);
+        return false;
+    }
+
+    if (ifaceParamCount != recordParamCount) {
         fprintf(stderr,
                 "L%d: Compiler Error: Method '%s' on record '%s' must take %d parameter(s) to satisfy interface '%s' (found %d).\n",
                 line,
                 ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
                 recordName,
-                ifaceMethod->child_count,
+                ifaceParamCount,
                 interfaceName,
-                recordMethod->child_count);
+                recordParamCount);
         compiler_had_error = true;
+        free(ifaceParams);
+        free(recordParams);
         return false;
     }
 
-    for (int i = 0; i < ifaceMethod->child_count; i++) {
-        AST* ifaceParam = ifaceMethod->children[i];
-        AST* recordParam = recordMethod->children[i];
-        if (!ifaceParam || !recordParam) {
+    bool success = true;
+    for (int i = 0; success && i < ifaceParamCount; i++) {
+        AST* ifaceGroup = ifaceParams[i].group;
+        AST* recordGroup = recordParams[i].group;
+
+        if (!ifaceGroup || !recordGroup) {
             fprintf(stderr,
                     "L%d: Compiler Error: Internal error validating parameter %d for method '%s'.\n",
                     line,
                     i + 1,
                     ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>");
             compiler_had_error = true;
-            return false;
+            success = false;
+            break;
         }
 
-        if ((ifaceParam->by_ref ? 1 : 0) != (recordParam->by_ref ? 1 : 0)) {
+        if ((ifaceGroup->by_ref ? 1 : 0) != (recordGroup->by_ref ? 1 : 0)) {
             fprintf(stderr,
                     "L%d: Compiler Error: Parameter %d of method '%s' on record '%s' must %sbe VAR to satisfy interface '%s'.\n",
                     line,
                     i + 1,
                     ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
                     recordName,
-                    ifaceParam->by_ref ? "" : "not ",
+                    ifaceGroup->by_ref ? "" : "not ",
                     interfaceName);
             compiler_had_error = true;
-            return false;
+            success = false;
+            break;
         }
 
-        AST* ifaceType = ifaceParam->type_def ? ifaceParam->type_def : ifaceParam->right;
-        AST* recordType = recordParam->type_def ? recordParam->type_def : recordParam->right;
+        AST* ifaceType = ifaceGroup->type_def ? ifaceGroup->type_def : ifaceGroup->right;
+        AST* recordType = recordGroup->type_def ? recordGroup->type_def : recordGroup->right;
         if (!compareTypeNodes(ifaceType, recordType)) {
             const char* expected = ifaceType ? varTypeToString(ifaceType->var_type) : "UNKNOWN";
             const char* got = recordType ? varTypeToString(recordType->var_type) : "UNKNOWN";
@@ -1708,11 +1799,12 @@ static bool compareMethodSignatures(AST* ifaceMethod, AST* recordMethod,
                     interfaceName,
                     got);
             compiler_had_error = true;
-            return false;
+            success = false;
+            break;
         }
     }
 
-    if (ifaceMethod->type == AST_FUNCTION_DECL) {
+    if (success && ifaceMethod->type == AST_FUNCTION_DECL) {
         AST* ifaceReturn = ifaceMethod->right;
         AST* recordReturn = recordMethod->right;
         if (!compareTypeNodes(ifaceReturn, recordReturn)) {
@@ -1727,11 +1819,13 @@ static bool compareMethodSignatures(AST* ifaceMethod, AST* recordMethod,
                     interfaceName,
                     got);
             compiler_had_error = true;
-            return false;
+            success = false;
         }
     }
 
-    return true;
+    free(ifaceParams);
+    free(recordParams);
+    return success;
 }
 
 static void propagateMethodSlotToSymbol(AST* recordType, AST* methodNode, int slot) {

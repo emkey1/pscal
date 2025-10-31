@@ -5,8 +5,16 @@ type
     procedure Greet(const msg: string);
   end;
 
+  IAdder = interface
+    procedure SumPair(a, b: Integer);
+  end;
+
   TConsoleGreeter = record
     procedure Greet(const msg: string); virtual;
+  end;
+
+  TAdder = record
+    procedure SumPair(a: Integer; b: Integer); virtual;
   end;
 
 procedure TConsoleGreeter.Greet(const msg: string);
@@ -14,12 +22,24 @@ begin
   writeln('greeter says: ', msg);
 end;
 
+procedure TAdder.SumPair(a: Integer; b: Integer);
+begin
+  writeln('sum: ', a + b);
+end;
+
 var
   GreeterPtr: ^TConsoleGreeter;
   GreeterIface: IGreeter;
+  AdderPtr: ^TAdder;
+  AdderIface: IAdder;
 begin
   new(GreeterPtr);
   GreeterIface := IGreeter(GreeterPtr);
   GreeterIface.Greet('hello world');
   dispose(GreeterPtr);
+
+  new(AdderPtr);
+  AdderIface := IAdder(AdderPtr);
+  AdderIface.SumPair(2, 3);
+  dispose(AdderPtr);
 end.
