@@ -1,0 +1,54 @@
+#!/usr/bin/env pascal
+program GeneratorDemo;
+
+// TNextFib is a function type.
+type
+    TNextFib = function: integer;
+
+// MakeFibGenerator creates and returns a closure.
+function MakeFibGenerator: TNextFib;
+var
+    a, b: integer;
+
+    // This is the closure. It captures 'a' and 'b'
+    // from the MakeFibGenerator scope.
+    function NextFib: integer;
+    var
+        temp: integer;
+    begin
+        temp := a;
+        a := b;
+        b := temp + b;
+        NextFib := temp;
+    end;
+
+begin
+    // Initialize the state for the closure
+    a := 0;
+    b := 1;
+    
+    // Return a function pointer to the nested function
+    MakeFibGenerator := @NextFib; 
+end;
+
+var
+    fib1, fib2: TNextFib;
+    i: integer;
+begin
+    // Create two *independent* generators
+    fib1 := MakeFibGenerator;
+    fib2 := MakeFibGenerator;
+
+    writeln('Generator 1:');
+    for i := 1 to 7 do
+        writeln('  ', fib1());
+
+    writeln('');
+    writeln('Generator 2 (is separate):');
+    writeln('  ', fib2());
+    writeln('  ', fib2());
+
+    writeln('');
+    writeln('Generator 1 (continues):');
+    writeln('  ', fib1());
+end.
