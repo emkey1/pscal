@@ -2003,29 +2003,71 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
             eat(parser, TOKEN_LPAREN);
             paramsList = newASTNode(AST_LIST, NULL);
             while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
-                // Support optional modifiers like VAR/CONST/OUT
+                bool byRef = false;
+                bool isConst = false;
+
                 while (parser->current_token &&
                        (parser->current_token->type == TOKEN_VAR ||
                         parser->current_token->type == TOKEN_CONST ||
                         parser->current_token->type == TOKEN_OUT)) {
-                    eat(parser, parser->current_token->type);
+                    TokenType modifier = parser->current_token->type;
+                    if (modifier == TOKEN_VAR || modifier == TOKEN_OUT) {
+                        byRef = true;
+                    }
+                    if (modifier == TOKEN_CONST) {
+                        isConst = true;
+                    }
+                    eat(parser, modifier);
                 }
 
-                // Support optional named parameters: name ':' type
+                AST* paramDecl = newASTNode(AST_VAR_DECL, NULL);
+                if (!paramDecl) {
+                    if (kwTok) freeToken(kwTok);
+                    freeAST(paramsList);
+                    return NULL;
+                }
+
                 if (tokenIsIdentifierLike(parser->current_token)) {
                     Token* nextTok = peekToken(parser);
                     bool hasNameThenColon = (nextTok && nextTok->type == TOKEN_COLON);
                     if (nextTok) freeToken(nextTok);
                     if (hasNameThenColon) {
-                        eat(parser, parser->current_token->type); // consume param name
-                        eat(parser, TOKEN_COLON);      // consume ':'
+                        AST* nameNode = newASTNode(AST_VARIABLE, parser->current_token);
+                        if (!nameNode) {
+                            freeAST(paramDecl);
+                            if (kwTok) freeToken(kwTok);
+                            freeAST(paramsList);
+                            return NULL;
+                        }
+                        eat(parser, parser->current_token->type);
+                        addChild(paramDecl, nameNode);
+                        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+                            errorParser(parser, "Expected ':' after parameter name");
+                            freeAST(paramsList);
+                            if (kwTok) freeToken(kwTok);
+                            freeAST(paramDecl);
+                            return NULL;
+                        }
+                        eat(parser, TOKEN_COLON);
                     }
                 }
 
-                // Parse the type after optional modifiers/name (or the type name itself if unnamed)
-                AST* ptype = typeSpecifier(parser, 1);
-                if (!ptype) { freeAST(paramsList); if (kwTok) freeToken(kwTok); return NULL; }
-                addChild(paramsList, ptype);
+                AST* paramType = typeSpecifier(parser, 1);
+                if (!paramType) {
+                    freeAST(paramDecl);
+                    freeAST(paramsList);
+                    if (kwTok) freeToken(kwTok);
+                    return NULL;
+                }
+
+                setRight(paramDecl, paramType);
+                paramDecl->type_def = paramType;
+                setTypeAST(paramDecl, paramType->var_type);
+                paramDecl->by_ref = byRef ? 1 : 0;
+
+                (void)isConst;
+
+                addChild(paramsList, paramDecl);
 
                 if (!parser->current_token) {
                     errorParser(parser, "Expected ')' to close parameter type list");
