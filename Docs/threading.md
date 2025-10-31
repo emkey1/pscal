@@ -13,7 +13,7 @@ characters. Names are truncated automatically when longer than the limit so
 callers should place the most distinctive tokens first.【F:src/vm/vm.h†L31-L120】
 When no name is supplied the runtime falls back to `worker-<slot>` using the
 pool index, ensuring that reused slots remain recognisable in diagnostic output
-and across generations.【F:src/vm/vm.c†L820-L877】 Wrapper helpers in the Pascal
+and across generations.【F:src/vm/vm.c†L952-L1005】 Wrapper helpers in the Pascal
 `Threading` unit and language front ends translate friendly helper names into
 these records so handle lookups stay portable across runtimes.【F:lib/pascal/threading.pl†L1-L54】
 
@@ -21,19 +21,19 @@ these records so handle lookups stay portable across runtimes.【F:lib/pascal/th
 reused workers can be distinguished even if they are assigned the same name.
 Fields such as `paused`, `cancel_requested`, and `ready_for_reuse` mirror the
 flags stored in the VM’s thread table, allowing monitoring dashboards to mirror
-what the runtime observes.【F:src/backend_ast/builtin.c†L5057-L5104】
+what the runtime observes.【F:src/backend_ast/builtin.c†L5074-L5113】
 
 Use `ThreadSetName(threadId, "label")` to assign human-readable identifiers to
 workers and `ThreadLookup("label")` when you need to map those labels back to
 handles from another part of the program. Both helpers fall back to the slot
 owner when the caller executes inside an embedded VM so names remain visible to
-all front ends.【F:src/backend_ast/builtin.c†L5677-L5751】
+all front ends.【F:src/backend_ast/builtin.c†L5677-L5729】
 
 ## Pool sizing and environment overrides
 
 The VM lazily grows the worker pool up to `VM_MAX_WORKERS` (15 workers plus the
 main thread). New slots are only reserved when a job cannot reuse an idle worker
-and the cap has not been reached.【F:src/vm/vm.c†L1319-L1358】 All front ends
+and the cap has not been reached.【F:src/vm/vm.c†L1470-L1538】 All front ends
 honour the optional environment variables `PSCAL_THREAD_POOL_SIZE` (Pascal,
 CLike, Rea, Tiny) and `PSCALSHELL_THREAD_POOL_SIZE` (exsh). Set either variable
 to an integer between `1` and `VM_MAX_WORKERS` to clamp the pool. Values outside
@@ -53,11 +53,11 @@ The worker loop respects `ThreadPause`, `ThreadResume`, `ThreadCancel`, and
 assignments. Workers mark themselves `awaiting_reuse` once they have published a
 result and stay parked until the caller consumes the status flag and releases
 the slot, preventing accidental reuse while downstream code still holds a
-handle.【F:src/vm/vm.c†L1008-L1339】 Cancelling a worker merely raises
+handle.【F:src/vm/vm.c†L1014-L1047】【F:src/vm/vm.c†L1186-L1405】 Cancelling a worker merely raises
 `cancelRequested`; long-running routines are expected to poll their pause state
 (e.g. between iterations) and exit promptly when the flag is raised. Submitting
 jobs with `submitOnly` keeps the caller’s slot available so interactive shells
-can continue handling input while background jobs drain the queue.【F:src/backend_ast/builtin.c†L4930-L5199】
+can continue handling input while background jobs drain the queue.【F:src/backend_ast/builtin.c†L4946-L5431】
 
 ## Interpreting `ThreadStats`
 
@@ -67,7 +67,7 @@ wall-clock timestamps (`queued_at`, `started_at`, `finished_at`), and a nested
 `metrics` record. The `metrics.start` and `metrics.end` samples include CPU
 runtime, microsecond-resolution `getrusage` totals, and resident-set estimates.
 When a worker is still running, `ThreadStats` synthesises an `end` sample from
-the current counters so monitors always receive up-to-date numbers.【F:src/backend_ast/builtin.c†L5008-L5104】
+the current counters so monitors always receive up-to-date numbers.【F:src/backend_ast/builtin.c†L5042-L5113】
 `ThreadMetrics` is part of the public VM surface, so embedders can collect the
 same data without round-tripping through a builtin.【F:src/vm/vm.h†L64-L119】
 
