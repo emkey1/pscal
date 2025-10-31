@@ -1081,7 +1081,6 @@ static void vmThreadResetResult(Thread* thread) {
     thread->startedAt = (struct timespec){0, 0};
     thread->finishedAt = (struct timespec){0, 0};
     vmThreadMetricsReset(&thread->metrics);
-    thread->name[0] = '\0';
 }
 
 static void vmThreadInitSlot(Thread* thread) {

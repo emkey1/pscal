@@ -1177,6 +1177,7 @@ add({
           lookupId: Integer;
           namedStatus: Integer;
           queuedStatus: Integer;
+          statsJson: String;
 
         begin
           namedId := ThreadSpawnBuiltin('delay', 5, ThreadOptionsNamed('pascal_worker'));
@@ -1189,6 +1190,8 @@ add({
           writeln('queued_status=', Ord(queuedStatus = 0));
           writeln('lookup_matches=', Ord(lookupId = queueId));
           writeln('stats_len=', ThreadStatsCount);
+          statsJson := ThreadStatsJson;
+          writeln('stats_json=', statsJson);
         end.
     """,
     "expected_stdout": """
@@ -1196,6 +1199,7 @@ add({
         queued_status=1
         lookup_matches=1
         stats_len=1
+        stats_json=[{"id": 2, "name": "pascal_pool", "active": false, "idle": true, "status_success": false, "ready_for_reuse": false, "pool_generation": 1}]
     """,
 })
 

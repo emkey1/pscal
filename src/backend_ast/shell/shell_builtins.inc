@@ -503,7 +503,7 @@ static bool shellArithmeticCommandEvaluateExpression(const char *expr, long long
         free(name);
     }
 
-fallback:
+fallback: {
     long long value = 0;
     if (!shellArithmeticCommandEvalSimple(start, end, &value)) {
         return false;
@@ -512,6 +512,7 @@ fallback:
         *out_value = value;
     }
     return true;
+}
 }
 
 Value vmBuiltinShellArithmetic(VM *vm, int arg_count, Value *args) {

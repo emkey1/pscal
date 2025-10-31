@@ -2102,15 +2102,18 @@ add({
             int pooled_ok = (pooled_wait == 0) ? 1 : 0;
             int lookup_match = (lookup == pooled) ? 1 : 0;
             int stats_len = length(thread_stats());
+            str stats_json = ThreadStatsJson();
 
             printf("named_status=%d\\n", named_ok);
             printf("pooled_status=%d lookup_match=%d stats=%d\\n", pooled_ok, lookup_match, stats_len);
+            printf("stats_json=%s\\n", stats_json);
             return 0;
         }
     """,
     "expected_stdout": """
         named_status=1
         pooled_status=1 lookup_match=1 stats=1
+        stats_json=[{"id": 2, "name": "rea_pool", "active": false, "idle": true, "status_success": false, "ready_for_reuse": false, "pool_generation": 1}]
     """,
 })
 

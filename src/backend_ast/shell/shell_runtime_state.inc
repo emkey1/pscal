@@ -1296,7 +1296,6 @@ typedef struct {
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count);
 static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t count);
 static void shellFreeRedirections(ShellCommand *cmd);
-static void shellForceBreakAllLoops(void);
 static void shellAbortPipeline(void);
 
 typedef struct {
@@ -3312,22 +3311,6 @@ static void shellLoopRequestContinueLevels(int levels) {
         target->continue_pending = true;
         target->break_pending = false;
     }
-}
-
-static void shellForceBreakAllLoops(void) {
-    if (gShellLoopStackSize == 0) {
-        return;
-    }
-    for (size_t idx = gShellLoopStackSize; idx > 0; --idx) {
-        ShellLoopFrame *frame = &gShellLoopStack[idx - 1];
-        frame->skip_body = true;
-        frame->break_pending = true;
-        frame->continue_pending = false;
-    }
-    gShellRuntime.break_requested = true;
-    gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
-    gShellRuntime.continue_requested = false;
-    gShellRuntime.continue_requested_levels = 0;
 }
 
 static VM *shellSwapCurrentVm(VM *vm) {

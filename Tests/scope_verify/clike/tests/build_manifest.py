@@ -968,12 +968,14 @@ add({
 
             printf("named_status=%d\n", named_ok);
             printf("pooled_status=%d lookup_match=%d stats=%d\n", pooled_ok, lookup_match, stats_len);
+            printf("stats_json=%s\n", ThreadStatsJson());
             return 0;
         }
     """,
     "expected_stdout": """
         named_status=1
         pooled_status=1 lookup_match=1 stats=1
+        stats_json=[{"id": 2, "name": "clike_pool", "active": true, "idle": false, "status_success": true, "ready_for_reuse": false, "pool_generation": 1}]
     """,
 })
 
