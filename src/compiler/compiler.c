@@ -5555,6 +5555,15 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         interfaceReceiver = node->left;
                         interfaceType = candidateType;
                         interfaceArgStart = 0;
+
+                        if (node->child_count > 0) {
+                            AST* firstChild = node->children[0];
+                            if (firstChild == interfaceReceiver ||
+                                (firstChild && firstChild->type == AST_FIELD_ACCESS &&
+                                 firstChild->left == interfaceReceiver)) {
+                                interfaceArgStart = 1;
+                            }
+                        }
                     }
                 }
             }
@@ -5888,7 +5897,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
-                int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
+                int metadataOffset = 1 - interfaceArgStart;
+                if (metadataOffset < 0) metadataOffset = 0;
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
@@ -5909,7 +5919,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
 
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
-                int total_args = node->child_count - interfaceArgStart + 1;
+                int total_args = node->child_count - interfaceArgStart;
                 if (total_args < 0) total_args = 0;
                 writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
@@ -7160,6 +7170,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         interfaceReceiver = node->left;
                         interfaceType = candidateType;
                         interfaceArgStart = 0;
+
+                        if (node->child_count > 0) {
+                            AST* firstChild = node->children[0];
+                            if (firstChild == interfaceReceiver ||
+                                (firstChild && firstChild->type == AST_FIELD_ACCESS &&
+                                 firstChild->left == interfaceReceiver)) {
+                                interfaceArgStart = 1;
+                            }
+                        }
                     }
                 }
             }
@@ -7246,7 +7265,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, CALL_HOST, line);
                 writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
-                int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
+                int metadataOffset = 1 - interfaceArgStart;
+                if (metadataOffset < 0) metadataOffset = 0;
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
@@ -7265,7 +7285,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
 
                 writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                int total_args = node->child_count - interfaceArgStart + 1;
+                int total_args = node->child_count - interfaceArgStart;
                 if (total_args < 0) total_args = 0;
                 writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
