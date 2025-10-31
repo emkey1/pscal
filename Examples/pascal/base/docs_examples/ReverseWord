@@ -1,0 +1,6 @@
+program ReverseWord;
+
+uses StringUtil;
+begin
+  writeln(ReverseString('hello'));  // olleh
+end.
