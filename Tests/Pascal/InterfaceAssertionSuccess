@@ -1,0 +1,37 @@
+program InterfaceAssertionSuccess;
+
+type
+  IGreeter = interface
+    procedure Greet(const msg: string);
+  end;
+
+  TConsoleGreeter = record
+    procedure Greet(const msg: string); virtual;
+  end;
+
+procedure TConsoleGreeter.Greet(const msg: string);
+begin
+  writeln('greet: ', msg);
+end;
+
+var
+  instance: ^TConsoleGreeter;
+  iface: IGreeter;
+  recovered: ^TConsoleGreeter;
+  recoveredViaIs: ^TConsoleGreeter;
+begin
+  new(instance);
+  iface := IGreeter(instance);
+  recovered := iface as TConsoleGreeter;
+  if recovered = instance then
+    writeln('as ok')
+  else
+    writeln('as mismatch');
+  recoveredViaIs := iface is TConsoleGreeter;
+  if recoveredViaIs = instance then
+    writeln('is ok')
+  else
+    writeln('is mismatch');
+  iface.Greet('through interface');
+  dispose(instance);
+end.

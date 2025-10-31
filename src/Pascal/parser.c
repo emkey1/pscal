@@ -66,6 +66,7 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction);
 static void registerRecordMethods(Parser *parser, const char *recordName, AST *recordType);
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
+static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -3750,7 +3751,42 @@ AST *factor(Parser *parser) {
         errorParser(parser, "Internal error: factor resulted in NULL node");
         return newASTNode(AST_NOOP, NULL);
     }
-    
+
+    while (parser->current_token &&
+           (parser->current_token->type == TOKEN_AS || parser->current_token->type == TOKEN_IS)) {
+        TokenType opType = parser->current_token->type;
+        Token *opCopy = copyToken(parser->current_token);
+        if (!opCopy) {
+            EXIT_FAILURE_HANDLER();
+        }
+        eat(parser, opType);
+
+        AST *targetType = parseTypeAssertionTarget(parser, opType);
+        if (!targetType || targetType->type == AST_NOOP) {
+            if (opCopy) freeToken(opCopy);
+            if (targetType) freeAST(targetType);
+            freeAST(node);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *assertNode = newASTNode(AST_TYPE_ASSERT, opCopy);
+        if (opCopy) freeToken(opCopy);
+        setLeft(assertNode, node);
+        setRight(assertNode, targetType);
+
+        AST *resolvedTarget = targetType->type_def ? targetType->type_def : targetType->right;
+        if (!resolvedTarget) {
+            resolvedTarget = targetType;
+        }
+        if (resolvedTarget) {
+            setTypeAST(assertNode, resolvedTarget->var_type);
+        } else {
+            setTypeAST(assertNode, targetType->var_type);
+        }
+        assertNode->type_def = resolvedTarget;
+        node = assertNode;
+    }
+
 #ifdef DEBUG
 if (dumpExec && node && node->token) { // Ensure node and node->token are not NULL
     fprintf(stderr, "[DEBUG_FACTOR_EXIT] Returning from factor(): initialTokenType=%s, node->type=%s, node->token->value='%s', node->token->type=%s\n",
@@ -3815,3 +3851,51 @@ AST *parsePointerType(Parser *parser) {
 
     return pointerTypeNode;
 }
+static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken) {
+    if (!parser || !parser->current_token || !tokenIsIdentifierLike(parser->current_token)) {
+        const char *kw = (keywordToken == TOKEN_IS) ? "'is'" : "'as'";
+        char message[128];
+        snprintf(message, sizeof(message), "Expected type name after %s", kw);
+        errorParser(parser, message);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    Token *typeTokenCopy = copyToken(parser->current_token);
+    if (!typeTokenCopy) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    const char *typeNameSource = parser->current_token->value;
+    char *typeNameCopy = NULL;
+    if (typeNameSource) {
+        typeNameCopy = strdup(typeNameSource);
+        if (!typeNameCopy) {
+            if (typeTokenCopy) freeToken(typeTokenCopy);
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    TokenType typeToken = parser->current_token->type;
+    eat(parser, typeToken);
+
+    if (typeNameCopy) {
+        toLowerString(typeNameCopy);
+    }
+    AST *resolvedType = typeNameCopy ? lookupType(typeNameCopy) : NULL;
+    if (!resolvedType) {
+        char message[160];
+        snprintf(message, sizeof(message), "Unknown type '%s' in type assertion", typeNameCopy ? typeNameCopy : "<anonymous>");
+        errorParser(parser, message);
+        if (typeTokenCopy) freeToken(typeTokenCopy);
+        if (typeNameCopy) free(typeNameCopy);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    AST *typeRef = newASTNode(AST_TYPE_REFERENCE, typeTokenCopy);
+    if (typeTokenCopy) freeToken(typeTokenCopy);
+    setTypeAST(typeRef, resolvedType->var_type);
+    typeRef->right = resolvedType;
+    typeRef->type_def = resolvedType;
+    if (typeNameCopy) free(typeNameCopy);
+    return typeRef;
+}
+

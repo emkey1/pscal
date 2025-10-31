@@ -905,6 +905,25 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 }
                 break;
             }
+            case AST_TYPE_ASSERT: {
+                AST *targetNode = node->right;
+                AST *resolvedTarget = NULL;
+                if (targetNode) {
+                    if (targetNode->type_def) {
+                        resolvedTarget = resolveTypeAlias(targetNode->type_def);
+                    } else if (targetNode->right) {
+                        resolvedTarget = resolveTypeAlias(targetNode->right);
+                    }
+                }
+                if (!resolvedTarget) {
+                    resolvedTarget = targetNode;
+                }
+                if (resolvedTarget) {
+                    node->var_type = resolvedTarget->var_type;
+                    node->type_def = resolvedTarget;
+                }
+                break;
+            }
             case AST_VARIABLE: {
                 if (node->parent && node->parent->type == AST_VAR_DECL) {
                     node->var_type = node->parent->var_type;

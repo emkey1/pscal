@@ -6860,6 +6860,48 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             global_init_new_depth--;
             break;
         }
+        case AST_TYPE_ASSERT: {
+            if (!node->left || !node->right) {
+                fprintf(stderr, "L%d: Compiler Error: Type assertion requires an expression and a target type.\n", line);
+                compiler_had_error = true;
+                emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            compileRValue(node->left, chunk, getLine(node->left));
+
+            AST* targetRef = node->right;
+            AST* resolvedTarget = NULL;
+            if (targetRef) {
+                if (targetRef->type_def) {
+                    resolvedTarget = resolveTypeAlias(targetRef->type_def);
+                } else if (targetRef->right) {
+                    resolvedTarget = resolveTypeAlias(targetRef->right);
+                }
+            }
+            if (!resolvedTarget && targetRef) {
+                resolvedTarget = resolveTypeAlias(targetRef);
+            }
+
+            const char* typeName = resolvedTarget ? getTypeNameFromAST(resolvedTarget) : NULL;
+            if ((!typeName || !*typeName) && targetRef && targetRef->token && targetRef->token->value) {
+                typeName = targetRef->token->value;
+            }
+
+            if (!typeName || !*typeName) {
+                fprintf(stderr, "L%d: Compiler Error: Unable to resolve target type for assertion.\n", line);
+                compiler_had_error = true;
+                writeBytecodeChunk(chunk, POP, line);
+                emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            int typeConstIndex = addStringConstant(chunk, typeName);
+            emitConstant(chunk, typeConstIndex, line);
+            writeBytecodeChunk(chunk, CALL_HOST, line);
+            writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_ASSERT, line);
+            break;
+        }
         case AST_SET: {
             Value set_const_val;
             memset(&set_const_val, 0, sizeof(Value));

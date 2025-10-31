@@ -1,0 +1,36 @@
+program InterfaceAssertionFailure;
+
+type
+  IGreeter = interface
+    procedure Greet(const msg: string);
+  end;
+
+  TConsoleGreeter = record
+    procedure Greet(const msg: string); virtual;
+  end;
+
+  TFileGreeter = record
+    procedure Greet(const msg: string); virtual;
+  end;
+
+procedure TConsoleGreeter.Greet(const msg: string);
+begin
+  writeln('console: ', msg);
+end;
+
+procedure TFileGreeter.Greet(const msg: string);
+begin
+  writeln('file: ', msg);
+end;
+
+var
+  instance: ^TConsoleGreeter;
+  iface: IGreeter;
+  wrong: ^TFileGreeter;
+begin
+  new(instance);
+  iface := IGreeter(instance);
+  wrong := iface as TFileGreeter; { should raise a runtime error }
+  wrong^.Greet('should not print');
+  dispose(instance);
+end.
