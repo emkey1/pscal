@@ -9,12 +9,20 @@ type
     procedure SumPair(a, b: Integer);
   end;
 
+  IVarMixer = interface
+    procedure Mix(var a, b: Integer; c: Integer);
+  end;
+
   TConsoleGreeter = record
     procedure Greet(const msg: string); virtual;
   end;
 
   TAdder = record
     procedure SumPair(a: Integer; b: Integer); virtual;
+  end;
+
+  TVarMixer = record
+    procedure Mix(var a: Integer; var b: Integer; c: Integer); virtual;
   end;
 
 procedure TConsoleGreeter.Greet(const msg: string);
@@ -27,11 +35,21 @@ begin
   writeln('sum: ', a + b);
 end;
 
+procedure TVarMixer.Mix(var a: Integer; var b: Integer; c: Integer);
+begin
+  a := a + c;
+  b := b + c;
+end;
+
 var
   GreeterPtr: ^TConsoleGreeter;
   GreeterIface: IGreeter;
   AdderPtr: ^TAdder;
   AdderIface: IAdder;
+  VarMixerPtr: ^TVarMixer;
+  VarMixerIface: IVarMixer;
+  firstValue: Integer;
+  secondValue: Integer;
 begin
   new(GreeterPtr);
   GreeterIface := IGreeter(GreeterPtr);
@@ -42,4 +60,12 @@ begin
   AdderIface := IAdder(AdderPtr);
   AdderIface.SumPair(2, 3);
   dispose(AdderPtr);
+
+  new(VarMixerPtr);
+  VarMixerIface := IVarMixer(VarMixerPtr);
+  firstValue := 1;
+  secondValue := 2;
+  VarMixerIface.Mix(firstValue, secondValue, 3);
+  writeln('mixed: ', firstValue, ', ', secondValue);
+  dispose(VarMixerPtr);
 end.
