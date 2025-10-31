@@ -1,0 +1,25 @@
+program InterfaceCastValidation;
+
+type
+  IGreeter = interface
+    procedure Greet(const msg: string);
+  end;
+
+  TConsoleGreeter = record
+    procedure Greet(const msg: string); virtual;
+  end;
+
+procedure TConsoleGreeter.Greet(const msg: string);
+begin
+  writeln('greeter says: ', msg);
+end;
+
+var
+  GreeterPtr: ^TConsoleGreeter;
+  GreeterIface: IGreeter;
+begin
+  new(GreeterPtr);
+  GreeterIface := IGreeter(GreeterPtr);
+  GreeterIface.Greet('hello world');
+  dispose(GreeterPtr);
+end.

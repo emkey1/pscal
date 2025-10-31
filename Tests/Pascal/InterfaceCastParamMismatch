@@ -1,0 +1,23 @@
+program InterfaceCastParamMismatch;
+
+type
+  IAdder = interface
+    function Add(a, b: integer): integer;
+  end;
+
+  TBadAdder = record
+    function Add(a: integer): integer; virtual;
+  end;
+
+function TBadAdder.Add(a: integer): integer;
+begin
+  Result := a;
+end;
+
+var
+  Ptr: ^TBadAdder;
+  Adder: IAdder;
+begin
+  new(Ptr);
+  Adder := IAdder(Ptr);
+end.

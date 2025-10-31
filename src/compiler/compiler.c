@@ -1473,28 +1473,439 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
     return NULL;
 }
 
-static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName) {
-    interfaceType = resolveTypeAlias(interfaceType);
-    if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
-        return -1;
+static const char* getTypeNameFromAST(AST* typeAst);
+static bool compareTypeNodes(AST* a, AST* b);
+
+static AST* resolveInterfaceAST(AST* typeNode) {
+    typeNode = resolveTypeAlias(typeNode);
+    if (!typeNode) return NULL;
+
+    if (typeNode->type == AST_TYPE_DECL && typeNode->left) {
+        typeNode = resolveTypeAlias(typeNode->left);
     }
 
-    int slot = 0;
-    int foundSlot = -1;
+    if (typeNode && typeNode->type == AST_INTERFACE) {
+        return typeNode;
+    }
+
+    return NULL;
+}
+
+static AST* resolveRecordAST(AST* typeNode) {
+    typeNode = resolveTypeAlias(typeNode);
+    if (!typeNode) return NULL;
+
+    if (typeNode->type == AST_TYPE_DECL && typeNode->left) {
+        typeNode = resolveTypeAlias(typeNode->left);
+    }
+
+    if (typeNode && typeNode->type == AST_RECORD_TYPE) {
+        return typeNode;
+    }
+
+    return NULL;
+}
+
+static AST* findRecordMethodInHierarchy(AST* recordType, const char* methodName) {
+    recordType = resolveRecordAST(recordType);
+    if (!recordType || !methodName) {
+        return NULL;
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* child = recordType->children[i];
+        if (!child) continue;
+        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+            child->token && child->token->value &&
+            strcasecmp(child->token->value, methodName) == 0) {
+            return child;
+        }
+    }
+
+    AST* parentRef = recordType->extra;
+    if (!parentRef) {
+        return NULL;
+    }
+
+    AST* parent = resolveRecordAST(parentRef);
+    if (!parent && parentRef->token && parentRef->token->value) {
+        parent = resolveRecordAST(lookupType(parentRef->token->value));
+    }
+    if (!parent && parentRef->type == AST_TYPE_REFERENCE && parentRef->token && parentRef->token->value) {
+        parent = resolveRecordAST(lookupType(parentRef->token->value));
+    }
+    if (!parent && parentRef->type == AST_VARIABLE && parentRef->token && parentRef->token->value) {
+        parent = resolveRecordAST(lookupType(parentRef->token->value));
+    }
+
+    if (parent && parent != recordType) {
+        return findRecordMethodInHierarchy(parent, methodName);
+    }
+
+    return NULL;
+}
+
+static bool addInterfaceMethod(AST*** methods, int* count, int* capacity, AST* method) {
+    if (!methods || !count || !capacity || !method) {
+        return false;
+    }
+
+    if (!method->token || !method->token->value) {
+        return true;
+    }
+
+    for (int i = 0; i < *count; i++) {
+        AST* existing = (*methods)[i];
+        if (!existing || !existing->token || !existing->token->value) {
+            continue;
+        }
+        if (strcasecmp(existing->token->value, method->token->value) == 0) {
+            (*methods)[i] = method;
+            return true;
+        }
+    }
+
+    if (*count >= *capacity) {
+        int new_capacity = (*capacity < 4) ? 4 : (*capacity * 2);
+        AST** resized = realloc(*methods, (size_t)new_capacity * sizeof(AST*));
+        if (!resized) {
+            fprintf(stderr, "Compiler error: Out of memory gathering interface methods.\n");
+            compiler_had_error = true;
+            return false;
+        }
+        *methods = resized;
+        *capacity = new_capacity;
+    }
+
+    (*methods)[(*count)++] = method;
+    return true;
+}
+
+static bool collectInterfaceMethods(AST* interfaceType, AST*** methods, int* count, int* capacity, int depth) {
+    if (depth > 32) {
+        fprintf(stderr, "Compiler error: Interface inheritance chain too deep.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    interfaceType = resolveInterfaceAST(interfaceType);
+    if (!interfaceType) {
+        return true;
+    }
+
+    if (interfaceType->extra) {
+        AST* baseList = interfaceType->extra;
+        if (baseList->type == AST_LIST) {
+            for (int i = 0; i < baseList->child_count; i++) {
+                if (!collectInterfaceMethods(baseList->children[i], methods, count, capacity, depth + 1)) {
+                    return false;
+                }
+            }
+        } else {
+            if (!collectInterfaceMethods(baseList, methods, count, capacity, depth + 1)) {
+                return false;
+            }
+        }
+    }
+
     for (int i = 0; i < interfaceType->child_count; i++) {
         AST* child = interfaceType->children[i];
         if (!child) continue;
         if (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) {
-            child->i_val = slot;
-            if (child->token && child->token->value &&
-                strcasecmp(child->token->value, methodName) == 0) {
-                foundSlot = child->i_val;
+            if (!addInterfaceMethod(methods, count, capacity, child)) {
+                return false;
             }
-            slot++;
         }
     }
 
-    return foundSlot;
+    return true;
+}
+
+static const char* getReadableTypeName(AST* typeAst) {
+    const char* name = getTypeNameFromAST(typeAst);
+    if (name) {
+        return name;
+    }
+    if (typeAst && typeAst->token && typeAst->token->value) {
+        return typeAst->token->value;
+    }
+    return "<anonymous>";
+}
+
+static bool compareMethodSignatures(AST* ifaceMethod, AST* recordMethod,
+                                    const char* recordName, const char* interfaceName,
+                                    int line) {
+    if (!ifaceMethod || !recordMethod) {
+        return false;
+    }
+
+    if (ifaceMethod->type != recordMethod->type) {
+        const char* kind_iface = (ifaceMethod->type == AST_FUNCTION_DECL) ? "function" : "procedure";
+        const char* kind_record = (recordMethod->type == AST_FUNCTION_DECL) ? "function" : "procedure";
+        fprintf(stderr,
+                "L%d: Compiler Error: Method '%s' on record '%s' must be a %s to satisfy interface '%s' (found %s).\n",
+                line,
+                ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
+                recordName,
+                kind_iface,
+                interfaceName,
+                kind_record);
+        compiler_had_error = true;
+        return false;
+    }
+
+    if (ifaceMethod->child_count != recordMethod->child_count) {
+        fprintf(stderr,
+                "L%d: Compiler Error: Method '%s' on record '%s' must take %d parameter(s) to satisfy interface '%s' (found %d).\n",
+                line,
+                ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
+                recordName,
+                ifaceMethod->child_count,
+                interfaceName,
+                recordMethod->child_count);
+        compiler_had_error = true;
+        return false;
+    }
+
+    for (int i = 0; i < ifaceMethod->child_count; i++) {
+        AST* ifaceParam = ifaceMethod->children[i];
+        AST* recordParam = recordMethod->children[i];
+        if (!ifaceParam || !recordParam) {
+            fprintf(stderr,
+                    "L%d: Compiler Error: Internal error validating parameter %d for method '%s'.\n",
+                    line,
+                    i + 1,
+                    ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>");
+            compiler_had_error = true;
+            return false;
+        }
+
+        if ((ifaceParam->by_ref ? 1 : 0) != (recordParam->by_ref ? 1 : 0)) {
+            fprintf(stderr,
+                    "L%d: Compiler Error: Parameter %d of method '%s' on record '%s' must %sbe VAR to satisfy interface '%s'.\n",
+                    line,
+                    i + 1,
+                    ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
+                    recordName,
+                    ifaceParam->by_ref ? "" : "not ",
+                    interfaceName);
+            compiler_had_error = true;
+            return false;
+        }
+
+        AST* ifaceType = ifaceParam->type_def ? ifaceParam->type_def : ifaceParam->right;
+        AST* recordType = recordParam->type_def ? recordParam->type_def : recordParam->right;
+        if (!compareTypeNodes(ifaceType, recordType)) {
+            const char* expected = ifaceType ? varTypeToString(ifaceType->var_type) : "UNKNOWN";
+            const char* got = recordType ? varTypeToString(recordType->var_type) : "UNKNOWN";
+            fprintf(stderr,
+                    "L%d: Compiler Error: Parameter %d of method '%s' on record '%s' must be type %s to satisfy interface '%s' (found %s).\n",
+                    line,
+                    i + 1,
+                    ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
+                    recordName,
+                    expected,
+                    interfaceName,
+                    got);
+            compiler_had_error = true;
+            return false;
+        }
+    }
+
+    if (ifaceMethod->type == AST_FUNCTION_DECL) {
+        AST* ifaceReturn = ifaceMethod->right;
+        AST* recordReturn = recordMethod->right;
+        if (!compareTypeNodes(ifaceReturn, recordReturn)) {
+            const char* expected = ifaceReturn ? varTypeToString(ifaceReturn->var_type) : "UNKNOWN";
+            const char* got = recordReturn ? varTypeToString(recordReturn->var_type) : "UNKNOWN";
+            fprintf(stderr,
+                    "L%d: Compiler Error: Function '%s' on record '%s' must return %s to satisfy interface '%s' (found %s).\n",
+                    line,
+                    ifaceMethod->token && ifaceMethod->token->value ? ifaceMethod->token->value : "<anonymous>",
+                    recordName,
+                    expected,
+                    interfaceName,
+                    got);
+            compiler_had_error = true;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void propagateMethodSlotToSymbol(AST* recordType, AST* methodNode, int slot) {
+    if (!recordType || !methodNode || slot < 0 || !methodNode->token || !methodNode->token->value) {
+        return;
+    }
+
+    const char* recordName = getReadableTypeName(recordType);
+    const char* methodName = methodNode->token->value;
+    char qualified[MAX_SYMBOL_LENGTH * 2 + 2];
+    snprintf(qualified, sizeof(qualified), "%s.%s", recordName, methodName);
+
+    char lowered[MAX_SYMBOL_LENGTH * 2 + 2];
+    strncpy(lowered, qualified, sizeof(lowered) - 1);
+    lowered[sizeof(lowered) - 1] = '\0';
+    toLowerString(lowered);
+
+    Symbol* sym = lookupProcedure(lowered);
+    if (sym && sym->is_alias && sym->real_symbol) {
+        sym = sym->real_symbol;
+    }
+    if (sym && sym->type_def) {
+        sym->type_def->i_val = slot;
+    }
+}
+
+typedef struct {
+    AST* interfaceMethod;
+    AST* recordMethod;
+} InterfaceMethodMatch;
+
+static bool validateInterfaceImplementation(AST* recordType, AST* interfaceType, int line) {
+    interfaceType = resolveInterfaceAST(interfaceType);
+    recordType = resolveRecordAST(recordType);
+
+    if (!interfaceType || !recordType) {
+        fprintf(stderr, "L%d: Compiler Error: Invalid interface or record type in cast.\n", line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    AST** ifaceMethods = NULL;
+    int methodCount = 0;
+    int methodCapacity = 0;
+    if (!collectInterfaceMethods(interfaceType, &ifaceMethods, &methodCount, &methodCapacity, 0)) {
+        free(ifaceMethods);
+        return false;
+    }
+
+    if (compiler_had_error) {
+        free(ifaceMethods);
+        return false;
+    }
+
+    if (methodCount == 0) {
+        interfaceType->i_val = 1;
+        free(ifaceMethods);
+        return true;
+    }
+
+    InterfaceMethodMatch* matches = calloc((size_t)methodCount, sizeof(InterfaceMethodMatch));
+    if (!matches) {
+        fprintf(stderr, "Compiler error: Out of memory validating interface methods.\n");
+        compiler_had_error = true;
+        free(ifaceMethods);
+        return false;
+    }
+
+    const char* interfaceName = getReadableTypeName(interfaceType);
+    const char* recordName = getReadableTypeName(recordType);
+
+    bool success = true;
+    for (int i = 0; success && i < methodCount; i++) {
+        AST* ifaceMethod = ifaceMethods[i];
+        const char* methodName = (ifaceMethod && ifaceMethod->token) ? ifaceMethod->token->value : NULL;
+        if (!ifaceMethod || !methodName) {
+            fprintf(stderr, "L%d: Compiler Error: Interface method missing name during validation.\n", line);
+            compiler_had_error = true;
+            success = false;
+            break;
+        }
+
+        AST* recordMethod = findRecordMethodInHierarchy(recordType, methodName);
+        if (!recordMethod) {
+            fprintf(stderr,
+                    "L%d: Compiler Error: Record '%s' is missing virtual method '%s' required by interface '%s'.\n",
+                    line,
+                    recordName,
+                    methodName,
+                    interfaceName);
+            compiler_had_error = true;
+            success = false;
+            break;
+        }
+
+        if (!recordMethod->is_virtual) {
+            fprintf(stderr,
+                    "L%d: Compiler Error: Method '%s' on record '%s' must be declared virtual to satisfy interface '%s'.\n",
+                    line,
+                    methodName,
+                    recordName,
+                    interfaceName);
+            compiler_had_error = true;
+            success = false;
+            break;
+        }
+
+        if (!compareMethodSignatures(ifaceMethod, recordMethod, recordName, interfaceName, line)) {
+            success = false;
+            break;
+        }
+
+        matches[i].interfaceMethod = ifaceMethod;
+        matches[i].recordMethod = recordMethod;
+    }
+
+    if (success) {
+        for (int i = 0; i < methodCount; i++) {
+            AST* ifaceMethod = matches[i].interfaceMethod;
+            AST* recordMethod = matches[i].recordMethod;
+            ifaceMethod->i_val = i;
+            if (ifaceMethod->parent && ifaceMethod->parent->type == AST_INTERFACE) {
+                ifaceMethod->parent->i_val = 1;
+            }
+            if (recordMethod) {
+                recordMethod->i_val = i;
+                propagateMethodSlotToSymbol(recordType, recordMethod, i);
+            }
+        }
+        interfaceType->i_val = 1;
+    }
+
+    free(matches);
+    free(ifaceMethods);
+    return success;
+}
+
+static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName) {
+    interfaceType = resolveInterfaceAST(interfaceType);
+    if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
+        return -1;
+    }
+
+    if (interfaceType->i_val == 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < interfaceType->child_count; i++) {
+        AST* child = interfaceType->children[i];
+        if (!child) continue;
+        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+            child->token && child->token->value &&
+            strcasecmp(child->token->value, methodName) == 0) {
+            if (child->i_val >= 0) {
+                return child->i_val;
+            }
+        }
+    }
+
+    if (interfaceType->extra) {
+        AST* baseList = interfaceType->extra;
+        if (baseList->type == AST_LIST) {
+            for (int i = 0; i < baseList->child_count; i++) {
+                int slot = ensureInterfaceMethodSlot(baseList->children[i], methodName);
+                if (slot >= 0) {
+                    return slot;
+                }
+            }
+        } else {
+            return ensureInterfaceMethodSlot(baseList, methodName);
+        }
+    }
+
+    return -1;
 }
 
 // --- Object layout helpers -------------------------------------------------
@@ -7449,6 +7860,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                                     line,
                                     functionName ? functionName : "<anonymous>");
                             compiler_had_error = true;
+                            writeBytecodeChunk(chunk, POP, line);
+                            emitConstant(chunk, addNilConstant(chunk), line);
+                            break;
+                        }
+
+                        if (!validateInterfaceImplementation(recordType, resolvedCast, line)) {
                             writeBytecodeChunk(chunk, POP, line);
                             emitConstant(chunk, addNilConstant(chunk), line);
                             break;

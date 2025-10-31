@@ -1,0 +1,2 @@
+L21: Compiler Error: Record 'tincompletewidget' is missing virtual method 'dowork' required by interface 'iwidget'.
+Compilation failed with errors.

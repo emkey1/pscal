@@ -1,0 +1,22 @@
+program InterfaceCastMissingMethod;
+
+type
+  IWidget = interface
+    procedure DoWork;
+  end;
+
+  TIncompleteWidget = record
+    procedure OtherThing; virtual;
+  end;
+
+procedure TIncompleteWidget.OtherThing;
+begin
+end;
+
+var
+  Ptr: ^TIncompleteWidget;
+  Widget: IWidget;
+begin
+  new(Ptr);
+  Widget := IWidget(Ptr);
+end.
