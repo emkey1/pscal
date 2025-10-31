@@ -1462,10 +1462,14 @@ resolved_field: ;
                                     AST *resolvedReturnType = resolvedProcType ?
                                             resolveTypeAlias(resolvedProcType->right) : NULL;
 
-                                    verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                    bool returnIsProcPointer = resolvedReturnType &&
+                                            resolvedReturnType->type == AST_PROC_PTR_TYPE;
 
-                                    if (resolvedReturnType &&
-                                            resolvedReturnType->type == AST_PROC_PTR_TYPE) {
+                                    if (!returnIsProcPointer) {
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                    }
+
+                                    if (returnIsProcPointer) {
                                         rhsIsProcPointer = true;
                                         rhs->var_type = TYPE_POINTER;
                                         rhs->type_def = resolvedReturnType;
