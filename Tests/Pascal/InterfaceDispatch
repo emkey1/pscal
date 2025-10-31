@@ -1,24 +1,241 @@
 program InterfaceDispatch;
 
+const
+  MemoryCapacity = 16;
+  MaxCompositeChildren = 4;
+
 type
+  TLogLevel = (llDebug, llInfo, llWarning, llError);
+
+  TLogMessage = record
+    Level: TLogLevel;
+    Text: string;
+  end;
+
   ILogger = interface
-    procedure Log(const msg: string);
+    procedure Log(const level: TLogLevel; const msg: string);
+    procedure Flush;
+    function Name: string;
   end;
 
   TConsoleLogger = record
-    procedure Log(const msg: string); virtual;
+    Prefix: string;
+    procedure Init(const APrefix: string);
+    procedure Log(const level: TLogLevel; const msg: string); virtual;
+    procedure Flush; virtual;
+    function Name: string; virtual;
   end;
 
-procedure TConsoleLogger.Log(const msg: string);
+  TMemoryLogger = record
+    Count: Integer;
+    Messages: array[0..MemoryCapacity - 1] of TLogMessage;
+    procedure Init;
+    procedure Log(const level: TLogLevel; const msg: string); virtual;
+    procedure Flush; virtual;
+    function Name: string; virtual;
+    procedure Dump;
+  end;
+
+  TCompositeLogger = record
+    Count: Integer;
+    Children: array[0..MaxCompositeChildren - 1] of ILogger;
+    procedure Init;
+    procedure AddLogger(const logger: ILogger);
+    procedure Log(const level: TLogLevel; const msg: string); virtual;
+    procedure Flush; virtual;
+    function Name: string; virtual;
+  end;
+
+function LevelToString(const level: TLogLevel): string;
 begin
-  writeln('[console] ', msg);
+  case level of
+    llDebug: LevelToString := 'DEBUG';
+    llInfo: LevelToString := 'INFO';
+    llWarning: LevelToString := 'WARNING';
+    llError: LevelToString := 'ERROR';
+  end;
+end;
+
+procedure TConsoleLogger.Init(const APrefix: string);
+begin
+  Prefix := APrefix;
+end;
+
+procedure TConsoleLogger.Log(const level: TLogLevel; const msg: string);
+begin
+  writeln('[console:', Self.Prefix, '] ', LevelToString(level), ' -> ', msg);
+end;
+
+procedure TConsoleLogger.Flush;
+begin
+  writeln('[console:', Self.Prefix, '] flush (no-op)');
+end;
+
+function TConsoleLogger.Name: string;
+begin
+  Name := 'console:' + Self.Prefix;
+end;
+
+procedure TMemoryLogger.Init;
+begin
+  Count := 0;
+end;
+
+procedure TMemoryLogger.Log(const level: TLogLevel; const msg: string);
+var
+  i: Integer;
+begin
+  if Count = MemoryCapacity then
+  begin
+    for i := 0 to MemoryCapacity - 2 do
+      Messages[i] := Messages[i + 1];
+    Count := MemoryCapacity - 1;
+  end;
+
+  Messages[Count].Level := level;
+  Messages[Count].Text := msg;
+  Count := Count + 1;
+
+  writeln('[memory] buffered ', LevelToString(level), ' -> ', msg);
+end;
+
+procedure TMemoryLogger.Flush;
+var
+  i: Integer;
+begin
+  writeln('[memory] flush dumping ', Count, ' message(s)');
+  for i := 0 to Count - 1 do
+    writeln('  ', LevelToString(Messages[i].Level), ': ', Messages[i].Text);
+  Count := 0;
+end;
+
+function TMemoryLogger.Name: string;
+begin
+  Name := 'memory-buffer';
+end;
+
+procedure TMemoryLogger.Dump;
+var
+  i: Integer;
+begin
+  if Count = 0 then
+  begin
+    writeln('[memory] <empty>');
+    exit;
+  end;
+
+  for i := 0 to Count - 1 do
+    writeln('[memory] cached ', LevelToString(Messages[i].Level), ' -> ', Messages[i].Text);
+end;
+
+procedure TCompositeLogger.Init;
+begin
+  Count := 0;
+end;
+
+procedure TCompositeLogger.AddLogger(const logger: ILogger);
+begin
+  if Count = MaxCompositeChildren then
+  begin
+    writeln('[composite] cannot add more loggers');
+    exit;
+  end;
+
+  Children[Count] := logger;
+  Count := Count + 1;
+  writeln('[composite] added child #', chr(ord('0') + Count));
+end;
+
+procedure TCompositeLogger.Log(const level: TLogLevel; const msg: string);
+var
+  i: Integer;
+begin
+  writeln('[composite] fan-out ', LevelToString(level), ' -> ', msg);
+  for i := 0 to Count - 1 do
+    Children[i].Log(level, msg);
+end;
+
+procedure TCompositeLogger.Flush;
+var
+  i: Integer;
+begin
+  writeln('[composite] flush to ', Count, ' child(ren)');
+  for i := 0 to Count - 1 do
+    Children[i].Flush;
+end;
+
+function TCompositeLogger.Name: string;
+begin
+  Name := 'composite-' + chr(ord('0') + Count);
+end;
+
+procedure Announce(const logger: ILogger);
+begin
+  writeln('[announce] switching to ', logger.Name);
+end;
+
+procedure EmitDemoSequence(const logger: ILogger);
+const
+  SampleLevels: array[0..3] of TLogLevel = (llInfo, llDebug, llWarning, llError);
+  SampleMessages: array[0..3] of string = (
+    'boot sequence initialised',
+    'diagnostic ping',
+    'disk space critically low',
+    'panic routine resolved');
+var
+  i: Integer;
+begin
+  for i := 0 to 3 do
+    logger.Log(SampleLevels[i], SampleMessages[i]);
+end;
+
+procedure EmitHeartbeat(const logger: ILogger; const labelText: string);
+var
+  i: Integer;
+begin
+  for i := 1 to 3 do
+    logger.Log(llDebug, labelText + ' heartbeat #' + chr(ord('0') + i));
 end;
 
 var
+  consolePtr: ^TConsoleLogger;
+  memoryPtr: ^TMemoryLogger;
+  compositePtr: ^TCompositeLogger;
   logger: ILogger;
-  concrete: ^TConsoleLogger;
+  pipeline: ILogger;
 begin
-  new(concrete);
-  logger := ILogger(concrete);
-  logger.Log('ready');
+  new(consolePtr);
+  consolePtr^.Init('primary');
+
+  new(memoryPtr);
+  memoryPtr^.Init;
+
+  new(compositePtr);
+  compositePtr^.Init;
+
+  compositePtr^.AddLogger(ILogger(consolePtr));
+  compositePtr^.AddLogger(ILogger(memoryPtr));
+
+  pipeline := ILogger(compositePtr);
+  Announce(pipeline);
+  EmitDemoSequence(pipeline);
+  EmitHeartbeat(pipeline, 'composite');
+  pipeline.Flush;
+
+  writeln;
+  writeln('--- Inspecting buffered state after composite flush ---');
+  memoryPtr^.Dump;
+
+  writeln;
+  logger := ILogger(memoryPtr);
+  Announce(logger);
+  EmitHeartbeat(logger, 'memory');
+  writeln('[main] manual dump without interface flush:');
+  memoryPtr^.Dump;
+
+  writeln;
+  logger := ILogger(consolePtr);
+  Announce(logger);
+  logger.Log(llInfo, 'single console dispatch');
+  logger.Flush;
 end.
