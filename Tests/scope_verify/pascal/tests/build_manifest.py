@@ -1037,6 +1037,34 @@ add({
     "failure_reason": "Current implementation leaks routine-local type aliases into the global namespace.",
 })
 
+add({
+    "id": "type_interface_self_return",
+    "name": "Interface method may return its own type",
+    "category": "type_scope",
+    "description": "Ensure that interface declarations can reference themselves within method signatures.",
+    "expect": "runtime_ok",
+    "code": """
+        program TypeInterfaceSelfReturn;
+
+        type
+          IFoo = interface
+            function Clone: IFoo;
+          end;
+
+        var
+          instance: IFoo;
+
+        begin
+          instance := nil;
+          if instance = nil then
+            writeln('ok')
+          else
+            writeln('fail');
+        end.
+    """,
+    "expected_stdout": "ok",
+})
+
 # ---------------------------------------------------------------------------
 # Resolution scope tests
 # ---------------------------------------------------------------------------
