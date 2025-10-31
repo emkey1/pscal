@@ -1,5 +1,0 @@
-program DemoBuiltins;
-begin
-  writeln('Random: ', Random(100));
-  writeln('Uppercase: ', UpCase('a'));
-end.
