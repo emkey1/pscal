@@ -3,22 +3,134 @@ program InterfaceDispatch;
 type
   ILogger = interface
     procedure Log(const msg: string);
+    procedure Flush;
+    function GetName: string;
   end;
 
   TConsoleLogger = record
+    Prefix: string;
+    procedure Init(const APrefix: string);
     procedure Log(const msg: string); virtual;
+    procedure Flush; virtual;
+    function GetName: string; virtual;
   end;
+
+  TBufferedLogger = record
+    Prefix: string;
+    Buffer: array[0..3] of string;
+    Count: integer;
+    procedure Init(const APrefix: string);
+    procedure Log(const msg: string); virtual;
+    procedure Flush; virtual;
+    function GetName: string; virtual;
+  end;
+
+procedure TConsoleLogger.Init(const APrefix: string);
+begin
+  Prefix := APrefix;
+end;
 
 procedure TConsoleLogger.Log(const msg: string);
 begin
-  writeln('[console] ', msg);
+  writeln(Prefix, msg);
+end;
+
+procedure TConsoleLogger.Flush;
+begin
+  writeln(Prefix, '--- flush complete ---');
+end;
+
+function TConsoleLogger.GetName: string;
+begin
+  GetName := 'console';
+end;
+
+procedure TBufferedLogger.Init(const APrefix: string);
+var
+  i: integer;
+begin
+  Prefix := APrefix;
+  Count := 0;
+  for i := Low(Buffer) to High(Buffer) do
+    Buffer[i] := '';
+end;
+
+procedure TBufferedLogger.Log(const msg: string);
+begin
+  if Count <= High(Buffer) then
+  begin
+    Buffer[Count] := msg;
+    Count := Count + 1;
+  end;
+
+  if Count > High(Buffer) then
+    Flush;
+end;
+
+procedure TBufferedLogger.Flush;
+var
+  i: integer;
+begin
+  if Count = 0 then
+  begin
+    writeln(Prefix, '(buffer empty)');
+    exit;
+  end;
+
+  writeln(Prefix, 'flushing ', Count, ' message(s)');
+  for i := 0 to Count - 1 do
+    writeln(Prefix, Buffer[i]);
+  Count := 0;
+end;
+
+function TBufferedLogger.GetName: string;
+begin
+  GetName := 'buffered';
+end;
+
+procedure Broadcast(const msg: string; const sinks: array of ILogger);
+var
+  i: integer;
+begin
+  writeln('Broadcasting "', msg, '" to ', High(sinks) - Low(sinks) + 1, ' logger(s)');
+  for i := Low(sinks) to High(sinks) do
+  begin
+    writeln('  using ', sinks[i].GetName, ' logger');
+    sinks[i].Log(msg);
+  end;
 end;
 
 var
-  logger: ILogger;
-  concrete: ^TConsoleLogger;
+  consoleLogger: ^TConsoleLogger;
+  bufferedLogger: ^TBufferedLogger;
+  loggers: array[0..1] of ILogger;
+  i: integer;
 begin
-  new(concrete);
-  logger := ILogger(concrete);
-  logger.Log('ready');
+  new(consoleLogger);
+  consoleLogger^.Init('[console] ');
+  loggers[0] := ILogger(consoleLogger);
+
+  new(bufferedLogger);
+  bufferedLogger^.Init('[buffer] ');
+  loggers[1] := ILogger(bufferedLogger);
+
+  for i := Low(loggers) to High(loggers) do
+  begin
+    writeln('Priming ', loggers[i].GetName, ' logger');
+    loggers[i].Log('system boot');
+  end;
+
+  Broadcast('server ready', loggers);
+
+  loggers[1].Log('queued event #1');
+  loggers[1].Log('queued event #2');
+  loggers[1].Log('queued event #3');
+  loggers[1].Flush;
+
+  loggers[0].Log('final console message');
+  loggers[0].Flush;
+  loggers[1].Flush;
+
+  dispose(consoleLogger);
+  dispose(bufferedLogger);
 end.
