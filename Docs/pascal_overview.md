@@ -76,9 +76,15 @@ end.
 ### Interfaces and Virtual Dispatch
 
 Interfaces capture the receiver pointer and a method table so concrete records
-with virtual methods can be passed around abstractly. Casting a record pointer
-to an interface boxes the object alongside its V-table; later calls route
-through the stored table using the existing indirect-call machinery.【F:src/compiler/compiler.c†L7026-L7076】【F:src/compiler/compiler.c†L7223-L7260】【F:src/vm/vm.c†L2704-L2885】
+with virtual methods can be passed around abstractly. During compilation
+`validateInterfaceImplementation` ensures the target record provides every
+required virtual, so casts now fail at compile time when a method is missing
+rather than deferring to runtime.【F:src/compiler/compiler.c†L1860-L1963】 The
+code generator then emits `CALL_HOST HOST_FN_BOX_INTERFACE`, passing the class
+and interface names so `vmHostBoxInterface` can box the receiver and initialise
+its table; subsequent calls dispatch through
+`HOST_FN_INTERFACE_LOOKUP`/`vmHostInterfaceLookup` using the stored slot
+indices.【F:src/compiler/compiler.c†L8000-L8066】【F:src/vm/vm.c†L2990-L3247】
 
 ```pascal
 program InterfaceDemo;
@@ -132,9 +138,11 @@ end.
 ```
 
 Both `expr as TRecord` and `expr is TRecord` perform the same runtime check.
-The compiler emits the interface value and target type name, then invokes a VM
-helper that compares the stored class identity. If they match the receiver is
-returned; otherwise a descriptive runtime error is raised.【F:src/Pascal/parser.c†L365-L417】【F:src/compiler/compiler.c†L6843-L6881】【F:src/vm/vm.c†L3043-L3166】
+The parser lowers them into assertion nodes, the compiler emits
+`HOST_FN_INTERFACE_ASSERT`, and `vmHostInterfaceAssert` compares the stored
+class identity before handing the receiver back to Pascal code. Mismatches raise
+clear runtime errors, while successful assertions return the boxed pointer for
+immediate use.【F:src/Pascal/parser.c†L3755-L3787】【F:src/compiler/compiler.c†L6863-L6903】【F:src/vm/vm.c†L3250-L3325】
 
 ## Builtins
 
