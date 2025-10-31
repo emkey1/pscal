@@ -2003,6 +2003,14 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
             eat(parser, TOKEN_LPAREN);
             paramsList = newASTNode(AST_LIST, NULL);
             while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+                // Support optional modifiers like VAR/CONST/OUT
+                while (parser->current_token &&
+                       (parser->current_token->type == TOKEN_VAR ||
+                        parser->current_token->type == TOKEN_CONST ||
+                        parser->current_token->type == TOKEN_OUT)) {
+                    eat(parser, parser->current_token->type);
+                }
+
                 // Support optional named parameters: name ':' type
                 if (tokenIsIdentifierLike(parser->current_token)) {
                     Token* nextTok = peekToken(parser);
@@ -2013,15 +2021,33 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                         eat(parser, TOKEN_COLON);      // consume ':'
                     }
                 }
-                // Parse the type after an optional name (or the type name itself if unnamed)
+
+                // Parse the type after optional modifiers/name (or the type name itself if unnamed)
                 AST* ptype = typeSpecifier(parser, 1);
                 if (!ptype) { freeAST(paramsList); if (kwTok) freeToken(kwTok); return NULL; }
                 addChild(paramsList, ptype);
-                if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
-                    eat(parser, TOKEN_COMMA);
-                } else {
+
+                if (!parser->current_token) {
+                    errorParser(parser, "Expected ')' to close parameter type list");
+                    if (kwTok) freeToken(kwTok);
+                    freeAST(paramsList);
+                    return NULL;
+                }
+
+                if (parser->current_token->type == TOKEN_COMMA ||
+                    parser->current_token->type == TOKEN_SEMICOLON) {
+                    eat(parser, parser->current_token->type);
+                    continue;
+                }
+
+                if (parser->current_token->type == TOKEN_RPAREN) {
                     break;
                 }
+
+                errorParser(parser, "Expected ',', ';', or ')' after parameter type");
+                if (kwTok) freeToken(kwTok);
+                freeAST(paramsList);
+                return NULL;
             }
             if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
                 errorParser(parser, "Expected ')' to close parameter type list");
