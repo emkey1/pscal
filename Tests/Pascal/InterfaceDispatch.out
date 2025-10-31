@@ -1,1 +1,17 @@
-[console] ready
+Priming console logger
+[console] system boot
+Priming buffered logger
+Broadcasting "server ready" to 2 logger(s)
+  using console logger
+[console] server ready
+  using buffered logger
+[buffer] flushing 4 message(s)
+[buffer] system boot
+[buffer] server ready
+[buffer] queued event #1
+[buffer] queued event #2
+[buffer] flushing 1 message(s)
+[buffer] queued event #3
+[console] final console message
+[console] --- flush complete ---
+[buffer] (buffer empty)
