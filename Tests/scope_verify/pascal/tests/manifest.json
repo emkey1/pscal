@@ -88,6 +88,24 @@
       "expected_stdout": "inner=5\nouter=3\nglobal=7"
     },
     {
+      "id": "routine_proc_ptr_assignment_var_mismatch",
+      "name": "Procedure pointer assignment enforces VAR parameters",
+      "category": "routine_scope",
+      "description": "Assignments to procedure pointers must preserve VAR/OUT passing conventions.",
+      "expect": "compile_error",
+      "code": "program ProcPtrAssignVarMismatch;\ntype\n  TVarHandler = procedure(var value: Integer);\n  TValueHandler = procedure(value: Integer);\n\nprocedure UsesVar(var value: Integer);\nbegin\n  value := value + 1;\nend;\n\nprocedure UsesValue(value: Integer);\nbegin\nend;\n\nvar\n  handler: TVarHandler;\n\nbegin\n  handler := @UsesVar;\n  handler := @UsesValue;\nend.",
+      "expected_stderr_substring": "passing convention mismatch"
+    },
+    {
+      "id": "routine_proc_ptr_call_var_passthrough",
+      "name": "Procedure pointer call preserves VAR semantics",
+      "category": "routine_scope",
+      "description": "Calling through a procedure pointer should pass VAR parameters by reference and observe mutations.",
+      "expect": "runtime_ok",
+      "code": "program ProcPtrCallVar;\ntype\n  TVarHandler = procedure(var value: Integer);\n\nprocedure Increment(var value: Integer);\nbegin\n  value := value + 5;\nend;\n\nvar\n  handler: TVarHandler;\n  counter: Integer;\n\nbegin\n  handler := @Increment;\n  counter := 3;\n  handler(counter);\n  writeln('counter=', counter);\nend.",
+      "expected_stdout": "counter=8"
+    },
+    {
       "id": "routine_sibling_local_access_error",
       "name": "Sibling routine cannot access another's local",
       "category": "routine_scope",

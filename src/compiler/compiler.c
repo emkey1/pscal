@@ -1446,6 +1446,84 @@ static AST* resolveTypeAlias(AST* type_node) {
     return type_node;
 }
 
+static AST* resolveProcPointerSignature(AST* type_node) {
+    type_node = resolveTypeAlias(type_node);
+    if (!type_node) {
+        return NULL;
+    }
+    if (type_node->type == AST_VAR_DECL) {
+        if (type_node->right) {
+            type_node = type_node->right;
+        } else if (type_node->type_def) {
+            type_node = type_node->type_def;
+        }
+        type_node = resolveTypeAlias(type_node);
+    }
+    if (!type_node) {
+        return NULL;
+    }
+    if (type_node->type == AST_PROC_PTR_TYPE) {
+        return type_node;
+    }
+    if (type_node->type == AST_POINTER_TYPE && type_node->right) {
+        AST* inner = resolveTypeAlias(type_node->right);
+        if (inner && inner->type == AST_PROC_PTR_TYPE) {
+            return inner;
+        }
+    }
+    return NULL;
+}
+
+static AST* findProcPointerSignatureForCall(AST* call) {
+    if (!call) {
+        return NULL;
+    }
+
+    AST* candidate = call->type_def;
+    if (!candidate && call->left) {
+        candidate = call->left->type_def;
+        if (!candidate && call->left->right) {
+            candidate = call->left->right;
+        }
+    }
+
+    if (!candidate && call->token && call->token->value) {
+        Symbol* sym = lookupLocalSymbol(call->token->value);
+        if (!sym) {
+            sym = lookupGlobalSymbol(call->token->value);
+        }
+        sym = resolveSymbolAlias(sym);
+        if (sym && sym->type_def) {
+            candidate = sym->type_def;
+        }
+    }
+
+    if (candidate && candidate->type == AST_VAR_DECL) {
+        if (candidate->right) {
+            candidate = candidate->right;
+        } else if (candidate->type_def) {
+            candidate = candidate->type_def;
+        }
+    }
+
+    if (!candidate && call->token && call->token->value && gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(call->token->value, call, gCurrentProgramRoot);
+        if (decl) {
+            if (decl->type == AST_VAR_DECL) {
+                if (decl->right) {
+                    candidate = decl->right;
+                } else if (decl->type_def) {
+                    candidate = decl->type_def;
+                }
+            } else if (decl->type == AST_CONST_DECL && decl->right) {
+                candidate = decl->right;
+            }
+        }
+    }
+
+    return resolveProcPointerSignature(candidate);
+}
+
 static AST* getInterfaceTypeFromExpression(AST* expr) {
     if (!expr) {
         return NULL;
@@ -6194,12 +6272,117 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                        strcasecmp(calleeName, "waitforthread") == 0);
             bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol && !host_thread_helper;
 
+            AST* procPtrSignature = NULL;
+            AST* procPtrParams = NULL;
+            if (!proc_symbol) {
+                procPtrSignature = findProcPointerSignatureForCall(node);
+                if (procPtrSignature && procPtrSignature->child_count > 0) {
+                    procPtrParams = procPtrSignature->children[0];
+                }
+            }
+            if (procPtrSignature) {
+                is_read_proc = false;
+                host_thread_helper = false;
+                callee_is_builtin = false;
+            }
+
             int arg_start = receiver_offset;
             int arg_count = node->child_count - receiver_offset;
             if (arg_count < 0) arg_count = 0;
 
             bool param_mismatch = false;
-            if (proc_symbol && proc_symbol->type_def) {
+            if (!proc_symbol && procPtrSignature) {
+                const char* pointerName = NULL;
+                if (node->token && node->token->value) {
+                    pointerName = node->token->value;
+                } else if (calleeName && calleeName[0] != '\0') {
+                    pointerName = calleeName;
+                } else {
+                    pointerName = "<procedure pointer>";
+                }
+
+                int expected = procPtrParams ? procPtrParams->child_count : 0;
+                if (arg_count != expected) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
+                            line, pointerName, expected, arg_count);
+                    compiler_had_error = true;
+                    param_mismatch = true;
+                }
+
+                if (!param_mismatch) {
+                    for (int i = 0; i < expected; i++) {
+                        AST* param_node = procPtrParams ? procPtrParams->children[i] : NULL;
+                        AST* arg_node = node->children[i + arg_start];
+                        if (!param_node || !arg_node) {
+                            continue;
+                        }
+
+                        AST* param_type = param_node->type_def ? param_node->type_def
+                                                               : (param_node->right ? param_node->right : param_node);
+                        bool match = typesMatch(param_type, arg_node, false);
+                        if (!match) {
+                            AST* param_actual = resolveTypeAlias(param_type);
+                            AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                            if (param_actual && arg_actual) {
+                                if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects an array but got %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(arg_actual->var_type));
+                                } else if (param_actual->var_type != TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects %s but got an array.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(param_actual->var_type));
+                                } else if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    AST* param_elem = resolveTypeAlias(param_actual->right);
+                                    AST* arg_elem   = resolveTypeAlias(arg_actual->right);
+                                    const char* exp_str = param_elem ? varTypeToString(param_elem->var_type) : "UNKNOWN";
+                                    const char* got_str = arg_elem ? varTypeToString(arg_elem->var_type) : "UNKNOWN";
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects type ARRAY OF %s but got ARRAY OF %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            exp_str,
+                                            got_str);
+                                } else {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(param_actual->var_type),
+                                            varTypeToString(arg_actual->var_type));
+                                }
+                            } else {
+                                VarType expected_vt = param_actual ? param_actual->var_type : param_type->var_type;
+                                VarType actual_vt   = arg_actual ? arg_actual->var_type : arg_node->var_type;
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                        line, (long long)i + 1, pointerName,
+                                        varTypeToString(expected_vt),
+                                        varTypeToString(actual_vt));
+                            }
+                            compiler_had_error = true;
+                            param_mismatch = true;
+                            break;
+                        }
+
+                        if (param_node->by_ref) {
+                            bool is_lvalue = (arg_node->type == AST_VARIABLE ||
+                                              arg_node->type == AST_FIELD_ACCESS ||
+                                              arg_node->type == AST_ARRAY_ACCESS ||
+                                              arg_node->type == AST_DEREFERENCE);
+                            if (!is_lvalue) {
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' must be a variable (VAR parameter).\n",
+                                        line, (long long)i + 1, pointerName);
+                                compiler_had_error = true;
+                                param_mismatch = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
                 bool is_inc_dec = callee_is_builtin &&
                                    (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
@@ -6502,6 +6685,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                          strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
                 )) {
                     is_var_param = true;
+                }
+                else if (!proc_symbol && procPtrParams && param_index < procPtrParams->child_count) {
+                    AST* param_node = procPtrParams->children[param_index];
+                    if (param_node && param_node->by_ref) {
+                        is_var_param = true;
+                    }
                 }
                 else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
                     AST* param_node = proc_symbol->type_def->children[param_index];
