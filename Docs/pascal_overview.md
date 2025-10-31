@@ -229,6 +229,14 @@ begin
 end.
 ```
 
+```
+mke@MacBook-Pro-M1 docs_examples % pascal check_file 
+FILE NOT FOUND
+% touch data.txt
+% pascal check_file
+FILE FOUND
+```
+
 ## Summary
 Pscal offers a Pascal environment with a modular architecture, a rich set of builtins, and reusable units for console I/O, math, string handling and system access. These tools make it suitable both for educational purposes and for experimenting with Pascal‑like language design.
 
