@@ -5455,21 +5455,32 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     break;
                 }
             }
-            const char* calleeName = node->token->value;
+            const char* calleeName = (node->token && node->token->value)
+                                         ? node->token->value
+                                         : NULL;
+            const char* methodIdentifier = calleeName;
+            bool isCallQualified = (node->left && node->token && node->token->value &&
+                                    node->token->type == TOKEN_IDENTIFIER);
             bool usesReceiverGlobal = false;
 
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* proc_symbol_lookup = NULL;
             char callee_lower[MAX_SYMBOL_LENGTH];
-            strncpy(callee_lower, calleeName, sizeof(callee_lower) - 1);
-            callee_lower[sizeof(callee_lower) - 1] = '\0';
-            toLowerString(callee_lower);
+            if (calleeName) {
+                strncpy(callee_lower, calleeName, sizeof(callee_lower) - 1);
+                callee_lower[sizeof(callee_lower) - 1] = '\0';
+                toLowerString(callee_lower);
+            } else {
+                callee_lower[0] = '\0';
+            }
 
             // First, try direct (unqualified) lookup
-            proc_symbol_lookup = lookupProcedure(callee_lower);
+            if (callee_lower[0] != '\0') {
+                proc_symbol_lookup = lookupProcedure(callee_lower);
+            }
 
             // If it fails and we are inside a unit, try a qualified lookup
-            if (!proc_symbol_lookup && current_compilation_unit_name) {
+            if (!proc_symbol_lookup && current_compilation_unit_name && callee_lower[0] != '\0') {
                 char qualified_name_lower[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, callee_lower);
                 toLowerString(qualified_name_lower);
@@ -5485,9 +5496,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
             if (proc_symbol && proc_symbol->name) {
                 calleeName = proc_symbol->name;   // ensure emitted call uses canonical lowercase
+                methodIdentifier = proc_symbol->name;
             }
 
-            if (!proc_symbol) {
+            if (!proc_symbol && callee_lower[0] != '\0') {
                 const char* dot = strrchr(callee_lower, '.');
                 if (dot && *(dot + 1)) {
                     Symbol* alt = lookupProcedure(dot + 1);
@@ -5498,14 +5510,23 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         proc_symbol = alt;
                         if (proc_symbol->name) {
                             calleeName = proc_symbol->name;
+                            methodIdentifier = proc_symbol->name;
                         } else {
                             calleeName = dot + 1;
+                            methodIdentifier = dot + 1;
                         }
                         if (node->child_count > 0) {
                             usesReceiverGlobal = true;
                         }
                     }
                 }
+            }
+
+            if (!calleeName) {
+                calleeName = "";
+            }
+            if (!methodIdentifier) {
+                methodIdentifier = calleeName;
             }
 
             // Ensure the target procedure is compiled so its address is available
@@ -5518,29 +5539,31 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             AST* interfaceType = NULL;
             int interfaceArgStart = 0;
 
-            if (node->child_count > 0) {
-                AST* candidate = node->children[0];
-                AST* candidateType = getInterfaceTypeFromExpression(candidate);
-                if (candidateType || candidate->var_type == TYPE_INTERFACE) {
-                    interfaceReceiver = candidate;
-                    interfaceType = candidateType;
-                    interfaceArgStart = 1;
+            if (isCallQualified) {
+                if (node->child_count > 0) {
+                    AST* candidate = node->children[0];
+                    AST* candidateType = getInterfaceTypeFromExpression(candidate);
+                    if (candidateType || candidate->var_type == TYPE_INTERFACE) {
+                        interfaceReceiver = candidate;
+                        interfaceType = candidateType;
+                        interfaceArgStart = 1;
+                    }
                 }
-            }
-            if (!interfaceReceiver && node->left) {
-                AST* candidateType = getInterfaceTypeFromExpression(node->left);
-                if (candidateType || node->left->var_type == TYPE_INTERFACE) {
-                    interfaceReceiver = node->left;
-                    interfaceType = candidateType;
-                    interfaceArgStart = 0;
+                if (!interfaceReceiver && node->left) {
+                    AST* candidateType = getInterfaceTypeFromExpression(node->left);
+                    if (candidateType || node->left->var_type == TYPE_INTERFACE) {
+                        interfaceReceiver = node->left;
+                        interfaceType = candidateType;
+                        interfaceArgStart = 0;
+                    }
                 }
             }
 
-            bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 &&
+            bool isVirtualMethod = (isCallQualified && node->child_count > 0 && node->i_val == 0 &&
                                     proc_symbol && proc_symbol->type_def &&
                                     proc_symbol->type_def->is_virtual &&
                                     interfaceReceiver == NULL);
-            bool isInterfaceDispatch = (interfaceReceiver != NULL);
+            bool isInterfaceDispatch = (isCallQualified && interfaceReceiver != NULL);
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
@@ -5819,9 +5842,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (isInterfaceDispatch) {
-                const char* slotName = (node->token && node->token->value)
-                                           ? node->token->value
-                                           : calleeName;
+                const char* slotName = methodIdentifier ? methodIdentifier : calleeName;
                 AST* methodSignature = (proc_symbol && proc_symbol->type_def)
                                            ? proc_symbol->type_def
                                            : NULL;
