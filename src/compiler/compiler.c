@@ -5860,6 +5860,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     break;
                 }
 
+                AST* recv = interfaceReceiver;
+                compileRValue(recv, chunk, getLine(recv));
+                int slotConst = addIntConstant(chunk, method_slot);
+                emitConstant(chunk, slotConst, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
+
                 int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
@@ -5877,14 +5884,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     } else {
                         compileRValue(arg_node, chunk, getLine(arg_node));
                     }
+                    writeBytecodeChunk(chunk, SWAP, line);
                 }
-
-                AST* recv = interfaceReceiver;
-                compileRValue(recv, chunk, getLine(recv));
-                int slotConst = addIntConstant(chunk, method_slot);
-                emitConstant(chunk, slotConst, line);
-                writeBytecodeChunk(chunk, CALL_HOST, line);
-                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
 
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
                 int total_args = node->child_count - interfaceArgStart + 1;
