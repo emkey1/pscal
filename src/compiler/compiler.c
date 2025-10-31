@@ -5514,7 +5514,33 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                       getLine(proc_symbol->type_def));
             }
 
-            bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 && proc_symbol && proc_symbol->type_def && proc_symbol->type_def->is_virtual);
+            AST* interfaceReceiver = NULL;
+            AST* interfaceType = NULL;
+            int interfaceArgStart = 0;
+
+            if (node->child_count > 0) {
+                AST* candidate = node->children[0];
+                AST* candidateType = getInterfaceTypeFromExpression(candidate);
+                if (candidateType || candidate->var_type == TYPE_INTERFACE) {
+                    interfaceReceiver = candidate;
+                    interfaceType = candidateType;
+                    interfaceArgStart = 1;
+                }
+            }
+            if (!interfaceReceiver && node->left) {
+                AST* candidateType = getInterfaceTypeFromExpression(node->left);
+                if (candidateType || node->left->var_type == TYPE_INTERFACE) {
+                    interfaceReceiver = node->left;
+                    interfaceType = candidateType;
+                    interfaceArgStart = 0;
+                }
+            }
+
+            bool isVirtualMethod = (node->child_count > 0 && node->i_val == 0 &&
+                                    proc_symbol && proc_symbol->type_def &&
+                                    proc_symbol->type_def->is_virtual &&
+                                    interfaceReceiver == NULL);
+            bool isInterfaceDispatch = (interfaceReceiver != NULL);
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
@@ -5789,6 +5815,81 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
                 writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                break;
+            }
+
+            if (isInterfaceDispatch) {
+                const char* slotName = (node->token && node->token->value)
+                                           ? node->token->value
+                                           : calleeName;
+                AST* methodSignature = (proc_symbol && proc_symbol->type_def)
+                                           ? proc_symbol->type_def
+                                           : NULL;
+
+                if (!methodSignature && interfaceType) {
+                    for (int i = 0; i < interfaceType->child_count; i++) {
+                        AST* child = interfaceType->children[i];
+                        if (!child) continue;
+                        if (child->token && child->token->value &&
+                            strcasecmp(child->token->value, slotName) == 0 &&
+                            (child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL)) {
+                            methodSignature = child;
+                            break;
+                        }
+                    }
+                }
+
+                int method_slot = methodSignature ? methodSignature->i_val : -1;
+                if (interfaceType) {
+                    int resolved_slot = ensureInterfaceMethodSlot(interfaceType, slotName);
+                    if (resolved_slot >= 0) {
+                        method_slot = resolved_slot;
+                        if (proc_symbol && proc_symbol->type_def) {
+                            proc_symbol->type_def->i_val = method_slot;
+                        } else if (methodSignature) {
+                            methodSignature->i_val = method_slot;
+                        }
+                    }
+                }
+
+                if (method_slot < 0) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: Interface method '%s' missing slot index.\n",
+                            line, calleeName ? calleeName : "<anonymous>");
+                    compiler_had_error = true;
+                    break;
+                }
+
+                int metadataOffset = (interfaceArgStart == 0) ? 1 : 0;
+                for (int i = interfaceArgStart; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    bool is_var_param = false;
+                    int meta_index = i + metadataOffset;
+                    if (methodSignature &&
+                        meta_index >= 0 && meta_index < methodSignature->child_count) {
+                        AST* param_node = methodSignature->children[meta_index];
+                        if (param_node && param_node->by_ref) {
+                            is_var_param = true;
+                        }
+                    }
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileRValue(arg_node, chunk, getLine(arg_node));
+                    }
+                }
+
+                AST* recv = interfaceReceiver;
+                compileRValue(recv, chunk, getLine(recv));
+                int slotConst = addIntConstant(chunk, method_slot);
+                emitConstant(chunk, slotConst, line);
+                writeBytecodeChunk(chunk, CALL_HOST, line);
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_LOOKUP, line);
+
+                writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
+                int total_args = node->child_count - interfaceArgStart + 1;
+                if (total_args < 0) total_args = 0;
+                writeBytecodeChunk(chunk, (uint8_t)total_args, line);
                 break;
             }
 
@@ -7041,7 +7142,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            bool isVirtualMethod = isCallQualified && node->i_val == 0 && func_symbol && func_symbol->type_def && func_symbol->type_def->is_virtual;
+            bool isVirtualMethod = isCallQualified && interfaceReceiver == NULL &&
+                                   node->i_val == 0 && func_symbol && func_symbol->type_def &&
+                                   func_symbol->type_def->is_virtual;
             bool isInterfaceDispatch = isCallQualified && interfaceReceiver != NULL;
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
@@ -7312,8 +7415,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         writeBytecodeChunk(chunk, DUP, line);
                         writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
                         writeBytecodeChunk(chunk, (uint8_t)0, line);
-                        writeBytecodeChunk(chunk, GET_INDIRECT, line);
                         writeBytecodeChunk(chunk, SWAP, line);
+
+                        const char* className = getTypeNameFromAST(recordType);
+                        if ((!className || className[0] == '\0') && recordType && recordType->token && recordType->token->value) {
+                            className = recordType->token->value;
+                        }
+                        if (!className) {
+                            className = "";
+                        }
+                        int classNameIndex = addStringConstant(chunk, className);
+                        emitConstant(chunk, classNameIndex, line);
 
                         const char* ifaceName = getTypeNameFromAST(resolvedCast);
                         if ((!ifaceName || ifaceName[0] == '\0') && resolvedCast->token && resolvedCast->token->value) {

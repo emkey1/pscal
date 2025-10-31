@@ -2709,16 +2709,250 @@ static Value vmHostCreateClosure(VM* vm) {
     return closure;
 }
 
+typedef struct RuntimeVTableEntry {
+    char* className;
+    Value* table;
+    struct RuntimeVTableEntry* next;
+} RuntimeVTableEntry;
+
+static RuntimeVTableEntry* runtimeVTables = NULL;
+
+static RuntimeVTableEntry* findRuntimeVTableEntry(const char* classNameLower) {
+    for (RuntimeVTableEntry* entry = runtimeVTables; entry; entry = entry->next) {
+        if (entry->className && strcasecmp(entry->className, classNameLower) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static RuntimeVTableEntry* createRuntimeVTableEntry(const char* classNameLower) {
+    RuntimeVTableEntry* entry = (RuntimeVTableEntry*)calloc(1, sizeof(RuntimeVTableEntry));
+    if (!entry) {
+        return NULL;
+    }
+    entry->className = strdup(classNameLower);
+    if (!entry->className) {
+        free(entry);
+        return NULL;
+    }
+    entry->table = NULL;
+    entry->next = runtimeVTables;
+    runtimeVTables = entry;
+    return entry;
+}
+
+static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* tableValue) {
+    if (!vm || !className || !tableValue) {
+        return false;
+    }
+
+    if (tableValue->type == TYPE_ARRAY && tableValue->array_val) {
+        return true;
+    }
+
+    if (!vm->procedureTable) {
+        return false;
+    }
+
+    char class_lower[MAX_SYMBOL_LENGTH];
+    strncpy(class_lower, className, sizeof(class_lower) - 1);
+    class_lower[sizeof(class_lower) - 1] = '\0';
+    toLowerString(class_lower);
+
+    size_t class_len = strlen(class_lower);
+    RuntimeVTableEntry* entry = findRuntimeVTableEntry(class_lower);
+    bool need_build = true;
+    if (entry && entry->table && entry->table->type == TYPE_ARRAY && entry->table->array_val) {
+        need_build = false;
+    }
+
+    int method_capacity = 0;
+    int method_count = 0;
+    int* addrs = NULL;
+
+    if (need_build) {
+        for (int bucket = 0; bucket < HASHTABLE_SIZE; bucket++) {
+            Symbol* sym = vm->procedureTable->buckets[bucket];
+            while (sym) {
+                Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+                if (!base || !base->name || !base->type_def) {
+                    sym = sym->next;
+                    continue;
+                }
+                if (strncasecmp(base->name, class_lower, class_len) == 0 && base->name[class_len] == '.') {
+                    int slot = base->type_def->i_val;
+                    if (slot < 0) {
+                        slot = method_count;
+                        base->type_def->i_val = slot;
+                    }
+                    if (slot >= method_capacity) {
+                        int new_capacity = method_capacity < 4 ? 4 : method_capacity * 2;
+                        while (new_capacity <= slot) {
+                            new_capacity *= 2;
+                        }
+                        int* resized = (int*)realloc(addrs, (size_t)new_capacity * sizeof(int));
+                        if (!resized) {
+                            free(addrs);
+                            return false;
+                        }
+                        for (int i = method_capacity; i < new_capacity; i++) {
+                            resized[i] = -1;
+                        }
+                        addrs = resized;
+                        method_capacity = new_capacity;
+                    }
+                    addrs[slot] = base->bytecode_address;
+                    if (slot + 1 > method_count) {
+                        method_count = slot + 1;
+                    }
+                }
+                sym = sym->next;
+            }
+        }
+
+        if (method_count == 0) {
+            AST* classType = lookupType(className);
+            if (!classType) {
+                classType = lookupType(class_lower);
+            }
+            if (classType && classType->type == AST_TYPE_DECL && classType->left) {
+                classType = classType->left;
+            }
+            while (classType && classType->type == AST_TYPE_REFERENCE && classType->right) {
+                classType = classType->right;
+            }
+            if (classType && classType->type == AST_RECORD_TYPE) {
+                for (int i = 0; i < classType->child_count; i++) {
+                    AST* member = classType->children[i];
+                    if (!member || !member->token || !member->token->value) {
+                        continue;
+                    }
+                    if (member->type != AST_PROCEDURE_DECL && member->type != AST_FUNCTION_DECL) {
+                        continue;
+                    }
+                    char method_lower[MAX_SYMBOL_LENGTH];
+                    strncpy(method_lower, member->token->value, sizeof(method_lower) - 1);
+                    method_lower[sizeof(method_lower) - 1] = '\0';
+                    toLowerString(method_lower);
+
+                    char qualified[MAX_SYMBOL_LENGTH * 2 + 2];
+                    snprintf(qualified, sizeof(qualified), "%s.%s", class_lower, method_lower);
+                    Symbol* sym = lookupProcedure(qualified);
+                    if (!sym) {
+                        snprintf(qualified, sizeof(qualified), "%s.%s", className, member->token->value);
+                        sym = lookupProcedure(qualified);
+                    }
+                    if (!sym) {
+                        continue;
+                    }
+                    Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+                    if (!base) {
+                        continue;
+                    }
+                    int slot = base->type_def ? base->type_def->i_val : -1;
+                    if (slot < 0) {
+                        slot = method_count;
+                        if (base->type_def) {
+                            base->type_def->i_val = slot;
+                        }
+                    }
+                    if (slot >= method_capacity) {
+                        int new_capacity = method_capacity < 4 ? 4 : method_capacity * 2;
+                        while (new_capacity <= slot) {
+                            new_capacity *= 2;
+                        }
+                        int* resized = (int*)realloc(addrs, (size_t)new_capacity * sizeof(int));
+                        if (!resized) {
+                            free(addrs);
+                            return false;
+                        }
+                        for (int j = method_capacity; j < new_capacity; j++) {
+                            resized[j] = -1;
+                        }
+                        addrs = resized;
+                        method_capacity = new_capacity;
+                    }
+                    addrs[slot] = base->bytecode_address;
+                    if (slot + 1 > method_count) {
+                        method_count = slot + 1;
+                    }
+                }
+            }
+        }
+
+        if (method_count == 0) {
+            free(addrs);
+            return false;
+        }
+
+        int lower = 0;
+        int upper = method_count - 1;
+        Value arr = makeArrayND(1, &lower, &upper, TYPE_INT32, NULL);
+        if (!arr.array_val) {
+            free(addrs);
+            return false;
+        }
+
+        for (int i = 0; i < method_count; i++) {
+            int addr = (i < method_capacity && addrs) ? addrs[i] : -1;
+            arr.array_val[i] = makeInt(addr >= 0 ? addr : 0);
+        }
+        free(addrs);
+
+        if (!entry) {
+            entry = createRuntimeVTableEntry(class_lower);
+            if (!entry) {
+                freeValue(&arr);
+                return false;
+            }
+        }
+
+        if (!entry->table) {
+            entry->table = (Value*)malloc(sizeof(Value));
+            if (!entry->table) {
+                freeValue(&arr);
+                return false;
+            }
+            *(entry->table) = makeNil();
+        } else {
+            freeValue(entry->table);
+        }
+        *(entry->table) = arr;
+    }
+
+    if (!entry) {
+        entry = findRuntimeVTableEntry(class_lower);
+    }
+    if (!entry || !entry->table) {
+        return false;
+    }
+
+    if (tableValue == entry->table) {
+        return true;
+    }
+
+    if (tableValue->type == TYPE_POINTER && tableValue->ptr_val == entry->table) {
+        return true;
+    }
+
+    freeValue(tableValue);
+    *tableValue = makePointer(entry->table, NULL);
+    return true;
+}
+
 static Value vmHostBoxInterface(VM* vm) {
     if (!vm) {
         return makeNil();
     }
 
     Value typeNameVal = pop(vm);
+    Value classNameVal = pop(vm);
     Value receiverVal = pop(vm);
     Value tablePtrVal = pop(vm);
 
     if (typeNameVal.type != TYPE_STRING || !typeNameVal.s_val) {
+        freeValue(&classNameVal);
         freeValue(&typeNameVal);
         freeValue(&receiverVal);
         freeValue(&tablePtrVal);
@@ -2726,8 +2960,18 @@ static Value vmHostBoxInterface(VM* vm) {
         return makeNil();
     }
 
+    if (classNameVal.type != TYPE_STRING || !classNameVal.s_val) {
+        freeValue(&classNameVal);
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        runtimeError(vm, "VM Error: Interface cast requires class type name string.");
+        return makeNil();
+    }
+
     AST* interfaceType = lookupType(typeNameVal.s_val);
     if (!interfaceType) {
+        freeValue(&classNameVal);
         freeValue(&typeNameVal);
         freeValue(&receiverVal);
         freeValue(&tablePtrVal);
@@ -2735,8 +2979,46 @@ static Value vmHostBoxInterface(VM* vm) {
         return makeNil();
     }
 
+    Value* tableSlotPtr = NULL;
+    Value* tableValuePtr = NULL;
+    if (tablePtrVal.type == TYPE_POINTER && tablePtrVal.ptr_val) {
+        tableSlotPtr = (Value*)tablePtrVal.ptr_val;
+        tableValuePtr = tableSlotPtr;
+        if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+            tableValuePtr = (Value*)tableValuePtr->ptr_val;
+        }
+    }
+
+    const char* class_name_str = (classNameVal.type == TYPE_STRING && classNameVal.s_val)
+                                     ? classNameVal.s_val
+                                     : NULL;
+    if (!tableValuePtr || !ensureRuntimeClassVTable(vm, class_name_str, tableValuePtr)) {
+        runtimeError(vm, "VM Error: Unable to initialise vtable for class '%s'.",
+                     class_name_str ? class_name_str : "<unknown>");
+        freeValue(&classNameVal);
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        return makeNil();
+    }
+    Value* resolvedTablePtr = tableSlotPtr;
+    while (resolvedTablePtr && resolvedTablePtr->type == TYPE_POINTER) {
+        resolvedTablePtr = (Value*)resolvedTablePtr->ptr_val;
+    }
+    if (!resolvedTablePtr || resolvedTablePtr->type != TYPE_ARRAY || !resolvedTablePtr->array_val) {
+        runtimeError(vm, "VM Error: Resolved vtable storage for class '%s' is invalid.",
+                     class_name_str ? class_name_str : "<unknown>");
+        freeValue(&classNameVal);
+        freeValue(&typeNameVal);
+        freeValue(&receiverVal);
+        freeValue(&tablePtrVal);
+        return makeNil();
+    }
+    tableValuePtr = resolvedTablePtr;
+
     ClosureEnvPayload* payload = createClosureEnv(2);
     if (!payload) {
+        freeValue(&classNameVal);
         freeValue(&typeNameVal);
         freeValue(&receiverVal);
         freeValue(&tablePtrVal);
@@ -2750,6 +3032,7 @@ static Value vmHostBoxInterface(VM* vm) {
         if (receiverCell) free(receiverCell);
         if (tableCell) free(tableCell);
         releaseClosureEnv(payload);
+        freeValue(&classNameVal);
         freeValue(&typeNameVal);
         freeValue(&receiverVal);
         freeValue(&tablePtrVal);
@@ -2758,7 +3041,7 @@ static Value vmHostBoxInterface(VM* vm) {
     }
 
     *receiverCell = makeCopyOfValue(&receiverVal);
-    *tableCell = makeCopyOfValue(&tablePtrVal);
+    *tableCell = makePointer(tableValuePtr, NULL);
     payload->slots[0] = receiverCell;
     payload->slots[1] = tableCell;
     payload->symbol = NULL;
@@ -2766,6 +3049,7 @@ static Value vmHostBoxInterface(VM* vm) {
     Value iface = makeInterface(interfaceType, payload);
 
     releaseClosureEnv(payload);
+    freeValue(&classNameVal);
     freeValue(&typeNameVal);
     freeValue(&receiverVal);
     freeValue(&tablePtrVal);
@@ -2812,14 +3096,14 @@ static Value vmHostInterfaceLookup(VM* vm) {
     }
 
     Value* tableValue = tableCell;
-    if (tableCell->type == TYPE_POINTER) {
-        if (!tableCell->ptr_val) {
+    while (tableValue && tableValue->type == TYPE_POINTER) {
+        if (!tableValue->ptr_val) {
             freeValue(&methodIndexVal);
             freeValue(&ifaceVal);
             runtimeError(vm, "VM Error: Interface method table pointer is nil.");
             return makeNil();
         }
-        tableValue = (Value*)tableCell->ptr_val;
+        tableValue = (Value*)tableValue->ptr_val;
     }
 
     if (!tableValue || tableValue->type != TYPE_ARRAY || !tableValue->array_val) {
