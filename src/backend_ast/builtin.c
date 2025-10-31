@@ -5831,6 +5831,7 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
             break;
         }
         const char *name = (thread->name[0] != '\0') ? thread->name : "";
+        const bool reported_idle = thread->idle || (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
         ok = jsonBufferAppendFormat(&buffer, "{\"id\": %d, \"name\": ", i);
         if (ok) {
             ok = jsonAppendEscapedString(&buffer, name);
@@ -5839,7 +5840,7 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
             ok = jsonBufferAppendFormat(&buffer,
                                         ", \"active\": %s, \"idle\": %s, \"status_success\": %s, \"ready_for_reuse\": %s, \"pool_generation\": %d}",
                                         thread->active ? "true" : "false",
-                                        thread->idle ? "true" : "false",
+                                        reported_idle ? "true" : "false",
                                         thread->statusFlag ? "true" : "false",
                                         thread->readyForReuse ? "true" : "false",
                                         thread->poolGeneration);
