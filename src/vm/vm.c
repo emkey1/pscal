@@ -5125,6 +5125,30 @@ dispatch_switch:
                     }
                     comparison_succeeded = true;
                 }
+                // Closure and NIL comparison
+                else if ((a_val.type == TYPE_CLOSURE || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_CLOSURE || b_val.type == TYPE_NIL)) {
+                    bool closures_equal = false;
+                    if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
+                        closures_equal = true;
+                    } else if (a_val.type == TYPE_CLOSURE && b_val.type == TYPE_CLOSURE) {
+                        closures_equal = (a_val.closure.entry_offset == b_val.closure.entry_offset) &&
+                                         (a_val.closure.symbol == b_val.closure.symbol) &&
+                                         (a_val.closure.env == b_val.closure.env);
+                    } else {
+                        closures_equal = false;
+                    }
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(closures_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!closures_equal);
+                    } else {
+                        runtimeError(vm, "Runtime Error: Invalid operator for closure comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
                 // Pointer and NIL comparison
                 else if ((a_val.type == TYPE_POINTER || a_val.type == TYPE_NIL) &&
                          (b_val.type == TYPE_POINTER || b_val.type == TYPE_NIL)) {
