@@ -305,6 +305,7 @@ static Token* makeIdentToken(const char *s) {
     t->length = t->value ? strlen(t->value) : 0;
     t->line = 0;
     t->column = 0;
+    t->is_char_code = false;
     return t;
 }
 

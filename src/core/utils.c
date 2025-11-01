@@ -1217,6 +1217,7 @@ Token *newToken(TokenType type, const char *value, int line, int column) { // Ad
     }
     token->line = line;     // <<< SET LINE
     token->column = column; // <<< SET COLUMN
+    token->is_char_code = false;
     return token;
 }
 
@@ -1228,6 +1229,7 @@ Token *copyToken(const Token *orig_token) { // Renamed parameter to avoid confli
 
     new_token->type = orig_token->type;
     new_token->length = orig_token->length;
+    new_token->is_char_code = orig_token->is_char_code;
     if (orig_token->value) {
         new_token->value = (char*)malloc(orig_token->length + 1);
         if (!new_token->value) {

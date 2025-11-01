@@ -186,6 +186,7 @@ typedef struct {
     size_t length;
     int line;
     int column;
+    bool is_char_code;
 } Token;
 
 /* =======================

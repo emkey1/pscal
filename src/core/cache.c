@@ -726,6 +726,7 @@ static Token* readToken(FILE* f) {
     tok->length = (size_t)len;
     tok->line = 0;
     tok->column = 0;
+    tok->is_char_code = false;
     return tok;
 }
 
