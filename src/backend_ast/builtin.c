@@ -982,6 +982,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"blockread", vmBuiltinBlockread},
     {"blockwrite", vmBuiltinBlockwrite},
     {"sizeof", vmBuiltinSizeof},
+    {"filesize", vmBuiltinFilesize},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -4143,6 +4144,93 @@ Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinFilesize(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "FileSize requires exactly 1 argument.");
+        last_io_error = 1;
+        return makeInt(0);
+    }
+
+    Value *fileValue = NULL;
+    if (args[0].type == TYPE_POINTER && args[0].ptr_val) {
+        fileValue = (Value*)args[0].ptr_val;
+    } else if (args[0].type == TYPE_FILE) {
+        fileValue = (Value*)&args[0];
+    }
+
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "FileSize argument must be a file variable.");
+        last_io_error = 1;
+        return makeInt(0);
+    }
+
+    long long sizeBytes = -1;
+
+    if (fileValue->f_val) {
+        int fd = fileno(fileValue->f_val);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) == 0) {
+                sizeBytes = (long long)st.st_size;
+            }
+        }
+
+        if (sizeBytes < 0) {
+            errno = 0;
+#ifdef _WIN32
+            long current = ftell(fileValue->f_val);
+            if (current >= 0L) {
+                if (fseek(fileValue->f_val, 0L, SEEK_END) == 0) {
+                    long end = ftell(fileValue->f_val);
+                    if (end >= 0L) {
+                        sizeBytes = (long long)end;
+                    }
+                }
+                fseek(fileValue->f_val, current, SEEK_SET);
+            }
+#else
+            off_t current = ftello(fileValue->f_val);
+            if (current >= (off_t)0) {
+                if (fseeko(fileValue->f_val, 0, SEEK_END) == 0) {
+                    off_t end = ftello(fileValue->f_val);
+                    if (end >= (off_t)0) {
+                        sizeBytes = (long long)end;
+                    }
+                }
+                fseeko(fileValue->f_val, current, SEEK_SET);
+            }
+#endif
+        }
+    } else if (fileValue->filename) {
+        struct stat st;
+        if (stat(fileValue->filename, &st) == 0) {
+            sizeBytes = (long long)st.st_size;
+        }
+    }
+
+    if (sizeBytes < 0) {
+        last_io_error = errno ? errno : 1;
+        return makeInt(0);
+    }
+
+    last_io_error = 0;
+
+    long long result = sizeBytes;
+    int recordSize = fileValue->record_size;
+    if (recordSize > 0 && (fileValue->record_size_explicit || fileValue->element_type != TYPE_VOID)) {
+        result = sizeBytes / recordSize;
+    }
+
+    if (result < 0) {
+        result = 0;
+    }
+    if (result > INT_MAX) {
+        result = INT_MAX;
+    }
+
+    return makeInt(result);
+}
+
 Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
     FILE* stream = NULL;
 
@@ -7168,6 +7256,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadStatsJson", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("BlockRead", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("BlockWrite", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("FileSize", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);

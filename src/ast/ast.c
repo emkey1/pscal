@@ -1650,6 +1650,7 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
         strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "filesize")  == 0 ||
         strcasecmp(name, "paramcount")== 0 ||
         strcasecmp(name, "length")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
