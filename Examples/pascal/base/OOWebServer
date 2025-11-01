@@ -71,6 +71,7 @@ end;
 
 const
     MaxQueueCapacity = 256;
+    BufferSize = 4096;
 var
     Port: integer = 5555;
     RootDir: string;
@@ -599,7 +600,7 @@ end;
 function loadFileToString(const path: string; var data: string): integer;
 var
     f: file;
-    buffer: array[0..4095] of byte;
+    buffer: array[0..BufferSize-1] of byte;
     bytesRead, status, idx: integer;
     chunk: string;
 begin
@@ -615,7 +616,7 @@ begin
 
     data := '';
     repeat
-        {$I-} blockread(f, buffer, sizeof(buffer), bytesRead); {$I+}
+        {$I-} blockread(f, buffer, SizeOf(buffer), bytesRead); {$I+}
         status := IOResult;
         if (status <> 0) then
         begin
@@ -656,7 +657,7 @@ begin
     while (offset <= total) do
     begin
         chunkSize := total - offset + 1;
-        if (chunkSize > 4096) then chunkSize := 4096;
+        if (chunkSize > SizeOf(buffer)) then chunkSize := SizeOf(buffer);
         {$I-} blockwrite(f, data[offset], chunkSize); {$I+}
         status := IOResult;
         if (status <> 0) then
