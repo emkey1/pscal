@@ -718,6 +718,7 @@ static AST *parseStringLiteralSequence(ReaParser *p) {
     tok->length = totalLen;
     tok->line = startLine;
     tok->column = 0;
+    tok->is_char_code = false;
 
     AST *node = newASTNode(AST_STRING, tok);
     node->i_val = (int)totalLen;

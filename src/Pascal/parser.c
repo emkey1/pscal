@@ -3755,6 +3755,14 @@ AST *factor(Parser *parser) {
         setTypeAST(node, (initialTokenType == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER);
         return node; // <<< RETURN IMMEDIATELY
 
+    } else if (initialTokenType == TOKEN_STRING_CONST && initialToken->is_char_code) {
+        Token *c = copyToken(initialToken);
+        eat(parser, initialTokenType);
+        node = newASTNode(AST_STRING, c);
+        freeToken(c);
+        setTypeAST(node, TYPE_STRING);
+        return node; // <<< RETURN IMMEDIATELY
+
     } else if (initialTokenType == TOKEN_STRING_CONST) {
         /* Treat zero-length strings as TYPE_STRING and single-character strings as TYPE_CHAR */
         size_t len = (initialToken->value ? strlen(initialToken->value) : 0);

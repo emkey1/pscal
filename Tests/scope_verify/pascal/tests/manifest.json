@@ -328,6 +328,15 @@
       "expected_stdout": "first=5\nsecond=5\ndone"
     },
     {
+      "id": "integration_char_code_concat",
+      "name": "Char-code literal concatenation in call arguments",
+      "category": "integration",
+      "description": "Ensure '#10' style char-code literals concatenate with strings inside argument expressions.",
+      "expect": "runtime_ok",
+      "code": "program IntegrationCharCodeConcat;\nvar\n  value: Integer;\nbegin\n  value := 1;\n  Write('a' + #10, value);\nend.",
+      "expected_stdout": "a\n1"
+    },
+    {
       "id": "integration_nested_scope_mix",
       "name": "Nested routines with shadowed consts and types",
       "category": "integration",

@@ -1188,6 +1188,27 @@ add({
 # ---------------------------------------------------------------------------
 
 add({
+    "id": "integration_char_code_concat",
+    "name": "Char-code literal concatenation in call arguments",
+    "category": "integration",
+    "description": "Ensure '#10' style char-code literals concatenate with strings inside argument expressions.",
+    "expect": "runtime_ok",
+    "code": """
+        program IntegrationCharCodeConcat;
+        var
+          value: Integer;
+        begin
+          value := 1;
+          Write('a' + #10, value);
+        end.
+    """,
+    "expected_stdout": """
+        a
+        1
+    """,
+})
+
+add({
     "id": "integration_nested_scope_mix",
     "name": "Nested routines with shadowed consts and types",
     "category": "integration",
