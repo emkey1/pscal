@@ -337,6 +337,15 @@
       "expected_stdout": "a\n1"
     },
     {
+      "id": "integration_adjacent_string_literals",
+      "name": "Adjacent string tokens concatenate",
+      "category": "integration",
+      "description": "Adjacent string and char-code tokens should fold into a single literal before semantic checks.",
+      "expect": "runtime_ok",
+      "code": "program AdjacentLiteralRegression;\nvar\n  combined: string;\n  text: string;\n  ch: Char;\nbegin\n  printf('A'+#10'B');\n  writeln;\n  combined := 'A'+#10'B';\n  text := 'Line1'#10'Line2';\n  ch := #0'';\n  writeln('combined_len=', Length(combined));\n  writeln('text_len=', Length(text));\n  writeln('text_ord6=', Ord(text[6]));\n  writeln('char_ord=', Ord(ch));\nend.",
+      "expected_stdout": "A\nB\ncombined_len=3\ntext_len=11\ntext_ord6=10\nchar_ord=0"
+    },
+    {
       "id": "integration_nested_scope_mix",
       "name": "Nested routines with shadowed consts and types",
       "category": "integration",
