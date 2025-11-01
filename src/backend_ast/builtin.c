@@ -105,6 +105,84 @@ static const char* builtinValueToCString(const Value* value) {
     return NULL;
 }
 
+static bool valueIsByteCompatible(const Value* value) {
+    if (!value) {
+        return false;
+    }
+    switch (value->type) {
+        case TYPE_BYTE:
+        case TYPE_UINT8:
+        case TYPE_INT8:
+        case TYPE_CHAR:
+        case TYPE_BOOLEAN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static unsigned char valueToByte(const Value* value) {
+    if (!value) {
+        return 0;
+    }
+    switch (value->type) {
+        case TYPE_CHAR:
+            return (unsigned char)value->c_val;
+        case TYPE_BOOLEAN:
+            return value->i_val ? 1u : 0u;
+        default:
+            if (IS_INTLIKE(*value)) {
+                return (unsigned char)AS_INTEGER(*value);
+            }
+            return 0u;
+    }
+}
+
+static void assignByteToValue(Value* target, unsigned char byte) {
+    if (!target) {
+        return;
+    }
+    switch (target->type) {
+        case TYPE_CHAR:
+            target->c_val = (unsigned char)byte;
+            SET_INT_VALUE(target, target->c_val);
+            break;
+        case TYPE_BOOLEAN:
+            SET_INT_VALUE(target, byte ? 1 : 0);
+            break;
+        default:
+            SET_INT_VALUE(target, byte);
+            break;
+    }
+}
+
+static void assignCountToResult(Value* slot, long long count) {
+    if (!slot) {
+        return;
+    }
+    if (slot->type == TYPE_POINTER && slot->ptr_val) {
+        assignCountToResult((Value*)slot->ptr_val, count);
+        return;
+    }
+    if (isRealType(slot->type)) {
+        SET_REAL_VALUE(slot, (long double)count);
+        return;
+    }
+    if (slot->type == TYPE_CHAR) {
+        slot->c_val = (unsigned char)count;
+        SET_INT_VALUE(slot, slot->c_val);
+        return;
+    }
+    if (slot->type == TYPE_BOOLEAN) {
+        SET_INT_VALUE(slot, count != 0 ? 1 : 0);
+        return;
+    }
+    SET_INT_VALUE(slot, count);
+    if (slot->type == TYPE_VOID || slot->type == TYPE_UNKNOWN || slot->type == TYPE_NIL) {
+        slot->type = TYPE_INT32;
+    }
+}
+
 static bool builtinSizeForVarType(VarType type, long long *out_bytes) {
     if (!out_bytes) return false;
     switch (type) {
@@ -901,6 +979,8 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
     {"atan2", vmBuiltinAtan2},
+    {"blockread", vmBuiltinBlockread},
+    {"blockwrite", vmBuiltinBlockwrite},
     {"sizeof", vmBuiltinSizeof},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
@@ -4105,6 +4185,406 @@ Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
     return makeBoolean(false);
 }
 
+Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
+    unsigned char* tempBuffer = NULL;
+    Value* resultSlot = NULL;
+    Value* fileValue = NULL;
+    Value* bufferValue = NULL;
+    unsigned char* rawPointer = NULL;
+    FILE* stream = NULL;
+    bool parameterError = false;
+    bool performedIO = false;
+    bool bufferIsRawPointer = false;
+    size_t bytesProcessed = 0;
+    long long recordsProcessed = 0;
+
+    last_io_error = 0;
+
+    if (arg_count < 3 || arg_count > 4) {
+        runtimeError(vm, "BlockRead requires 3 or 4 arguments.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "BlockRead: first argument must be a VAR file parameter.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    fileValue = (Value*)args[0].ptr_val;
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "BlockRead: first argument must reference a file variable.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    if (!fileValue->f_val) {
+        runtimeError(vm, "BlockRead: file is not open.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    stream = fileValue->f_val;
+
+    if (!IS_INTLIKE(args[2])) {
+        runtimeError(vm, "BlockRead: count must be an integer value.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    long long requestedRecords = AS_INTEGER(args[2]);
+    if (requestedRecords < 0) {
+        requestedRecords = 0;
+    }
+
+    if (arg_count == 4) {
+        if (args[3].type != TYPE_POINTER || !args[3].ptr_val) {
+            runtimeError(vm, "BlockRead: result argument must be a VAR parameter.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        resultSlot = (Value*)args[3].ptr_val;
+    }
+
+    if (args[1].type != TYPE_POINTER || !args[1].ptr_val) {
+        runtimeError(vm, "BlockRead: buffer must be passed by reference.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        bufferIsRawPointer = true;
+        rawPointer = (unsigned char*)args[1].ptr_val;
+    } else {
+        bufferValue = (Value*)args[1].ptr_val;
+        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            bufferIsRawPointer = true;
+            rawPointer = (unsigned char*)bufferValue->ptr_val;
+        }
+    }
+
+    if (!bufferIsRawPointer) {
+        if (!bufferValue || bufferValue->type != TYPE_ARRAY) {
+            runtimeError(vm, "BlockRead: buffer must be an array of byte-sized elements or a character pointer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+    }
+
+    int recordSize = fileValue->record_size > 0 ? fileValue->record_size : PSCAL_DEFAULT_FILE_RECORD_SIZE;
+    if (recordSize <= 0) {
+        recordSize = 1;
+    }
+
+    unsigned long long requestedRecordsULL = (unsigned long long)requestedRecords;
+    unsigned long long requestedBytesULL = requestedRecordsULL * (unsigned long long)recordSize;
+    size_t requestedBytes = (requestedBytesULL > SIZE_MAX) ? SIZE_MAX : (size_t)requestedBytesULL;
+
+    if (bufferIsRawPointer) {
+        if (!rawPointer && requestedBytes > 0) {
+            runtimeError(vm, "BlockRead: buffer pointer is NULL.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        errno = 0;
+        performedIO = true;
+        bytesProcessed = (requestedBytes > 0) ? fread(rawPointer, 1, requestedBytes, stream) : 0;
+        if (bytesProcessed < requestedBytes && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        }
+    } else {
+        size_t available = 0;
+        if (bufferValue->dimensions > 1) {
+            runtimeError(vm, "BlockRead: multidimensional arrays are not supported.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        int totalElements = calculateArrayTotalSize(bufferValue);
+        if (totalElements > 0) {
+            available = (size_t)totalElements;
+        }
+        size_t requestedRecordsSize = (requestedRecordsULL > (unsigned long long)SIZE_MAX) ? SIZE_MAX : (size_t)requestedRecordsULL;
+        size_t bytesToRead = requestedRecordsSize;
+        if (bytesToRead > available) {
+            bytesToRead = available;
+        }
+        if (recordSize != 1 && bytesToRead > 0) {
+            runtimeError(vm, "BlockRead: record sizes larger than 1 require a raw pointer buffer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        if (bytesToRead > 0) {
+            bool elementByteCompatible =
+                bufferValue->element_type == TYPE_BYTE ||
+                bufferValue->element_type == TYPE_UINT8 ||
+                bufferValue->element_type == TYPE_INT8 ||
+                bufferValue->element_type == TYPE_CHAR ||
+                bufferValue->element_type == TYPE_BOOLEAN;
+            if (!elementByteCompatible && bufferValue->array_val && available > 0) {
+                elementByteCompatible = valueIsByteCompatible(&bufferValue->array_val[0]);
+            }
+            if (!elementByteCompatible) {
+                runtimeError(vm, "BlockRead: buffer array must contain byte-sized elements.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            tempBuffer = (unsigned char*)malloc(bytesToRead);
+            if (!tempBuffer) {
+                runtimeError(vm, "BlockRead: memory allocation failed.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            errno = 0;
+            performedIO = true;
+            bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
+            if (bytesProcessed < bytesToRead && ferror(stream)) {
+                last_io_error = errno ? errno : 1;
+            }
+            for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
+                assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+            }
+        } else {
+            performedIO = true;
+            bytesProcessed = 0;
+        }
+    }
+
+    if (recordSize > 0) {
+        recordsProcessed = (long long)(bytesProcessed / (size_t)recordSize);
+    } else {
+        recordsProcessed = (long long)bytesProcessed;
+    }
+
+cleanup:
+    if (tempBuffer) {
+        free(tempBuffer);
+        tempBuffer = NULL;
+    }
+
+    if (!parameterError) {
+        if (!last_io_error && stream && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        } else if (last_io_error != 1) {
+            last_io_error = 0;
+        }
+        if (resultSlot && performedIO) {
+            assignCountToResult(resultSlot, recordsProcessed);
+        }
+    }
+
+    return makeVoid();
+}
+
+Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
+    unsigned char* tempBuffer = NULL;
+    Value* fileValue = NULL;
+    Value* bufferValue = NULL;
+    Value* resultSlot = NULL;
+    unsigned char* rawPointer = NULL;
+    FILE* stream = NULL;
+    bool parameterError = false;
+    bool performedIO = false;
+    bool bufferIsRawPointer = false;
+    size_t bytesProcessed = 0;
+    long long recordsProcessed = 0;
+
+    last_io_error = 0;
+
+    if (arg_count < 3 || arg_count > 4) {
+        runtimeError(vm, "BlockWrite requires 3 or 4 arguments.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "BlockWrite: first argument must be a VAR file parameter.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    fileValue = (Value*)args[0].ptr_val;
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "BlockWrite: first argument must reference a file variable.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    if (!fileValue->f_val) {
+        runtimeError(vm, "BlockWrite: file is not open.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    stream = fileValue->f_val;
+
+    if (!IS_INTLIKE(args[2])) {
+        runtimeError(vm, "BlockWrite: count must be an integer value.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    long long requestedRecords = AS_INTEGER(args[2]);
+    if (requestedRecords < 0) {
+        requestedRecords = 0;
+    }
+
+    if (arg_count == 4) {
+        if (args[3].type != TYPE_POINTER || !args[3].ptr_val) {
+            runtimeError(vm, "BlockWrite: result argument must be a VAR parameter.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        resultSlot = (Value*)args[3].ptr_val;
+    }
+
+    if (args[1].type != TYPE_POINTER || !args[1].ptr_val) {
+        runtimeError(vm, "BlockWrite: buffer must be passed by reference.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        bufferIsRawPointer = true;
+        rawPointer = (unsigned char*)args[1].ptr_val;
+    } else {
+        bufferValue = (Value*)args[1].ptr_val;
+        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            bufferIsRawPointer = true;
+            rawPointer = (unsigned char*)bufferValue->ptr_val;
+        }
+    }
+
+    if (!bufferIsRawPointer) {
+        if (!bufferValue || bufferValue->type != TYPE_ARRAY) {
+            runtimeError(vm, "BlockWrite: buffer must be an array of byte-sized elements or a character pointer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+    }
+
+    int recordSize = fileValue->record_size > 0 ? fileValue->record_size : PSCAL_DEFAULT_FILE_RECORD_SIZE;
+    if (recordSize <= 0) {
+        recordSize = 1;
+    }
+
+    unsigned long long requestedRecordsULL = (unsigned long long)requestedRecords;
+    unsigned long long requestedBytesULL = requestedRecordsULL * (unsigned long long)recordSize;
+    size_t requestedBytes = (requestedBytesULL > SIZE_MAX) ? SIZE_MAX : (size_t)requestedBytesULL;
+
+    if (bufferIsRawPointer) {
+        if (!rawPointer && requestedBytes > 0) {
+            runtimeError(vm, "BlockWrite: buffer pointer is NULL.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        errno = 0;
+        performedIO = true;
+        bytesProcessed = (requestedBytes > 0) ? fwrite(rawPointer, 1, requestedBytes, stream) : 0;
+        if (bytesProcessed < requestedBytes && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        }
+    } else {
+        size_t available = 0;
+        if (bufferValue->dimensions > 1) {
+            runtimeError(vm, "BlockWrite: multidimensional arrays are not supported.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        int totalElements = calculateArrayTotalSize(bufferValue);
+        if (totalElements > 0) {
+            available = (size_t)totalElements;
+        }
+        size_t requestedRecordsSize = (requestedRecordsULL > (unsigned long long)SIZE_MAX) ? SIZE_MAX : (size_t)requestedRecordsULL;
+        size_t bytesToWrite = requestedRecordsSize;
+        if (bytesToWrite > available) {
+            bytesToWrite = available;
+        }
+        if (recordSize != 1 && bytesToWrite > 0) {
+            runtimeError(vm, "BlockWrite: record sizes larger than 1 require a raw pointer buffer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        if (bytesToWrite > 0) {
+            bool elementByteCompatible =
+                bufferValue->element_type == TYPE_BYTE ||
+                bufferValue->element_type == TYPE_UINT8 ||
+                bufferValue->element_type == TYPE_INT8 ||
+                bufferValue->element_type == TYPE_CHAR ||
+                bufferValue->element_type == TYPE_BOOLEAN;
+            if (!elementByteCompatible && bufferValue->array_val && available > 0) {
+                elementByteCompatible = valueIsByteCompatible(&bufferValue->array_val[0]);
+            }
+            if (!elementByteCompatible) {
+                runtimeError(vm, "BlockWrite: buffer array must contain byte-sized elements.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            tempBuffer = (unsigned char*)malloc(bytesToWrite);
+            if (!tempBuffer) {
+                runtimeError(vm, "BlockWrite: memory allocation failed.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
+                tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
+            }
+            errno = 0;
+            performedIO = true;
+            bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
+            if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                last_io_error = errno ? errno : 1;
+            }
+        } else {
+            performedIO = true;
+            bytesProcessed = 0;
+        }
+    }
+
+    if (recordSize > 0) {
+        recordsProcessed = (long long)(bytesProcessed / (size_t)recordSize);
+    } else {
+        recordsProcessed = (long long)bytesProcessed;
+    }
+
+cleanup:
+    if (tempBuffer) {
+        free(tempBuffer);
+        tempBuffer = NULL;
+    }
+
+    if (!parameterError) {
+        if (!last_io_error && stream && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        } else if (last_io_error != 1) {
+            last_io_error = 0;
+        }
+        if (resultSlot && performedIO) {
+            assignCountToResult(resultSlot, recordsProcessed);
+        }
+    }
+
+    return makeVoid();
+}
+
 Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
@@ -6686,6 +7166,8 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadCancel", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStats", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStatsJson", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockRead", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockWrite", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);

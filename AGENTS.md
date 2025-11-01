@@ -19,6 +19,7 @@
 - Many compiler helpers rely on implicit global state; when adding new stacks (like the vtable tracker), ensure push/pop happen on every exit path.
 - Keep allocations paired with frees; leak auditors assume matcher functions like `freeVTableClassList` exist.
 - When adding VM builtins, append them to the end of the dispatch tables/registration arrays so legacy builtin IDs remain stable.
+  Never insert new entries mid-table—shifting established builtin IDs breaks existing bytecode, so this **must never happen**.
 
 ## Workflow Tips
 - Always read existing globals before introducing new ones—regressions often come from missing reset logic during module/unit compiles.

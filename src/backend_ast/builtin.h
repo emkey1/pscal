@@ -257,6 +257,8 @@ Value vmBuiltinAppend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinClose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRename(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinErase(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBlockread(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinBlockwrite(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRead(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinReadln(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinWrite(struct VM_s* vm, int arg_count, Value* args);
