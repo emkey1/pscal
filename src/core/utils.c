@@ -466,6 +466,10 @@ static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
         return false;
     }
 
+    if (type == TYPE_INTEGER) {
+        type = TYPE_INT32;
+    }
+
     switch (type) {
         case TYPE_INT8:
         case TYPE_UINT8:
@@ -481,7 +485,6 @@ static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
             return true;
         case TYPE_INT32:
         case TYPE_UINT32:
-        case TYPE_INTEGER:
             *out_bytes = 4;
             return true;
         case TYPE_INT64:
