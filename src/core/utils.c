@@ -138,6 +138,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_CARET:         return "CARET";
         case TOKEN_NIL:           return "NIL";
         case TOKEN_INLINE:       return "INLINE";
+        case TOKEN_FORWARD:      return "FORWARD";
         case TOKEN_SPAWN:        return "SPAWN";
         case TOKEN_JOIN:         return "JOIN";
         case TOKEN_AT:           return "AT";

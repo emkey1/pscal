@@ -4985,7 +4985,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
-            if (!node->token || !node->token->value) break;
+            if (!node->token || !node->token->value || node->is_forward_decl) break;
             DBG_PRINTF("[dbg] compile decl %s\n", node->token->value);
             writeBytecodeChunk(chunk, JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
@@ -6126,7 +6126,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // Ensure the target procedure is compiled so its address is available
-            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def) {
+            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def &&
+                !proc_symbol->type_def->is_forward_decl) {
                 compileDefinedFunction(proc_symbol->type_def, chunk,
                                       getLine(proc_symbol->type_def));
             }
