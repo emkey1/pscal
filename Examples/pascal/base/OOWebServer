@@ -77,7 +77,6 @@ var
     RootDir: string;
     IndexPath: string;
     Body: string; // Default index.html body
-    GFile: text;
     ConfiguredAssetRoot: string = '@PSCAL_INSTALL_ROOT_RESOLVED@/misc/htdocs';
     //ConfiguredAssetRoot: string = '/usr/local/pscal/misc/htdocs';
 
@@ -691,9 +690,7 @@ begin
     
     if (copied = 0) or (fileexists(IndexPath) = 0) then
     begin
-        GFile := fopen(IndexPath, 'w');
-        fprintf(GFile, '%s' + #10, Body);
-        fclose(GFile);
+        saveStringToFile(IndexPath, Body);
     end;
 end;
 
@@ -736,9 +733,7 @@ begin
         mkdir(RootDir);
         if (fileexists(IndexPath) = 0) then
         begin
-            GFile := fopen(IndexPath, 'w');
-            fprintf(GFile, '%s' + #10, Body);
-            fclose(GFile);
+            saveStringToFile(IndexPath, Body);
         end;
         
         if (paramcount >= 3) then
