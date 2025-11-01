@@ -3372,7 +3372,8 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
     }
     fileVarLValue->record_size = new_record_size;
 
-    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit ||
+                           fileVarLValue->element_type != TYPE_VOID;
     const char* mode = use_binary_mode ? "wb" : "w";
 
     FILE* f = fopen(fileVarLValue->filename, mode);
@@ -4156,7 +4157,8 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     }
     fileVarLValue->record_size = new_record_size;
 
-    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit ||
+                           fileVarLValue->element_type != TYPE_VOID;
     const char* mode = use_binary_mode ? "rb" : "r";
 
     FILE* f = fopen(fileVarLValue->filename, mode);
@@ -5100,13 +5102,16 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             start_index = 2;
             if (args[1].type == TYPE_FILE) first_arg_is_file_by_value = true;
             file_value = first;
-            if (file_value->element_type != TYPE_VOID) {
-                long long size_bytes = 0;
-                if (builtinSizeForVarType(file_value->element_type, &size_bytes) && size_bytes > 0 &&
-                    (size_t)size_bytes <= sizeof(long double)) {
-                    binary_file = true;
-                    binary_element_type = file_value->element_type;
-                    binary_element_size = (size_t)size_bytes;
+            if (file_value->element_type != TYPE_VOID && file_value->element_type != TYPE_UNKNOWN) {
+                bool has_typed_metadata = file_value->record_size_explicit || file_value->element_type_def != NULL;
+                if (has_typed_metadata) {
+                    long long size_bytes = 0;
+                    if (builtinSizeForVarType(file_value->element_type, &size_bytes) && size_bytes > 0 &&
+                        (size_t)size_bytes <= sizeof(long double)) {
+                        binary_file = true;
+                        binary_element_type = file_value->element_type;
+                        binary_element_size = (size_t)size_bytes;
+                    }
                 }
             }
         }

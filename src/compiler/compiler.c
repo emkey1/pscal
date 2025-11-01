@@ -33,6 +33,8 @@ static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
 
+static AST* resolveTypeAlias(AST* type_node);
+
 typedef struct {
     int constant_index;
     int original_address;
@@ -1204,6 +1206,43 @@ static void emitGlobalVarDefinition(AST* var_decl,
                 freeValue(&len_val);
             }
             emitConstantIndex16(chunk, addIntConstant(chunk, max_len), line);
+        } else if (var_decl->var_type == TYPE_FILE) {
+            VarType file_element_type = TYPE_VOID;
+            const char *file_element_name = "";
+            bool is_text_file = false;
+
+            AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
+            if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
+                resolved_file_type = resolveTypeAlias(resolved_file_type->left);
+            }
+            if (resolved_file_type && resolved_file_type->type == AST_VAR_DECL && resolved_file_type->right) {
+                resolved_file_type = resolveTypeAlias(resolved_file_type->right);
+            }
+            if (resolved_file_type && resolved_file_type->type == AST_VARIABLE &&
+                resolved_file_type->token && resolved_file_type->token->value) {
+                const char *file_token = resolved_file_type->token->value;
+                if (strcasecmp(file_token, "file") == 0 && resolved_file_type->right) {
+                    AST *element_node = resolveTypeAlias(resolved_file_type->right);
+                    AST *source_node = element_node ? element_node : resolved_file_type->right;
+                    if (source_node && source_node->var_type != TYPE_VOID && source_node->var_type != TYPE_UNKNOWN) {
+                        file_element_type = source_node->var_type;
+                    }
+                    if (source_node && source_node->token && source_node->token->value) {
+                        file_element_name = source_node->token->value;
+                    }
+                } else if (strcasecmp(file_token, "text") == 0) {
+                    is_text_file = true;
+                    file_element_type = TYPE_VOID;
+                    file_element_name = "";
+                }
+            }
+
+            writeBytecodeChunk(chunk, (uint8_t)file_element_type, line);
+            if (!is_text_file && file_element_name && file_element_name[0]) {
+                emitConstantIndex16(chunk, addStringConstant(chunk, file_element_name), line);
+            } else {
+                emitShort(chunk, 0xFFFF, line);
+            }
         }
     }
 
@@ -4807,6 +4846,44 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+
+                        VarType file_element_type = TYPE_VOID;
+                        const char *file_element_name = "";
+                        bool is_text_file = false;
+
+                        AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
+                        if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
+                            resolved_file_type = resolveTypeAlias(resolved_file_type->left);
+                        }
+                        if (resolved_file_type && resolved_file_type->type == AST_VAR_DECL && resolved_file_type->right) {
+                            resolved_file_type = resolveTypeAlias(resolved_file_type->right);
+                        }
+                        if (resolved_file_type && resolved_file_type->type == AST_VARIABLE &&
+                            resolved_file_type->token && resolved_file_type->token->value) {
+                            const char *type_name = resolved_file_type->token->value;
+                            if (strcasecmp(type_name, "file") == 0 && resolved_file_type->right) {
+                                AST *element_node = resolveTypeAlias(resolved_file_type->right);
+                                AST *source_node = element_node ? element_node : resolved_file_type->right;
+                                if (source_node && source_node->var_type != TYPE_VOID && source_node->var_type != TYPE_UNKNOWN) {
+                                    file_element_type = source_node->var_type;
+                                }
+                                if (source_node && source_node->token && source_node->token->value) {
+                                    file_element_name = source_node->token->value;
+                                }
+                            } else if (strcasecmp(type_name, "text") == 0) {
+                                is_text_file = true;
+                                file_element_type = TYPE_VOID;
+                                file_element_name = "";
+                            }
+                        }
+
+                        writeBytecodeChunk(chunk, (uint8_t)file_element_type, getLine(varNameNode));
+                        if (!is_text_file && file_element_name && file_element_name[0]) {
+                            int type_name_index = addStringConstant(chunk, file_element_name);
+                            emitConstantIndex16(chunk, type_name_index, getLine(varNameNode));
+                        } else {
+                            emitShort(chunk, 0xFFFF, getLine(varNameNode));
+                        }
                     } else if (node->var_type == TYPE_POINTER) {
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, getLine(varNameNode));

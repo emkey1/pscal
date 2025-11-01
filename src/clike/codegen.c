@@ -795,6 +795,27 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
             } else if (node->var_type == TYPE_FILE) {
                 writeBytecodeChunk(chunk, INIT_LOCAL_FILE, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+
+                VarType file_element_type = TYPE_VOID;
+                const char* element_type_name = "";
+
+                if (node->right && node->right->token.type != CLIKE_TOKEN_TEXT) {
+                    if (node->element_type != TYPE_UNKNOWN && node->element_type != TYPE_VOID) {
+                        file_element_type = node->element_type;
+                        element_type_name = clikeTokenTypeToTypeName(node->right->token.type);
+                        if (!element_type_name || element_type_name[0] == '\0') {
+                            element_type_name = varTypeToString(file_element_type);
+                        }
+                    }
+                }
+
+                writeBytecodeChunk(chunk, (uint8_t)file_element_type, node->token.line);
+                if (file_element_type != TYPE_VOID && element_type_name && element_type_name[0] != '\0') {
+                    int type_name_index = addStringConstant(chunk, element_type_name);
+                    emitShort(chunk, (uint16_t)type_name_index, node->token.line);
+                } else {
+                    emitShort(chunk, 0xFFFF, node->token.line);
+                }
                 if (node->left) {
                     compileExpression(node->left, chunk, ctx);
                     writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
@@ -884,6 +905,27 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         int elemNameIdx = addStringConstant(chunk, "");
         writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+    } else if (node->var_type == TYPE_FILE) {
+        VarType file_element_type = TYPE_VOID;
+        const char* element_type_name = "";
+
+        if (node->right && node->right->token.type != CLIKE_TOKEN_TEXT) {
+            if (node->element_type != TYPE_UNKNOWN && node->element_type != TYPE_VOID) {
+                file_element_type = node->element_type;
+                element_type_name = clikeTokenTypeToTypeName(node->right->token.type);
+                if (!element_type_name || element_type_name[0] == '\0') {
+                    element_type_name = varTypeToString(file_element_type);
+                }
+            }
+        }
+
+        writeBytecodeChunk(chunk, (uint8_t)file_element_type, node->token.line);
+        if (file_element_type != TYPE_VOID && element_type_name && element_type_name[0] != '\0') {
+            int type_name_index = addStringConstant(chunk, element_type_name);
+            emitShort(chunk, (uint16_t)type_name_index, node->token.line);
+        } else {
+            emitShort(chunk, 0xFFFF, node->token.line);
+        }
     } else {
         const char* type_name = varTypeToString(node->var_type);
         int type_idx = addStringConstant(chunk, type_name);
