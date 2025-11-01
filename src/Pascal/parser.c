@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
@@ -99,6 +100,10 @@ static bool tokenIsIdentifierLike(const Token *token) {
 
 static bool currentTokenIsIdentifierLike(Parser *parser) {
     return parser && tokenIsIdentifierLike(parser->current_token);
+}
+
+static bool tokenMatchesKeyword(const Token *token, const char *keyword) {
+    return token && token->value && keyword && strcasecmp(token->value, keyword) == 0;
 }
 
 static AST *labelDeclarationBlock(Parser *parser) {
@@ -2006,18 +2011,22 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                 bool byRef = false;
                 bool isConst = false;
 
-                while (parser->current_token &&
-                       (parser->current_token->type == TOKEN_VAR ||
-                        parser->current_token->type == TOKEN_CONST ||
-                        parser->current_token->type == TOKEN_OUT)) {
-                    TokenType modifier = parser->current_token->type;
-                    if (modifier == TOKEN_VAR || modifier == TOKEN_OUT) {
+                while (parser->current_token) {
+                    bool isVarModifier = parser->current_token->type == TOKEN_VAR;
+                    bool isConstModifier = parser->current_token->type == TOKEN_CONST;
+                    bool isOutModifier = parser->current_token->type == TOKEN_IDENTIFIER &&
+                                         tokenMatchesKeyword(parser->current_token, "out");
+                    if (!(isVarModifier || isConstModifier || isOutModifier)) {
+                        break;
+                    }
+
+                    if (isVarModifier || isOutModifier) {
                         byRef = true;
                     }
-                    if (modifier == TOKEN_CONST) {
+                    if (isConstModifier) {
                         isConst = true;
                     }
-                    eat(parser, modifier);
+                    eat(parser, parser->current_token->type);
                 }
 
                 AST* paramDecl = newASTNode(AST_VAR_DECL, NULL);
@@ -2569,13 +2578,17 @@ AST *paramList(Parser *parser) {
     AST *compound = newASTNode(AST_COMPOUND, NULL);
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
-        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT || parser->current_token->type == TOKEN_CONST) {
-            // If it's VAR or OUT, mark as pass-by-reference
-            if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
-                 byRef = 1;
+        if (parser->current_token) {
+            bool isVarModifier = parser->current_token->type == TOKEN_VAR;
+            bool isConstModifier = parser->current_token->type == TOKEN_CONST;
+            bool isOutModifier = parser->current_token->type == TOKEN_IDENTIFIER &&
+                                 tokenMatchesKeyword(parser->current_token, "out");
+            if (isVarModifier || isConstModifier || isOutModifier) {
+                if (isVarModifier || isOutModifier) {
+                    byRef = 1;
+                }
+                eat(parser, parser->current_token->type);
             }
-            // Consume the keyword (VAR, OUT, or CONST)
-            eat(parser, parser->current_token->type);
         }
 
         AST *group = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
