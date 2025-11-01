@@ -364,6 +364,7 @@ typedef struct FunctionCompilerState {
     Symbol* function_symbol;
     CompilerUpvalue upvalues[MAX_UPVALUES];
     int upvalue_count;
+    bool returns_value;
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
@@ -2683,6 +2684,7 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->enclosing = NULL;
     fc->function_symbol = NULL;
     fc->upvalue_count = 0;
+    fc->returns_value = false;
 }
 
 static void compilerBeginScope(FunctionCompilerState* fc) {
@@ -5079,6 +5081,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     AST* blockNode = NULL;
 
     fc.name = func_name;
+    fc.returns_value = (func_decl_node->type == AST_FUNCTION_DECL);
 
     int func_bytecode_start_address = chunk->count;
 
@@ -5330,8 +5333,15 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
                        (decl->token ? decl->token->value : NULL);
         temp_fc.function_symbol = proc_symbol;
     }
+    bool saved_returns_value = current_function_compiler->returns_value;
+    if (decl->type == AST_FUNCTION_DECL) {
+        current_function_compiler->returns_value = true;
+    }
     AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
-    if (!blockNode) return;
+    if (!blockNode) {
+        current_function_compiler->returns_value = saved_returns_value;
+        return;
+    }
 
     int starting_local_count = current_function_compiler->local_count;
 
@@ -5387,6 +5397,8 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             emitConstant(chunk, addNilConstant(chunk), line);
         }
     }
+
+    current_function_compiler->returns_value = saved_returns_value;
 
     // Clean up locals added during inlining
     for (int i = current_function_compiler->local_count - 1; i >= starting_local_count; i--) {
@@ -5850,7 +5862,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
 
-                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                if (current_function_compiler && current_function_compiler->returns_value &&
+                    current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
                     (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
                      strcasecmp(lvalue->token->value, "result") == 0)) {
@@ -7550,7 +7563,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compileRValue(rvalue, chunk, getLine(rvalue));
                 writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
 
-                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                if (current_function_compiler && current_function_compiler->returns_value &&
+                    current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
                     (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
                      strcasecmp(lvalue->token->value, "result") == 0)) {
