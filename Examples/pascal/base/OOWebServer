@@ -93,6 +93,9 @@ var
     GDropped: integer = 0;
     GServed: integer = 0;
 
+function loadFileToString(const path: string; var data: string): integer; forward;
+function saveStringToFile(const path, data: string): integer; forward;
+
 // Helper functions (pad2, timestamp, etc.) are identical
 procedure pad2(n: integer; var result: string);
 var s: string;
@@ -222,32 +225,28 @@ var
     // These are nested procedures. They act as closures,
     // capturing the global vars RootDir, IndexPath, and Body.
 
-    procedure HandleRoot(const path: string; 
-                         var code: integer; 
-                         var body: string; 
-                         var ctype: string; 
+    procedure HandleRoot(const path: string;
+                         var code: integer;
+                         var body: string;
+                         var ctype: string;
                          var logDetail: string);
     var
-        ms: mstream;
         ok: integer;
-        listing, name: string;
+        listing, name, content: string;
     begin
         // Try to serve index.html first
         if (fileexists(IndexPath) = 1) then
         begin
-            ms := mstreamcreate;
-            ok := mstreamloadfromfile(ms, IndexPath);
+            ok := loadFileToString(IndexPath, content);
             if (ok = 1) then
             begin
-                body := mstreambuffer(ms);
+                body := content;
                 code := 200;
                 ctype := 'text/html';
                 logDetail := 'index.html';
-                mstreamfree(ms);
             end
             else
             begin
-                mstreamfree(ms);
                 // Fallback to in-memory Body
                 body := Body;
                 code := 200;
@@ -273,31 +272,28 @@ var
         end;
     end;
 
-    procedure HandleIndex(const path: string; 
-                          var code: integer; 
-                          var body: string; 
-                          var ctype: string; 
+    procedure HandleIndex(const path: string;
+                          var code: integer;
+                          var body: string;
+                          var ctype: string;
                           var logDetail: string);
     var
-        ms: mstream;
         ok: integer;
+        content: string;
     begin
         // Serve real index.html or default Body
         if (fileexists(IndexPath) = 1) then
         begin
-            ms := mstreamcreate;
-            ok := mstreamloadfromfile(ms, IndexPath);
+            ok := loadFileToString(IndexPath, content);
             if (ok = 1) then
             begin
-                body := mstreambuffer(ms);
+                body := content;
                 code := 200;
                 ctype := 'text/html';
                 logDetail := 'index.html';
-                mstreamfree(ms);
             end
             else
             begin
-                mstreamfree(ms);
                 body := Body;
                 code := 200;
                 ctype := 'text/html';
@@ -313,15 +309,15 @@ var
         end;
     end;
 
-    procedure HandleFile(const path: string; 
-                         var code: integer; 
-                         var body: string; 
-                         var ctype: string; 
+    procedure HandleFile(const path: string;
+                         var code: integer;
+                         var body: string;
+                         var ctype: string;
                          var logDetail: string);
     var
         rel, fullPath: string;
-        ms: mstream;
         ok: integer;
+        content: string;
     begin
         // Serve file under RootDir
         if (copy(path, 1, 1) = '/') then rel := copy(path, 2, length(path) - 1) else rel := path;
@@ -330,19 +326,16 @@ var
         
         if (fileexists(fullPath) = 1) then
         begin
-            ms := mstreamcreate;
-            ok := mstreamloadfromfile(ms, fullPath);
+            ok := loadFileToString(fullPath, content);
             if (ok = 1) then
             begin
-                body := mstreambuffer(ms);
+                body := content;
                 code := 200;
                 contentType(rel, ctype);
-                mstreamfree(ms);
                 logDetail := rel;
             end
             else
             begin
-                mstreamfree(ms);
                 body := '<html><body>Internal Server Error</body></html>';
                 code := 500;
                 ctype := 'text/html';
@@ -528,13 +521,18 @@ begin
 end;
 
 function copyFile(const src, dst: string): integer;
-var ms: mstream; loaded: integer;
+var data: string;
 begin
-    ms := mstreamcreate;
-    loaded := mstreamloadfromfile(ms, src);
-    if (loaded = 0) then begin mstreamfree(ms); copyFile := 0; exit; end;
-    mstreamsavetofile(ms, dst);
-    mstreamfree(ms);
+    if (loadFileToString(src, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
+    if (saveStringToFile(dst, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
     copyFile := 1;
 end;
 
@@ -596,6 +594,82 @@ begin
     if (len = 0) then begin result := '/tmp/'; exit; end;
     last := copy(path, len, 1);
     if (last = '/') or (last = '\') then result := path else result := path + '/';
+end;
+
+function loadFileToString(const path: string; var data: string): integer;
+var
+    f: file;
+    buffer: array[0..4095] of byte;
+    bytesRead, status, idx: integer;
+    chunk: string;
+begin
+    assign(f, path);
+    {$I-} reset(f, 1); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        data := '';
+        loadFileToString := 0;
+        exit;
+    end;
+
+    data := '';
+    repeat
+        {$I-} blockread(f, buffer, sizeof(buffer), bytesRead); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            data := '';
+            loadFileToString := 0;
+            exit;
+        end;
+        if (bytesRead > 0) then
+        begin
+            setlength(chunk, bytesRead);
+            for idx := 0 to bytesRead - 1 do
+                chunk[idx + 1] := chr(buffer[idx]);
+            data := data + chunk;
+        end;
+    until bytesRead = 0;
+
+    close(f);
+    loadFileToString := 1;
+end;
+
+function saveStringToFile(const path, data: string): integer;
+var
+    f: file;
+    total, offset, chunkSize, status: integer;
+begin
+    assign(f, path);
+    {$I-} rewrite(f, 1); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        saveStringToFile := 0;
+        exit;
+    end;
+
+    total := length(data);
+    offset := 1;
+    while (offset <= total) do
+    begin
+        chunkSize := total - offset + 1;
+        if (chunkSize > 4096) then chunkSize := 4096;
+        {$I-} blockwrite(f, data[offset], chunkSize); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            saveStringToFile := 0;
+            exit;
+        end;
+        offset := offset + chunkSize;
+    end;
+
+    close(f);
+    saveStringToFile := 1;
 end;
 
 procedure initFiles;
