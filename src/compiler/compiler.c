@@ -4966,7 +4966,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     tbl = (HashTable*)node->left->symbol_table;
                 } else {
                     tbl = createHashTable();
-                    node->left->symbol_table = (Symbol*)tbl;
+                    node->left->symbol_table = tbl;
                 }
                 current_class_const_table = tbl;
                 for (int i = 0; i < node->left->child_count; i++) {
