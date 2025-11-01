@@ -1653,6 +1653,7 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "paramcount")== 0 ||
         strcasecmp(name, "length")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
+        strcasecmp(name, "sizeof")    == 0 ||
         strcasecmp(name, "screencols")== 0 ||
         strcasecmp(name, "screenrows")== 0 ||
         strcasecmp(name, "wherex")    == 0 ||

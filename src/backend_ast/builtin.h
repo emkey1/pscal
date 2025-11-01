@@ -38,6 +38,7 @@ void registerExtendedBuiltins(void);
 /* VM-native general built-ins */
 Value vmBuiltinInttostr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinLength(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinSizeof(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinAbs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRound(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHalt(struct VM_s* vm, int arg_count, Value* args);

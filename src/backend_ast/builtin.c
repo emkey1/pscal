@@ -105,6 +105,211 @@ static const char* builtinValueToCString(const Value* value) {
     return NULL;
 }
 
+static bool builtinSizeForVarType(VarType type, long long *out_bytes) {
+    if (!out_bytes) return false;
+    switch (type) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+            *out_bytes = 1;
+            return true;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            *out_bytes = 2;
+            return true;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+            *out_bytes = 4;
+            return true;
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            *out_bytes = 8;
+            return true;
+        case TYPE_FLOAT:
+            *out_bytes = (long long)sizeof(float);
+            return true;
+        case TYPE_DOUBLE:
+            *out_bytes = (long long)sizeof(double);
+            return true;
+        case TYPE_LONG_DOUBLE:
+            *out_bytes = (long long)sizeof(long double);
+            return true;
+        case TYPE_POINTER:
+        case TYPE_FILE:
+        case TYPE_MEMORYSTREAM:
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+        case TYPE_THREAD:
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        case TYPE_ENUM:
+            *out_bytes = (long long)sizeof(int);
+            return true;
+        case TYPE_SET:
+        case TYPE_ARRAY:
+        case TYPE_RECORD:
+        case TYPE_STRING:
+        case TYPE_UNKNOWN:
+        case TYPE_VOID:
+        case TYPE_NIL:
+        default:
+            return false;
+    }
+}
+
+static bool computeValueSizeBytesInternal(const Value *value, long long *out_bytes, int depth);
+
+static bool computeValueSizeBytes(const Value *value, long long *out_bytes) {
+    if (!value || !out_bytes) {
+        return false;
+    }
+    return computeValueSizeBytesInternal(value, out_bytes, 0);
+}
+
+static bool computeSizeFromTypeName(const char *type_name, long long *out_bytes) {
+    if (!type_name || !*type_name || !out_bytes) {
+        return false;
+    }
+
+    if (strcasecmp(type_name, "integer") == 0 || strcasecmp(type_name, "longint") == 0) {
+        return builtinSizeForVarType(TYPE_INT32, out_bytes);
+    }
+    if (strcasecmp(type_name, "real") == 0) {
+        return builtinSizeForVarType(TYPE_DOUBLE, out_bytes);
+    }
+    if (strcasecmp(type_name, "float") == 0) {
+        return builtinSizeForVarType(TYPE_FLOAT, out_bytes);
+    }
+    if (strcasecmp(type_name, "char") == 0) {
+        return builtinSizeForVarType(TYPE_CHAR, out_bytes);
+    }
+    if (strcasecmp(type_name, "boolean") == 0) {
+        return builtinSizeForVarType(TYPE_BOOLEAN, out_bytes);
+    }
+    if (strcasecmp(type_name, "byte") == 0) {
+        return builtinSizeForVarType(TYPE_BYTE, out_bytes);
+    }
+    if (strcasecmp(type_name, "word") == 0) {
+        return builtinSizeForVarType(TYPE_WORD, out_bytes);
+    }
+
+    AST *type_def = lookupType(type_name);
+    if (!type_def) {
+        return false;
+    }
+
+    AST *resolved = type_def;
+    if (resolved->type == AST_TYPE_REFERENCE && resolved->right) {
+        resolved = resolved->right;
+    }
+
+    VarType vt = resolved->var_type;
+    if (vt == TYPE_VOID || vt == TYPE_UNKNOWN) {
+        if (resolved->right) {
+            vt = resolved->right->var_type;
+        }
+    }
+
+    Value temp = makeValueForType(vt, resolved, NULL);
+    bool ok = computeValueSizeBytes(&temp, out_bytes);
+    freeValue(&temp);
+    return ok;
+}
+
+static bool computeValueSizeBytesInternal(const Value *value, long long *out_bytes, int depth) {
+    if (!value || !out_bytes || depth > 16) {
+        return false;
+    }
+
+    switch (value->type) {
+        case TYPE_POINTER: {
+            if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+                *out_bytes = (long long)sizeof(void*);
+                return true;
+            }
+            if (value->base_type_node != NULL) {
+                *out_bytes = (long long)sizeof(void*);
+                return true;
+            }
+            if (!value->ptr_val || value->ptr_val == value) {
+                *out_bytes = (long long)sizeof(void*);
+                return true;
+            }
+            return computeValueSizeBytesInternal((const Value*)value->ptr_val, out_bytes, depth + 1);
+        }
+        case TYPE_STRING:
+            if (value->max_length > 0) {
+                *out_bytes = (long long)value->max_length + 1;
+            } else {
+                *out_bytes = (long long)sizeof(char*);
+            }
+            return true;
+        case TYPE_ARRAY: {
+            int total = calculateArrayTotalSize(value);
+            if (total < 0) {
+                total = 0;
+            }
+            long long elem_size = 0;
+            bool have_elem = false;
+            if (value->array_val && total > 0) {
+                for (int i = 0; i < total; ++i) {
+                    if (computeValueSizeBytesInternal(&value->array_val[i], &elem_size, depth + 1)) {
+                        have_elem = true;
+                        break;
+                    }
+                }
+            }
+            if (!have_elem && value->element_type != TYPE_VOID) {
+                have_elem = builtinSizeForVarType(value->element_type, &elem_size);
+                if (!have_elem) {
+                    Value temp = makeValueForType(value->element_type, value->element_type_def, NULL);
+                    have_elem = computeValueSizeBytesInternal(&temp, &elem_size, depth + 1);
+                    freeValue(&temp);
+                }
+            }
+            if (!have_elem) {
+                return false;
+            }
+            long long count = (long long)total;
+            if (elem_size > 0 && count > 0 && elem_size > LLONG_MAX / count) {
+                return false;
+            }
+            *out_bytes = elem_size * count;
+            return true;
+        }
+        case TYPE_RECORD: {
+            long long total = 0;
+            for (FieldValue *field = value->record_val; field; field = field->next) {
+                long long field_size = 0;
+                if (!computeValueSizeBytesInternal(&field->value, &field_size, depth + 1)) {
+                    return false;
+                }
+                total += field_size;
+            }
+            *out_bytes = total;
+            return true;
+        }
+        case TYPE_SET:
+            if (value->set_val.set_size > 0) {
+                *out_bytes = (long long)value->set_val.set_size * (long long)sizeof(long long);
+            } else {
+                *out_bytes = 0;
+            }
+            return true;
+        case TYPE_NIL:
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        default:
+            if (builtinSizeForVarType(value->type, out_bytes)) {
+                return true;
+            }
+            return false;
+    }
+}
+
 #ifdef SDL
 static bool sdlReadKeyBufferHasData(void) {
     return gSdlReadKeyBufferCount > 0;
@@ -707,6 +912,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
     {"atan2", vmBuiltinAtan2},
+    {"sizeof", vmBuiltinSizeof},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -4925,6 +5131,37 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+Value vmBuiltinSizeof(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "SizeOf expects 1 argument.");
+        return makeInt64(0);
+    }
+
+    Value arg = args[0];
+
+    const char *type_name = NULL;
+    if (builtinValueIsStringLike(&arg)) {
+        type_name = builtinValueToCString(&arg);
+    }
+
+    if (type_name && *type_name) {
+        long long bytes = 0;
+        if (computeSizeFromTypeName(type_name, &bytes)) {
+            return makeInt64(bytes);
+        }
+        runtimeError(vm, "SizeOf: unknown type '%s'.", type_name);
+        return makeInt64(0);
+    }
+
+    long long bytes = 0;
+    if (computeValueSizeBytes(&arg, &bytes)) {
+        return makeInt64(bytes);
+    }
+
+    runtimeError(vm, "SizeOf unsupported for type '%s'.", varTypeToString(arg.type));
+    return makeInt64(0);
+}
+
 
 Value vmBuiltinAbs(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "abs expects 1 argument."); return makeInt(0); }
@@ -6368,6 +6605,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Length", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SetLength", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SizeOf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ln", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Log10", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Low", AST_FUNCTION_DECL, NULL);
