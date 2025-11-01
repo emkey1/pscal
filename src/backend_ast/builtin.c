@@ -138,6 +138,122 @@ static unsigned char valueToByte(const Value* value) {
     }
 }
 
+static bool writeBinaryElement(FILE* stream, const Value* rawValue, VarType elementType,
+                               size_t elementSize, int* outErrno) {
+    if (!stream || !rawValue) {
+        return false;
+    }
+
+    const Value* value = rawValue;
+    if (value->type == TYPE_POINTER && value->ptr_val) {
+        value = (const Value*)value->ptr_val;
+    }
+
+    unsigned char buffer[sizeof(long double)] = {0};
+    size_t bytes = 0;
+
+    switch (elementType) {
+        case TYPE_CHAR:
+        case TYPE_BOOLEAN:
+        case TYPE_BYTE:
+        case TYPE_UINT8:
+        case TYPE_INT8:
+            buffer[0] = valueToByte(value);
+            bytes = 1;
+            break;
+        case TYPE_INT16: {
+            int16_t v = (int16_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT16:
+        case TYPE_WORD: {
+            uint16_t v = (uint16_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                   : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_INT32: {
+            int32_t v = (int32_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT32:
+        case TYPE_ENUM: {
+            uint32_t v = (uint32_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                     : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_INT64: {
+            int64_t v = (int64_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT64: {
+            uint64_t v = (uint64_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                     : (isRealType(value->type) ? (unsigned long long)AS_REAL(*value) : 0u));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_FLOAT: {
+            float f = isRealType(value->type) ? (float)AS_REAL(*value)
+                      : (IS_INTLIKE(*value) ? (float)AS_INTEGER(*value) : 0.0f);
+            memcpy(buffer, &f, sizeof(f));
+            bytes = sizeof(f);
+            break;
+        }
+        case TYPE_DOUBLE: {
+            double d = isRealType(value->type) ? (double)AS_REAL(*value)
+                        : (IS_INTLIKE(*value) ? (double)AS_INTEGER(*value) : 0.0);
+            memcpy(buffer, &d, sizeof(d));
+            bytes = sizeof(d);
+            break;
+        }
+        case TYPE_LONG_DOUBLE: {
+            long double ld = isRealType(value->type) ? AS_REAL(*value)
+                                 : (IS_INTLIKE(*value) ? (long double)AS_INTEGER(*value) : 0.0L);
+            memcpy(buffer, &ld, sizeof(ld));
+            bytes = sizeof(ld);
+            break;
+        }
+        default:
+            return false;
+    }
+
+    if (elementSize > 0 && elementSize != bytes) {
+        if (elementSize > sizeof(buffer)) {
+            return false;
+        }
+        if (elementSize > bytes) {
+            memset(buffer + bytes, 0, elementSize - bytes);
+        }
+        bytes = elementSize;
+    }
+
+    errno = 0;
+    size_t written = fwrite(buffer, 1, bytes, stream);
+    if (written != bytes) {
+        if (outErrno) {
+            *outErrno = errno ? errno : 1;
+        }
+        return false;
+    }
+    if (outErrno) {
+        *outErrno = 0;
+    }
+    return true;
+}
+
 static void assignByteToValue(Value* target, unsigned char byte) {
     if (!target) {
         return;
@@ -4949,6 +5065,7 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     bool newline = false;
     bool suppress_spacing = (gSuppressWriteSpacing != 0);
     bool suppress_spacing_flag = false;
+    last_io_error = 0;
     Value flag = args[0];
     if (isRealType(flag.type)) {
         newline = (AS_REAL(flag) != 0.0);
@@ -4966,6 +5083,10 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     FILE* output_stream = stdout;
     int start_index = 1;
     bool first_arg_is_file_by_value = false;
+    const Value* file_value = NULL;
+    bool binary_file = false;
+    VarType binary_element_type = TYPE_VOID;
+    size_t binary_element_size = 0;
 
     if (arg_count > 1) {
         const Value* first = &args[1];
@@ -4978,7 +5099,21 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             output_stream = first->f_val;
             start_index = 2;
             if (args[1].type == TYPE_FILE) first_arg_is_file_by_value = true;
+            file_value = first;
+            if (file_value->element_type != TYPE_VOID) {
+                long long size_bytes = 0;
+                if (builtinSizeForVarType(file_value->element_type, &size_bytes) && size_bytes > 0 &&
+                    (size_t)size_bytes <= sizeof(long double)) {
+                    binary_file = true;
+                    binary_element_type = file_value->element_type;
+                    binary_element_size = (size_t)size_bytes;
+                }
+            }
         }
+    }
+
+    if (binary_file) {
+        suppress_spacing = true;
     }
 
     int print_arg_count = arg_count - start_index;
@@ -4996,6 +5131,16 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     bool has_prev = false;
     for (int i = start_index; i < arg_count; i++) {
         Value val = args[i];
+        if (binary_file) {
+            int write_error = 0;
+            if (!writeBinaryElement(output_stream, &val, binary_element_type, binary_element_size, &write_error)) {
+                last_io_error = write_error != 0 ? write_error : 1;
+                break;
+            }
+            prev = val;
+            has_prev = true;
+            continue;
+        }
         if (!suppress_spacing && has_prev) {
             bool add_space = true;
             const char *no_space_after = "=,.;:?!-)]}>)\"'";
@@ -5051,7 +5196,7 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         has_prev = true;
     }
 
-    if (newline) {
+    if (newline && !binary_file) {
         fprintf(output_stream, "\n");
     }
 
