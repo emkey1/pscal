@@ -749,8 +749,6 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"arctan", vmBuiltinArctan},
     {"assign", vmBuiltinAssign},
     {"beep", vmBuiltinBeep},
-    {"blockread", vmBuiltinBlockread},
-    {"blockwrite", vmBuiltinBlockwrite},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
     {"biclrscr", vmBuiltinClrscr},
@@ -981,6 +979,8 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
     {"atan2", vmBuiltinAtan2},
+    {"blockread", vmBuiltinBlockread},
+    {"blockwrite", vmBuiltinBlockwrite},
     {"sizeof", vmBuiltinSizeof},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
@@ -7026,8 +7026,6 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("atan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Assign", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Beep", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunctionUnlocked("BlockRead", AST_PROCEDURE_DECL, NULL);
-    registerBuiltinFunctionUnlocked("BlockWrite", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Byte", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ceil", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Chr", AST_FUNCTION_DECL, NULL);
@@ -7168,6 +7166,8 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadCancel", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStats", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStatsJson", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockRead", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockWrite", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);
