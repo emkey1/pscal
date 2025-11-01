@@ -40,12 +40,30 @@ static Symbol *lookupProcedureInAncestors(const char *loweredName, AST *scope) {
         if (!curr->symbol_table) {
             continue;
         }
-        HashTable *table = (HashTable *)curr->symbol_table;
-        Symbol *sym = hashTableLookup(table, loweredName);
-        if (!sym) {
-            continue;
+
+        Symbol *sym = NULL;
+        if (curr->type == AST_UNIT) {
+            for (Symbol *unitSym = curr->symbol_table; unitSym; unitSym = unitSym->next) {
+                if (!unitSym->name) {
+                    continue;
+                }
+                char lowered_unit_name[MAX_SYMBOL_LENGTH];
+                strncpy(lowered_unit_name, unitSym->name, sizeof(lowered_unit_name) - 1);
+                lowered_unit_name[sizeof(lowered_unit_name) - 1] = '\0';
+                toLowerString(lowered_unit_name);
+                if (strcmp(lowered_unit_name, loweredName) == 0) {
+                    sym = unitSym;
+                    break;
+                }
+            }
+        } else {
+            HashTable *table = (HashTable *)curr->symbol_table;
+            sym = hashTableLookup(table, loweredName);
         }
-        return resolveSymbolAlias(sym);
+
+        if (sym) {
+            return resolveSymbolAlias(sym);
+        }
     }
     return NULL;
 }
@@ -1659,6 +1677,7 @@ VarType getBuiltinReturnType(const char* name) {
 
     /* Memory stream helpers */
     if (strcasecmp(name, "mstreamcreate") == 0) return TYPE_MEMORYSTREAM;
+    if (strcasecmp(name, "mstreamloadfromfile") == 0) return TYPE_BOOLEAN;
 
     /* Threading helpers (new API) */
     if (strcasecmp(name, "createthread") == 0) return TYPE_THREAD;
