@@ -244,7 +244,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case LOAD_ELEMENT_VALUE:
         case GET_CHAR_ADDRESS:
         case INIT_LOCAL_FILE:
-            return 2; // 1-byte opcode + 1-byte operand
+            return 5; // opcode + slot + element type + 2-byte type name index
         case GET_ELEMENT_ADDRESS_CONST:
         case LOAD_ELEMENT_VALUE_CONST:
             return 5; // opcode + 4-byte flat offset
@@ -317,11 +317,13 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                     current_pos += 2; // Skip element VarType and element type name index
                 }
             } else {
-                // Simple types store a 16-bit type name index and, for strings,
-                // an extra 16-bit length constant.
+                // Simple types store a 16-bit type name index. Strings add an
+                // extra 16-bit length constant and files carry element metadata.
                 current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
+                } else if (declaredType == TYPE_FILE) {
+                    current_pos += 3; // element VarType byte + element type name index
                 }
             }
             return (current_pos - offset); // Return the total calculated length
@@ -343,6 +345,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
+                } else if (declaredType == TYPE_FILE) {
+                    current_pos += 3; // element VarType byte + element type name index
                 }
             }
             return (current_pos - offset);
@@ -576,6 +580,16 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                         if (len_idx < chunk->constants_count && chunk->constants[len_idx].type == TYPE_INTEGER) {
                             fprintf(stderr, " len=%lld", chunk->constants[len_idx].i_val);
                         }
+                    } else if (declaredType == TYPE_FILE && current_offset + 2 < chunk->count) {
+                        VarType elem_type = (VarType)chunk->code[current_offset++];
+                        uint16_t elem_name_idx =
+                            (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                        current_offset += 2;
+                        fprintf(stderr, " elem=%s", varTypeToString(elem_type));
+                        if (elem_name_idx != 0xFFFF && elem_name_idx < chunk->constants_count &&
+                            chunk->constants[elem_name_idx].type == TYPE_STRING) {
+                            fprintf(stderr, " ('%s')", chunk->constants[elem_name_idx].s_val);
+                        }
                     }
                 }
             }
@@ -721,8 +735,18 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case INIT_LOCAL_FILE: {
             uint8_t slot = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d (slot)\n", "INIT_LOCAL_FILE", slot);
-            return offset + 2;
+            VarType elem_type = (VarType)chunk->code[offset + 2];
+            uint16_t name_idx = (uint16_t)(chunk->code[offset + 3] << 8) | chunk->code[offset + 4];
+            fprintf(stderr, "%-16s %4d (slot) %-8s", "INIT_LOCAL_FILE", slot, varTypeToString(elem_type));
+            if (name_idx != 0xFFFF) {
+                fprintf(stderr, " idx=%u", name_idx);
+                if (name_idx < chunk->constants_count && chunk->constants[name_idx].type == TYPE_STRING &&
+                    chunk->constants[name_idx].s_val) {
+                    fprintf(stderr, " '%s'", chunk->constants[name_idx].s_val);
+                }
+            }
+            fprintf(stderr, "\n");
+            return offset + 5;
         }
         case INIT_LOCAL_STRING: {
             uint8_t slot = chunk->code[offset + 1];
