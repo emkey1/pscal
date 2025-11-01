@@ -10,7 +10,7 @@ typedef struct AST {
     ASTNodeType type;
     Token *token;            /* For names, field names, type names, nil, ^, etc. */
     List *unit_list;         // List of unit names (for 'uses' clause)
-    Symbol *symbol_table;    // Symbol table for the unit (if applicable)
+    HashTable *symbol_table; // Symbol table for the unit (if applicable)
     VarType var_type;        // <<< RENAMED from int to VarType for clarity >>>
     int by_ref;              /* 1 if parameter passed by reference */
     struct AST *left;        // Left child or operand

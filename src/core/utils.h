@@ -246,8 +246,8 @@ int calculateArrayTotalSize(const Value* array_val);
 // Unit Stuff
 char *findUnitFile(const char *unit_name);
 void linkUnit(AST *unit_ast, int recursion_depth);
-Symbol *buildUnitSymbolTable(AST *interface_ast);
-void freeUnitSymbolTable(Symbol *symbol_table);
+HashTable *buildUnitSymbolTable(AST *interface_ast);
+void freeUnitSymbolTable(HashTable *symbol_table);
 bool isUnitDocumented(const char *unit_name);
 
 // General helpers

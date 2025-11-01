@@ -2738,7 +2738,7 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     }
 
     if (local_proc_table) {
-        func->symbol_table = (Symbol*)local_proc_table;
+        func->symbol_table = local_proc_table;
     }
     setTypeAST(func, vtype);
     

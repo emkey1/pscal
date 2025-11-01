@@ -1067,7 +1067,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
     AST *interface_decls = declarations(parser_for_this_unit, true);
     setLeft(unit_node, interface_decls);
     
-    Symbol *unitSymTable = buildUnitSymbolTable(interface_decls);
+    HashTable *unitSymTable = buildUnitSymbolTable(interface_decls);
     unit_node->symbol_table = unitSymTable;
 
     eat(parser_for_this_unit, TOKEN_IMPLEMENTATION);
@@ -1710,7 +1710,7 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setRight(node, blockNode);
-        node->symbol_table = (Symbol*)my_table;
+        node->symbol_table = my_table;
         popProcedureTable(false);
     }
     addProcedure(parser, node, parser->current_unit_name_context, outer_table);
@@ -2551,7 +2551,7 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
         addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setExtra(node, blockNode);
-        node->symbol_table = (Symbol*)my_table;
+        node->symbol_table = my_table;
         popProcedureTable(false);
     }
 
