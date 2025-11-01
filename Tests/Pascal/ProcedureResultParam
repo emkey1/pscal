@@ -1,0 +1,14 @@
+program ProcedureResultParam;
+
+procedure AdjustValue(var result: integer; value: integer);
+begin
+  result := value * 2;
+end;
+
+var
+  outcome: integer;
+begin
+  outcome := 1;
+  AdjustValue(outcome, 7);
+  writeln('result=', outcome);
+end.
