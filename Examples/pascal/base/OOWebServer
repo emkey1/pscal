@@ -599,13 +599,12 @@ end;
 
 function loadFileToString(const path: string; var data: string): integer;
 var
-    f: file;
-    buffer: array[0..BufferSize-1] of byte;
-    bytesRead, status, idx: integer;
-    chunk: string;
+    f: file of byte;
+    status, size, idx: integer;
+    value: byte;
 begin
     assign(f, path);
-    {$I-} reset(f, 1); {$I+}
+    {$I-} reset(f); {$I+}
     status := IOResult;
     if (status <> 0) then
     begin
@@ -614,9 +613,14 @@ begin
         exit;
     end;
 
-    data := '';
-    repeat
-        {$I-} blockread(f, buffer, SizeOf(buffer), bytesRead); {$I+}
+    size := filesize(f);
+    if (size < 0) then size := 0;
+    setlength(data, size);
+
+    idx := 1;
+    while (idx <= size) do
+    begin
+        {$I-} read(f, value); {$I+}
         status := IOResult;
         if (status <> 0) then
         begin
@@ -625,14 +629,9 @@ begin
             loadFileToString := 0;
             exit;
         end;
-        if (bytesRead > 0) then
-        begin
-            setlength(chunk, bytesRead);
-            for idx := 0 to bytesRead - 1 do
-                chunk[idx + 1] := chr(buffer[idx]);
-            data := data + chunk;
-        end;
-    until bytesRead = 0;
+        data[idx] := chr(value);
+        idx := idx + 1;
+    end;
 
     close(f);
     loadFileToString := 1;
@@ -640,11 +639,12 @@ end;
 
 function saveStringToFile(const path, data: string): integer;
 var
-    f: file;
-    total, offset, chunkSize, status: integer;
+    f: file of byte;
+    total, status, idx: integer;
+    value: byte;
 begin
     assign(f, path);
-    {$I-} rewrite(f, 1); {$I+}
+    {$I-} rewrite(f); {$I+}
     status := IOResult;
     if (status <> 0) then
     begin
@@ -653,12 +653,10 @@ begin
     end;
 
     total := length(data);
-    offset := 1;
-    while (offset <= total) do
+    for idx := 1 to total do
     begin
-        chunkSize := total - offset + 1;
-        if (chunkSize > SizeOf(buffer)) then chunkSize := SizeOf(buffer);
-        {$I-} blockwrite(f, data[offset], chunkSize); {$I+}
+        value := ord(data[idx]);
+        {$I-} write(f, value); {$I+}
         status := IOResult;
         if (status <> 0) then
         begin
@@ -666,7 +664,6 @@ begin
             saveStringToFile := 0;
             exit;
         end;
-        offset := offset + chunkSize;
     end;
 
     close(f);
