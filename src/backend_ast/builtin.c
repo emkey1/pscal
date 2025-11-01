@@ -2945,7 +2945,10 @@ Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) { runtimeError(vm, "Rewrite requires 1 argument."); return makeVoid(); }
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Rewrite requires 1 or 2 arguments.");
+        return makeVoid();
+    }
 
     if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
         runtimeError(vm, "Rewrite: Argument must be a VAR file parameter.");
@@ -2957,7 +2960,30 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
-    FILE* f = fopen(fileVarLValue->filename, "w");
+    bool has_record_size_arg = (arg_count == 2);
+    int new_record_size = fileVarLValue->record_size;
+    if (has_record_size_arg) {
+        if (!IS_INTLIKE(args[1])) {
+            runtimeError(vm, "Rewrite: Record size must be an integer value.");
+            return makeVoid();
+        }
+        long long size_val = AS_INTEGER(args[1]);
+        if (size_val <= 0 || size_val > INT_MAX) {
+            runtimeError(vm, "Rewrite: Record size must be between 1 and %d.", INT_MAX);
+            return makeVoid();
+        }
+        new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
+    } else if (new_record_size <= 0) {
+        new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
+    }
+    fileVarLValue->record_size = new_record_size;
+
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    const char* mode = use_binary_mode ? "wb" : "w";
+
+    FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
         last_io_error = errno ? errno : 1;
     } else {
@@ -3703,8 +3729,11 @@ Value vmBuiltinAssign(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) { runtimeError(vm, "Reset requires 1 argument."); return makeVoid(); }
-    
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Reset requires 1 or 2 arguments.");
+        return makeVoid();
+    }
+
     if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
         runtimeError(vm, "Reset: Argument must be a VAR file parameter.");
         return makeVoid();
@@ -3715,7 +3744,30 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
-    FILE* f = fopen(fileVarLValue->filename, "r");
+    bool has_record_size_arg = (arg_count == 2);
+    int new_record_size = fileVarLValue->record_size;
+    if (has_record_size_arg) {
+        if (!IS_INTLIKE(args[1])) {
+            runtimeError(vm, "Reset: Record size must be an integer value.");
+            return makeVoid();
+        }
+        long long size_val = AS_INTEGER(args[1]);
+        if (size_val <= 0 || size_val > INT_MAX) {
+            runtimeError(vm, "Reset: Record size must be between 1 and %d.", INT_MAX);
+            return makeVoid();
+        }
+        new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
+    } else if (new_record_size <= 0) {
+        new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
+    }
+    fileVarLValue->record_size = new_record_size;
+
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    const char* mode = use_binary_mode ? "rb" : "r";
+
+    FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
         last_io_error = errno ? errno : 1;
     } else {

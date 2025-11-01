@@ -943,7 +943,12 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         }
         case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
         case TYPE_BOOLEAN: v.i_val = 0; break;
-        case TYPE_FILE:    v.f_val = NULL; v.filename = NULL; break;
+        case TYPE_FILE:
+            v.f_val = NULL;
+            v.filename = NULL;
+            v.record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+            v.record_size_explicit = false;
+            break;
         case TYPE_RECORD:
             if (node_to_inspect) {
                 v.record_val = createEmptyRecord(node_to_inspect);
