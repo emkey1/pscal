@@ -12,6 +12,11 @@
 #include "list.h"
 #include <stdbool.h>
 
+// Default record size used for untyped files when RESET/REWRITE omit an
+// explicit size. Turbo Pascal historically defaults to 128 bytes; mirror that
+// so existing code that relies on the legacy behaviour keeps working.
+#define PSCAL_DEFAULT_FILE_RECORD_SIZE 128
+
 // Forward declaration of AST struct, as TypeEntry will use AST*
 struct AST;
 
@@ -132,6 +137,7 @@ typedef struct ValueStruct {
                          // Needed for new(), dispose(), dereferencing type checks.
 
     char *filename;
+    int record_size;      // Active record size for untyped file operations
     int lower_bound;    // For single-dimensional arrays
     int upper_bound;    // For single-dimensional arrays
     int max_length;     // For fixed length strings (text: string[100];)
