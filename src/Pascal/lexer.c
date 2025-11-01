@@ -146,7 +146,7 @@ static Keyword keywords[] = {
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
     {"end", TOKEN_END}, {"enum", TOKEN_ENUM}, // Added enum
     {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
-    {"function", TOKEN_FUNCTION}, {"goto", TOKEN_GOTO}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
+    {"forward", TOKEN_FORWARD}, {"function", TOKEN_FUNCTION}, {"goto", TOKEN_GOTO}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
     {"in", TOKEN_IN}, // Added IN
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},

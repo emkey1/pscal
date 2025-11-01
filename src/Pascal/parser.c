@@ -716,6 +716,7 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
     eat(parser, originalName->type);
 
     AST *routine = newASTNode(isFunction ? AST_FUNCTION_DECL : AST_PROCEDURE_DECL, copiedName);
+    routine->is_forward_decl = true;
     freeToken(copiedName);
 
     AST *params = NULL;
@@ -803,6 +804,8 @@ static void registerRecordMethodPrototype(Parser *parser, const char *recordName
     if (!methodCopy) {
         EXIT_FAILURE_HANDLER();
     }
+
+    methodCopy->is_forward_decl = true;
 
     if (methodCopy->token && methodCopy->token->value) {
         size_t recordLen = strlen(recordName);
@@ -1184,6 +1187,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
         // Ensure arity matches the declaration's parameter count
         existing_sym->arity = proc_decl_ast_original->child_count;
         existing_sym->is_inline = proc_decl_ast_original->is_inline;
+        existing_sym->is_defined = !proc_decl_ast_original->is_forward_decl;
 
         // The update is complete. Free the constructed name and return.
         free(name_for_table);
@@ -1265,7 +1269,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
     sym->closure_escapes = false;
     sym->next = NULL;
     sym->enclosing = NULL;
-    sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
+    sym->is_defined = !proc_decl_ast_original->is_forward_decl; // Only mark defined when a body is present
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
     sym->arity = proc_decl_ast_original->child_count; // Store parameter count for builtins and declarations
     sym->locals_count = 0;      // Will be updated later.
@@ -1618,6 +1622,7 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         return newASTNode(AST_NOOP, NULL);
     }
     AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken);
+    node->is_forward_decl = in_interface;
     // freeToken(copiedProcNameToken); // Already handled if newASTNode copies
 
     // *** ADD DIAGNOSTIC PRINT HERE ***
@@ -1701,7 +1706,16 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         eat(parser, TOKEN_SEMICOLON);
     }
 
-    if (!in_interface) {
+    if (parser->current_token && parser->current_token->type == TOKEN_FORWARD) {
+        node->is_forward_decl = true;
+        eat(parser, TOKEN_FORWARD);
+        if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+            errorParser(parser, "Expected ';' after FORWARD directive");
+        }
+        eat(parser, TOKEN_SEMICOLON);
+    }
+
+    if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
@@ -2454,6 +2468,7 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     }
 
     AST *node = newASTNode(AST_FUNCTION_DECL, copiedFuncNameToken);
+    node->is_forward_decl = in_interface;
     // newASTNode makes its own copy, so we can free copiedFuncNameToken after node creation
     // BUT we assign node->token to copiedFuncNameToken in newASTNode, so freeToken(copiedFuncNameToken)
     // at the end of this function is correct if newASTNode's copy is what's stored in node->token.
@@ -2540,7 +2555,16 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
         eat(parser, TOKEN_SEMICOLON);
     }
 
-    if (!in_interface) {
+    if (parser->current_token && parser->current_token->type == TOKEN_FORWARD) {
+        node->is_forward_decl = true;
+        eat(parser, TOKEN_FORWARD);
+        if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+            errorParser(parser, "Expected ';' after FORWARD directive");
+        }
+        eat(parser, TOKEN_SEMICOLON);
+    }
+
+    if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
 
         AST *local_declarations = declarations(parser, false);
