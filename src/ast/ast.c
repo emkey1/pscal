@@ -898,7 +898,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 bool operand_is_procedure = false;
                 if (node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                     const char* name = node->left->token->value;
-                    Symbol* procSym = lookupProcedure(name);
+                    Symbol* procSym = resolveProcedureSymbolInScope(name, node, globalProgramNode);
                     if (procSym) {
                         operand_is_procedure = true;
                     }
@@ -1226,7 +1226,7 @@ resolved_field: ;
                 node->var_type = (node->token && node->token->type == TOKEN_NOT) ? TYPE_BOOLEAN : (node->left ? node->left->var_type : TYPE_VOID);
                 break;
             case AST_PROCEDURE_CALL: {
-                 Symbol *procSymbol = node->token ? lookupProcedure(node->token->value) : NULL;
+                 Symbol *procSymbol = node->token ? resolveProcedureSymbolInScope(node->token->value, node, globalProgramNode) : NULL;
                 if (procSymbol) {
                     node->var_type = procSymbol->type;
                 } else {
@@ -1257,7 +1257,7 @@ resolved_field: ;
                              if (ftype && ftype->type == AST_PROC_PTR_TYPE) {
                                  if (actual->type == AST_ADDR_OF && actual->left && actual->left->token) {
                                      const char* aname = actual->left->token->value;
-                                     Symbol* as = lookupProcedure(aname);
+                                     Symbol* as = resolveProcedureSymbolInScope(aname, node, globalProgramNode);
                                      if (as && as->type_def) {
                                          AST* adecl = as->type_def;
                                          AST* fparams = (ftype->child_count > 0) ? ftype->children[0] : NULL;

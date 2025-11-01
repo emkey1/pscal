@@ -106,6 +106,15 @@
       "expected_stdout": "counter=8"
     },
     {
+      "id": "routine_nested_proc_ptr_compiles",
+      "name": "Nested procedure pointer resolves local handler",
+      "category": "routine_scope",
+      "description": "Nested procedure pointers passed with '@' should resolve local helpers declared in the same scope.",
+      "expect": "compile_ok",
+      "code": "program RoutineNestedProcPtr;\ntype\n  THandler = procedure;\n\nprocedure Setup;\n  procedure Register(handler: THandler);\n  begin\n  end;\n\n  procedure LocalHandler;\n  begin\n  end;\n\nbegin\n  Register(@LocalHandler);\nend;\n\nbegin\n  Setup;\nend.",
+      "failure_reason": "Regression coverage for nested procedure pointer lookup."
+    },
+    {
       "id": "routine_sibling_local_access_error",
       "name": "Sibling routine cannot access another's local",
       "category": "routine_scope",
