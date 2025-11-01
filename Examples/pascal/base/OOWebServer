@@ -1,0 +1,745 @@
+#!/usr/bin/env pascal
+program OOWebServer;
+
+// This version is refactored to use interfaces,
+// records, and closures to make the request
+// handling more modular and "Pascal-like".
+
+// --- Part 1: Interface and Generic Record ---
+
+type
+    // 1. The Interface: Defines what a response handler must do.
+    IBodyBuilder = interface
+        // Fills in the response details based on the request path.
+        procedure BuildBody(const path: string; 
+                            var code: integer; 
+                            var body: string; 
+                            var ctype: string; 
+                            var logDetail: string);
+    end;
+
+    // A procedure type that matches the method in our interface.
+    THandlerFunc = procedure(const path: string; 
+                             var code: integer; 
+                             var body: string; 
+                             var ctype: string; 
+                             var logDetail: string);
+
+    // 2. The Record: A generic record that uses a function pointer (closure)
+    //    to implement the interface.
+    PClosureBuilder = ^TClosureBuilder;
+    TClosureBuilder = record
+        handler: THandlerFunc; // This will hold our closure
+        procedure BuildBody(const path: string; 
+                            var code: integer; 
+                            var body: string; 
+                            var ctype: string; 
+                            var logDetail: string); virtual;
+    end;
+
+// The record's implementation of BuildBody just calls the closure
+procedure TClosureBuilder.BuildBody(const path: string; 
+                                    var code: integer; 
+                                    var body: string; 
+                                    var ctype: string; 
+                                    var logDetail: string);
+begin
+    if (myself.handler <> nil) then
+        myself.handler(path, code, body, ctype, logDetail)
+    else
+    begin
+        code := 500;
+        body := 'Server Error: Handler not set.';
+        ctype := 'text/plain';
+        logDetail := 'HandlerNil';
+    end;
+end;
+
+// 3. The Factory: A simple procedure to create a new builder
+//    from any procedure that matches the THandlerFunc signature.
+procedure MakeBuilder(h: THandlerFunc; var newBuilder: IBodyBuilder);
+var
+    b: PClosureBuilder;
+begin
+    new(b);
+    b^.handler := h;
+    newBuilder := IBodyBuilder(b); // Box the record into the interface
+end;
+
+// --- Part 2: Global Vars and Helpers ---
+// (These are mostly unchanged from the original)
+
+const
+    MaxQueueCapacity = 256;
+var
+    Port: integer = 5555;
+    RootDir: string;
+    IndexPath: string;
+    Body: string; // Default index.html body
+    GFile: text;
+    ConfiguredAssetRoot: string = '@PSCAL_INSTALL_ROOT_RESOLVED@/misc/htdocs';
+    //ConfiguredAssetRoot: string = '/usr/local/pscal/misc/htdocs';
+
+    MaxThreads: integer = 8;
+    QCap: integer = 64;
+    q: array[0..MaxQueueCapacity-1] of integer;
+    qHead: integer = 0;
+    qTail: integer = 0;
+    qCount: integer = 0;
+    qmu: integer;
+
+    GAccepted: integer = 0;
+    GEnqueued: integer = 0;
+    GDropped: integer = 0;
+    GServed: integer = 0;
+
+// Helper functions (pad2, timestamp, etc.) are identical
+procedure pad2(n: integer; var result: string);
+var s: string;
+begin
+    s := inttostr(n);
+    if (length(s) < 2) then s := '0' + s;
+    result := s;
+end;
+
+procedure timestamp(var result: string);
+var
+    yr, mo, dy, dow, hh, mi, ss, hs: integer;
+    ts, s_mo, s_dy, s_hh, s_mi, s_ss: string;
+begin
+    getdate(yr, mo, dy, dow);
+    gettime(hh, mi, ss, hs);
+    pad2(mo, s_mo); pad2(dy, s_dy); pad2(hh, s_hh); 
+    pad2(mi, s_mi); pad2(ss, s_ss);
+    ts := inttostr(yr)+'-'+s_mo+'-'+s_dy+' '+s_hh+':'+s_mi+':'+s_ss;
+    result := ts;
+end;
+
+function endswith(const s, suffix: string): integer;
+var ls, lf: integer; tail: string;
+begin
+    ls := length(s); lf := length(suffix);
+    if (lf > ls) then begin endswith := 0; exit; end;
+    tail := copy(s, ls - lf + 1, lf);
+    if (tail = suffix) then endswith := 1 else endswith := 0;
+end;
+
+procedure contentType(const path: string; var result: string);
+begin
+    if (endswith(path, '.html') = 1) or (endswith(path, '.htm') = 1) then result := 'text/html'
+    else if (endswith(path, '.css') = 1) then result := 'text/css'
+    else if (endswith(path, '.js') = 1) then result := 'application/javascript'
+    else if (endswith(path, '.json') = 1) then result := 'application/json'
+    else if (endswith(path, '.txt') = 1) then result := 'text/plain'
+    else if (endswith(path, '.png') = 1) then result := 'image/png'
+    else if (endswith(path, '.jpg') = 1) or (endswith(path, '.jpeg') = 1) then result := 'image/jpeg'
+    else result := 'application/octet-stream';
+end;
+
+procedure decodePercent(s: string; var result: string);
+var out: string; i, v1, v2, val: integer; h1, h2: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        if (copy(s, i, 1) = '%') and (i + 2 <= length(s)) then
+        begin
+            h1 := copy(s, i + 1, 1); h2 := copy(s, i + 2, 1);
+            v1 := -1; v2 := -1;
+            if (h1 >= '0') and (h1 <= '9') then v1 := ord(h1) - ord('0')
+            else if (h1 >= 'a') and (h1 <= 'f') then v1 := 10 + (ord(h1) - ord('a'))
+            else if (h1 >= 'A') and (h1 <= 'F') then v1 := 10 + (ord(h1) - ord('A'));
+            if (h2 >= '0') and (h2 <= '9') then v2 := ord(h2) - ord('0')
+            else if (h2 >= 'a') and (h2 <= 'f') then v2 := 10 + (ord(h2) - ord('a'))
+            else if (h2 >= 'A') and (h2 <= 'F') then v2 := 10 + (ord(h2) - ord('A'));
+            if (v1 >= 0) and (v2 >= 0) then
+            begin
+                val := v1 * 16 + v2;
+                out := out + tochar(val);
+                i := i + 3;
+                continue;
+            end;
+        end;
+        out := out + copy(s, i, 1);
+        i := i + 1;
+    end;
+    result := out;
+end;
+
+procedure normalizePath(s: string; var result: string);
+var out: string; i, j, segLen, k, last: integer; seg: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        while (i <= length(s)) and (copy(s, i, 1) = '/') do i := i + 1;
+        if (i > length(s)) then break;
+        j := i;
+        while (j <= length(s)) and (copy(s, j, 1) <> '/') do j := j + 1;
+        segLen := j - i;
+        seg := copy(s, i, segLen);
+        if (seg = '') or (seg = '.') then
+        begin
+            // skip
+        end
+        else if (seg = '..') then
+        begin
+            if (length(out) > 0) then
+            begin
+                k := 1; last := 0;
+                while (k <= length(out)) do
+                begin
+                    if (copy(out, k, 1) = '/') then last := k;
+                    k := k + 1;
+                end;
+                if (last > 0) then out := copy(out, 1, last - 1) else out := '';
+            end;
+        end
+        else
+        begin
+            if (length(out) > 0) then out := out + '/' + seg else out := seg;
+        end;
+        i := j + 1;
+    end;
+    result := out;
+end;
+
+// --- Part 3: Refactored Connection Handler ---
+
+procedure serveConn(c: integer);
+var
+    req: mstream;
+    reqText, firstLine, method, path: string;
+    ln, flen, i, mstart, pstart, qidx, len: integer;
+    respBody, ctype, logDetail, status, hdr, ts: string;
+    code: integer;
+    depth, served, enq, drop: integer;
+    
+    // This is our polymorphic handler
+    builder: IBodyBuilder;
+
+    // --- Handler Closures ---
+    // These are nested procedures. They act as closures,
+    // capturing the global vars RootDir, IndexPath, and Body.
+
+    procedure HandleRoot(const path: string; 
+                         var code: integer; 
+                         var body: string; 
+                         var ctype: string; 
+                         var logDetail: string);
+    var
+        ms: mstream;
+        ok: integer;
+        listing, name: string;
+    begin
+        // Try to serve index.html first
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ms := mstreamcreate;
+            ok := mstreamloadfromfile(ms, IndexPath);
+            if (ok = 1) then
+            begin
+                body := mstreambuffer(ms);
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html';
+                mstreamfree(ms);
+            end
+            else
+            begin
+                mstreamfree(ms);
+                // Fallback to in-memory Body
+                body := Body;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            // No index.html, generate a directory listing
+            listing := '<html><body><h1>Index of /</h1><ul>';
+            name := findfirst(RootDir);
+            while (name <> '') do
+            begin
+                listing := listing + '<li><a href="/' + name + '">' + name + '</a></li>';
+                name := findnext;
+            end;
+            listing := listing + '</ul></body></html>';
+            body := listing;
+            code := 200;
+            ctype := 'text/html';
+            logDetail := '(listing)';
+        end;
+    end;
+
+    procedure HandleIndex(const path: string; 
+                          var code: integer; 
+                          var body: string; 
+                          var ctype: string; 
+                          var logDetail: string);
+    var
+        ms: mstream;
+        ok: integer;
+    begin
+        // Serve real index.html or default Body
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ms := mstreamcreate;
+            ok := mstreamloadfromfile(ms, IndexPath);
+            if (ok = 1) then
+            begin
+                body := mstreambuffer(ms);
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html';
+                mstreamfree(ms);
+            end
+            else
+            begin
+                mstreamfree(ms);
+                body := Body;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            body := Body;
+            code := 200;
+            ctype := 'text/html';
+            logDetail := 'index.html (default)';
+        end;
+    end;
+
+    procedure HandleFile(const path: string; 
+                         var code: integer; 
+                         var body: string; 
+                         var ctype: string; 
+                         var logDetail: string);
+    var
+        rel, fullPath: string;
+        ms: mstream;
+        ok: integer;
+    begin
+        // Serve file under RootDir
+        if (copy(path, 1, 1) = '/') then rel := copy(path, 2, length(path) - 1) else rel := path;
+        normalizePath(rel, rel);
+        fullPath := RootDir + '/' + rel;
+        
+        if (fileexists(fullPath) = 1) then
+        begin
+            ms := mstreamcreate;
+            ok := mstreamloadfromfile(ms, fullPath);
+            if (ok = 1) then
+            begin
+                body := mstreambuffer(ms);
+                code := 200;
+                contentType(rel, ctype);
+                mstreamfree(ms);
+                logDetail := rel;
+            end
+            else
+            begin
+                mstreamfree(ms);
+                body := '<html><body>Internal Server Error</body></html>';
+                code := 500;
+                ctype := 'text/html';
+                logDetail := rel;
+            end;
+        end
+        else
+        begin
+            body := '<html><body>Not Found</body></html>';
+            code := 404;
+            ctype := 'text/html';
+            logDetail := rel;
+        end;
+    end;
+
+// --- serveConn main logic begins ---
+begin
+    // 1. Parse Request (unchanged)
+    req := socketreceive(c, 2048);
+    reqText := mstreambuffer(req);
+    ln := pos(reqText, #13#10);
+    if (ln = 0) then ln := pos(reqText, #10);
+    if (ln > 0) then firstLine := copy(reqText, 1, ln - 1) else firstLine := reqText;
+    
+    flen := length(firstLine);
+    i := 1;
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    mstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (mstart <= flen) then method := copy(firstLine, mstart, i - mstart) else method := '';
+    
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    pstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (pstart <= flen) and (i > pstart) then path := copy(firstLine, pstart, i - pstart) else path := '/';
+    
+    qidx := pos(path, '?');
+    if (qidx > 0) then path := copy(path, 1, qidx - 1);
+    decodePercent(path, path);
+
+    // 2. Select and Create Handler (NEW LOGIC)
+    if (path = '/') then
+    begin
+        MakeBuilder(@HandleRoot, builder);
+    end
+    else if (path = '/index.html') then
+    begin
+        MakeBuilder(@HandleIndex, builder);
+    end
+    else
+    begin
+        MakeBuilder(@HandleFile, builder);
+    end;
+
+    // 3. Use Handler to Build Response (NEW LOGIC)
+    // Initialize defaults
+    code := 200;
+    ctype := 'text/html';
+    logDetail := '';
+    
+    // Call the interface method. This will execute the
+    // specific closure we assigned.
+    builder.BuildBody(path, code, respBody, ctype, logDetail);
+
+    // 4. Send Response (unchanged)
+    len := length(respBody);
+    if (code = 200) then status := '200 OK'
+    else if (code = 404) then status := '404 Not Found'
+    else status := '500 Internal Server Error';
+    
+    hdr := 'HTTP/1.1 ' + status + #13#10
+         + 'Content-Type: ' + ctype + #13#10
+         + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+         
+    socketsend(c, hdr);
+    socketsend(c, respBody);
+    
+    // 5. Log (unchanged)
+    lock(qmu);
+    depth := qCount; served := GServed; enq := GEnqueued; drop := GDropped;
+    unlock(qmu);
+    
+    timestamp(ts);
+    printf('%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d' + #10,
+           ts, method, path, code, logDetail, depth, served, enq, drop);
+    socketclose(c);
+end;
+
+// --- Part 4: Worker Pool and Main ---
+// (All unchanged, but I'll include them for completeness)
+
+procedure qinit;
+begin
+    qmu := mutex;
+    qHead := 0;
+    qTail := 0;
+    qCount := 0;
+end;
+
+function enqueue(c: integer): integer;
+var ok: integer;
+begin
+    ok := 0;
+    lock(qmu);
+    if (qCount < QCap) then
+    begin
+        q[qTail] := c;
+        qTail := (qTail + 1) mod QCap;
+        qCount := qCount + 1;
+        GEnqueued := GEnqueued + 1;
+        ok := 1;
+    end;
+    unlock(qmu);
+    enqueue := ok;
+end;
+
+function dequeue: integer;
+var v: integer;
+begin
+    v := -1;
+    lock(qmu);
+    if (qCount > 0) then
+    begin
+        v := q[qHead];
+        qHead := (qHead + 1) mod QCap;
+        qCount := qCount - 1;
+    end;
+    unlock(qmu);
+    dequeue := v;
+end;
+
+procedure worker;
+var c: integer;
+begin
+    while (true) do
+    begin
+        c := dequeue;
+        if (c >= 0) then
+        begin
+            serveConn(c);
+            lock(qmu); GServed := GServed + 1; unlock(qmu);
+        end
+        else
+        begin
+            delay(10);
+        end;
+    end;
+end;
+
+procedure heartbeat;
+var prevServed, depth, served, enq, drop, acc, cap, thr, dps: integer;
+    ts: string;
+begin
+    prevServed := 0;
+    while (true) do
+    begin
+        delay(60000); // ~60s
+        lock(qmu);
+        depth := qCount; served := GServed; enq := GEnqueued;
+        drop := GDropped; acc := GAccepted; cap := QCap; thr := MaxThreads;
+        unlock(qmu);
+        
+        dps := served - prevServed;
+        prevServed := served;
+        timestamp(ts);
+        printf('%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d' + #10,
+               ts, depth, cap, thr, acc, enq, served, drop, dps);
+    end;
+end;
+
+// File/Path helpers (fs* and initFiles) are unchanged.
+// ... (I've omitted them for brevity, but they are identical
+//      to the previous version: isDirectory, copyFile,
+//      copyDirectory, resolveTempDir, ensureTrailingSlash,
+//      fs* functions, initFiles) ...
+
+// Need to include these for initFiles
+function isDirectory(const path: string): integer;
+var attr: integer;
+begin
+    attr := getfattr(path);
+    if ((attr and 16) <> 0) then isDirectory := 1 else isDirectory := 0;
+end;
+
+function copyFile(const src, dst: string): integer;
+var ms: mstream; loaded: integer;
+begin
+    ms := mstreamcreate;
+    loaded := mstreamloadfromfile(ms, src);
+    if (loaded = 0) then begin mstreamfree(ms); copyFile := 0; exit; end;
+    mstreamsavetofile(ms, dst);
+    mstreamfree(ms);
+    copyFile := 1;
+end;
+
+function copyDirectory(const src, dst: string): integer;
+var entries, name, entry, srcPath, dstPath: string;
+    idx, j, segLen, success: integer;
+begin
+    if (isDirectory(src) = 0) then begin copyDirectory := 0; exit; end;
+    mkdir(dst);
+    entries := '';
+    name := findfirst(src);
+    while (name <> '') do
+    begin
+        entries := entries + name + #10;
+        name := findnext;
+    end;
+    idx := 1;
+    success := 1;
+    while (idx <= length(entries)) do
+    begin
+        j := idx;
+        while (j <= length(entries)) and (copy(entries, j, 1) <> #10) do j := j + 1;
+        segLen := j - idx;
+        if (segLen > 0) then
+        begin
+            entry := copy(entries, idx, segLen);
+            srcPath := src + '/' + entry;
+            dstPath := dst + '/' + entry;
+            if (isDirectory(srcPath) = 1) then
+            begin
+                if (copyDirectory(srcPath, dstPath) = 0) then success := 0;
+            end
+            else
+            begin
+                if (copyFile(srcPath, dstPath) = 0) then success := 0;
+            end;
+        end;
+        idx := j + 1;
+    end;
+    copyDirectory := success;
+end;
+
+procedure resolveTempDir(var result: string);
+var dir: string;
+begin
+    dir := getenv('TMPDIR');
+    if (dir = '') then dir := getenv('TMP');
+    if (dir = '') then dir := getenv('TEMP');
+    if (dir = '') then dir := getenv('PWD');
+    if (dir = '') then dir := getenv('HOME');
+    if (dir = '') then dir := '/tmp';
+    result := dir;
+end;
+
+procedure ensureTrailingSlash(path: string; var result: string);
+var len: integer; last: string;
+begin
+    len := length(path);
+    if (len = 0) then begin result := '/tmp/'; exit; end;
+    last := copy(path, len, 1);
+    if (last = '/') or (last = '\') then result := path else result := path + '/';
+end;
+
+procedure initFiles;
+var pid, copied: integer; pidStr, base, source, tempDir: string;
+begin
+    pid := getpid;
+    pidStr := inttostr(pid);
+    resolveTempDir(tempDir);
+    ensureTrailingSlash(tempDir, base);
+    RootDir := base + 'htdocs.' + pidStr;
+    mkdir(RootDir);
+    IndexPath := RootDir + '/index.html';
+    Body := '<html><body>Hello from the OO pscal web server</body></html>';
+    
+    source := ConfiguredAssetRoot;
+    copied := 0;
+    if (isDirectory(source) = 1) then
+    begin
+        copied := copyDirectory(source, RootDir);
+    end;
+    
+    if (copied = 0) or (fileexists(IndexPath) = 0) then
+    begin
+        GFile := fopen(IndexPath, 'w');
+        fprintf(GFile, '%s' + #10, Body);
+        fclose(GFile);
+    end;
+end;
+
+// --- Main Program ---
+var
+    a1, a2: string;
+    parsed, code, parsedT, codeT, parsedQ, codeQ: integer;
+    srv, bindrc, i, c, tries, ok: integer;
+    
+begin
+    initFiles;
+    qinit;
+    
+    // Param parsing (unchanged)
+    if (paramcount >= 1) then
+    begin
+        a1 := paramstr(1);
+        val(a1, parsed, code);
+        if (code = 0) and (parsed > 0) and (parsed < 65536) then
+        begin
+            Port := parsed;
+            if (paramcount >= 2) then
+            begin
+                RootDir := paramstr(2);
+                IndexPath := RootDir + '/index.html';
+            end;
+        end
+        else
+        begin
+            RootDir := a1;
+            IndexPath := RootDir + '/index.html';
+            if (paramcount >= 2) then
+            begin
+                a2 := paramstr(2);
+                val(a2, parsed, code);
+                if (code = 0) and (parsed > 0) and (parsed < 65536) then Port := parsed;
+            end;
+        end;
+        
+        mkdir(RootDir);
+        if (fileexists(IndexPath) = 0) then
+        begin
+            GFile := fopen(IndexPath, 'w');
+            fprintf(GFile, '%s' + #10, Body);
+            fclose(GFile);
+        end;
+        
+        if (paramcount >= 3) then
+        begin
+            val(paramstr(3), parsedT, codeT);
+            if (codeT = 0) and (parsedT > 0) and (parsedT <= 64) then MaxThreads := parsedT;
+        end;
+        
+        if (paramcount >= 4) then
+        begin
+            val(paramstr(4), parsedQ, codeQ);
+            if (codeQ = 0) then
+            begin
+                if (parsedQ < 8) then parsedQ := 8;
+                if (parsedQ > MaxQueueCapacity) then parsedQ := MaxQueueCapacity;
+                lock(qmu);
+                QCap := parsedQ; qHead := 0; qTail := 0; qCount := 0;
+                unlock(qmu);
+            end;
+        end;
+    end;
+    
+    printf('Serving %s on http://127.0.0.1:%d' + #10, IndexPath, Port);
+    printf('Root: %s' + #10, RootDir);
+    
+    // Socket setup (unchanged)
+    srv := socketcreate(0);
+    if (srv < 0) then begin printf('socketcreate failed' + #10); halt(1); end;
+    
+    bindrc := socketbindaddr(srv, '127.0.0.1', Port);
+    if (bindrc <> 0) then begin printf('socketbind failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    if (socketlisten(srv, 16) <> 0) then begin printf('socketlisten failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    printf('Waiting for connections... (Ctrl+C to quit)' + #10);
+    
+    // Spawn threads (unchanged)
+    spawn heartbeat;
+    i := 0;
+    while (i < MaxThreads) do
+    begin
+        spawn worker;
+        i := i + 1;
+    end;
+    
+    // Main accept loop (unchanged)
+    while (true) do
+    begin
+        c := socketaccept(srv);
+        if (c >= 0) then
+        begin
+            lock(qmu); GAccepted := GAccepted + 1; unlock(qmu);
+            tries := 0;
+            ok := 0;
+            while (tries < 5) do
+            begin
+                ok := enqueue(c);
+                if (ok = 1) then break;
+                delay(10);
+                tries := tries + 1;
+            end;
+            
+            if (ok = 0) then
+            begin
+                socketclose(c);
+                lock(qmu); GDropped := GDropped + 1; unlock(qmu);
+            end;
+        end
+        else
+        begin
+            delay(10);
+        end;
+    end;
+    
+    socketclose(srv);
+end.
