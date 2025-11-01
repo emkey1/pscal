@@ -3765,6 +3765,8 @@ AST *factor(Parser *parser) {
         size_t bufferCap = 0;
         char *buffer = NULL;
         bool allCharCodes = true;
+        int initialLine = initialToken ? initialToken->line : 0;
+        int initialColumn = initialToken ? initialToken->column : 0;
 
         while (parser->current_token && parser->current_token->type == TOKEN_STRING_CONST) {
             Token *segment = parser->current_token;
@@ -3820,8 +3822,8 @@ AST *factor(Parser *parser) {
         combinedToken.type = TOKEN_STRING_CONST;
         combinedToken.value = buffer;
         combinedToken.length = bufferLen;
-        combinedToken.line = initialToken->line;
-        combinedToken.column = initialToken->column;
+        combinedToken.line = initialLine;
+        combinedToken.column = initialColumn;
         combinedToken.is_char_code = (bufferLen == 1) && allCharCodes;
 
         node = newASTNode(AST_STRING, &combinedToken);
