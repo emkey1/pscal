@@ -1209,6 +1209,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
         } else if (var_decl->var_type == TYPE_FILE) {
             VarType file_element_type = TYPE_VOID;
             const char *file_element_name = "";
+            bool is_text_file = false;
 
             AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
             if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
@@ -1230,13 +1231,14 @@ static void emitGlobalVarDefinition(AST* var_decl,
                         file_element_name = source_node->token->value;
                     }
                 } else if (strcasecmp(file_token, "text") == 0) {
-                    file_element_type = TYPE_CHAR;
-                    file_element_name = "char";
+                    is_text_file = true;
+                    file_element_type = TYPE_VOID;
+                    file_element_name = "";
                 }
             }
 
             writeBytecodeChunk(chunk, (uint8_t)file_element_type, line);
-            if (file_element_name && file_element_name[0]) {
+            if (!is_text_file && file_element_name && file_element_name[0]) {
                 emitConstantIndex16(chunk, addStringConstant(chunk, file_element_name), line);
             } else {
                 emitShort(chunk, 0xFFFF, line);
@@ -4847,6 +4849,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
                         VarType file_element_type = TYPE_VOID;
                         const char *file_element_name = "";
+                        bool is_text_file = false;
 
                         AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
                         if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
@@ -4868,13 +4871,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                     file_element_name = source_node->token->value;
                                 }
                             } else if (strcasecmp(type_name, "text") == 0) {
-                                file_element_type = TYPE_CHAR;
-                                file_element_name = "char";
+                                is_text_file = true;
+                                file_element_type = TYPE_VOID;
+                                file_element_name = "";
                             }
                         }
 
                         writeBytecodeChunk(chunk, (uint8_t)file_element_type, getLine(varNameNode));
-                        if (file_element_name && file_element_name[0]) {
+                        if (!is_text_file && file_element_name && file_element_name[0]) {
                             int type_name_index = addStringConstant(chunk, file_element_name);
                             emitConstantIndex16(chunk, type_name_index, getLine(varNameNode));
                         } else {
