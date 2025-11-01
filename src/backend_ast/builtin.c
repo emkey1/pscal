@@ -6325,7 +6325,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFromString", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamBuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("New", AST_PROCEDURE_DECL, NULL);

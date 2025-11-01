@@ -1659,6 +1659,7 @@ VarType getBuiltinReturnType(const char* name) {
 
     /* Memory stream helpers */
     if (strcasecmp(name, "mstreamcreate") == 0) return TYPE_MEMORYSTREAM;
+    if (strcasecmp(name, "mstreamloadfromfile") == 0) return TYPE_BOOLEAN;
 
     /* Threading helpers (new API) */
     if (strcasecmp(name, "createthread") == 0) return TYPE_THREAD;
