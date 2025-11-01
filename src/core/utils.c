@@ -1837,111 +1837,95 @@ static void exportEnumMembersFromNode(AST* node, const char* unit_name) {
 void linkUnit(AST *unit_ast, int recursion_depth) {
     if (!unit_ast) return;
 
-    // The unit parser should have built a temporary (unit-scoped) symbol list.
-    if (!unit_ast->symbol_table) {
-        fprintf(stderr, "Error: Symbol table for unit is missing.\n");
-        EXIT_FAILURE_HANDLER();
-    }
-
     const char* unit_name_original = unit_ast->token ? unit_ast->token->value : NULL;
 
     exportEnumMembersFromNode(unit_ast->left, unit_name_original);
 
-    // Walk the unit's symbol list and merge ONLY variables/constants into globals.
-    Symbol *unit_symbol = unit_ast->symbol_table;
-    while (unit_symbol) {
+    // Walk the unit's symbol table and merge ONLY variables/constants into globals.
+    HashTable *unit_table = (HashTable*)unit_ast->symbol_table;
+    if (!unit_table) {
+        fprintf(stderr, "Error: Symbol table for unit is missing.\n");
+        EXIT_FAILURE_HANDLER();
+    }
 
-        // Skip procedures/functions (these live in procedure_table and are handled elsewhere).
-        bool is_routine_symbol =
-            (unit_symbol->type_def &&
-            (unit_symbol->type_def->type == AST_PROCEDURE_DECL ||
-             unit_symbol->type_def->type == AST_FUNCTION_DECL));
-        if (is_routine_symbol) {
-            DEBUG_PRINT("[DEBUG] linkUnit: Skipping routine symbol '%s' (type %s) from unit interface.\n",
+    for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
+        Symbol *unit_symbol = unit_table->buckets[bucket];
+        while (unit_symbol) {
+            bool is_routine_symbol =
+                (unit_symbol->type_def &&
+                (unit_symbol->type_def->type == AST_PROCEDURE_DECL ||
+                 unit_symbol->type_def->type == AST_FUNCTION_DECL));
+            if (is_routine_symbol) {
+                DEBUG_PRINT("[DEBUG] linkUnit: Skipping routine symbol '%s' (type %s) from unit interface.\n",
+                            unit_symbol->name, varTypeToString(unit_symbol->type));
+                unit_symbol = unit_symbol->next;
+                continue;
+            }
+
+            Symbol *existing_global = lookupGlobalSymbol(unit_symbol->name);
+            if (existing_global) {
+                DEBUG_PRINT("[DEBUG] linkUnit: '%s' already exists globally.\n", unit_symbol->name);
+
+                if (unit_symbol->is_const && unit_symbol->value) {
+                    DEBUG_PRINT("[DEBUG] linkUnit: Updating existing global const '%s' from unit.\n",
+                                unit_symbol->name);
+                    Value dup = makeCopyOfValue(unit_symbol->value);
+                    updateSymbol(unit_symbol->name, dup);
+                    existing_global->is_const = true;
+                }
+
+                if (unit_name_original && *unit_name_original) {
+                    char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+                    snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name_original, unit_symbol->name);
+                    toLowerString(qualified_name);
+                    insertGlobalAlias(qualified_name, existing_global);
+                }
+
+                unit_symbol = unit_symbol->next;
+                continue;
+            }
+
+            DEBUG_PRINT("[DEBUG] linkUnit: Inserting global '%s' (type %s) from unit.\n",
                         unit_symbol->name, varTypeToString(unit_symbol->type));
-            unit_symbol = unit_symbol->next;
-            continue;
-        }
+            insertGlobalSymbol(unit_symbol->name, unit_symbol->type, unit_symbol->type_def);
 
-        // Already present in globals?
-        Symbol *existing_global = lookupGlobalSymbol(unit_symbol->name);
-        if (existing_global) {
-            DEBUG_PRINT("[DEBUG] linkUnit: '%s' already exists globally.\n", unit_symbol->name);
+            Symbol *g = lookupGlobalSymbol(unit_symbol->name);
+            if (!g) {
+                fprintf(stderr, "Internal Error: Failed to find global '%s' after insertion.\n",
+                        unit_symbol->name);
+                EXIT_FAILURE_HANDLER();
+            }
+            DEBUG_PRINT("[DEBUG] linkUnit: Successfully inserted '%s'.\n", g->name);
 
-            // If the unit provided a constant value, update the existing global
-            // using a DEEP COPY so updateSymbol can free its temp safely.
             if (unit_symbol->is_const && unit_symbol->value) {
-                DEBUG_PRINT("[DEBUG] linkUnit: Updating existing global const '%s' from unit.\n",
+                DEBUG_PRINT("[DEBUG] linkUnit: Copying constant value for '%s'.\n", unit_symbol->name);
+                Value dup = makeCopyOfValue(unit_symbol->value);
+                updateSymbol(unit_symbol->name, dup);
+                g->is_const = true;
+            } else if (unit_symbol->type == TYPE_ARRAY && unit_symbol->value) {
+                DEBUG_PRINT("[DEBUG] linkUnit: Copying initial array value for '%s'.\n",
                             unit_symbol->name);
-                Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
-                updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
-                existing_global->is_const = true;
+                Value dup = makeCopyOfValue(unit_symbol->value);
+                updateSymbol(unit_symbol->name, dup);
             }
 
             if (unit_name_original && *unit_name_original) {
                 char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
                 snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name_original, unit_symbol->name);
                 toLowerString(qualified_name);
-                insertGlobalAlias(qualified_name, existing_global);
+                insertGlobalAlias(qualified_name, g);
             }
 
             unit_symbol = unit_symbol->next;
-            continue;
         }
-
-        // Insert a fresh global (Value is default-initialized inside insertGlobalSymbol).
-        DEBUG_PRINT("[DEBUG] linkUnit: Inserting global '%s' (type %s) from unit.\n",
-                    unit_symbol->name, varTypeToString(unit_symbol->type));
-        insertGlobalSymbol(unit_symbol->name, unit_symbol->type, unit_symbol->type_def);
-
-        Symbol *g = lookupGlobalSymbol(unit_symbol->name);
-        if (!g) {
-            fprintf(stderr, "Internal Error: Failed to find global '%s' after insertion.\n",
-                    unit_symbol->name);
-            EXIT_FAILURE_HANDLER();
-        }
-        DEBUG_PRINT("[DEBUG] linkUnit: Successfully inserted '%s'.\n", g->name);
-
-        // If the unit symbol is a constant with a value, copy that value into the global now.
-        if (unit_symbol->is_const && unit_symbol->value) {
-            DEBUG_PRINT("[DEBUG] linkUnit: Copying constant value for '%s'.\n", unit_symbol->name);
-            Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
-            updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
-            g->is_const = true;
-        }
-        // If the unit symbol is an initialized array *variable* in the interface (rare),
-        // copy its initial value too (deep copy). Constants were handled above already.
-        else if (unit_symbol->type == TYPE_ARRAY && unit_symbol->value) {
-            DEBUG_PRINT("[DEBUG] linkUnit: Copying initial array value for '%s'.\n",
-                        unit_symbol->name);
-            Value dup = makeCopyOfValue(unit_symbol->value);  // deep copy
-            updateSymbol(unit_symbol->name, dup);             // updateSymbol will free dup
-        }
-
-        if (unit_name_original && *unit_name_original) {
-            char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
-            snprintf(qualified_name, sizeof(qualified_name), "%s.%s", unit_name_original, unit_symbol->name);
-            toLowerString(qualified_name);
-            insertGlobalAlias(qualified_name, g);
-        }
-
-        // NOTE:
-        // We intentionally do NOT perform additional manual per-type copying here.
-        // updateSymbol(...) already handles all supported types (ENUM, SET, POINTER, etc.)
-        // and takes ownership of the temporary deep-copied Value safely. Doing manual
-        // re-copies after updateSymbol risks double-frees and is redundant.
-
-        unit_symbol = unit_symbol->next;
     }
 
-    // Done merging: free the temporary unit symbol list. Its Values are still owned by the unit
-    // list and will be freed here; globals now own their own deep copies, so this is safe.
     if (unit_ast->symbol_table) {
         DEBUG_PRINT("[DEBUG] linkUnit: Freeing unit symbol table for '%s' at %p\n",
                     unit_ast->token ? unit_ast->token->value : "NULL",
                     (void*)unit_ast->symbol_table);
-        freeUnitSymbolTable(unit_ast->symbol_table);
-        unit_ast->symbol_table = NULL; // prevent double free when freeing the AST later
+        freeUnitSymbolTable((HashTable*)unit_ast->symbol_table);
+        unit_ast->symbol_table = NULL;
     }
 
     // Register types declared in the unit's interface (these ASTs are managed by the type table).
@@ -2025,114 +2009,121 @@ void linkUnit(AST *unit_ast, int recursion_depth) {
 // containing all exported symbols (variables, procedures, functions, types) for the unit.
 // buildUnitSymbolTable traverses the unit's interface AST node and builds a linked list
 // of Symbols for all exported constants, variables, and procedures/functions.
-Symbol *buildUnitSymbolTable(AST *interface_ast) {
-    if (!interface_ast || interface_ast->type != AST_COMPOUND) return NULL;
+HashTable *buildUnitSymbolTable(AST *interface_ast) {
+    if (!interface_ast || interface_ast->type != AST_COMPOUND) {
+        return NULL;
+    }
 
-    Symbol *unitSymbols = NULL;
-    Symbol **tail = &unitSymbols; // Pointer-to-pointer for efficient list appending
+    HashTable *unitSymbols = createHashTable();
 
-    // Iterate over all declarations in the interface.
     for (int i = 0; i < interface_ast->child_count; i++) {
         AST *decl = interface_ast->children[i];
-        if (!decl) continue;
+        if (!decl) {
+            continue;
+        }
 
-        Symbol *sym = NULL; // Symbol to potentially add
-
-        switch(decl->type) {
+        switch (decl->type) {
             case AST_CONST_DECL: {
-                if (!decl->token) break;
-                Value v = evaluateCompileTimeValue(decl->left); // evaluated constant expression
-                sym = malloc(sizeof(Symbol)); /* null check */
-                if (!sym) { fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n"); freeValue(&v); EXIT_FAILURE_HANDLER(); }
+                if (!decl->token) {
+                    break;
+                }
+                Value v = evaluateCompileTimeValue(decl->left);
+                Symbol *sym = calloc(1, sizeof(Symbol));
+                if (!sym) {
+                    fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n");
+                    freeValue(&v);
+                    EXIT_FAILURE_HANDLER();
+                }
 
-                sym->name = strdup(decl->token->value); /* null check */
-                if (!sym->name) { fprintf(stderr, "Malloc failed (name) in buildUnitSymbolTable\n"); free(sym); freeValue(&v); EXIT_FAILURE_HANDLER(); }
+                sym->name = strdup(decl->token->value);
+                if (!sym->name) {
+                    fprintf(stderr, "Malloc failed (name) in buildUnitSymbolTable\n");
+                    free(sym);
+                    freeValue(&v);
+                    EXIT_FAILURE_HANDLER();
+                }
+                toLowerString(sym->name);
 
-                sym->value = malloc(sizeof(Value)); /* null check */
-                if (!sym->value) { fprintf(stderr, "Malloc failed (Value) in buildUnitSymbolTable\n"); free(sym->name); free(sym); freeValue(&v); EXIT_FAILURE_HANDLER(); }
+                sym->value = malloc(sizeof(Value));
+                if (!sym->value) {
+                    fprintf(stderr, "Malloc failed (Value) in buildUnitSymbolTable\n");
+                    free(sym->name);
+                    free(sym);
+                    freeValue(&v);
+                    EXIT_FAILURE_HANDLER();
+                }
 
-                *sym->value = makeCopyOfValue(&v); // deep copy the evaluated value
-                sym->type = v.type;                // Use evaluated value's type
-                sym->type_def = decl->right;       // Link to type node if present
-                sym->is_const = true;              // Mark as constant
-                sym->is_alias = false;
-                sym->is_local_var = false;
-                sym->is_inline = false;
-                sym->closure_captures = false;
-                sym->closure_escapes = false;
-                sym->next = NULL;
-                sym->enclosing = NULL;
-                freeValue(&v); // Free the temporary value from eval
+                *sym->value = makeCopyOfValue(&v);
+                sym->type = v.type;
+                sym->type_def = decl->right;
+                sym->is_const = true;
+                freeValue(&v);
+
+                hashTableInsert(unitSymbols, sym);
                 break;
             }
             case AST_VAR_DECL: {
-                 // Interface VARs typically represent external linkage in other systems.
-                 // Here, we can add them to the unit's symbol table, but they won't
-                 // have actual storage allocated unless the implementation part defines them.
-                 // The main purpose here is to make their name and type known.
-                 for (int j = 0; j < decl->child_count; j++) {
-                     AST *varNode = decl->children[j];
-                     if (!varNode || !varNode->token) continue;
-                     DEBUG_PRINT("[DEBUG BUILD_UNIT_SYM] Adding interface VAR '%s' (type %s)\n", varNode->token->value, varTypeToString(decl->var_type));
-                     Symbol *varSym = malloc(sizeof(Symbol)); /* null check */
-                     if (!varSym) { /* error */ }
-                     varSym->name = strdup(varNode->token->value); /* null check */
-                      if (!varSym->name) { /* error */ }
-                     varSym->type = decl->var_type;
-                     varSym->type_def = decl->right; // Store type def link
-                     varSym->value = NULL; // Interface VARs don't have values initially
-                     varSym->is_const = false;
-                     varSym->is_alias = false;
-                     varSym->is_local_var = false; // Not local to the unit's execution scope yet
-                     varSym->is_inline = false;
-                     varSym->closure_captures = false;
-                     varSym->closure_escapes = false;
-                     varSym->next = NULL;
-                     varSym->enclosing = NULL;
+                for (int j = 0; j < decl->child_count; j++) {
+                    AST *varNode = decl->children[j];
+                    if (!varNode || !varNode->token) {
+                        continue;
+                    }
 
-                     // Append to list
-                     *tail = varSym;
-                     tail = &varSym->next;
-                 }
-                 // Skip adding to list via 'sym' below
-                 continue; // Process next declaration
-             }
+                    Symbol *varSym = calloc(1, sizeof(Symbol));
+                    if (!varSym) {
+                        fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n");
+                        EXIT_FAILURE_HANDLER();
+                    }
+
+                    varSym->name = strdup(varNode->token->value);
+                    if (!varSym->name) {
+                        fprintf(stderr, "Malloc failed (name) in buildUnitSymbolTable\n");
+                        free(varSym);
+                        EXIT_FAILURE_HANDLER();
+                    }
+                    toLowerString(varSym->name);
+
+                    varSym->type = decl->var_type;
+                    varSym->type_def = decl->right;
+                    hashTableInsert(unitSymbols, varSym);
+                }
+                break;
+            }
             case AST_PROCEDURE_DECL:
             case AST_FUNCTION_DECL: {
-                if (!decl->token) break;
-                sym = malloc(sizeof(Symbol)); /* null check */
-                 if (!sym) { /* error */ }
-                sym->name = strdup(decl->token->value); /* null check */
-                 if (!sym->name) { /* error */ }
+                if (!decl->token) {
+                    break;
+                }
 
-                // Determine type (return type for functions, VOID for procedures)
+                Symbol *sym = calloc(1, sizeof(Symbol));
+                if (!sym) {
+                    fprintf(stderr, "Malloc failed (Symbol) in buildUnitSymbolTable\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+
+                sym->name = strdup(decl->token->value);
+                if (!sym->name) {
+                    fprintf(stderr, "Malloc failed (name) in buildUnitSymbolTable\n");
+                    free(sym);
+                    EXIT_FAILURE_HANDLER();
+                }
+                toLowerString(sym->name);
+
                 if (decl->type == AST_FUNCTION_DECL && decl->right) {
-                    sym->type = decl->right->var_type; // Use pre-annotated type
-                    sym->type_def = decl->right;      // Link to return type node
+                    sym->type = decl->right->var_type;
                 } else {
                     sym->type = TYPE_VOID;
-                    sym->type_def = NULL;
                 }
-                sym->value = NULL; // Procedures/functions don't have a 'value' in this context
-                sym->is_const = false;
-                sym->is_alias = false;
-                sym->is_local_var = false;
+                sym->type_def = decl;
                 sym->is_inline = decl->is_inline;
-                sym->next = NULL;
-                sym->enclosing = NULL;
+
+                hashTableInsert(unitSymbols, sym);
                 break;
             }
             default:
-                // Skip other declaration types (e.g. TYPE_DECL)
                 break;
-        } // End switch
-
-        // Append the created symbol (if any) to the list
-        if (sym) {
-            *tail = sym;
-            tail = &sym->next;
         }
-    } // End for loop
+    }
 
     return unitSymbols;
 }
@@ -2181,21 +2172,29 @@ int getTerminalSize(int *rows, int *cols) {
     return 0; // Success
 }
 
-void freeUnitSymbolTable(Symbol *symbol_table) {
-    Symbol *current = symbol_table;
-    while (current) {
-        Symbol *next = current->next;
-        if (current->name) {
-            free(current->name);
-        }
-        // Only free the value if it's not NULL (i.e., for constants built here)
-        if (current->value) {
-            freeValue(current->value); // Free the deep-copied value content
-            free(current->value);      // Free the Value struct itself
-        }
-        free(current); // Free the Symbol struct
-        current = next;
+void freeUnitSymbolTable(HashTable *symbol_table) {
+    if (!symbol_table) {
+        return;
     }
+
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        Symbol *current = symbol_table->buckets[i];
+        while (current) {
+            Symbol *next = current->next;
+            if (current->name) {
+                free(current->name);
+            }
+            if (current->value) {
+                freeValue(current->value);
+                free(current->value);
+            }
+            free(current);
+            current = next;
+        }
+        symbol_table->buckets[i] = NULL;
+    }
+
+    free(symbol_table);
 }
 
 void toLowerString(char *str) {
