@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <limits.h>
+#include <stdint.h>
 
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
@@ -3755,30 +3757,79 @@ AST *factor(Parser *parser) {
         setTypeAST(node, (initialTokenType == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER);
         return node; // <<< RETURN IMMEDIATELY
 
-    } else if (initialTokenType == TOKEN_STRING_CONST && initialToken->is_char_code) {
-        Token *c = copyToken(initialToken);
-        eat(parser, initialTokenType);
-        node = newASTNode(AST_STRING, c);
-        freeToken(c);
-
-        /* Character-code tokens always represent a single character, but
-         * `Token.length` will be zero for `#0` because the stored value begins
-         * with a NUL byte.  Preserve the legacy TYPE_CHAR classification for
-         * these literals so assignments like `var ch: Char; ch := #10;` continue
-         * to type-check while still treating the node as AST_STRING for parsing
-         * purposes. */
-        bool isSingleChar = (initialToken->length <= 1);
-        setTypeAST(node, isSingleChar ? TYPE_CHAR : TYPE_STRING);
-        return node; // <<< RETURN IMMEDIATELY
-
     } else if (initialTokenType == TOKEN_STRING_CONST) {
-        /* Treat zero-length strings as TYPE_STRING and single-character strings as TYPE_CHAR */
-        size_t len = (initialToken->value ? strlen(initialToken->value) : 0);
-        int isChar = (len == 1);
-        Token* c = copyToken(initialToken);
-        eat(parser, initialTokenType); // Eat the string token
-        node = newASTNode(AST_STRING, c); freeToken(c);
-        setTypeAST(node, isChar ? TYPE_CHAR : TYPE_STRING);
+        /* Concatenate immediately adjacent string tokens (including `#nn` char codes)
+         * into a single literal.  The lexer represents `#0` with `length == 0`, so
+         * treat those as single-byte segments while copying. */
+        size_t bufferLen = 0;
+        size_t bufferCap = 0;
+        char *buffer = NULL;
+        bool allCharCodes = true;
+        int initialLine = initialToken ? initialToken->line : 0;
+        int initialColumn = initialToken ? initialToken->column : 0;
+
+        while (parser->current_token && parser->current_token->type == TOKEN_STRING_CONST) {
+            Token *segment = parser->current_token;
+            size_t chunkLen = segment->length;
+            if (segment->is_char_code && chunkLen == 0) {
+                chunkLen = 1;
+            }
+
+            size_t required = bufferLen + chunkLen + 1; // keep space for terminator
+            if (required > bufferCap) {
+                size_t newCap = bufferCap ? bufferCap : 16;
+                while (newCap < required) {
+                    if (newCap > SIZE_MAX / 2) {
+                        newCap = required;
+                        break;
+                    }
+                    newCap *= 2;
+                }
+                char *resized = realloc(buffer, newCap);
+                if (!resized) {
+                    free(buffer);
+                    fprintf(stderr, "Memory allocation error concatenating string literal\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                buffer = resized;
+                bufferCap = newCap;
+            }
+
+            if (chunkLen > 0 && segment->value) {
+                memcpy(buffer + bufferLen, segment->value, chunkLen);
+                bufferLen += chunkLen;
+            }
+
+            if (!segment->is_char_code && chunkLen > 0) {
+                allCharCodes = false;
+            }
+
+            eat(parser, TOKEN_STRING_CONST);
+        }
+
+        if (!buffer) {
+            bufferCap = 1;
+            buffer = malloc(bufferCap);
+            if (!buffer) {
+                fprintf(stderr, "Memory allocation error concatenating empty string literal\n");
+                EXIT_FAILURE_HANDLER();
+            }
+        }
+
+        buffer[bufferLen] = '\0';
+
+        Token combinedToken;
+        combinedToken.type = TOKEN_STRING_CONST;
+        combinedToken.value = buffer;
+        combinedToken.length = bufferLen;
+        combinedToken.line = initialLine;
+        combinedToken.column = initialColumn;
+        combinedToken.is_char_code = (bufferLen == 1) && allCharCodes;
+
+        node = newASTNode(AST_STRING, &combinedToken);
+        free(buffer);
+
+        setTypeAST(node, (bufferLen == 1) ? TYPE_CHAR : TYPE_STRING);
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_IDENTIFIER) {
