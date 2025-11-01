@@ -3760,7 +3760,15 @@ AST *factor(Parser *parser) {
         eat(parser, initialTokenType);
         node = newASTNode(AST_STRING, c);
         freeToken(c);
-        setTypeAST(node, TYPE_STRING);
+
+        /* Character-code tokens always represent a single character, but
+         * `Token.length` will be zero for `#0` because the stored value begins
+         * with a NUL byte.  Preserve the legacy TYPE_CHAR classification for
+         * these literals so assignments like `var ch: Char; ch := #10;` continue
+         * to type-check while still treating the node as AST_STRING for parsing
+         * purposes. */
+        bool isSingleChar = (initialToken->length <= 1);
+        setTypeAST(node, isSingleChar ? TYPE_CHAR : TYPE_STRING);
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_STRING_CONST) {
