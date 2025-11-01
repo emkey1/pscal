@@ -225,21 +225,10 @@ static bool computeValueSizeBytesInternal(const Value *value, long long *out_byt
     }
 
     switch (value->type) {
-        case TYPE_POINTER: {
-            if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
-                *out_bytes = (long long)sizeof(void*);
-                return true;
-            }
-            if (value->base_type_node != NULL) {
-                *out_bytes = (long long)sizeof(void*);
-                return true;
-            }
-            if (!value->ptr_val || value->ptr_val == value) {
-                *out_bytes = (long long)sizeof(void*);
-                return true;
-            }
-            return computeValueSizeBytesInternal((const Value*)value->ptr_val, out_bytes, depth + 1);
-        }
+        case TYPE_POINTER:
+            /* Pascal SizeOf should treat any pointer value as pointer-sized. */
+            *out_bytes = (long long)sizeof(void*);
+            return true;
         case TYPE_STRING:
             if (value->max_length > 0) {
                 *out_bytes = (long long)value->max_length + 1;
