@@ -1067,8 +1067,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
     AST *interface_decls = declarations(parser_for_this_unit, true);
     setLeft(unit_node, interface_decls);
     
-    Symbol *unitSymTable = buildUnitSymbolTable(interface_decls);
-    unit_node->symbol_table = unitSymTable;
+    HashTable *unitSymTable = buildUnitSymbolTable(interface_decls);
+    unit_node->symbol_table = (Symbol*)unitSymTable;
 
     eat(parser_for_this_unit, TOKEN_IMPLEMENTATION);
     AST *impl_decls = declarations(parser_for_this_unit, false);
