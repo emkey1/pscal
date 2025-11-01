@@ -384,6 +384,127 @@ static bool recordTypeNeedsVTableSlot(AST* recordType) {
     return false;
 }
 
+static VarType deduceBasicVarType(const char *name) {
+    if (!name) {
+        return TYPE_VOID;
+    }
+
+    if (strcasecmp(name, "integer") == 0) return TYPE_INT32;
+    if (strcasecmp(name, "longint") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "cardinal") == 0) return TYPE_UINT32;
+    if (strcasecmp(name, "shortint") == 0) return TYPE_INT8;
+    if (strcasecmp(name, "smallint") == 0) return TYPE_INT16;
+    if (strcasecmp(name, "int64") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "uint64") == 0) return TYPE_UINT64;
+    if (strcasecmp(name, "single") == 0) return TYPE_FLOAT;
+    if (strcasecmp(name, "double") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "extended") == 0) return TYPE_LONG_DOUBLE;
+    if (strcasecmp(name, "real") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
+    if (strcasecmp(name, "word") == 0) return TYPE_WORD;
+    if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
+    if (strcasecmp(name, "file") == 0 || strcasecmp(name, "text") == 0) return TYPE_FILE;
+    if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
+
+    return TYPE_VOID;
+}
+
+static VarType resolveValueTypeNode(AST **typeNodeRef) {
+    if (!typeNodeRef) {
+        return TYPE_VOID;
+    }
+
+    AST *node = *typeNodeRef;
+    if (node) {
+        AST *resolved = resolveTypeAliasForRecord(node);
+        if (resolved) {
+            node = resolved;
+        }
+    }
+
+    VarType vt = TYPE_VOID;
+    if (node) {
+        if (node->var_type != TYPE_VOID && node->var_type != TYPE_UNKNOWN) {
+            vt = node->var_type;
+        } else if (node->type == AST_VARIABLE && node->token && node->token->value) {
+            vt = deduceBasicVarType(node->token->value);
+            if (vt == TYPE_VOID) {
+                AST *looked = lookupType(node->token->value);
+                if (looked && looked != node) {
+                    node = resolveTypeAliasForRecord(looked);
+                    if (node) {
+                        if (node->var_type != TYPE_VOID && node->var_type != TYPE_UNKNOWN) {
+                            vt = node->var_type;
+                        } else if (node->type == AST_VARIABLE && node->token && node->token->value) {
+                            vt = deduceBasicVarType(node->token->value);
+                        } else if (node->type == AST_RECORD_TYPE) {
+                            vt = TYPE_RECORD;
+                        } else if (node->type == AST_ARRAY_TYPE) {
+                            vt = TYPE_ARRAY;
+                        } else if (node->type == AST_ENUM_TYPE) {
+                            vt = TYPE_ENUM;
+                        }
+                    }
+                }
+            }
+        } else if (node->type == AST_RECORD_TYPE) {
+            vt = TYPE_RECORD;
+        } else if (node->type == AST_ARRAY_TYPE) {
+            vt = TYPE_ARRAY;
+        } else if (node->type == AST_ENUM_TYPE) {
+            vt = TYPE_ENUM;
+        }
+    }
+
+    *typeNodeRef = node;
+    return vt;
+}
+
+static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
+    if (!out_bytes) {
+        return false;
+    }
+
+    switch (type) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+            *out_bytes = 1;
+            return true;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            *out_bytes = 2;
+            return true;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_INTEGER:
+            *out_bytes = 4;
+            return true;
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            *out_bytes = 8;
+            return true;
+        case TYPE_FLOAT:
+            *out_bytes = (long long)sizeof(float);
+            return true;
+        case TYPE_DOUBLE:
+            *out_bytes = (long long)sizeof(double);
+            return true;
+        case TYPE_LONG_DOUBLE:
+            *out_bytes = (long long)sizeof(long double);
+            return true;
+        case TYPE_ENUM:
+            *out_bytes = 4;
+            return true;
+        default:
+            return false;
+    }
+}
+
 FieldValue *createEmptyRecord(AST *recordType) {
     // Resolve type references if necessary
     if (recordType && recordType->type == AST_TYPE_REFERENCE) {
@@ -943,12 +1064,36 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         }
         case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
         case TYPE_BOOLEAN: v.i_val = 0; break;
-        case TYPE_FILE:
+        case TYPE_FILE: {
             v.f_val = NULL;
             v.filename = NULL;
             v.record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
             v.record_size_explicit = false;
+            v.element_type = TYPE_VOID;
+            v.element_type_def = NULL;
+
+            AST *fileTypeNode = node_to_inspect ? resolveTypeAliasForRecord(node_to_inspect) : NULL;
+            if (fileTypeNode && fileTypeNode->type == AST_TYPE_REFERENCE && fileTypeNode->right) {
+                fileTypeNode = resolveTypeAliasForRecord(fileTypeNode->right);
+            }
+            if (fileTypeNode && fileTypeNode->type == AST_VARIABLE && fileTypeNode->token &&
+                fileTypeNode->token->value && strcasecmp(fileTypeNode->token->value, "file") == 0 &&
+                fileTypeNode->right) {
+                AST *elementNode = fileTypeNode->right;
+                VarType elementType = resolveValueTypeNode(&elementNode);
+                if (elementType != TYPE_VOID && elementType != TYPE_UNKNOWN) {
+                    v.element_type = elementType;
+                    v.element_type_def = elementNode;
+
+                    long long elementBytes = 0;
+                    if (pascalVarTypeSize(elementType, &elementBytes) && elementBytes > 0 && elementBytes <= INT_MAX) {
+                        v.record_size = (int)elementBytes;
+                        v.record_size_explicit = true;
+                    }
+                }
+            }
             break;
+        }
         case TYPE_RECORD:
             if (node_to_inspect) {
                 v.record_val = createEmptyRecord(node_to_inspect);

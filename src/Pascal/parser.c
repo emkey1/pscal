@@ -2191,6 +2191,19 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                 node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken
                 setTypeAST(node, basicType);
                 eat(parser, parser->current_token->type); // Consume the type identifier
+
+                if (basicType == TYPE_FILE && parser->current_token &&
+                    parser->current_token->type == TOKEN_OF) {
+                    eat(parser, TOKEN_OF);
+                    AST *elementType = typeSpecifier(parser, 1);
+                    if (!elementType || elementType->type == AST_NOOP) {
+                        errorParser(parser, "Invalid element type for file");
+                        free(typeNameCopy);
+                        freeAST(node);
+                        return NULL;
+                    }
+                    setRight(node, elementType);
+                }
             } else {
                 // User-defined type reference
                 AST *userType = lookupType(typeNameCopy);
