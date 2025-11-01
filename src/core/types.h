@@ -138,6 +138,7 @@ typedef struct ValueStruct {
 
     char *filename;
     int record_size;      // Active record size for untyped file operations
+    bool record_size_explicit; // Whether the record size was explicitly requested
     int lower_bound;    // For single-dimensional arrays
     int upper_bound;    // For single-dimensional arrays
     int max_length;     // For fixed length strings (text: string[100];)

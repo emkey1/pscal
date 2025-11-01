@@ -2960,8 +2960,9 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
+    bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
-    if (arg_count == 2) {
+    if (has_record_size_arg) {
         if (!IS_INTLIKE(args[1])) {
             runtimeError(vm, "Rewrite: Record size must be an integer value.");
             return makeVoid();
@@ -2972,12 +2973,15 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
             return makeVoid();
         }
         new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
     } else if (new_record_size <= 0) {
         new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
     }
     fileVarLValue->record_size = new_record_size;
 
-    const char* mode = (new_record_size != PSCAL_DEFAULT_FILE_RECORD_SIZE) ? "wb" : "w";
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    const char* mode = use_binary_mode ? "wb" : "w";
 
     FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
@@ -3740,8 +3744,9 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
+    bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
-    if (arg_count == 2) {
+    if (has_record_size_arg) {
         if (!IS_INTLIKE(args[1])) {
             runtimeError(vm, "Reset: Record size must be an integer value.");
             return makeVoid();
@@ -3752,12 +3757,15 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
             return makeVoid();
         }
         new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
     } else if (new_record_size <= 0) {
         new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
     }
     fileVarLValue->record_size = new_record_size;
 
-    const char* mode = (new_record_size != PSCAL_DEFAULT_FILE_RECORD_SIZE) ? "rb" : "r";
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit;
+    const char* mode = use_binary_mode ? "rb" : "r";
 
     FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
