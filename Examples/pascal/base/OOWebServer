@@ -605,39 +605,39 @@ begin
     stripLeadingCurrent := cleaned;
 end;
 
-function normalizePath(const path: string): string;
+function canonicalizePath(const path: string): string;
 var cleaned, pwd, base: string;
 begin
-    if (length(path) = 0) then begin normalizePath := ''; exit; end;
+    if (length(path) = 0) then begin canonicalizePath := ''; exit; end;
     if (copy(path, 1, 1) = '/') or (copy(path, 1, 1) = '\\') then
     begin
-        normalizePath := trimTrailingSlashes(path);
+        canonicalizePath := trimTrailingSlashes(path);
         exit;
     end;
     cleaned := stripLeadingCurrent(path);
     pwd := getenv('PWD');
     if (pwd = '') then
     begin
-        normalizePath := trimTrailingSlashes(cleaned);
+        canonicalizePath := trimTrailingSlashes(cleaned);
         exit;
     end;
     base := trimTrailingSlashes(pwd);
     if (cleaned = '') then
     begin
-        normalizePath := base;
+        canonicalizePath := base;
         exit;
     end;
     if (length(base) = 0) then
     begin
-        normalizePath := trimTrailingSlashes(cleaned);
+        canonicalizePath := trimTrailingSlashes(cleaned);
         exit;
     end;
     if (length(base) = 1) and ((copy(base, 1, 1) = '/') or (copy(base, 1, 1) = '\\')) then
     begin
-        normalizePath := trimTrailingSlashes(base + cleaned);
+        canonicalizePath := trimTrailingSlashes(base + cleaned);
         exit;
     end;
-    normalizePath := trimTrailingSlashes(base + '/' + cleaned);
+    canonicalizePath := trimTrailingSlashes(base + '/' + cleaned);
 end;
 
 function pathDirname(const path: string): string;
@@ -686,7 +686,7 @@ end;
 function defaultInstallRoot(): string;
 var scriptPath, dir: string;
 begin
-    scriptPath := normalizePath(paramstr(0));
+    scriptPath := canonicalizePath(paramstr(0));
     if (scriptPath = '') then begin defaultInstallRoot := ''; exit; end;
     dir := pathDirname(scriptPath);
     if (dir = '') then begin defaultInstallRoot := ''; exit; end;
