@@ -575,6 +575,151 @@ begin
     copyDirectory := success;
 end;
 
+function trimTrailingSlashes(const path: string): string;
+var cleaned: string; len: integer;
+begin
+    cleaned := path;
+    len := length(cleaned);
+    while (len > 1) and ((copy(cleaned, len, 1) = '/') or (copy(cleaned, len, 1) = '\\')) do
+    begin
+        cleaned := copy(cleaned, 1, len - 1);
+        len := len - 1;
+    end;
+    if (len = 0) then trimTrailingSlashes := '' else trimTrailingSlashes := cleaned;
+end;
+
+function stripLeadingCurrent(const path: string): string;
+var cleaned: string;
+begin
+    cleaned := path;
+    while (length(cleaned) >= 2) and (copy(cleaned, 1, 1) = '.') and
+          ((copy(cleaned, 2, 1) = '/') or (copy(cleaned, 2, 1) = '\\')) do
+    begin
+        if (length(cleaned) = 2) then
+        begin
+            stripLeadingCurrent := '';
+            exit;
+        end;
+        cleaned := copy(cleaned, 3, length(cleaned) - 2);
+    end;
+    stripLeadingCurrent := cleaned;
+end;
+
+function normalizePath(const path: string): string;
+var cleaned, pwd, base: string;
+begin
+    if (length(path) = 0) then begin normalizePath := ''; exit; end;
+    if (copy(path, 1, 1) = '/') or (copy(path, 1, 1) = '\\') then
+    begin
+        normalizePath := trimTrailingSlashes(path);
+        exit;
+    end;
+    cleaned := stripLeadingCurrent(path);
+    pwd := getenv('PWD');
+    if (pwd = '') then
+    begin
+        normalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    base := trimTrailingSlashes(pwd);
+    if (cleaned = '') then
+    begin
+        normalizePath := base;
+        exit;
+    end;
+    if (length(base) = 0) then
+    begin
+        normalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    if (length(base) = 1) and ((copy(base, 1, 1) = '/') or (copy(base, 1, 1) = '\\')) then
+    begin
+        normalizePath := trimTrailingSlashes(base + cleaned);
+        exit;
+    end;
+    normalizePath := trimTrailingSlashes(base + '/' + cleaned);
+end;
+
+function pathDirname(const path: string): string;
+var cleaned: string; len, i: integer;
+begin
+    cleaned := trimTrailingSlashes(path);
+    len := length(cleaned);
+    if (len = 0) then begin pathDirname := ''; exit; end;
+    if (len = 1) and ((copy(cleaned, 1, 1) = '/') or (copy(cleaned, 1, 1) = '\\')) then
+    begin
+        pathDirname := cleaned;
+        exit;
+    end;
+    i := len;
+    while (i > 0) and (copy(cleaned, i, 1) <> '/') and (copy(cleaned, i, 1) <> '\\') do
+        i := i - 1;
+    if (i <= 0) then begin pathDirname := ''; exit; end;
+    if (i = 1) then
+    begin
+        pathDirname := copy(cleaned, 1, 1);
+        exit;
+    end;
+    pathDirname := trimTrailingSlashes(copy(cleaned, 1, i - 1));
+end;
+
+function pathJoin(const base, rel: string): string;
+var normalizedBase: string;
+begin
+    if (length(rel) = 0) then begin pathJoin := trimTrailingSlashes(base); exit; end;
+    if (length(base) = 0) then begin pathJoin := rel; exit; end;
+    normalizedBase := trimTrailingSlashes(base);
+    if (copy(rel, 1, 1) = '/') or (copy(rel, 1, 1) = '\\') then
+    begin
+        if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+            pathJoin := rel
+        else
+            pathJoin := normalizedBase + rel;
+        exit;
+    end;
+    if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+        pathJoin := normalizedBase + rel
+    else
+        pathJoin := normalizedBase + '/' + rel;
+end;
+
+function defaultInstallRoot(): string;
+var scriptPath, dir: string;
+begin
+    scriptPath := normalizePath(paramstr(0));
+    if (scriptPath = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(scriptPath);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    defaultInstallRoot := dir;
+end;
+
+procedure resolveAssetRoot(var result: string);
+var candidate, base, fallback: string;
+begin
+    candidate := ConfiguredAssetRoot;
+    if (isDirectory(candidate) = 1) then
+    begin
+        result := candidate;
+        exit;
+    end;
+    base := defaultInstallRoot();
+    if (base <> '') then
+    begin
+        fallback := pathJoin(base, 'lib/misc/simple_web_server/htdocs');
+        if (isDirectory(fallback) = 1) then
+        begin
+            result := fallback;
+            exit;
+        end;
+    end;
+    result := '';
+end;
+
 procedure resolveTempDir(var result: string);
 var dir: string;
 begin
@@ -724,9 +869,9 @@ begin
     IndexPath := RootDir + '/index.html';
     Body := '<html><body>Hello from the OO pscal web server</body></html>';
     
-    source := ConfiguredAssetRoot;
+    resolveAssetRoot(source);
     copied := 0;
-    if (isDirectory(source) = 1) then
+    if (source <> '') and (isDirectory(source) = 1) then
     begin
         copied := copyDirectory(source, RootDir);
     end;

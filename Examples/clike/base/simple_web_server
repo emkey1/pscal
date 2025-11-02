@@ -12,7 +12,7 @@ str RootDir;
 str IndexPath;
 str Body;
 text GFile;
-str ConfiguredAssetRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@/misc/htdocs";
+str ConfiguredAssetRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/misc/simple_web_server/htdocs";
 
 // Worker pool + simple ring queue for accepted connections
 int MaxThreads = 8;                   // configurable via CLI
@@ -397,7 +397,12 @@ str fsTrimTrailingSlashes(str path) {
 }
 
 str fsStripLeadingCurrent(str path) {
-  while (length(path) >= 2 && copy(path, 1, 2) == "./") {
+  while (length(path) >= 2) {
+    str first = copy(path, 1, 1);
+    str second = copy(path, 2, 1);
+    if (first != "." || (second != "/" && second != "\\")) {
+      break;
+    }
     if (length(path) == 2) {
       return "";
     }
@@ -463,6 +468,17 @@ int fsPathExists(str path) {
   return 0;
 }
 
+str resolveAssetRoot() {
+  str candidate = ConfiguredAssetRoot;
+  if (isDirectory(candidate)) return candidate;
+  str base = fsDefaultInstallRoot();
+  if (strlen(base) > 0) {
+    str fallback = fsPathJoin(base, "lib/misc/simple_web_server/htdocs");
+    if (isDirectory(fallback)) return fallback;
+  }
+  return "";
+}
+
 str fsDefaultInstallRoot() {
   str scriptPath = fsNormalizePath(paramstr(0));
   if (strlen(scriptPath) == 0) return "";
@@ -484,9 +500,9 @@ void initFiles() {
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
-  str source = ConfiguredAssetRoot;
+  str source = resolveAssetRoot();
   int copied = 0;
-  if (isDirectory(source)) {
+  if (strlen(source) > 0 && isDirectory(source)) {
     copied = copyDirectory(source, RootDir);
   }
   // Fallback: ensure at least a basic index exists if copy failed or missing.
