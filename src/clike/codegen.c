@@ -906,6 +906,26 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
         writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
     } else if (node->var_type == TYPE_FILE) {
+        const char* type_name = "";
+        char* owned_type_name = NULL;
+        if (node->right) {
+            const char* mapped = clikeTokenTypeToTypeName(node->right->token.type);
+            if (mapped && mapped[0] != '\0') {
+                type_name = mapped;
+            } else if (node->right->token.length > 0 && node->right->token.lexeme) {
+                owned_type_name = tokenToCString(node->right->token);
+                type_name = owned_type_name;
+            }
+        }
+        if (type_name[0] == '\0') {
+            type_name = varTypeToString(node->var_type);
+        }
+        int type_name_index = addStringConstant(chunk, type_name);
+        if (owned_type_name) {
+            free(owned_type_name);
+        }
+        emitShort(chunk, (uint16_t)type_name_index, node->token.line);
+
         VarType file_element_type = TYPE_VOID;
         const char* element_type_name = "";
 
@@ -921,8 +941,8 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
 
         writeBytecodeChunk(chunk, (uint8_t)file_element_type, node->token.line);
         if (file_element_type != TYPE_VOID && element_type_name && element_type_name[0] != '\0') {
-            int type_name_index = addStringConstant(chunk, element_type_name);
-            emitShort(chunk, (uint16_t)type_name_index, node->token.line);
+            int element_type_index = addStringConstant(chunk, element_type_name);
+            emitShort(chunk, (uint16_t)element_type_index, node->token.line);
         } else {
             emitShort(chunk, 0xFFFF, node->token.line);
         }
