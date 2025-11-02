@@ -304,6 +304,21 @@ var
 begin
     // 1. Parse Request (unchanged)
     req := socketreceive(c, 2048);
+    if (req = nil) then
+    begin
+        status := '400 Bad Request';
+        respBody := '<html><body>Bad Request</body></html>';
+        ctype := 'text/html';
+        code := 400;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
     reqText := mstreambuffer(req);
     ln := pos(reqText, #13#10);
     if (ln = 0) then ln := pos(reqText, #10);
