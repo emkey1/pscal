@@ -18,9 +18,6 @@ type
 // --- Part 2: Global Vars and Helpers ---
 // (These are mostly unchanged from the original)
 
-const
-    MaxQueueCapacity = 256;
-    BufferSize = 4096;
 var
     Port: integer = 5555;
     RootDir: string;
@@ -29,17 +26,7 @@ var
     ConfiguredAssetRoot: string = '@PSCAL_INSTALL_ROOT_RESOLVED@/lib/misc/simple_web_server/htdocs';
     //ConfiguredAssetRoot: string = '/usr/local/pscal/misc/htdocs';
 
-    MaxThreads: integer = 8;
-    QCap: integer = 64;
-    q: array[0..MaxQueueCapacity-1] of integer;
-    qHead: integer = 0;
-    qTail: integer = 0;
-    qCount: integer = 0;
-    qmu: integer;
-
     GAccepted: integer = 0;
-    GEnqueued: integer = 0;
-    GDropped: integer = 0;
     GServed: integer = 0;
 
 function loadFileToString(const path: string; var data: string): integer; forward;
@@ -156,17 +143,60 @@ begin
     result := out;
 end;
 
+function tryParseInt(const s: string; var value: integer): boolean;
+var
+    i, sign, digit: integer;
+    ch: char;
+    resultValue: integer;
+begin
+    if length(s) = 0 then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    i := 1;
+    sign := 1;
+    if s[i] = '-' then
+    begin
+        sign := -1;
+        i := i + 1;
+    end
+    else if s[i] = '+' then
+    begin
+        i := i + 1;
+    end;
+    if i > length(s) then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    resultValue := 0;
+    while i <= length(s) do
+    begin
+        ch := s[i];
+        if (ch < '0') or (ch > '9') then
+        begin
+            tryParseInt := false;
+            exit;
+        end;
+        digit := ord(ch) - ord('0');
+        resultValue := resultValue * 10 + digit;
+        i := i + 1;
+    end;
+    value := sign * resultValue;
+    tryParseInt := true;
+end;
+
 // --- Part 3: Refactored Connection Handler ---
 
 procedure serveConn(c: integer);
 var
     req: mstream;
-    reqText, firstLine, method, path: string;
-    ln, flen, i, mstart, pstart, qidx, len: integer;
+    reqText, firstLine, method, path, ch: string;
+    flen, i, mstart, pstart, qidx, len: integer;
     respBody, ctype, logDetail, status, hdr, ts: string;
     code: integer;
-    depth, served, enq, drop: integer;
-    
+
     // Selected handler for the current path.
     handler: THandlerFunc;
 
@@ -302,14 +332,31 @@ var
 
 // --- serveConn main logic begins ---
 begin
-    // 1. Parse Request (unchanged)
+    // 1. Ensure the socket is blocking so we can read a full request.
+    socketsetblocking(c, true);
+    if (socketpoll(c, 5000, 1) <= 0) then
+    begin
+        status := '408 Request Timeout';
+        respBody := '<html><body>Request Timeout</body></html>';
+        ctype := 'text/html';
+        code := 408;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
+
     req := socketreceive(c, 2048);
     if (req = nil) then
     begin
-        status := '400 Bad Request';
-        respBody := '<html><body>Bad Request</body></html>';
+        status := '500 Internal Server Error';
+        respBody := '<html><body>Server Error</body></html>';
         ctype := 'text/html';
-        code := 400;
+        code := 500;
         len := length(respBody);
         hdr := 'HTTP/1.1 ' + status + #13#10
              + 'Content-Type: ' + ctype + #13#10
@@ -320,9 +367,17 @@ begin
         exit;
     end;
     reqText := mstreambuffer(req);
-    ln := pos(reqText, #13#10);
-    if (ln = 0) then ln := pos(reqText, #10);
-    if (ln > 0) then firstLine := copy(reqText, 1, ln - 1) else firstLine := reqText;
+    mstreamfree(req);
+    // Extract first request line manually (up to CR or LF).
+    firstLine := '';
+    i := 1;
+    while (i <= length(reqText)) do
+    begin
+        ch := copy(reqText, i, 1);
+        if (ch = #13) or (ch = #10) then break;
+        firstLine := firstLine + ch;
+        i := i + 1;
+    end;
     
     flen := length(firstLine);
     i := 1;
@@ -336,7 +391,17 @@ begin
     while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
     if (pstart <= flen) and (i > pstart) then path := copy(firstLine, pstart, i - pstart) else path := '/';
     
-    qidx := pos(path, '?');
+    qidx := 0;
+    i := 1;
+    while (i <= length(path)) do
+    begin
+        if (copy(path, i, 1) = '?') then
+        begin
+            qidx := i;
+            break;
+        end;
+        i := i + 1;
+    end;
     if (qidx > 0) then path := copy(path, 1, qidx - 1);
     decodePercent(path, path);
 
@@ -370,96 +435,10 @@ begin
     socketsend(c, respBody);
     
     // 5. Log (unchanged)
-    lock(qmu);
-    depth := qCount; served := GServed; enq := GEnqueued; drop := GDropped;
-    unlock(qmu);
-    
     timestamp(ts);
-    printf('%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d' + #10,
-           ts, method, path, code, logDetail, depth, served, enq, drop);
+    printf('%s [%s] %s -> %d %s' + #10,
+           ts, method, path, code, logDetail);
     socketclose(c);
-end;
-
-// --- Part 4: Worker Pool and Main ---
-// (All unchanged, but I'll include them for completeness)
-
-procedure qinit;
-begin
-    qmu := mutex;
-    qHead := 0;
-    qTail := 0;
-    qCount := 0;
-end;
-
-function enqueue(c: integer): integer;
-var ok: integer;
-begin
-    ok := 0;
-    lock(qmu);
-    if (qCount < QCap) then
-    begin
-        q[qTail] := c;
-        qTail := (qTail + 1) mod QCap;
-        qCount := qCount + 1;
-        GEnqueued := GEnqueued + 1;
-        ok := 1;
-    end;
-    unlock(qmu);
-    enqueue := ok;
-end;
-
-function dequeue: integer;
-var v: integer;
-begin
-    v := -1;
-    lock(qmu);
-    if (qCount > 0) then
-    begin
-        v := q[qHead];
-        qHead := (qHead + 1) mod QCap;
-        qCount := qCount - 1;
-    end;
-    unlock(qmu);
-    dequeue := v;
-end;
-
-procedure worker;
-var c: integer;
-begin
-    while (true) do
-    begin
-        c := dequeue;
-        if (c >= 0) then
-        begin
-            serveConn(c);
-            lock(qmu); GServed := GServed + 1; unlock(qmu);
-        end
-        else
-        begin
-            delay(10);
-        end;
-    end;
-end;
-
-procedure heartbeat;
-var prevServed, depth, served, enq, drop, acc, cap, thr, dps: integer;
-    ts: string;
-begin
-    prevServed := 0;
-    while (true) do
-    begin
-        delay(60000); // ~60s
-        lock(qmu);
-        depth := qCount; served := GServed; enq := GEnqueued;
-        drop := GDropped; acc := GAccepted; cap := QCap; thr := MaxThreads;
-        unlock(qmu);
-        
-        dps := served - prevServed;
-        prevServed := served;
-        timestamp(ts);
-        printf('%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d' + #10,
-               ts, depth, cap, thr, acc, enq, served, drop, dps);
-    end;
 end;
 
 // File/Path helpers (fs* and initFiles) are unchanged.
@@ -841,19 +820,18 @@ end;
 // --- Main Program ---
 var
     a1, a2: string;
-    parsed, code, parsedT, codeT, parsedQ, codeQ: integer;
-    srv, bindrc, i, c, tries, ok: integer;
+    parsed: integer;
+    parsedOk: boolean;
+    srv, bindrc, c: integer;
     
 begin
     initFiles;
-    qinit;
-    
     // Param parsing (unchanged)
     if (paramcount >= 1) then
     begin
         a1 := paramstr(1);
-        val(a1, parsed, code);
-        if (code = 0) and (parsed > 0) and (parsed < 65536) then
+        parsedOk := tryParseInt(a1, parsed);
+        if parsedOk and (parsed > 0) and (parsed < 65536) then
         begin
             Port := parsed;
             if (paramcount >= 2) then
@@ -869,8 +847,8 @@ begin
             if (paramcount >= 2) then
             begin
                 a2 := paramstr(2);
-                val(a2, parsed, code);
-                if (code = 0) and (parsed > 0) and (parsed < 65536) then Port := parsed;
+                parsedOk := tryParseInt(a2, parsed);
+                if parsedOk and (parsed > 0) and (parsed < 65536) then Port := parsed;
             end;
         end;
         
@@ -880,24 +858,6 @@ begin
             saveStringToFile(IndexPath, Body);
         end;
         
-        if (paramcount >= 3) then
-        begin
-            val(paramstr(3), parsedT, codeT);
-            if (codeT = 0) and (parsedT > 0) and (parsedT <= 64) then MaxThreads := parsedT;
-        end;
-        
-        if (paramcount >= 4) then
-        begin
-            val(paramstr(4), parsedQ, codeQ);
-            if (codeQ = 0) then
-            begin
-                if (parsedQ < 8) then parsedQ := 8;
-                if (parsedQ > MaxQueueCapacity) then parsedQ := MaxQueueCapacity;
-                lock(qmu);
-                QCap := parsedQ; qHead := 0; qTail := 0; qCount := 0;
-                unlock(qmu);
-            end;
-        end;
     end;
     
     printf('Serving %s on http://127.0.0.1:%d' + #10, IndexPath, Port);
@@ -913,38 +873,15 @@ begin
     if (socketlisten(srv, 16) <> 0) then begin printf('socketlisten failed: %d' + #10, socketlasterror); halt(1); end;
     
     printf('Waiting for connections... (Ctrl+C to quit)' + #10);
-    
-    // Spawn threads (unchanged)
-    spawn heartbeat;
-    i := 0;
-    while (i < MaxThreads) do
-    begin
-        spawn worker;
-        i := i + 1;
-    end;
-    
-    // Main accept loop (unchanged)
-    while (true) do
+
+    while true do
     begin
         c := socketaccept(srv);
         if (c >= 0) then
         begin
-            lock(qmu); GAccepted := GAccepted + 1; unlock(qmu);
-            tries := 0;
-            ok := 0;
-            while (tries < 5) do
-            begin
-                ok := enqueue(c);
-                if (ok = 1) then break;
-                delay(10);
-                tries := tries + 1;
-            end;
-            
-            if (ok = 0) then
-            begin
-                socketclose(c);
-                lock(qmu); GDropped := GDropped + 1; unlock(qmu);
-            end;
+            GAccepted := GAccepted + 1;
+            serveConn(c);
+            GServed := GServed + 1;
         end
         else
         begin
