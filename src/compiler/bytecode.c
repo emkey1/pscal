@@ -246,8 +246,9 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 5; // opcode + slot + element type + 2-byte type name index
         case GET_ELEMENT_ADDRESS:
         case LOAD_ELEMENT_VALUE:
-        case GET_CHAR_ADDRESS:
             return 2; // opcode + operand byte
+        case GET_CHAR_ADDRESS:
+            return 1; // opcode only
         case GET_ELEMENT_ADDRESS_CONST:
         case LOAD_ELEMENT_VALUE_CONST:
             return 5; // opcode + 4-byte flat offset
