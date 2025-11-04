@@ -923,12 +923,50 @@ static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job) {
 
     for (int i = 0; i < proc_symbol->upvalue_count; ++i) {
         Value* slot_ptr = NULL;
+
         if (proc_symbol->upvalues[i].isLocal) {
+            // --- BEGIN FIX ---
+            // The variable is on the parent's stack frame, which will
+            // be destroyed. We MUST "box" it by copying its value to
+            // a new heap-allocated cell to prevent a data race.
+
             uint8_t slot_index = proc_symbol->upvalues[i].index;
-            if (parent_frame->slots && slot_index < parent_frame->slotCount) {
-                slot_ptr = parent_frame->slots + slot_index;
+            if (!parent_frame->slots || slot_index >= parent_frame->slotCount) {
+                runtimeError(vm, "VM Error: Invalid local variable index %d for thread capture.", (int)slot_index);
+                free(job->capturedUpvalues);
+                job->capturedUpvalues = NULL;
+                job->capturedUpvalueCount = 0;
+                return false;
             }
+
+            // 1. Get the pointer to the value on the parent's stack.
+            Value* stack_slot_ptr = parent_frame->slots + slot_index;
+
+            // 2. Allocate a new heap cell for it.
+            Value* heap_cell = (Value*)malloc(sizeof(Value));
+            if (!heap_cell) {
+                runtimeError(vm, "VM Error: Out of memory boxing captured variable for thread.");
+                free(job->capturedUpvalues);
+                job->capturedUpvalues = NULL;
+                job->capturedUpvalueCount = 0;
+                return false;
+            }
+
+            // 3. Copy the current value from the stack into the new heap cell.
+            *heap_cell = makeCopyOfValue(stack_slot_ptr);
+
+            // 4. This new heap cell is what the thread will safely capture.
+            slot_ptr = heap_cell;
+
+            // NOTE: This changes the semantics from capture-by-reference
+            // to capture-by-value (a snapshot). This is a necessary
+            // trade-off for thread-safety at the VM level.
+
+            // --- END FIX ---
+
         } else if (parent_frame->upvalues) {
+            // This is already an upvalue (likely a heap cell from a
+            // closure or a previously boxed variable). It's safe to capture.
             uint8_t up_index = proc_symbol->upvalues[i].index;
             if (up_index < parent_frame->upvalue_count) {
                 slot_ptr = parent_frame->upvalues[up_index];
@@ -943,6 +981,9 @@ static bool vmThreadCaptureUpvaluesForJob(VM* vm, ThreadJob* job) {
             return false;
         }
 
+        // The thread's 'upvalues' array will now point to either an
+        // existing heap cell (from the 'else' branch) or our new
+        // heap cell (from the 'if' branch).
         job->capturedUpvalues[i] = slot_ptr;
     }
 
