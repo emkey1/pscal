@@ -979,7 +979,7 @@ static void emitVTables(BytecodeChunk* chunk) {
         emitConstantIndex16(chunk, ubIdx, 0);              // upper bound
         writeBytecodeChunk(chunk, (uint8_t)TYPE_INT32, 0); // element type
         int elemNameIdx = addStringConstant(chunk, "integer");
-        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
+        emitConstantIndex16(chunk, elemNameIdx, 0);
         emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
         vtableTrackerRecordClass(vt->class_name);
         free(vt->class_name);
@@ -1207,7 +1207,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
         AST* elem_type = actual_type_def_node ? actual_type_def_node->right : NULL;
         writeBytecodeChunk(chunk, (uint8_t)(elem_type ? elem_type->var_type : TYPE_VOID), line);
         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), line);
+        emitConstantIndex16(chunk, addStringConstant(chunk, elem_type_name), line);
     } else {
         const char* type_name = "";
         if (var_decl->var_type == TYPE_POINTER) {
@@ -2291,7 +2291,7 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
                 VarType elem_var_type = elem_type->var_type;
                 writeBytecodeChunk(chunk, (uint8_t)elem_var_type, line);
                 const char* elem_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_name), line);
+                emitConstantIndex16(chunk, addStringConstant(chunk, elem_name), line);
             }
         }
     }
@@ -4833,7 +4833,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         AST* elem_type = actual_type_def_node->right;
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                        emitConstantIndex16(chunk,
+                                            addStringConstant(chunk, elem_type_name),
+                                            getLine(varNameNode));
                     } else if (is_record_type) {
                         Value record_init = makeValueForType(TYPE_RECORD, resolved_local_type, NULL);
                         int const_idx = addConstantToChunk(chunk, &record_init);
