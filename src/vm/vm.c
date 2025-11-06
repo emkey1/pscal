@@ -4139,7 +4139,13 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
 
         VarType elem_var_type = (VarType)READ_BYTE();
-        uint8_t elem_name_idx = READ_BYTE();
+        uint16_t elem_name_idx = READ_SHORT(vm);
+        if (elem_name_idx >= vm->chunk->constants_count) {
+            runtimeError(vm, "VM Error: Array element type constant index out of range for '%s'.", varNameVal.s_val);
+            if (lower_bounds) free(lower_bounds);
+            if (upper_bounds) free(upper_bounds);
+            return INTERPRET_RUNTIME_ERROR;
+        }
         Value elem_name_val = vm->chunk->constants[elem_name_idx];
         AST* elem_type_def = NULL;
         if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
@@ -6733,7 +6739,13 @@ comparison_error_label:
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
-                uint8_t elem_name_idx = READ_BYTE();
+                uint16_t elem_name_idx = READ_SHORT(vm);
+                if (elem_name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Array element type constant index out of range.");
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value elem_name_val = vm->chunk->constants[elem_name_idx];
                 AST* elem_type_def = NULL;
                 if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
@@ -6823,7 +6835,13 @@ comparison_error_label:
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
-                uint8_t elem_name_idx = READ_BYTE();
+                uint16_t elem_name_idx = READ_SHORT(vm);
+                if (elem_name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Array element type constant index out of range for INIT_FIELD_ARRAY.");
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value elem_name_val = vm->chunk->constants[elem_name_idx];
                 AST* elem_type_def = NULL;
                 if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {

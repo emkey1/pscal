@@ -262,7 +262,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (current_pos >= chunk->count) return 1;
             uint8_t dimension_count = chunk->code[current_pos++];
             current_pos += dimension_count * 4; // bounds indices
-            current_pos += 2; // elem type and elem type name index
+            current_pos += 3; // elem type and 2-byte elem type name index
             return current_pos - offset;
         }
         case INIT_LOCAL_ARRAY: {
@@ -271,7 +271,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (current_pos >= chunk->count) return 1;
             uint8_t dimension_count = chunk->code[current_pos++];
             current_pos += dimension_count * 4; // bounds indices (two 16-bit indices per dimension)
-            current_pos += 2; // elem type and elem type name index
+            current_pos += 3; // elem type and 2-byte elem type name index
             return current_pos - offset;
         }
         case CONSTANT16:
@@ -318,7 +318,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
                     current_pos += dimension_count * 4; // Skip over all the bounds indices
-                    current_pos += 2; // Skip element VarType and element type name index
+                    current_pos += 3; // Skip element VarType and 2-byte element type name index
                 }
             } else {
                 // Simple types store a 16-bit type name index. Strings add an
@@ -327,7 +327,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
                 } else if (declaredType == TYPE_FILE) {
-                    current_pos += 3; // element VarType byte + element type name index
+                    current_pos += 3; // element VarType byte + 2-byte element type name index
                 }
             }
             return (current_pos - offset); // Return the total calculated length
@@ -343,14 +343,14 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
                     current_pos += dimension_count * 4; // bounds indices
-                    current_pos += 2; // element var type and element type name index
+                    current_pos += 3; // element var type and 2-byte element type name index
                 }
             } else {
                 current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
                 } else if (declaredType == TYPE_FILE) {
-                    current_pos += 3; // element VarType byte + element type name index
+                    current_pos += 3; // element VarType byte + 2-byte element type name index
                 }
             }
             return (current_pos - offset);
@@ -560,9 +560,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     if (current_offset < chunk->count) {
                         VarType elem_var_type = (VarType)chunk->code[current_offset++];
                         fprintf(stderr, "%s ", varTypeToString(elem_var_type));
-                        if (current_offset < chunk->count) {
-                            uint8_t elem_name_idx = chunk->code[current_offset++];
-                            if (elem_name_idx < chunk->constants_count && chunk->constants[elem_name_idx].type == TYPE_STRING) {
+                        if (current_offset + 1 < chunk->count) {
+                            uint16_t elem_name_idx =
+                                (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
+                            if (elem_name_idx < chunk->constants_count &&
+                                chunk->constants[elem_name_idx].type == TYPE_STRING) {
                                 fprintf(stderr, "('%s')", chunk->constants[elem_name_idx].s_val);
                             }
                         }
@@ -630,9 +633,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                     if (current_offset < chunk->count) {
                         VarType elem_var_type = (VarType)chunk->code[current_offset++];
                         fprintf(stderr, "%s ", varTypeToString(elem_var_type));
-                        if (current_offset < chunk->count) {
-                            uint8_t elem_name_idx = chunk->code[current_offset++];
-                            if (elem_name_idx < chunk->constants_count && chunk->constants[elem_name_idx].type == TYPE_STRING) {
+                        if (current_offset + 1 < chunk->count) {
+                            uint16_t elem_name_idx =
+                                (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                            current_offset += 2;
+                            if (elem_name_idx < chunk->constants_count &&
+                                chunk->constants[elem_name_idx].type == TYPE_STRING) {
                                 fprintf(stderr, "('%s')", chunk->constants[elem_name_idx].s_val);
                             }
                         }
@@ -728,14 +734,54 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         case INIT_FIELD_ARRAY: {
             uint8_t field = chunk->code[offset + 1];
             uint8_t dim_count = chunk->code[offset + 2];
-            fprintf(stderr, "%-16s Field:%d Dims:%d\n", "INIT_FIELD_ARRAY", field, dim_count);
-            return offset + 5 + dim_count * 4;
+            fprintf(stderr, "%-16s Field:%d Dims:%d", "INIT_FIELD_ARRAY", field, dim_count);
+            int current_offset = offset + 3 + dim_count * 4;
+            int next_offset = offset + 6 + dim_count * 4;
+            if (current_offset < chunk->count) {
+                VarType elem_type = (VarType)chunk->code[current_offset++];
+                fprintf(stderr, " Elem:%s", varTypeToString(elem_type));
+                if (current_offset + 1 < chunk->count) {
+                    uint16_t elem_name_idx =
+                        (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                    current_offset += 2;
+                    if (elem_name_idx != 0xFFFF &&
+                        elem_name_idx < chunk->constants_count &&
+                        chunk->constants[elem_name_idx].type == TYPE_STRING &&
+                        chunk->constants[elem_name_idx].s_val) {
+                        fprintf(stderr, " ('%s')", chunk->constants[elem_name_idx].s_val);
+                    } else if (elem_name_idx != 0xFFFF) {
+                        fprintf(stderr, " idx=%u", elem_name_idx);
+                    }
+                }
+            }
+            fprintf(stderr, "\n");
+            return next_offset;
         }
         case INIT_LOCAL_ARRAY: {
             uint8_t slot = chunk->code[offset + 1];
             uint8_t dim_count = chunk->code[offset + 2];
-            fprintf(stderr, "%-16s Slot:%d Dims:%d\n", "INIT_LOCAL_ARRAY", slot, dim_count);
-            return offset + 5 + dim_count * 4;
+            fprintf(stderr, "%-16s Slot:%d Dims:%d", "INIT_LOCAL_ARRAY", slot, dim_count);
+            int current_offset = offset + 3 + dim_count * 4;
+            int next_offset = offset + 6 + dim_count * 4;
+            if (current_offset < chunk->count) {
+                VarType elem_type = (VarType)chunk->code[current_offset++];
+                fprintf(stderr, " Elem:%s", varTypeToString(elem_type));
+                if (current_offset + 1 < chunk->count) {
+                    uint16_t elem_name_idx =
+                        (uint16_t)((chunk->code[current_offset] << 8) | chunk->code[current_offset + 1]);
+                    current_offset += 2;
+                    if (elem_name_idx != 0xFFFF &&
+                        elem_name_idx < chunk->constants_count &&
+                        chunk->constants[elem_name_idx].type == TYPE_STRING &&
+                        chunk->constants[elem_name_idx].s_val) {
+                        fprintf(stderr, " ('%s')", chunk->constants[elem_name_idx].s_val);
+                    } else if (elem_name_idx != 0xFFFF) {
+                        fprintf(stderr, " idx=%u", elem_name_idx);
+                    }
+                }
+            }
+            fprintf(stderr, "\n");
+            return next_offset;
         }
         case INIT_LOCAL_FILE: {
             uint8_t slot = chunk->code[offset + 1];
