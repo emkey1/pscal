@@ -43,6 +43,9 @@ struct Symbol_s {
         bool isLocal;
         bool is_ref;          // Indicates whether the captured variable is a reference (VAR param)
     } upvalues[256];
+    VarType* slot_types;
+    struct AST** slot_type_nodes;
+    uint16_t slot_type_count;
 };
 
 typedef struct Symbol_s Symbol;

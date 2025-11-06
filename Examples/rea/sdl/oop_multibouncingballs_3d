@@ -272,12 +272,12 @@ class StarField {
 
   void draw(float elapsedSeconds) {
     float time = elapsedSeconds;
+    int i = 0;
     GLDisable("lighting");
     GLDepthTest(false);
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one");
     GLBegin("lines");
-      int i = 0;
       while (i < NumStars) {
         float sparklePhase = myself.starPhase[i] + time * myself.starTwinkleRate[i];
         float sparkle = 0.55 + 0.45 * sin(sparklePhase);

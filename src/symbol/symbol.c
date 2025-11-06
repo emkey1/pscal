@@ -69,8 +69,16 @@ void freeHashTable(HashTable *table) {
                 if (current->type_def) {
                     freeAST(current->type_def);
                 }
+                if (current->slot_types) {
+                    free(current->slot_types);
+                    current->slot_types = NULL;
+                }
+                if (current->slot_type_nodes) {
+                    free(current->slot_type_nodes);
+                    current->slot_type_nodes = NULL;
+                }
             }
-            
+
             free(current);
             current = next;
         }
@@ -285,6 +293,9 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     new_symbol->arity = 0; // Number of parameters
     new_symbol->locals_count = 0; // Number of local variables (excluding parameters)
     new_symbol->upvalue_count = 0;
+    new_symbol->slot_types = NULL;
+    new_symbol->slot_type_nodes = NULL;
+    new_symbol->slot_type_count = 0;
 
     // Allocate the Value struct itself
     new_symbol->value = malloc(sizeof(Value));
@@ -383,6 +394,9 @@ void insertGlobalAlias(const char *name, Symbol *target) {
     alias->locals_count = resolved->locals_count;
     alias->slot_index = resolved->slot_index;
     alias->upvalue_count = resolved->upvalue_count;
+    alias->slot_types = resolved->slot_types;
+    alias->slot_type_nodes = resolved->slot_type_nodes;
+    alias->slot_type_count = resolved->slot_type_count;
     if (alias->upvalue_count > 0) {
         memcpy(alias->upvalues, resolved->upvalues, sizeof(resolved->upvalues));
     }
@@ -435,6 +449,9 @@ void insertConstGlobalSymbol(const char *name, Value val) {
     new_symbol->locals_count = 0;
     new_symbol->slot_index = 0;
     new_symbol->upvalue_count = 0;
+    new_symbol->slot_types = NULL;
+    new_symbol->slot_type_nodes = NULL;
+    new_symbol->slot_type_count = 0;
 
     new_symbol->value = malloc(sizeof(Value));
     if (!new_symbol->value) {
@@ -489,6 +506,9 @@ void insertConstSymbolIn(HashTable *table, const char *name, Value val) {
     new_symbol->locals_count = 0;
     new_symbol->slot_index = 0;
     new_symbol->upvalue_count = 0;
+    new_symbol->slot_types = NULL;
+    new_symbol->slot_type_nodes = NULL;
+    new_symbol->slot_type_count = 0;
 
     new_symbol->value = malloc(sizeof(Value));
     if (!new_symbol->value) {
@@ -581,6 +601,9 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
     sym->next = NULL; // Will be linked by hashTableInsert
     sym->enclosing = NULL;
     sym->upvalue_count = 0;
+    sym->slot_types = NULL;
+    sym->slot_type_nodes = NULL;
+    sym->slot_type_count = 0;
 
 
     // <<< MODIFIED: Insert into the local hash table >>>

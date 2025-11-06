@@ -454,10 +454,49 @@ static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
 #endif
 }
 
-static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
+static void initializeProcedureLocals(VM* vm, CallFrame* frame, uint16_t first_local_slot);
+static void pushAndInitLocals(VM* vm, CallFrame* frame, Symbol* proc_symbol, uint16_t base_slot_count);
+
+static bool adjustLocalByDelta(VM* vm, CallFrame* frame, uint16_t slot_index, long long delta, const char* opcode_name) {
+    if (!frame || !frame->slots) {
+        runtimeError(vm, "VM Error: %s encountered an invalid call frame.", opcode_name);
+        return false;
+    }
+    if (slot_index >= frame->slotCount) {
+        runtimeError(vm, "VM Error: %s local slot index %u out of range (frame has %u slots).",
+                     opcode_name, slot_index, frame->slotCount);
+        return false;
+    }
+
+    Value* slot = &frame->slots[slot_index];
     if (!slot) {
         runtimeError(vm, "VM Error: %s encountered a null local slot pointer.", opcode_name);
         return false;
+    }
+
+    if (slot->type == TYPE_NIL && frame->function_symbol && frame->function_symbol->slot_types &&
+        slot_index < frame->function_symbol->slot_type_count) {
+        VarType declared = frame->function_symbol->slot_types[slot_index];
+        AST* type_node = (frame->function_symbol->slot_type_nodes &&
+                          slot_index < frame->function_symbol->slot_type_count)
+                             ? frame->function_symbol->slot_type_nodes[slot_index]
+                             : NULL;
+        if (declared != TYPE_UNKNOWN && declared != TYPE_VOID && declared != TYPE_NIL) {
+            setTypeValue(slot, declared);
+            slot->base_type_node = type_node;
+            if (declared == TYPE_ENUM) {
+                slot->enum_val.ordinal = 0;
+                slot->enum_val.enum_name = NULL;
+                SET_INT_VALUE(slot, 0);
+            } else if (isIntlikeType(declared)) {
+                SET_INT_VALUE(slot, 0);
+                if (declared == TYPE_CHAR) {
+                    slot->c_val = 0;
+                }
+            } else if (isRealType(declared)) {
+                SET_REAL_VALUE(slot, 0.0L);
+            }
+        }
     }
 
     if (slot->type == TYPE_ENUM) {
@@ -523,6 +562,61 @@ static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char*
     runtimeError(vm, "VM Error: %s requires an ordinal or real local, got %s.",
                  opcode_name, varTypeToString(slot->type));
     return false;
+}
+
+static void initializeProcedureLocals(VM* vm, CallFrame* frame, uint16_t first_local_slot) {
+    (void)vm;
+    if (!frame || !frame->function_symbol || !frame->function_symbol->slot_types) {
+        return;
+    }
+    Symbol* proc_symbol = frame->function_symbol;
+    if (!proc_symbol->slot_types || proc_symbol->slot_type_count == 0) {
+        return;
+    }
+    uint16_t limit = frame->slotCount;
+    if (limit > proc_symbol->slot_type_count) {
+        limit = proc_symbol->slot_type_count;
+    }
+    for (uint16_t slot = first_local_slot; slot < limit; slot++) {
+        Value* dest = frame->slots + slot;
+        if (!dest || dest->type != TYPE_NIL) {
+            continue;
+        }
+        VarType declared = proc_symbol->slot_types[slot];
+        if (declared == TYPE_UNKNOWN || declared == TYPE_VOID || declared == TYPE_NIL) {
+            continue;
+        }
+        setTypeValue(dest, declared);
+        if (proc_symbol->slot_type_nodes && slot < proc_symbol->slot_type_count) {
+            dest->base_type_node = proc_symbol->slot_type_nodes[slot];
+        }
+        if (declared == TYPE_ENUM) {
+            dest->enum_val.ordinal = 0;
+            dest->enum_val.enum_name = NULL;
+            SET_INT_VALUE(dest, 0);
+        } else if (isIntlikeType(declared)) {
+            SET_INT_VALUE(dest, 0);
+            if (declared == TYPE_CHAR) {
+                dest->c_val = 0;
+            }
+        } else if (isRealType(declared)) {
+            SET_REAL_VALUE(dest, 0.0L);
+        }
+    }
+}
+
+static void pushAndInitLocals(VM* vm, CallFrame* frame, Symbol* proc_symbol, uint16_t base_slot_count) {
+    if (!frame) {
+        return;
+    }
+    uint16_t locals = proc_symbol ? proc_symbol->locals_count : 0;
+    for (uint16_t i = 0; i < locals; i++) {
+        push(vm, makeNil());
+    }
+    frame->slotCount = (uint16_t)(base_slot_count + locals);
+    if (proc_symbol && locals > 0) {
+        initializeProcedureLocals(vm, frame, base_slot_count);
+    }
 }
 
 // --- Class method registration helpers ---
@@ -1362,12 +1456,8 @@ static void* threadStart(void* arg) {
                         pushed_args++;
                     }
 
-                    for (int i = 0; proc_symbol && i < proc_symbol->locals_count; i++) {
-                        push(workerVm, makeNil());
-                    }
-
                     if (proc_symbol) {
-                        frame->slotCount = (uint16_t)(pushed_args + proc_symbol->locals_count);
+                        pushAndInitLocals(workerVm, frame, proc_symbol, (uint16_t)pushed_args);
                     } else {
                         frame->slotCount = (uint16_t)pushed_args;
                     }
@@ -6614,8 +6704,7 @@ comparison_error_label:
                                  slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                Value* target_slot = &frame->slots[slot];
-                if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
+                if (!adjustLocalByDelta(vm, frame, slot, 1, "INC_LOCAL")) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
@@ -6631,8 +6720,7 @@ comparison_error_label:
                                  slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                Value* target_slot = &frame->slots[slot];
-                if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
+                if (!adjustLocalByDelta(vm, frame, slot, -1, "DEC_LOCAL")) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
@@ -7399,11 +7487,7 @@ comparison_error_label:
                     }
                 }
 
-                for (int i = 0; i < proc_symbol->locals_count; i++) {
-                    push(vm, makeNil());
-                }
-
-                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+                pushAndInitLocals(vm, frame, proc_symbol, declared_arity);
 
                 vm->ip = vm->chunk->code + target_address;
                 break;
@@ -7494,11 +7578,7 @@ comparison_error_label:
                     }
                 }
 
-                for (int i = 0; i < proc_symbol->locals_count; i++) {
-                    push(vm, makeNil());
-                }
-
-                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+                pushAndInitLocals(vm, frame, proc_symbol, declared_arity);
 
                 vm->ip = vm->chunk->code + target_address;
                 break;
@@ -7632,11 +7712,7 @@ comparison_error_label:
                     releaseClosureEnv(captured_env);
                 }
 
-                for (int i = 0; i < proc_symbol->locals_count; i++) {
-                    push(vm, makeNil());
-                }
-
-                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+                pushAndInitLocals(vm, frame, proc_symbol, declared_arity);
 
                 vm->ip = vm->chunk->code + target_address;
                 break;
@@ -7753,11 +7829,7 @@ comparison_error_label:
                     }
                 }
 
-                for (int i = 0; i < method_symbol->locals_count; i++) {
-                    push(vm, makeNil());
-                }
-
-                frame->slotCount = (uint16_t)(declared_arity + 1 + method_symbol->locals_count);
+                pushAndInitLocals(vm, frame, method_symbol, (uint16_t)(declared_arity + 1));
 
                 vm->ip = vm->chunk->code + target_address;
                 break;
@@ -7890,11 +7962,7 @@ comparison_error_label:
                     releaseClosureEnv(captured_env);
                 }
 
-                for (int i = 0; i < proc_symbol->locals_count; i++) {
-                    push(vm, makeNil());
-                }
-
-                frame->slotCount = (uint16_t)(declared_arity + proc_symbol->locals_count);
+                pushAndInitLocals(vm, frame, proc_symbol, declared_arity);
 
                 vm->ip = vm->chunk->code + target_address;
 
