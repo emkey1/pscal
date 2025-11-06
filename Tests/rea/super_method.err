@@ -29,35 +29,35 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0044    | RETURN
 0045    0 CONSTANT            8 'Value type ARRAY'
 0047    | DEFINE_GLOBAL    NameIdx:9   'child_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0057    | SET_GLOBAL          9 'child_vtable'
-0059    | CONSTANT           12 'Value type ARRAY'
-0061    | DEFINE_GLOBAL    NameIdx:13  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
-0071    | SET_GLOBAL         13 'base_vtable'
-0073    3 DEFINE_GLOBAL    NameIdx:14  'c' Type:POINTER ('Child')
-0078    | ALLOC_OBJECT        3 (fields)
-0080    | DUP
-0081    | GET_FIELD_OFFSET    0 (index)
-0083    | GET_GLOBAL_ADDRESS    9 'child_vtable'
-0085    | SET_INDIRECT
-0086    | DUP
-0087    | CALL_USER_PROC      16 'child.child' @0028 (1 args)
-0091    | SET_GLOBAL         14 'c'
-0093    0 GET_GLOBAL         14 'c'
-0095    | DUP
-0096    | GET_FIELD_OFFSET    0 (index)
-0098    | GET_GLOBAL_ADDRESS    9 'child_vtable'
-0100    | SET_INDIRECT
-0101    | POP
-0102    4 GET_GLOBAL         14 'c'
-0104    | DUP
-0105    | GET_FIELD_OFFSET    0 (index)
-0107    | GET_INDIRECT
-0108    | CONSTANT            3 '1'
-0110    | SWAP
-0111    | GET_ELEMENT_ADDRESS    1 (dims)
-0113    | GET_INDIRECT
-0114    | PROC_CALL_INDIRECT (args=1)
-0116    0 HALT
+0058    | SET_GLOBAL          9 'child_vtable'
+0060    | CONSTANT           12 'Value type ARRAY'
+0062    | DEFINE_GLOBAL    NameIdx:13  'base_vtable' Type:ARRAY Dims:1 [0..1] of INTEGER ('integer')
+0073    | SET_GLOBAL         13 'base_vtable'
+0075    3 DEFINE_GLOBAL    NameIdx:14  'c' Type:POINTER ('Child')
+0080    | ALLOC_OBJECT        3 (fields)
+0082    | DUP
+0083    | GET_FIELD_OFFSET    0 (index)
+0085    | GET_GLOBAL_ADDRESS    9 'child_vtable'
+0087    | SET_INDIRECT
+0088    | DUP
+0089    | CALL_USER_PROC      16 'child.child' @0028 (1 args)
+0093    | SET_GLOBAL         14 'c'
+0095    0 GET_GLOBAL         14 'c'
+0097    | DUP
+0098    | GET_FIELD_OFFSET    0 (index)
+0100    | GET_GLOBAL_ADDRESS    9 'child_vtable'
+0102    | SET_INDIRECT
+0103    | POP
+0104    4 GET_GLOBAL         14 'c'
+0106    | DUP
+0107    | GET_FIELD_OFFSET    0 (index)
+0109    | GET_INDIRECT
+0110    | CONSTANT            3 '1'
+0112    | SWAP
+0113    | GET_ELEMENT_ADDRESS    1 (dims)
+0115    | GET_INDIRECT
+0116    | PROC_CALL_INDIRECT (args=1)
+0118    0 HALT
 == End Disassembly: rea/super_method.rea ==
 
 Constants (17):\n  0000: STR   "myself"
