@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
@@ -4093,15 +4094,48 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     uint8_t* optimized_code = (uint8_t*)malloc((size_t)original_count);
     int* optimized_lines = (int*)malloc((size_t)original_count * sizeof(int));
     int* offset_map = (int*)malloc((size_t)(original_count + 1) * sizeof(int));
+    bool* original_instruction_starts = NULL;
+    bool abort_optimizations = true;
+
     if (!optimized_code || !optimized_lines || !offset_map) {
-        free(optimized_code);
-        free(optimized_lines);
-        free(offset_map);
-        return;
+        goto cleanup;
+    }
+
+    original_instruction_starts = (bool*)calloc((size_t)(original_count + 1), sizeof(bool));
+    if (!original_instruction_starts) {
+        goto cleanup;
     }
 
     for (int i = 0; i <= original_count; ++i) {
         offset_map[i] = -1;
+    }
+
+    bool instruction_map_error = false;
+    int scan_offset = 0;
+    while (scan_offset < original_count) {
+        original_instruction_starts[scan_offset] = true;
+        int instr_len = getInstructionLength(chunk, scan_offset);
+        if (instr_len <= 0 || scan_offset + instr_len > original_count) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Invalid instruction encountered at byte %d while preparing peephole map (len=%d).\n",
+                           scan_offset,
+                           instr_len);
+            }
+            fprintf(stderr,
+                    "Compiler error: Invalid instruction layout encountered while optimizing bytecode.\n");
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"invalid instruction layout before peephole optimization");
+#endif
+            instruction_map_error = true;
+            break;
+        }
+        scan_offset += instr_len;
+    }
+    original_instruction_starts[original_count] = true;
+
+    if (instruction_map_error) {
+        goto cleanup;
     }
 
     typedef struct {
@@ -4287,12 +4321,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                 int new_capacity = jump_capacity < 8 ? 8 : jump_capacity * 2;
                 JumpFixup* resized = (JumpFixup*)realloc(jump_fixes, (size_t)new_capacity * sizeof(JumpFixup));
                 if (!resized) {
-                    free(optimized_code);
-                    free(optimized_lines);
-                    free(offset_map);
-                    free(jump_fixes);
-                    free(absolute_fixes);
-                    return;
+                    goto cleanup;
                 }
                 jump_fixes = resized;
                 jump_capacity = new_capacity;
@@ -4306,12 +4335,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                 int new_capacity = absolute_capacity < 8 ? 8 : absolute_capacity * 2;
                 AbsoluteFixup* resized = (AbsoluteFixup*)realloc(absolute_fixes, (size_t)new_capacity * sizeof(AbsoluteFixup));
                 if (!resized) {
-                    free(optimized_code);
-                    free(optimized_lines);
-                    free(offset_map);
-                    free(jump_fixes);
-                    free(absolute_fixes);
-                    return;
+                    goto cleanup;
                 }
                 absolute_fixes = resized;
                 absolute_capacity = new_capacity;
@@ -4335,20 +4359,49 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     offset_map[original_count] = write_index;
 
     if (!changed) {
-        free(optimized_code);
-        free(optimized_lines);
-        free(offset_map);
-        free(jump_fixes);
-        free(absolute_fixes);
-        return;
+        goto cleanup;
     }
 
     for (int i = 0; i < jump_count; ++i) {
         int original_target = jump_fixes[i].original_target;
-        if (original_target < 0) original_target = 0;
-        if (original_target > original_count) original_target = original_count;
-        int new_target = offset_map[original_target];
-        if (new_target < 0) new_target = offset_map[original_count];
+        bool target_is_end = (original_target == original_count);
+        bool target_within = (original_target >= 0 && original_target < original_count);
+        bool target_marked = target_within ? original_instruction_starts[original_target] : false;
+
+        if (!target_is_end && (!target_within || !target_marked)) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Peephole optimizer encountered invalid jump target %d at new offset %d.\n",
+                           original_target,
+                           jump_fixes[i].new_offset);
+            }
+            fprintf(stderr,
+                    "Compiler error: Peephole optimizer encountered invalid jump target %d.\n",
+                    original_target);
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"peephole optimizer encountered invalid jump target");
+#endif
+            continue;
+        }
+
+        int target_index = target_is_end ? original_count : original_target;
+        int new_target = offset_map[target_index];
+        if (new_target < 0) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Peephole optimizer could not map jump target %d (new offset %d).\n",
+                           original_target,
+                           jump_fixes[i].new_offset);
+            }
+            fprintf(stderr,
+                    "Compiler error: Peephole optimizer could not map jump target %d.\n",
+                    original_target);
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"peephole optimizer missing mapping for jump target");
+#endif
+            continue;
+        }
+
         int new_offset = jump_fixes[i].new_offset;
         int new_delta = new_target - (new_offset + 3);
         optimized_code[new_offset + 1] = (uint8_t)((new_delta >> 8) & 0xFF);
@@ -4417,10 +4470,17 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
             val->u_val = (unsigned long long)mapped;
         }
     }
+    abort_optimizations = false;
 
-    free(offset_map);
-    free(jump_fixes);
-    free(absolute_fixes);
+cleanup:
+    if (offset_map) free(offset_map);
+    if (jump_fixes) free(jump_fixes);
+    if (absolute_fixes) free(absolute_fixes);
+    if (original_instruction_starts) free(original_instruction_starts);
+    if (abort_optimizations) {
+        free(optimized_code);
+        free(optimized_lines);
+    }
 }
 
 
@@ -5303,45 +5363,91 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_code_len > 0) {
         bool* valid_offsets = (bool*)calloc((size_t)func_code_len, sizeof(bool));
         if (valid_offsets) {
+            const char* func_name = (fc && fc->function_symbol && fc->function_symbol->name)
+                                        ? fc->function_symbol->name
+                                        : "<anonymous>";
+            bool instruction_scan_failed = false;
             int scan_offset = func_code_start;
             while (scan_offset < func_code_end) {
                 valid_offsets[scan_offset - func_code_start] = true;
                 int instr_len = getInstructionLength(chunk, scan_offset);
-                if (instr_len <= 0) instr_len = 1;
+                if (instr_len <= 0 || scan_offset + instr_len > func_code_end) {
+                    if (compiler_debug) {
+                        DBG_PRINTF("[dbg] Invalid instruction length while validating jumps in '%s' at byte %d (len=%d).\n",
+                                   func_name,
+                                   scan_offset - func_code_start,
+                                   instr_len);
+                    }
+                    fprintf(stderr,
+                            "Compiler error: Invalid instruction layout while validating jumps in '%s'.\n",
+                            func_name);
+                    compiler_had_error = true;
+#ifndef NDEBUG
+                    assert(!"invalid instruction length during jump validation");
+#endif
+                    instruction_scan_failed = true;
+                    break;
+                }
                 scan_offset += instr_len;
             }
 
-            scan_offset = func_code_start;
-            while (scan_offset < func_code_end) {
-                uint8_t opcode = chunk->code[scan_offset];
-                int instr_len = getInstructionLength(chunk, scan_offset);
-                if (instr_len <= 0) instr_len = 1;
-                bool is_jump = (opcode == JUMP || opcode == JUMP_IF_FALSE);
-                if (is_jump && scan_offset + instr_len <= func_code_end) {
-                    int operand_idx = scan_offset + 1;
-                    int16_t rel = (int16_t)((chunk->code[operand_idx] << 8) | chunk->code[operand_idx + 1]);
-                    int instr_end = scan_offset + instr_len;
-                    int dest = instr_end + rel;
-                    if (dest >= func_code_start && dest < func_code_end) {
-                        if (!valid_offsets[dest - func_code_start]) {
-                            int adjusted = dest;
-                            while (adjusted > func_code_start && !valid_offsets[adjusted - func_code_start]) {
-                                adjusted--;
-                            }
-                            if (!valid_offsets[adjusted - func_code_start]) {
-                                adjusted = dest;
-                                while (adjusted < func_code_end && !valid_offsets[adjusted - func_code_start]) {
-                                    adjusted++;
+            if (!instruction_scan_failed) {
+                scan_offset = func_code_start;
+                while (scan_offset < func_code_end) {
+                    uint8_t opcode = chunk->code[scan_offset];
+                    int instr_len = getInstructionLength(chunk, scan_offset);
+                    bool is_jump = (opcode == JUMP || opcode == JUMP_IF_FALSE);
+                    if (is_jump && scan_offset + instr_len <= func_code_end) {
+                        int operand_idx = scan_offset + 1;
+                        int16_t rel = (int16_t)((chunk->code[operand_idx] << 8) |
+                                                chunk->code[operand_idx + 1]);
+                        int instr_end = scan_offset + instr_len;
+                        int dest = instr_end + rel;
+                        bool dest_is_end = (dest == func_code_end);
+                        bool dest_within_body = (dest >= func_code_start && dest < func_code_end);
+                        if (dest_within_body || dest_is_end) {
+                            if (!dest_is_end) {
+                                bool marked_valid = valid_offsets[dest - func_code_start];
+                                if (!marked_valid) {
+                                    if (compiler_debug) {
+                                        DBG_PRINTF(
+                                            "[dbg] Invalid jump target %d discovered in '%s' at byte %d.\n",
+                                            dest - func_code_start,
+                                            func_name,
+                                            scan_offset - func_code_start);
+                                    }
+                                    fprintf(stderr,
+                                            "Compiler error: Jump at byte %d in '%s' targets invalid offset %d.\n",
+                                            scan_offset - func_code_start,
+                                            func_name,
+                                            dest - func_code_start);
+                                    compiler_had_error = true;
+#ifndef NDEBUG
+                                    assert(!"jump target offset not marked as valid");
+#endif
                                 }
                             }
-                            if (valid_offsets[adjusted - func_code_start]) {
-                                int16_t new_rel = (int16_t)(adjusted - instr_end);
-                                patchShort(chunk, operand_idx, (uint16_t)new_rel);
+                        } else {
+                            if (compiler_debug) {
+                                DBG_PRINTF(
+                                    "[dbg] Jump at byte %d in '%s' targets out-of-range offset %d.\n",
+                                    scan_offset - func_code_start,
+                                    func_name,
+                                    dest - func_code_start);
                             }
+                            fprintf(stderr,
+                                    "Compiler error: Jump at byte %d in '%s' targets out-of-range offset %d.\n",
+                                    scan_offset - func_code_start,
+                                    func_name,
+                                    dest - func_code_start);
+                            compiler_had_error = true;
+#ifndef NDEBUG
+                            assert(!"jump target offset outside of function bounds");
+#endif
                         }
                     }
+                    scan_offset += instr_len;
                 }
-                scan_offset += instr_len;
             }
 
             free(valid_offsets);
