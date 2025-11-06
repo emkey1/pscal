@@ -288,37 +288,6 @@ static void resetAddressConstantTracking(void) {
     address_constant_count = 0;
 }
 
-static void remapProcedureAddresses(HashTable* table, int* offset_map, int original_count) {
-    if (!table || !offset_map || original_count < 0) {
-        return;
-    }
-    int fallback = offset_map[original_count];
-
-    for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
-        for (Symbol* sym = table->buckets[bucket]; sym; sym = sym->next) {
-            Symbol* target = resolveSymbolAlias(sym);
-            if (target && target->is_defined) {
-                int old_address = target->bytecode_address;
-                if (old_address >= 0 && old_address <= original_count) {
-                    int mapped = offset_map[old_address];
-                    if (mapped < 0) {
-                        mapped = fallback;
-                    }
-                    target->bytecode_address = mapped;
-                }
-
-                if (target->type_def && target->type_def->symbol_table) {
-                    remapProcedureAddresses((HashTable*)target->type_def->symbol_table,
-                                            offset_map, original_count);
-                }
-            } else if (sym->type_def && sym->type_def->symbol_table) {
-                remapProcedureAddresses((HashTable*)sym->type_def->symbol_table,
-                                        offset_map, original_count);
-            }
-        }
-    }
-}
-
 void compilerEnableDynamicLocals(int enable) {
     compiler_dynamic_locals = enable ? 1 : 0;
 }
@@ -4409,7 +4378,17 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     chunk->capacity = write_index;
 
     if (procedure_table) {
-        remapProcedureAddresses(procedure_table, offset_map, original_count);
+        for (int bucket = 0; bucket < HASHTABLE_SIZE; ++bucket) {
+            for (Symbol* sym = procedure_table->buckets[bucket]; sym; sym = sym->next) {
+                Symbol* target = resolveSymbolAlias(sym);
+                if (!target || target != sym || !target->is_defined) continue;
+                int old_address = target->bytecode_address;
+                if (old_address < 0 || old_address > original_count) continue;
+                int mapped = offset_map[old_address];
+                if (mapped < 0) mapped = offset_map[original_count];
+                target->bytecode_address = mapped;
+            }
+        }
     }
 
     for (int i = 0; i < address_constant_count; ++i) {
