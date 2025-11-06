@@ -5363,9 +5363,9 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_code_len > 0) {
         bool* valid_offsets = (bool*)calloc((size_t)func_code_len, sizeof(bool));
         if (valid_offsets) {
-            const char* func_name = (fc && fc->function_symbol && fc->function_symbol->name)
-                                        ? fc->function_symbol->name
-                                        : "<anonymous>";
+            const char* func_name = (fc.function_symbol && fc.function_symbol->name)
+                                        ? fc.function_symbol->name
+                                        : (fc.name ? fc.name : "<anonymous>");
             bool instruction_scan_failed = false;
             int scan_offset = func_code_start;
             while (scan_offset < func_code_end) {
