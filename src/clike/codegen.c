@@ -760,7 +760,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     }
                 }
                 writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
-                writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+                emitShort(chunk, (uint16_t)elemNameIdx, node->token.line);
                 if (node->left && node->left->type == TCAST_STRING &&
                     node->element_type == TYPE_CHAR && node->dim_count == 1) {
                     char* str = tokenStringToCString(node->left->token);
@@ -904,7 +904,7 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         }
         int elemNameIdx = addStringConstant(chunk, "");
         writeBytecodeChunk(chunk, (uint8_t)node->element_type, node->token.line);
-        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, node->token.line);
+        emitShort(chunk, (uint16_t)elemNameIdx, node->token.line);
     } else if (node->var_type == TYPE_FILE) {
         const char* type_name = "";
         char* owned_type_name = NULL;
