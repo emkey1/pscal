@@ -398,8 +398,6 @@ typedef struct FunctionCompilerState {
     CompilerUpvalue upvalues[MAX_UPVALUES];
     int upvalue_count;
     bool returns_value;
-    VarType slot_types[MAX_GLOBALS];
-    AST* slot_type_nodes[MAX_GLOBALS];
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
@@ -2757,10 +2755,6 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->function_symbol = NULL;
     fc->upvalue_count = 0;
     fc->returns_value = false;
-    for (int i = 0; i < MAX_GLOBALS; i++) {
-        fc->slot_types[i] = TYPE_UNKNOWN;
-        fc->slot_type_nodes[i] = NULL;
-    }
 }
 
 static void compilerBeginScope(FunctionCompilerState* fc) {
@@ -2788,87 +2782,42 @@ static int findLocalByName(FunctionCompilerState* fc, const char* name) {
 
 static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool is_ref);
 
-static void rememberSlotType(FunctionCompilerState* fc, int slot, AST* type_node, VarType fallback_type) {
-    if (!fc || slot < 0 || slot >= MAX_GLOBALS) {
-        return;
-    }
-    AST* resolved = resolveTypeAlias(type_node);
-    AST* stored = resolved ? resolved : type_node;
-    VarType recorded = fallback_type;
-    if (stored && stored->var_type != TYPE_UNKNOWN && stored->var_type != TYPE_VOID) {
-        recorded = stored->var_type;
-    } else if (type_node && type_node->var_type != TYPE_UNKNOWN && type_node->var_type != TYPE_VOID) {
-        recorded = type_node->var_type;
-    } else if (recorded == TYPE_UNKNOWN && fallback_type != TYPE_UNKNOWN) {
-        recorded = fallback_type;
-    }
-    fc->slot_types[slot] = recorded;
-    fc->slot_type_nodes[slot] = stored;
-}
-
 static void registerVarDeclLocals(AST* varDecl, bool emitError) {
     if (!current_function_compiler || !varDecl) return;
-
-    AST* type_node = varDecl->right;
-    AST* resolved_type = resolveTypeAlias(type_node);
-    VarType fallback_type = varDecl->var_type;
-    if (resolved_type && resolved_type->var_type != TYPE_UNKNOWN) {
-        fallback_type = resolved_type->var_type;
-    } else if (type_node && type_node->var_type != TYPE_UNKNOWN) {
-        fallback_type = type_node->var_type;
-    }
-
     for (int i = 0; i < varDecl->child_count; i++) {
         AST* varNameNode = varDecl->children[i];
         if (!varNameNode || !varNameNode->token || !varNameNode->token->value) continue;
         const char* name = varNameNode->token->value;
         int idx = findLocalByName(current_function_compiler, name);
         if (idx >= 0) {
-            CompilerLocal* existing = &current_function_compiler->locals[idx];
-            if (existing->depth < 0) {
-                existing->depth = current_function_compiler->scope_depth;
-                existing->is_ref = false;
-                existing->is_captured = false;
-                existing->decl_node = varDecl;
-                rememberSlotType(current_function_compiler, idx,
-                                 resolved_type ? resolved_type : type_node,
-                                 fallback_type);
-                continue;
-            }
-            if (existing->depth == current_function_compiler->scope_depth) {
-                if (existing->decl_node == varDecl) {
-                    rememberSlotType(current_function_compiler, idx,
-                                     resolved_type ? resolved_type : type_node,
-                                     fallback_type);
-                    continue;
-                }
-                if (emitError) {
-                    fprintf(stderr, "L%d: duplicate variable '%s' in this scope.\n",
-                            getLine(varNameNode), name);
-                    compiler_had_error = true;
-                }
-            } else {
-                addLocal(current_function_compiler, name, getLine(varNameNode), false);
-                int slot = current_function_compiler->local_count - 1;
-                CompilerLocal* fresh = &current_function_compiler->locals[slot];
-                fresh->decl_node = varDecl;
-                rememberSlotType(current_function_compiler, slot,
-                                 resolved_type ? resolved_type : type_node,
-                                 fallback_type);
-                continue;
-            }
+        CompilerLocal* existing = &current_function_compiler->locals[idx];
+        if (existing->depth < 0) {
+            existing->depth = current_function_compiler->scope_depth;
+            existing->is_ref = false;
+            existing->is_captured = false;
+            existing->decl_node = varDecl;
+            continue;
         }
-
-        if (idx < 0) {
+        if (existing->depth == current_function_compiler->scope_depth) {
+            if (existing->decl_node == varDecl) {
+                continue;
+            }
+            if (emitError) {
+                fprintf(stderr, "L%d: duplicate variable '%s' in this scope.\n",
+                        getLine(varNameNode), name);
+                compiler_had_error = true;
+            }
+        } else {
             addLocal(current_function_compiler, name, getLine(varNameNode), false);
-            int slot = current_function_compiler->local_count - 1;
-            CompilerLocal* fresh = &current_function_compiler->locals[slot];
+            CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
             fresh->decl_node = varDecl;
-            rememberSlotType(current_function_compiler, slot,
-                             resolved_type ? resolved_type : type_node,
-                             fallback_type);
         }
+    } else {
+        addLocal(current_function_compiler, name, getLine(varNameNode), false);
+        CompilerLocal* fresh = &current_function_compiler->locals[current_function_compiler->local_count - 1];
+        fresh->decl_node = varDecl;
     }
+}
 }
 
 
@@ -3001,16 +2950,11 @@ static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool
     if (fc->local_count > fc->max_slot_used) {
         fc->max_slot_used = fc->local_count;
     }
-    int slot_index = fc->local_count - 1;
     local->name = strdup(name);
     local->depth = fc->scope_depth;
     local->is_ref = is_ref;
     local->is_captured = false;
     local->decl_node = NULL;
-    if (slot_index >= 0 && slot_index < MAX_GLOBALS) {
-        fc->slot_types[slot_index] = TYPE_UNKNOWN;
-        fc->slot_type_nodes[slot_index] = NULL;
-    }
 }
 
 static int resolveLocal(FunctionCompilerState* fc, const char* name) {
@@ -4842,15 +4786,6 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         resolved_local_type = resolveTypeAlias(resolved_local_type->left);
                     }
                     bool is_record_type = resolved_local_type && resolved_local_type->type == AST_RECORD_TYPE;
-                    VarType declared_local_type = node->var_type;
-                    if (resolved_local_type && resolved_local_type->var_type != TYPE_UNKNOWN) {
-                        declared_local_type = resolved_local_type->var_type;
-                    } else if (actual_type_def_node && actual_type_def_node->var_type != TYPE_UNKNOWN) {
-                        declared_local_type = actual_type_def_node->var_type;
-                    }
-                    rememberSlotType(current_function_compiler, slot,
-                                     resolved_local_type ? resolved_local_type : actual_type_def_node,
-                                     declared_local_type);
 
                     if (node->var_type == TYPE_ARRAY) {
                         int dimension_count = actual_type_def_node->child_count;
@@ -5310,23 +5245,10 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             AST* param_group_node = func_decl_node->children[i];
             if (param_group_node && param_group_node->type == AST_VAR_DECL) {
                 bool is_var_param = param_group_node->by_ref;
-                AST* param_type_node = param_group_node->right ? param_group_node->right
-                                                               : param_group_node->type_def;
-                AST* resolved_param_type = resolveTypeAlias(param_type_node);
-                VarType param_var_type = param_group_node->var_type;
-                if (resolved_param_type && resolved_param_type->var_type != TYPE_UNKNOWN) {
-                    param_var_type = resolved_param_type->var_type;
-                } else if (param_type_node && param_type_node->var_type != TYPE_UNKNOWN) {
-                    param_var_type = param_type_node->var_type;
-                }
                 for (int j = 0; j < param_group_node->child_count; j++) {
                     AST* param_name_node = param_group_node->children[j];
                     if (param_name_node && param_name_node->token) {
                         addLocal(&fc, param_name_node->token->value, getLine(param_name_node), is_var_param);
-                        int slot = fc.local_count - 1;
-                        rememberSlotType(&fc, slot,
-                                         resolved_param_type ? resolved_param_type : param_type_node,
-                                         param_var_type);
                     }
                 }
             }
@@ -5338,22 +5260,8 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         addLocal(&fc, func_name, line, false);
         return_value_slot = fc.local_count - 1;
-        AST* return_type_node = func_decl_node->right;
-        AST* resolved_return_type = resolveTypeAlias(return_type_node);
-        VarType return_type = TYPE_UNKNOWN;
-        if (resolved_return_type && resolved_return_type->var_type != TYPE_UNKNOWN) {
-            return_type = resolved_return_type->var_type;
-        } else if (return_type_node && return_type_node->var_type != TYPE_UNKNOWN) {
-            return_type = return_type_node->var_type;
-        }
-        rememberSlotType(&fc, return_value_slot,
-                         resolved_return_type ? resolved_return_type : return_type_node,
-                         return_type);
 
         addLocal(&fc, "result", line, false);
-        rememberSlotType(&fc, fc.local_count - 1,
-                         resolved_return_type ? resolved_return_type : return_type_node,
-                         return_type);
     }
     
     // Step 3: Add all other local variables.
@@ -5472,44 +5380,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
     proc_symbol->locals_count = (uint16_t)effective_locals;
 
-    if (!proc_symbol->is_alias) {
-        if (proc_symbol->slot_types) {
-            free(proc_symbol->slot_types);
-            proc_symbol->slot_types = NULL;
-        }
-        if (proc_symbol->slot_type_nodes) {
-            free(proc_symbol->slot_type_nodes);
-            proc_symbol->slot_type_nodes = NULL;
-        }
-        proc_symbol->slot_type_count = 0;
-
-        int total_slots = proc_symbol->arity + proc_symbol->locals_count;
-        if (total_slots > 0) {
-            VarType* slot_types_copy = malloc(sizeof(VarType) * (size_t)total_slots);
-            AST** slot_nodes_copy = malloc(sizeof(AST*) * (size_t)total_slots);
-            if (!slot_types_copy || !slot_nodes_copy) {
-                fprintf(stderr, "Compiler error: Out of memory while recording local slot type metadata.\n");
-                free(slot_types_copy);
-                free(slot_nodes_copy);
-                compiler_had_error = true;
-            } else {
-                for (int i = 0; i < total_slots; i++) {
-                    VarType recorded = TYPE_UNKNOWN;
-                    AST* node = NULL;
-                    if (i < MAX_GLOBALS) {
-                        recorded = fc.slot_types[i];
-                        node = fc.slot_type_nodes[i];
-                    }
-                    slot_types_copy[i] = recorded;
-                    slot_nodes_copy[i] = node;
-                }
-                proc_symbol->slot_types = slot_types_copy;
-                proc_symbol->slot_type_nodes = slot_nodes_copy;
-                proc_symbol->slot_type_count = (uint16_t)total_slots;
-            }
-        }
-    }
-
     // Step 5: Emit the return instruction.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         noteLocalSlotUse(&fc, return_value_slot);
@@ -5580,23 +5450,12 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     for (int i = 0; i < decl->child_count && arg_index < call_node->child_count; i++) {
         AST* param_group = decl->children[i];
         bool by_ref = param_group->by_ref;
-        AST* param_type_node = param_group->right ? param_group->right : param_group->type_def;
-        AST* resolved_param_type = resolveTypeAlias(param_type_node);
-        VarType param_type = param_group->var_type;
-        if (resolved_param_type && resolved_param_type->var_type != TYPE_UNKNOWN) {
-            param_type = resolved_param_type->var_type;
-        } else if (param_type_node && param_type_node->var_type != TYPE_UNKNOWN) {
-            param_type = param_type_node->var_type;
-        }
         for (int j = 0; j < param_group->child_count && arg_index < call_node->child_count; j++, arg_index++) {
             AST* param_name_node = param_group->children[j];
             const char* pname = param_name_node->token ? param_name_node->token->value : NULL;
             if (!pname) continue;
             addLocal(current_function_compiler, pname, line, by_ref);
             int slot = current_function_compiler->local_count - 1;
-            rememberSlotType(current_function_compiler, slot,
-                             resolved_param_type ? resolved_param_type : param_type_node,
-                             param_type);
             AST* arg_node = call_node->children[arg_index];
             if (by_ref) {
                 compileLValue(arg_node, chunk, getLine(arg_node));
@@ -5609,24 +5468,12 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         }
     }
 
-    AST* return_type_node = (decl->type == AST_FUNCTION_DECL) ? decl->right : NULL;
-    AST* resolved_return_type = resolveTypeAlias(return_type_node);
-    VarType inline_return_type = TYPE_UNKNOWN;
-    if (resolved_return_type && resolved_return_type->var_type != TYPE_UNKNOWN) {
-        inline_return_type = resolved_return_type->var_type;
-    } else if (return_type_node && return_type_node->var_type != TYPE_UNKNOWN) {
-        inline_return_type = return_type_node->var_type;
-    }
-
     int result_slot = -1;
     if (decl->type == AST_FUNCTION_DECL) {
         // Allocate a slot for the function's result. Assignments to the
         // function name will target this slot.
         addLocal(current_function_compiler, decl->token->value, line, false);
         result_slot = current_function_compiler->local_count - 1;
-        rememberSlotType(current_function_compiler, result_slot,
-                         resolved_return_type ? resolved_return_type : return_type_node,
-                         inline_return_type);
     }
 
     LabelTableState inline_labels;
