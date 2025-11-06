@@ -262,7 +262,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (current_pos >= chunk->count) return 1;
             uint8_t dimension_count = chunk->code[current_pos++];
             current_pos += dimension_count * 4; // bounds indices
-            current_pos += 2; // elem type and elem type name index
+            current_pos += 3; // elem type and 2-byte elem type name index
             return current_pos - offset;
         }
         case INIT_LOCAL_ARRAY: {
@@ -271,7 +271,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             if (current_pos >= chunk->count) return 1;
             uint8_t dimension_count = chunk->code[current_pos++];
             current_pos += dimension_count * 4; // bounds indices (two 16-bit indices per dimension)
-            current_pos += 2; // elem type and elem type name index
+            current_pos += 3; // elem type and 2-byte elem type name index
             return current_pos - offset;
         }
         case CONSTANT16:
@@ -318,7 +318,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
                     current_pos += dimension_count * 4; // Skip over all the bounds indices
-                    current_pos += 2; // Skip element VarType and element type name index
+                    current_pos += 3; // Skip element VarType and 2-byte element type name index
                 }
             } else {
                 // Simple types store a 16-bit type name index. Strings add an
@@ -327,7 +327,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
                 } else if (declaredType == TYPE_FILE) {
-                    current_pos += 3; // element VarType byte + element type name index
+                    current_pos += 3; // element VarType byte + 2-byte element type name index
                 }
             }
             return (current_pos - offset); // Return the total calculated length
@@ -343,14 +343,14 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
                 if (current_pos < chunk->count) {
                     uint8_t dimension_count = chunk->code[current_pos++];
                     current_pos += dimension_count * 4; // bounds indices
-                    current_pos += 2; // element var type and element type name index
+                    current_pos += 3; // element var type and 2-byte element type name index
                 }
             } else {
                 current_pos += 2; // type name index (16-bit)
                 if (declaredType == TYPE_STRING) {
                     current_pos += 2; // length constant index (16-bit)
                 } else if (declaredType == TYPE_FILE) {
-                    current_pos += 3; // element VarType byte + element type name index
+                    current_pos += 3; // element VarType byte + 2-byte element type name index
                 }
             }
             return (current_pos - offset);
