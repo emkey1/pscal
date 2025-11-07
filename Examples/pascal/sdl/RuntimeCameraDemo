@@ -23,8 +23,8 @@ const
   KeyboardMoveSpeed      = 6.0;
   KeyboardFastMultiplier = 1.9;
 
-  KeyForwardScanCode  = 26;  // SDL_SCANCODE_W
-  KeyBackwardScanCode = 22;  // SDL_SCANCODE_S
+  KeyBackwardScanCode = 26;  // SDL_SCANCODE_W
+  KeyForwardScanCode  = 22;  // SDL_SCANCODE_S
   KeyLeftScanCode     = 4;   // SDL_SCANCODE_A
   KeyRightScanCode    = 7;   // SDL_SCANCODE_D
   KeyAscendScanCode   = 21;  // SDL_SCANCODE_R
@@ -197,22 +197,22 @@ begin
   GLEnd();
 end;
 
-procedure DrawAxes(length: Real);
+procedure DrawAxes(mylength: Real);
 begin
   GLDisable('lighting');
   GLLineWidth(2.0);
   GLBegin('lines');
     GLColor3f(0.85, 0.2, 0.2);
     GLVertex3f(0.0, 0.0, 0.0);
-    GLVertex3f(length, 0.0, 0.0);
+    GLVertex3f(mylength, 0.0, 0.0);
 
     GLColor3f(0.2, 0.85, 0.3);
     GLVertex3f(0.0, 0.0, 0.0);
-    GLVertex3f(0.0, length * 0.7, 0.0);
+    GLVertex3f(0.0, mylength * 0.7, 0.0);
 
     GLColor3f(0.25, 0.5, 0.95);
     GLVertex3f(0.0, 0.0, 0.0);
-    GLVertex3f(0.0, 0.0, length);
+    GLVertex3f(0.0, 0.0, mylength);
   GLEnd();
   GLLineWidth(1.0);
 end;
