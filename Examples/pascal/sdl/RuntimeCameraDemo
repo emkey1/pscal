@@ -1,0 +1,637 @@
+#!/usr/bin/env pascal
+program RuntimeCameraDemo;
+
+const
+  ScreenWidth  = 1280;
+  ScreenHeight = 720;
+  PiConst      = 3.14159265358979323846;
+  FieldOfView  = 60.0;
+  NearClip     = 0.1;
+  FarClip      = 200.0;
+
+  MouseButtonLeft   = 1;
+  MouseButtonMiddle = 2;
+  MouseButtonRight  = 4;
+
+  MouseLookSpeed    = 0.22;
+  OrbitZoomSpeed    = 0.045;
+  OrbitPanSpeed     = 0.0105;
+  OrbitMinDistance  = 2.4;
+  OrbitMaxDistance  = 65.0;
+  OrbitDefaultDist  = 10.0;
+
+  KeyboardMoveSpeed      = 6.0;
+  KeyboardFastMultiplier = 1.9;
+
+  KeyForwardScanCode  = 26;  // SDL_SCANCODE_W
+  KeyBackwardScanCode = 22;  // SDL_SCANCODE_S
+  KeyLeftScanCode     = 4;   // SDL_SCANCODE_A
+  KeyRightScanCode    = 7;   // SDL_SCANCODE_D
+  KeyAscendScanCode   = 21;  // SDL_SCANCODE_R
+  KeyDescendScanCode  = 9;   // SDL_SCANCODE_F
+  KeyJumpScanCode     = 44;  // SDL_SCANCODE_SPACE
+  KeyBoostScanCode    = 225; // SDL_SCANCODE_LSHIFT
+
+  ModeOrbit       = 0;
+  ModeFirstPerson = 1;
+
+var
+  Running            : Boolean;
+  LastTicks          : Integer;
+  ElapsedSeconds     : Real;
+  CameraPosX         : Real;
+  CameraPosY         : Real;
+  CameraPosZ         : Real;
+  CameraYaw          : Real;
+  CameraPitch        : Real;
+  OrbitTargetX       : Real;
+  OrbitTargetY       : Real;
+  OrbitTargetZ       : Real;
+  OrbitDistance      : Real;
+  CameraMode         : Integer;
+  MouseX             : Integer;
+  MouseY             : Integer;
+  PrevMouseX         : Integer;
+  PrevMouseY         : Integer;
+  MouseButtons       : Integer;
+  PrevMouseButtons   : Integer;
+  MouseInsideWindow  : Integer;
+  MouseInitialized   : Boolean;
+  SpinnerAngle       : Real;
+  RibbonPhase        : Real;
+
+function Clamp(value, minValue, maxValue: Real): Real;
+begin
+  if value < minValue then
+    value := minValue
+  else if value > maxValue then
+    value := maxValue;
+  Clamp := value;
+end;
+
+procedure NormalizeVector(var x, y, z: Real);
+var
+  len : Real;
+begin
+  len := sqrt(x * x + y * y + z * z);
+  if len > 0.00001 then
+  begin
+    x := x / len;
+    y := y / len;
+    z := z / len;
+  end
+  else
+  begin
+    x := 0.0;
+    y := 0.0;
+    z := 0.0;
+  end;
+end;
+
+procedure ComputeCameraBasis(var forwardX, forwardY, forwardZ,
+                             rightX, rightY, rightZ,
+                             upX, upY, upZ: Real);
+var
+  yawRad   : Real;
+  pitchRad : Real;
+begin
+  yawRad := CameraYaw * PiConst / 180.0;
+  pitchRad := CameraPitch * PiConst / 180.0;
+
+  forwardX := sin(yawRad) * cos(pitchRad);
+  forwardY := sin(pitchRad);
+  forwardZ := cos(yawRad) * cos(pitchRad);
+  NormalizeVector(forwardX, forwardY, forwardZ);
+
+  rightX := cos(yawRad);
+  rightY := 0.0;
+  rightZ := -sin(yawRad);
+  NormalizeVector(rightX, rightY, rightZ);
+
+  upX := rightY * forwardZ - rightZ * forwardY;
+  upY := rightZ * forwardX - rightX * forwardZ;
+  upZ := rightX * forwardY - rightY * forwardX;
+  NormalizeVector(upX, upY, upZ);
+end;
+
+procedure SetupProjection(width, height: Integer);
+var
+  aspect : Real;
+begin
+  if height = 0 then height := 1;
+  aspect := width / height;
+  GLViewport(0, 0, width, height);
+  GLMatrixMode('projection');
+  GLLoadIdentity();
+  GLPerspective(FieldOfView, aspect, NearClip, FarClip);
+  GLMatrixMode('modelview');
+end;
+
+procedure ApplyCameraView;
+begin
+  GLRotatef(-CameraPitch, 1.0, 0.0, 0.0);
+  GLRotatef(-CameraYaw, 0.0, 1.0, 0.0);
+  GLTranslatef(-CameraPosX, -CameraPosY, -CameraPosZ);
+end;
+
+procedure UpdateOrbitFromOrientation;
+var
+  forwardX, forwardY, forwardZ : Real;
+  rightX, rightY, rightZ       : Real;
+  upX, upY, upZ                : Real;
+begin
+  ComputeCameraBasis(forwardX, forwardY, forwardZ,
+                     rightX, rightY, rightZ,
+                     upX, upY, upZ);
+  CameraPosX := OrbitTargetX - forwardX * OrbitDistance;
+  CameraPosY := OrbitTargetY - forwardY * OrbitDistance;
+  CameraPosZ := OrbitTargetZ - forwardZ * OrbitDistance;
+end;
+
+procedure EnsureOrbitTargetFromView;
+var
+  forwardX, forwardY, forwardZ : Real;
+  rightX, rightY, rightZ       : Real;
+  upX, upY, upZ                : Real;
+begin
+  if OrbitDistance < OrbitMinDistance then
+    OrbitDistance := OrbitDefaultDist;
+  OrbitDistance := Clamp(OrbitDistance, OrbitMinDistance, OrbitMaxDistance);
+  ComputeCameraBasis(forwardX, forwardY, forwardZ,
+                     rightX, rightY, rightZ,
+                     upX, upY, upZ);
+  OrbitTargetX := CameraPosX + forwardX * OrbitDistance;
+  OrbitTargetY := CameraPosY + forwardY * OrbitDistance;
+  OrbitTargetZ := CameraPosZ + forwardZ * OrbitDistance;
+end;
+
+procedure DrawGroundPlane;
+const
+  HalfSize   = 36.0;
+  StepSize   = 1.0;
+  StepExtent = 36;
+var
+  i : Integer;
+begin
+  GLDisable('lighting');
+  GLColor3f(0.035, 0.055, 0.095);
+  GLBegin('quads');
+    GLVertex3f(-HalfSize, 0.0,  HalfSize);
+    GLVertex3f( HalfSize, 0.0,  HalfSize);
+    GLVertex3f( HalfSize, 0.0, -HalfSize);
+    GLVertex3f(-HalfSize, 0.0, -HalfSize);
+  GLEnd();
+
+  GLColor4f(0.18, 0.22, 0.35, 0.35);
+  GLBegin('lines');
+  for i := -StepExtent to StepExtent do
+  begin
+    GLVertex3f(i * StepSize, 0.001, -HalfSize);
+    GLVertex3f(i * StepSize, 0.001,  HalfSize);
+  end;
+  for i := -StepExtent to StepExtent do
+  begin
+    GLVertex3f(-HalfSize, 0.001, i * StepSize);
+    GLVertex3f( HalfSize, 0.001, i * StepSize);
+  end;
+  GLEnd();
+end;
+
+procedure DrawAxes(length: Real);
+begin
+  GLDisable('lighting');
+  GLLineWidth(2.0);
+  GLBegin('lines');
+    GLColor3f(0.85, 0.2, 0.2);
+    GLVertex3f(0.0, 0.0, 0.0);
+    GLVertex3f(length, 0.0, 0.0);
+
+    GLColor3f(0.2, 0.85, 0.3);
+    GLVertex3f(0.0, 0.0, 0.0);
+    GLVertex3f(0.0, length * 0.7, 0.0);
+
+    GLColor3f(0.25, 0.5, 0.95);
+    GLVertex3f(0.0, 0.0, 0.0);
+    GLVertex3f(0.0, 0.0, length);
+  GLEnd();
+  GLLineWidth(1.0);
+end;
+
+procedure DrawUnitCube;
+begin
+  GLBegin('quads');
+    GLColor3f(0.7, 0.25, 0.85);
+    GLVertex3f(-0.5, -0.5,  0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+
+    GLColor3f(0.35, 0.8, 0.9);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f(-0.5,  0.5, -0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+    GLVertex3f( 0.5, -0.5, -0.5);
+
+    GLColor3f(0.9, 0.55, 0.25);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f(-0.5, -0.5,  0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+    GLVertex3f(-0.5,  0.5, -0.5);
+
+    GLColor3f(0.25, 0.55, 0.95);
+    GLVertex3f( 0.5, -0.5, -0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+
+    GLColor3f(0.8, 0.35, 0.4);
+    GLVertex3f(-0.5,  0.5, -0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+
+    GLColor3f(0.35, 0.45, 0.85);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f( 0.5, -0.5, -0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+    GLVertex3f(-0.5, -0.5,  0.5);
+  GLEnd();
+end;
+
+procedure DrawOrbitMarker(pulse: Real);
+const
+  Segments = 48;
+  RingRadius = 0.9;
+var
+  i    : Integer;
+  ang  : Real;
+  size : Real;
+begin
+  GLDisable('lighting');
+  size := 0.6 + pulse * 0.4;
+
+  GLPushMatrix();
+  GLTranslatef(OrbitTargetX, OrbitTargetY, OrbitTargetZ);
+
+  GLColor4f(0.95, 0.55, 0.25, 0.6 + pulse * 0.25);
+  GLBegin('line_loop');
+  for i := 0 to Segments - 1 do
+  begin
+    ang := (2.0 * PiConst * i) / Segments;
+    GLVertex3f(cos(ang) * RingRadius * size,
+               0.0,
+               sin(ang) * RingRadius * size);
+  end;
+  GLEnd();
+
+  GLColor4f(0.95, 0.85, 0.35, 0.75);
+  GLBegin('lines');
+    GLVertex3f(-RingRadius, 0.0, 0.0);
+    GLVertex3f( RingRadius, 0.0, 0.0);
+    GLVertex3f(0.0, -RingRadius * 0.4, 0.0);
+    GLVertex3f(0.0,  RingRadius * 0.4, 0.0);
+    GLVertex3f(0.0, 0.0, -RingRadius);
+    GLVertex3f(0.0, 0.0,  RingRadius);
+  GLEnd();
+
+  GLPopMatrix();
+end;
+
+procedure DrawSceneObjects;
+var
+  i         : Integer;
+  columnPos : Real;
+  height    : Real;
+  offset    : Real;
+begin
+  DrawGroundPlane;
+
+  for i := -2 to 2 do
+  begin
+    columnPos := i * 4.0;
+    height := 1.6 + (abs(i) * 0.9);
+    GLPushMatrix();
+      GLTranslatef(columnPos, height * 0.5, -6.0);
+      GLScalef(1.4, height, 1.4);
+      DrawUnitCube;
+    GLPopMatrix();
+  end;
+
+  GLPushMatrix();
+    GLTranslatef(0.0, 2.2, 4.5);
+    GLRotatef(SpinnerAngle, 0.0, 1.0, 0.0);
+    GLScalef(6.0, 0.1, 6.0);
+    GLColor3f(0.25, 0.75, 0.95);
+    GLBegin('line_loop');
+    for i := 0 to 63 do
+    begin
+      offset := (2.0 * PiConst * i) / 64.0;
+      GLVertex3f(cos(offset), 0.0, sin(offset));
+    end;
+    GLEnd();
+  GLPopMatrix();
+
+  GLPushMatrix();
+    GLTranslatef(0.0, 1.2 + sin(RibbonPhase) * 0.6, 0.0);
+    GLRotatef(SpinnerAngle * 0.5, 0.0, 1.0, 0.0);
+    GLScalef(1.2, 2.2, 1.2);
+    DrawUnitCube;
+  GLPopMatrix();
+
+  DrawAxes(3.0);
+
+  if CameraMode = ModeOrbit then
+    DrawOrbitMarker((sin(ElapsedSeconds * 2.6) + 1.0) * 0.5);
+end;
+
+procedure RenderScene;
+begin
+  GLClearColor(0.02, 0.04, 0.08, 1.0);
+  GLClear();
+
+  GLMatrixMode('modelview');
+  GLLoadIdentity();
+  ApplyCameraView;
+
+  DrawSceneObjects;
+end;
+
+procedure ToggleCameraMode;
+begin
+  if CameraMode = ModeOrbit then
+    CameraMode := ModeFirstPerson
+  else
+  begin
+    CameraMode := ModeOrbit;
+    EnsureOrbitTargetFromView;
+    UpdateOrbitFromOrientation;
+  end;
+end;
+
+procedure ProcessInput(deltaTime: Real);
+var
+  keyCode     : Integer;
+  deltaX      : Integer;
+  deltaY      : Integer;
+  forwardX    : Real;
+  forwardY    : Real;
+  forwardZ    : Real;
+  rightX      : Real;
+  rightY      : Real;
+  rightZ      : Real;
+  upX         : Real;
+  upY         : Real;
+  upZ         : Real;
+  yawRad      : Real;
+  flatForwardX: Real;
+  flatForwardZ: Real;
+  flatRightX  : Real;
+  flatRightZ  : Real;
+  moveAmount  : Real;
+  zoomDelta   : Real;
+  panScale    : Real;
+begin
+  keyCode := PollKeyAny();
+  while keyCode <> 0 do
+  begin
+    if (keyCode = Ord('q')) or (keyCode = Ord('Q')) or (keyCode = 27) then
+    begin
+      Running := False;
+      exit;
+    end
+    else if (keyCode = Ord('t')) or (keyCode = Ord('T')) then
+    begin
+      ToggleCameraMode;
+    end;
+    keyCode := PollKeyAny();
+  end;
+
+  if QuitRequested then
+  begin
+    Running := False;
+    exit;
+  end;
+
+  GetMouseState(MouseX, MouseY, MouseButtons, MouseInsideWindow);
+  if not MouseInitialized then
+  begin
+    PrevMouseX := MouseX;
+    PrevMouseY := MouseY;
+    PrevMouseButtons := MouseButtons;
+    MouseInitialized := True;
+  end;
+
+  deltaX := MouseX - PrevMouseX;
+  deltaY := MouseY - PrevMouseY;
+
+  ComputeCameraBasis(forwardX, forwardY, forwardZ,
+                     rightX, rightY, rightZ,
+                     upX, upY, upZ);
+
+  if (MouseButtons and MouseButtonLeft) <> 0 then
+  begin
+    CameraYaw := CameraYaw + deltaX * MouseLookSpeed;
+    CameraPitch := CameraPitch + deltaY * MouseLookSpeed;
+    CameraPitch := Clamp(CameraPitch, -85.0, 85.0);
+    if CameraMode = ModeOrbit then
+      UpdateOrbitFromOrientation;
+  end;
+
+  if CameraMode = ModeOrbit then
+  begin
+    if (MouseButtons and MouseButtonRight) <> 0 then
+    begin
+      zoomDelta := deltaY * OrbitZoomSpeed;
+      OrbitDistance := OrbitDistance + zoomDelta;
+      OrbitDistance := Clamp(OrbitDistance, OrbitMinDistance, OrbitMaxDistance);
+      UpdateOrbitFromOrientation;
+    end;
+
+    if (MouseButtons and MouseButtonMiddle) <> 0 then
+    begin
+      panScale := OrbitPanSpeed * OrbitDistance;
+      OrbitTargetX := OrbitTargetX - rightX * deltaX * panScale + upX * deltaY * panScale;
+      OrbitTargetY := OrbitTargetY - rightY * deltaX * panScale + upY * deltaY * panScale;
+      OrbitTargetZ := OrbitTargetZ - rightZ * deltaX * panScale + upZ * deltaY * panScale;
+      UpdateOrbitFromOrientation;
+    end;
+  end;
+
+  PrevMouseX := MouseX;
+  PrevMouseY := MouseY;
+  PrevMouseButtons := MouseButtons;
+
+  yawRad := CameraYaw * PiConst / 180.0;
+  flatForwardX := sin(yawRad);
+  flatForwardZ := cos(yawRad);
+  flatRightX := cos(yawRad);
+  flatRightZ := -sin(yawRad);
+
+  moveAmount := KeyboardMoveSpeed * deltaTime;
+  if IsKeyDown(KeyBoostScanCode) then
+    moveAmount := moveAmount * KeyboardFastMultiplier;
+
+  if CameraMode = ModeFirstPerson then
+  begin
+    if IsKeyDown(KeyForwardScanCode) then
+    begin
+      CameraPosX := CameraPosX + flatForwardX * moveAmount;
+      CameraPosZ := CameraPosZ + flatForwardZ * moveAmount;
+    end;
+    if IsKeyDown(KeyBackwardScanCode) then
+    begin
+      CameraPosX := CameraPosX - flatForwardX * moveAmount;
+      CameraPosZ := CameraPosZ - flatForwardZ * moveAmount;
+    end;
+    if IsKeyDown(KeyLeftScanCode) then
+    begin
+      CameraPosX := CameraPosX - flatRightX * moveAmount;
+      CameraPosZ := CameraPosZ - flatRightZ * moveAmount;
+    end;
+    if IsKeyDown(KeyRightScanCode) then
+    begin
+      CameraPosX := CameraPosX + flatRightX * moveAmount;
+      CameraPosZ := CameraPosZ + flatRightZ * moveAmount;
+    end;
+
+    if IsKeyDown(KeyAscendScanCode) then
+      CameraPosY := CameraPosY + moveAmount;
+    if IsKeyDown(KeyDescendScanCode) or IsKeyDown(KeyJumpScanCode) then
+      CameraPosY := CameraPosY - moveAmount;
+  end
+  else
+  begin
+    if IsKeyDown(KeyForwardScanCode) then
+    begin
+      OrbitTargetX := OrbitTargetX + flatForwardX * moveAmount;
+      OrbitTargetZ := OrbitTargetZ + flatForwardZ * moveAmount;
+      CameraPosX := CameraPosX + flatForwardX * moveAmount;
+      CameraPosZ := CameraPosZ + flatForwardZ * moveAmount;
+    end;
+    if IsKeyDown(KeyBackwardScanCode) then
+    begin
+      OrbitTargetX := OrbitTargetX - flatForwardX * moveAmount;
+      OrbitTargetZ := OrbitTargetZ - flatForwardZ * moveAmount;
+      CameraPosX := CameraPosX - flatForwardX * moveAmount;
+      CameraPosZ := CameraPosZ - flatForwardZ * moveAmount;
+    end;
+    if IsKeyDown(KeyLeftScanCode) then
+    begin
+      OrbitTargetX := OrbitTargetX - flatRightX * moveAmount;
+      OrbitTargetZ := OrbitTargetZ - flatRightZ * moveAmount;
+      CameraPosX := CameraPosX - flatRightX * moveAmount;
+      CameraPosZ := CameraPosZ - flatRightZ * moveAmount;
+    end;
+    if IsKeyDown(KeyRightScanCode) then
+    begin
+      OrbitTargetX := OrbitTargetX + flatRightX * moveAmount;
+      OrbitTargetZ := OrbitTargetZ + flatRightZ * moveAmount;
+      CameraPosX := CameraPosX + flatRightX * moveAmount;
+      CameraPosZ := CameraPosZ + flatRightZ * moveAmount;
+    end;
+
+    if IsKeyDown(KeyAscendScanCode) then
+    begin
+      OrbitTargetY := OrbitTargetY + moveAmount;
+      CameraPosY := CameraPosY + moveAmount;
+    end;
+    if IsKeyDown(KeyDescendScanCode) or IsKeyDown(KeyJumpScanCode) then
+    begin
+      OrbitTargetY := OrbitTargetY - moveAmount;
+      CameraPosY := CameraPosY - moveAmount;
+    end;
+  end;
+
+  if CameraMode = ModeOrbit then
+    OrbitDistance := Clamp(OrbitDistance, OrbitMinDistance, OrbitMaxDistance);
+
+  if CameraYaw > 360.0 then
+    CameraYaw := CameraYaw - 360.0
+  else if CameraYaw < -360.0 then
+    CameraYaw := CameraYaw + 360.0;
+
+  if IsKeyDown('escape') then
+  begin
+    Running := False;
+    exit;
+  end;
+end;
+
+procedure UpdateWorld(deltaTime: Real);
+begin
+  ElapsedSeconds := ElapsedSeconds + deltaTime;
+  SpinnerAngle := SpinnerAngle + deltaTime * 48.0;
+  if SpinnerAngle > 360.0 then SpinnerAngle := SpinnerAngle - 360.0;
+  RibbonPhase := RibbonPhase + deltaTime * 2.1;
+  if RibbonPhase > 2.0 * PiConst then RibbonPhase := RibbonPhase - 2.0 * PiConst;
+end;
+
+procedure InitializeScene;
+begin
+  InitGraph3D(ScreenWidth, ScreenHeight, 'Runtime Camera Demo (Pascal SDL)', 24, 8);
+  GLSetSwapInterval(1);
+  SetupProjection(ScreenWidth, ScreenHeight);
+
+  GLClearDepth(1.0);
+  GLDepthTest(true);
+  GLShadeModel('smooth');
+
+  CameraYaw := 35.0;
+  CameraPitch := -18.0;
+  OrbitTargetX := 0.0;
+  OrbitTargetY := 1.4;
+  OrbitTargetZ := 0.0;
+  OrbitDistance := OrbitDefaultDist;
+  CameraMode := ModeOrbit;
+  UpdateOrbitFromOrientation;
+
+  Running := True;
+  LastTicks := GetTicks;
+  ElapsedSeconds := 0.0;
+  SpinnerAngle := 0.0;
+  RibbonPhase := 0.0;
+  MouseInitialized := False;
+end;
+
+procedure MainLoop;
+var
+  currentTicks : Integer;
+  deltaMs      : Integer;
+  deltaTime    : Real;
+begin
+  while Running do
+  begin
+    currentTicks := GetTicks;
+    deltaMs := currentTicks - LastTicks;
+    if deltaMs < 1 then deltaMs := 1;
+    LastTicks := currentTicks;
+
+    deltaTime := deltaMs / 1000.0;
+    if deltaTime > 0.05 then deltaTime := 0.05;
+
+    ProcessInput(deltaTime);
+    if not Running then break;
+
+    UpdateWorld(deltaTime);
+    RenderScene;
+
+    GLSwapWindow();
+    GraphLoop(1);
+  end;
+end;
+
+begin
+  InitializeScene;
+  writeln('Runtime Camera Demo (Pascal SDL)');
+  writeln('Controls:');
+  writeln('  Q / Esc - Quit');
+  writeln('  T - Toggle between orbit and first-person camera');
+  writeln('  Left mouse drag - Look / orbit');
+  writeln('  Right mouse drag - Zoom in orbit mode');
+  writeln('  Middle mouse drag - Pan orbit target');
+  writeln('  WASD - Strafe / move');
+  writeln('  R - Rise, F or Space - Descend');
+  writeln('  Hold Shift - Faster movement');
+  MainLoop;
+  CloseGraph3D;
+end.

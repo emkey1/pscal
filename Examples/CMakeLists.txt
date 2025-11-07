@@ -48,6 +48,7 @@ add_custom_target(run_rea_crt_demo
 if(SDL)
     add_custom_target(run_sdl_examples
         COMMAND ${CMAKE_COMMAND} -E echo "Running SDL examples..."
+        COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/sdl/RuntimeCameraDemo
         COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/sdl/SoundSimplePong
         COMMAND ${REA_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/rea/sdl/multibouncingballs
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

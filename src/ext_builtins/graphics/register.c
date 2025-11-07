@@ -105,6 +105,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLIsHardwareAccelerated", "glishardwareaccelerated", BUILTIN_TYPE_FUNCTION, vmBuiltinGlishardwareaccelerated},
     {"window", "GetScreenSize", "getscreensize", BUILTIN_TYPE_PROCEDURE, vmBuiltinGetscreensize}, // Append new builtins to preserve existing IDs.
     {"input", "PollKeyAny", "pollkeyany", BUILTIN_TYPE_FUNCTION, vmBuiltinPollkeyany}, // Append new builtins to preserve existing IDs.
+    {"opengl", "GLLineWidth", "gllinewidth", BUILTIN_TYPE_PROCEDURE, vmBuiltinGllinewidth}, // Append new builtins to preserve existing IDs.
 };
 #endif
 
