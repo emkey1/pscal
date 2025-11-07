@@ -24,10 +24,6 @@ static float saturatef(float value) {
     return value;
 }
 
-static float lerpf(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
 static bool ensureCapacity(TerrainGenerator *generator, size_t vertexCount, size_t indexCount) {
     if (!generator) return false;
     if (vertexCount > generator->vertexCapacity) {

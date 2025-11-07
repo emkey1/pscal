@@ -223,17 +223,13 @@ static float clampf(float v, float minVal, float maxVal) {
     return v;
 }
 
+#ifdef SDL
 static float saturatef(float value) {
     if (value < 0.0f) return 0.0f;
     if (value > 1.0f) return 1.0f;
     return value;
 }
 
-static float lerpf(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
-#ifdef SDL
 static bool valueToBool(Value v, bool* out) {
     if (out == NULL) return false;
     if (v.type == TYPE_BOOLEAN) {

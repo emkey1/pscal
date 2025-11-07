@@ -746,6 +746,7 @@ set(REA_SOURCES
     src/rea/parser.c
     src/rea/semantic.c
     src/rea/builtins/thread.c
+    lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
