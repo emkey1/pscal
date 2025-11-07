@@ -1,6 +1,7 @@
 #include "runtime/terrain/terrain_generator.h"
 
 #include "noise/noise.h"
+#include "runtime/shaders/terrain/terrain_shader.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -134,7 +135,6 @@ static void computeColors(TerrainGenerator *generator) {
     if (!generator || !generator->vertices) return;
     float minH = generator->minHeight;
     float maxH = generator->maxHeight;
-    float waterLevel = generator->waterLevel;
     float span = maxH - minH;
     if (span <= 0.0001f) span = 1.0f;
     for (size_t i = 0; i < generator->vertexCount; ++i) {
@@ -142,62 +142,13 @@ static void computeColors(TerrainGenerator *generator) {
         float height = v->position[1];
         float normalized = (height - minH) / span;
         normalized = clampf(normalized, 0.0f, 1.0f);
-        float r, g, b;
-        bool underwater = normalized < waterLevel;
-        if (underwater) {
-            float denom = waterLevel <= 1e-6f ? 1.0f : waterLevel;
-            float depth = (waterLevel - normalized) / denom;
-            depth = clampf(depth, 0.0f, 1.0f);
-            float shore = 1.0f - depth;
-            r = 0.05f + 0.08f * depth + 0.10f * shore;
-            g = 0.32f + 0.36f * depth + 0.18f * shore;
-            b = 0.52f + 0.40f * depth + 0.12f * shore;
-        } else if (normalized < waterLevel + 0.06f) {
-            float w = (normalized - waterLevel) / 0.06f;
-            r = 0.36f + 0.14f * w;
-            g = 0.34f + 0.20f * w;
-            b = 0.20f + 0.09f * w;
-        } else if (normalized < 0.62f) {
-            float w = (normalized - (waterLevel + 0.06f)) / 0.16f;
-            r = 0.24f + 0.18f * w;
-            g = 0.46f + 0.32f * w;
-            b = 0.22f + 0.12f * w;
-        } else if (normalized < 0.82f) {
-            float w = (normalized - 0.62f) / 0.20f;
-            r = 0.46f + 0.26f * w;
-            g = 0.40f + 0.22f * w;
-            b = 0.30f + 0.20f * w;
-        } else {
-            float w = (normalized - 0.82f) / 0.18f;
-            w = clampf(w, 0.0f, 1.0f);
-            float base = 0.84f + 0.14f * w;
-            r = base;
-            g = base;
-            b = base;
-            float frost = saturatef((normalized - 0.88f) / 0.12f);
-            float sunSpark = 0.75f + 0.25f * frost;
-            r = lerpf(r, sunSpark, frost * 0.4f);
-            g = lerpf(g, sunSpark, frost * 0.4f);
-            b = lerpf(b, sunSpark, frost * 0.6f);
-        }
-        if (!underwater) {
-            float slope = 1.0f - v->normal[1];
-            slope = clampf(slope, 0.0f, 1.0f);
-            float cool = saturatef((0.58f - normalized) * 3.5f);
-            g += cool * 0.04f;
-            b += cool * 0.06f;
-            float alpine = saturatef((normalized - 0.68f) * 2.2f);
-            r = lerpf(r, r * 0.92f, alpine * 0.3f);
-            g = lerpf(g, g * 0.90f, alpine * 0.26f);
-            b = lerpf(b, b * 1.05f, alpine * 0.24f);
-            float slopeTint = slope * 0.6f;
-            r = lerpf(r, r * 0.78f, slopeTint);
-            g = lerpf(g, g * 0.74f, slopeTint);
-            b = lerpf(b, b * 0.86f, slopeTint);
-        }
-        v->color[0] = saturatef(r);
-        v->color[1] = saturatef(g);
-        v->color[2] = saturatef(b);
+        float slope = 1.0f - v->normal[1];
+        slope = clampf(slope, 0.0f, 1.0f);
+        float color[3];
+        terrainShaderSampleGradient(normalized, generator->waterLevel, slope, color);
+        v->color[0] = saturatef(color[0]);
+        v->color[1] = saturatef(color[1]);
+        v->color[2] = saturatef(color[2]);
     }
 }
 
@@ -390,25 +341,71 @@ void terrainGeneratorDraw(const TerrainGenerator *generator) {
     glBindBuffer(GL_ARRAY_BUFFER, generator->vbo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, generator->ibo);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, position));
+    const TerrainShaderHandles *shader = terrainShaderBind(generator);
+    bool usedShader = shader && shader->program;
+    if (usedShader) {
+        if (shader->attribPosition >= 0) {
+            glEnableVertexAttribArray((GLuint)shader->attribPosition);
+            glVertexAttribPointer((GLuint)shader->attribPosition,
+                                  3,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  sizeof(TerrainVertex),
+                                  (const void *)offsetof(TerrainVertex, position));
+        }
+        if (shader->attribNormal >= 0) {
+            glEnableVertexAttribArray((GLuint)shader->attribNormal);
+            glVertexAttribPointer((GLuint)shader->attribNormal,
+                                  3,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  sizeof(TerrainVertex),
+                                  (const void *)offsetof(TerrainVertex, normal));
+        }
+        if (shader->attribColor >= 0) {
+            glEnableVertexAttribArray((GLuint)shader->attribColor);
+            glVertexAttribPointer((GLuint)shader->attribColor,
+                                  3,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  sizeof(TerrainVertex),
+                                  (const void *)offsetof(TerrainVertex, color));
+        }
 
-    glEnableClientState(GL_NORMAL_ARRAY);
-    glNormalPointer(GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, normal));
+        glDrawElements(GL_TRIANGLES, (GLsizei)generator->indexCount, GL_UNSIGNED_INT, (const void *)0);
 
-    glClientActiveTexture(GL_TEXTURE0);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, uv));
+        if (shader->attribColor >= 0) {
+            glDisableVertexAttribArray((GLuint)shader->attribColor);
+        }
+        if (shader->attribNormal >= 0) {
+            glDisableVertexAttribArray((GLuint)shader->attribNormal);
+        }
+        if (shader->attribPosition >= 0) {
+            glDisableVertexAttribArray((GLuint)shader->attribPosition);
+        }
 
-    glEnableClientState(GL_COLOR_ARRAY);
-    glColorPointer(3, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, color));
+        terrainShaderUnbind();
+    } else {
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(3, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, position));
 
-    glDrawElements(GL_TRIANGLES, (GLsizei)generator->indexCount, GL_UNSIGNED_INT, (const void *)0);
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glNormalPointer(GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, normal));
 
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    glDisableClientState(GL_NORMAL_ARRAY);
-    glDisableClientState(GL_VERTEX_ARRAY);
+        glClientActiveTexture(GL_TEXTURE0);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, uv));
+
+        glEnableClientState(GL_COLOR_ARRAY);
+        glColorPointer(3, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, color));
+
+        glDrawElements(GL_TRIANGLES, (GLsizei)generator->indexCount, GL_UNSIGNED_INT, (const void *)0);
+
+        glDisableClientState(GL_COLOR_ARRAY);
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_VERTEX_ARRAY);
+    }
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
