@@ -2,13 +2,16 @@ program ExtBuiltinEnumerationTest;
 var
   catCount, fnCount, i, j, k, groupCount, groupFnCount, groupTotal: integer;
   catName, fnName, groupName: string;
-  success, foundSystem, foundGetPid, foundUser, foundLandscapeRendering,
-  foundLandscapePrecompute, foundOpenAI, foundOpenAIChat: boolean;
+  success, foundSystem, foundGetPid, foundUser, foundLandscapeConfigure,
+  foundLandscapeConfigureFn, foundLandscapeRendering, foundLandscapePrecompute,
+  foundOpenAI, foundOpenAIChat: boolean;
 begin
   success := true;
   foundSystem := false;
   foundGetPid := false;
   foundUser := false;
+  foundLandscapeConfigure := false;
+  foundLandscapeConfigureFn := false;
   foundLandscapeRendering := false;
   foundLandscapePrecompute := false;
   foundOpenAI := false;
@@ -37,7 +40,13 @@ begin
           foundGetPid := true;
         if (catName = 'user') then
         begin
-          if groupName = 'landscape/rendering' then
+          if groupName = 'landscape/configure' then
+          begin
+            foundLandscapeConfigure := true;
+            if fnName = 'LandscapeConfigureProcedural' then
+              foundLandscapeConfigureFn := true;
+          end
+          else if groupName = 'landscape/rendering' then
             foundLandscapeRendering := true
           else if groupName = 'landscape/precompute' then
             foundLandscapePrecompute := true;
@@ -70,6 +79,11 @@ begin
   if HasExtBuiltin('user', 'LandscapeDrawTerrain') then
   begin
     if not (foundUser and foundLandscapeRendering) then
+      success := false;
+  end;
+  if HasExtBuiltin('user', 'LandscapeConfigureProcedural') then
+  begin
+    if not (foundUser and foundLandscapeConfigure and foundLandscapeConfigureFn) then
       success := false;
   end;
   if HasExtBuiltin('user', 'LandscapePrecomputeWorldCoords') then
