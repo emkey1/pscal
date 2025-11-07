@@ -230,6 +230,43 @@ Types are defined in a `type` block.
     type
       MyArray = array[1..10] of real;
     ```
+
+#### Dynamic arrays
+
+Dynamic arrays are declared with an open bound (`array of <Type>`) and default to
+length zero. Allocate or resize them with `SetLength`:
+
+```pascal
+type
+  TIntArray = array of Integer;
+
+var
+  values: TIntArray;
+begin
+  SetLength(values, 3);  { grows from 0 to 3 elements }
+  values[0] := 10;
+  values[1] := 20;
+  values[2] := 30;
+  SetLength(values, 5);  { preserves the first three slots and zero-initialises the tail }
+  SetLength(values, 2);  { shrinks in place and keeps the leading elements }
+end;
+```
+
+`SetLength` accepts multiple dimensions (`SetLength(matrix, rows, cols)`) and
+retains overlapping contents when you resize nested arrays. Sibling references
+made via assignment (`alias := values;`) continue to observe the updated data
+because both variables point at the same heap allocation.
+
+The usual helpers work with dynamic arrays:
+
+* `Length(arr)` reports the current element count.
+* `Low(arr)` is `0` when the array has elements and remains `0` for empty arrays.
+* `High(arr)` evaluates to `Length(arr) - 1` for populated arrays and `-1` when
+  the array is empty.
+
+These intrinsics also operate on alias references so appending via
+`SetLength(alias, Length(alias) + 1)` keeps `Low/High` in sync with the primary
+variable.
 * **Enumerated Types:**
     ```pascal
     type

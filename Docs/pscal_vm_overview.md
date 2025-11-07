@@ -32,6 +32,22 @@ The thread table doubles as a **reusable worker pool**. Worker slots are lazily 
 
 Jobs publish both a result payload and a success flag; a worker is only released back to the queue once *both* have been consumed. Use `ThreadGetResult(t, /*consumeStatus=*/true)` to clear the result and status in a single call, or pair `ThreadGetResult` with `ThreadGetStatus(t, /*dropResult=*/true)` when you prefer to stream the value first.
 
+#### **Builtin registry and procedure cache**
+
+Dispatch-heavy paths in the VM lean on two caches:
+
+* The builtin registry is backed by a canonical-name hash table so `registerVmBuiltin`
+  and runtime lookups resolve handlers in constant time rather than walking the
+  dispatch arrays.
+* Procedure symbols discovered during compilation are copied into a dense
+  `procedureByAddress` array the first time a chunk is loaded. Subsequent
+  invocations resolve call targets directly from that cache, falling back to the
+  full symbol table only when the entry is missing.
+
+Both caches are cleared or rebuilt automatically when new bytecode is installed,
+keeping lookups fast while ensuring that hot swaps still honour updated
+definitions.
+
 #### **Execution Flow**
 
 The VM's execution is driven by the `interpretBytecode` function in `src/vm/vm.c`. This function contains a main loop that repeatedly performs the following steps:
