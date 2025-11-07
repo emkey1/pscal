@@ -6,16 +6,16 @@
 // elevation, and weather controls so the demo can be explored without
 // restarting.
 
-const int WindowWidth = 1024;
-const int WindowHeight = 768;
-const int TerrainSize = 200;
+const int WindowWidth = 1280;
+const int WindowHeight = 1024;
+const int TerrainSize = 300;
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
 const float TileScale = 1.2;
 const float InvTileScale = 1.0 / TileScale;
 const float InvTwoTileScale = 0.5 * InvTileScale;
 const int NoiseOctaves = 5;
-const float HeightScale = 16.0;
+const float HeightScale = 26.0;
 const float EyeHeight = 6.5;
 const float MoveSpeed = 18.0;
 const float MaxPitch = 75.0;
@@ -1185,7 +1185,7 @@ class LandscapeDemo {
       value = value / 2;
       shift = shift - 1;
     }
-    if ((value mod 2) != 0) return true;
+    if ((value % 2) != 0) return true;
     return false;
   }
 
@@ -1330,14 +1330,43 @@ class LandscapeDemo {
     return result;
   }
 
+  int truncDiv(int dividend, int divisor) {
+    if (divisor == 0) return 0;
+    bool negative = false;
+    int numerator = dividend;
+    int denominator = divisor;
+    if (numerator < 0) {
+      negative = !negative;
+      numerator = -numerator;
+    }
+    if (denominator < 0) {
+      negative = !negative;
+      denominator = -denominator;
+    }
+    int quotient = 0;
+    while (numerator >= denominator) {
+      int chunk = denominator;
+      int multiple = 1;
+      while (chunk <= numerator - chunk) {
+        chunk = chunk + chunk;
+        multiple = multiple + multiple;
+      }
+      numerator = numerator - chunk;
+      quotient = quotient + multiple;
+    }
+    if (negative) quotient = -quotient;
+    return quotient;
+  }
+
   str floatToString(float value, int decimals) {
     bool negative = value < 0.0;
     if (negative) value = -value;
     int scale = my.pow10(decimals);
     float scaled = value * scale;
     int scaledInt = trunc(scaled + 0.5);
-    int integerPart = scaledInt div scale;
-    int fractionalPart = scaledInt mod scale;
+    int integerPart = my.truncDiv(scaledInt, scale);
+    int fractionalPart = scaledInt % scale;
+    if (fractionalPart < 0) fractionalPart = -fractionalPart;
     str result = inttostr(integerPart);
     if (decimals > 0) {
       result = result + ".";
@@ -1940,15 +1969,15 @@ class LandscapeDemo {
 
   void setupLighting() {
     GLClearDepth(1.0);
-    GLDepthTest(true);
+
     GLEnable("lighting");
     GLEnable("light0");
     GLEnable("color_material");
     GLEnable("normalize");
     GLShadeModel("smooth");
     GLColorMaterial("front", "ambient_and_diffuse");
-//    GLEnable("cull_face");
-//    GLCullFace("back");
+    GLEnable("cull_face");
+    GLCullFace("back");
 
     GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
     GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
@@ -2038,7 +2067,7 @@ class LandscapeDemo {
       }
     } else if (direction < 0) {
       if (current > 1) {
-        int next = current div 2;
+        int next = current / 2;
         if (next < 1) next = 1;
         current = next;
       }
@@ -2287,7 +2316,7 @@ class LandscapeDemo {
   void drawHudOverlay() {
     if (!my.hudVisible) return;
     GLDisable("lighting");
-    GLDepthTest(false);
+        GLDepthTest(false);
     GLMatrixMode("projection");
     GLPushMatrix();
     GLLoadIdentity();
@@ -2386,7 +2415,7 @@ class LandscapeDemo {
     GLMatrixMode("projection");
     GLPopMatrix();
     GLMatrixMode("modelview");
-    GLDepthTest(true);
+
     GLEnable("lighting");
   }
 
