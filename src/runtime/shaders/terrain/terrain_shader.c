@@ -456,13 +456,13 @@ static void computeNormalMatrix(const float modelView[16], float out[9]) {
     float i22 = (m00 * m11 - m01 * m10) * invDet;
 
     out[0] = i00;
-    out[1] = i10;
-    out[2] = i20;
-    out[3] = i01;
+    out[1] = i01;
+    out[2] = i02;
+    out[3] = i10;
     out[4] = i11;
-    out[5] = i21;
-    out[6] = i02;
-    out[7] = i12;
+    out[5] = i12;
+    out[6] = i20;
+    out[7] = i21;
     out[8] = i22;
 }
 
