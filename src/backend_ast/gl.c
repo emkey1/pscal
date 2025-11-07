@@ -8,6 +8,8 @@
 #include <stdbool.h>
 #include <strings.h>
 #include <math.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1148,6 +1150,98 @@ Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     }
 
     return makeBoolean(accelerated != 0);
+}
+
+Value vmBuiltinGlsaveframebufferpng(VM* vm, int arg_count, Value* args) {
+    const char* name = "GLSaveFramebufferPng";
+    if (arg_count != 1 && arg_count != 2) {
+        runtimeError(vm, "%s expects 1 or 2 arguments (Path: String [, FlipVertical: Boolean]).", name);
+        return makeBoolean(false);
+    }
+    if (!ensureGlContext(vm, name)) {
+        return makeBoolean(false);
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "%s expects the first argument to be a file path string.", name);
+        return makeBoolean(false);
+    }
+
+    const char* path = args[0].s_val;
+    bool flipVertical = true;
+    if (arg_count == 2) {
+        if (args[1].type == TYPE_BOOLEAN) {
+            flipVertical = AS_BOOLEAN(args[1]);
+        } else if (IS_INTLIKE(args[1])) {
+            flipVertical = AS_INTEGER(args[1]) != 0;
+        } else if (isRealType(args[1].type)) {
+            flipVertical = AS_REAL(args[1]) != 0.0;
+        } else {
+            runtimeError(vm, "%s expects a boolean flipVertical flag as the second argument.", name);
+            return makeBoolean(false);
+        }
+    }
+
+    int width = 0;
+    int height = 0;
+    SDL_GL_GetDrawableSize(gSdlWindow, &width, &height);
+    if (width <= 0 || height <= 0) {
+        runtimeError(vm, "%s could not determine the drawable size.", name);
+        return makeBoolean(false);
+    }
+
+    size_t stride = (size_t)width * 4u;
+    size_t bufferSize = stride * (size_t)height;
+    uint8_t* pixels = (uint8_t*)malloc(bufferSize);
+    if (!pixels) {
+        runtimeError(vm, "%s could not allocate %zu bytes for the framebuffer capture.", name, bufferSize);
+        return makeBoolean(false);
+    }
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        free(pixels);
+        runtimeError(vm, "%s failed to read pixels (GL error %u).", name, (unsigned int)error);
+        return makeBoolean(false);
+    }
+
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) {
+        free(pixels);
+        runtimeError(vm, "%s could not allocate an SDL surface: %s.", name, SDL_GetError());
+        return makeBoolean(false);
+    }
+
+    uint8_t* dest = (uint8_t*)surface->pixels;
+    for (int y = 0; y < height; ++y) {
+        int sourceY = flipVertical ? (height - 1 - y) : y;
+        memcpy(dest + (size_t)y * surface->pitch,
+               pixels + (size_t)sourceY * stride,
+               stride);
+    }
+
+    free(pixels);
+
+    if (!gSdlImageInitialized) {
+        int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+        if (!(IMG_Init(imgFlags) & imgFlags)) {
+            runtimeError(vm, "%s failed to initialise SDL_image: %s.", name, IMG_GetError());
+            SDL_FreeSurface(surface);
+            return makeBoolean(false);
+        }
+        gSdlImageInitialized = true;
+    }
+
+    if (IMG_SavePNG(surface, path) != 0) {
+        runtimeError(vm, "%s failed to write '%s': %s.", name, path, IMG_GetError());
+        SDL_FreeSurface(surface);
+        return makeBoolean(false);
+    }
+
+    SDL_FreeSurface(surface);
+    return makeBoolean(true);
 }
 
 #endif // SDL

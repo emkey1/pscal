@@ -41,6 +41,7 @@ Value vmBuiltinGltranslatef(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlvertex3f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlviewport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlishardwareaccelerated(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlsaveframebufferpng(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
 }

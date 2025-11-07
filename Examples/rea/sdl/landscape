@@ -35,6 +35,7 @@ const int HudFontFirstChar = 32;
 const int HudFontCharCount = 96;
 const int HudFontRows = 7;
 const int HudFontColumns = 5;
+const int TourWaypointCapacity = 8;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 const int ScanCodeA = 4;  // SDL_SCANCODE_A
@@ -119,6 +120,44 @@ bool floatWithinTolerance(float a, float b, float tolerance) {
   float diff = a - b;
   diff = absf(diff);
   return diff <= tolerance;
+}
+
+float clampf(float value, float minimum, float maximum) {
+  if (value < minimum) return minimum;
+  if (value > maximum) return maximum;
+  return value;
+}
+
+float wrapAngleDegrees(float angle) {
+  while (angle >= 360.0) {
+    angle = angle - 360.0;
+  }
+  while (angle < 0.0) {
+    angle = angle + 360.0;
+  }
+  return angle;
+}
+
+float unwrapAngleRelative(float anchor, float value) {
+  float unwrapped = value;
+  while (unwrapped - anchor > 180.0) {
+    unwrapped = unwrapped - 360.0;
+  }
+  while (unwrapped - anchor < -180.0) {
+    unwrapped = unwrapped + 360.0;
+  }
+  return unwrapped;
+}
+
+float catmullRom(float p0, float p1, float p2, float p3, float t) {
+  if (t < 0.0) t = 0.0;
+  if (t > 1.0) t = 1.0;
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return 0.5 * ((2.0 * p1) +
+                (-p0 + p2) * t +
+                (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+                (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
 }
 
 int extractSeedFromArgs(int fallback) {
@@ -411,6 +450,30 @@ class LandscapeDemo {
   float hudPixelToClipY;
   int hudFont[HudFontCharCount * HudFontRows];
   bool hudFontReady;
+  bool paletteBuiltinAvailable;
+  bool lightingBuiltinAvailable;
+  bool screenshotSupported;
+  bool screenshotPending;
+  int screenshotSequence;
+  bool tourAvailable;
+  bool tourPlaying;
+  bool tourAtTarget;
+  int tourWaypointCount;
+  float tourX[TourWaypointCapacity];
+  float tourZ[TourWaypointCapacity];
+  float tourYaw[TourWaypointCapacity];
+  float tourPitch[TourWaypointCapacity];
+  float tourTravelSeconds[TourWaypointCapacity];
+  float tourDwellSeconds[TourWaypointCapacity];
+  float tourHeightScale[TourWaypointCapacity];
+  float tourWaterLevel[TourWaypointCapacity];
+  int tourPaletteIndex[TourWaypointCapacity];
+  int tourLightingIndex[TourWaypointCapacity];
+  bool tourShowClouds[TourWaypointCapacity];
+  bool tourShowWater[TourWaypointCapacity];
+  bool tourShowLens[TourWaypointCapacity];
+  float tourSegmentElapsed;
+  int tourSegmentIndex;
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
@@ -450,6 +513,10 @@ class LandscapeDemo {
                               hasextbuiltin("user", "LandscapeDrawTerrain");
     my.fastWaterAvailable = my.allowExtendedBuiltins &&
                              hasextbuiltin("user", "LandscapeDrawWater");
+    my.paletteBuiltinAvailable = my.allowExtendedBuiltins &&
+                                 hasextbuiltin("user", "LandscapeSetPalettePreset");
+    my.lightingBuiltinAvailable = my.allowExtendedBuiltins &&
+                                  hasextbuiltin("user", "LandscapeSetLightingPreset");
     my.fastDrawEnabled = false;
     my.useFastTerrain = false;
     my.useFastWater = false;
@@ -478,6 +545,16 @@ class LandscapeDemo {
     my.lastMouseY = 0;
     my.hasMouseSample = false;
     my.useFastVertexBake = false;
+    my.screenshotSupported = hasextbuiltin("graphics", "GLSaveFramebufferPng");
+    my.screenshotPending = false;
+    my.screenshotSequence = 1;
+    my.tourWaypointCount = 0;
+    my.tourSegmentElapsed = 0.0;
+    my.tourSegmentIndex = 0;
+    my.tourPlaying = false;
+    my.tourAtTarget = false;
+    my.initTourWaypoints();
+    my.tourAvailable = my.tourWaypointCount >= 2;
   }
 
   void enableFastDraw(str reason) {
@@ -528,6 +605,245 @@ class LandscapeDemo {
       my.disableFastDraw("toggled");
     } else {
       my.enableFastDraw("toggled");
+    }
+  }
+
+  void addTourWaypoint(float x,
+                       float z,
+                       float yawDegrees,
+                       float pitchDegrees,
+                       float travelSeconds,
+                       float dwellSeconds,
+                       float heightScale,
+                       float waterLevel,
+                       int paletteIndex,
+                       int lightingIndex,
+                       bool clouds,
+                       bool water,
+                       bool lens) {
+    if (my.tourWaypointCount >= TourWaypointCapacity) return;
+    int idx = my.tourWaypointCount;
+    my.tourX[idx] = clampf(x, 1.0, TerrainSize - 1);
+    my.tourZ[idx] = clampf(z, 1.0, TerrainSize - 1);
+    my.tourYaw[idx] = wrapAngleDegrees(yawDegrees);
+    my.tourPitch[idx] = clampf(pitchDegrees, -MaxPitch, MaxPitch);
+    if (travelSeconds < 1.0) travelSeconds = 1.0;
+    my.tourTravelSeconds[idx] = travelSeconds;
+    if (dwellSeconds < 0.0) dwellSeconds = 0.0;
+    my.tourDwellSeconds[idx] = dwellSeconds;
+    float clampedScale = clampf(heightScale, my.minHeightScale, my.maxHeightScale);
+    my.tourHeightScale[idx] = clampedScale;
+    float clampedWater = clampf(waterLevel, 0.0, 1.0);
+    my.tourWaterLevel[idx] = clampedWater;
+    my.tourPaletteIndex[idx] = paletteIndex;
+    my.tourLightingIndex[idx] = lightingIndex;
+    my.tourShowClouds[idx] = clouds;
+    my.tourShowWater[idx] = water;
+    my.tourShowLens[idx] = lens;
+    my.tourWaypointCount = idx + 1;
+  }
+
+  void initTourWaypoints() {
+    my.tourWaypointCount = 0;
+    my.addTourWaypoint(110.0,
+                       118.0,
+                       135.0,
+                       -18.0,
+                       9.0,
+                       4.0,
+                       1.0,
+                       0.36,
+                       0,
+                       0,
+                       true,
+                       true,
+                       true);
+    my.addTourWaypoint(48.0,
+                       82.0,
+                       92.0,
+                       -12.0,
+                       10.5,
+                       4.0,
+                       0.72,
+                       0.18,
+                       1,
+                       1,
+                       false,
+                       false,
+                       true);
+    my.addTourWaypoint(162.0,
+                       64.0,
+                       212.0,
+                       -24.0,
+                       11.0,
+                       4.5,
+                       1.35,
+                       0.44,
+                       2,
+                       2,
+                       true,
+                       true,
+                       false);
+    my.addTourWaypoint(124.0,
+                       32.0,
+                       320.0,
+                       -16.0,
+                       12.0,
+                       4.0,
+                       1.05,
+                       0.33,
+                       0,
+                       1,
+                       true,
+                       true,
+                       true);
+  }
+
+  void applyTourEnvironment(int index, bool initial) {
+    if (index < 0 || index >= my.tourWaypointCount) return;
+    float targetScale = my.tourHeightScale[index];
+    float targetWater = my.tourWaterLevel[index];
+    bool changed = false;
+    if (!floatWithinTolerance(targetScale, my.heightScaleMultiplier, 0.0005)) {
+      my.heightScaleMultiplier = targetScale;
+      changed = true;
+    }
+    if (!floatWithinTolerance(targetWater, my.waterNormalizedLevel, 0.0005)) {
+      my.waterNormalizedLevel = targetWater;
+      changed = true;
+    }
+    my.showClouds = my.tourShowClouds[index];
+    my.showWater = my.tourShowWater[index];
+    my.showLensFlare = my.tourShowLens[index];
+    if (changed) {
+      my.rebuildTerrain(true);
+    }
+    if (my.paletteBuiltinAvailable) {
+      landscapesetpalettepreset(my.tourPaletteIndex[index]);
+    }
+    if (my.lightingBuiltinAvailable) {
+      landscapesetlightingpreset(my.tourLightingIndex[index]);
+    }
+    if (initial && (!my.paletteBuiltinAvailable || !my.lightingBuiltinAvailable)) {
+      writeln("Biome styling presets are limited on this runtime; tour visuals will use available defaults.");
+    }
+  }
+
+  void updateTourCamera(int startIdx, int endIdx, float t) {
+    int count = my.tourWaypointCount;
+    if (count < 2) return;
+    int prevIdx = startIdx - 1;
+    if (prevIdx < 0) prevIdx = count - 1;
+    int nextIdx = endIdx + 1;
+    if (nextIdx >= count) nextIdx = 0;
+    float posX = catmullRom(my.tourX[prevIdx],
+                            my.tourX[startIdx],
+                            my.tourX[endIdx],
+                            my.tourX[nextIdx],
+                            t);
+    float posZ = catmullRom(my.tourZ[prevIdx],
+                            my.tourZ[startIdx],
+                            my.tourZ[endIdx],
+                            my.tourZ[nextIdx],
+                            t);
+    my.camX = clampf(posX, 1.0, TerrainSize - 1);
+    my.camZ = clampf(posZ, 1.0, TerrainSize - 1);
+    float yaw0 = unwrapAngleRelative(my.tourYaw[startIdx], my.tourYaw[prevIdx]);
+    float yaw1 = my.tourYaw[startIdx];
+    float yaw2 = unwrapAngleRelative(yaw1, my.tourYaw[endIdx]);
+    float yaw3 = unwrapAngleRelative(yaw2, my.tourYaw[nextIdx]);
+    float yawValue = catmullRom(yaw0, yaw1, yaw2, yaw3, t);
+    my.yaw = wrapAngleDegrees(yawValue);
+    float pitch0 = my.tourPitch[prevIdx];
+    float pitch1 = my.tourPitch[startIdx];
+    float pitch2 = my.tourPitch[endIdx];
+    float pitch3 = my.tourPitch[nextIdx];
+    float pitchValue = catmullRom(pitch0, pitch1, pitch2, pitch3, t);
+    pitchValue = clampf(pitchValue, -MaxPitch, MaxPitch);
+    my.pitch = pitchValue;
+    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+  }
+
+  void updateTour(float dt) {
+    if (!my.tourPlaying) return;
+    if (my.tourWaypointCount < 2) {
+      my.stopTour("insufficient waypoints");
+      return;
+    }
+    if (dt > 0.2) dt = 0.2;
+    int current = my.tourSegmentIndex;
+    int next = current + 1;
+    if (next >= my.tourWaypointCount) next = 0;
+    float travel = my.tourTravelSeconds[current];
+    if (travel < 0.1) travel = 0.1;
+    my.tourSegmentElapsed = my.tourSegmentElapsed + dt;
+    if (my.tourSegmentElapsed < travel) {
+      float t = my.tourSegmentElapsed / travel;
+      my.updateTourCamera(current, next, t);
+      my.tourAtTarget = false;
+    } else {
+      if (!my.tourAtTarget) {
+        my.applyTourEnvironment(next, false);
+        my.camX = clampf(my.tourX[next], 1.0, TerrainSize - 1);
+        my.camZ = clampf(my.tourZ[next], 1.0, TerrainSize - 1);
+        my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+        float targetYaw = wrapAngleDegrees(my.tourYaw[next]);
+        my.yaw = targetYaw;
+        float targetPitch = clampf(my.tourPitch[next], -MaxPitch, MaxPitch);
+        my.pitch = targetPitch;
+        my.tourAtTarget = true;
+      }
+      float dwell = my.tourDwellSeconds[next];
+      if (dwell < 0.0) dwell = 0.0;
+      if (my.tourSegmentElapsed >= travel + dwell) {
+        my.tourSegmentIndex = next;
+        my.tourSegmentElapsed = 0.0;
+        my.tourAtTarget = false;
+        my.applyTourEnvironment(my.tourSegmentIndex, false);
+      }
+    }
+  }
+
+  void startTour() {
+    if (!my.tourAvailable || my.tourWaypointCount < 2) {
+      writeln("Biome tour is unavailable on this configuration.");
+      return;
+    }
+    my.tourSegmentIndex = 0;
+    my.tourSegmentElapsed = 0.0;
+    my.tourPlaying = true;
+    my.tourAtTarget = false;
+    my.applyTourEnvironment(0, true);
+    my.camX = clampf(my.tourX[0], 1.0, TerrainSize - 1);
+    my.camZ = clampf(my.tourZ[0], 1.0, TerrainSize - 1);
+    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    my.yaw = wrapAngleDegrees(my.tourYaw[0]);
+    float initialPitch = clampf(my.tourPitch[0], -MaxPitch, MaxPitch);
+    my.pitch = initialPitch;
+    writeln("Biome tour engaged. Move or look around to exit.");
+  }
+
+  void stopTour(str reason) {
+    if (!my.tourPlaying) return;
+    my.tourPlaying = false;
+    my.tourAtTarget = false;
+    my.tourSegmentElapsed = 0.0;
+    if (reason != "") {
+      writeln("Biome tour stopped (", reason, ").");
+    } else {
+      writeln("Biome tour stopped.");
+    }
+  }
+
+  void toggleTour() {
+    if (my.tourPlaying) {
+      my.stopTour("toggled");
+    } else {
+      if (!my.tourAvailable || my.tourWaypointCount < 2) {
+        writeln("Biome tour is unavailable on this runtime.");
+        return;
+      }
+      my.startTour();
     }
   }
 
@@ -1037,6 +1353,43 @@ class LandscapeDemo {
       result = "-" + result;
     }
     return result;
+  }
+
+  str screenshotPathForIndex(int index) {
+    str digits = inttostr(index);
+    int pad = 4 - length(digits);
+    while (pad > 0) {
+      digits = "0" + digits;
+      pad = pad - 1;
+    }
+    return "terrain_explorer_" + digits + ".png";
+  }
+
+  void requestScreenshot() {
+    if (!my.screenshotSupported) {
+      writeln("PNG capture helper is unavailable on this runtime.");
+      return;
+    }
+    if (my.screenshotPending) {
+      writeln("Screenshot already queued; waiting for the next frame.");
+      return;
+    }
+    my.screenshotPending = true;
+    writeln("Screenshot queued; it will be captured after the current frame.");
+  }
+
+  void captureScreenshotIfPending() {
+    if (!my.screenshotPending) return;
+    my.screenshotPending = false;
+    if (!my.screenshotSupported) return;
+    str path = my.screenshotPathForIndex(my.screenshotSequence);
+    bool ok = glsaveframebufferpng(path);
+    if (ok) {
+      my.screenshotSequence = my.screenshotSequence + 1;
+      writeln("Saved screenshot to ", path, ".");
+    } else {
+      writeln("Failed to save screenshot to ", path, ".");
+    }
   }
 
   void updateVertexData() {
@@ -1612,7 +1965,7 @@ class LandscapeDemo {
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     my.setupLighting();
-    writeln("Controls: W/S or Up/Down to move, A/D or Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, F toggles fast draw, Q or Esc exits.");
+    writeln("Controls: W/S or Up/Down to move, A/D or Left/Right to turn, use the mouse to look around. N/P change seed, R randomizes, F toggles fast draw, B toggles the biome tour, K captures a PNG, Q or Esc exits.");
     if (my.fastDrawEnabled) {
       writeln("Fast draw active; press F to switch back to the software renderer.");
     }
@@ -1665,6 +2018,9 @@ class LandscapeDemo {
   }
 
   void regenerate(int newSeed) {
+    if (my.tourPlaying) {
+      my.stopTour("terrain regenerated");
+    }
     my.seed = newSeed;
     my.rebuildTerrain(true);
     my.elapsedSeconds = 0.0;
@@ -1754,6 +2110,10 @@ class LandscapeDemo {
         } else {
           writeln("Lens flare disabled.");
         }
+      } else if (key == 'b' || key == 'B') {
+        my.toggleTour();
+      } else if (key == 'k' || key == 'K') {
+        my.requestScreenshot();
       } else if (key == 'h' || key == 'H') {
         my.hudVisible = !my.hudVisible;
         if (my.hudVisible) {
@@ -1950,6 +2310,18 @@ class LandscapeDemo {
                       " (C)  WATER " + my.onOffLabel(my.showWater) +
                       " (V)  LENS " + my.onOffLabel(my.showLensFlare) + " (L)";
     str fastLine = "FAST DRAW " + my.onOffLabel(my.fastDrawEnabled) + " (F)";
+    str tourLine;
+    if (my.tourAvailable) {
+      tourLine = "BIOME TOUR " + my.onOffLabel(my.tourPlaying) + " (B)";
+    } else {
+      tourLine = "BIOME TOUR N/A";
+    }
+    str captureLine;
+    if (my.screenshotSupported) {
+      captureLine = "SCREENSHOT (K)";
+    } else {
+      captureLine = "SCREENSHOT N/A";
+    }
     float frameMs = my.frameTimeMs;
     if (frameMs < 0.0) frameMs = 0.0;
     float fps = 0.0;
@@ -1963,8 +2335,10 @@ class LandscapeDemo {
     float width3 = my.measureHudText(elevLine, scale);
     float width4 = my.measureHudText(weatherLine, scale);
     float width5 = my.measureHudText(fastLine, scale);
-    float width6 = my.measureHudText(frameLine, scale);
-    float width7 = my.measureHudText(controlsLine, scale);
+    float width6 = my.measureHudText(tourLine, scale);
+    float width7 = my.measureHudText(captureLine, scale);
+    float width8 = my.measureHudText(frameLine, scale);
+    float width9 = my.measureHudText(controlsLine, scale);
     float maxWidth = width1;
     if (width2 > maxWidth) maxWidth = width2;
     if (width3 > maxWidth) maxWidth = width3;
@@ -1972,8 +2346,10 @@ class LandscapeDemo {
     if (width5 > maxWidth) maxWidth = width5;
     if (width6 > maxWidth) maxWidth = width6;
     if (width7 > maxWidth) maxWidth = width7;
+    if (width8 > maxWidth) maxWidth = width8;
+    if (width9 > maxWidth) maxWidth = width9;
 
-    int lineCount = 7;
+    int lineCount = 9;
     float textHeight = glyphHeight + (lineCount - 1) * lineAdvance;
     float paddingX = 12.0;
     float paddingY = 12.0;
@@ -1995,6 +2371,10 @@ class LandscapeDemo {
     my.drawHudString(left, textY, weatherLine, scale, 1.0, 1.0, 1.0, 0.95);
     textY = textY + lineAdvance;
     my.drawHudString(left, textY, fastLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, tourLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, captureLine, scale, 1.0, 1.0, 1.0, 0.95);
     textY = textY + lineAdvance;
     my.drawHudString(left, textY, frameLine, scale, 1.0, 1.0, 1.0, 0.95);
     textY = textY + lineAdvance;
@@ -2018,6 +2398,9 @@ class LandscapeDemo {
     int mouseInside = 0;
     getmousestate(mouseX, mouseY, mouseButtons, mouseInside);
     bool insideWindow = mouseInside != 0;
+    int deltaX = 0;
+    int deltaY = 0;
+    bool mouseMoved = false;
     if (!insideWindow) {
       my.hasMouseSample = false;
     } else if (!my.hasMouseSample) {
@@ -2025,27 +2408,45 @@ class LandscapeDemo {
       my.lastMouseY = mouseY;
       my.hasMouseSample = true;
     } else {
-      int deltaX = mouseX - my.lastMouseX;
-      int deltaY = mouseY - my.lastMouseY;
+      deltaX = mouseX - my.lastMouseX;
+      deltaY = mouseY - my.lastMouseY;
       my.lastMouseX = mouseX;
       my.lastMouseY = mouseY;
-      if (deltaX != 0 || deltaY != 0) {
-        int maxDeltaX = WindowWidth / 2;
-        int maxDeltaY = WindowHeight / 2;
-        if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
-            deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
-          my.yaw = my.yaw - deltaX * MouseYawSensitivity;
-          my.pitch = my.pitch - deltaY * MousePitchSensitivity;
+      int maxDeltaX = WindowWidth / 2;
+      int maxDeltaY = WindowHeight / 2;
+      if (deltaX >= -maxDeltaX && deltaX <= maxDeltaX &&
+          deltaY >= -maxDeltaY && deltaY <= maxDeltaY) {
+        if (deltaX != 0 || deltaY != 0) {
+          mouseMoved = true;
         }
+      } else {
+        deltaX = 0;
+        deltaY = 0;
       }
     }
 
-    bool forward = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeUp);
-    bool backward = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeDown);
+    bool forwardDown = IsKeyDown(ScanCodeS) || IsKeyDown(ScanCodeUp);
+    bool backwardDown = IsKeyDown(ScanCodeW) || IsKeyDown(ScanCodeDown);
+    bool turnLeftDown = IsKeyDown(ScanCodeLeft) || IsKeyDown(ScanCodeA);
+    bool turnRightDown = IsKeyDown(ScanCodeRight) || IsKeyDown(ScanCodeD);
+    if (my.tourPlaying && (mouseMoved || forwardDown || backwardDown ||
+                           turnLeftDown || turnRightDown)) {
+      my.stopTour("manual input");
+    }
+
+    if (my.tourPlaying) {
+      my.updateTour(dt);
+      return;
+    }
+
+    if (mouseMoved) {
+      my.yaw = my.yaw - deltaX * MouseYawSensitivity;
+      my.pitch = my.pitch - deltaY * MousePitchSensitivity;
+    }
 
     float moveForward = 0.0;
-    if (forward) moveForward = moveForward + 1.0;
-    if (backward) moveForward = moveForward - 1.0;
+    if (forwardDown) moveForward = moveForward + 1.0;
+    if (backwardDown) moveForward = moveForward - 1.0;
     if (moveForward != 0.0) {
       float speed = MoveSpeed * dt * moveForward;
       float yawRadians = my.yaw * DegreesToRadians;
@@ -2062,17 +2463,15 @@ class LandscapeDemo {
         forwardX = forwardX / forwardLen;
         forwardZ = forwardZ / forwardLen;
       }
-      float deltaX = forwardX * speed * InvTileScale;
-      float deltaZ = forwardZ * speed * InvTileScale;
-      my.camX = my.camX + deltaX;
-      my.camZ = my.camZ + deltaZ;
+      float deltaForwardX = forwardX * speed * InvTileScale;
+      float deltaForwardZ = forwardZ * speed * InvTileScale;
+      my.camX = my.camX + deltaForwardX;
+      my.camZ = my.camZ + deltaForwardZ;
     }
 
     float turnInput = 0.0;
-    bool turnLeft = IsKeyDown(ScanCodeLeft) || IsKeyDown(ScanCodeA);
-    bool turnRight = IsKeyDown(ScanCodeRight) || IsKeyDown(ScanCodeD);
-    if (turnLeft) turnInput = turnInput + 1.0;
-    if (turnRight) turnInput = turnInput - 1.0;
+    if (turnLeftDown) turnInput = turnInput + 1.0;
+    if (turnRightDown) turnInput = turnInput - 1.0;
     if (turnInput != 0.0) {
       my.yaw = my.yaw + turnInput * KeyTurnSpeed * dt;
     }
@@ -2118,6 +2517,7 @@ class LandscapeDemo {
     my.drawTerrain();
     my.drawWater(my.elapsedSeconds);
     my.drawHudOverlay();
+    my.captureScreenshotIfPending();
     GLSwapWindow();
   }
 

@@ -106,6 +106,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"window", "GetScreenSize", "getscreensize", BUILTIN_TYPE_PROCEDURE, vmBuiltinGetscreensize}, // Append new builtins to preserve existing IDs.
     {"input", "PollKeyAny", "pollkeyany", BUILTIN_TYPE_FUNCTION, vmBuiltinPollkeyany}, // Append new builtins to preserve existing IDs.
     {"opengl", "GLLineWidth", "gllinewidth", BUILTIN_TYPE_PROCEDURE, vmBuiltinGllinewidth}, // Append new builtins to preserve existing IDs.
+    {"opengl", "GLSaveFramebufferPng", "glsaveframebufferpng", BUILTIN_TYPE_FUNCTION, vmBuiltinGlsaveframebufferpng}, // Append new builtins to preserve existing IDs.
 };
 #endif
 
