@@ -211,6 +211,7 @@ include_directories(
     src/compiler
     src/vm
     src/third_party/yyjson
+    lib
 )
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
     include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
@@ -346,6 +347,8 @@ set(PSCAL_SOURCES
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
     src/vm/vm.c
+    lib/noise/noise.c
+    src/runtime/terrain/terrain_generator.c
 )
 
 # --- Conditionally add SDL source files ---

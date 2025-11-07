@@ -8,9 +8,12 @@ void registerUserBuiltins(void) {
     const char *category = "user";
     extBuiltinRegisterCategory(category);
     extBuiltinRegisterGroup(category, "landscape");
+    extBuiltinRegisterGroup(category, "landscape/configure");
     extBuiltinRegisterGroup(category, "landscape/rendering");
     extBuiltinRegisterGroup(category, "landscape/precompute");
     extBuiltinRegisterGroup(category, "demos");
+    extBuiltinRegisterFunction(category, "landscape/configure",
+                               "LandscapeConfigureProcedural");
     extBuiltinRegisterFunction(category, "landscape/rendering",
                                "LandscapeDrawTerrain");
     extBuiltinRegisterFunction(category, "landscape/rendering",
