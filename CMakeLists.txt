@@ -737,6 +737,7 @@ set(REA_SOURCES
     src/rea/parser.c
     src/rea/semantic.c
     src/rea/builtins/thread.c
+    src/runtime/terrain/terrain_generator.c
     src/Pascal/lexer.c
     src/Pascal/parser.c
     src/ast/ast.c
@@ -1004,6 +1005,7 @@ set(JSON2BC_SOURCES
     src/symbol/symbol.c
     src/vm/vm.c
     src/Pascal/globals.c
+    src/runtime/terrain/terrain_generator.c
 )
 list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND JSON2BC_SOURCES src/third_party/yyjson/yyjson.c)
