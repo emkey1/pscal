@@ -2,7 +2,9 @@
 // Procedural landscape demo for the Rea front end. Generates a deterministic
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
 // the user walk with either WASD or the arrow keys while steering the camera
-// with the mouse.
+// with the mouse. The runtime HUD exposes regeneration, tessellation,
+// elevation, and weather controls so the demo can be explored without
+// restarting.
 
 const int WindowWidth = 1024;
 const int WindowHeight = 768;
@@ -29,6 +31,10 @@ const float SunCoreRadius = 18.0;
 const float SunHaloRadius = 34.0;
 const float SkyDomeRadius = 260.0;
 const int LensFlareElementCount = 6;
+const int HudFontFirstChar = 32;
+const int HudFontCharCount = 96;
+const int HudFontRows = 7;
+const int HudFontColumns = 5;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 const int ScanCodeA = 4;  // SDL_SCANCODE_A
@@ -115,16 +121,6 @@ bool floatWithinTolerance(float a, float b, float tolerance) {
   return diff <= tolerance;
 }
 
-bool hasDigit(str s) {
-  int i = 1;
-  while (i <= length(s)) {
-    char ch = s[i];
-    if (ch >= '0' && ch <= '9') return true;
-    i = i + 1;
-  }
-  return false;
-}
-
 int extractSeedFromArgs(int fallback) {
   int count = paramcount();
   if (count == 0) return fallback;
@@ -145,12 +141,14 @@ class TerrainField {
   float maxHeight;
   float normalizationScale;
   int seed;
+  float heightScaleFactor;
 
   void TerrainField() {
     my.seed = 0;
     my.minHeight = 0.0;
     my.maxHeight = 0.0;
     my.normalizationScale = 0.0;
+    my.heightScaleFactor = 1.0;
     int total = VertexCount;
     int i = 0;
     while (i < total) {
@@ -203,6 +201,12 @@ class TerrainField {
     if (total == 0.0) return 0.0;
     return sum / total;
   }
+  void setHeightScaleFactor(float factor) {
+    if (factor < 0.05) factor = 0.05;
+    if (factor > 8.0) factor = 8.0;
+    my.heightScaleFactor = factor;
+  }
+
   bool tryBuildFast(int s) {
     if (!hasextbuiltin("user", "LandscapeBuildHeightField")) {
       return false;
@@ -214,7 +218,7 @@ class TerrainField {
                               s,
                               TerrainSize,
                               VertexStride,
-                              HeightScale,
+                              HeightScale * my.heightScaleFactor,
                               NoiseOctaves,
                               minHeight,
                               maxHeight,
@@ -277,7 +281,7 @@ class TerrainField {
       while (x <= TerrainSize) {
         float sampleX = (x + s * 0.13) * baseFrequency;
         float sampleZ = (z + s * 0.29) * baseFrequency;
-        float h = my.fbm(sampleX, sampleZ) * HeightScale;
+        float h = my.fbm(sampleX, sampleZ) * HeightScale * my.heightScaleFactor;
         int idx = my.index(x, z);
         my.heights[idx] = h;
         if (h < my.minHeight) my.minHeight = h;
@@ -393,10 +397,38 @@ class LandscapeDemo {
   float cloudVerticalRadius[CloudCount];
   float cloudClusterSpread[CloudCount];
   float cloudParallaxWeight[CloudCount];
+  float heightScaleMultiplier;
+  float minHeightScale;
+  float maxHeightScale;
+  int tessellationStep;
+  int maxTessellationStep;
+  bool showClouds;
+  bool showLensFlare;
+  bool showWater;
+  bool hudVisible;
+  float frameTimeMs;
+  float hudPixelToClipX;
+  float hudPixelToClipY;
+  int hudFont[HudFontCharCount * HudFontRows];
+  bool hudFontReady;
 
   void LandscapeDemo(int initialSeed) {
     my.field = new TerrainField();
     my.seed = initialSeed;
+    my.heightScaleMultiplier = 1.0;
+    my.minHeightScale = 0.4;
+    my.maxHeightScale = 2.5;
+    my.tessellationStep = 1;
+    my.maxTessellationStep = 8;
+    my.showClouds = true;
+    my.showLensFlare = true;
+    my.showWater = true;
+    my.hudVisible = true;
+    my.frameTimeMs = 16.0;
+    my.hudPixelToClipX = 2.0 / WindowWidth;
+    my.hudPixelToClipY = 2.0 / WindowHeight;
+    my.hudFontReady = false;
+    my.initHudFont();
     bool disableExt = extendedBuiltinsDisabled();
     my.allowExtendedBuiltins = !disableExt;
     if (disableExt) {
@@ -438,14 +470,8 @@ class LandscapeDemo {
     my.sunDirX = sunX * invLen;
     my.sunDirY = sunY * invLen;
     my.sunDirZ = sunZ * invLen;
-    my.field.build(initialSeed);
-    my.initializeSkyElements();
-    my.updateVertexData();
-    my.camX = TerrainSize * 0.5;
-    my.camZ = TerrainSize * 0.5;
-    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
-    my.yaw = 135.0;
-    my.pitch = -20.0;
+    my.field.setHeightScaleFactor(my.heightScaleMultiplier);
+    my.rebuildTerrain(false);
     my.lastTicks = getticks();
     my.running = true;
     my.lastMouseX = 0;
@@ -457,6 +483,13 @@ class LandscapeDemo {
   void enableFastDraw(str reason) {
     if (!my.allowExtendedBuiltins) {
       writeln("Cannot enable fast draw: extended builtins have been disabled.");
+      my.fastDrawEnabled = false;
+      my.useFastTerrain = false;
+      my.useFastWater = false;
+      return;
+    }
+    if (my.tessellationStep > 1) {
+      writeln("Cannot enable fast draw while tessellation step is ", my.tessellationStep, ".");
       my.fastDrawEnabled = false;
       my.useFastTerrain = false;
       my.useFastWater = false;
@@ -736,6 +769,274 @@ class LandscapeDemo {
       return false;
     }
     return true;
+  }
+
+  int parseGlyphRow(str pattern) {
+    int value = 0;
+    int idx = 1;
+    int len = length(pattern);
+    while (idx <= len) {
+      value = value * 2;
+      char symbol = pattern[idx];
+      if (symbol != '0' && symbol != ' ') value = value + 1;
+      idx = idx + 1;
+    }
+    return value;
+  }
+
+  void setHudGlyph(char ch,
+                   str r0,
+                   str r1,
+                   str r2,
+                   str r3,
+                   str r4,
+                   str r5,
+                   str r6) {
+    int ascii = ord(ch);
+    int offset = ascii - HudFontFirstChar;
+    if (offset < 0 || offset >= HudFontCharCount) return;
+    int base = offset * HudFontRows;
+    my.hudFont[base + 0] = my.parseGlyphRow(r0);
+    my.hudFont[base + 1] = my.parseGlyphRow(r1);
+    my.hudFont[base + 2] = my.parseGlyphRow(r2);
+    my.hudFont[base + 3] = my.parseGlyphRow(r3);
+    my.hudFont[base + 4] = my.parseGlyphRow(r4);
+    my.hudFont[base + 5] = my.parseGlyphRow(r5);
+    my.hudFont[base + 6] = my.parseGlyphRow(r6);
+  }
+
+  void initHudFont() {
+    if (my.hudFontReady) return;
+    int total = HudFontCharCount * HudFontRows;
+    int idx = 0;
+    while (idx < total) {
+      my.hudFont[idx] = 0;
+      idx = idx + 1;
+    }
+
+    my.setHudGlyph(' ', "00000", "00000", "00000", "00000", "00000", "00000", "00000");
+    my.setHudGlyph('0', "01110", "10001", "10011", "10101", "11001", "10001", "01110");
+    my.setHudGlyph('1', "00100", "01100", "00100", "00100", "00100", "00100", "01110");
+    my.setHudGlyph('2', "01110", "10001", "00001", "00010", "00100", "01000", "11111");
+    my.setHudGlyph('3', "11110", "00001", "00001", "01110", "00001", "00001", "11110");
+    my.setHudGlyph('4', "00010", "00110", "01010", "10010", "11111", "00010", "00010");
+    my.setHudGlyph('5', "11111", "10000", "10000", "11110", "00001", "00001", "11110");
+    my.setHudGlyph('6', "01110", "10000", "10000", "11110", "10001", "10001", "01110");
+    my.setHudGlyph('7', "11111", "00001", "00010", "00100", "01000", "10000", "10000");
+    my.setHudGlyph('8', "01110", "10001", "10001", "01110", "10001", "10001", "01110");
+    my.setHudGlyph('9', "01110", "10001", "10001", "01111", "00001", "00001", "01110");
+    my.setHudGlyph('A', "01110", "10001", "10001", "11111", "10001", "10001", "10001");
+    my.setHudGlyph('B', "11110", "10001", "10001", "11110", "10001", "10001", "11110");
+    my.setHudGlyph('C', "01110", "10001", "10000", "10000", "10000", "10001", "01110");
+    my.setHudGlyph('D', "11100", "10010", "10001", "10001", "10001", "10010", "11100");
+    my.setHudGlyph('E', "11111", "10000", "10000", "11110", "10000", "10000", "11111");
+    my.setHudGlyph('F', "11111", "10000", "10000", "11110", "10000", "10000", "10000");
+    my.setHudGlyph('G', "01110", "10001", "10000", "10111", "10001", "10001", "01111");
+    my.setHudGlyph('H', "10001", "10001", "10001", "11111", "10001", "10001", "10001");
+    my.setHudGlyph('I', "01110", "00100", "00100", "00100", "00100", "00100", "01110");
+    my.setHudGlyph('J', "00111", "00010", "00010", "00010", "10010", "10010", "01100");
+    my.setHudGlyph('K', "10001", "10010", "10100", "11000", "10100", "10010", "10001");
+    my.setHudGlyph('L', "10000", "10000", "10000", "10000", "10000", "10000", "11111");
+    my.setHudGlyph('M', "10001", "11011", "10101", "10101", "10001", "10001", "10001");
+    my.setHudGlyph('N', "10001", "11001", "10101", "10011", "10001", "10001", "10001");
+    my.setHudGlyph('O', "01110", "10001", "10001", "10001", "10001", "10001", "01110");
+    my.setHudGlyph('P', "11110", "10001", "10001", "11110", "10000", "10000", "10000");
+    my.setHudGlyph('Q', "01110", "10001", "10001", "10001", "10101", "10010", "01101");
+    my.setHudGlyph('R', "11110", "10001", "10001", "11110", "10100", "10010", "10001");
+    my.setHudGlyph('S', "01111", "10000", "10000", "01110", "00001", "00001", "11110");
+    my.setHudGlyph('T', "11111", "00100", "00100", "00100", "00100", "00100", "00100");
+    my.setHudGlyph('U', "10001", "10001", "10001", "10001", "10001", "10001", "01110");
+    my.setHudGlyph('V', "10001", "10001", "10001", "10001", "10001", "01010", "00100");
+    my.setHudGlyph('W', "10001", "10001", "10001", "10101", "10101", "10101", "01010");
+    my.setHudGlyph('X', "10001", "10001", "01010", "00100", "01010", "10001", "10001");
+    my.setHudGlyph('Y', "10001", "10001", "01010", "00100", "00100", "00100", "00100");
+    my.setHudGlyph('Z', "11111", "00001", "00010", "00100", "01000", "10000", "11111");
+    my.setHudGlyph(':', "00000", "00100", "00100", "00000", "00100", "00100", "00000");
+    my.setHudGlyph('.', "00000", "00000", "00000", "00000", "00000", "00100", "00100");
+    my.setHudGlyph('-', "00000", "00000", "00000", "11111", "00000", "00000", "00000");
+    my.setHudGlyph('+', "00000", "00100", "00100", "11111", "00100", "00100", "00000");
+    my.setHudGlyph('(', "00010", "00100", "01000", "01000", "01000", "00100", "00010");
+    my.setHudGlyph(')', "01000", "00100", "00010", "00010", "00010", "00100", "01000");
+
+    my.hudFontReady = true;
+  }
+
+  bool glyphPixel(int bits, int column) {
+    if (column < 0 || column >= HudFontColumns) return false;
+    int shift = HudFontColumns - 1 - column;
+    int value = bits;
+    while (shift > 0) {
+      value = value / 2;
+      shift = shift - 1;
+    }
+    if ((value mod 2) != 0) return true;
+    return false;
+  }
+
+  float hudCoordX(float x) { return x * my.hudPixelToClipX - 1.0; }
+
+  float hudCoordY(float y) { return 1.0 - y * my.hudPixelToClipY; }
+
+  void drawHudGlyph(float x,
+                    float y,
+                    char ch,
+                    float scale,
+                    float r,
+                    float g,
+                    float b,
+                    float a) {
+    int ascii = ord(ch);
+    int offset = ascii - HudFontFirstChar;
+    if (offset < 0 || offset >= HudFontCharCount) return;
+    int base = offset * HudFontRows;
+    GLColor4f(r, g, b, a);
+    GLBegin("quads");
+    int row = 0;
+    while (row < HudFontRows) {
+      int bits = my.hudFont[base + row];
+      int col = 0;
+      while (col < HudFontColumns) {
+        if (my.glyphPixel(bits, col)) {
+          float px0 = x + col * scale;
+          float py0 = y + row * scale;
+          float px1 = px0 + scale;
+          float py1 = py0 + scale;
+          float vx0 = my.hudCoordX(px0);
+          float vy0 = my.hudCoordY(py0);
+          float vx1 = my.hudCoordX(px1);
+          float vy1 = my.hudCoordY(py1);
+          GLVertex3f(vx0, vy0, 0.0);
+          GLVertex3f(vx1, vy0, 0.0);
+          GLVertex3f(vx1, vy1, 0.0);
+          GLVertex3f(vx0, vy1, 0.0);
+        }
+        col = col + 1;
+      }
+      row = row + 1;
+    }
+    GLEnd();
+  }
+
+  float measureHudText(str text, float scale) {
+    float width = 0.0;
+    int len = length(text);
+    int idx = 1;
+    while (idx <= len) {
+      char ch = text[idx];
+      if (ch == '\n') {
+        break;
+      }
+      width = width + HudFontColumns * scale + scale;
+      idx = idx + 1;
+    }
+    if (width > 0.0) width = width - scale;
+    return width;
+  }
+
+  void drawHudString(float x,
+                     float y,
+                     str text,
+                     float scale,
+                     float r,
+                     float g,
+                     float b,
+                     float a) {
+    float cursorX = x;
+    int len = length(text);
+    int idx = 1;
+    float lineHeight = HudFontRows * scale + 4.0;
+    while (idx <= len) {
+      char ch = text[idx];
+      if (ch == '\n') {
+        y = y + lineHeight;
+        cursorX = x;
+      } else {
+        my.drawHudGlyph(cursorX, y, ch, scale, r, g, b, a);
+        cursorX = cursorX + HudFontColumns * scale + scale;
+      }
+      idx = idx + 1;
+    }
+  }
+
+  void drawHudQuad(float x0,
+                   float y0,
+                   float x1,
+                   float y1,
+                   float r,
+                   float g,
+                   float b,
+                   float a) {
+    float vx0 = my.hudCoordX(x0);
+    float vy0 = my.hudCoordY(y0);
+    float vx1 = my.hudCoordX(x1);
+    float vy1 = my.hudCoordY(y1);
+    GLColor4f(r, g, b, a);
+    GLBegin("quads");
+    GLVertex3f(vx0, vy0, 0.0);
+    GLVertex3f(vx1, vy0, 0.0);
+    GLVertex3f(vx1, vy1, 0.0);
+    GLVertex3f(vx0, vy1, 0.0);
+    GLEnd();
+  }
+
+  void drawHudBorder(float x0,
+                     float y0,
+                     float x1,
+                     float y1,
+                     float r,
+                     float g,
+                     float b,
+                     float a) {
+    float vx0 = my.hudCoordX(x0);
+    float vy0 = my.hudCoordY(y0);
+    float vx1 = my.hudCoordX(x1);
+    float vy1 = my.hudCoordY(y1);
+    GLColor4f(r, g, b, a);
+    GLBegin("line_loop");
+    GLVertex3f(vx0, vy0, 0.0);
+    GLVertex3f(vx1, vy0, 0.0);
+    GLVertex3f(vx1, vy1, 0.0);
+    GLVertex3f(vx0, vy1, 0.0);
+    GLEnd();
+  }
+
+  str onOffLabel(bool value) {
+    if (value) return "ON";
+    return "OFF";
+  }
+
+  int pow10(int exponent) {
+    int result = 1;
+    while (exponent > 0) {
+      result = result * 10;
+      exponent = exponent - 1;
+    }
+    return result;
+  }
+
+  str floatToString(float value, int decimals) {
+    bool negative = value < 0.0;
+    if (negative) value = -value;
+    int scale = my.pow10(decimals);
+    float scaled = value * scale;
+    int scaledInt = trunc(scaled + 0.5);
+    int integerPart = scaledInt div scale;
+    int fractionalPart = scaledInt mod scale;
+    str result = inttostr(integerPart);
+    if (decimals > 0) {
+      result = result + ".";
+      str fraction = inttostr(fractionalPart);
+      int pad = decimals - length(fraction);
+      while (pad > 0) {
+        fraction = "0" + fraction;
+        pad = pad - 1;
+      }
+      result = result + fraction;
+    }
+    if (negative && result[1] != '-') {
+      result = "-" + result;
+    }
+    return result;
   }
 
   void updateVertexData() {
@@ -1258,26 +1559,30 @@ class LandscapeDemo {
       upZ = upZ / upLen;
     }
     my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
-    my.drawLensFlare(timeSeconds,
-                     forwardX,
-                     forwardY,
-                     forwardZ,
-                     rightX,
-                     rightY,
-                     rightZ,
-                     upX,
-                     upY,
-                     upZ);
-    my.drawCloudLayer(timeSeconds,
-                      forwardX,
-                      forwardY,
-                      forwardZ,
-                      rightX,
-                      rightY,
-                      rightZ,
-                      upX,
-                      upY,
-                      upZ);
+    if (my.showLensFlare) {
+      my.drawLensFlare(timeSeconds,
+                       forwardX,
+                       forwardY,
+                       forwardZ,
+                       rightX,
+                       rightY,
+                       rightZ,
+                       upX,
+                       upY,
+                       upZ);
+    }
+    if (my.showClouds) {
+      my.drawCloudLayer(timeSeconds,
+                        forwardX,
+                        forwardY,
+                        forwardZ,
+                        rightX,
+                        rightY,
+                        rightZ,
+                        upX,
+                        upY,
+                        upZ);
+    }
   }
 
   void setupLighting() {
@@ -1331,16 +1636,77 @@ class LandscapeDemo {
     }
   }
 
-  void regenerate(int newSeed) {
-    my.seed = newSeed;
-    my.field.build(newSeed);
+  void rebuildTerrain(bool preserveCamera) {
+    float prevCamX = my.camX;
+    float prevCamZ = my.camZ;
+    float prevYaw = my.yaw;
+    float prevPitch = my.pitch;
+    my.field.setHeightScaleFactor(my.heightScaleMultiplier);
+    my.field.build(my.seed);
     my.initializeSkyElements();
     my.updateVertexData();
-    my.camX = TerrainSize * 0.5;
-    my.camZ = TerrainSize * 0.5;
-    my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+    if (preserveCamera) {
+      my.camX = prevCamX;
+      my.camZ = prevCamZ;
+      if (my.camX < 1.0) my.camX = 1.0;
+      if (my.camX > TerrainSize - 1) my.camX = TerrainSize - 1;
+      if (my.camZ < 1.0) my.camZ = 1.0;
+      if (my.camZ > TerrainSize - 1) my.camZ = TerrainSize - 1;
+      my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+      my.yaw = prevYaw;
+      my.pitch = prevPitch;
+    } else {
+      my.camX = TerrainSize * 0.5;
+      my.camZ = TerrainSize * 0.5;
+      my.camY = my.field.heightAt(my.camX, my.camZ) + EyeHeight;
+      my.yaw = 135.0;
+      my.pitch = -20.0;
+    }
+  }
+
+  void regenerate(int newSeed) {
+    my.seed = newSeed;
+    my.rebuildTerrain(true);
     my.elapsedSeconds = 0.0;
     writeln("Generated landscape for seed ", my.seed, ".");
+  }
+
+  void adjustTessellation(int direction) {
+    int current = my.tessellationStep;
+    if (direction > 0) {
+      if (current < my.maxTessellationStep) {
+        int next = current * 2;
+        if (next > my.maxTessellationStep) next = my.maxTessellationStep;
+        if (next > TerrainSize) next = TerrainSize;
+        if (next > current) current = next;
+      }
+    } else if (direction < 0) {
+      if (current > 1) {
+        int next = current div 2;
+        if (next < 1) next = 1;
+        current = next;
+      }
+    }
+    if (current < 1) current = 1;
+    if (current != my.tessellationStep) {
+      my.tessellationStep = current;
+      if (my.tessellationStep > 1 && my.fastDrawEnabled) {
+        my.disableFastDraw("tessellation changed");
+      }
+      writeln("Tessellation step set to ", my.tessellationStep, ".");
+    }
+  }
+
+  void adjustElevation(float delta) {
+    float newScale = my.heightScaleMultiplier + delta;
+    if (newScale < my.minHeightScale) newScale = my.minHeightScale;
+    if (newScale > my.maxHeightScale) newScale = my.maxHeightScale;
+    if (!floatWithinTolerance(newScale, my.heightScaleMultiplier, 0.0005)) {
+      my.heightScaleMultiplier = newScale;
+      my.rebuildTerrain(true);
+      str scaleStr = my.floatToString(my.heightScaleMultiplier, 2);
+      writeln("Elevation scale adjusted to ", scaleStr, "x.");
+    }
   }
 
   void handleDiscreteInput() {
@@ -1359,13 +1725,51 @@ class LandscapeDemo {
         my.regenerate(tickSeed);
       } else if (key == 'f' || key == 'F') {
         my.toggleFastDraw();
+      } else if (key == 't' || key == 'T') {
+        my.adjustTessellation(-1);
+      } else if (key == 'y' || key == 'Y') {
+        my.adjustTessellation(1);
+      } else if (key == 'j' || key == 'J') {
+        my.adjustElevation(-0.1);
+      } else if (key == 'u' || key == 'U') {
+        my.adjustElevation(0.1);
+      } else if (key == 'c' || key == 'C') {
+        my.showClouds = !my.showClouds;
+        if (my.showClouds) {
+          writeln("Cloud rendering enabled.");
+        } else {
+          writeln("Cloud rendering disabled.");
+        }
+      } else if (key == 'v' || key == 'V') {
+        my.showWater = !my.showWater;
+        if (my.showWater) {
+          writeln("Water rendering enabled.");
+        } else {
+          writeln("Water rendering disabled.");
+        }
+      } else if (key == 'l' || key == 'L') {
+        my.showLensFlare = !my.showLensFlare;
+        if (my.showLensFlare) {
+          writeln("Lens flare enabled.");
+        } else {
+          writeln("Lens flare disabled.");
+        }
+      } else if (key == 'h' || key == 'H') {
+        my.hudVisible = !my.hudVisible;
+        if (my.hudVisible) {
+          writeln("HUD enabled.");
+        } else {
+          writeln("HUD hidden.");
+        }
       }
       key = pollkeyany();
     }
   }
 
   void drawTerrain() {
-    if (my.useFastTerrain) {
+    int step = my.tessellationStep;
+    if (step < 1) step = 1;
+    if (my.useFastTerrain && step == 1) {
       landscapedrawterrain(my.vertexHeights,
                            my.vertexColorR,
                            my.vertexColorG,
@@ -1381,13 +1785,16 @@ class LandscapeDemo {
     }
     int z = 0;
     while (z < TerrainSize) {
+      int nextZ = z + step;
+      if (nextZ > TerrainSize) nextZ = TerrainSize;
+      if (nextZ == z) break;
       GLBegin("triangle_strip");
       float worldZ0 = my.worldZCoords[z];
-      float worldZ1 = my.worldZCoords[z + 1];
+      float worldZ1 = my.worldZCoords[nextZ];
       int rowIndex = z * VertexStride;
-      int nextRowIndex = (z + 1) * VertexStride;
+      int nextRowIndex = nextZ * VertexStride;
       int x = 0;
-      while (x <= TerrainSize) {
+      while (true) {
         int idx0 = rowIndex + x;
         int idx1 = nextRowIndex + x;
         float worldX = my.worldXCoords[x];
@@ -1401,10 +1808,15 @@ class LandscapeDemo {
                    my.vertexNormalZ[idx1]);
         GLColor3f(my.vertexColorR[idx1], my.vertexColorG[idx1], my.vertexColorB[idx1]);
         GLVertex3f(worldX, my.vertexHeights[idx1], worldZ1);
-        x = x + 1;
+        if (x >= TerrainSize) break;
+        int nextX = x + step;
+        if (nextX > TerrainSize) nextX = TerrainSize;
+        if (nextX == x) break;
+        x = nextX;
       }
       GLEnd();
-      z = z + 1;
+      if (nextZ >= TerrainSize) break;
+      z = nextZ;
     }
   }
 
@@ -1444,9 +1856,12 @@ class LandscapeDemo {
   }
 
   void drawWater(float timeSeconds) {
+    if (!my.showWater) return;
+    int step = my.tessellationStep;
+    if (step < 1) step = 1;
     GLEnable("blend");
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
-    if (my.useFastWater) {
+    if (my.useFastWater && step == 1) {
       landscapedrawwater(my.vertexHeights,
                          my.worldXCoords,
                          my.worldZCoords,
@@ -1468,14 +1883,20 @@ class LandscapeDemo {
     GLBegin("triangles");
     int z = 0;
     while (z < TerrainSize) {
+      int nextZ = z + step;
+      if (nextZ > TerrainSize) nextZ = TerrainSize;
+      if (nextZ == z) break;
       int rowIndex = z * VertexStride;
-      int nextRowIndex = (z + 1) * VertexStride;
+      int nextRowIndex = nextZ * VertexStride;
       int x = 0;
       while (x < TerrainSize) {
+        int nextX = x + step;
+        if (nextX > TerrainSize) nextX = TerrainSize;
+        if (nextX == x) break;
         int idx00 = rowIndex + x;
-        int idx10 = rowIndex + x + 1;
+        int idx10 = rowIndex + nextX;
         int idx01 = nextRowIndex + x;
-        int idx11 = nextRowIndex + x + 1;
+        int idx11 = nextRowIndex + nextX;
         float h00 = my.vertexHeights[idx00];
         float h10 = my.vertexHeights[idx10];
         float h01 = my.vertexHeights[idx01];
@@ -1484,22 +1905,109 @@ class LandscapeDemo {
             h10 <= maxWaterHeight &&
             h01 <= maxWaterHeight) {
           my.emitWaterVertex(idx00, x, z, h00, basePhase, baseSecondary, baseSparkle);
-          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
-          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx10, nextX, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, nextZ, h01, basePhase, baseSecondary, baseSparkle);
         }
         if (h10 <= maxWaterHeight &&
             h11 <= maxWaterHeight &&
             h01 <= maxWaterHeight) {
-          my.emitWaterVertex(idx10, x + 1, z, h10, basePhase, baseSecondary, baseSparkle);
-          my.emitWaterVertex(idx11, x + 1, z + 1, h11, basePhase, baseSecondary, baseSparkle);
-          my.emitWaterVertex(idx01, x, z + 1, h01, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx10, nextX, z, h10, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx11, nextX, nextZ, h11, basePhase, baseSecondary, baseSparkle);
+          my.emitWaterVertex(idx01, x, nextZ, h01, basePhase, baseSecondary, baseSparkle);
         }
-        x = x + 1;
+        x = nextX;
       }
-      z = z + 1;
+      if (nextZ >= TerrainSize) break;
+      z = nextZ;
     }
     GLEnd();
     GLDisable("blend");
+  }
+
+  void drawHudOverlay() {
+    if (!my.hudVisible) return;
+    GLDisable("lighting");
+    GLDepthTest(false);
+    GLMatrixMode("projection");
+    GLPushMatrix();
+    GLLoadIdentity();
+    GLMatrixMode("modelview");
+    GLPushMatrix();
+    GLLoadIdentity();
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+
+    float scale = 2.0;
+    float lineAdvance = HudFontRows * scale + 4.0;
+    float glyphHeight = HudFontRows * scale;
+    float left = 28.0;
+    float top = 28.0;
+
+    str seedLine = "SEED " + inttostr(my.seed) + "  N NEXT  P PREV  R RANDOM";
+    str tessLine = "TESSELLATION STEP " + inttostr(my.tessellationStep) + "  T-  Y+";
+    str elevLine = "ELEVATION " + my.floatToString(my.heightScaleMultiplier, 2) + "X  J-  U+";
+    str weatherLine = "WEATHER CLOUDS " + my.onOffLabel(my.showClouds) +
+                      " (C)  WATER " + my.onOffLabel(my.showWater) +
+                      " (V)  LENS " + my.onOffLabel(my.showLensFlare) + " (L)";
+    str fastLine = "FAST DRAW " + my.onOffLabel(my.fastDrawEnabled) + " (F)";
+    float frameMs = my.frameTimeMs;
+    if (frameMs < 0.0) frameMs = 0.0;
+    float fps = 0.0;
+    if (frameMs > 0.0001) fps = 1000.0 / frameMs;
+    str frameLine = "FRAME " + my.floatToString(frameMs, 1) + "MS  " +
+                    my.floatToString(fps, 1) + " FPS";
+    str controlsLine = "CONTROLS WASD MOVE  ARROWS TURN  MOUSE LOOK  H HUD";
+
+    float width1 = my.measureHudText(seedLine, scale);
+    float width2 = my.measureHudText(tessLine, scale);
+    float width3 = my.measureHudText(elevLine, scale);
+    float width4 = my.measureHudText(weatherLine, scale);
+    float width5 = my.measureHudText(fastLine, scale);
+    float width6 = my.measureHudText(frameLine, scale);
+    float width7 = my.measureHudText(controlsLine, scale);
+    float maxWidth = width1;
+    if (width2 > maxWidth) maxWidth = width2;
+    if (width3 > maxWidth) maxWidth = width3;
+    if (width4 > maxWidth) maxWidth = width4;
+    if (width5 > maxWidth) maxWidth = width5;
+    if (width6 > maxWidth) maxWidth = width6;
+    if (width7 > maxWidth) maxWidth = width7;
+
+    int lineCount = 7;
+    float textHeight = glyphHeight + (lineCount - 1) * lineAdvance;
+    float paddingX = 12.0;
+    float paddingY = 12.0;
+    float x0 = left - paddingX;
+    float y0 = top - paddingY;
+    float x1 = x0 + maxWidth + paddingX * 2.0;
+    float y1 = y0 + textHeight + paddingY * 2.0;
+
+    my.drawHudQuad(x0, y0, x1, y1, 0.05, 0.08, 0.12, 0.65);
+    my.drawHudBorder(x0, y0, x1, y1, 0.9, 0.95, 1.0, 0.18);
+
+    float textY = top;
+    my.drawHudString(left, textY, seedLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, tessLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, elevLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, weatherLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, fastLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, frameLine, scale, 1.0, 1.0, 1.0, 0.95);
+    textY = textY + lineAdvance;
+    my.drawHudString(left, textY, controlsLine, scale, 1.0, 1.0, 1.0, 0.95);
+
+    GLDisable("blend");
+    GLMatrixMode("modelview");
+    GLPopMatrix();
+    GLMatrixMode("projection");
+    GLPopMatrix();
+    GLMatrixMode("modelview");
+    GLDepthTest(true);
+    GLEnable("lighting");
   }
 
   void updateCamera(float dt) {
@@ -1609,6 +2117,7 @@ class LandscapeDemo {
 
     my.drawTerrain();
     my.drawWater(my.elapsedSeconds);
+    my.drawHudOverlay();
     GLSwapWindow();
   }
 
@@ -1626,6 +2135,8 @@ class LandscapeDemo {
       float dt = (now - my.lastTicks) / 1000.0;
       my.lastTicks = now;
       if (dt < 0.0) dt = 0.0;
+      float frameMs = dt * 1000.0;
+      my.frameTimeMs = my.frameTimeMs * 0.9 + frameMs * 0.1;
       my.updateCamera(dt);
       my.elapsedSeconds = my.elapsedSeconds + dt;
       my.drawFrame();
