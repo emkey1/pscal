@@ -539,6 +539,8 @@ set(SHELL_SOURCES
     src/compiler/bytecode.c
     src/vm/vm.c
     src/symbol/symbol.c
+    lib/noise/noise.c
+    src/runtime/terrain/terrain_generator.c
 )
 
 list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
@@ -625,6 +627,8 @@ set(CLIKE_SOURCES
     src/backend_ast/shell_runtime_stub.c
     src/symbol/symbol.c
     src/clike/stubs.c
+    lib/noise/noise.c
+    src/runtime/terrain/terrain_generator.c
 )
 
 # Include user-supplied builtins in clike as well
