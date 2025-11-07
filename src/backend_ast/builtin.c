@@ -105,6 +105,394 @@ static const char* builtinValueToCString(const Value* value) {
     return NULL;
 }
 
+static bool valueIsByteCompatible(const Value* value) {
+    if (!value) {
+        return false;
+    }
+    switch (value->type) {
+        case TYPE_BYTE:
+        case TYPE_UINT8:
+        case TYPE_INT8:
+        case TYPE_CHAR:
+        case TYPE_BOOLEAN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static unsigned char valueToByte(const Value* value) {
+    if (!value) {
+        return 0;
+    }
+    switch (value->type) {
+        case TYPE_CHAR:
+            return (unsigned char)value->c_val;
+        case TYPE_BOOLEAN:
+            return value->i_val ? 1u : 0u;
+        default:
+            if (IS_INTLIKE(*value)) {
+                return (unsigned char)AS_INTEGER(*value);
+            }
+            return 0u;
+    }
+}
+
+static bool writeBinaryElement(FILE* stream, const Value* rawValue, VarType elementType,
+                               size_t elementSize, int* outErrno) {
+    if (!stream || !rawValue) {
+        return false;
+    }
+
+    const Value* value = rawValue;
+    if (value->type == TYPE_POINTER && value->ptr_val) {
+        value = (const Value*)value->ptr_val;
+    }
+
+    unsigned char buffer[sizeof(long double)] = {0};
+    size_t bytes = 0;
+
+    switch (elementType) {
+        case TYPE_CHAR:
+        case TYPE_BOOLEAN:
+        case TYPE_BYTE:
+        case TYPE_UINT8:
+        case TYPE_INT8:
+            buffer[0] = valueToByte(value);
+            bytes = 1;
+            break;
+        case TYPE_INT16: {
+            int16_t v = (int16_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT16:
+        case TYPE_WORD: {
+            uint16_t v = (uint16_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                   : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_INT32: {
+            int32_t v = (int32_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT32:
+        case TYPE_ENUM: {
+            uint32_t v = (uint32_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                     : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_INT64: {
+            int64_t v = (int64_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                 : (isRealType(value->type) ? (long long)AS_REAL(*value) : 0));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_UINT64: {
+            uint64_t v = (uint64_t)(IS_INTLIKE(*value) ? AS_INTEGER(*value)
+                                     : (isRealType(value->type) ? (unsigned long long)AS_REAL(*value) : 0u));
+            memcpy(buffer, &v, sizeof(v));
+            bytes = sizeof(v);
+            break;
+        }
+        case TYPE_FLOAT: {
+            float f = isRealType(value->type) ? (float)AS_REAL(*value)
+                      : (IS_INTLIKE(*value) ? (float)AS_INTEGER(*value) : 0.0f);
+            memcpy(buffer, &f, sizeof(f));
+            bytes = sizeof(f);
+            break;
+        }
+        case TYPE_DOUBLE: {
+            double d = isRealType(value->type) ? (double)AS_REAL(*value)
+                        : (IS_INTLIKE(*value) ? (double)AS_INTEGER(*value) : 0.0);
+            memcpy(buffer, &d, sizeof(d));
+            bytes = sizeof(d);
+            break;
+        }
+        case TYPE_LONG_DOUBLE: {
+            long double ld = isRealType(value->type) ? AS_REAL(*value)
+                                 : (IS_INTLIKE(*value) ? (long double)AS_INTEGER(*value) : 0.0L);
+            memcpy(buffer, &ld, sizeof(ld));
+            bytes = sizeof(ld);
+            break;
+        }
+        default:
+            return false;
+    }
+
+    if (elementSize > 0 && elementSize != bytes) {
+        if (elementSize > sizeof(buffer)) {
+            return false;
+        }
+        if (elementSize > bytes) {
+            memset(buffer + bytes, 0, elementSize - bytes);
+        }
+        bytes = elementSize;
+    }
+
+    errno = 0;
+    size_t written = fwrite(buffer, 1, bytes, stream);
+    if (written != bytes) {
+        if (outErrno) {
+            *outErrno = errno ? errno : 1;
+        }
+        return false;
+    }
+    if (outErrno) {
+        *outErrno = 0;
+    }
+    return true;
+}
+
+static void assignByteToValue(Value* target, unsigned char byte) {
+    if (!target) {
+        return;
+    }
+    switch (target->type) {
+        case TYPE_CHAR:
+            target->c_val = (unsigned char)byte;
+            SET_INT_VALUE(target, target->c_val);
+            break;
+        case TYPE_BOOLEAN:
+            SET_INT_VALUE(target, byte ? 1 : 0);
+            break;
+        default:
+            SET_INT_VALUE(target, byte);
+            break;
+    }
+}
+
+static void assignCountToResult(Value* slot, long long count) {
+    if (!slot) {
+        return;
+    }
+    if (slot->type == TYPE_POINTER && slot->ptr_val) {
+        assignCountToResult((Value*)slot->ptr_val, count);
+        return;
+    }
+    if (isRealType(slot->type)) {
+        SET_REAL_VALUE(slot, (long double)count);
+        return;
+    }
+    if (slot->type == TYPE_CHAR) {
+        slot->c_val = (unsigned char)count;
+        SET_INT_VALUE(slot, slot->c_val);
+        return;
+    }
+    if (slot->type == TYPE_BOOLEAN) {
+        SET_INT_VALUE(slot, count != 0 ? 1 : 0);
+        return;
+    }
+    SET_INT_VALUE(slot, count);
+    if (slot->type == TYPE_VOID || slot->type == TYPE_UNKNOWN || slot->type == TYPE_NIL) {
+        slot->type = TYPE_INT32;
+    }
+}
+
+static bool builtinSizeForVarType(VarType type, long long *out_bytes) {
+    if (!out_bytes) return false;
+    switch (type) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+            *out_bytes = 1;
+            return true;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            *out_bytes = 2;
+            return true;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+            *out_bytes = 4;
+            return true;
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            *out_bytes = 8;
+            return true;
+        case TYPE_FLOAT:
+            *out_bytes = (long long)sizeof(float);
+            return true;
+        case TYPE_DOUBLE:
+            *out_bytes = (long long)sizeof(double);
+            return true;
+        case TYPE_LONG_DOUBLE:
+            *out_bytes = (long long)sizeof(long double);
+            return true;
+        case TYPE_POINTER:
+        case TYPE_FILE:
+        case TYPE_MEMORYSTREAM:
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+        case TYPE_THREAD:
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        case TYPE_ENUM:
+            *out_bytes = (long long)sizeof(int);
+            return true;
+        case TYPE_SET:
+        case TYPE_ARRAY:
+        case TYPE_RECORD:
+        case TYPE_STRING:
+        case TYPE_UNKNOWN:
+        case TYPE_VOID:
+        case TYPE_NIL:
+        default:
+            return false;
+    }
+}
+
+static bool computeValueSizeBytesInternal(const Value *value, long long *out_bytes, int depth);
+
+static bool computeValueSizeBytes(const Value *value, long long *out_bytes) {
+    if (!value || !out_bytes) {
+        return false;
+    }
+    return computeValueSizeBytesInternal(value, out_bytes, 0);
+}
+
+static bool computeSizeFromTypeName(const char *type_name, long long *out_bytes) {
+    if (!type_name || !*type_name || !out_bytes) {
+        return false;
+    }
+
+    if (strcasecmp(type_name, "integer") == 0 || strcasecmp(type_name, "longint") == 0) {
+        return builtinSizeForVarType(TYPE_INT32, out_bytes);
+    }
+    if (strcasecmp(type_name, "real") == 0) {
+        return builtinSizeForVarType(TYPE_DOUBLE, out_bytes);
+    }
+    if (strcasecmp(type_name, "float") == 0) {
+        return builtinSizeForVarType(TYPE_FLOAT, out_bytes);
+    }
+    if (strcasecmp(type_name, "char") == 0) {
+        return builtinSizeForVarType(TYPE_CHAR, out_bytes);
+    }
+    if (strcasecmp(type_name, "boolean") == 0) {
+        return builtinSizeForVarType(TYPE_BOOLEAN, out_bytes);
+    }
+    if (strcasecmp(type_name, "byte") == 0) {
+        return builtinSizeForVarType(TYPE_BYTE, out_bytes);
+    }
+    if (strcasecmp(type_name, "word") == 0) {
+        return builtinSizeForVarType(TYPE_WORD, out_bytes);
+    }
+
+    AST *type_def = lookupType(type_name);
+    if (!type_def) {
+        return false;
+    }
+
+    AST *resolved = type_def;
+    if (resolved->type == AST_TYPE_REFERENCE && resolved->right) {
+        resolved = resolved->right;
+    }
+
+    VarType vt = resolved->var_type;
+    if (vt == TYPE_VOID || vt == TYPE_UNKNOWN) {
+        if (resolved->right) {
+            vt = resolved->right->var_type;
+        }
+    }
+
+    Value temp = makeValueForType(vt, resolved, NULL);
+    bool ok = computeValueSizeBytes(&temp, out_bytes);
+    freeValue(&temp);
+    return ok;
+}
+
+static bool computeValueSizeBytesInternal(const Value *value, long long *out_bytes, int depth) {
+    if (!value || !out_bytes || depth > 16) {
+        return false;
+    }
+
+    switch (value->type) {
+        case TYPE_POINTER:
+            /* Pascal SizeOf should treat any pointer value as pointer-sized. */
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        case TYPE_STRING:
+            if (value->max_length > 0) {
+                *out_bytes = (long long)value->max_length + 1;
+            } else {
+                *out_bytes = (long long)sizeof(char*);
+            }
+            return true;
+        case TYPE_ARRAY: {
+            int total = calculateArrayTotalSize(value);
+            if (total < 0) {
+                total = 0;
+            }
+            long long elem_size = 0;
+            bool have_elem = false;
+            if (value->array_val && total > 0) {
+                for (int i = 0; i < total; ++i) {
+                    if (computeValueSizeBytesInternal(&value->array_val[i], &elem_size, depth + 1)) {
+                        have_elem = true;
+                        break;
+                    }
+                }
+            }
+            if (!have_elem && value->element_type != TYPE_VOID) {
+                have_elem = builtinSizeForVarType(value->element_type, &elem_size);
+                if (!have_elem) {
+                    Value temp = makeValueForType(value->element_type, value->element_type_def, NULL);
+                    have_elem = computeValueSizeBytesInternal(&temp, &elem_size, depth + 1);
+                    freeValue(&temp);
+                }
+            }
+            if (!have_elem) {
+                return false;
+            }
+            long long count = (long long)total;
+            if (elem_size > 0 && count > 0 && elem_size > LLONG_MAX / count) {
+                return false;
+            }
+            *out_bytes = elem_size * count;
+            return true;
+        }
+        case TYPE_RECORD: {
+            long long total = 0;
+            for (FieldValue *field = value->record_val; field; field = field->next) {
+                long long field_size = 0;
+                if (!computeValueSizeBytesInternal(&field->value, &field_size, depth + 1)) {
+                    return false;
+                }
+                total += field_size;
+            }
+            *out_bytes = total;
+            return true;
+        }
+        case TYPE_SET:
+            if (value->set_val.set_size > 0) {
+                *out_bytes = (long long)value->set_val.set_size * (long long)sizeof(long long);
+            } else {
+                *out_bytes = 0;
+            }
+            return true;
+        case TYPE_NIL:
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        default:
+            if (builtinSizeForVarType(value->type, out_bytes)) {
+                return true;
+            }
+            return false;
+    }
+}
+
 #ifdef SDL
 static bool sdlReadKeyBufferHasData(void) {
     return gSdlReadKeyBufferCount > 0;
@@ -707,6 +1095,10 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"threadstats", vmBuiltinThreadStats},
     {"threadstatsjson", vmBuiltinThreadStatsJson},
     {"atan2", vmBuiltinAtan2},
+    {"blockread", vmBuiltinBlockread},
+    {"blockwrite", vmBuiltinBlockwrite},
+    {"sizeof", vmBuiltinSizeof},
+    {"filesize", vmBuiltinFilesize},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
     {"to be filled", NULL}
 };
@@ -2945,7 +3337,10 @@ Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) { runtimeError(vm, "Rewrite requires 1 argument."); return makeVoid(); }
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Rewrite requires 1 or 2 arguments.");
+        return makeVoid();
+    }
 
     if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
         runtimeError(vm, "Rewrite: Argument must be a VAR file parameter.");
@@ -2957,7 +3352,31 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
-    FILE* f = fopen(fileVarLValue->filename, "w");
+    bool has_record_size_arg = (arg_count == 2);
+    int new_record_size = fileVarLValue->record_size;
+    if (has_record_size_arg) {
+        if (!IS_INTLIKE(args[1])) {
+            runtimeError(vm, "Rewrite: Record size must be an integer value.");
+            return makeVoid();
+        }
+        long long size_val = AS_INTEGER(args[1]);
+        if (size_val <= 0 || size_val > INT_MAX) {
+            runtimeError(vm, "Rewrite: Record size must be between 1 and %d.", INT_MAX);
+            return makeVoid();
+        }
+        new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
+    } else if (new_record_size <= 0) {
+        new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
+    }
+    fileVarLValue->record_size = new_record_size;
+
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit ||
+                           fileVarLValue->element_type != TYPE_VOID;
+    const char* mode = use_binary_mode ? "wb" : "w";
+
+    FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
         last_io_error = errno ? errno : 1;
     } else {
@@ -3703,8 +4122,11 @@ Value vmBuiltinAssign(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1) { runtimeError(vm, "Reset requires 1 argument."); return makeVoid(); }
-    
+    if (arg_count < 1 || arg_count > 2) {
+        runtimeError(vm, "Reset requires 1 or 2 arguments.");
+        return makeVoid();
+    }
+
     if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
         runtimeError(vm, "Reset: Argument must be a VAR file parameter.");
         return makeVoid();
@@ -3715,7 +4137,31 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
     if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
 
-    FILE* f = fopen(fileVarLValue->filename, "r");
+    bool has_record_size_arg = (arg_count == 2);
+    int new_record_size = fileVarLValue->record_size;
+    if (has_record_size_arg) {
+        if (!IS_INTLIKE(args[1])) {
+            runtimeError(vm, "Reset: Record size must be an integer value.");
+            return makeVoid();
+        }
+        long long size_val = AS_INTEGER(args[1]);
+        if (size_val <= 0 || size_val > INT_MAX) {
+            runtimeError(vm, "Reset: Record size must be between 1 and %d.", INT_MAX);
+            return makeVoid();
+        }
+        new_record_size = (int)size_val;
+        fileVarLValue->record_size_explicit = true;
+    } else if (new_record_size <= 0) {
+        new_record_size = PSCAL_DEFAULT_FILE_RECORD_SIZE;
+        fileVarLValue->record_size_explicit = false;
+    }
+    fileVarLValue->record_size = new_record_size;
+
+    bool use_binary_mode = has_record_size_arg || fileVarLValue->record_size_explicit ||
+                           fileVarLValue->element_type != TYPE_VOID;
+    const char* mode = use_binary_mode ? "rb" : "r";
+
+    FILE* f = fopen(fileVarLValue->filename, mode);
     if (f == NULL) {
         last_io_error = errno ? errno : 1;
     } else {
@@ -3816,6 +4262,93 @@ Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinFilesize(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "FileSize requires exactly 1 argument.");
+        last_io_error = 1;
+        return makeInt(0);
+    }
+
+    Value *fileValue = NULL;
+    if (args[0].type == TYPE_POINTER && args[0].ptr_val) {
+        fileValue = (Value*)args[0].ptr_val;
+    } else if (args[0].type == TYPE_FILE) {
+        fileValue = (Value*)&args[0];
+    }
+
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "FileSize argument must be a file variable.");
+        last_io_error = 1;
+        return makeInt(0);
+    }
+
+    long long sizeBytes = -1;
+
+    if (fileValue->f_val) {
+        int fd = fileno(fileValue->f_val);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) == 0) {
+                sizeBytes = (long long)st.st_size;
+            }
+        }
+
+        if (sizeBytes < 0) {
+            errno = 0;
+#ifdef _WIN32
+            long current = ftell(fileValue->f_val);
+            if (current >= 0L) {
+                if (fseek(fileValue->f_val, 0L, SEEK_END) == 0) {
+                    long end = ftell(fileValue->f_val);
+                    if (end >= 0L) {
+                        sizeBytes = (long long)end;
+                    }
+                }
+                fseek(fileValue->f_val, current, SEEK_SET);
+            }
+#else
+            off_t current = ftello(fileValue->f_val);
+            if (current >= (off_t)0) {
+                if (fseeko(fileValue->f_val, 0, SEEK_END) == 0) {
+                    off_t end = ftello(fileValue->f_val);
+                    if (end >= (off_t)0) {
+                        sizeBytes = (long long)end;
+                    }
+                }
+                fseeko(fileValue->f_val, current, SEEK_SET);
+            }
+#endif
+        }
+    } else if (fileValue->filename) {
+        struct stat st;
+        if (stat(fileValue->filename, &st) == 0) {
+            sizeBytes = (long long)st.st_size;
+        }
+    }
+
+    if (sizeBytes < 0) {
+        last_io_error = errno ? errno : 1;
+        return makeInt(0);
+    }
+
+    last_io_error = 0;
+
+    long long result = sizeBytes;
+    int recordSize = fileValue->record_size;
+    if (recordSize > 0 && (fileValue->record_size_explicit || fileValue->element_type != TYPE_VOID)) {
+        result = sizeBytes / recordSize;
+    }
+
+    if (result < 0) {
+        result = 0;
+    }
+    if (result > INT_MAX) {
+        result = INT_MAX;
+    }
+
+    return makeInt(result);
+}
+
 Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
     FILE* stream = NULL;
 
@@ -3856,6 +4389,406 @@ Value vmBuiltinEof(VM* vm, int arg_count, Value* args) {
     }
     ungetc(c, stream); // Push character back
     return makeBoolean(false);
+}
+
+Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
+    unsigned char* tempBuffer = NULL;
+    Value* resultSlot = NULL;
+    Value* fileValue = NULL;
+    Value* bufferValue = NULL;
+    unsigned char* rawPointer = NULL;
+    FILE* stream = NULL;
+    bool parameterError = false;
+    bool performedIO = false;
+    bool bufferIsRawPointer = false;
+    size_t bytesProcessed = 0;
+    long long recordsProcessed = 0;
+
+    last_io_error = 0;
+
+    if (arg_count < 3 || arg_count > 4) {
+        runtimeError(vm, "BlockRead requires 3 or 4 arguments.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "BlockRead: first argument must be a VAR file parameter.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    fileValue = (Value*)args[0].ptr_val;
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "BlockRead: first argument must reference a file variable.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    if (!fileValue->f_val) {
+        runtimeError(vm, "BlockRead: file is not open.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    stream = fileValue->f_val;
+
+    if (!IS_INTLIKE(args[2])) {
+        runtimeError(vm, "BlockRead: count must be an integer value.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    long long requestedRecords = AS_INTEGER(args[2]);
+    if (requestedRecords < 0) {
+        requestedRecords = 0;
+    }
+
+    if (arg_count == 4) {
+        if (args[3].type != TYPE_POINTER || !args[3].ptr_val) {
+            runtimeError(vm, "BlockRead: result argument must be a VAR parameter.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        resultSlot = (Value*)args[3].ptr_val;
+    }
+
+    if (args[1].type != TYPE_POINTER || !args[1].ptr_val) {
+        runtimeError(vm, "BlockRead: buffer must be passed by reference.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        bufferIsRawPointer = true;
+        rawPointer = (unsigned char*)args[1].ptr_val;
+    } else {
+        bufferValue = (Value*)args[1].ptr_val;
+        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            bufferIsRawPointer = true;
+            rawPointer = (unsigned char*)bufferValue->ptr_val;
+        }
+    }
+
+    if (!bufferIsRawPointer) {
+        if (!bufferValue || bufferValue->type != TYPE_ARRAY) {
+            runtimeError(vm, "BlockRead: buffer must be an array of byte-sized elements or a character pointer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+    }
+
+    int recordSize = fileValue->record_size > 0 ? fileValue->record_size : PSCAL_DEFAULT_FILE_RECORD_SIZE;
+    if (recordSize <= 0) {
+        recordSize = 1;
+    }
+
+    unsigned long long requestedRecordsULL = (unsigned long long)requestedRecords;
+    unsigned long long requestedBytesULL = requestedRecordsULL * (unsigned long long)recordSize;
+    size_t requestedBytes = (requestedBytesULL > SIZE_MAX) ? SIZE_MAX : (size_t)requestedBytesULL;
+
+    if (bufferIsRawPointer) {
+        if (!rawPointer && requestedBytes > 0) {
+            runtimeError(vm, "BlockRead: buffer pointer is NULL.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        errno = 0;
+        performedIO = true;
+        bytesProcessed = (requestedBytes > 0) ? fread(rawPointer, 1, requestedBytes, stream) : 0;
+        if (bytesProcessed < requestedBytes && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        }
+    } else {
+        size_t available = 0;
+        if (bufferValue->dimensions > 1) {
+            runtimeError(vm, "BlockRead: multidimensional arrays are not supported.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        int totalElements = calculateArrayTotalSize(bufferValue);
+        if (totalElements > 0) {
+            available = (size_t)totalElements;
+        }
+        size_t requestedRecordsSize = (requestedRecordsULL > (unsigned long long)SIZE_MAX) ? SIZE_MAX : (size_t)requestedRecordsULL;
+        size_t bytesToRead = requestedRecordsSize;
+        if (bytesToRead > available) {
+            bytesToRead = available;
+        }
+        if (recordSize != 1 && bytesToRead > 0) {
+            runtimeError(vm, "BlockRead: record sizes larger than 1 require a raw pointer buffer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        if (bytesToRead > 0) {
+            bool elementByteCompatible =
+                bufferValue->element_type == TYPE_BYTE ||
+                bufferValue->element_type == TYPE_UINT8 ||
+                bufferValue->element_type == TYPE_INT8 ||
+                bufferValue->element_type == TYPE_CHAR ||
+                bufferValue->element_type == TYPE_BOOLEAN;
+            if (!elementByteCompatible && bufferValue->array_val && available > 0) {
+                elementByteCompatible = valueIsByteCompatible(&bufferValue->array_val[0]);
+            }
+            if (!elementByteCompatible) {
+                runtimeError(vm, "BlockRead: buffer array must contain byte-sized elements.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            tempBuffer = (unsigned char*)malloc(bytesToRead);
+            if (!tempBuffer) {
+                runtimeError(vm, "BlockRead: memory allocation failed.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            errno = 0;
+            performedIO = true;
+            bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
+            if (bytesProcessed < bytesToRead && ferror(stream)) {
+                last_io_error = errno ? errno : 1;
+            }
+            for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
+                assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+            }
+        } else {
+            performedIO = true;
+            bytesProcessed = 0;
+        }
+    }
+
+    if (recordSize > 0) {
+        recordsProcessed = (long long)(bytesProcessed / (size_t)recordSize);
+    } else {
+        recordsProcessed = (long long)bytesProcessed;
+    }
+
+cleanup:
+    if (tempBuffer) {
+        free(tempBuffer);
+        tempBuffer = NULL;
+    }
+
+    if (!parameterError) {
+        if (!last_io_error && stream && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        } else if (last_io_error != 1) {
+            last_io_error = 0;
+        }
+        if (resultSlot && performedIO) {
+            assignCountToResult(resultSlot, recordsProcessed);
+        }
+    }
+
+    return makeVoid();
+}
+
+Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
+    unsigned char* tempBuffer = NULL;
+    Value* fileValue = NULL;
+    Value* bufferValue = NULL;
+    Value* resultSlot = NULL;
+    unsigned char* rawPointer = NULL;
+    FILE* stream = NULL;
+    bool parameterError = false;
+    bool performedIO = false;
+    bool bufferIsRawPointer = false;
+    size_t bytesProcessed = 0;
+    long long recordsProcessed = 0;
+
+    last_io_error = 0;
+
+    if (arg_count < 3 || arg_count > 4) {
+        runtimeError(vm, "BlockWrite requires 3 or 4 arguments.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[0].type != TYPE_POINTER || !args[0].ptr_val) {
+        runtimeError(vm, "BlockWrite: first argument must be a VAR file parameter.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    fileValue = (Value*)args[0].ptr_val;
+    if (!fileValue || fileValue->type != TYPE_FILE) {
+        runtimeError(vm, "BlockWrite: first argument must reference a file variable.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    if (!fileValue->f_val) {
+        runtimeError(vm, "BlockWrite: file is not open.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    stream = fileValue->f_val;
+
+    if (!IS_INTLIKE(args[2])) {
+        runtimeError(vm, "BlockWrite: count must be an integer value.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+    long long requestedRecords = AS_INTEGER(args[2]);
+    if (requestedRecords < 0) {
+        requestedRecords = 0;
+    }
+
+    if (arg_count == 4) {
+        if (args[3].type != TYPE_POINTER || !args[3].ptr_val) {
+            runtimeError(vm, "BlockWrite: result argument must be a VAR parameter.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        resultSlot = (Value*)args[3].ptr_val;
+    }
+
+    if (args[1].type != TYPE_POINTER || !args[1].ptr_val) {
+        runtimeError(vm, "BlockWrite: buffer must be passed by reference.");
+        last_io_error = 1;
+        parameterError = true;
+        goto cleanup;
+    }
+
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        bufferIsRawPointer = true;
+        rawPointer = (unsigned char*)args[1].ptr_val;
+    } else {
+        bufferValue = (Value*)args[1].ptr_val;
+        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            bufferIsRawPointer = true;
+            rawPointer = (unsigned char*)bufferValue->ptr_val;
+        }
+    }
+
+    if (!bufferIsRawPointer) {
+        if (!bufferValue || bufferValue->type != TYPE_ARRAY) {
+            runtimeError(vm, "BlockWrite: buffer must be an array of byte-sized elements or a character pointer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+    }
+
+    int recordSize = fileValue->record_size > 0 ? fileValue->record_size : PSCAL_DEFAULT_FILE_RECORD_SIZE;
+    if (recordSize <= 0) {
+        recordSize = 1;
+    }
+
+    unsigned long long requestedRecordsULL = (unsigned long long)requestedRecords;
+    unsigned long long requestedBytesULL = requestedRecordsULL * (unsigned long long)recordSize;
+    size_t requestedBytes = (requestedBytesULL > SIZE_MAX) ? SIZE_MAX : (size_t)requestedBytesULL;
+
+    if (bufferIsRawPointer) {
+        if (!rawPointer && requestedBytes > 0) {
+            runtimeError(vm, "BlockWrite: buffer pointer is NULL.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        errno = 0;
+        performedIO = true;
+        bytesProcessed = (requestedBytes > 0) ? fwrite(rawPointer, 1, requestedBytes, stream) : 0;
+        if (bytesProcessed < requestedBytes && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        }
+    } else {
+        size_t available = 0;
+        if (bufferValue->dimensions > 1) {
+            runtimeError(vm, "BlockWrite: multidimensional arrays are not supported.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        int totalElements = calculateArrayTotalSize(bufferValue);
+        if (totalElements > 0) {
+            available = (size_t)totalElements;
+        }
+        size_t requestedRecordsSize = (requestedRecordsULL > (unsigned long long)SIZE_MAX) ? SIZE_MAX : (size_t)requestedRecordsULL;
+        size_t bytesToWrite = requestedRecordsSize;
+        if (bytesToWrite > available) {
+            bytesToWrite = available;
+        }
+        if (recordSize != 1 && bytesToWrite > 0) {
+            runtimeError(vm, "BlockWrite: record sizes larger than 1 require a raw pointer buffer.");
+            last_io_error = 1;
+            parameterError = true;
+            goto cleanup;
+        }
+        if (bytesToWrite > 0) {
+            bool elementByteCompatible =
+                bufferValue->element_type == TYPE_BYTE ||
+                bufferValue->element_type == TYPE_UINT8 ||
+                bufferValue->element_type == TYPE_INT8 ||
+                bufferValue->element_type == TYPE_CHAR ||
+                bufferValue->element_type == TYPE_BOOLEAN;
+            if (!elementByteCompatible && bufferValue->array_val && available > 0) {
+                elementByteCompatible = valueIsByteCompatible(&bufferValue->array_val[0]);
+            }
+            if (!elementByteCompatible) {
+                runtimeError(vm, "BlockWrite: buffer array must contain byte-sized elements.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            tempBuffer = (unsigned char*)malloc(bytesToWrite);
+            if (!tempBuffer) {
+                runtimeError(vm, "BlockWrite: memory allocation failed.");
+                last_io_error = 1;
+                parameterError = true;
+                goto cleanup;
+            }
+            for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
+                tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
+            }
+            errno = 0;
+            performedIO = true;
+            bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
+            if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                last_io_error = errno ? errno : 1;
+            }
+        } else {
+            performedIO = true;
+            bytesProcessed = 0;
+        }
+    }
+
+    if (recordSize > 0) {
+        recordsProcessed = (long long)(bytesProcessed / (size_t)recordSize);
+    } else {
+        recordsProcessed = (long long)bytesProcessed;
+    }
+
+cleanup:
+    if (tempBuffer) {
+        free(tempBuffer);
+        tempBuffer = NULL;
+    }
+
+    if (!parameterError) {
+        if (!last_io_error && stream && ferror(stream)) {
+            last_io_error = errno ? errno : 1;
+        } else if (last_io_error != 1) {
+            last_io_error = 0;
+        }
+        if (resultSlot && performedIO) {
+            assignCountToResult(resultSlot, recordsProcessed);
+        }
+    }
+
+    return makeVoid();
 }
 
 Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
@@ -4134,6 +5067,7 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     bool newline = false;
     bool suppress_spacing = (gSuppressWriteSpacing != 0);
     bool suppress_spacing_flag = false;
+    last_io_error = 0;
     Value flag = args[0];
     if (isRealType(flag.type)) {
         newline = (AS_REAL(flag) != 0.0);
@@ -4151,6 +5085,10 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     FILE* output_stream = stdout;
     int start_index = 1;
     bool first_arg_is_file_by_value = false;
+    const Value* file_value = NULL;
+    bool binary_file = false;
+    VarType binary_element_type = TYPE_VOID;
+    size_t binary_element_size = 0;
 
     if (arg_count > 1) {
         const Value* first = &args[1];
@@ -4163,7 +5101,24 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             output_stream = first->f_val;
             start_index = 2;
             if (args[1].type == TYPE_FILE) first_arg_is_file_by_value = true;
+            file_value = first;
+            if (file_value->element_type != TYPE_VOID && file_value->element_type != TYPE_UNKNOWN) {
+                bool has_typed_metadata = file_value->record_size_explicit || file_value->element_type_def != NULL;
+                if (has_typed_metadata) {
+                    long long size_bytes = 0;
+                    if (builtinSizeForVarType(file_value->element_type, &size_bytes) && size_bytes > 0 &&
+                        (size_t)size_bytes <= sizeof(long double)) {
+                        binary_file = true;
+                        binary_element_type = file_value->element_type;
+                        binary_element_size = (size_t)size_bytes;
+                    }
+                }
+            }
         }
+    }
+
+    if (binary_file) {
+        suppress_spacing = true;
     }
 
     int print_arg_count = arg_count - start_index;
@@ -4181,6 +5136,16 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     bool has_prev = false;
     for (int i = start_index; i < arg_count; i++) {
         Value val = args[i];
+        if (binary_file) {
+            int write_error = 0;
+            if (!writeBinaryElement(output_stream, &val, binary_element_type, binary_element_size, &write_error)) {
+                last_io_error = write_error != 0 ? write_error : 1;
+                break;
+            }
+            prev = val;
+            has_prev = true;
+            continue;
+        }
         if (!suppress_spacing && has_prev) {
             bool add_space = true;
             const char *no_space_after = "=,.;:?!-)]}>)\"'";
@@ -4236,7 +5201,7 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         has_prev = true;
     }
 
-    if (newline) {
+    if (newline && !binary_file) {
         fprintf(output_stream, "\n");
     }
 
@@ -4871,6 +5836,37 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
 
     runtimeError(vm, "Length expects a string or array argument.");
     return makeInt(0);
+}
+
+Value vmBuiltinSizeof(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "SizeOf expects 1 argument.");
+        return makeInt64(0);
+    }
+
+    Value arg = args[0];
+
+    const char *type_name = NULL;
+    if (builtinValueIsStringLike(&arg)) {
+        type_name = builtinValueToCString(&arg);
+    }
+
+    if (type_name && *type_name) {
+        long long bytes = 0;
+        if (computeSizeFromTypeName(type_name, &bytes)) {
+            return makeInt64(bytes);
+        }
+        runtimeError(vm, "SizeOf: unknown type '%s'.", type_name);
+        return makeInt64(0);
+    }
+
+    long long bytes = 0;
+    if (computeValueSizeBytes(&arg, &bytes)) {
+        return makeInt64(bytes);
+    }
+
+    runtimeError(vm, "SizeOf unsupported for type '%s'.", varTypeToString(arg.type));
+    return makeInt64(0);
 }
 
 
@@ -6316,6 +7312,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("KeyPressed", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Length", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SetLength", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SizeOf", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ln", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Log10", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Low", AST_FUNCTION_DECL, NULL);
@@ -6325,7 +7322,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFree", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFromString", AST_FUNCTION_DECL, NULL);
-    registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("MStreamLoadFromFile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamSaveToFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamBuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("New", AST_PROCEDURE_DECL, NULL);
@@ -6407,6 +7404,9 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ThreadCancel", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStats", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ThreadStatsJson", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockRead", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("BlockWrite", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("FileSize", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("rcmutex", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("lock", AST_PROCEDURE_DECL, NULL);

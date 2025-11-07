@@ -1,0 +1,59 @@
+program InterfaceNilComparisonTest;
+
+type
+  IRunner = interface
+    procedure Run;
+  end;
+
+  TRunner = record
+    procedure Run; virtual;
+  end;
+
+procedure TRunner.Run;
+begin
+  { no-op }
+end;
+
+var
+  runner: ^TRunner;
+  maybe: IRunner;
+begin
+  maybe := nil;
+
+  if maybe = nil then
+    writeln('initial eq nil ok')
+  else
+    writeln('initial eq nil fail');
+
+  if maybe <> nil then
+    writeln('initial ne nil fail')
+  else
+    writeln('initial ne nil ok');
+
+  new(runner);
+  maybe := IRunner(runner);
+
+  if maybe <> nil then
+    writeln('assigned ne nil ok')
+  else
+    writeln('assigned ne nil fail');
+
+  if maybe = nil then
+    writeln('assigned eq nil fail')
+  else
+    writeln('assigned eq nil ok');
+
+  maybe := nil;
+
+  if maybe = nil then
+    writeln('reset eq nil ok')
+  else
+    writeln('reset eq nil fail');
+
+  if maybe <> nil then
+    writeln('reset ne nil fail')
+  else
+    writeln('reset ne nil ok');
+
+  dispose(runner);
+end.

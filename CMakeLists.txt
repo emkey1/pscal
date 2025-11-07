@@ -895,6 +895,19 @@ install(DIRECTORY etc/
 install(DIRECTORY Examples/
         DESTINATION "${_pscal_runtime_root}/Examples"
         USE_SOURCE_PERMISSIONS)
+if(PSCAL_CONFIGURED_EXAMPLES)
+    install(CODE [[
+        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
+        if(CMAKE_CONFIGURATION_TYPES)
+            list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
+        endif()
+        execute_process(COMMAND ${_pscal_build_cmd}
+            RESULT_VARIABLE _pscal_configured_examples_result)
+        if(NOT _pscal_configured_examples_result EQUAL 0)
+            message(FATAL_ERROR "Failed to generate configured example files (configured_examples target)")
+        endif()
+    ]])
+endif()
 foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
     string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
     get_filename_component(example_dir "${example_relative}" DIRECTORY)

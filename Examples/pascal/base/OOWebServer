@@ -1,0 +1,893 @@
+#!/usr/bin/env pascal
+program OOWebServer;
+
+// This version is refactored to use interfaces,
+// records, and closures to make the request
+// handling more modular and "Pascal-like".
+
+// --- Part 1: Interface and Generic Record ---
+
+type
+    // Handler signature for serving a request path.
+    THandlerFunc = procedure(const path: string; 
+                             var code: integer; 
+                             var body: string; 
+                             var ctype: string; 
+                             var logDetail: string);
+
+// --- Part 2: Global Vars and Helpers ---
+// (These are mostly unchanged from the original)
+
+var
+    Port: integer = 5555;
+    RootDir: string;
+    IndexPath: string;
+    Body: string; // Default index.html body
+    ConfiguredAssetRoot: string = '@PSCAL_INSTALL_ROOT_RESOLVED@/lib/misc/simple_web_server/htdocs';
+    //ConfiguredAssetRoot: string = '/usr/local/pscal/misc/htdocs';
+
+    GAccepted: integer = 0;
+    GServed: integer = 0;
+
+function loadFileToString(const path: string; var data: string): integer; forward;
+function saveStringToFile(const path, data: string): integer; forward;
+
+// Helper functions (pad2, timestamp, etc.) are identical
+procedure pad2(n: integer; var result: string);
+var s: string;
+begin
+    s := inttostr(n);
+    if (length(s) < 2) then s := '0' + s;
+    result := s;
+end;
+
+procedure timestamp(var result: string);
+var
+    yr, mo, dy, dow, hh, mi, ss, hs: integer;
+    ts, s_mo, s_dy, s_hh, s_mi, s_ss: string;
+begin
+    getdate(yr, mo, dy, dow);
+    gettime(hh, mi, ss, hs);
+    pad2(mo, s_mo); pad2(dy, s_dy); pad2(hh, s_hh); 
+    pad2(mi, s_mi); pad2(ss, s_ss);
+    ts := inttostr(yr)+'-'+s_mo+'-'+s_dy+' '+s_hh+':'+s_mi+':'+s_ss;
+    result := ts;
+end;
+
+function endswith(const s, suffix: string): integer;
+var ls, lf: integer; tail: string;
+begin
+    ls := length(s); lf := length(suffix);
+    if (lf > ls) then begin endswith := 0; exit; end;
+    tail := copy(s, ls - lf + 1, lf);
+    if (tail = suffix) then endswith := 1 else endswith := 0;
+end;
+
+procedure contentType(const path: string; var result: string);
+begin
+    if (endswith(path, '.html') = 1) or (endswith(path, '.htm') = 1) then result := 'text/html'
+    else if (endswith(path, '.css') = 1) then result := 'text/css'
+    else if (endswith(path, '.js') = 1) then result := 'application/javascript'
+    else if (endswith(path, '.json') = 1) then result := 'application/json'
+    else if (endswith(path, '.txt') = 1) then result := 'text/plain'
+    else if (endswith(path, '.png') = 1) then result := 'image/png'
+    else if (endswith(path, '.jpg') = 1) or (endswith(path, '.jpeg') = 1) then result := 'image/jpeg'
+    else result := 'application/octet-stream';
+end;
+
+procedure decodePercent(s: string; var result: string);
+var out: string; i, v1, v2, val: integer; h1, h2: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        if (copy(s, i, 1) = '%') and (i + 2 <= length(s)) then
+        begin
+            h1 := copy(s, i + 1, 1); h2 := copy(s, i + 2, 1);
+            v1 := -1; v2 := -1;
+            if (h1 >= '0') and (h1 <= '9') then v1 := ord(h1) - ord('0')
+            else if (h1 >= 'a') and (h1 <= 'f') then v1 := 10 + (ord(h1) - ord('a'))
+            else if (h1 >= 'A') and (h1 <= 'F') then v1 := 10 + (ord(h1) - ord('A'));
+            if (h2 >= '0') and (h2 <= '9') then v2 := ord(h2) - ord('0')
+            else if (h2 >= 'a') and (h2 <= 'f') then v2 := 10 + (ord(h2) - ord('a'))
+            else if (h2 >= 'A') and (h2 <= 'F') then v2 := 10 + (ord(h2) - ord('A'));
+            if (v1 >= 0) and (v2 >= 0) then
+            begin
+                val := v1 * 16 + v2;
+                out := out + tochar(val);
+                i := i + 3;
+                continue;
+            end;
+        end;
+        out := out + copy(s, i, 1);
+        i := i + 1;
+    end;
+    result := out;
+end;
+
+procedure normalizePath(s: string; var result: string);
+var out: string; i, j, segLen, k, last: integer; seg: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        while (i <= length(s)) and (copy(s, i, 1) = '/') do i := i + 1;
+        if (i > length(s)) then break;
+        j := i;
+        while (j <= length(s)) and (copy(s, j, 1) <> '/') do j := j + 1;
+        segLen := j - i;
+        seg := copy(s, i, segLen);
+        if (seg = '') or (seg = '.') then
+        begin
+            // skip
+        end
+        else if (seg = '..') then
+        begin
+            if (length(out) > 0) then
+            begin
+                k := 1; last := 0;
+                while (k <= length(out)) do
+                begin
+                    if (copy(out, k, 1) = '/') then last := k;
+                    k := k + 1;
+                end;
+                if (last > 0) then out := copy(out, 1, last - 1) else out := '';
+            end;
+        end
+        else
+        begin
+            if (length(out) > 0) then out := out + '/' + seg else out := seg;
+        end;
+        i := j + 1;
+    end;
+    result := out;
+end;
+
+function tryParseInt(const s: string; var value: integer): boolean;
+var
+    i, sign, digit: integer;
+    ch: char;
+    resultValue: integer;
+begin
+    if length(s) = 0 then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    i := 1;
+    sign := 1;
+    if s[i] = '-' then
+    begin
+        sign := -1;
+        i := i + 1;
+    end
+    else if s[i] = '+' then
+    begin
+        i := i + 1;
+    end;
+    if i > length(s) then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    resultValue := 0;
+    while i <= length(s) do
+    begin
+        ch := s[i];
+        if (ch < '0') or (ch > '9') then
+        begin
+            tryParseInt := false;
+            exit;
+        end;
+        digit := ord(ch) - ord('0');
+        resultValue := resultValue * 10 + digit;
+        i := i + 1;
+    end;
+    value := sign * resultValue;
+    tryParseInt := true;
+end;
+
+// --- Part 3: Refactored Connection Handler ---
+
+procedure serveConn(c: integer);
+var
+    req: mstream;
+    reqText, firstLine, method, path, ch: string;
+    flen, i, mstart, pstart, qidx, len: integer;
+    respBody, ctype, logDetail, status, hdr, ts: string;
+    code: integer;
+
+    // Selected handler for the current path.
+    handler: THandlerFunc;
+
+    // --- Handler Closures ---
+    // These are nested procedures. They act as closures,
+    // capturing the global vars RootDir, IndexPath, and Body.
+
+    procedure HandleRoot(const path: string;
+                         var code: integer;
+                         var body: string;
+                         var ctype: string;
+                         var logDetail: string);
+    var
+        ok: integer;
+        listing, name, content: string;
+    begin
+        // Try to serve index.html first
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                body := content;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                // Fallback to in-memory Body
+                body := Body;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            // No index.html, generate a directory listing
+            listing := '<html><body><h1>Index of /</h1><ul>';
+            name := findfirst(RootDir);
+            while (name <> '') do
+            begin
+                listing := listing + '<li><a href="/' + name + '">' + name + '</a></li>';
+                name := findnext;
+            end;
+            listing := listing + '</ul></body></html>';
+            body := listing;
+            code := 200;
+            ctype := 'text/html';
+            logDetail := '(listing)';
+        end;
+    end;
+
+    procedure HandleIndex(const path: string;
+                          var code: integer;
+                          var body: string;
+                          var ctype: string;
+                          var logDetail: string);
+    var
+        ok: integer;
+        content: string;
+    begin
+        // Serve real index.html or default Body
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                body := content;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                body := Body;
+                code := 200;
+                ctype := 'text/html';
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            body := Body;
+            code := 200;
+            ctype := 'text/html';
+            logDetail := 'index.html (default)';
+        end;
+    end;
+
+    procedure HandleFile(const path: string;
+                         var code: integer;
+                         var body: string;
+                         var ctype: string;
+                         var logDetail: string);
+    var
+        rel, fullPath: string;
+        ok: integer;
+        content: string;
+    begin
+        // Serve file under RootDir
+        if (copy(path, 1, 1) = '/') then rel := copy(path, 2, length(path) - 1) else rel := path;
+        normalizePath(rel, rel);
+        fullPath := RootDir + '/' + rel;
+        
+        if (fileexists(fullPath) = 1) then
+        begin
+            ok := loadFileToString(fullPath, content);
+            if (ok = 1) then
+            begin
+                body := content;
+                code := 200;
+                contentType(rel, ctype);
+                logDetail := rel;
+            end
+            else
+            begin
+                body := '<html><body>Internal Server Error</body></html>';
+                code := 500;
+                ctype := 'text/html';
+                logDetail := rel;
+            end;
+        end
+        else
+        begin
+            body := '<html><body>Not Found</body></html>';
+            code := 404;
+            ctype := 'text/html';
+            logDetail := rel;
+        end;
+    end;
+
+// --- serveConn main logic begins ---
+begin
+    // 1. Ensure the socket is blocking so we can read a full request.
+    socketsetblocking(c, true);
+    if (socketpoll(c, 5000, 1) <= 0) then
+    begin
+        status := '408 Request Timeout';
+        respBody := '<html><body>Request Timeout</body></html>';
+        ctype := 'text/html';
+        code := 408;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
+
+    req := socketreceive(c, 2048);
+    if (req = nil) then
+    begin
+        status := '500 Internal Server Error';
+        respBody := '<html><body>Server Error</body></html>';
+        ctype := 'text/html';
+        code := 500;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
+    reqText := mstreambuffer(req);
+    mstreamfree(req);
+    // Extract first request line manually (up to CR or LF).
+    firstLine := '';
+    i := 1;
+    while (i <= length(reqText)) do
+    begin
+        ch := copy(reqText, i, 1);
+        if (ch = #13) or (ch = #10) then break;
+        firstLine := firstLine + ch;
+        i := i + 1;
+    end;
+    
+    flen := length(firstLine);
+    i := 1;
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    mstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (mstart <= flen) then method := copy(firstLine, mstart, i - mstart) else method := '';
+    
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    pstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (pstart <= flen) and (i > pstart) then path := copy(firstLine, pstart, i - pstart) else path := '/';
+    
+    qidx := 0;
+    i := 1;
+    while (i <= length(path)) do
+    begin
+        if (copy(path, i, 1) = '?') then
+        begin
+            qidx := i;
+            break;
+        end;
+        i := i + 1;
+    end;
+    if (qidx > 0) then path := copy(path, 1, qidx - 1);
+    decodePercent(path, path);
+
+    // 2. Select Handler for the requested path
+    if (path = '/') then
+        handler := @HandleRoot
+    else if (path = '/index.html') then
+        handler := @HandleIndex
+    else
+        handler := @HandleFile;
+
+    // 3. Use the handler to build the response body
+    // Initialize defaults
+    code := 200;
+    ctype := 'text/html';
+    logDetail := '';
+    
+    handler(path, code, respBody, ctype, logDetail);
+
+    // 4. Send Response (unchanged)
+    len := length(respBody);
+    if (code = 200) then status := '200 OK'
+    else if (code = 404) then status := '404 Not Found'
+    else status := '500 Internal Server Error';
+    
+    hdr := 'HTTP/1.1 ' + status + #13#10
+         + 'Content-Type: ' + ctype + #13#10
+         + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+         
+    socketsend(c, hdr);
+    socketsend(c, respBody);
+    
+    // 5. Log (unchanged)
+    timestamp(ts);
+    printf('%s [%s] %s -> %d %s' + #10,
+           ts, method, path, code, logDetail);
+    socketclose(c);
+end;
+
+// File/Path helpers (fs* and initFiles) are unchanged.
+// ... (I've omitted them for brevity, but they are identical
+//      to the previous version: isDirectory, copyFile,
+//      copyDirectory, resolveTempDir, ensureTrailingSlash,
+//      fs* functions, initFiles) ...
+
+// Need to include these for initFiles
+function isDirectory(const path: string): integer;
+var attr: integer;
+begin
+    attr := getfattr(path);
+    if ((attr and 16) <> 0) then isDirectory := 1 else isDirectory := 0;
+end;
+
+function copyFile(const src, dst: string): integer;
+var data: string;
+begin
+    if (loadFileToString(src, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
+    if (saveStringToFile(dst, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
+    copyFile := 1;
+end;
+
+function copyDirectory(const src, dst: string): integer;
+var entries, name, entry, srcPath, dstPath: string;
+    idx, j, segLen, success: integer;
+begin
+    if (isDirectory(src) = 0) then begin copyDirectory := 0; exit; end;
+    mkdir(dst);
+    entries := '';
+    name := findfirst(src);
+    while (name <> '') do
+    begin
+        entries := entries + name + #10;
+        name := findnext;
+    end;
+    idx := 1;
+    success := 1;
+    while (idx <= length(entries)) do
+    begin
+        j := idx;
+        while (j <= length(entries)) and (copy(entries, j, 1) <> #10) do j := j + 1;
+        segLen := j - idx;
+        if (segLen > 0) then
+        begin
+            entry := copy(entries, idx, segLen);
+            srcPath := src + '/' + entry;
+            dstPath := dst + '/' + entry;
+            if (isDirectory(srcPath) = 1) then
+            begin
+                if (copyDirectory(srcPath, dstPath) = 0) then success := 0;
+            end
+            else
+            begin
+                if (copyFile(srcPath, dstPath) = 0) then success := 0;
+            end;
+        end;
+        idx := j + 1;
+    end;
+    copyDirectory := success;
+end;
+
+function trimTrailingSlashes(const path: string): string;
+var cleaned: string; len: integer;
+begin
+    cleaned := path;
+    len := length(cleaned);
+    while (len > 1) and ((copy(cleaned, len, 1) = '/') or (copy(cleaned, len, 1) = '\\')) do
+    begin
+        cleaned := copy(cleaned, 1, len - 1);
+        len := len - 1;
+    end;
+    if (len = 0) then trimTrailingSlashes := '' else trimTrailingSlashes := cleaned;
+end;
+
+function stripLeadingCurrent(const path: string): string;
+var cleaned: string;
+begin
+    cleaned := path;
+    while (length(cleaned) >= 2) and (copy(cleaned, 1, 1) = '.') and
+          ((copy(cleaned, 2, 1) = '/') or (copy(cleaned, 2, 1) = '\\')) do
+    begin
+        if (length(cleaned) = 2) then
+        begin
+            stripLeadingCurrent := '';
+            exit;
+        end;
+        cleaned := copy(cleaned, 3, length(cleaned) - 2);
+    end;
+    stripLeadingCurrent := cleaned;
+end;
+
+function canonicalizePath(const path: string): string;
+var cleaned, pwd, base: string;
+begin
+    if (length(path) = 0) then begin canonicalizePath := ''; exit; end;
+    if (copy(path, 1, 1) = '/') or (copy(path, 1, 1) = '\\') then
+    begin
+        canonicalizePath := trimTrailingSlashes(path);
+        exit;
+    end;
+    cleaned := stripLeadingCurrent(path);
+    pwd := getenv('PWD');
+    if (pwd = '') then
+    begin
+        canonicalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    base := trimTrailingSlashes(pwd);
+    if (cleaned = '') then
+    begin
+        canonicalizePath := base;
+        exit;
+    end;
+    if (length(base) = 0) then
+    begin
+        canonicalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    if (length(base) = 1) and ((copy(base, 1, 1) = '/') or (copy(base, 1, 1) = '\\')) then
+    begin
+        canonicalizePath := trimTrailingSlashes(base + cleaned);
+        exit;
+    end;
+    canonicalizePath := trimTrailingSlashes(base + '/' + cleaned);
+end;
+
+function pathDirname(const path: string): string;
+var cleaned: string; len, i: integer;
+begin
+    cleaned := trimTrailingSlashes(path);
+    len := length(cleaned);
+    if (len = 0) then begin pathDirname := ''; exit; end;
+    if (len = 1) and ((copy(cleaned, 1, 1) = '/') or (copy(cleaned, 1, 1) = '\\')) then
+    begin
+        pathDirname := cleaned;
+        exit;
+    end;
+    i := len;
+    while (i > 0) and (copy(cleaned, i, 1) <> '/') and (copy(cleaned, i, 1) <> '\\') do
+        i := i - 1;
+    if (i <= 0) then begin pathDirname := ''; exit; end;
+    if (i = 1) then
+    begin
+        pathDirname := copy(cleaned, 1, 1);
+        exit;
+    end;
+    pathDirname := trimTrailingSlashes(copy(cleaned, 1, i - 1));
+end;
+
+function pathJoin(const base, rel: string): string;
+var normalizedBase: string;
+begin
+    if (length(rel) = 0) then begin pathJoin := trimTrailingSlashes(base); exit; end;
+    if (length(base) = 0) then begin pathJoin := rel; exit; end;
+    normalizedBase := trimTrailingSlashes(base);
+    if (copy(rel, 1, 1) = '/') or (copy(rel, 1, 1) = '\\') then
+    begin
+        if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+            pathJoin := rel
+        else
+            pathJoin := normalizedBase + rel;
+        exit;
+    end;
+    if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+        pathJoin := normalizedBase + rel
+    else
+        pathJoin := normalizedBase + '/' + rel;
+end;
+
+function defaultInstallRoot(): string;
+var scriptPath, dir: string;
+begin
+    scriptPath := canonicalizePath(paramstr(0));
+    if (scriptPath = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(scriptPath);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
+    dir := pathDirname(dir);
+    defaultInstallRoot := dir;
+end;
+
+procedure resolveAssetRoot(var result: string);
+var candidate, base, fallback: string;
+begin
+    candidate := ConfiguredAssetRoot;
+    if (isDirectory(candidate) = 1) then
+    begin
+        result := candidate;
+        exit;
+    end;
+    base := defaultInstallRoot();
+    if (base <> '') then
+    begin
+        fallback := pathJoin(base, 'lib/misc/simple_web_server/htdocs');
+        if (isDirectory(fallback) = 1) then
+        begin
+            result := fallback;
+            exit;
+        end;
+    end;
+    result := '';
+end;
+
+procedure resolveTempDir(var result: string);
+var dir: string;
+begin
+    dir := getenv('TMPDIR');
+    if (dir = '') then dir := getenv('TMP');
+    if (dir = '') then dir := getenv('TEMP');
+    if (dir = '') then dir := getenv('PWD');
+    if (dir = '') then dir := getenv('HOME');
+    if (dir = '') then dir := '/tmp';
+    result := dir;
+end;
+
+procedure ensureTrailingSlash(path: string; var result: string);
+var len: integer; last: string;
+begin
+    len := length(path);
+    if (len = 0) then begin result := '/tmp/'; exit; end;
+    last := copy(path, len, 1);
+    if (last = '/') or (last = '\') then result := path else result := path + '/';
+end;
+
+function loadFileToString(const path: string; var data: string): integer;
+var
+    f: file of byte;
+    status, size, idx: integer;
+    value: byte;
+    procedure maybeDecodeDecimalHtml(var s: string);
+    var
+        i, n, len: integer;
+        decoded: string;
+        code: integer;
+        ch: string;
+    begin
+        len := length(s);
+        if (len = 0) then exit;
+        for i := 1 to len do
+        begin
+            if (s[i] = '%') and (i = len) then break;
+            if (s[i] < '0') or (s[i] > '9') then exit;
+        end;
+        decoded := '';
+        i := 1;
+        while (i <= len) do
+        begin
+            if (s[i] = '%') and (i = len) then break;
+            if (s[i] = '%') then exit;
+            if (s[i] = '1') and (i + 2 <= len) then
+            begin
+                ch := copy(s, i, 3);
+                i := i + 3;
+            end
+            else if (i + 1 <= len) then
+            begin
+                ch := copy(s, i, 2);
+                i := i + 2;
+            end
+            else exit;
+            code := 0;
+            for n := 1 to length(ch) do
+            begin
+                if (ch[n] < '0') or (ch[n] > '9') then exit;
+                code := code * 10 + (ord(ch[n]) - ord('0'));
+            end;
+            if (code < 0) or (code > 255) then exit;
+            decoded := decoded + chr(code);
+        end;
+        if (length(decoded) > 0) and (pos('<', decoded) > 0) then s := decoded;
+    end;
+begin
+    assign(f, path);
+    {$I-} reset(f); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        data := '';
+        loadFileToString := 0;
+        exit;
+    end;
+
+    size := filesize(f);
+    if (size < 0) then size := 0;
+    setlength(data, size);
+
+    idx := 1;
+    while (idx <= size) do
+    begin
+        {$I-} read(f, value); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            data := '';
+            loadFileToString := 0;
+            exit;
+        end;
+        data[idx] := chr(value);
+        idx := idx + 1;
+    end;
+
+    close(f);
+    maybeDecodeDecimalHtml(data);
+    loadFileToString := 1;
+end;
+
+function saveStringToFile(const path, data: string): integer;
+var
+    f: file of byte;
+    total, status, idx: integer;
+    value: byte;
+begin
+    assign(f, path);
+    {$I-} rewrite(f); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        saveStringToFile := 0;
+        exit;
+    end;
+
+    total := length(data);
+    for idx := 1 to total do
+    begin
+        value := ord(data[idx]);
+        {$I-} write(f, value); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            saveStringToFile := 0;
+            exit;
+        end;
+    end;
+
+    close(f);
+    saveStringToFile := 1;
+end;
+
+procedure initFiles;
+var pid, copied: integer; pidStr, base, source, tempDir: string;
+begin
+    pid := getpid;
+    pidStr := inttostr(pid);
+    resolveTempDir(tempDir);
+    ensureTrailingSlash(tempDir, base);
+    RootDir := base + 'htdocs.' + pidStr;
+    mkdir(RootDir);
+    IndexPath := RootDir + '/index.html';
+    Body := '<html><body>Hello from the OO pscal web server</body></html>';
+    
+    resolveAssetRoot(source);
+    copied := 0;
+    if (source <> '') and (isDirectory(source) = 1) then
+    begin
+        copied := copyDirectory(source, RootDir);
+    end;
+    
+    if (copied = 0) or (fileexists(IndexPath) = 0) then
+    begin
+        saveStringToFile(IndexPath, Body);
+    end;
+end;
+
+// --- Main Program ---
+var
+    a1, a2: string;
+    parsed: integer;
+    parsedOk: boolean;
+    srv, bindrc, c: integer;
+    
+begin
+    initFiles;
+    // Param parsing (unchanged)
+    if (paramcount >= 1) then
+    begin
+        a1 := paramstr(1);
+        parsedOk := tryParseInt(a1, parsed);
+        if parsedOk and (parsed > 0) and (parsed < 65536) then
+        begin
+            Port := parsed;
+            if (paramcount >= 2) then
+            begin
+                RootDir := paramstr(2);
+                IndexPath := RootDir + '/index.html';
+            end;
+        end
+        else
+        begin
+            RootDir := a1;
+            IndexPath := RootDir + '/index.html';
+            if (paramcount >= 2) then
+            begin
+                a2 := paramstr(2);
+                parsedOk := tryParseInt(a2, parsed);
+                if parsedOk and (parsed > 0) and (parsed < 65536) then Port := parsed;
+            end;
+        end;
+        
+        mkdir(RootDir);
+        if (fileexists(IndexPath) = 0) then
+        begin
+            saveStringToFile(IndexPath, Body);
+        end;
+        
+    end;
+    
+    printf('Serving %s on http://127.0.0.1:%d' + #10, IndexPath, Port);
+    printf('Root: %s' + #10, RootDir);
+    
+    // Socket setup (unchanged)
+    srv := socketcreate(0);
+    if (srv < 0) then begin printf('socketcreate failed' + #10); halt(1); end;
+    
+    bindrc := socketbindaddr(srv, '127.0.0.1', Port);
+    if (bindrc <> 0) then begin printf('socketbind failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    if (socketlisten(srv, 16) <> 0) then begin printf('socketlisten failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    printf('Waiting for connections... (Ctrl+C to quit)' + #10);
+
+    while true do
+    begin
+        c := socketaccept(srv);
+        if (c >= 0) then
+        begin
+            GAccepted := GAccepted + 1;
+            serveConn(c);
+            GServed := GServed + 1;
+        end
+        else
+        begin
+            delay(10);
+        end;
+    end;
+    
+    socketclose(srv);
+end.

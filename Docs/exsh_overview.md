@@ -126,11 +126,17 @@ extends it with orchestration helpers implemented in
 
 - Shell control builtins (`cd`, `pwd`, `exit`, `alias`, `export`, `setenv`,
   `unset`, `unsetenv`) and an interactive `help` builtin for listing and
-  describing available commands.
+  describing available commands. The directory-stack helpers (`dirs`, `pushd`,
+  `popd`) mirror Bash: they maintain `$PWD`, print the stack after each
+  mutation, and reject unsupported flag combinations so parity tests stay
+  precise.【F:src/backend_ast/shell/shell_builtins.inc†L2495-L2627】【F:Tests/exsh/tests/bash_parity_directory_stack.exsh†L1-L32】
 - Pipeline helpers (`__shell_exec`, `__shell_pipeline`, `__shell_and`,
   `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`).
 - The complete PSCAL builtin catalog (HTTP, sockets, JSON, extended math/string
   groups, optional SQLite/SDL bindings) via `registerAllBuiltins()`.
+- Command-dispatch diagnostics such as `hash`, `enable`, and `which` let
+  scripts inspect the cached PATH table or enumerate disabled builtins without
+  leaving the shell.【F:src/backend_ast/shell/shell_builtins.inc†L7243-L7310】
 
 The `builtin` shell command bridges these catalogs into scripts. Invoke it with
 the VM builtin name followed by any arguments. Values are treated as strings by
@@ -144,6 +150,12 @@ High-level control-flow syntax (`if`, `while`/`until`, and `for`) lowers to the
 loop helpers above, which cooperate with real VM jump opcodes. The runtime
 evaluates conditions using shell truthiness rules and only executes the branch
 or loop body whose guard succeeds.
+
+Job control follows Bash's conventions. `jobs` collates the active table,
+`disown` removes entries without killing them, `fg`/`bg` resume stopped
+pipelines, and `wait`/`kill` honour `%`-style specifiers while normalising
+signal names and integers. All helpers consult the shared job ledger so output
+stays stable when pipelines fork or launch nested processes.【F:src/backend_ast/shell/shell_builtins.inc†L7949-L8119】
 
 ## Accessing core and extended builtins
 
@@ -165,6 +177,13 @@ inventory by running `exsh --dump-ext-builtins`, which produces the same
 category/group/function listing used by other front ends.【F:src/shell/main.c†L2351-L2387】
 Available categories include math, system, SQLite, graphics, yyjson, and other
 optional modules controlled by the `-DENABLE_EXT_BUILTIN_*` CMake flags.【F:Docs/extended_builtins.md†L15-L44】
+
+EXIT traps now run with a clean execution context. The runtime snapshots exit
+and loop flags before invoking the trap body, merges any new requests after it
+finishes, and only escalates deferred `set -e` failures once conditional guards
+have had a chance to handle them. This keeps `&&`, `||`, and `if` short-circuits
+behaving like Bash while preserving pending exits when the trap requests an
+override.【F:src/backend_ast/shell/shell_runtime_state.inc†L1667-L1779】
 
 ## Worker threads and builtin orchestration
 

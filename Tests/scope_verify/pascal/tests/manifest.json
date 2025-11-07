@@ -88,6 +88,33 @@
       "expected_stdout": "inner=5\nouter=3\nglobal=7"
     },
     {
+      "id": "routine_proc_ptr_assignment_var_mismatch",
+      "name": "Procedure pointer assignment enforces VAR parameters",
+      "category": "routine_scope",
+      "description": "Assignments to procedure pointers must preserve VAR/OUT passing conventions.",
+      "expect": "compile_error",
+      "code": "program ProcPtrAssignVarMismatch;\ntype\n  TVarHandler = procedure(var value: Integer);\n  TValueHandler = procedure(value: Integer);\n\nprocedure UsesVar(var value: Integer);\nbegin\n  value := value + 1;\nend;\n\nprocedure UsesValue(value: Integer);\nbegin\nend;\n\nvar\n  handler: TVarHandler;\n\nbegin\n  handler := @UsesVar;\n  handler := @UsesValue;\nend.",
+      "expected_stderr_substring": "passing convention mismatch"
+    },
+    {
+      "id": "routine_proc_ptr_call_var_passthrough",
+      "name": "Procedure pointer call preserves VAR semantics",
+      "category": "routine_scope",
+      "description": "Calling through a procedure pointer should pass VAR parameters by reference and observe mutations.",
+      "expect": "runtime_ok",
+      "code": "program ProcPtrCallVar;\ntype\n  TVarHandler = procedure(var value: Integer);\n\nprocedure Increment(var value: Integer);\nbegin\n  value := value + 5;\nend;\n\nvar\n  handler: TVarHandler;\n  counter: Integer;\n\nbegin\n  handler := @Increment;\n  counter := 3;\n  handler(counter);\n  writeln('counter=', counter);\nend.",
+      "expected_stdout": "counter=8"
+    },
+    {
+      "id": "routine_nested_proc_ptr_compiles",
+      "name": "Nested procedure pointer resolves local handler",
+      "category": "routine_scope",
+      "description": "Nested procedure pointers passed with '@' should resolve local helpers declared in the same scope.",
+      "expect": "compile_ok",
+      "code": "program RoutineNestedProcPtr;\ntype\n  THandler = procedure;\n\nprocedure Setup;\n  procedure Register(handler: THandler);\n  begin\n  end;\n\n  procedure LocalHandler;\n  begin\n  end;\n\nbegin\n  Register(@LocalHandler);\nend;\n\nbegin\n  Setup;\nend.",
+      "failure_reason": "Regression coverage for nested procedure pointer lookup."
+    },
+    {
       "id": "routine_sibling_local_access_error",
       "name": "Sibling routine cannot access another's local",
       "category": "routine_scope",
@@ -308,6 +335,24 @@
       "expect": "runtime_ok",
       "code": "program BuiltinRepeatedLookup;\nvar\n  first: Integer;\n  second: Integer;\nbegin\n  first := Abs(-5);\n  second := abs(-first);\n  writeln('first=', first);\n  writeln('second=', second);\n  Delay(0);\n  writeln('done');\nend.",
       "expected_stdout": "first=5\nsecond=5\ndone"
+    },
+    {
+      "id": "integration_char_code_concat",
+      "name": "Char-code literal concatenation in call arguments",
+      "category": "integration",
+      "description": "Ensure '#10' style char-code literals concatenate with strings inside argument expressions.",
+      "expect": "runtime_ok",
+      "code": "program IntegrationCharCodeConcat;\nvar\n  value: Integer;\nbegin\n  value := 1;\n  Write('a' + #10, value);\nend.",
+      "expected_stdout": "a\n1"
+    },
+    {
+      "id": "integration_adjacent_string_literals",
+      "name": "Adjacent string tokens concatenate",
+      "category": "integration",
+      "description": "Adjacent string and char-code tokens should fold into a single literal before semantic checks.",
+      "expect": "runtime_ok",
+      "code": "program AdjacentLiteralRegression;\nvar\n  combined: string;\n  text: string;\n  ch: Char;\nbegin\n  printf('A'+#10'B');\n  writeln;\n  combined := 'A'+#10'B';\n  text := 'Line1'#10'Line2';\n  ch := #0'';\n  writeln('combined_len=', Length(combined));\n  writeln('text_len=', Length(text));\n  writeln('text_ord6=', Ord(text[6]));\n  writeln('char_ord=', Ord(ch));\nend.",
+      "expected_stdout": "A\nB\ncombined_len=3\ntext_len=11\ntext_ord6=10\nchar_ord=0"
     },
     {
       "id": "integration_nested_scope_mix",

@@ -1,0 +1,74 @@
+#!/usr/bin/env pascal
+program CombinedDemo;
+
+type
+    // 1. The Interface
+    IEventListener = interface
+        procedure OnEvent(eventCode: integer; const eventMsg: string);
+    end;
+
+    // A procedure type for our handler
+    TEventHandler = procedure(eventCode: integer; const eventMsg: string);
+
+    // 2. The Record
+    // This record just holds a function pointer
+    PListenerRecord = ^TListenerRecord;
+    TListenerRecord = record
+        handler: TEventHandler; 
+        procedure OnEvent(eventCode: integer; const eventMsg: string); virtual;
+    end;
+
+// This is the record's interface method.
+// It just calls the 'handler' closure it's storing.
+procedure TListenerRecord.OnEvent(eventCode: integer; const eventMsg: string);
+begin
+    if (myself.handler <> nil) then
+        myself.handler(eventCode, eventMsg);
+end;
+
+// 3. The Factory Function
+// This creates a listener and assigns a closure to it.
+procedure MakePrefixLogger(const prefix: string; var newListener: IEventListener);
+var
+    listener: PListenerRecord; // Pointer to our record
+
+    // --- The Closure ---
+    // It captures the 'prefix' variable from its parent, MakePrefixLogger
+    procedure HandleLog(eventCode: integer; const eventMsg: string);
+    begin
+        writeln(prefix, ' (Code ', eventCode, '): ', eventMsg);
+    end;
+    // --- End Closure ---
+
+begin
+    // Create the record
+    new(listener);
+    // Assign the *address* of the nested closure function to the record's field
+    listener^.handler := @HandleLog; 
+    // "Return" the boxed interface via the var parameter
+    newListener := IEventListener(listener);
+end;
+
+
+// --- Main Program ---
+var
+    logGeneral: IEventListener;
+    logCritical: IEventListener;
+begin
+    // Create two different listeners. Each one gets its own
+    // closure that remembers a *different* 'prefix'.
+    MakePrefixLogger('[General]', logGeneral);
+    MakePrefixLogger('[CRITICAL]', logCritical);
+
+    writeln('Firing events...');
+    writeln('');
+    
+    // Call the first listener
+    logGeneral.OnEvent(101, 'Program started.');
+    
+    // Call the second listener
+    logCritical.OnEvent(999, 'System overheating!');
+    
+    // Call the first one again
+    logGeneral.OnEvent(102, 'User clicked button.');
+end.

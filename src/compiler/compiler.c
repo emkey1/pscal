@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For strcmp, strdup, atoll
@@ -32,6 +33,8 @@ static AST* gCurrentProgramRoot = NULL;
 static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
+
+static AST* resolveTypeAlias(AST* type_node);
 
 typedef struct {
     int constant_index;
@@ -364,6 +367,7 @@ typedef struct FunctionCompilerState {
     Symbol* function_symbol;
     CompilerUpvalue upvalues[MAX_UPVALUES];
     int upvalue_count;
+    bool returns_value;
 } FunctionCompilerState;
 
 FunctionCompilerState* current_function_compiler = NULL;
@@ -945,7 +949,7 @@ static void emitVTables(BytecodeChunk* chunk) {
         emitConstantIndex16(chunk, ubIdx, 0);              // upper bound
         writeBytecodeChunk(chunk, (uint8_t)TYPE_INT32, 0); // element type
         int elemNameIdx = addStringConstant(chunk, "integer");
-        writeBytecodeChunk(chunk, (uint8_t)elemNameIdx, 0);
+        emitConstantIndex16(chunk, elemNameIdx, 0);
         emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, nameIdx, 0);
         vtableTrackerRecordClass(vt->class_name);
         free(vt->class_name);
@@ -1173,7 +1177,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
         AST* elem_type = actual_type_def_node ? actual_type_def_node->right : NULL;
         writeBytecodeChunk(chunk, (uint8_t)(elem_type ? elem_type->var_type : TYPE_VOID), line);
         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), line);
+        emitConstantIndex16(chunk, addStringConstant(chunk, elem_type_name), line);
     } else {
         const char* type_name = "";
         if (var_decl->var_type == TYPE_POINTER) {
@@ -1203,6 +1207,43 @@ static void emitGlobalVarDefinition(AST* var_decl,
                 freeValue(&len_val);
             }
             emitConstantIndex16(chunk, addIntConstant(chunk, max_len), line);
+        } else if (var_decl->var_type == TYPE_FILE) {
+            VarType file_element_type = TYPE_VOID;
+            const char *file_element_name = "";
+            bool is_text_file = false;
+
+            AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
+            if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
+                resolved_file_type = resolveTypeAlias(resolved_file_type->left);
+            }
+            if (resolved_file_type && resolved_file_type->type == AST_VAR_DECL && resolved_file_type->right) {
+                resolved_file_type = resolveTypeAlias(resolved_file_type->right);
+            }
+            if (resolved_file_type && resolved_file_type->type == AST_VARIABLE &&
+                resolved_file_type->token && resolved_file_type->token->value) {
+                const char *file_token = resolved_file_type->token->value;
+                if (strcasecmp(file_token, "file") == 0 && resolved_file_type->right) {
+                    AST *element_node = resolveTypeAlias(resolved_file_type->right);
+                    AST *source_node = element_node ? element_node : resolved_file_type->right;
+                    if (source_node && source_node->var_type != TYPE_VOID && source_node->var_type != TYPE_UNKNOWN) {
+                        file_element_type = source_node->var_type;
+                    }
+                    if (source_node && source_node->token && source_node->token->value) {
+                        file_element_name = source_node->token->value;
+                    }
+                } else if (strcasecmp(file_token, "text") == 0) {
+                    is_text_file = true;
+                    file_element_type = TYPE_VOID;
+                    file_element_name = "";
+                }
+            }
+
+            writeBytecodeChunk(chunk, (uint8_t)file_element_type, line);
+            if (!is_text_file && file_element_name && file_element_name[0]) {
+                emitConstantIndex16(chunk, addStringConstant(chunk, file_element_name), line);
+            } else {
+                emitShort(chunk, 0xFFFF, line);
+            }
         }
     }
 
@@ -1444,6 +1485,84 @@ static AST* resolveTypeAlias(AST* type_node) {
         type_node = looked;
     }
     return type_node;
+}
+
+static AST* resolveProcPointerSignature(AST* type_node) {
+    type_node = resolveTypeAlias(type_node);
+    if (!type_node) {
+        return NULL;
+    }
+    if (type_node->type == AST_VAR_DECL) {
+        if (type_node->right) {
+            type_node = type_node->right;
+        } else if (type_node->type_def) {
+            type_node = type_node->type_def;
+        }
+        type_node = resolveTypeAlias(type_node);
+    }
+    if (!type_node) {
+        return NULL;
+    }
+    if (type_node->type == AST_PROC_PTR_TYPE) {
+        return type_node;
+    }
+    if (type_node->type == AST_POINTER_TYPE && type_node->right) {
+        AST* inner = resolveTypeAlias(type_node->right);
+        if (inner && inner->type == AST_PROC_PTR_TYPE) {
+            return inner;
+        }
+    }
+    return NULL;
+}
+
+static AST* findProcPointerSignatureForCall(AST* call) {
+    if (!call) {
+        return NULL;
+    }
+
+    AST* candidate = call->type_def;
+    if (!candidate && call->left) {
+        candidate = call->left->type_def;
+        if (!candidate && call->left->right) {
+            candidate = call->left->right;
+        }
+    }
+
+    if (!candidate && call->token && call->token->value) {
+        Symbol* sym = lookupLocalSymbol(call->token->value);
+        if (!sym) {
+            sym = lookupGlobalSymbol(call->token->value);
+        }
+        sym = resolveSymbolAlias(sym);
+        if (sym && sym->type_def) {
+            candidate = sym->type_def;
+        }
+    }
+
+    if (candidate && candidate->type == AST_VAR_DECL) {
+        if (candidate->right) {
+            candidate = candidate->right;
+        } else if (candidate->type_def) {
+            candidate = candidate->type_def;
+        }
+    }
+
+    if (!candidate && call->token && call->token->value && gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(call->token->value, call, gCurrentProgramRoot);
+        if (decl) {
+            if (decl->type == AST_VAR_DECL) {
+                if (decl->right) {
+                    candidate = decl->right;
+                } else if (decl->type_def) {
+                    candidate = decl->type_def;
+                }
+            } else if (decl->type == AST_CONST_DECL && decl->right) {
+                candidate = decl->right;
+            }
+        }
+    }
+
+    return resolveProcPointerSignature(candidate);
 }
 
 static AST* getInterfaceTypeFromExpression(AST* expr) {
@@ -2142,7 +2261,7 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
                 VarType elem_var_type = elem_type->var_type;
                 writeBytecodeChunk(chunk, (uint8_t)elem_var_type, line);
                 const char* elem_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_name), line);
+                emitConstantIndex16(chunk, addStringConstant(chunk, elem_name), line);
             }
         }
     }
@@ -2605,6 +2724,7 @@ static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->enclosing = NULL;
     fc->function_symbol = NULL;
     fc->upvalue_count = 0;
+    fc->returns_value = false;
 }
 
 static void compilerBeginScope(FunctionCompilerState* fc) {
@@ -3974,15 +4094,48 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     uint8_t* optimized_code = (uint8_t*)malloc((size_t)original_count);
     int* optimized_lines = (int*)malloc((size_t)original_count * sizeof(int));
     int* offset_map = (int*)malloc((size_t)(original_count + 1) * sizeof(int));
+    bool* original_instruction_starts = NULL;
+    bool abort_optimizations = true;
+
     if (!optimized_code || !optimized_lines || !offset_map) {
-        free(optimized_code);
-        free(optimized_lines);
-        free(offset_map);
-        return;
+        goto cleanup;
+    }
+
+    original_instruction_starts = (bool*)calloc((size_t)(original_count + 1), sizeof(bool));
+    if (!original_instruction_starts) {
+        goto cleanup;
     }
 
     for (int i = 0; i <= original_count; ++i) {
         offset_map[i] = -1;
+    }
+
+    bool instruction_map_error = false;
+    int scan_offset = 0;
+    while (scan_offset < original_count) {
+        original_instruction_starts[scan_offset] = true;
+        int instr_len = getInstructionLength(chunk, scan_offset);
+        if (instr_len <= 0 || scan_offset + instr_len > original_count) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Invalid instruction encountered at byte %d while preparing peephole map (len=%d).\n",
+                           scan_offset,
+                           instr_len);
+            }
+            fprintf(stderr,
+                    "Compiler error: Invalid instruction layout encountered while optimizing bytecode.\n");
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"invalid instruction layout before peephole optimization");
+#endif
+            instruction_map_error = true;
+            break;
+        }
+        scan_offset += instr_len;
+    }
+    original_instruction_starts[original_count] = true;
+
+    if (instruction_map_error) {
+        goto cleanup;
     }
 
     typedef struct {
@@ -4168,12 +4321,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                 int new_capacity = jump_capacity < 8 ? 8 : jump_capacity * 2;
                 JumpFixup* resized = (JumpFixup*)realloc(jump_fixes, (size_t)new_capacity * sizeof(JumpFixup));
                 if (!resized) {
-                    free(optimized_code);
-                    free(optimized_lines);
-                    free(offset_map);
-                    free(jump_fixes);
-                    free(absolute_fixes);
-                    return;
+                    goto cleanup;
                 }
                 jump_fixes = resized;
                 jump_capacity = new_capacity;
@@ -4187,12 +4335,7 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
                 int new_capacity = absolute_capacity < 8 ? 8 : absolute_capacity * 2;
                 AbsoluteFixup* resized = (AbsoluteFixup*)realloc(absolute_fixes, (size_t)new_capacity * sizeof(AbsoluteFixup));
                 if (!resized) {
-                    free(optimized_code);
-                    free(optimized_lines);
-                    free(offset_map);
-                    free(jump_fixes);
-                    free(absolute_fixes);
-                    return;
+                    goto cleanup;
                 }
                 absolute_fixes = resized;
                 absolute_capacity = new_capacity;
@@ -4216,20 +4359,49 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     offset_map[original_count] = write_index;
 
     if (!changed) {
-        free(optimized_code);
-        free(optimized_lines);
-        free(offset_map);
-        free(jump_fixes);
-        free(absolute_fixes);
-        return;
+        goto cleanup;
     }
 
     for (int i = 0; i < jump_count; ++i) {
         int original_target = jump_fixes[i].original_target;
-        if (original_target < 0) original_target = 0;
-        if (original_target > original_count) original_target = original_count;
-        int new_target = offset_map[original_target];
-        if (new_target < 0) new_target = offset_map[original_count];
+        bool target_is_end = (original_target == original_count);
+        bool target_within = (original_target >= 0 && original_target < original_count);
+        bool target_marked = target_within ? original_instruction_starts[original_target] : false;
+
+        if (!target_is_end && (!target_within || !target_marked)) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Peephole optimizer encountered invalid jump target %d at new offset %d.\n",
+                           original_target,
+                           jump_fixes[i].new_offset);
+            }
+            fprintf(stderr,
+                    "Compiler error: Peephole optimizer encountered invalid jump target %d.\n",
+                    original_target);
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"peephole optimizer encountered invalid jump target");
+#endif
+            continue;
+        }
+
+        int target_index = target_is_end ? original_count : original_target;
+        int new_target = offset_map[target_index];
+        if (new_target < 0) {
+            if (compiler_debug) {
+                DBG_PRINTF("[dbg] Peephole optimizer could not map jump target %d (new offset %d).\n",
+                           original_target,
+                           jump_fixes[i].new_offset);
+            }
+            fprintf(stderr,
+                    "Compiler error: Peephole optimizer could not map jump target %d.\n",
+                    original_target);
+            compiler_had_error = true;
+#ifndef NDEBUG
+            assert(!"peephole optimizer missing mapping for jump target");
+#endif
+            continue;
+        }
+
         int new_offset = jump_fixes[i].new_offset;
         int new_delta = new_target - (new_offset + 3);
         optimized_code[new_offset + 1] = (uint8_t)((new_delta >> 8) & 0xFF);
@@ -4298,10 +4470,17 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
             val->u_val = (unsigned long long)mapped;
         }
     }
+    abort_optimizations = false;
 
-    free(offset_map);
-    free(jump_fixes);
-    free(absolute_fixes);
+cleanup:
+    if (offset_map) free(offset_map);
+    if (jump_fixes) free(jump_fixes);
+    if (absolute_fixes) free(absolute_fixes);
+    if (original_instruction_starts) free(original_instruction_starts);
+    if (abort_optimizations) {
+        free(optimized_code);
+        free(optimized_lines);
+    }
 }
 
 
@@ -4693,7 +4872,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         AST* elem_type = actual_type_def_node->right;
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
                         const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
-                        writeBytecodeChunk(chunk, (uint8_t)addStringConstant(chunk, elem_type_name), getLine(varNameNode));
+                        emitConstantIndex16(chunk,
+                                            addStringConstant(chunk, elem_type_name),
+                                            getLine(varNameNode));
                     } else if (is_record_type) {
                         Value record_init = makeValueForType(TYPE_RECORD, resolved_local_type, NULL);
                         int const_idx = addConstantToChunk(chunk, &record_init);
@@ -4727,6 +4908,44 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_FILE, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+
+                        VarType file_element_type = TYPE_VOID;
+                        const char *file_element_name = "";
+                        bool is_text_file = false;
+
+                        AST *resolved_file_type = resolveTypeAlias(actual_type_def_node);
+                        if (resolved_file_type && resolved_file_type->type == AST_TYPE_DECL && resolved_file_type->left) {
+                            resolved_file_type = resolveTypeAlias(resolved_file_type->left);
+                        }
+                        if (resolved_file_type && resolved_file_type->type == AST_VAR_DECL && resolved_file_type->right) {
+                            resolved_file_type = resolveTypeAlias(resolved_file_type->right);
+                        }
+                        if (resolved_file_type && resolved_file_type->type == AST_VARIABLE &&
+                            resolved_file_type->token && resolved_file_type->token->value) {
+                            const char *type_name = resolved_file_type->token->value;
+                            if (strcasecmp(type_name, "file") == 0 && resolved_file_type->right) {
+                                AST *element_node = resolveTypeAlias(resolved_file_type->right);
+                                AST *source_node = element_node ? element_node : resolved_file_type->right;
+                                if (source_node && source_node->var_type != TYPE_VOID && source_node->var_type != TYPE_UNKNOWN) {
+                                    file_element_type = source_node->var_type;
+                                }
+                                if (source_node && source_node->token && source_node->token->value) {
+                                    file_element_name = source_node->token->value;
+                                }
+                            } else if (strcasecmp(type_name, "text") == 0) {
+                                is_text_file = true;
+                                file_element_type = TYPE_VOID;
+                                file_element_name = "";
+                            }
+                        }
+
+                        writeBytecodeChunk(chunk, (uint8_t)file_element_type, getLine(varNameNode));
+                        if (!is_text_file && file_element_name && file_element_name[0]) {
+                            int type_name_index = addStringConstant(chunk, file_element_name);
+                            emitConstantIndex16(chunk, type_name_index, getLine(varNameNode));
+                        } else {
+                            emitShort(chunk, 0xFFFF, getLine(varNameNode));
+                        }
                     } else if (node->var_type == TYPE_POINTER) {
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, getLine(varNameNode));
@@ -4905,7 +5124,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
             break;
         case AST_PROCEDURE_DECL:
         case AST_FUNCTION_DECL: {
-            if (!node->token || !node->token->value) break;
+            if (!node->token || !node->token->value || node->is_forward_decl) break;
             DBG_PRINTF("[dbg] compile decl %s\n", node->token->value);
             writeBytecodeChunk(chunk, JUMP, line);
             int jump_over_body_operand_offset = chunk->count;
@@ -5001,6 +5220,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     AST* blockNode = NULL;
 
     fc.name = func_name;
+    fc.returns_value = (func_decl_node->type == AST_FUNCTION_DECL);
 
     int func_bytecode_start_address = chunk->count;
 
@@ -5143,45 +5363,91 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_code_len > 0) {
         bool* valid_offsets = (bool*)calloc((size_t)func_code_len, sizeof(bool));
         if (valid_offsets) {
+            const char* func_name = (fc.function_symbol && fc.function_symbol->name)
+                                        ? fc.function_symbol->name
+                                        : (fc.name ? fc.name : "<anonymous>");
+            bool instruction_scan_failed = false;
             int scan_offset = func_code_start;
             while (scan_offset < func_code_end) {
                 valid_offsets[scan_offset - func_code_start] = true;
                 int instr_len = getInstructionLength(chunk, scan_offset);
-                if (instr_len <= 0) instr_len = 1;
+                if (instr_len <= 0 || scan_offset + instr_len > func_code_end) {
+                    if (compiler_debug) {
+                        DBG_PRINTF("[dbg] Invalid instruction length while validating jumps in '%s' at byte %d (len=%d).\n",
+                                   func_name,
+                                   scan_offset - func_code_start,
+                                   instr_len);
+                    }
+                    fprintf(stderr,
+                            "Compiler error: Invalid instruction layout while validating jumps in '%s'.\n",
+                            func_name);
+                    compiler_had_error = true;
+#ifndef NDEBUG
+                    assert(!"invalid instruction length during jump validation");
+#endif
+                    instruction_scan_failed = true;
+                    break;
+                }
                 scan_offset += instr_len;
             }
 
-            scan_offset = func_code_start;
-            while (scan_offset < func_code_end) {
-                uint8_t opcode = chunk->code[scan_offset];
-                int instr_len = getInstructionLength(chunk, scan_offset);
-                if (instr_len <= 0) instr_len = 1;
-                bool is_jump = (opcode == JUMP || opcode == JUMP_IF_FALSE);
-                if (is_jump && scan_offset + instr_len <= func_code_end) {
-                    int operand_idx = scan_offset + 1;
-                    int16_t rel = (int16_t)((chunk->code[operand_idx] << 8) | chunk->code[operand_idx + 1]);
-                    int instr_end = scan_offset + instr_len;
-                    int dest = instr_end + rel;
-                    if (dest >= func_code_start && dest < func_code_end) {
-                        if (!valid_offsets[dest - func_code_start]) {
-                            int adjusted = dest;
-                            while (adjusted > func_code_start && !valid_offsets[adjusted - func_code_start]) {
-                                adjusted--;
-                            }
-                            if (!valid_offsets[adjusted - func_code_start]) {
-                                adjusted = dest;
-                                while (adjusted < func_code_end && !valid_offsets[adjusted - func_code_start]) {
-                                    adjusted++;
+            if (!instruction_scan_failed) {
+                scan_offset = func_code_start;
+                while (scan_offset < func_code_end) {
+                    uint8_t opcode = chunk->code[scan_offset];
+                    int instr_len = getInstructionLength(chunk, scan_offset);
+                    bool is_jump = (opcode == JUMP || opcode == JUMP_IF_FALSE);
+                    if (is_jump && scan_offset + instr_len <= func_code_end) {
+                        int operand_idx = scan_offset + 1;
+                        int16_t rel = (int16_t)((chunk->code[operand_idx] << 8) |
+                                                chunk->code[operand_idx + 1]);
+                        int instr_end = scan_offset + instr_len;
+                        int dest = instr_end + rel;
+                        bool dest_is_end = (dest == func_code_end);
+                        bool dest_within_body = (dest >= func_code_start && dest < func_code_end);
+                        if (dest_within_body || dest_is_end) {
+                            if (!dest_is_end) {
+                                bool marked_valid = valid_offsets[dest - func_code_start];
+                                if (!marked_valid) {
+                                    if (compiler_debug) {
+                                        DBG_PRINTF(
+                                            "[dbg] Invalid jump target %d discovered in '%s' at byte %d.\n",
+                                            dest - func_code_start,
+                                            func_name,
+                                            scan_offset - func_code_start);
+                                    }
+                                    fprintf(stderr,
+                                            "Compiler error: Jump at byte %d in '%s' targets invalid offset %d.\n",
+                                            scan_offset - func_code_start,
+                                            func_name,
+                                            dest - func_code_start);
+                                    compiler_had_error = true;
+#ifndef NDEBUG
+                                    assert(!"jump target offset not marked as valid");
+#endif
                                 }
                             }
-                            if (valid_offsets[adjusted - func_code_start]) {
-                                int16_t new_rel = (int16_t)(adjusted - instr_end);
-                                patchShort(chunk, operand_idx, (uint16_t)new_rel);
+                        } else {
+                            if (compiler_debug) {
+                                DBG_PRINTF(
+                                    "[dbg] Jump at byte %d in '%s' targets out-of-range offset %d.\n",
+                                    scan_offset - func_code_start,
+                                    func_name,
+                                    dest - func_code_start);
                             }
+                            fprintf(stderr,
+                                    "Compiler error: Jump at byte %d in '%s' targets out-of-range offset %d.\n",
+                                    scan_offset - func_code_start,
+                                    func_name,
+                                    dest - func_code_start);
+                            compiler_had_error = true;
+#ifndef NDEBUG
+                            assert(!"jump target offset outside of function bounds");
+#endif
                         }
                     }
+                    scan_offset += instr_len;
                 }
-                scan_offset += instr_len;
             }
 
             free(valid_offsets);
@@ -5252,8 +5518,15 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
                        (decl->token ? decl->token->value : NULL);
         temp_fc.function_symbol = proc_symbol;
     }
+    bool saved_returns_value = current_function_compiler->returns_value;
+    if (decl->type == AST_FUNCTION_DECL) {
+        current_function_compiler->returns_value = true;
+    }
     AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
-    if (!blockNode) return;
+    if (!blockNode) {
+        current_function_compiler->returns_value = saved_returns_value;
+        return;
+    }
 
     int starting_local_count = current_function_compiler->local_count;
 
@@ -5309,6 +5582,8 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             emitConstant(chunk, addNilConstant(chunk), line);
         }
     }
+
+    current_function_compiler->returns_value = saved_returns_value;
 
     // Clean up locals added during inlining
     for (int i = current_function_compiler->local_count - 1; i >= starting_local_count; i--) {
@@ -5772,7 +6047,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
 
-                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                if (current_function_compiler && current_function_compiler->returns_value &&
+                    current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
                     (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
                      strcasecmp(lvalue->token->value, "result") == 0)) {
@@ -6035,7 +6311,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // Ensure the target procedure is compiled so its address is available
-            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def) {
+            if (proc_symbol && !proc_symbol->is_defined && proc_symbol->type_def &&
+                !proc_symbol->type_def->is_forward_decl) {
                 compileDefinedFunction(proc_symbol->type_def, chunk,
                                       getLine(proc_symbol->type_def));
             }
@@ -6194,12 +6471,117 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                        strcasecmp(calleeName, "waitforthread") == 0);
             bool callee_is_builtin = isBuiltin(calleeName) && !proc_symbol && !host_thread_helper;
 
+            AST* procPtrSignature = NULL;
+            AST* procPtrParams = NULL;
+            if (!proc_symbol) {
+                procPtrSignature = findProcPointerSignatureForCall(node);
+                if (procPtrSignature && procPtrSignature->child_count > 0) {
+                    procPtrParams = procPtrSignature->children[0];
+                }
+            }
+            if (procPtrSignature) {
+                is_read_proc = false;
+                host_thread_helper = false;
+                callee_is_builtin = false;
+            }
+
             int arg_start = receiver_offset;
             int arg_count = node->child_count - receiver_offset;
             if (arg_count < 0) arg_count = 0;
 
             bool param_mismatch = false;
-            if (proc_symbol && proc_symbol->type_def) {
+            if (!proc_symbol && procPtrSignature) {
+                const char* pointerName = NULL;
+                if (node->token && node->token->value) {
+                    pointerName = node->token->value;
+                } else if (calleeName && calleeName[0] != '\0') {
+                    pointerName = calleeName;
+                } else {
+                    pointerName = "<procedure pointer>";
+                }
+
+                int expected = procPtrParams ? procPtrParams->child_count : 0;
+                if (arg_count != expected) {
+                    fprintf(stderr,
+                            "L%d: Compiler Error: '%s' expects %d argument(s) but %d were provided.\n",
+                            line, pointerName, expected, arg_count);
+                    compiler_had_error = true;
+                    param_mismatch = true;
+                }
+
+                if (!param_mismatch) {
+                    for (int i = 0; i < expected; i++) {
+                        AST* param_node = procPtrParams ? procPtrParams->children[i] : NULL;
+                        AST* arg_node = node->children[i + arg_start];
+                        if (!param_node || !arg_node) {
+                            continue;
+                        }
+
+                        AST* param_type = param_node->type_def ? param_node->type_def
+                                                               : (param_node->right ? param_node->right : param_node);
+                        bool match = typesMatch(param_type, arg_node, false);
+                        if (!match) {
+                            AST* param_actual = resolveTypeAlias(param_type);
+                            AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                            if (param_actual && arg_actual) {
+                                if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects an array but got %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(arg_actual->var_type));
+                                } else if (param_actual->var_type != TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects %s but got an array.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(param_actual->var_type));
+                                } else if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type == TYPE_ARRAY) {
+                                    AST* param_elem = resolveTypeAlias(param_actual->right);
+                                    AST* arg_elem   = resolveTypeAlias(arg_actual->right);
+                                    const char* exp_str = param_elem ? varTypeToString(param_elem->var_type) : "UNKNOWN";
+                                    const char* got_str = arg_elem ? varTypeToString(arg_elem->var_type) : "UNKNOWN";
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects type ARRAY OF %s but got ARRAY OF %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            exp_str,
+                                            got_str);
+                                } else {
+                                    fprintf(stderr,
+                                            "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                            line, (long long)i + 1, pointerName,
+                                            varTypeToString(param_actual->var_type),
+                                            varTypeToString(arg_actual->var_type));
+                                }
+                            } else {
+                                VarType expected_vt = param_actual ? param_actual->var_type : param_type->var_type;
+                                VarType actual_vt   = arg_actual ? arg_actual->var_type : arg_node->var_type;
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' expects type %s but got %s.\n",
+                                        line, (long long)i + 1, pointerName,
+                                        varTypeToString(expected_vt),
+                                        varTypeToString(actual_vt));
+                            }
+                            compiler_had_error = true;
+                            param_mismatch = true;
+                            break;
+                        }
+
+                        if (param_node->by_ref) {
+                            bool is_lvalue = (arg_node->type == AST_VARIABLE ||
+                                              arg_node->type == AST_FIELD_ACCESS ||
+                                              arg_node->type == AST_ARRAY_ACCESS ||
+                                              arg_node->type == AST_DEREFERENCE);
+                            if (!is_lvalue) {
+                                fprintf(stderr,
+                                        "L%d: Compiler Error: argument %lld to '%s' must be a variable (VAR parameter).\n",
+                                        line, (long long)i + 1, pointerName);
+                                compiler_had_error = true;
+                                param_mismatch = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if (proc_symbol && proc_symbol->type_def) {
                 int expected = proc_symbol->type_def->child_count;
                 bool is_inc_dec = callee_is_builtin &&
                                    (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0);
@@ -6502,6 +6884,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                          strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
                 )) {
                     is_var_param = true;
+                }
+                else if (!proc_symbol && procPtrParams && param_index < procPtrParams->child_count) {
+                    AST* param_node = procPtrParams->children[param_index];
+                    if (param_node && param_node->by_ref) {
+                        is_var_param = true;
+                    }
                 }
                 else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
                     AST* param_node = proc_symbol->type_def->children[param_index];
@@ -7361,7 +7749,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compileRValue(rvalue, chunk, getLine(rvalue));
                 writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
 
-                if (current_function_compiler && current_function_compiler->name && lvalue->type == AST_VARIABLE &&
+                if (current_function_compiler && current_function_compiler->returns_value &&
+                    current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
                     (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
                      strcasecmp(lvalue->token->value, "result") == 0)) {

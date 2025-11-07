@@ -13,6 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <limits.h>
+#include <stdint.h>
 
 // Define the helper function *only* when DEBUG is enabled
 // No 'static inline' needed here as it's defined only once in this file.
@@ -99,6 +102,10 @@ static bool tokenIsIdentifierLike(const Token *token) {
 
 static bool currentTokenIsIdentifierLike(Parser *parser) {
     return parser && tokenIsIdentifierLike(parser->current_token);
+}
+
+static bool tokenMatchesKeyword(const Token *token, const char *keyword) {
+    return token && token->value && keyword && strcasecmp(token->value, keyword) == 0;
 }
 
 static AST *labelDeclarationBlock(Parser *parser) {
@@ -709,6 +716,7 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
     eat(parser, originalName->type);
 
     AST *routine = newASTNode(isFunction ? AST_FUNCTION_DECL : AST_PROCEDURE_DECL, copiedName);
+    routine->is_forward_decl = true;
     freeToken(copiedName);
 
     AST *params = NULL;
@@ -796,6 +804,8 @@ static void registerRecordMethodPrototype(Parser *parser, const char *recordName
     if (!methodCopy) {
         EXIT_FAILURE_HANDLER();
     }
+
+    methodCopy->is_forward_decl = true;
 
     if (methodCopy->token && methodCopy->token->value) {
         size_t recordLen = strlen(recordName);
@@ -1177,6 +1187,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
         // Ensure arity matches the declaration's parameter count
         existing_sym->arity = proc_decl_ast_original->child_count;
         existing_sym->is_inline = proc_decl_ast_original->is_inline;
+        existing_sym->is_defined = !proc_decl_ast_original->is_forward_decl;
 
         // The update is complete. Free the constructed name and return.
         free(name_for_table);
@@ -1258,7 +1269,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
     sym->closure_escapes = false;
     sym->next = NULL;
     sym->enclosing = NULL;
-    sym->is_defined = true; // For built-ins and user procedures parsed with body, it is defined.
+    sym->is_defined = !proc_decl_ast_original->is_forward_decl; // Only mark defined when a body is present
     sym->bytecode_address = -1; // -1 can indicate no address assigned yet.
     sym->arity = proc_decl_ast_original->child_count; // Store parameter count for builtins and declarations
     sym->locals_count = 0;      // Will be updated later.
@@ -1611,6 +1622,7 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         return newASTNode(AST_NOOP, NULL);
     }
     AST *node = newASTNode(AST_PROCEDURE_DECL, copiedProcNameToken);
+    node->is_forward_decl = in_interface;
     // freeToken(copiedProcNameToken); // Already handled if newASTNode copies
 
     // *** ADD DIAGNOSTIC PRINT HERE ***
@@ -1694,7 +1706,16 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
         eat(parser, TOKEN_SEMICOLON);
     }
 
-    if (!in_interface) {
+    if (parser->current_token && parser->current_token->type == TOKEN_FORWARD) {
+        node->is_forward_decl = true;
+        eat(parser, TOKEN_FORWARD);
+        if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+            errorParser(parser, "Expected ';' after FORWARD directive");
+        }
+        eat(parser, TOKEN_SEMICOLON);
+    }
+
+    if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
@@ -2003,25 +2024,97 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
             eat(parser, TOKEN_LPAREN);
             paramsList = newASTNode(AST_LIST, NULL);
             while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
-                // Support optional named parameters: name ':' type
+                bool byRef = false;
+                bool isConst = false;
+
+                while (parser->current_token) {
+                    bool isVarModifier = parser->current_token->type == TOKEN_VAR;
+                    bool isConstModifier = parser->current_token->type == TOKEN_CONST;
+                    bool isOutModifier = parser->current_token->type == TOKEN_IDENTIFIER &&
+                                         tokenMatchesKeyword(parser->current_token, "out");
+                    if (!(isVarModifier || isConstModifier || isOutModifier)) {
+                        break;
+                    }
+
+                    if (isVarModifier || isOutModifier) {
+                        byRef = true;
+                    }
+                    if (isConstModifier) {
+                        isConst = true;
+                    }
+                    eat(parser, parser->current_token->type);
+                }
+
+                AST* paramDecl = newASTNode(AST_VAR_DECL, NULL);
+                if (!paramDecl) {
+                    if (kwTok) freeToken(kwTok);
+                    freeAST(paramsList);
+                    return NULL;
+                }
+
                 if (tokenIsIdentifierLike(parser->current_token)) {
                     Token* nextTok = peekToken(parser);
                     bool hasNameThenColon = (nextTok && nextTok->type == TOKEN_COLON);
                     if (nextTok) freeToken(nextTok);
                     if (hasNameThenColon) {
-                        eat(parser, parser->current_token->type); // consume param name
-                        eat(parser, TOKEN_COLON);      // consume ':'
+                        AST* nameNode = newASTNode(AST_VARIABLE, parser->current_token);
+                        if (!nameNode) {
+                            freeAST(paramDecl);
+                            if (kwTok) freeToken(kwTok);
+                            freeAST(paramsList);
+                            return NULL;
+                        }
+                        eat(parser, parser->current_token->type);
+                        addChild(paramDecl, nameNode);
+                        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+                            errorParser(parser, "Expected ':' after parameter name");
+                            freeAST(paramsList);
+                            if (kwTok) freeToken(kwTok);
+                            freeAST(paramDecl);
+                            return NULL;
+                        }
+                        eat(parser, TOKEN_COLON);
                     }
                 }
-                // Parse the type after an optional name (or the type name itself if unnamed)
-                AST* ptype = typeSpecifier(parser, 1);
-                if (!ptype) { freeAST(paramsList); if (kwTok) freeToken(kwTok); return NULL; }
-                addChild(paramsList, ptype);
-                if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
-                    eat(parser, TOKEN_COMMA);
-                } else {
+
+                AST* paramType = typeSpecifier(parser, 1);
+                if (!paramType) {
+                    freeAST(paramDecl);
+                    freeAST(paramsList);
+                    if (kwTok) freeToken(kwTok);
+                    return NULL;
+                }
+
+                setRight(paramDecl, paramType);
+                paramDecl->type_def = paramType;
+                setTypeAST(paramDecl, paramType->var_type);
+                paramDecl->by_ref = byRef ? 1 : 0;
+
+                (void)isConst;
+
+                addChild(paramsList, paramDecl);
+
+                if (!parser->current_token) {
+                    errorParser(parser, "Expected ')' to close parameter type list");
+                    if (kwTok) freeToken(kwTok);
+                    freeAST(paramsList);
+                    return NULL;
+                }
+
+                if (parser->current_token->type == TOKEN_COMMA ||
+                    parser->current_token->type == TOKEN_SEMICOLON) {
+                    eat(parser, parser->current_token->type);
+                    continue;
+                }
+
+                if (parser->current_token->type == TOKEN_RPAREN) {
                     break;
                 }
+
+                errorParser(parser, "Expected ',', ';', or ')' after parameter type");
+                if (kwTok) freeToken(kwTok);
+                freeAST(paramsList);
+                return NULL;
             }
             if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
                 errorParser(parser, "Expected ')' to close parameter type list");
@@ -2098,6 +2191,19 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                 node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken
                 setTypeAST(node, basicType);
                 eat(parser, parser->current_token->type); // Consume the type identifier
+
+                if (basicType == TYPE_FILE && parser->current_token &&
+                    parser->current_token->type == TOKEN_OF) {
+                    eat(parser, TOKEN_OF);
+                    AST *elementType = typeSpecifier(parser, 1);
+                    if (!elementType || elementType->type == AST_NOOP) {
+                        errorParser(parser, "Invalid element type for file");
+                        free(typeNameCopy);
+                        freeAST(node);
+                        return NULL;
+                    }
+                    setRight(node, elementType);
+                }
             } else {
                 // User-defined type reference
                 AST *userType = lookupType(typeNameCopy);
@@ -2375,6 +2481,7 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
     }
 
     AST *node = newASTNode(AST_FUNCTION_DECL, copiedFuncNameToken);
+    node->is_forward_decl = in_interface;
     // newASTNode makes its own copy, so we can free copiedFuncNameToken after node creation
     // BUT we assign node->token to copiedFuncNameToken in newASTNode, so freeToken(copiedFuncNameToken)
     // at the end of this function is correct if newASTNode's copy is what's stored in node->token.
@@ -2461,7 +2568,16 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
         eat(parser, TOKEN_SEMICOLON);
     }
 
-    if (!in_interface) {
+    if (parser->current_token && parser->current_token->type == TOKEN_FORWARD) {
+        node->is_forward_decl = true;
+        eat(parser, TOKEN_FORWARD);
+        if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+            errorParser(parser, "Expected ';' after FORWARD directive");
+        }
+        eat(parser, TOKEN_SEMICOLON);
+    }
+
+    if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
 
         AST *local_declarations = declarations(parser, false);
@@ -2501,13 +2617,17 @@ AST *paramList(Parser *parser) {
     AST *compound = newASTNode(AST_COMPOUND, NULL);
     while (parser->current_token->type != TOKEN_RPAREN) {
         int byRef = 0;
-        if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT || parser->current_token->type == TOKEN_CONST) {
-            // If it's VAR or OUT, mark as pass-by-reference
-            if (parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_OUT) {
-                 byRef = 1;
+        if (parser->current_token) {
+            bool isVarModifier = parser->current_token->type == TOKEN_VAR;
+            bool isConstModifier = parser->current_token->type == TOKEN_CONST;
+            bool isOutModifier = parser->current_token->type == TOKEN_IDENTIFIER &&
+                                 tokenMatchesKeyword(parser->current_token, "out");
+            if (isVarModifier || isConstModifier || isOutModifier) {
+                if (isVarModifier || isOutModifier) {
+                    byRef = 1;
+                }
+                eat(parser, parser->current_token->type);
             }
-            // Consume the keyword (VAR, OUT, or CONST)
-            eat(parser, parser->current_token->type);
         }
 
         AST *group = newASTNode(AST_VAR_DECL, NULL); // Temp node for names
@@ -3675,13 +3795,78 @@ AST *factor(Parser *parser) {
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_STRING_CONST) {
-        /* Treat zero-length strings as TYPE_STRING and single-character strings as TYPE_CHAR */
-        size_t len = (initialToken->value ? strlen(initialToken->value) : 0);
-        int isChar = (len == 1);
-        Token* c = copyToken(initialToken);
-        eat(parser, initialTokenType); // Eat the string token
-        node = newASTNode(AST_STRING, c); freeToken(c);
-        setTypeAST(node, isChar ? TYPE_CHAR : TYPE_STRING);
+        /* Concatenate immediately adjacent string tokens (including `#nn` char codes)
+         * into a single literal.  The lexer represents `#0` with `length == 0`, so
+         * treat those as single-byte segments while copying. */
+        size_t bufferLen = 0;
+        size_t bufferCap = 0;
+        char *buffer = NULL;
+        bool allCharCodes = true;
+        int initialLine = initialToken ? initialToken->line : 0;
+        int initialColumn = initialToken ? initialToken->column : 0;
+
+        while (parser->current_token && parser->current_token->type == TOKEN_STRING_CONST) {
+            Token *segment = parser->current_token;
+            size_t chunkLen = segment->length;
+            if (segment->is_char_code && chunkLen == 0) {
+                chunkLen = 1;
+            }
+
+            size_t required = bufferLen + chunkLen + 1; // keep space for terminator
+            if (required > bufferCap) {
+                size_t newCap = bufferCap ? bufferCap : 16;
+                while (newCap < required) {
+                    if (newCap > SIZE_MAX / 2) {
+                        newCap = required;
+                        break;
+                    }
+                    newCap *= 2;
+                }
+                char *resized = realloc(buffer, newCap);
+                if (!resized) {
+                    free(buffer);
+                    fprintf(stderr, "Memory allocation error concatenating string literal\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                buffer = resized;
+                bufferCap = newCap;
+            }
+
+            if (chunkLen > 0 && segment->value) {
+                memcpy(buffer + bufferLen, segment->value, chunkLen);
+                bufferLen += chunkLen;
+            }
+
+            if (!segment->is_char_code && chunkLen > 0) {
+                allCharCodes = false;
+            }
+
+            eat(parser, TOKEN_STRING_CONST);
+        }
+
+        if (!buffer) {
+            bufferCap = 1;
+            buffer = malloc(bufferCap);
+            if (!buffer) {
+                fprintf(stderr, "Memory allocation error concatenating empty string literal\n");
+                EXIT_FAILURE_HANDLER();
+            }
+        }
+
+        buffer[bufferLen] = '\0';
+
+        Token combinedToken;
+        combinedToken.type = TOKEN_STRING_CONST;
+        combinedToken.value = buffer;
+        combinedToken.length = bufferLen;
+        combinedToken.line = initialLine;
+        combinedToken.column = initialColumn;
+        combinedToken.is_char_code = (bufferLen == 1) && allCharCodes;
+
+        node = newASTNode(AST_STRING, &combinedToken);
+        free(buffer);
+
+        setTypeAST(node, (bufferLen == 1) ? TYPE_CHAR : TYPE_STRING);
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_IDENTIFIER) {

@@ -18,6 +18,7 @@ Start here to explore the available guides and references in this directory.
 
 ## exsh front end
 - [exsh_overview.md](exsh_overview.md): running shell scripts on the PSCAL VM, caching and builtin integration for exsh.
+- [exsh_debug_log.md](exsh_debug_log.md): enabling and reading the structured debug log.
 
 ## Rea front end
 - [rea_overview.md](rea_overview.md): architecture and roadmap of the experimental Rea compiler.

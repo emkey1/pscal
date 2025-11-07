@@ -3972,6 +3972,56 @@ static inline uint32_t READ_UINT32(VM* vm_param) {
 
 #define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
 
+static bool vmSizeForVarType(VarType type, long long* out_bytes) {
+    if (!out_bytes) {
+        return false;
+    }
+    switch (type) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_CHAR:
+            *out_bytes = 1;
+            return true;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+        case TYPE_WORD:
+            *out_bytes = 2;
+            return true;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+            *out_bytes = 4;
+            return true;
+        case TYPE_INT64:
+        case TYPE_UINT64:
+            *out_bytes = 8;
+            return true;
+        case TYPE_FLOAT:
+            *out_bytes = (long long)sizeof(float);
+            return true;
+        case TYPE_DOUBLE:
+            *out_bytes = (long long)sizeof(double);
+            return true;
+        case TYPE_LONG_DOUBLE:
+            *out_bytes = (long long)sizeof(long double);
+            return true;
+        case TYPE_POINTER:
+        case TYPE_FILE:
+        case TYPE_MEMORYSTREAM:
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+        case TYPE_THREAD:
+            *out_bytes = (long long)sizeof(void*);
+            return true;
+        case TYPE_ENUM:
+            *out_bytes = (long long)sizeof(int);
+            return true;
+        default:
+            return false;
+    }
+}
+
 // --- Symbol Management (VM specific) ---
 static Symbol* createSymbolForVM(const char* name, VarType type, AST* type_def_for_value_init) {
     if (!name || name[0] == '\0') { /* ... */ return NULL; }
@@ -4048,7 +4098,13 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
 
         VarType elem_var_type = (VarType)READ_BYTE();
-        uint8_t elem_name_idx = READ_BYTE();
+        uint16_t elem_name_idx = READ_SHORT(vm);
+        if (elem_name_idx >= vm->chunk->constants_count) {
+            runtimeError(vm, "VM Error: Array element type constant index out of range for '%s'.", varNameVal.s_val);
+            if (lower_bounds) free(lower_bounds);
+            if (upper_bounds) free(upper_bounds);
+            return INTERPRET_RUNTIME_ERROR;
+        }
         Value elem_name_val = vm->chunk->constants[elem_name_idx];
         AST* elem_type_def = NULL;
         if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
@@ -4104,6 +4160,12 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
     } else {
         uint16_t type_name_idx = READ_SHORT(vm);
+        VarType file_element_type = TYPE_VOID;
+        uint16_t file_element_name_idx = 0xFFFF;
+        if (declaredType == TYPE_FILE) {
+            file_element_type = (VarType)READ_BYTE();
+            file_element_name_idx = READ_SHORT(vm);
+        }
         int str_len = 0;
         uint16_t len_idx = 0;
         if (declaredType == TYPE_STRING) {
@@ -4181,6 +4243,26 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
             hashTableInsert(vm->vmGlobalSymbols, sym);
         } else {
             runtimeWarning(vm, "VM Warning: Global variable '%s' redefined.", varNameVal.s_val);
+        }
+
+        if (declaredType == TYPE_FILE && sym && sym->value) {
+            if (file_element_type != TYPE_VOID && file_element_type != TYPE_UNKNOWN) {
+                sym->value->element_type = file_element_type;
+                long long bytes = 0;
+                if (vmSizeForVarType(file_element_type, &bytes) && bytes > 0 && bytes <= INT_MAX) {
+                    sym->value->record_size = (int)bytes;
+                    sym->value->record_size_explicit = true;
+                }
+            }
+            if (file_element_name_idx != 0xFFFF && file_element_name_idx < vm->chunk->constants_count) {
+                Value elem_name_val = vm->chunk->constants[file_element_name_idx];
+                if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
+                    AST* elem_def = lookupType(elem_name_val.s_val);
+                    if (elem_def) {
+                        sym->value->element_type_def = elem_def;
+                    }
+                }
+            }
         }
     }
 
@@ -5104,6 +5186,47 @@ dispatch_switch:
                         runtimeError(vm,
                                      "Runtime Error: Invalid operator for memory stream comparison. Only '=' and '<>' are allowed. Got opcode %d.",
                                      instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+                // Interface and NIL comparison
+                else if ((a_val.type == TYPE_INTERFACE || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_INTERFACE || b_val.type == TYPE_NIL)) {
+                    ClosureEnvPayload* payload_a = (a_val.type == TYPE_INTERFACE) ? a_val.interface.payload : NULL;
+                    ClosureEnvPayload* payload_b = (b_val.type == TYPE_INTERFACE) ? b_val.interface.payload : NULL;
+                    bool interfaces_equal = (payload_a == payload_b);
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(interfaces_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!interfaces_equal);
+                    } else {
+                        runtimeError(vm, "Runtime Error: Invalid operator for interface comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
+                        freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
+                    }
+                    comparison_succeeded = true;
+                }
+                // Closure and NIL comparison
+                else if ((a_val.type == TYPE_CLOSURE || a_val.type == TYPE_NIL) &&
+                         (b_val.type == TYPE_CLOSURE || b_val.type == TYPE_NIL)) {
+                    bool closures_equal = false;
+                    if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
+                        closures_equal = true;
+                    } else if (a_val.type == TYPE_CLOSURE && b_val.type == TYPE_CLOSURE) {
+                        closures_equal = (a_val.closure.entry_offset == b_val.closure.entry_offset) &&
+                                         (a_val.closure.symbol == b_val.closure.symbol) &&
+                                         (a_val.closure.env == b_val.closure.env);
+                    } else {
+                        closures_equal = false;
+                    }
+
+                    if (instruction_val == EQUAL) {
+                        result_val = makeBoolean(closures_equal);
+                    } else if (instruction_val == NOT_EQUAL) {
+                        result_val = makeBoolean(!closures_equal);
+                    } else {
+                        runtimeError(vm, "Runtime Error: Invalid operator for closure comparison. Only '=' and '<>' are allowed. Got opcode %d.", instruction_val);
                         freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
@@ -6575,7 +6698,13 @@ comparison_error_label:
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
-                uint8_t elem_name_idx = READ_BYTE();
+                uint16_t elem_name_idx = READ_SHORT(vm);
+                if (elem_name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Array element type constant index out of range.");
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value elem_name_val = vm->chunk->constants[elem_name_idx];
                 AST* elem_type_def = NULL;
                 if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
@@ -6665,7 +6794,13 @@ comparison_error_label:
                 }
 
                 VarType elem_var_type = (VarType)READ_BYTE();
-                uint8_t elem_name_idx = READ_BYTE();
+                uint16_t elem_name_idx = READ_SHORT(vm);
+                if (elem_name_idx >= vm->chunk->constants_count) {
+                    runtimeError(vm, "VM Error: Array element type constant index out of range for INIT_FIELD_ARRAY.");
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 Value elem_name_val = vm->chunk->constants[elem_name_idx];
                 AST* elem_type_def = NULL;
                 if (elem_name_val.type == TYPE_STRING && elem_name_val.s_val && elem_name_val.s_val[0] != '\0') {
@@ -6756,10 +6891,30 @@ comparison_error_label:
             }
             case INIT_LOCAL_FILE: {
                 uint8_t slot = READ_BYTE();
+                VarType element_type = (VarType)READ_BYTE();
+                uint16_t type_name_index = READ_SHORT(vm);
+                AST* element_type_def = NULL;
+                if (type_name_index != 0xFFFF && type_name_index < vm->chunk->constants_count) {
+                    Value type_name_val = vm->chunk->constants[type_name_index];
+                    if (type_name_val.type == TYPE_STRING && type_name_val.s_val && type_name_val.s_val[0] != '\0') {
+                        element_type_def = lookupType(type_name_val.s_val);
+                    }
+                }
+
                 CallFrame* frame = &vm->frames[vm->frameCount - 1];
                 Value* target_slot = &frame->slots[slot];
                 freeValue(target_slot);
-                *target_slot = makeValueForType(TYPE_FILE, NULL, NULL);
+                Value file_val = makeValueForType(TYPE_FILE, NULL, NULL);
+                if (element_type != TYPE_VOID && element_type != TYPE_UNKNOWN) {
+                    file_val.element_type = element_type;
+                    file_val.element_type_def = element_type_def;
+                    long long bytes = 0;
+                    if (vmSizeForVarType(element_type, &bytes) && bytes > 0 && bytes <= INT_MAX) {
+                        file_val.record_size = (int)bytes;
+                        file_val.record_size_explicit = true;
+                    }
+                }
+                *target_slot = file_val;
                 break;
             }
             case INIT_LOCAL_POINTER: {

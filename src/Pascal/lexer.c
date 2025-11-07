@@ -146,13 +146,12 @@ static Keyword keywords[] = {
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
     {"end", TOKEN_END}, {"enum", TOKEN_ENUM}, // Added enum
     {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
-    {"function", TOKEN_FUNCTION}, {"goto", TOKEN_GOTO}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
+    {"forward", TOKEN_FORWARD}, {"function", TOKEN_FUNCTION}, {"goto", TOKEN_GOTO}, {"if", TOKEN_IF}, {"implementation", TOKEN_IMPLEMENTATION},
     {"in", TOKEN_IN}, // Added IN
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
     {"interface", TOKEN_INTERFACE}, {"is", TOKEN_IS}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
-    {"out", TOKEN_OUT}, // Added OUT
     {"pointer", TOKEN_POINTER},
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
     {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
@@ -377,6 +376,7 @@ Token *identifier(Lexer *lexer) {
     token->type = TOKEN_IDENTIFIER; // Default to IDENTIFIER
     token->line = token_line;
     token->column = token_column;
+    token->is_char_code = false;
     for (int i = 0; i < (int)NUM_KEYWORDS; i++) {
         // ADD DEBUG PRINT 3: See the comparison being made
         // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);
@@ -626,7 +626,9 @@ Token *getNextToken(Lexer *lexer) {
              * constants. */
             char_buf[0] = (unsigned char)val;
             char_buf[1] = '\0';
-            return newToken(TOKEN_STRING_CONST, char_buf, start_line, start_column);
+            Token *char_token = newToken(TOKEN_STRING_CONST, char_buf, start_line, start_column);
+            char_token->is_char_code = true;
+            return char_token;
         }
         
         // Handle Hex Constant ($ followed by hex digits)

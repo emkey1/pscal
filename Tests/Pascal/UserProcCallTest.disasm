@@ -5,60 +5,60 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0000    1 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
 0007   17 DEFINE_GLOBAL    NameIdx:3   'data' Type:ARRAY Dims:1 [1..3] of INTEGER ('integer')
-0017   18 DEFINE_GLOBAL    NameIdx:7   'i' Type:INTEGER ('integer')
-0022    6 JUMP               10 (to 0035)
+0018   18 DEFINE_GLOBAL    NameIdx:7   'i' Type:INTEGER ('integer')
+0023    6 JUMP               10 (to 0036)
 
---- Function doubleit (at 0025) ---
-0025    8 GET_LOCAL           0 (slot)
-0027    | CONSTANT            8 '2'
-0029    | MULTIPLY
-0030    | SET_LOCAL           1 (slot)
-0032    6 GET_LOCAL           1 (slot)
-0034    | RETURN
-0035   11 JUMP               13 (to 0051)
+--- Function doubleit (at 0026) ---
+0026    8 GET_LOCAL           0 (slot)
+0028    | CONSTANT            8 '2'
+0030    | MULTIPLY
+0031    | SET_LOCAL           1 (slot)
+0033    6 GET_LOCAL           1 (slot)
+0035    | RETURN
+0036   11 JUMP               13 (to 0052)
 
---- Procedure printvalue (at 0038) ---
-0038   13 CONSTANT            4 '1'
-0040    | CONSTANT            9 'value='
-0042    | GET_LOCAL           0 (slot)
-0044    | CALL_BUILTIN_PROC   176 'write' (3 args)
-0050   11 RETURN
-0051   20 CONSTANT            4 '1'
-0053    | CONSTANT           11 'double='
-0055    | CONSTANT           12 '5'
-0057    | CALL_USER_PROC      13 'doubleit' @0025 (1 args)
-0061    | CALL_BUILTIN_PROC   176 'write' (3 args)
-0067   21 CONSTANT            5 '3'
-0069    | GET_GLOBAL_ADDRESS    3 'data'
-0071    | GET_ELEMENT_ADDRESS_CONST          0 (flat offset)
-0076    0 SWAP
-0077    | SET_INDIRECT
-0078   22 CONSTANT           14 '4'
-0080    | GET_GLOBAL_ADDRESS    3 'data'
-0082    | GET_ELEMENT_ADDRESS_CONST          1 (flat offset)
-0087    0 SWAP
-0088    | SET_INDIRECT
-0089   23 CONSTANT           12 '5'
-0091    | GET_GLOBAL_ADDRESS    3 'data'
-0093    | GET_ELEMENT_ADDRESS_CONST          2 (flat offset)
-0098    0 SWAP
-0099    | SET_INDIRECT
-0100   24 CONSTANT            4 '1'
-0102    | SET_GLOBAL          7 'i'
-0104    | GET_GLOBAL          7 'i'
-0106    | CONSTANT            5 '3'
-0108    | LESS_EQUAL
-0109    | JUMP_IF_FALSE      20 (to 0132)
-0112   25 GET_GLOBAL          7 'i'
-0114    | GET_GLOBAL_ADDRESS    3 'data'
-0116    | LOAD_ELEMENT_VALUE    1 (dims)
-0118    | CALL_USER_PROC      15 'printvalue' @0038 (1 args)
-0122   24 GET_GLOBAL          7 'i'
-0124    | CONSTANT            4 '1'
-0126    | ADD
-0127    | SET_GLOBAL          7 'i'
-0129    | JUMP              -28 (to 0104)
-0132    1 HALT
+--- Procedure printvalue (at 0039) ---
+0039   13 CONSTANT            4 '1'
+0041    | CONSTANT            9 'value='
+0043    | GET_LOCAL           0 (slot)
+0045    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0051   11 RETURN
+0052   20 CONSTANT            4 '1'
+0054    | CONSTANT           11 'double='
+0056    | CONSTANT           12 '5'
+0058    | CALL_USER_PROC      13 'doubleit' @0026 (1 args)
+0062    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0068   21 CONSTANT            5 '3'
+0070    | GET_GLOBAL_ADDRESS    3 'data'
+0072    | GET_ELEMENT_ADDRESS_CONST          0 (flat offset)
+0077    0 SWAP
+0078    | SET_INDIRECT
+0079   22 CONSTANT           14 '4'
+0081    | GET_GLOBAL_ADDRESS    3 'data'
+0083    | GET_ELEMENT_ADDRESS_CONST          1 (flat offset)
+0088    0 SWAP
+0089    | SET_INDIRECT
+0090   23 CONSTANT           12 '5'
+0092    | GET_GLOBAL_ADDRESS    3 'data'
+0094    | GET_ELEMENT_ADDRESS_CONST          2 (flat offset)
+0099    0 SWAP
+0100    | SET_INDIRECT
+0101   24 CONSTANT            4 '1'
+0103    | SET_GLOBAL          7 'i'
+0105    | GET_GLOBAL          7 'i'
+0107    | CONSTANT            5 '3'
+0109    | LESS_EQUAL
+0110    | JUMP_IF_FALSE      20 (to 0133)
+0113   25 GET_GLOBAL          7 'i'
+0115    | GET_GLOBAL_ADDRESS    3 'data'
+0117    | LOAD_ELEMENT_VALUE    1 (dims)
+0119    | CALL_USER_PROC      15 'printvalue' @0039 (1 args)
+0123   24 GET_GLOBAL          7 'i'
+0125    | CONSTANT            4 '1'
+0127    | ADD
+0128    | SET_GLOBAL          7 'i'
+0130    | JUMP              -28 (to 0105)
+0133    1 HALT
 == End Disassembly: Pascal/UserProcCallTest ==
 
 Constants (16):\n  0000: STR   "myself"

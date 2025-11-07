@@ -40,12 +40,30 @@ static Symbol *lookupProcedureInAncestors(const char *loweredName, AST *scope) {
         if (!curr->symbol_table) {
             continue;
         }
-        HashTable *table = (HashTable *)curr->symbol_table;
-        Symbol *sym = hashTableLookup(table, loweredName);
-        if (!sym) {
-            continue;
+
+        Symbol *sym = NULL;
+        if (curr->type == AST_UNIT) {
+            for (Symbol *unitSym = curr->symbol_table; unitSym; unitSym = unitSym->next) {
+                if (!unitSym->name) {
+                    continue;
+                }
+                char lowered_unit_name[MAX_SYMBOL_LENGTH];
+                strncpy(lowered_unit_name, unitSym->name, sizeof(lowered_unit_name) - 1);
+                lowered_unit_name[sizeof(lowered_unit_name) - 1] = '\0';
+                toLowerString(lowered_unit_name);
+                if (strcmp(lowered_unit_name, loweredName) == 0) {
+                    sym = unitSym;
+                    break;
+                }
+            }
+        } else {
+            HashTable *table = (HashTable *)curr->symbol_table;
+            sym = hashTableLookup(table, loweredName);
         }
-        return resolveSymbolAlias(sym);
+
+        if (sym) {
+            return resolveSymbolAlias(sym);
+        }
     }
     return NULL;
 }
@@ -81,6 +99,32 @@ Symbol *resolveProcedureSymbolInScope(const char *name, AST *referenceNode, AST 
     return sym ? resolveSymbolAlias(sym) : NULL;
 }
 
+static VarType procPointerParamType(AST* param) {
+    if (!param) {
+        return TYPE_VOID;
+    }
+    if (param->type == AST_VAR_DECL) {
+        if (param->type_def && param->type_def->var_type != TYPE_VOID) {
+            return param->type_def->var_type;
+        }
+        if (param->right && param->right->var_type != TYPE_VOID) {
+            return param->right->var_type;
+        }
+        return param->var_type;
+    }
+    return param->var_type;
+}
+
+static bool procPointerParamByRef(AST* param) {
+    if (!param) {
+        return false;
+    }
+    if (param->type == AST_VAR_DECL) {
+        return param->by_ref != 0;
+    }
+    return param->by_ref != 0;
+}
+
 static bool compareProcPointerParams(AST* lhsParams, AST* rhsParams, const char* rhsName) {
     int lhsCount = lhsParams ? lhsParams->child_count : 0;
     int rhsCount = rhsParams ? rhsParams->child_count : 0;
@@ -104,19 +148,38 @@ static bool compareProcPointerParams(AST* lhsParams, AST* rhsParams, const char*
         if (!lhsParam || !rhsParam) {
             continue;
         }
-        if (lhsParam->var_type != rhsParam->var_type) {
+        bool lhsByRef = procPointerParamByRef(lhsParam);
+        bool rhsByRef = procPointerParamByRef(rhsParam);
+        if (lhsByRef != rhsByRef) {
+            const char* expected_conv = lhsByRef ? "VAR/OUT" : "value";
+            const char* got_conv = rhsByRef ? "VAR/OUT" : "value";
+            if (rhsName) {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                        (long long)i + 1, rhsName, expected_conv, got_conv);
+            } else {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld passing convention mismatch in assignment (expected %s, got %s).\n",
+                        (long long)i + 1, expected_conv, got_conv);
+            }
+            pascal_semantic_error_count++;
+            return false;
+        }
+        VarType lhsType = procPointerParamType(lhsParam);
+        VarType rhsType = procPointerParamType(rhsParam);
+        if (lhsType != rhsType) {
             if (rhsName) {
                 fprintf(stderr,
                         "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
                         (long long)i + 1, rhsName,
-                        varTypeToString(lhsParam->var_type),
-                        varTypeToString(rhsParam->var_type));
+                        varTypeToString(lhsType),
+                        varTypeToString(rhsType));
             } else {
                 fprintf(stderr,
                         "Type error: proc pointer param %lld type mismatch in assignment (expected %s, got %s).\n",
                         (long long)i + 1,
-                        varTypeToString(lhsParam->var_type),
-                        varTypeToString(rhsParam->var_type));
+                        varTypeToString(lhsType),
+                        varTypeToString(rhsType));
             }
             pascal_semantic_error_count++;
             return false;
@@ -147,12 +210,25 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
         if (!lhsParam || !declParam) {
             continue;
         }
-        if (lhsParam->var_type != declParam->var_type) {
+        bool lhsByRef = procPointerParamByRef(lhsParam);
+        bool declByRef = procPointerParamByRef(declParam);
+        if (lhsByRef != declByRef) {
+            fprintf(stderr,
+                    "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                    (long long)i + 1, procName,
+                    lhsByRef ? "VAR/OUT" : "value",
+                    declByRef ? "VAR/OUT" : "value");
+            pascal_semantic_error_count++;
+            return false;
+        }
+        VarType lhsType = procPointerParamType(lhsParam);
+        VarType declType = procPointerParamType(declParam);
+        if (lhsType != declType) {
             fprintf(stderr,
                     "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
                     (long long)i + 1, procName,
-                    varTypeToString(lhsParam->var_type),
-                    varTypeToString(declParam->var_type));
+                    varTypeToString(lhsType),
+                    varTypeToString(declType));
             pascal_semantic_error_count++;
             return false;
         }
@@ -223,6 +299,7 @@ AST *newASTNode(ASTNodeType type, Token *token) {
     node->type = type;
     node->is_global_scope = false;
     node->is_inline = false;
+    node->is_forward_decl = false;
     node->is_virtual = false;
     node->i_val = 0; // Initialize i_val
     node->symbol_table = NULL; // Initialize symbol_table
@@ -840,7 +917,7 @@ void annotateTypes(AST *node, AST *currentScopeNode, AST *globalProgramNode) {
                 bool operand_is_procedure = false;
                 if (node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
                     const char* name = node->left->token->value;
-                    Symbol* procSym = lookupProcedure(name);
+                    Symbol* procSym = resolveProcedureSymbolInScope(name, node, globalProgramNode);
                     if (procSym) {
                         operand_is_procedure = true;
                     }
@@ -1168,7 +1245,7 @@ resolved_field: ;
                 node->var_type = (node->token && node->token->type == TOKEN_NOT) ? TYPE_BOOLEAN : (node->left ? node->left->var_type : TYPE_VOID);
                 break;
             case AST_PROCEDURE_CALL: {
-                 Symbol *procSymbol = node->token ? lookupProcedure(node->token->value) : NULL;
+                 Symbol *procSymbol = node->token ? resolveProcedureSymbolInScope(node->token->value, node, globalProgramNode) : NULL;
                 if (procSymbol) {
                     node->var_type = procSymbol->type;
                 } else {
@@ -1199,7 +1276,7 @@ resolved_field: ;
                              if (ftype && ftype->type == AST_PROC_PTR_TYPE) {
                                  if (actual->type == AST_ADDR_OF && actual->left && actual->left->token) {
                                      const char* aname = actual->left->token->value;
-                                     Symbol* as = lookupProcedure(aname);
+                                     Symbol* as = resolveProcedureSymbolInScope(aname, node, globalProgramNode);
                                      if (as && as->type_def) {
                                          AST* adecl = as->type_def;
                                          AST* fparams = (ftype->child_count > 0) ? ftype->children[0] : NULL;
@@ -1457,19 +1534,36 @@ resolved_field: ;
                             if (!rhsType && rhs->token && rhs->token->value && rhs->type == AST_PROCEDURE_CALL && rhs->child_count == 0) {
                                 const char *callName = rhs->token->value;
                                 Symbol* rhsProc = resolveProcedureSymbolInScope(callName, node, globalProgramNode);
-                            if (rhsProc && rhsProc->type_def) {
-                                rhsIsProcPointer = true;
-                                verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
-                                AST *designator = newASTNode(AST_VARIABLE, rhs->token);
-                                if (rhs->token) {
-                                    freeToken(rhs->token);
-                                    rhs->token = NULL;
+                                if (rhsProc && rhsProc->type_def) {
+                                    AST *resolvedProcType = resolveTypeAlias(rhsProc->type_def);
+                                    AST *resolvedReturnType = resolvedProcType ?
+                                            resolveTypeAlias(resolvedProcType->right) : NULL;
+
+                                    bool returnIsProcPointer = resolvedReturnType &&
+                                            resolvedReturnType->type == AST_PROC_PTR_TYPE;
+
+                                    if (!returnIsProcPointer) {
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                    }
+
+                                    if (returnIsProcPointer) {
+                                        rhsIsProcPointer = true;
+                                        rhs->var_type = TYPE_POINTER;
+                                        rhs->type_def = resolvedReturnType;
+                                        verifyProcPointerTypesCompatible(lhsType, resolvedReturnType);
+                                    } else {
+                                        rhsIsProcPointer = true;
+                                        AST *designator = newASTNode(AST_VARIABLE, rhs->token);
+                                        if (rhs->token) {
+                                            freeToken(rhs->token);
+                                            rhs->token = NULL;
+                                        }
+                                        rhs->type = AST_ADDR_OF;
+                                        rhs->var_type = TYPE_POINTER;
+                                        rhs->type_def = lhsType;
+                                        setLeft(rhs, designator);
+                                    }
                                 }
-                                rhs->type = AST_ADDR_OF;
-                                rhs->var_type = TYPE_POINTER;
-                                rhs->type_def = lhsType;
-                                setLeft(rhs, designator);
-                            }
                             }
 
                             if (!rhsIsProcPointer) {
@@ -1556,9 +1650,11 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "trunc")     == 0 ||
         strcasecmp(name, "random")    == 0 ||
         strcasecmp(name, "ioresult")  == 0 ||
+        strcasecmp(name, "filesize")  == 0 ||
         strcasecmp(name, "paramcount")== 0 ||
         strcasecmp(name, "length")    == 0 ||
         strcasecmp(name, "pos")       == 0 ||
+        strcasecmp(name, "sizeof")    == 0 ||
         strcasecmp(name, "screencols")== 0 ||
         strcasecmp(name, "screenrows")== 0 ||
         strcasecmp(name, "wherex")    == 0 ||
@@ -1584,6 +1680,7 @@ VarType getBuiltinReturnType(const char* name) {
 
     /* Memory stream helpers */
     if (strcasecmp(name, "mstreamcreate") == 0) return TYPE_MEMORYSTREAM;
+    if (strcasecmp(name, "mstreamloadfromfile") == 0) return TYPE_BOOLEAN;
 
     /* Threading helpers (new API) */
     if (strcasecmp(name, "createthread") == 0) return TYPE_THREAD;
@@ -1627,6 +1724,7 @@ AST *copyAST(AST *node) {
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
     newNode->is_inline = node->is_inline;
+    newNode->is_forward_decl = node->is_forward_decl;
     newNode->is_virtual = node->is_virtual;
     newNode->i_val = node->i_val;
     // Preserve pointers for unit_list and symbol_table (shallow copy).

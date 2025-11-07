@@ -12,6 +12,11 @@
 #include "list.h"
 #include <stdbool.h>
 
+// Default record size used for untyped files when RESET/REWRITE omit an
+// explicit size. Turbo Pascal historically defaults to 128 bytes; mirror that
+// so existing code that relies on the legacy behaviour keeps working.
+#define PSCAL_DEFAULT_FILE_RECORD_SIZE 128
+
 // Forward declaration of AST struct, as TypeEntry will use AST*
 struct AST;
 
@@ -132,6 +137,8 @@ typedef struct ValueStruct {
                          // Needed for new(), dispose(), dereferencing type checks.
 
     char *filename;
+    int record_size;      // Active record size for untyped file operations
+    bool record_size_explicit; // Whether the record size was explicitly requested
     int lower_bound;    // For single-dimensional arrays
     int upper_bound;    // For single-dimensional arrays
     int max_length;     // For fixed length strings (text: string[100];)
@@ -176,7 +183,7 @@ typedef enum {
     TOKEN_USES, TOKEN_EOF, TOKEN_HEX_CONST, TOKEN_UNKNOWN, TOKEN_UNIT,
     TOKEN_INTERFACE, TOKEN_IMPLEMENTATION, TOKEN_INITIALIZATION, TOKEN_ENUM,
     TOKEN_IN, TOKEN_IS, TOKEN_XOR, TOKEN_BREAK, TOKEN_RETURN, TOKEN_OUT, TOKEN_SHL, TOKEN_SHR,
-    TOKEN_SET, TOKEN_POINTER, TOKEN_CARET, TOKEN_NIL, TOKEN_INLINE, TOKEN_SPAWN, TOKEN_JOIN,
+    TOKEN_SET, TOKEN_POINTER, TOKEN_CARET, TOKEN_NIL, TOKEN_INLINE, TOKEN_FORWARD, TOKEN_SPAWN, TOKEN_JOIN,
     TOKEN_AT, TOKEN_LABEL, TOKEN_GOTO
 } TokenType;
 
@@ -186,6 +193,7 @@ typedef struct {
     size_t length;
     int line;
     int column;
+    bool is_char_code;
 } Token;
 
 /* =======================

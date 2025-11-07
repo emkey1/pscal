@@ -1,0 +1,3 @@
+after Increment: outValue=42
+global out identifier=3
+local out identifier=10

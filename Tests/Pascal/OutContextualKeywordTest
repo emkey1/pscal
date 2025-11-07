@@ -1,0 +1,29 @@
+program OutContextualKeywordTest;
+
+procedure Increment(out value: integer);
+begin
+  value := value + 1;
+end;
+
+procedure ShowOutIdentifier;
+var
+  out: integer;
+begin
+  out := 10;
+  writeln('local out identifier=', out);
+end;
+
+var
+  outValue: integer;
+  out: integer;
+
+begin
+  outValue := 41;
+  Increment(outValue);
+  writeln('after Increment: outValue=', outValue);
+
+  out := 3;
+  writeln('global out identifier=', out);
+
+  ShowOutIdentifier;
+end.

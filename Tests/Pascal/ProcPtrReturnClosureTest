@@ -1,0 +1,31 @@
+program ProcPtrReturnClosureTest;
+
+type
+  TGenerator = function: integer;
+
+function MakeGenerator(start, step: integer): TGenerator;
+var
+  current: integer;
+
+  function Next: integer;
+  begin
+    current := current + step;
+    Next := current;
+  end;
+begin
+  current := start;
+  MakeGenerator := @Next;
+end;
+
+var
+  genA, genB: TGenerator;
+begin
+  genA := MakeGenerator(0, 1);
+  genB := MakeGenerator(10, -2);
+
+  writeln('A->', genA());
+  writeln('A->', genA());
+  writeln('B->', genB());
+  writeln('A->', genA());
+  writeln('B->', genB());
+end.
