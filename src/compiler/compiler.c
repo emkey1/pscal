@@ -4091,10 +4091,26 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     uint8_t* original_code = chunk->code;
     int* original_lines = chunk->lines;
 
+    typedef struct {
+        int original_target;
+        int new_offset;
+    } JumpFixup;
+
+    typedef struct {
+        int operand_offset;
+        int original_address;
+    } AbsoluteFixup;
+
     uint8_t* optimized_code = (uint8_t*)malloc((size_t)original_count);
     int* optimized_lines = (int*)malloc((size_t)original_count * sizeof(int));
     int* offset_map = (int*)malloc((size_t)(original_count + 1) * sizeof(int));
     bool* original_instruction_starts = NULL;
+    JumpFixup* jump_fixes = NULL;
+    int jump_count = 0;
+    int jump_capacity = 0;
+    AbsoluteFixup* absolute_fixes = NULL;
+    int absolute_count = 0;
+    int absolute_capacity = 0;
     bool abort_optimizations = true;
 
     if (!optimized_code || !optimized_lines || !offset_map) {
@@ -4137,24 +4153,6 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     if (instruction_map_error) {
         goto cleanup;
     }
-
-    typedef struct {
-        int original_target;
-        int new_offset;
-    } JumpFixup;
-
-    typedef struct {
-        int operand_offset;
-        int original_address;
-    } AbsoluteFixup;
-
-    JumpFixup* jump_fixes = NULL;
-    int jump_count = 0;
-    int jump_capacity = 0;
-
-    AbsoluteFixup* absolute_fixes = NULL;
-    int absolute_count = 0;
-    int absolute_capacity = 0;
 
     int read_index = 0;
     int write_index = 0;

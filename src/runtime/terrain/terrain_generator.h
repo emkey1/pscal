@@ -6,7 +6,15 @@
 #include <stdint.h>
 
 #ifdef SDL
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <SDL2/SDL_opengl.h>
+#if defined(__has_include)
+#if __has_include(<SDL2/SDL_opengl_glext.h>)
+#include <SDL2/SDL_opengl_glext.h>
+#endif
+#endif
 #endif
 
 typedef struct TerrainGeneratorConfig {
