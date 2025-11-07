@@ -1010,6 +1010,7 @@ set(JSON2BC_SOURCES
     src/tools/ast_json_loader.c
     src/rea/type_stubs.c
     src/ast/ast.c
+    lib/noise/noise.c
     src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
