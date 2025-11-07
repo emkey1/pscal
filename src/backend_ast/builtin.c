@@ -1100,6 +1100,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sizeof", vmBuiltinSizeof},
     {"filesize", vmBuiltinFilesize},
     {"glcullface", NULL}, // Append new builtins above the placeholder to avoid shifting legacy IDs.
+    {"gllinewidth", NULL},
     {"to be filled", NULL}
 };
 

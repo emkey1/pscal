@@ -1111,6 +1111,27 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+Value vmBuiltinGllinewidth(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLLineWidth expects 1 numeric argument.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLLineWidth")) return makeVoid();
+
+    float width;
+    if (!valueToFloat(args[0], &width)) {
+        runtimeError(vm, "GLLineWidth argument must be numeric.");
+        return makeVoid();
+    }
+    if (width <= 0.0f) {
+        runtimeError(vm, "GLLineWidth requires a positive width.");
+        return makeVoid();
+    }
+
+    glLineWidth(width);
+    return makeVoid();
+}
+
 Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     if (arg_count != 0) {
         runtimeError(vm, "GLIsHardwareAccelerated does not take any arguments.");
