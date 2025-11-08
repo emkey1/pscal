@@ -150,6 +150,7 @@ typedef struct {
     int constants_capacity; // Allocated capacity for 'constants'
     Value* constants;   // Array of constants (Value structs: numbers, strings)
     int* builtin_lowercase_indices; // Maps string constant indices to their lowercase copies (-1 if not a builtin)
+    struct Symbol_s** global_symbol_cache;
 
     // Optional: For debugging runtime errors
     int* lines;         // Array storing the source line number for each byte of code

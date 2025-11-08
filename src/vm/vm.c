@@ -779,6 +779,18 @@ static void vmThreadJobQueueWake(ThreadJobQueue* queue) {
     pthread_mutex_unlock(&queue->mutex);
 }
 
+static Symbol* vmGetCachedGlobalSymbol(BytecodeChunk* chunk, int index) {
+    if (!chunk || !chunk->global_symbol_cache) return NULL;
+    if (index < 0 || index >= chunk->constants_capacity) return NULL;
+    return chunk->global_symbol_cache[index];
+}
+
+static void vmCacheGlobalSymbol(BytecodeChunk* chunk, int index, Symbol* sym) {
+    if (!chunk || !chunk->global_symbol_cache) return;
+    if (index < 0 || index >= chunk->constants_capacity) return;
+    chunk->global_symbol_cache[index] = sym;
+}
+
 static ThreadJob* vmThreadJobCreate(VM* vm,
                                     ThreadJobKind kind,
                                     BytecodeChunk* chunk,
@@ -6323,21 +6335,27 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = NULL;
-                if (vm->vmConstGlobalSymbols) {
-                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
-                    if (sym && sym->value) {
-                        push(vm, copyValueForStack(sym->value));
-                        break;
-                    }
-                }
-
-                pthread_mutex_lock(&globals_mutex);
-                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                pthread_mutex_unlock(&globals_mutex);
+                Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym || !sym->value) {
-                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
-                    return INTERPRET_RUNTIME_ERROR;
+                    Symbol* resolved = NULL;
+                    bool locked = false;
+                    if (vm->vmConstGlobalSymbols) {
+                        resolved = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    }
+                    if (!resolved) {
+                        pthread_mutex_lock(&globals_mutex);
+                        locked = true;
+                        resolved = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                        if (!resolved || !resolved->value) {
+                            pthread_mutex_unlock(&globals_mutex);
+                            runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                    }
+                    if (!locked) pthread_mutex_lock(&globals_mutex);
+                    vmCacheGlobalSymbol(vm->chunk, name_idx, resolved);
+                    pthread_mutex_unlock(&globals_mutex);
+                    sym = resolved;
                 }
 
                 if (!gTextAttrInitialized && name_val->s_val &&
@@ -6365,21 +6383,27 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                Symbol* sym = NULL;
-                if (vm->vmConstGlobalSymbols) {
-                    sym = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
-                    if (sym && sym->value) {
-                        push(vm, copyValueForStack(sym->value));
-                        break;
-                    }
-                }
-
-                pthread_mutex_lock(&globals_mutex);
-                sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
-                pthread_mutex_unlock(&globals_mutex);
+                Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym || !sym->value) {
-                    runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
-                    return INTERPRET_RUNTIME_ERROR;
+                    Symbol* resolved = NULL;
+                    bool locked = false;
+                    if (vm->vmConstGlobalSymbols) {
+                        resolved = hashTableLookup(vm->vmConstGlobalSymbols, name_val->s_val);
+                    }
+                    if (!resolved) {
+                        pthread_mutex_lock(&globals_mutex);
+                        locked = true;
+                        resolved = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                        if (!resolved || !resolved->value) {
+                            pthread_mutex_unlock(&globals_mutex);
+                            runtimeError(vm, "Runtime Error: Undefined global variable '%s'.", name_val->s_val);
+                            return INTERPRET_RUNTIME_ERROR;
+                        }
+                    }
+                    if (!locked) pthread_mutex_lock(&globals_mutex);
+                    vmCacheGlobalSymbol(vm->chunk, name_idx, resolved);
+                    pthread_mutex_unlock(&globals_mutex);
+                    sym = resolved;
                 }
 
                 if (!gTextAttrInitialized && name_val->s_val &&
@@ -6408,11 +6432,15 @@ comparison_error_label:
                 }
 
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym) {
-                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
-                    pthread_mutex_unlock(&globals_mutex);
-                    return INTERPRET_RUNTIME_ERROR;
+                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                    if (!sym) {
+                        pthread_mutex_unlock(&globals_mutex);
+                        runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    vmCacheGlobalSymbol(vm->chunk, name_idx, sym);
                 }
 
                 if (!sym->value) {
@@ -6425,7 +6453,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-                updateSymbol(name_val->s_val, value_from_stack);
+                updateSymbolDirect(sym, name_val->s_val, value_from_stack);
                 pthread_mutex_unlock(&globals_mutex);
                 break;
             }
@@ -6443,11 +6471,15 @@ comparison_error_label:
                 }
 
                 pthread_mutex_lock(&globals_mutex);
-                Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym) {
-                    runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
-                    pthread_mutex_unlock(&globals_mutex);
-                    return INTERPRET_RUNTIME_ERROR;
+                    sym = hashTableLookup(vm->vmGlobalSymbols, name_val->s_val);
+                    if (!sym) {
+                        pthread_mutex_unlock(&globals_mutex);
+                        runtimeError(vm, "Runtime Error: Global variable '%s' not defined for assignment.", name_val->s_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    vmCacheGlobalSymbol(vm->chunk, name_idx, sym);
                 }
 
                 if (!sym->value) {
@@ -6460,7 +6492,7 @@ comparison_error_label:
                 }
 
                 Value value_from_stack = pop(vm);
-                updateSymbol(name_val->s_val, value_from_stack);
+                updateSymbolDirect(sym, name_val->s_val, value_from_stack);
                 pthread_mutex_unlock(&globals_mutex);
                 break;
             }

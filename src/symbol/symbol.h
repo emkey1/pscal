@@ -70,6 +70,7 @@ Symbol *lookupSymbol(const char *name);
 Symbol *lookupGlobalSymbol(const char *name);
 Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);
+void updateSymbolDirect(Symbol *sym, const char *name, Value val);
 Symbol *lookupSymbolIn(HashTable *table, const char *name);
 void insertGlobalSymbol(const char *name, VarType type, struct AST *type_def_ast); // Use struct AST
 void insertGlobalAlias(const char *name, struct Symbol_s *target);
