@@ -2,8 +2,8 @@
 program RuntimeCameraDemo;
 
 const
-  ScreenWidth  = 1280;
-  ScreenHeight = 720;
+  ScreenWidth  = 1600;
+  ScreenHeight = 1024;
   PiConst      = 3.14159265358979323846;
   FieldOfView  = 60.0;
   NearClip     = 0.1;

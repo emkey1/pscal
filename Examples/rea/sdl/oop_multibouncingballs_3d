@@ -353,25 +353,20 @@ class BouncingBalls3DApp {
 
     int screenWidth = WindowWidth;
     int screenHeight = WindowHeight;
-    getscreensize(screenWidth, screenHeight);
-
-    int availableWidth = screenWidth - WindowMarginX;
-    int availableHeight = screenHeight - WindowMarginY;
-
-    if (availableWidth > screenWidth) availableWidth = screenWidth;
-    if (availableHeight > screenHeight) availableHeight = screenHeight;
-
-    if (availableWidth < MinWindowWidth) {
-      availableWidth = screenWidth;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth < MinWindowWidth) screenWidth = MinWindowWidth;
+      if (screenHeight < MinWindowHeight) screenHeight = MinWindowHeight;
+      screenWidth = screenWidth - WindowMarginX;
+      screenHeight = screenHeight - WindowMarginY;
+      if (screenWidth < MinWindowWidth) screenWidth = MinWindowWidth;
+      if (screenHeight < MinWindowHeight) screenHeight = MinWindowHeight;
+    } else {
+      screenWidth = WindowWidth;
+      screenHeight = WindowHeight;
     }
-    if (availableHeight < MinWindowHeight) {
-      availableHeight = screenHeight;
-    }
-    if (availableWidth <= 0) availableWidth = WindowWidth;
-    if (availableHeight <= 0) availableHeight = WindowHeight;
 
-    int windowWidthPx = availableWidth;
-    int windowHeightPx = availableHeight;
+    int windowWidthPx = screenWidth;
+    int windowHeightPx = screenHeight;
 
     my.windowWidthPx = windowWidthPx;
     my.windowHeightPx = windowHeightPx;
