@@ -27,16 +27,6 @@
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
 
-#ifndef likely
-#if defined(__GNUC__) || defined(__clang__)
-#define likely(x)       __builtin_expect(!!(x), 1)
-#define unlikely(x)     __builtin_expect(!!(x), 0)
-#else
-#define likely(x)       (x)
-#define unlikely(x)     (x)
-#endif
-#endif
-
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_COMPUTED_GOTO 1
 #else
@@ -4384,90 +4374,15 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     }
     #endif
 
-#define PSCAL_CONCAT_INNER(a, b) a##b
-#define PSCAL_CONCAT(a, b) PSCAL_CONCAT_INNER(a, b)
 #define BINARY_OP(op_char_for_error_msg, current_instruction_code) \
-    BINARY_OP_IMPL(op_char_for_error_msg, current_instruction_code, __LINE__)
-#define BINARY_OP_IMPL(op_char_for_error_msg, current_instruction_code, line) \
-    BINARY_OP_IMPL2(op_char_for_error_msg, current_instruction_code, line)
-#define BINARY_OP_IMPL2(op_char_for_error_msg, current_instruction_code, line) \
     do { \
         Value b_val_popped = pop(vm); \
         Value a_val_popped = pop(vm); \
         Value result_val; \
+        bool op_is_handled = false; \
         \
-        /* FAST PATH: Integer Arithmetic */ \
-        /* Checks both are integer-like AND not pointers, to avoid dereferencing logic in fast path */ \
-        if (likely(IS_INTLIKE(a_val_popped) && IS_INTLIKE(b_val_popped) && \
-                   a_val_popped.type != TYPE_POINTER && b_val_popped.type != TYPE_POINTER)) { \
-            long long ia = AS_INTEGER(a_val_popped); \
-            long long ib = AS_INTEGER(b_val_popped); \
-            \
-            if (current_instruction_code == DIVIDE) { \
-                if (unlikely(ib == 0)) { \
-                    runtimeError(vm, "Runtime Error: Division by zero."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                result_val = makeReal((long double)ia / (long double)ib); \
-            } else { \
-                long long iresult = 0; \
-                bool overflow = false; \
-                switch (current_instruction_code) { \
-                    case ADD:      overflow = __builtin_add_overflow(ia, ib, &iresult); break; \
-                    case SUBTRACT: overflow = __builtin_sub_overflow(ia, ib, &iresult); break; \
-                    case MULTIPLY: overflow = __builtin_mul_overflow(ia, ib, &iresult); break; \
-                    case MOD: \
-                        if (unlikely(ib == 0)) { \
-                             runtimeError(vm, "Runtime Error: Modulo by zero."); \
-                             freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                             return INTERPRET_RUNTIME_ERROR; \
-                        } \
-                        iresult = ia % ib; \
-                        break; \
-                    default: \
-                        /* unreachable for ADD/SUB/MUL/MOD/DIVIDE opcodes */ \
-                        runtimeError(vm, "Runtime Error: Invalid integer opcode %d.", current_instruction_code); \
-                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                        return INTERPRET_RUNTIME_ERROR; \
-                } \
-                if (unlikely(overflow)) { \
-                    runtimeError(vm, "Runtime Error: Integer overflow."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                result_val = makeInt(iresult); \
-            } \
-        } \
-        /* SLOW PATH 1: Real Arithmetic */ \
-        else if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped) && \
-                 (IS_REAL(a_val_popped) || IS_REAL(b_val_popped))) { \
-            Value a_tmp = makeCopyOfValue(&a_val_popped); \
-            Value b_tmp = makeCopyOfValue(&b_val_popped); \
-            long double fa = asLd(a_tmp); \
-            long double fb = asLd(b_tmp); \
-            freeValue(&a_tmp); freeValue(&b_tmp); \
-            \
-            if (current_instruction_code == DIVIDE && unlikely(fb == 0.0L)) { \
-                 runtimeError(vm, "Runtime Error: Division by zero."); \
-                 freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                 return INTERPRET_RUNTIME_ERROR; \
-            } \
-            bool useLong = (a_val_popped.type == TYPE_LONG_DOUBLE || b_val_popped.type == TYPE_LONG_DOUBLE); \
-            switch (current_instruction_code) { \
-                case ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
-                case SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
-                case MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
-                case DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
-                default: \
-                    runtimeError(vm, "Runtime Error: Invalid real opcode %d.", current_instruction_code); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-            } \
-        } \
-        /* SLOW PATH 2: String Concatenation (ADD only) - Full Original Logic */ \
-        else if (current_instruction_code == ADD) { \
-            /* Dereference pointers first, exactly as in original code */ \
+        /* String/char concatenation for ADD */ \
+        if (current_instruction_code == ADD) { \
             while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
                 Value tmp = copyValueForStack(a_val_popped.ptr_val); \
                 freeValue(&a_val_popped); \
@@ -4478,7 +4393,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 freeValue(&b_val_popped); \
                 b_val_popped = tmp; \
             } \
-            \
             if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
                 (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
                 char a_buffer[2] = {0}; \
@@ -4510,66 +4424,150 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 memcpy(temp_concat_buffer + len_a, s_b, len_b); \
                 temp_concat_buffer[total_len] = '\0'; \
                 result_val = makeOwnedString(temp_concat_buffer, total_len); \
-            } else { \
-                 /* Fallback for cases that looked like strings (e.g. pointer derefs) but weren't */ \
-                 goto PSCAL_CONCAT(numeric_fallback_after_deref_, line); \
+                op_is_handled = true; \
             } \
-        } \
-        /* SLOW PATH 3: Sets */ \
-        else if (a_val_popped.type == TYPE_SET && b_val_popped.type == TYPE_SET) { \
-            switch (current_instruction_code) { \
-                case ADD:      result_val = setUnion(a_val_popped, b_val_popped); break; \
-                case SUBTRACT: result_val = setDifference(a_val_popped, b_val_popped); break; \
-                case MULTIPLY: result_val = setIntersection(a_val_popped, b_val_popped); break; \
-                default: \
-                    runtimeError(vm, "Runtime Error: Unsupported set operation '%s'.", op_char_for_error_msg); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-            } \
-        } \
-        /* SLOW PATH 4: Enums */ \
-        else if ((a_val_popped.type == TYPE_ENUM && IS_INTLIKE(b_val_popped)) || \
-                 (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_ENUM)) { \
-             if (current_instruction_code == ADD || current_instruction_code == SUBTRACT) { \
-                 bool a_enum = (a_val_popped.type == TYPE_ENUM); \
-                 Value enum_val = a_enum ? a_val_popped : b_val_popped; \
-                 Value int_val  = a_enum ? b_val_popped : a_val_popped; \
-                 long long delta = AS_INTEGER(int_val); \
-                 int new_ord = enum_val.enum_val.ordinal + ((current_instruction_code == ADD) ? (int)delta : -(int)delta); \
-                 if (enum_val.enum_meta && (new_ord < 0 || new_ord >= enum_val.enum_meta->member_count)) { \
-                      runtimeError(vm, "Runtime Error: Enum '%s' out of range.", \
-                                   enum_val.enum_val.enum_name ? enum_val.enum_val.enum_name : "<anon>"); \
-                      freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                      return INTERPRET_RUNTIME_ERROR; \
-                 } \
-                 result_val = makeEnum(enum_val.enum_val.enum_name, new_ord); \
-                 result_val.enum_meta = enum_val.enum_meta; \
-                 result_val.base_type_node = enum_val.base_type_node; \
-             } else { \
-                 goto PSCAL_CONCAT(type_error_, line); \
-             } \
-        } \
-        else { \
-PSCAL_CONCAT(numeric_fallback_after_deref_, line): \
-            /* Final attempt at numeric if dereferencing happened but didn't yield strings */ \
-            /* Re-check IS_NUMERIC because dereferencing might have exposed numeric values */ \
-            if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
-                 /* Recurse? No, just duplicate the numeric logic or accept code duplication for this rare case. */ \
-                 /* For simplicity and code size, we error here. If dereferenced pointers to numbers are common, */ \
-                 /* they should be handled by a dedicated block or by recursively calling a helper function. */ \
-                 goto PSCAL_CONCAT(type_error_, line); \
-            } \
-PSCAL_CONCAT(type_error_, line): \
-            runtimeError(vm, "Runtime Error: Operands not supported for operator '%s'. Got %s and %s", \
-                         op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
-            freeValue(&a_val_popped); freeValue(&b_val_popped); \
-            return INTERPRET_RUNTIME_ERROR; \
         } \
         \
+        /* Char +/- intlike handled as numeric ordinal operations */ \
+\
+        /* Enum +/- intlike */ \
+        if (!op_is_handled) { \
+            if (current_instruction_code == ADD || current_instruction_code == SUBTRACT) { \
+                bool a_enum_b_int = (a_val_popped.type == TYPE_ENUM && IS_INTLIKE(b_val_popped)); \
+                bool a_int_b_enum = (IS_INTLIKE(a_val_popped) && b_val_popped.type == TYPE_ENUM); \
+                if (a_enum_b_int || a_int_b_enum) { \
+                    Value enum_val = a_enum_b_int ? a_val_popped : b_val_popped; \
+                    Value int_val  = a_enum_b_int ? b_val_popped : a_val_popped; \
+                    long long delta = asI64(int_val); \
+                    int new_ord = enum_val.enum_val.ordinal + \
+                        ((current_instruction_code == ADD) ? (int)delta : -(int)delta); \
+                    if (enum_val.enum_meta && \
+                        (new_ord < 0 || new_ord >= enum_val.enum_meta->member_count)) { \
+                        runtimeError(vm, "Runtime Error: Enum '%s' out of range.", \
+                                     enum_val.enum_val.enum_name ? enum_val.enum_val.enum_name : "<anon>"); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    result_val = makeEnum(enum_val.enum_val.enum_name, new_ord); \
+                    result_val.enum_meta = enum_val.enum_meta; \
+                    result_val.base_type_node = enum_val.base_type_node; \
+                    op_is_handled = true; \
+                } \
+            } \
+        } \
+        \
+        /* Set union/difference/intersection */ \
+        if (!op_is_handled) { \
+            if (a_val_popped.type == TYPE_SET && b_val_popped.type == TYPE_SET) { \
+                switch (current_instruction_code) { \
+                    case ADD: \
+                        result_val = setUnion(a_val_popped, b_val_popped); \
+                        break; \
+                    case SUBTRACT: \
+                        result_val = setDifference(a_val_popped, b_val_popped); \
+                        break; \
+                    case MULTIPLY: \
+                        result_val = setIntersection(a_val_popped, b_val_popped); \
+                        break; \
+                    default: \
+                        runtimeError(vm, "Runtime Error: Unsupported set operation '%s'.", op_char_for_error_msg); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        /* Numeric arithmetic (INTEGER/BYTE/WORD/REAL) */ \
+        if (!op_is_handled) { \
+            if (IS_NUMERIC(a_val_popped) && IS_NUMERIC(b_val_popped)) { \
+                bool a_real = IS_REAL(a_val_popped); \
+                bool b_real = IS_REAL(b_val_popped); \
+                if (a_real || b_real) { \
+                    /*
+                     * When an integer participates in real arithmetic, operate on
+                     * temporary copies so the original integer Value retains its
+                     * type.  This prevents implicit widening of integer operands.
+                     */ \
+                    Value a_tmp = makeCopyOfValue(&a_val_popped); \
+                    Value b_tmp = makeCopyOfValue(&b_val_popped); \
+                    long double fa = asLd(a_tmp); \
+                    long double fb = asLd(b_tmp); \
+                    freeValue(&a_tmp); \
+                    freeValue(&b_tmp); \
+                    if (current_instruction_code == DIVIDE && fb == 0.0L) { \
+                        runtimeError(vm, "Runtime Error: Division by zero."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    int useLong = (a_val_popped.type == TYPE_LONG_DOUBLE || b_val_popped.type == TYPE_LONG_DOUBLE); \
+                    switch (current_instruction_code) { \
+                        case ADD:      result_val = useLong ? makeLongDouble(fa + fb) : makeReal(fa + fb); break; \
+                        case SUBTRACT: result_val = useLong ? makeLongDouble(fa - fb) : makeReal(fa - fb); break; \
+                        case MULTIPLY: result_val = useLong ? makeLongDouble(fa * fb) : makeReal(fa * fb); break; \
+                        case DIVIDE:   result_val = useLong ? makeLongDouble(fa / fb) : makeReal(fa / fb); break; \
+                        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for real numbers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                } else { \
+                    long long ia = asI64(a_val_popped); \
+                    long long ib = asI64(b_val_popped); \
+                    if (current_instruction_code == DIVIDE && ib == 0) { \
+                        runtimeError(vm, "Runtime Error: Division by zero (integer)."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    long long iresult = 0; \
+                    bool overflow = false; \
+                    switch (current_instruction_code) { \
+                        case ADD: \
+                            overflow = __builtin_add_overflow(ia, ib, &iresult); \
+                            break; \
+                        case SUBTRACT: \
+                            overflow = __builtin_sub_overflow(ia, ib, &iresult); \
+                            break; \
+                        case MULTIPLY: \
+                            overflow = __builtin_mul_overflow(ia, ib, &iresult); \
+                            break; \
+                        case DIVIDE: \
+                            result_val = makeReal((long double)ia / (long double)ib); \
+                            break; \
+                        case MOD: \
+                            iresult = ib == 0 ? 0 : ia % ib; \
+                            break; \
+        default: \
+                            runtimeError(vm, "Runtime Error: Invalid arithmetic opcode %d for integers.", current_instruction_code); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    if (current_instruction_code == DIVIDE) { \
+                        /* result_val already set for division */ \
+                    } else if (overflow) { \
+                        runtimeError(vm, "Runtime Error: Integer overflow."); \
+                        freeValue(&a_val_popped); \
+                        freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } else { \
+                        result_val = makeInt(iresult); \
+                    } \
+                } \
+                op_is_handled = true; \
+            } \
+        } \
+        \
+        if (!op_is_handled) { \
+            runtimeError(vm, "Runtime Error: Operands must be numbers for arithmetic operation '%s' (or strings/chars for '+'). Got %s and %s", \
+                         op_char_for_error_msg, varTypeToString(a_val_popped.type), varTypeToString(b_val_popped.type)); \
+            freeValue(&a_val_popped); \
+            freeValue(&b_val_popped); \
+            return INTERPRET_RUNTIME_ERROR; \
+        } \
         push(vm, result_val); \
         freeValue(&a_val_popped); \
         freeValue(&b_val_popped); \
-    } while (0)
+    } while (false)
 
     uint8_t instruction_val;
     for (;;) {
