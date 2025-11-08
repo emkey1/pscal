@@ -4413,6 +4413,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } \
                 size_t len_a = strlen(s_a); \
                 size_t len_b = strlen(s_b); \
+                if (len_b > SIZE_MAX - len_a - 1) { \
+                    runtimeError(vm, "Runtime Error: String concatenation overflow."); \
+                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                    return INTERPRET_RUNTIME_ERROR; \
+                } \
                 size_t total_len = len_a + len_b; \
                 char* temp_concat_buffer = (char*)malloc(total_len + 1); \
                 if (!temp_concat_buffer) { \
