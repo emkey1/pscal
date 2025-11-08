@@ -12,11 +12,18 @@
 #include "core/types.h" // For Value struct, as constants will be Values
 #include "symbol/symbol.h" // For HashTable definition
 
+#define GLOBAL_INLINE_CACHE_SLOT_SIZE ((int)sizeof(Symbol*))
+
 // --- Opcode Definitions ---
 typedef enum {
     RETURN,        // Return from current function/script (implicit at end of main block)
     CONSTANT,      // Push a constant from the constant pool onto the stack
     CONSTANT16,   // For cases where the number exceeds a byte
+    CONST_0,      // Push immediate integer 0
+    CONST_1,      // Push immediate integer 1
+    CONST_TRUE,   // Push boolean true
+    CONST_FALSE,  // Push boolean false
+    PUSH_IMMEDIATE_INT8, // Push signed 8-bit integer inline
     ADD,           // Pop two values, add, push result
     SUBTRACT,      // Pop two values, subtract, push result
     MULTIPLY,      // Pop two values, multiply, push result
@@ -58,6 +65,10 @@ typedef enum {
     GET_GLOBAL16,  // 16-bit name index variant of GET_GLOBAL
     SET_GLOBAL16,  // 16-bit name index variant of SET_GLOBAL
     GET_GLOBAL_ADDRESS16, // 16-bit name index variant of GET_GLOBAL_ADDRESS
+    GET_GLOBAL_CACHED,    // Patched variant with inline Symbol* cache
+    SET_GLOBAL_CACHED,
+    GET_GLOBAL16_CACHED,
+    SET_GLOBAL16_CACHED,
 
     GET_LOCAL,     // Get local scoped variables
     SET_LOCAL,     // Set local scoped variables
@@ -170,5 +181,6 @@ void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value);
 int getInstructionLength(BytecodeChunk* chunk, int offset);
 void setBuiltinLowercaseIndex(BytecodeChunk* chunk, int original_idx, int lowercase_idx);
 int getBuiltinLowercaseIndex(const BytecodeChunk* chunk, int original_idx);
+void writeInlineCacheSlot(BytecodeChunk* chunk, int line);
 
 #endif // PSCAL_BYTECODE_H

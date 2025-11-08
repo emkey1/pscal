@@ -37,6 +37,11 @@
     X(RETURN) \
     X(CONSTANT) \
     X(CONSTANT16) \
+    X(CONST_0) \
+    X(CONST_1) \
+    X(CONST_TRUE) \
+    X(CONST_FALSE) \
+    X(PUSH_IMMEDIATE_INT8) \
     X(ADD) \
     X(SUBTRACT) \
     X(MULTIPLY) \
@@ -69,6 +74,10 @@
     X(GET_GLOBAL16) \
     X(SET_GLOBAL16) \
     X(GET_GLOBAL_ADDRESS16) \
+    X(GET_GLOBAL_CACHED) \
+    X(SET_GLOBAL_CACHED) \
+    X(GET_GLOBAL16_CACHED) \
+    X(SET_GLOBAL16_CACHED) \
     X(GET_LOCAL) \
     X(SET_LOCAL) \
     X(INC_LOCAL) \
@@ -3984,6 +3993,41 @@ static inline uint32_t READ_UINT32(VM* vm_param) {
 
 #define READ_HOST_ID() ((HostFunctionID)READ_BYTE())
 
+// --- Fast Stack Helpers -------------------------------------------------
+// These helpers intentionally skip overflow/underflow checks and should only
+// be used in opcode handlers where stack depth has already been validated by
+// preceding logic.
+static inline void vmFastPushUnchecked(VM* vm, Value value) {
+    *vm->stackTop = value;
+    vm->stackTop++;
+}
+
+static inline Value vmFastPopUnchecked(VM* vm) {
+    vm->stackTop--;
+    return *vm->stackTop;
+}
+
+#define FAST_PUSH(v) vmFastPushUnchecked(vm, (v))
+#define FAST_POP() vmFastPopUnchecked(vm)
+#define FAST_PEEK(dist) (vm->stackTop[-((dist) + 1)])
+
+static inline Symbol* vmInlineCacheReadSymbol(uint8_t* slot) {
+    Symbol* sym = NULL;
+    memcpy(&sym, slot, sizeof(Symbol*));
+    return sym;
+}
+
+static inline void vmInlineCacheWriteSymbol(uint8_t* slot, Symbol* sym) {
+    memcpy(slot, &sym, sizeof(Symbol*));
+}
+
+static inline void vmPatchGlobalOpcode(uint8_t* instruction, bool isSet, bool isWide) {
+    uint8_t newOpcode = isSet
+        ? (isWide ? SET_GLOBAL16_CACHED : SET_GLOBAL_CACHED)
+        : (isWide ? GET_GLOBAL16_CACHED : GET_GLOBAL_CACHED);
+    *instruction = newOpcode;
+}
+
 static bool vmSizeForVarType(VarType type, long long* out_bytes) {
     if (!out_bytes) {
         return false;
@@ -4388,8 +4432,8 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
 #define BINARY_OP(op_char_for_error_msg, current_instruction_code) \
     do { \
-        Value b_val_popped = pop(vm); \
-        Value a_val_popped = pop(vm); \
+        Value b_val_popped = FAST_POP(); \
+        Value a_val_popped = FAST_POP(); \
         Value result_val; \
         bool op_is_handled = false; \
         \
@@ -4581,7 +4625,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             freeValue(&b_val_popped); \
             return INTERPRET_RUNTIME_ERROR; \
         } \
-        push(vm, result_val); \
+        FAST_PUSH(result_val); \
         freeValue(&a_val_popped); \
         freeValue(&b_val_popped); \
     } while (false)
@@ -4680,6 +4724,24 @@ dispatch_switch:
                    return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, copyValueForStack(&vm->chunk->constants[idx]));
+                break;
+            }
+            case CONST_0:
+                FAST_PUSH(makeInt(0));
+                break;
+            case CONST_1:
+                FAST_PUSH(makeInt(1));
+                break;
+            case CONST_TRUE:
+                FAST_PUSH(makeBoolean(true));
+                break;
+            case CONST_FALSE:
+                FAST_PUSH(makeBoolean(false));
+                break;
+            case PUSH_IMMEDIATE_INT8: {
+                uint8_t raw = READ_BYTE();
+                long long imm = (raw <= 0x7F) ? (long long)raw : ((long long)raw - 0x100LL);
+                FAST_PUSH(makeInt(imm));
                 break;
             }
 
@@ -4800,7 +4862,7 @@ dispatch_switch:
             case DIVIDE:   BINARY_OP("/", instruction_val); break;
 
             case NEGATE: {
-                Value val_popped = pop(vm);
+                Value val_popped = FAST_POP();
                 Value result_val;
                 if (IS_INTEGER(val_popped)) result_val = makeInt(-AS_INTEGER(val_popped));
                 else if (IS_REAL(val_popped)) {
@@ -4812,31 +4874,31 @@ dispatch_switch:
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, result_val);
+                FAST_PUSH(result_val);
                 freeValue(&val_popped);
                 break;
             }
             case NOT: {
-                Value val_popped = pop(vm);
+                Value val_popped = FAST_POP();
                 bool condition_truth = false;
                 if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
                     runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeBoolean(!condition_truth));
+                FAST_PUSH(makeBoolean(!condition_truth));
                 freeValue(&val_popped);
                 break;
             }
             case TO_BOOL: {
-                Value val_popped = pop(vm);
+                Value val_popped = FAST_POP();
                 bool condition_truth = false;
                 if (!coerceValueToBoolean(&val_popped, &condition_truth)) {
                     runtimeError(vm, "Runtime Error: Operand for boolean conversion must be boolean or numeric.");
                     freeValue(&val_popped);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, makeBoolean(condition_truth));
+                FAST_PUSH(makeBoolean(condition_truth));
                 freeValue(&val_popped);
                 break;
             }
@@ -6323,7 +6385,10 @@ comparison_error_label:
                 break;
             }
             case GET_GLOBAL: {
+                uint8_t* instruction_start = vm->lastInstruction;
                 uint8_t name_idx = READ_BYTE();
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
@@ -6368,10 +6433,15 @@ comparison_error_label:
                 }
 
                 push(vm, copyValueForStack(sym->value));
+                vmInlineCacheWriteSymbol(cache_slot, sym);
+                vmPatchGlobalOpcode(instruction_start, false, false);
                 break;
             }
             case GET_GLOBAL16: {
+                uint8_t* instruction_start = vm->lastInstruction;
                 uint16_t name_idx = READ_SHORT(vm);
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for GET_GLOBAL16.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
@@ -6416,10 +6486,39 @@ comparison_error_label:
                 }
 
                 push(vm, copyValueForStack(sym->value));
+                vmInlineCacheWriteSymbol(cache_slot, sym);
+                vmPatchGlobalOpcode(instruction_start, false, true);
+                break;
+            }
+            case GET_GLOBAL_CACHED: {
+                READ_BYTE();
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
+                Symbol* sym = vmInlineCacheReadSymbol(cache_slot);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "VM Error: Cached global unavailable in GET_GLOBAL_CACHED.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, copyValueForStack(sym->value));
+                break;
+            }
+            case GET_GLOBAL16_CACHED: {
+                READ_SHORT(vm);
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
+                Symbol* sym = vmInlineCacheReadSymbol(cache_slot);
+                if (!sym || !sym->value) {
+                    runtimeError(vm, "VM Error: Cached global unavailable in GET_GLOBAL16_CACHED.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(vm, copyValueForStack(sym->value));
                 break;
             }
             case SET_GLOBAL: {
+                uint8_t* instruction_start = vm->lastInstruction;
                 uint8_t name_idx = READ_BYTE();
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
@@ -6455,10 +6554,15 @@ comparison_error_label:
                 Value value_from_stack = pop(vm);
                 updateSymbolDirect(sym, name_val->s_val, value_from_stack);
                 pthread_mutex_unlock(&globals_mutex);
+                vmInlineCacheWriteSymbol(cache_slot, sym);
+                vmPatchGlobalOpcode(instruction_start, true, false);
                 break;
             }
             case SET_GLOBAL16: {
+                uint8_t* instruction_start = vm->lastInstruction;
                 uint16_t name_idx = READ_SHORT(vm);
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
                 if (name_idx >= vm->chunk->constants_count) {
                     runtimeError(vm, "VM Error: Name constant index %u out of bounds for SET_GLOBAL16.", name_idx);
                     return INTERPRET_RUNTIME_ERROR;
@@ -6493,6 +6597,56 @@ comparison_error_label:
 
                 Value value_from_stack = pop(vm);
                 updateSymbolDirect(sym, name_val->s_val, value_from_stack);
+                pthread_mutex_unlock(&globals_mutex);
+                vmInlineCacheWriteSymbol(cache_slot, sym);
+                vmPatchGlobalOpcode(instruction_start, true, true);
+                break;
+            }
+            case SET_GLOBAL_CACHED: {
+                READ_BYTE();
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
+                Symbol* sym = vmInlineCacheReadSymbol(cache_slot);
+                if (!sym) {
+                    runtimeError(vm, "VM Error: Cached symbol missing for SET_GLOBAL_CACHED.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                pthread_mutex_lock(&globals_mutex);
+                if (!sym->value) {
+                    sym->value = (Value*)malloc(sizeof(Value));
+                    if (!sym->value) {
+                        pthread_mutex_unlock(&globals_mutex);
+                        runtimeError(vm, "VM Error: Malloc failed for cached symbol value in SET_GLOBAL.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
+                }
+                Value value_from_stack = pop(vm);
+                updateSymbolDirect(sym, sym->name, value_from_stack);
+                pthread_mutex_unlock(&globals_mutex);
+                break;
+            }
+            case SET_GLOBAL16_CACHED: {
+                READ_SHORT(vm);
+                uint8_t* cache_slot = vm->ip;
+                vm->ip += GLOBAL_INLINE_CACHE_SLOT_SIZE;
+                Symbol* sym = vmInlineCacheReadSymbol(cache_slot);
+                if (!sym) {
+                    runtimeError(vm, "VM Error: Cached symbol missing for SET_GLOBAL16_CACHED.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                pthread_mutex_lock(&globals_mutex);
+                if (!sym->value) {
+                    sym->value = (Value*)malloc(sizeof(Value));
+                    if (!sym->value) {
+                        pthread_mutex_unlock(&globals_mutex);
+                        runtimeError(vm, "VM Error: Malloc failed for cached symbol value in SET_GLOBAL16.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    *(sym->value) = makeValueForType(sym->type, sym->type_def, sym);
+                }
+                Value value_from_stack = pop(vm);
+                updateSymbolDirect(sym, sym->name, value_from_stack);
                 pthread_mutex_unlock(&globals_mutex);
                 break;
             }

@@ -963,9 +963,11 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         if (name_idx < 256) {
             writeBytecodeChunk(chunk, SET_GLOBAL, node->token.line);
             writeBytecodeChunk(chunk, (uint8_t)name_idx, node->token.line);
+            writeInlineCacheSlot(chunk, node->token.line);
         } else {
             writeBytecodeChunk(chunk, SET_GLOBAL16, node->token.line);
             emitShort(chunk, (uint16_t)name_idx, node->token.line);
+            writeInlineCacheSlot(chunk, node->token.line);
         }
     }
     free(name);
@@ -1182,9 +1184,11 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                         if (nameIdx < 256) {
                             writeBytecodeChunk(chunk, SET_GLOBAL, node->token.line);
                             writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->token.line);
+                            writeInlineCacheSlot(chunk, node->token.line);
                         } else {
                             writeBytecodeChunk(chunk, SET_GLOBAL16, node->token.line);
                             emitShort(chunk, (uint16_t)nameIdx, node->token.line);
+                            writeInlineCacheSlot(chunk, node->token.line);
                         }
                     }
                     free(name);
@@ -1248,9 +1252,11 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 if (nameIdx < 256) {
                     writeBytecodeChunk(chunk, GET_GLOBAL, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)nameIdx, node->token.line);
+                    writeInlineCacheSlot(chunk, node->token.line);
                 } else {
                     writeBytecodeChunk(chunk, GET_GLOBAL16, node->token.line);
                     emitShort(chunk, (uint16_t)nameIdx, node->token.line);
+                    writeInlineCacheSlot(chunk, node->token.line);
                 }
             }
             free(name);

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> // For memcpy
+#include <stdint.h>
 
 #include "compiler/bytecode.h"
 #include "core/types.h"
@@ -222,6 +223,15 @@ void patchShort(BytecodeChunk* chunk, int offset_in_code, uint16_t value) {
     chunk->code[offset_in_code + 1] = (uint8_t)(value & 0xFF);
 }
 
+void writeInlineCacheSlot(BytecodeChunk* chunk, int line) {
+    if (!chunk) {
+        return;
+    }
+    for (int i = 0; i < GLOBAL_INLINE_CACHE_SLOT_SIZE; ++i) {
+        writeBytecodeChunk(chunk, 0, line);
+    }
+}
+
 // Corrected helper function to find procedure/function name by its bytecode address
 static const char* findProcedureNameByAddress(HashTable* procedureTable, uint16_t address) {
     if (!procedureTable) return NULL;
@@ -241,8 +251,6 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
     uint8_t instruction = chunk->code[offset];
     switch (instruction) {
         case CONSTANT:
-        case GET_GLOBAL:
-        case SET_GLOBAL:
         case GET_LOCAL:
         case SET_LOCAL:
         case INC_LOCAL:
@@ -253,6 +261,11 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case SET_UPVALUE:
         case GET_UPVALUE_ADDRESS:
             return 2; // opcode + 1-byte operand
+        case GET_GLOBAL:
+        case SET_GLOBAL:
+        case GET_GLOBAL_CACHED:
+        case SET_GLOBAL_CACHED:
+            return 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         case GET_FIELD_ADDRESS:
         case GET_FIELD_OFFSET:
         case LOAD_FIELD_VALUE:
@@ -297,10 +310,20 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case LOAD_FIELD_VALUE16:
         case LOAD_FIELD_VALUE_BY_NAME16:
         case ALLOC_OBJECT16:
-        case GET_GLOBAL16:
-        case SET_GLOBAL16:
         case GET_GLOBAL_ADDRESS16:
             return 3; // 1 byte opcode + 2-byte operand
+        case GET_GLOBAL16:
+        case SET_GLOBAL16:
+        case GET_GLOBAL16_CACHED:
+        case SET_GLOBAL16_CACHED:
+            return 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
+        case PUSH_IMMEDIATE_INT8:
+            return 2; // opcode + immediate byte
+        case CONST_0:
+        case CONST_1:
+        case CONST_TRUE:
+        case CONST_FALSE:
+            return 1;
         case JUMP:
         case JUMP_IF_FALSE:
         case FORMAT_VALUE:
@@ -459,6 +482,15 @@ static void printConstantValue(const Value* value) {
     }
 }
 
+static uintptr_t readInlineCachePtr(const BytecodeChunk* chunk, int offset) {
+    uintptr_t value = 0;
+    size_t to_copy = sizeof(value) < (size_t)GLOBAL_INLINE_CACHE_SLOT_SIZE
+                         ? sizeof(value)
+                         : (size_t)GLOBAL_INLINE_CACHE_SLOT_SIZE;
+    memcpy(&value, chunk->code + offset, to_copy);
+    return value;
+}
+
 // This is the function declared in bytecode.h and called by disassembleBytecodeChunk
 // It was already non-static in your provided bytecode.c
 int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedureTable) {
@@ -500,6 +532,24 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             printConstantValue(&constantValue);
             fprintf(stderr, "'\n");
             return offset + 3;
+        }
+        case CONST_0:
+            fprintf(stderr, "CONST_0\n");
+            return offset + 1;
+        case CONST_1:
+            fprintf(stderr, "CONST_1\n");
+            return offset + 1;
+        case CONST_TRUE:
+            fprintf(stderr, "CONST_TRUE\n");
+            return offset + 1;
+        case CONST_FALSE:
+            fprintf(stderr, "CONST_FALSE\n");
+            return offset + 1;
+        case PUSH_IMMEDIATE_INT8: {
+            uint8_t raw = chunk->code[offset + 1];
+            int imm = (raw <= 0x7F) ? (int)raw : ((int)raw - 0x100);
+            fprintf(stderr, "%-16s %4d\n", "PUSH_IMM_I8", imm);
+            return offset + 2;
         }
         case ADD:           fprintf(stderr, "ADD\n"); return offset + 1;
         case SUBTRACT:      fprintf(stderr, "SUBTRACT\n"); return offset + 1;
@@ -685,13 +735,41 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case GET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
-            return offset + 2;
+            const char* name = (name_index < chunk->constants_count &&
+                                chunk->constants[name_index].type == TYPE_STRING &&
+                                chunk->constants[name_index].s_val)
+                                   ? chunk->constants[name_index].s_val
+                                   : "<invalid>";
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
+            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "GET_GLOBAL",
+                    (unsigned)name_index, name, (void*)cached);
+            return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL: {
             uint8_t name_index = chunk->code[offset + 1];
-            fprintf(stderr, "%-16s %4d '%s'\n", "SET_GLOBAL", name_index, AS_STRING(chunk->constants[name_index]));
-            return offset + 2;
+            const char* name = (name_index < chunk->constants_count &&
+                                chunk->constants[name_index].type == TYPE_STRING &&
+                                chunk->constants[name_index].s_val)
+                                   ? chunk->constants[name_index].s_val
+                                   : "<invalid>";
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
+            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "SET_GLOBAL",
+                    (unsigned)name_index, name, (void*)cached);
+            return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
+        }
+        case GET_GLOBAL_CACHED: {
+            uint8_t name_index = chunk->code[offset + 1];
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
+            fprintf(stderr, "%-16s %4u cache=%p\n", "GET_GLOBAL_CACHED",
+                    (unsigned)name_index, (void*)cached);
+            return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
+        }
+        case SET_GLOBAL_CACHED: {
+            uint8_t name_index = chunk->code[offset + 1];
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
+            fprintf(stderr, "%-16s %4u cache=%p\n", "SET_GLOBAL_CACHED",
+                    (unsigned)name_index, (void*)cached);
+            return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL_ADDRESS: {
             uint8_t name_index = chunk->code[offset + 1];
@@ -700,13 +778,41 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
         }
         case GET_GLOBAL16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4d '%s'\n", "GET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
-            return offset + 3;
+            const char* name = (name_index < chunk->constants_count &&
+                                chunk->constants[name_index].type == TYPE_STRING &&
+                                chunk->constants[name_index].s_val)
+                                   ? chunk->constants[name_index].s_val
+                                   : "<invalid>";
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
+            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "GET_GLOBAL16",
+                    (unsigned)name_index, name, (void*)cached);
+            return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
-            fprintf(stderr, "%-16s %4d '%s'\n", "SET_GLOBAL16", name_index, AS_STRING(chunk->constants[name_index]));
-            return offset + 3;
+            const char* name = (name_index < chunk->constants_count &&
+                                chunk->constants[name_index].type == TYPE_STRING &&
+                                chunk->constants[name_index].s_val)
+                                   ? chunk->constants[name_index].s_val
+                                   : "<invalid>";
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
+            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "SET_GLOBAL16",
+                    (unsigned)name_index, name, (void*)cached);
+            return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
+        }
+        case GET_GLOBAL16_CACHED: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
+            fprintf(stderr, "%-16s %4u cache=%p\n", "GET_GLOBAL16_CACHED",
+                    (unsigned)name_index, (void*)cached);
+            return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
+        }
+        case SET_GLOBAL16_CACHED: {
+            uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
+            uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
+            fprintf(stderr, "%-16s %4u cache=%p\n", "SET_GLOBAL16_CACHED",
+                    (unsigned)name_index, (void*)cached);
+            return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL_ADDRESS16: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);

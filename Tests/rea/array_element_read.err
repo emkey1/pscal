@@ -8,8 +8,8 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0018    2 DEFINE_GLOBAL    NameIdx:7   'value' Type:INT64 ('int')
 0023    | GET_GLOBAL_ADDRESS    3 'a'
 0025    | LOAD_ELEMENT_VALUE_CONST          1 (flat offset)
-0030    | SET_GLOBAL          7 'value'
-0032    0 HALT
+0030    | SET_GLOBAL          7 'value' cache=0x0
+0040    0 HALT
 == End Disassembly: rea/array_element_read.rea ==
 
 Constants (8):\n  0000: STR   "myself"

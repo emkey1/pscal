@@ -5,28 +5,28 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0000    0 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
 0007    1 DEFINE_GLOBAL    NameIdx:3   'a' Type:INT64 ('int')
-0012    | CONSTANT            5 '1'
-0014    | CONSTANT            6 '2'
-0016    | CONSTANT            7 '3'
-0018    | MULTIPLY
-0019    | ADD
-0020    | SET_GLOBAL          3 'a'
-0022    2 DEFINE_GLOBAL    NameIdx:8   'b' Type:BOOLEAN ('bool')
-0027    | GET_GLOBAL          3 'a'
-0029    | CONSTANT           10 '7'
-0031    | GREATER_EQUAL
-0032    | SET_GLOBAL          8 'b'
-0034    3 DEFINE_GLOBAL    NameIdx:11  'msg' Type:STRING ('str') len=0
-0041    | CONSTANT           14 'hi'
-0043    | SET_GLOBAL         11 'msg'
-0045    4 GET_GLOBAL          3 'a'
-0047    | NEGATE
-0048    | CONSTANT           15 '4'
-0050    | ADD
-0051    | GET_GLOBAL_ADDRESS    3 'a'
-0053    | SWAP
-0054    | SET_INDIRECT
-0055    0 HALT
+0012    | CONST_1
+0013    | PUSH_IMM_I8         2
+0015    | PUSH_IMM_I8         3
+0017    | MULTIPLY
+0018    | ADD
+0019    | SET_GLOBAL          3 'a' cache=0x0
+0029    2 DEFINE_GLOBAL    NameIdx:8   'b' Type:BOOLEAN ('bool')
+0034    | GET_GLOBAL          3 'a' cache=0x0
+0044    | PUSH_IMM_I8         7
+0046    | GREATER_EQUAL
+0047    | SET_GLOBAL          8 'b' cache=0x0
+0057    3 DEFINE_GLOBAL    NameIdx:11  'msg' Type:STRING ('str') len=0
+0064    | CONSTANT           14 'hi'
+0066    | SET_GLOBAL         11 'msg' cache=0x0
+0076    4 GET_GLOBAL          3 'a' cache=0x0
+0086    | NEGATE
+0087    | PUSH_IMM_I8         4
+0089    | ADD
+0090    | GET_GLOBAL_ADDRESS    3 'a'
+0092    | SWAP
+0093    | SET_INDIRECT
+0094    0 HALT
 == End Disassembly: rea/bytecode_exec.rea ==
 
 Constants (16):\n  0000: STR   "myself"

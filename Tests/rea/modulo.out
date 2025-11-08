@@ -24,7 +24,7 @@
             "node_type": "BINARY_OP",
             "token": {
                 "type": "MOD",
-                "value": "mod
+                "value": "mod"
             },
             "var_type_annotated": "INT64",
             "left": 

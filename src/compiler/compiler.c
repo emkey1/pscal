@@ -1419,10 +1419,49 @@ static bool constantFitsInIntType(AST* expr, VarType targetType) {
     return fits;
 }
 
+static bool emitImmediateConstant(BytecodeChunk* chunk, int constant_index, int line) {
+    if (!chunk || constant_index < 0) {
+        return false;
+    }
+    if (constant_index >= chunk->constants_count) {
+        return false;
+    }
+    Value* value = &chunk->constants[constant_index];
+    switch (value->type) {
+        case TYPE_INTEGER: {
+            long long iv = value->i_val;
+            if (iv == 0) {
+                writeBytecodeChunk(chunk, CONST_0, line);
+                return true;
+            }
+            if (iv == 1) {
+                writeBytecodeChunk(chunk, CONST_1, line);
+                return true;
+            }
+            if (iv >= INT8_MIN && iv <= INT8_MAX) {
+                writeBytecodeChunk(chunk, PUSH_IMMEDIATE_INT8, line);
+                int8_t imm = (int8_t)iv;
+                writeBytecodeChunk(chunk, (uint8_t)imm, line);
+                return true;
+            }
+            break;
+        }
+        case TYPE_BOOLEAN:
+            writeBytecodeChunk(chunk, value->i_val ? CONST_TRUE : CONST_FALSE, line);
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+
 static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
     if (constant_index < 0) {
         fprintf(stderr, "L%d: Compiler error: negative constant index.\n", line);
         compiler_had_error = true;
+        return;
+    }
+    if (emitImmediateConstant(chunk, constant_index, line)) {
         return;
     }
     if (constant_index <= 0xFF) {
@@ -1457,12 +1496,19 @@ static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
         compiler_had_error = true;
         return;
     }
+    bool needs_inline_cache = (op8 == GET_GLOBAL || op8 == SET_GLOBAL);
     if (name_idx <= 0xFF) {
         writeBytecodeChunk(chunk, op8, line);
         writeBytecodeChunk(chunk, (uint8_t)name_idx, line);
+        if (needs_inline_cache) {
+            writeInlineCacheSlot(chunk, line);
+        }
     } else if (name_idx <= 0xFFFF) {
         writeBytecodeChunk(chunk, op16, line);
         emitShort(chunk, (uint16_t)name_idx, line);
+        if (needs_inline_cache) {
+            writeInlineCacheSlot(chunk, line);
+        }
     } else {
         fprintf(stderr, "L%d: Compiler error: too many constants (%d). Limit is 65535.\n",
                 line, name_idx);
