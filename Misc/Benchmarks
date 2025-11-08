@@ -446,3 +446,37 @@ subshell.sh: command subs                              13,380      2,066   647.6
 subshell.sh: external command                             598        648    92.3%
 stringop1.sh: string length                           119,144    607,470    19.6%
 ------------------------------------------------------------------------
+
+Sat Nov  8 14:36:26 PST 2025
+o After latest round of VM optimizations
+
+------------------------------------------------------------------------
+name                                                     exsh       bash
+------------------------------------------------------------------------
+assign.sh: positional params                           86,796    443,793    19.6%
+assign.sh: variable                                   130,918    681,269    19.2%
+assign.sh: local var                                  131,134    680,142    19.3%
+assign.sh: local var (typeset)                        131,117    677,249    19.4%
+cmp.sh: [ ]                                            55,236    365,018    15.1%
+cmp.sh: [[ ]]                                          59,984    511,619    11.7%
+cmp.sh: case                                          103,096    652,906    15.8%
+count.sh: posix                                       114,718    507,049    22.6%
+count.sh: typeset -i                                  114,982    480,740    23.9%
+count.sh: increment                                   154,571    628,775    24.6%
+eval.sh: direct assign                                 62,483    316,887    19.7%
+eval.sh: eval assign                                   16,349    186,629     8.8%
+eval.sh: command subs                                   7,679      1,710   449.1%
+func.sh: no func                                      183,123    624,900    29.3%
+func.sh: func                                          57,814    330,591    17.5%
+null.sh: blank                                        182,139      error     n/a
+null.sh: assign variable                              131,346    707,516    18.6%
+null.sh: define function                              145,394    745,523    19.5%
+null.sh: undefined variable                           109,715    564,085    19.5%
+null.sh: : command                                    186,540    635,533    29.4%
+subshell.sh: no subshell                              185,251    574,130    32.3%
+subshell.sh: brace                                     98,333    564,782    17.4%
+subshell.sh: subshell                                  91,531      1,769  5174.2%
+subshell.sh: command subs                              12,392      1,678   738.5%
+subshell.sh: external command                             587        634    92.6%
+stringop1.sh: string length                           115,242    588,785    19.6%
+------------------------------------------------------------------------
