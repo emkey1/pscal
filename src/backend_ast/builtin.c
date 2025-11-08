@@ -6082,7 +6082,10 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
 
     const bool active = thread && thread->active;
     const bool in_pool = thread && thread->inPool;
-    const bool idle = thread && thread->idle;
+    const bool reported_idle = thread &&
+        (thread->idle ||
+         thread->readyForReuse ||
+         (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL));
     const bool should_exit = thread && thread->shouldExit;
     const bool awaiting_reuse = thread && thread->awaitingReuse;
     const bool ready_for_reuse = thread && thread->readyForReuse;
@@ -6097,7 +6100,7 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
 
     if (!appendThreadField(&head, &tail, "active", makeBoolean(active ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "in_pool", makeBoolean(in_pool ? 1 : 0)) ||
-        !appendThreadField(&head, &tail, "idle", makeBoolean(idle ? 1 : 0)) ||
+        !appendThreadField(&head, &tail, "idle", makeBoolean(reported_idle ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "should_exit", makeBoolean(should_exit ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "awaiting_reuse", makeBoolean(awaiting_reuse ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "ready_for_reuse", makeBoolean(ready_for_reuse ? 1 : 0)) ||
@@ -6830,7 +6833,9 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
             break;
         }
         const char *name = (thread->name[0] != '\0') ? thread->name : "";
-        const bool reported_idle = thread->idle || (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
+        const bool reported_idle = thread->idle ||
+                                   thread->readyForReuse ||
+                                   (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
         ok = jsonBufferAppendFormat(&buffer, "{\"id\": %d, \"name\": ", i);
         if (ok) {
             ok = jsonAppendEscapedString(&buffer, name);
