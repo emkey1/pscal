@@ -1112,7 +1112,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
             v.element_type = TYPE_VOID;
             v.element_type_def = NULL;
 
-            AST* definition_node_for_array = node_to_inspect;
+            AST* definition_node_for_array = node_to_inspect ? resolveTypeAliasForRecord(node_to_inspect) : NULL;
 
             if (definition_node_for_array && definition_node_for_array->type == AST_TYPE_REFERENCE) {
                 #ifdef DEBUG
@@ -1162,7 +1162,13 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                        }
                  }
 
-                 if (dims > 0 && elemType != TYPE_VOID) {
+                 bool is_open_array = (dims == 0);
+                 if (is_open_array) {
+                     VarType initElemType = (elemType != TYPE_VOID && elemType != TYPE_UNKNOWN)
+                                                ? elemType
+                                                : TYPE_UNKNOWN;
+                     v = makeEmptyArray(initElemType, elemTypeDefNode);
+                 } else if (dims > 0 && elemType != TYPE_VOID) {
                      int *lbs = (int*)malloc(sizeof(int) * dims);
                      int *ubs = (int*)malloc(sizeof(int) * dims);
                      if (!lbs || !ubs) {
@@ -1205,11 +1211,10 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      free(lbs);
                      free(ubs);
                  } else {
-                     fprintf(stderr, "Warning: Invalid dimension count (%d) or element type (%s) for array in makeValueForType.\n", dims, varTypeToString(elemType));
+                     v = makeEmptyArray(TYPE_UNKNOWN, elemTypeDefNode);
                  }
             } else {
-                 fprintf(stderr, "Warning: Cannot initialize array value. Type definition missing, not an array type, or could not be resolved. (Actual node type for definition: %s)\n",
-                         definition_node_for_array ? astTypeToString(definition_node_for_array->type) : "NULL");
+                 v = makeEmptyArray(TYPE_UNKNOWN, definition_node_for_array);
             }
 
             #ifdef DEBUG
