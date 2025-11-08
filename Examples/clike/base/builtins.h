@@ -88,6 +88,8 @@ int glcolor4f();
 int glenable();
 int gldisable();
 int gldepthtest();
+int gldepthmask();
+int gldepthfunc();
 int gllinewidth();
 int glend();
 int glnormal3f();

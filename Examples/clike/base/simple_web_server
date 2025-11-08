@@ -32,13 +32,16 @@ int GServed = 0;
 
 // Helpers
 str resolveTempDir() {
-  str dir = getenv("TMPDIR");
-  if (dir == "") dir = getenv("TMP");
-  if (dir == "") dir = getenv("TEMP");
-  if (dir == "") dir = getenv("PWD");
-  if (dir == "") dir = getenv("HOME");
-  if (dir == "") dir = "/tmp";
-  return dir;
+  str dir = "/tmp";
+  dir = fsNormalizePath(dir);
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMPDIR");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMP");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TEMP");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("HOME");
+  if (dir == "" || !fsPathExists(dir)) dir = ".";
+  str normalized = fsNormalizePath(dir);
+  if (normalized == "") return dir;
+  return normalized;
 }
 
 str ensureTrailingSlash(str path) {
@@ -180,6 +183,10 @@ int copyDirectory(str src, str dst) {
     int segLen = j - idx;
     if (segLen > 0) {
       str entry = copy(entries, idx, segLen);
+      if (entry == "." || entry == "..") {
+        idx = j + 1;
+        continue;
+      }
       str srcPath = src + "/" + entry;
       str dstPath = dst + "/" + entry;
       if (isDirectory(srcPath)) {
@@ -470,11 +477,52 @@ int fsPathExists(str path) {
 
 str resolveAssetRoot() {
   str candidate = ConfiguredAssetRoot;
-  if (isDirectory(candidate)) return candidate;
-  str base = fsDefaultInstallRoot();
-  if (strlen(base) > 0) {
-    str fallback = fsPathJoin(base, "lib/misc/simple_web_server/htdocs");
+  str placeholder = "@PSCAL_INSTALL_ROOT_RESOLVED@";
+  int placeholderLen = length(placeholder);
+  int idx = pos(candidate, placeholder);
+  if (idx > 0) {
+    str envRoot = getenv("PSCAL_INSTALL_ROOT_RESOLVED");
+    if (envRoot == "") envRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (envRoot != "") {
+      str prefix = idx > 1 ? copy(candidate, 1, idx - 1) : "";
+      str suffix = "";
+      int suffixStart = idx + placeholderLen;
+      if (suffixStart <= length(candidate)) {
+        suffix = copy(candidate, suffixStart, length(candidate) - suffixStart + 1);
+      }
+      candidate = fsNormalizePath(prefix + envRoot + suffix);
+    } else {
+      candidate = "";
+    }
+  } else {
+    candidate = fsNormalizePath(candidate);
+  }
+  if (candidate != "" && isDirectory(candidate)) return candidate;
+
+  str envAsset = fsNormalizePath(getenv("PSCAL_ASSET_ROOT"));
+  if (envAsset != "" && isDirectory(envAsset)) return envAsset;
+
+  str installBase = getenv("PSCAL_INSTALL_ROOT_RESOLVED");
+  if (installBase == "") installBase = getenv("PSCAL_INSTALL_ROOT");
+  installBase = fsNormalizePath(installBase);
+  if (installBase != "") {
+    str fallback = fsPathJoin(installBase, "misc/htdocs");
     if (isDirectory(fallback)) return fallback;
+    fallback = fsPathJoin(installBase, "lib/misc/simple_web_server/htdocs");
+    if (isDirectory(fallback)) return fallback;
+  }
+
+  str local = fsNormalizePath("lib/misc/simple_web_server/htdocs");
+  if (local != "" && isDirectory(local)) return local;
+  local = fsNormalizePath("misc/htdocs");
+  if (local != "" && isDirectory(local)) return local;
+
+  if (isDirectory("/usr/local/pscal/misc/htdocs")) return "/usr/local/pscal/misc/htdocs";
+  if (isDirectory("/usr/local/pscal/lib/misc/simple_web_server/htdocs")) {
+    return "/usr/local/pscal/lib/misc/simple_web_server/htdocs";
+  }
+  if (isDirectory("/usr/local/share/pscal/misc/htdocs")) {
+    return "/usr/local/share/pscal/misc/htdocs";
   }
   return "";
 }
@@ -505,11 +553,22 @@ void initFiles() {
   if (strlen(source) > 0 && isDirectory(source)) {
     copied = copyDirectory(source, RootDir);
   }
+  if (strlen(source) > 0) {
+    printf("Asset root: %s\n", source);
+  } else {
+    printf("Asset root: (fallback inline page)\n");
+  }
+  if (!copied && strlen(source) > 0) {
+    printf("Warning: copyDirectory failed from %s (copied=%d)\n", source, copied);
+  }
   // Fallback: ensure at least a basic index exists if copy failed or missing.
-  if (!copied || !fileexists(IndexPath)) {
+  if (!fileexists(IndexPath)) {
     GFile = fopen(IndexPath, "w");
     fprintf(GFile, "%s\n", Body);
     fclose(GFile);
+    printf("Using inline default index page.\n");
+  } else {
+    printf("Copied sample site into %s\n", RootDir);
   }
 }
 

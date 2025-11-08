@@ -1415,8 +1415,8 @@ static const char *opLexeme(TokenType t) {
         case TOKEN_MINUS: return "-";
         case TOKEN_MUL: return "*";
         case TOKEN_SLASH: return "/";
-        case TOKEN_INT_DIV: return "//";
-        case TOKEN_MOD: return "%";
+        case TOKEN_INT_DIV: return "div";
+        case TOKEN_MOD: return "mod";
         case TOKEN_EQUAL: return "==";
         case TOKEN_NOT_EQUAL: return "!=";
         case TOKEN_GREATER: return ">";
@@ -1514,7 +1514,13 @@ static AST *parseTerm(ReaParser *p) {
         setLeft(bin, node);
         setRight(bin, right);
         VarType res;
-        bool forceReal = (tt == TOKEN_SLASH) || (tt != TOKEN_INT_DIV && (leftReal || rightReal));
+        bool integerOnlyOp = (tt == TOKEN_INT_DIV || tt == TOKEN_MOD);
+        bool forceReal = (tt == TOKEN_SLASH) || (!integerOnlyOp && (leftReal || rightReal));
+        if (integerOnlyOp && (leftReal || rightReal)) {
+            fprintf(stderr, "L%d: Operands for '%s' must be integers.\n",
+                    op.line, tt == TOKEN_INT_DIV ? "div" : "mod");
+            p->hadError = true;
+        }
         if (forceReal) {
             res = promoteRealBinaryType(lt, rt);
         } else {

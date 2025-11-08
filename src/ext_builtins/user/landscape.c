@@ -9,6 +9,7 @@
 #include <SDL2/SDL_opengl.h>
 #include "runtime/terrain/terrain_generator.h"
 #include "runtime/shaders/sky/sky_dome.h"
+#include "runtime/shaders/sky/cloud_layer.h"
 #endif
 
 #include <float.h>
@@ -277,6 +278,12 @@ typedef struct SkyDomeState {
 
 static SkyDomeState gSkyDome = {0};
 
+typedef struct CloudLayerState {
+    CloudLayerRenderer *renderer;
+} CloudLayerState;
+
+static CloudLayerState gCloudLayer = {0};
+
 static void ensureProceduralGenerator(void) {
     if (!gProceduralTerrain.initialised) {
         terrainGeneratorInit(&gProceduralTerrain.generator);
@@ -298,6 +305,12 @@ static void shutdownSkyDome(void) {
     }
 }
 
+static void shutdownCloudLayer(void) {
+    if (gCloudLayer.renderer) {
+        cloudLayerRendererShutdown(&gCloudLayer.renderer);
+    }
+}
+
 static void disableProceduralGenerator(void) {
     if (gProceduralTerrain.initialised) {
         terrainGeneratorFree(&gProceduralTerrain.generator);
@@ -307,6 +320,7 @@ static void disableProceduralGenerator(void) {
     gProceduralTerrain.enabled = false;
     gProceduralTerrain.lastResolution = -1;
     shutdownSkyDome();
+    shutdownCloudLayer();
 }
 #endif
 
@@ -1562,6 +1576,42 @@ static Value vmBuiltinLandscapeSetLightingPreset(VM* vm, int arg_count, Value* a
 }
 
 #ifdef SDL
+static Value vmBuiltinLandscapeDrawCloudLayer(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeDrawCloudLayer";
+    if (arg_count != 10) {
+        runtimeError(vm, "%s expects 10 arguments.", name);
+        return makeVoid();
+    }
+
+    float values[10];
+    for (int i = 0; i < 10; ++i) {
+        if (!valueToFloat32(args[i], &values[i])) {
+            runtimeError(vm, "%s argument %d must be numeric.", name, i + 1);
+            return makeVoid();
+        }
+    }
+
+    if (!ensureGlContext(vm, name)) return makeVoid();
+
+    CloudLayerParams params;
+    memset(&params, 0, sizeof(params));
+    params.timeSeconds = values[0];
+    params.cameraOffsetX = values[1];
+    params.cameraOffsetZ = values[2];
+    params.parallaxScale = values[3];
+    params.coverage = values[4];
+    params.softness = values[5];
+    params.dayFactor = values[6];
+    params.sunDirection[0] = values[7];
+    params.sunDirection[1] = values[8];
+    params.sunDirection[2] = values[9];
+
+    if (!cloudLayerRendererDraw(&gCloudLayer.renderer, &params)) {
+        runtimeError(vm, "%s failed to render the cloud layer.", name);
+    }
+    return makeVoid();
+}
+
 static Value vmBuiltinLandscapeDrawSkyDome(VM* vm, int arg_count, Value* args) {
     const char* name = "LandscapeDrawSkyDome";
     if (arg_count != 0 && arg_count != 1) {
@@ -1615,5 +1665,7 @@ void registerLandscapeBuiltins(void) {
 #ifdef SDL
     registerVmBuiltin("landscapedrawskydome", vmBuiltinLandscapeDrawSkyDome,
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawSkyDome");
+    registerVmBuiltin("landscapedrawcloudlayer", vmBuiltinLandscapeDrawCloudLayer,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
 #endif
 }

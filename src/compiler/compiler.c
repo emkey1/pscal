@@ -3213,7 +3213,14 @@ Value evaluateCompileTimeValue(AST* node) {
                 bool left_is_real = isRealType(left_val.type);
                 bool right_is_real = isRealType(right_val.type);
 
-                if (left_is_real && right_is_real) {
+                bool op_is_int_div = (node->token->type == TOKEN_INT_DIV);
+                bool op_is_mod = (node->token->type == TOKEN_MOD);
+                bool op_requires_int = op_is_int_div || op_is_mod;
+
+                if (op_requires_int && (left_is_real || right_is_real)) {
+                    fprintf(stderr, "Compile-time Error: '%s' operands must be integers in constant expressions.\n",
+                            op_is_int_div ? "div" : "mod");
+                } else if (left_is_real && right_is_real) {
                     double a = (double)AS_REAL(left_val);
                     double b = (double)AS_REAL(right_val);
                     switch (node->token->type) {
@@ -3233,30 +3240,8 @@ Value evaluateCompileTimeValue(AST* node) {
                                 result = makeReal(a / b);
                             }
                             break;
-                        case TOKEN_INT_DIV:
-                            if (b == 0.0) {
-                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                            } else {
-                                result = makeReal(a / b);
-                            }
-                            break;
-                        case TOKEN_MOD:
-                            if (b == 0.0) {
-                                fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                            } else {
-                                result = makeReal(fmod(a, b));
-                            }
-                            break;
                         default:
                             break;
-                    }
-                } else if (node->token->type == TOKEN_INT_DIV && (left_is_real || right_is_real)) {
-                    double a = left_is_real ? (double)AS_REAL(left_val) : (double)AS_INTEGER(left_val);
-                    double b = right_is_real ? (double)AS_REAL(right_val) : (double)AS_INTEGER(right_val);
-                    if (b == 0.0) {
-                        fprintf(stderr, "Compile-time Error: Division by zero in constant expression.\n");
-                    } else {
-                        result = makeReal(a / b);
                     }
                 } else if (left_is_real || right_is_real) {
                     fprintf(stderr, "Compile-time Error: Mixing real and integer in constant expression.\n");
@@ -5282,10 +5267,16 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             AST* param_group_node = func_decl_node->children[i];
             if (param_group_node && param_group_node->type == AST_VAR_DECL) {
                 bool is_var_param = param_group_node->by_ref;
+                AST* param_type_node = param_group_node->right ? param_group_node->right : param_group_node->type_def;
+                VarType param_var_type = param_type_node ? param_type_node->var_type : TYPE_UNKNOWN;
                 for (int j = 0; j < param_group_node->child_count; j++) {
                     AST* param_name_node = param_group_node->children[j];
                     if (param_name_node && param_name_node->token) {
                         addLocal(&fc, param_name_node->token->value, getLine(param_name_node), is_var_param);
+                        insertLocalSymbol(param_name_node->token->value,
+                                          param_var_type,
+                                          param_type_node,
+                                          true);
                     }
                 }
             }
@@ -7847,17 +7838,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         case TOKEN_MINUS:         writeBytecodeChunk(chunk, SUBTRACT, line); break;
                         case TOKEN_MUL:           writeBytecodeChunk(chunk, MULTIPLY, line); break;
                         case TOKEN_SLASH:         writeBytecodeChunk(chunk, DIVIDE, line); break;
-                        case TOKEN_INT_DIV: {
-                            bool left_is_real = node->left && isRealType(node->left->var_type);
-                            bool right_is_real = node->right && isRealType(node->right->var_type);
-                            bool expr_is_real = isRealType(node->var_type);
-                            
-                            bool emit_real_div = left_is_real || right_is_real || expr_is_real;
-
-
-                            writeBytecodeChunk(chunk, emit_real_div ? DIVIDE : INT_DIV, line);
+                        case TOKEN_INT_DIV:
+                            writeBytecodeChunk(chunk, INT_DIV, line);
                             break;
-                        }
                         case TOKEN_MOD:           writeBytecodeChunk(chunk, MOD, line); break;
                         // AND and OR are now handled above
                         case TOKEN_SHL:           writeBytecodeChunk(chunk, SHL, line); break;

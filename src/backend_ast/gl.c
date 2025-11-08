@@ -260,6 +260,54 @@ static bool parseCullFaceMode(Value arg, GLenum* mode) {
     return false;
 }
 
+static bool parseDepthFunc(Value arg, GLenum* func) {
+    if (IS_INTLIKE(arg)) {
+        *func = (GLenum)AS_INTEGER(arg);
+        return true;
+    }
+    if (arg.type == TYPE_STRING && arg.s_val) {
+        if (strcasecmp(arg.s_val, "never") == 0) {
+            *func = GL_NEVER;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "less") == 0) {
+            *func = GL_LESS;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "equal") == 0) {
+            *func = GL_EQUAL;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "lequal") == 0 ||
+            strcasecmp(arg.s_val, "less_equal") == 0 ||
+            strcasecmp(arg.s_val, "less-equal") == 0) {
+            *func = GL_LEQUAL;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "greater") == 0) {
+            *func = GL_GREATER;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "notequal") == 0 ||
+            strcasecmp(arg.s_val, "not_equal") == 0 ||
+            strcasecmp(arg.s_val, "not-equal") == 0) {
+            *func = GL_NOTEQUAL;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "gequal") == 0 ||
+            strcasecmp(arg.s_val, "greater_equal") == 0 ||
+            strcasecmp(arg.s_val, "greater-equal") == 0) {
+            *func = GL_GEQUAL;
+            return true;
+        }
+        if (strcasecmp(arg.s_val, "always") == 0) {
+            *func = GL_ALWAYS;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool parseShadeModel(Value arg, GLenum* mode) {
     if (IS_INTLIKE(arg)) {
         *mode = (GLenum)AS_INTEGER(arg);
@@ -1110,6 +1158,46 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     } else {
         glDisable(GL_DEPTH_TEST);
     }
+    return makeVoid();
+}
+
+Value vmBuiltinGldepthmask(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLDepthMask expects 1 boolean or numeric argument.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLDepthMask")) return makeVoid();
+
+    bool enable;
+    if (args[0].type == TYPE_BOOLEAN) {
+        enable = AS_BOOLEAN(args[0]);
+    } else if (IS_INTLIKE(args[0])) {
+        enable = AS_INTEGER(args[0]) != 0;
+    } else if (isRealType(args[0].type)) {
+        enable = AS_REAL(args[0]) != 0.0;
+    } else {
+        runtimeError(vm, "GLDepthMask argument must be boolean or numeric.");
+        return makeVoid();
+    }
+
+    glDepthMask(enable ? GL_TRUE : GL_FALSE);
+    return makeVoid();
+}
+
+Value vmBuiltinGldepthfunc(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "GLDepthFunc expects 1 argument specifying the depth comparison.");
+        return makeVoid();
+    }
+    if (!ensureGlContext(vm, "GLDepthFunc")) return makeVoid();
+
+    GLenum func;
+    if (!parseDepthFunc(args[0], &func)) {
+        runtimeError(vm, "GLDepthFunc argument must be a known depth function name (less, lequal, equal, greater, gequal, notequal, always, never) or a GLenum value.");
+        return makeVoid();
+    }
+
+    glDepthFunc(func);
     return makeVoid();
 }
 

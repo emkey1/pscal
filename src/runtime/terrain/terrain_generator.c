@@ -1,9 +1,62 @@
 #include "runtime/terrain/terrain_generator.h"
+#include <math.h>
 
-#include "noise/noise.h"
+#if defined(__has_include)
+  #if __has_include("noise/noise.h")
+    #include "noise/noise.h"
+    #define PSCAL_NOISE_EXTERNAL 1
+  #else
+    #define PSCAL_NOISE_EXTERNAL 0
+  #endif
+#else
+  /* Conservative default if __has_include is unavailable */
+  #define PSCAL_NOISE_EXTERNAL 0
+#endif
+
+#if !PSCAL_NOISE_EXTERNAL
+/* Fallback lightweight noise implementations (deterministic, fast, not high quality) */
+static inline uint32_t pscal_hash_u32(uint32_t x) {
+    x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x;
+}
+static inline float pscal_hash01(uint32_t x) {
+    return (pscal_hash_u32(x) >> 8) * (1.0f / 16777216.0f); /* [0,1) */
+}
+static inline float pscal_lerp(float a, float b, float t) { return a + (b - a) * t; }
+static inline float pscal_fade(float t) { return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f); }
+
+static float pscal_valueNoise2D(float x, float y, uint32_t seed) {
+    int xi = (int)floorf(x);
+    int yi = (int)floorf(y);
+    float xf = x - (float)xi;
+    float yf = y - (float)yi;
+    uint32_t s = seed * 0x9E3779B9u;
+    float v00 = pscal_hash01((uint32_t)xi * 374761393u ^ (uint32_t)yi * 668265263u ^ s);
+    float v10 = pscal_hash01((uint32_t)(xi+1) * 374761393u ^ (uint32_t)yi * 668265263u ^ s);
+    float v01 = pscal_hash01((uint32_t)xi * 374761393u ^ (uint32_t)(yi+1) * 668265263u ^ s);
+    float v11 = pscal_hash01((uint32_t)(xi+1) * 374761393u ^ (uint32_t)(yi+1) * 668265263u ^ s);
+    float u = pscal_fade(xf);
+    float v = pscal_fade(yf);
+    float x1 = pscal_lerp(v00, v10, u);
+    float x2 = pscal_lerp(v01, v11, u);
+    return pscal_lerp(x1, x2, v) * 2.0f - 1.0f; /* map to [-1,1] */
+}
+
+/* Public fallbacks matching expected signatures */
+static inline float pscalPerlin2D(float x, float y, uint32_t seed) {
+    /* Use value noise with fade as a simple Perlin-like fallback */
+    return pscal_valueNoise2D(x, y, seed);
+}
+
+static inline float pscalSimplex2D(float x, float y, uint32_t seed) {
+    /* Simple alternate by rotating coordinates */
+    float xr = x * 0.70710678f - y * 0.70710678f; /* rotate 45 degrees */
+    float yr = x * 0.70710678f + y * 0.70710678f;
+    return pscal_valueNoise2D(xr, yr, seed ^ 0xA5A5A5A5u);
+}
+#endif /* !PSCAL_NOISE_EXTERNAL */
+
 #include "runtime/shaders/terrain/terrain_shader.h"
 
-#include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -407,3 +460,5 @@ void terrainGeneratorDraw(const TerrainGenerator *generator) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 #endif
+
+

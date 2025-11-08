@@ -206,6 +206,9 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "my", 2) == 0) return REA_TOKEN_MYSELF;
             break;
         case 3:
+            if (strncmp(start, "div", 3) == 0) return REA_TOKEN_INT_DIV;
+            if (strncmp(start, "mod", 3) == 0) return REA_TOKEN_PERCENT;
+            if (strncmp(start, "mul", 3) == 0) return REA_TOKEN_STAR;
             if (strncmp(start, "for", 3) == 0) return REA_TOKEN_FOR;
             if (strncmp(start, "int", 3) == 0) return REA_TOKEN_INT;
             if (strncmp(start, "str", 3) == 0) return REA_TOKEN_STR;

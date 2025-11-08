@@ -352,6 +352,7 @@ set(PSCAL_SOURCES
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
+    src/runtime/shaders/sky/cloud_layer.c
 )
 
 # --- Conditionally add SDL source files ---
@@ -547,6 +548,7 @@ set(SHELL_SOURCES
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
+    src/runtime/shaders/sky/cloud_layer.c
 )
 
 list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
@@ -638,6 +640,7 @@ set(CLIKE_SOURCES
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
+    src/runtime/shaders/sky/cloud_layer.c
 )
 
 # Include user-supplied builtins in clike as well
@@ -751,6 +754,7 @@ set(REA_SOURCES
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
+    src/runtime/shaders/sky/cloud_layer.c
     src/Pascal/lexer.c
     src/Pascal/parser.c
     src/ast/ast.c
@@ -1019,10 +1023,12 @@ set(JSON2BC_SOURCES
     src/symbol/symbol.c
     src/vm/vm.c
     src/Pascal/globals.c
+    lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
     src/runtime/shaders/shader_common.c
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
+    src/runtime/shaders/sky/cloud_layer.c
 )
 list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND JSON2BC_SOURCES src/third_party/yyjson/yyjson.c)

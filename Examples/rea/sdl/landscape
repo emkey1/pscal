@@ -16,8 +16,8 @@ const float InvTileScale = 1.0 / TileScale;
 const float InvTwoTileScale = 0.5 * InvTileScale;
 const int NoiseOctaves = 5;
 const float HeightScale = 26.0;
-const float EyeHeight = 6.5;
-const float MoveSpeed = 18.0;
+const float EyeHeight = 2.5;
+const float MoveSpeed = 4.0;
 const float MaxPitch = 75.0;
 const float MouseYawSensitivity = 0.30;
 const float MousePitchSensitivity = 0.15;
@@ -36,6 +36,10 @@ const int HudFontCharCount = 96;
 const int HudFontRows = 7;
 const int HudFontColumns = 5;
 const int TourWaypointCapacity = 8;
+const int StarCount = 260;
+const float NightFadeStart = -0.05;
+const float NightFadeEnd = -0.35;
+const float MoonDistance = 215.0;
 const int ScanCodeW = 26; // SDL_SCANCODE_W
 const int ScanCodeS = 22; // SDL_SCANCODE_S
 const int ScanCodeA = 4;  // SDL_SCANCODE_A
@@ -436,6 +440,27 @@ class LandscapeDemo {
   float cloudVerticalRadius[CloudCount];
   float cloudClusterSpread[CloudCount];
   float cloudParallaxWeight[CloudCount];
+  bool shaderCloudsAvailable;
+  float shaderCloudParallax;
+  float shaderCloudCoverageBase;
+  float shaderCloudSoftness;
+  float starDirX[StarCount];
+  float starDirY[StarCount];
+  float starDirZ[StarCount];
+  float starColorR[StarCount];
+  float starColorG[StarCount];
+  float starColorB[StarCount];
+  float starBaseIntensity[StarCount];
+  float starTwinkleSpeed[StarCount];
+  float starTwinklePhase[StarCount];
+  float moonDirX;
+  float moonDirY;
+  float moonDirZ;
+  float moonPhaseOffset;
+  float dayCycleSeconds;
+  bool dayNightEnabled;
+  float daylightFactor;
+  float sunOrbitOffset;
   float heightScaleMultiplier;
   float minHeightScale;
   float maxHeightScale;
@@ -486,12 +511,23 @@ class LandscapeDemo {
     my.showClouds = true;
     my.showLensFlare = true;
     my.showWater = true;
+    my.shaderCloudsAvailable = false;
+    my.shaderCloudParallax = 0.0016;
+    my.shaderCloudCoverageBase = 0.42;
+    my.shaderCloudSoftness = 0.12;
     my.hudVisible = true;
     my.frameTimeMs = 16.0;
     my.hudPixelToClipX = 2.0 / WindowWidth;
     my.hudPixelToClipY = 2.0 / WindowHeight;
     my.hudFontReady = false;
     my.initHudFont();
+    my.dayNightEnabled = true;
+    my.dayCycleSeconds = 240.0;
+    my.sunOrbitOffset = my.skyRandom(2, 811) * TwoPi;
+    my.moonPhaseOffset = my.skyRandom(4, 977) * TwoPi;
+    my.daylightFactor = 1.0;
+    my.initStars();
+    my.updateSunCycle(0.0);
     bool disableExt = extendedBuiltinsDisabled();
     my.allowExtendedBuiltins = !disableExt;
     if (disableExt) {
@@ -517,6 +553,8 @@ class LandscapeDemo {
                                  hasextbuiltin("user", "LandscapeSetPalettePreset");
     my.lightingBuiltinAvailable = my.allowExtendedBuiltins &&
                                   hasextbuiltin("user", "LandscapeSetLightingPreset");
+    my.shaderCloudsAvailable = my.allowExtendedBuiltins &&
+                               hasextbuiltin("user", "LandscapeDrawCloudLayer");
     my.fastDrawEnabled = false;
     my.useFastTerrain = false;
     my.useFastWater = false;
@@ -940,6 +978,16 @@ class LandscapeDemo {
     return noise * 0.5 + 0.5;
   }
 
+  float starRand(int index, int salt) {
+    int seedMask = my.seed & 2147483647;
+    int value = index * 374761 + salt * 668265 + seedMask;
+    value = value ^ (value >> 15);
+    value = value * 1597334677 + 1;
+    value = value ^ (value >> 12);
+    value = value & 2147483647;
+    return value / 2147483647.0;
+  }
+
   void initializeSkyElements() {
     int i = 0;
     while (i < CloudCount) {
@@ -977,6 +1025,90 @@ class LandscapeDemo {
     }
   }
 
+  void initStars() {
+    int i = 0;
+    while (i < StarCount) {
+      float u = my.starRand(i, 197);
+      float v = my.starRand(i, 251);
+      float theta = TwoPi * u;
+      float cosPhi = 0.15 + 0.85 * v;
+      if (cosPhi > 0.999) cosPhi = 0.999;
+      float phi = arccos(cosPhi);
+      float sinPhi = sin(phi);
+      float dirX = sinPhi * cos(theta);
+      float dirY = cos(phi);
+      float dirZ = sinPhi * sin(theta);
+      my.starDirX[i] = dirX;
+      my.starDirY[i] = dirY;
+      my.starDirZ[i] = dirZ;
+      float tint = my.starRand(i, 557);
+      my.starColorR[i] = 0.80 + tint * 0.18;
+      my.starColorG[i] = 0.82 + (1.0 - tint * 0.6) * 0.16;
+      my.starColorB[i] = 0.92 + tint * 0.08;
+      my.starBaseIntensity[i] = 0.45 + my.starRand(i, 641) * 0.55;
+      my.starTwinkleSpeed[i] = 0.6 + my.starRand(i, 701) * 1.4;
+      my.starTwinklePhase[i] = my.starRand(i, 811) * TwoPi;
+      i = i + 1;
+    }
+  }
+
+  void updateSunCycle(float timeSeconds) {
+    if (!my.dayNightEnabled) {
+      my.daylightFactor = 1.0;
+      return;
+    }
+    float cycle = timeSeconds / my.dayCycleSeconds;
+    cycle = cycle - floor(cycle);
+    float orbit = cycle * TwoPi + my.sunOrbitOffset;
+    float elevation = sin(orbit) * 0.9;
+    float cosElev = cos(elevation);
+    my.sunDirX = cos(orbit) * cosElev;
+    my.sunDirY = sin(elevation);
+    my.sunDirZ = sin(orbit) * cosElev;
+    float len = sqrt(my.sunDirX * my.sunDirX +
+                     my.sunDirY * my.sunDirY +
+                     my.sunDirZ * my.sunDirZ);
+    if (len <= 0.0001) len = 1.0;
+    my.sunDirX = my.sunDirX / len;
+    my.sunDirY = my.sunDirY / len;
+    my.sunDirZ = my.sunDirZ / len;
+    float moonOrbit = orbit + Pi + my.moonPhaseOffset;
+    float moonElev = sin(moonOrbit) * 0.8;
+    float moonCos = cos(moonElev);
+    my.moonDirX = cos(moonOrbit) * moonCos;
+    my.moonDirY = sin(moonElev);
+    my.moonDirZ = sin(moonOrbit) * moonCos;
+    float moonLen = sqrt(my.moonDirX * my.moonDirX +
+                         my.moonDirY * my.moonDirY +
+                         my.moonDirZ * my.moonDirZ);
+    if (moonLen <= 0.0001) moonLen = 1.0;
+    my.moonDirX = my.moonDirX / moonLen;
+    my.moonDirY = my.moonDirY / moonLen;
+    my.moonDirZ = my.moonDirZ / moonLen;
+    my.daylightFactor = my.saturate(my.sunDirY * 0.55 + 0.45);
+  }
+
+  float nightVisibility() {
+    if (!my.dayNightEnabled) return 0.0;
+    float t = (NightFadeStart - my.sunDirY) / (NightFadeStart - NightFadeEnd);
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    return t;
+  }
+
+  void refreshSunLight() {
+    float day = my.daylightFactor;
+    float amb = my.lerp(0.05, 0.24, day);
+    float ambR = amb * 0.85;
+    float ambG = amb;
+    float ambB = amb * 1.08;
+    GLLightfv("light0", "ambient", ambR, ambG, ambB, 1.0);
+    float diff = my.lerp(0.18, 0.95, day);
+    GLLightfv("light0", "diffuse", diff, diff, diff * 0.95, 1.0);
+    float spec = my.lerp(0.08, 0.70, day);
+    GLLightfv("light0", "specular", spec, spec, spec, 1.0);
+  }
+
   float saturate(float value) {
     if (value < 0.0) return 0.0;
     if (value > 1.0) return 1.0;
@@ -984,6 +1116,106 @@ class LandscapeDemo {
   }
 
   float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+  void drawBillboardQuad(float centerX,
+                         float centerY,
+                         float centerZ,
+                         float halfWidthX,
+                         float halfWidthY,
+                         float halfWidthZ,
+                         float halfHeightX,
+                         float halfHeightY,
+                         float halfHeightZ,
+                         float r,
+                         float g,
+                         float b,
+                         float a) {
+    GLColor4f(r, g, b, a);
+    GLBegin("quads");
+    GLVertex3f(centerX - halfWidthX - halfHeightX,
+               centerY - halfWidthY - halfHeightY,
+               centerZ - halfWidthZ - halfHeightZ);
+    GLVertex3f(centerX + halfWidthX - halfHeightX,
+               centerY + halfWidthY - halfHeightY,
+               centerZ + halfWidthZ - halfHeightZ);
+    GLVertex3f(centerX + halfWidthX + halfHeightX,
+               centerY + halfWidthY + halfHeightY,
+               centerZ + halfWidthZ + halfHeightZ);
+    GLVertex3f(centerX - halfWidthX + halfHeightX,
+               centerY - halfWidthY + halfHeightY,
+               centerZ - halfWidthZ + halfHeightZ);
+    GLEnd();
+  }
+
+  void drawBillboardCircle(float centerX,
+                           float centerY,
+                           float centerZ,
+                           float rightX,
+                           float rightY,
+                           float rightZ,
+                           float upX,
+                           float upY,
+                           float upZ,
+                           float radius,
+                           float r,
+                           float g,
+                           float b,
+                           float a,
+                           int segments) {
+    GLBegin("triangle_fan");
+    GLColor4f(r, g, b, a);
+    GLVertex3f(centerX, centerY, centerZ);
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float offsetX = rightX * (cosA * radius) + upX * (sinA * radius);
+      float offsetY = rightY * (cosA * radius) + upY * (sinA * radius);
+      float offsetZ = rightZ * (cosA * radius) + upZ * (sinA * radius);
+      GLVertex3f(centerX + offsetX, centerY + offsetY, centerZ + offsetZ);
+      i = i + 1;
+    }
+    GLEnd();
+  }
+
+  void drawBillboardRing(float centerX,
+                         float centerY,
+                         float centerZ,
+                         float rightX,
+                         float rightY,
+                         float rightZ,
+                         float upX,
+                         float upY,
+                         float upZ,
+                         float innerRadius,
+                         float outerRadius,
+                         float r,
+                         float g,
+                         float b,
+                         float innerAlpha,
+                         float outerAlpha,
+                         int segments) {
+    GLBegin("triangle_strip");
+    int i = 0;
+    while (i <= segments) {
+      float angle = i * (TwoPi / segments);
+      float cosA = cos(angle);
+      float sinA = sin(angle);
+      float outerX = rightX * (cosA * outerRadius) + upX * (sinA * outerRadius);
+      float outerY = rightY * (cosA * outerRadius) + upY * (sinA * outerRadius);
+      float outerZ = rightZ * (cosA * outerRadius) + upZ * (sinA * outerRadius);
+      float innerX = rightX * (cosA * innerRadius) + upX * (sinA * innerRadius);
+      float innerY = rightY * (cosA * innerRadius) + upY * (sinA * innerRadius);
+      float innerZ = rightZ * (cosA * innerRadius) + upZ * (sinA * innerRadius);
+      GLColor4f(r, g, b, outerAlpha);
+      GLVertex3f(centerX + outerX, centerY + outerY, centerZ + outerZ);
+      GLColor4f(r, g, b, innerAlpha);
+      GLVertex3f(centerX + innerX, centerY + innerY, centerZ + innerZ);
+      i = i + 1;
+    }
+    GLEnd();
+  }
 
   void computeVertexNormals() {
     int z = 0;
@@ -1513,76 +1745,117 @@ class LandscapeDemo {
                         float upX,
                         float upY,
                         float upZ) {
+    float sunIntensity = my.saturate(my.daylightFactor);
+    if (sunIntensity <= 0.001) sunIntensity = 0.001;
     float sunX = my.sunDirX * SunDistance;
     float sunY = my.sunDirY * SunDistance;
     float sunZ = my.sunDirZ * SunDistance;
-    int haloSegments = 96;
-    float outerRadius = SunHaloRadius * 1.45;
-    float innerHaloRadius = SunHaloRadius * 1.05;
-    float glowRadius = SunHaloRadius * 0.82;
+    GLDepthTest(true);
+    GLDepthMask(false);
 
-    GLBegin("triangle_strip");
+    GLBlendFunc("src_alpha", "one");
+    drawBillboardRing(sunX, sunY, sunZ,
+                      rightX, rightY, rightZ,
+                      upX, upY, upZ,
+                      SunHaloRadius * 0.9,
+                      SunHaloRadius * 1.6,
+                      1.0, 0.90, 0.65,
+                      0.00,
+                      0.28 * sunIntensity,
+                      96);
+
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+    drawBillboardCircle(sunX, sunY, sunZ,
+                        rightX, rightY, rightZ,
+                        upX, upY, upZ,
+                        SunHaloRadius * 0.9,
+                        1.0, 0.96, 0.82,
+                        0.55 * sunIntensity,
+                        64);
+
+    GLDisable("blend");
+    drawBillboardCircle(sunX, sunY, sunZ,
+                        rightX, rightY, rightZ,
+                        upX, upY, upZ,
+                        SunCoreRadius * 0.85,
+                        1.0, 0.99, 0.92,
+                        1.0,
+                        48);
+    GLEnable("blend");
+    GLDepthMask(true);
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+  }
+
+  void drawMoonBillboard(float rightX,
+                         float rightY,
+                         float rightZ,
+                         float upX,
+                         float upY,
+                         float upZ,
+                         float visibility) {
+    if (visibility <= 0.0) return;
+    float moonX = my.moonDirX * MoonDistance;
+    float moonY = my.moonDirY * MoonDistance;
+    float moonZ = my.moonDirZ * MoonDistance;
+    float radius = SunCoreRadius * 0.65;
+    float haloRadius = SunHaloRadius * 0.52;
+
+    GLDepthTest(true);
+
+    GLDisable("blend");
+    drawBillboardCircle(moonX, moonY, moonZ,
+                        rightX, rightY, rightZ,
+                        upX, upY, upZ,
+                        radius,
+                        0.92, 0.95, 1.0, 1.0 * visibility,
+                        48);
+
+    GLEnable("blend");
+    GLBlendFunc("src_alpha", "one");
+    drawBillboardRing(moonX, moonY, moonZ,
+                      rightX, rightY, rightZ,
+                      upX, upY, upZ,
+                      radius * 0.9,
+                      haloRadius,
+                      0.65, 0.72, 0.90,
+                      0.0,
+                      0.30 * visibility,
+                      48);
+    GLBlendFunc("src_alpha", "one_minus_src_alpha");
+  }
+
+  void drawStars(float timeSeconds,
+                 float visibility,
+                 float rightX,
+                 float rightY,
+                 float rightZ,
+                 float upX,
+                 float upY,
+                 float upZ) {
+    if (visibility <= 0.0) return;
+    GLBegin("quads");
     int i = 0;
-    while (i <= haloSegments) {
-      float angle = i * (TwoPi / haloSegments);
-      float cosA = cos(angle);
-      float sinA = sin(angle);
-      float jitter = 0.92 + sin(angle * 4.0) * 0.04;
-      float outerX = rightX * (cosA * outerRadius) + upX * (sinA * outerRadius);
-      float outerY = rightY * (cosA * outerRadius) + upY * (sinA * outerRadius);
-      float outerZ = rightZ * (cosA * outerRadius) + upZ * (sinA * outerRadius);
-      float innerX = rightX * (cosA * innerHaloRadius) +
-                     upX * (sinA * innerHaloRadius);
-      float innerY = rightY * (cosA * innerHaloRadius) +
-                     upY * (sinA * innerHaloRadius);
-      float innerZ = rightZ * (cosA * innerHaloRadius) +
-                     upZ * (sinA * innerHaloRadius);
-      GLColor4f(1.0, 0.82, 0.46, 0.0);
-      GLVertex3f(sunX + outerX, sunY + outerY, sunZ + outerZ);
-      GLColor4f(1.0, 0.90, 0.62, 0.18 * jitter);
-      GLVertex3f(sunX + innerX, sunY + innerY, sunZ + innerZ);
-      i = i + 1;
-    }
-    GLEnd();
-
-    GLBegin("triangle_fan");
-    GLColor4f(1.0, 0.97, 0.85, 0.55);
-    GLVertex3f(sunX, sunY, sunZ);
-    i = 0;
-    while (i <= haloSegments) {
-      float angle = i * (TwoPi / haloSegments);
-      float cosA = cos(angle);
-      float sinA = sin(angle);
-      float rimScale = 0.90 + cos(angle * 3.0) * 0.05;
-      float offsetX = rightX * (cosA * glowRadius * rimScale) +
-                      upX * (sinA * glowRadius * rimScale);
-      float offsetY = rightY * (cosA * glowRadius * rimScale) +
-                      upY * (sinA * glowRadius * rimScale);
-      float offsetZ = rightZ * (cosA * glowRadius * rimScale) +
-                      upZ * (sinA * glowRadius * rimScale);
-      GLColor4f(1.0, 0.94, 0.72, 0.16);
-      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
-      i = i + 1;
-    }
-    GLEnd();
-
-    int coreSegments = 48;
-    GLBegin("triangle_fan");
-    GLColor4f(1.0, 1.0, 0.94, 0.95);
-    GLVertex3f(sunX, sunY, sunZ);
-    i = 0;
-    while (i <= coreSegments) {
-      float angle = i * (TwoPi / coreSegments);
-      float cosA = cos(angle);
-      float sinA = sin(angle);
-      float offsetX = rightX * (cosA * SunCoreRadius * 0.9) +
-                      upX * (sinA * SunCoreRadius * 0.9);
-      float offsetY = rightY * (cosA * SunCoreRadius * 0.9) +
-                      upY * (sinA * SunCoreRadius * 0.9);
-      float offsetZ = rightZ * (cosA * SunCoreRadius * 0.9) +
-                      upZ * (sinA * SunCoreRadius * 0.9);
-      GLColor4f(1.0, 0.95, 0.70, 0.38);
-      GLVertex3f(sunX + offsetX, sunY + offsetY, sunZ + offsetZ);
+    while (i < StarCount) {
+      float dirX = my.starDirX[i];
+      float dirY = my.starDirY[i];
+      float dirZ = my.starDirZ[i];
+      float twinkle = sin(timeSeconds * my.starTwinkleSpeed[i] + my.starTwinklePhase[i]) * 0.5 + 0.5;
+      float intensity = my.starBaseIntensity[i] * (0.55 + 0.45 * twinkle) * visibility;
+      float size = (0.22 + my.starBaseIntensity[i] * 0.55) * (0.4 + 0.6 * visibility);
+      float px = dirX * SkyDomeRadius;
+      float py = dirY * SkyDomeRadius;
+      float pz = dirZ * SkyDomeRadius;
+      float rx = rightX * size;
+      float ry = rightY * size;
+      float rz = rightZ * size;
+      float ux = upX * size;
+      float uy = upY * size;
+      float uz = upZ * size;
+      GLColor4f(my.starColorR[i], my.starColorG[i], my.starColorB[i], 0.65 * intensity);
+      GLVertex3f(px - rx - ux, py - ry - uy, pz - rz - uz);
+      GLVertex3f(px + rx - ux, py + ry - uy, pz + rz - uz);
+      GLVertex3f(px + rx + ux, py + ry + uy, pz + rz + uz);
+      GLVertex3f(px - rx + ux, py - ry + uy, pz - rz + uz);
       i = i + 1;
     }
     GLEnd();
@@ -1786,6 +2059,27 @@ class LandscapeDemo {
     GLBlendFunc("src_alpha", "one_minus_src_alpha");
   }
 
+  bool drawProceduralClouds(float timeSeconds) {
+    if (!my.shaderCloudsAvailable) return false;
+    float camOffsetX = (my.camX - TerrainSize * 0.5) * TileScale;
+    float camOffsetZ = (my.camZ - TerrainSize * 0.5) * TileScale;
+    float coverage = my.saturate(my.shaderCloudCoverageBase +
+                                 (1.0 - my.daylightFactor) * 0.12);
+    float softness = my.shaderCloudSoftness;
+    float parallax = my.shaderCloudParallax;
+    landscapedrawcloudlayer(timeSeconds,
+                            camOffsetX,
+                            camOffsetZ,
+                            parallax,
+                            coverage,
+                            softness,
+                            my.daylightFactor,
+                            my.sunDirX,
+                            my.sunDirY,
+                            my.sunDirZ);
+    return true;
+  }
+
   void drawCloudLayer(float timeSeconds,
                       float forwardX,
                       float forwardY,
@@ -1940,8 +2234,29 @@ class LandscapeDemo {
       upY = upY / upLen;
       upZ = upZ / upLen;
     }
-    my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
-    if (my.showLensFlare) {
+    float nightVis = my.nightVisibility();
+    if (nightVis > 0.01) {
+      my.drawStars(timeSeconds, nightVis, rightX, rightY, rightZ, upX, upY, upZ);
+      my.drawMoonBillboard(rightX, rightY, rightZ, upX, upY, upZ, nightVis);
+    }
+    if (my.daylightFactor > 0.01) {
+      my.drawSunBillboard(rightX, rightY, rightZ, upX, upY, upZ);
+    }
+    if (my.showClouds) {
+      if (!my.drawProceduralClouds(timeSeconds)) {
+        my.drawCloudLayer(timeSeconds,
+                          forwardX,
+                          forwardY,
+                          forwardZ,
+                          rightX,
+                          rightY,
+                          rightZ,
+                          upX,
+                          upY,
+                          upZ);
+      }
+    }
+    if (my.showLensFlare && my.daylightFactor > 0.05) {
       my.drawLensFlare(timeSeconds,
                        forwardX,
                        forwardY,
@@ -1952,18 +2267,6 @@ class LandscapeDemo {
                        upX,
                        upY,
                        upZ);
-    }
-    if (my.showClouds) {
-      my.drawCloudLayer(timeSeconds,
-                        forwardX,
-                        forwardY,
-                        forwardZ,
-                        rightX,
-                        rightY,
-                        rightZ,
-                        upX,
-                        upY,
-                        upZ);
     }
   }
 
@@ -1976,8 +2279,8 @@ class LandscapeDemo {
     GLEnable("normalize");
     GLShadeModel("smooth");
     GLColorMaterial("front", "ambient_and_diffuse");
-    GLEnable("cull_face");
-    GLCullFace("back");
+    // Culling turns HUD/water invisible because of mixed winding; leave disabled for now.
+    GLDisable("cull_face");
 
     GLLightfv("light0", "ambient", 0.20, 0.24, 0.30, 1.0);
     GLLightfv("light0", "diffuse", 0.90, 0.90, 0.88, 1.0);
@@ -2316,7 +2619,7 @@ class LandscapeDemo {
   void drawHudOverlay() {
     if (!my.hudVisible) return;
     GLDisable("lighting");
-        GLDepthTest(false);
+    GLDepthTest(false);
     GLMatrixMode("projection");
     GLPushMatrix();
     GLLoadIdentity();
@@ -2415,6 +2718,7 @@ class LandscapeDemo {
     GLMatrixMode("projection");
     GLPopMatrix();
     GLMatrixMode("modelview");
+    GLDepthTest(true);
 
     GLEnable("lighting");
   }
@@ -2519,7 +2823,14 @@ class LandscapeDemo {
   }
 
   void drawFrame() {
-    GLClearColor(0.36, 0.55, 0.78, 1.0);
+    if (my.dayNightEnabled) {
+      my.updateSunCycle(my.elapsedSeconds);
+    }
+    float day = my.daylightFactor;
+    float clearR = my.lerp(0.02, 0.36, day);
+    float clearG = my.lerp(0.04, 0.55, day);
+    float clearB = my.lerp(0.08, 0.78, day);
+    GLClearColor(clearR, clearG, clearB, 1.0);
     GLClear();
 
     GLMatrixMode("projection");
@@ -2529,6 +2840,7 @@ class LandscapeDemo {
 
     GLMatrixMode("modelview");
     GLLoadIdentity();
+    my.refreshSunLight();
     GLLightfv("light0", "position", my.sunDirX, my.sunDirY, my.sunDirZ, 0.0);
     GLRotatef(-my.pitch, 1.0, 0.0, 0.0);
     GLRotatef(-my.yaw, 0.0, 1.0, 0.0);

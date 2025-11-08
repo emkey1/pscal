@@ -274,6 +274,8 @@ imported from each front end (Pascal, CLike, and Rea).
 | glcleardepth | (depth: Real) | void | Set the depth buffer clear value (clamped to 0..1). |
 | glcolor3f | (r: Real, g: Real, b: Real) | void | Set the current vertex color (components are clamped to 0..1). |
 | gldepthtest | (enable: Boolean) | void | Enable or disable depth testing. |
+| gldepthmask | (enable: Boolean) | void | Toggle depth buffer writes using `glDepthMask`. |
+| gldepthfunc | (func: String\|Integer) | void | Set the depth comparison (e.g. `"less"`, `"lequal"`, `"greater"`, `"always"`). |
 | gllinewidth | (width: Real) | void | Set the current OpenGL line width (must be positive). |
 | glend | () | void | End the current immediate-mode primitive. |
 | glloadidentity | () | void | Replace the current matrix with the identity matrix. |
@@ -334,7 +336,7 @@ imported from each front end (Pascal, CLike, and Rea).
 | pollkeyany | () | Integer | Returns the next pending key from either the SDL window queue (when graphics are active) or the console input buffer, falling back to 0 when no input is available. |
 | iskeydown | (key: String\|Integer) | Boolean | Return `true` while the requested key is held down (uses SDL scancodes/key names). |
 
-For OpenGL programs, PSCAL now exposes additional fixed-function helpers alongside the existing pipeline calls: `GLColor4f`, `GLNormal3f`, `GLLineWidth`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, and `GLBlendFunc` simplify configuring lighting, materials, and blending directly from Pascal, Rea, and the other front ends. Use `GLCullFace('back')`, `GLCullFace('front')`, or `GLCullFace('front_and_back')` (or pass the corresponding numeric `GLenum`) to toggle which primitives are rejected during rasterization.
+For OpenGL programs, PSCAL now exposes additional fixed-function helpers alongside the existing pipeline calls: `GLColor4f`, `GLNormal3f`, `GLLineWidth`, `GLDepthMask`, `GLDepthFunc`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, and `GLBlendFunc` simplify configuring lighting, materials, blending, and depth state directly from Pascal, Rea, and the other front ends. Use `GLCullFace('back')`, `GLCullFace('front')`, or `GLCullFace('front_and_back')` (or pass the corresponding numeric `GLenum`) to toggle which primitives are rejected during rasterization.
 
 ### Basic OpenGL render loop
 
@@ -347,6 +349,7 @@ begin
   GLViewport(0, 0, 640, 480);
   GLClearDepth(1.0);
   GLDepthTest(true);
+  GLDepthMask(true);
   GLSetSwapInterval(1); { enable vsync }
 
   for frame := 0 to 599 do
