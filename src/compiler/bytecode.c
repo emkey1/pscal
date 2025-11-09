@@ -87,6 +87,20 @@ static void* reallocate(void* pointer, size_t oldSize, size_t newSize) { // From
     return result;
 }
 
+static const char* formatInlineCachePointer(uintptr_t cached, char* buffer, size_t bufferSize) {
+    if (cached == (uintptr_t)0) {
+        return "0x0";
+    }
+
+    if (bufferSize == 0) {
+        return "";
+    }
+
+    snprintf(buffer, bufferSize, "%p", (void*)cached);
+    buffer[bufferSize - 1] = '\0';
+    return buffer;
+}
+
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From all.txt
     if (chunk->capacity < chunk->count + 1) {
         int oldCapacity = chunk->capacity;
@@ -741,8 +755,10 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                                    ? chunk->constants[name_index].s_val
                                    : "<invalid>";
             uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
-            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "GET_GLOBAL",
-                    (unsigned)name_index, name, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u '%s' cache=%s\n", "GET_GLOBAL",
+                    (unsigned)name_index, name, cache_string);
             return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL: {
@@ -753,22 +769,28 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                                    ? chunk->constants[name_index].s_val
                                    : "<invalid>";
             uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
-            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "SET_GLOBAL",
-                    (unsigned)name_index, name, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u '%s' cache=%s\n", "SET_GLOBAL",
+                    (unsigned)name_index, name, cache_string);
             return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL_CACHED: {
             uint8_t name_index = chunk->code[offset + 1];
             uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
-            fprintf(stderr, "%-16s %4u cache=%p\n", "GET_GLOBAL_CACHED",
-                    (unsigned)name_index, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u cache=%s\n", "GET_GLOBAL_CACHED",
+                    (unsigned)name_index, cache_string);
             return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL_CACHED: {
             uint8_t name_index = chunk->code[offset + 1];
             uintptr_t cached = readInlineCachePtr(chunk, offset + 2);
-            fprintf(stderr, "%-16s %4u cache=%p\n", "SET_GLOBAL_CACHED",
-                    (unsigned)name_index, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u cache=%s\n", "SET_GLOBAL_CACHED",
+                    (unsigned)name_index, cache_string);
             return offset + 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL_ADDRESS: {
@@ -784,8 +806,10 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                                    ? chunk->constants[name_index].s_val
                                    : "<invalid>";
             uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
-            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "GET_GLOBAL16",
-                    (unsigned)name_index, name, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u '%s' cache=%s\n", "GET_GLOBAL16",
+                    (unsigned)name_index, name, cache_string);
             return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL16: {
@@ -796,22 +820,28 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
                                    ? chunk->constants[name_index].s_val
                                    : "<invalid>";
             uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
-            fprintf(stderr, "%-16s %4u '%s' cache=%p\n", "SET_GLOBAL16",
-                    (unsigned)name_index, name, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u '%s' cache=%s\n", "SET_GLOBAL16",
+                    (unsigned)name_index, name, cache_string);
             return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL16_CACHED: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
             uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
-            fprintf(stderr, "%-16s %4u cache=%p\n", "GET_GLOBAL16_CACHED",
-                    (unsigned)name_index, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u cache=%s\n", "GET_GLOBAL16_CACHED",
+                    (unsigned)name_index, cache_string);
             return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case SET_GLOBAL16_CACHED: {
             uint16_t name_index = (uint16_t)((chunk->code[offset + 1] << 8) | chunk->code[offset + 2]);
             uintptr_t cached = readInlineCachePtr(chunk, offset + 3);
-            fprintf(stderr, "%-16s %4u cache=%p\n", "SET_GLOBAL16_CACHED",
-                    (unsigned)name_index, (void*)cached);
+            char cache_buffer[32];
+            const char* cache_string = formatInlineCachePointer(cached, cache_buffer, sizeof(cache_buffer));
+            fprintf(stderr, "%-16s %4u cache=%s\n", "SET_GLOBAL16_CACHED",
+                    (unsigned)name_index, cache_string);
             return offset + 3 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         }
         case GET_GLOBAL_ADDRESS16: {
