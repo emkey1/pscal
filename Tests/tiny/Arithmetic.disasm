@@ -11,11 +11,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0015    | SWAP
 0016    | SET_INDIRECT
 0017    | CONSTANT            3 '0'
-0019    | GET_GLOBAL          5 'x'
-0021    | CALL_BUILTIN         1 'write' (2 args)
-0025    | CONSTANT            2 '1'
-0027    | CALL_BUILTIN         1 'write' (1 args)
-0031    | HALT
+0019    | GET_GLOBAL          5 'x' cache=0x0
+0029    | CALL_BUILTIN         1 'write' (2 args)
+0033    | CONSTANT            2 '1'
+0035    | CALL_BUILTIN         1 'write' (1 args)
+0039    | HALT
 == End Disassembly: tiny/Arithmetic.pbc ==
 
 Constants (8):\n  0000: STR   "read"
