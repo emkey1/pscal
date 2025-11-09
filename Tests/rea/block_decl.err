@@ -5,20 +5,20 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0000    0 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
 0007    1 DEFINE_GLOBAL    NameIdx:3   'x' Type:INT64 ('int')
-0012    | CONSTANT            5 '0'
-0014    | SET_GLOBAL          3 'x'
-0016    2 GET_GLOBAL          3 'x'
-0018    | CONSTANT            5 '0'
-0020    | EQUAL
-0021    | JUMP_IF_FALSE      15 (to 0039)
-0024    3 DEFINE_GLOBAL    NameIdx:6   'y' Type:INT64 ('int')
-0029    | CONSTANT            7 '1'
-0031    | SET_GLOBAL          6 'y'
-0033    4 GET_GLOBAL          6 'y'
-0035    | GET_GLOBAL_ADDRESS    3 'x'
-0037    | SWAP
-0038    | SET_INDIRECT
-0039    0 HALT
+0012    | CONST_0
+0013    | SET_GLOBAL          3 'x' cache=0x0
+0023    2 GET_GLOBAL          3 'x' cache=0x0
+0033    | CONST_0
+0034    | EQUAL
+0035    | JUMP_IF_FALSE      30 (to 0068)
+0038    3 DEFINE_GLOBAL    NameIdx:6   'y' Type:INT64 ('int')
+0043    | CONST_1
+0044    | SET_GLOBAL          6 'y' cache=0x0
+0054    4 GET_GLOBAL          6 'y' cache=0x0
+0064    | GET_GLOBAL_ADDRESS    3 'x'
+0066    | SWAP
+0067    | SET_INDIRECT
+0068    0 HALT
 == End Disassembly: rea/block_decl.rea ==
 
 Constants (8):\n  0000: STR   "myself"

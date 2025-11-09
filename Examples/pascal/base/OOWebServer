@@ -7,17 +7,6 @@ program OOWebServer;
 
 // --- Part 1: Interface and Generic Record ---
 
-type
-    // Handler signature for serving a request path.
-    THandlerFunc = procedure(const path: string; 
-                             var code: integer; 
-                             var body: string; 
-                             var ctype: string; 
-                             var logDetail: string);
-
-// --- Part 2: Global Vars and Helpers ---
-// (These are mostly unchanged from the original)
-
 var
     Port: integer = 5555;
     RootDir: string;
@@ -187,148 +176,44 @@ begin
     tryParseInt := true;
 end;
 
+function parsePort(const s: string; var portValue: integer): boolean;
+var
+    value, i: integer;
+begin
+    if s = '' then begin parsePort := false; exit; end;
+    if not tryParseInt(s, value) then
+    begin
+        parsePort := false;
+        exit;
+    end;
+    for i := 1 to length(s) do
+    begin
+        if (s[i] < '0') or (s[i] > '9') then
+        begin
+            parsePort := false;
+            exit;
+        end;
+    end;
+    if (value <= 0) or (value > 65535) then
+    begin
+        parsePort := false;
+        exit;
+    end;
+    portValue := value;
+    parsePort := true;
+end;
+
 // --- Part 3: Refactored Connection Handler ---
 
 procedure serveConn(c: integer);
 var
     req: mstream;
     reqText, firstLine, method, path, ch: string;
+    listing, name, content, rel, fullPath: string;
     flen, i, mstart, pstart, qidx, len: integer;
     respBody, ctype, logDetail, status, hdr, ts: string;
     code: integer;
-
-    // Selected handler for the current path.
-    handler: THandlerFunc;
-
-    // --- Handler Closures ---
-    // These are nested procedures. They act as closures,
-    // capturing the global vars RootDir, IndexPath, and Body.
-
-    procedure HandleRoot(const path: string;
-                         var code: integer;
-                         var body: string;
-                         var ctype: string;
-                         var logDetail: string);
-    var
-        ok: integer;
-        listing, name, content: string;
-    begin
-        // Try to serve index.html first
-        if (fileexists(IndexPath) = 1) then
-        begin
-            ok := loadFileToString(IndexPath, content);
-            if (ok = 1) then
-            begin
-                body := content;
-                code := 200;
-                ctype := 'text/html';
-                logDetail := 'index.html';
-            end
-            else
-            begin
-                // Fallback to in-memory Body
-                body := Body;
-                code := 200;
-                ctype := 'text/html';
-                logDetail := 'index.html (fallback)';
-            end;
-        end
-        else
-        begin
-            // No index.html, generate a directory listing
-            listing := '<html><body><h1>Index of /</h1><ul>';
-            name := findfirst(RootDir);
-            while (name <> '') do
-            begin
-                listing := listing + '<li><a href="/' + name + '">' + name + '</a></li>';
-                name := findnext;
-            end;
-            listing := listing + '</ul></body></html>';
-            body := listing;
-            code := 200;
-            ctype := 'text/html';
-            logDetail := '(listing)';
-        end;
-    end;
-
-    procedure HandleIndex(const path: string;
-                          var code: integer;
-                          var body: string;
-                          var ctype: string;
-                          var logDetail: string);
-    var
-        ok: integer;
-        content: string;
-    begin
-        // Serve real index.html or default Body
-        if (fileexists(IndexPath) = 1) then
-        begin
-            ok := loadFileToString(IndexPath, content);
-            if (ok = 1) then
-            begin
-                body := content;
-                code := 200;
-                ctype := 'text/html';
-                logDetail := 'index.html';
-            end
-            else
-            begin
-                body := Body;
-                code := 200;
-                ctype := 'text/html';
-                logDetail := 'index.html (fallback)';
-            end;
-        end
-        else
-        begin
-            body := Body;
-            code := 200;
-            ctype := 'text/html';
-            logDetail := 'index.html (default)';
-        end;
-    end;
-
-    procedure HandleFile(const path: string;
-                         var code: integer;
-                         var body: string;
-                         var ctype: string;
-                         var logDetail: string);
-    var
-        rel, fullPath: string;
-        ok: integer;
-        content: string;
-    begin
-        // Serve file under RootDir
-        if (copy(path, 1, 1) = '/') then rel := copy(path, 2, length(path) - 1) else rel := path;
-        normalizePath(rel, rel);
-        fullPath := RootDir + '/' + rel;
-        
-        if (fileexists(fullPath) = 1) then
-        begin
-            ok := loadFileToString(fullPath, content);
-            if (ok = 1) then
-            begin
-                body := content;
-                code := 200;
-                contentType(rel, ctype);
-                logDetail := rel;
-            end
-            else
-            begin
-                body := '<html><body>Internal Server Error</body></html>';
-                code := 500;
-                ctype := 'text/html';
-                logDetail := rel;
-            end;
-        end
-        else
-        begin
-            body := '<html><body>Not Found</body></html>';
-            code := 404;
-            ctype := 'text/html';
-            logDetail := rel;
-        end;
-    end;
+    ok: integer;
 
 // --- serveConn main logic begins ---
 begin
@@ -405,21 +290,97 @@ begin
     if (qidx > 0) then path := copy(path, 1, qidx - 1);
     decodePercent(path, path);
 
-    // 2. Select Handler for the requested path
-    if (path = '/') then
-        handler := @HandleRoot
-    else if (path = '/index.html') then
-        handler := @HandleIndex
-    else
-        handler := @HandleFile;
-
-    // 3. Use the handler to build the response body
-    // Initialize defaults
+    // 2. Build the response body based on the requested path
     code := 200;
     ctype := 'text/html';
     logDetail := '';
-    
-    handler(path, code, respBody, ctype, logDetail);
+    respBody := '';
+
+    if (path = '/') then
+    begin
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                printf('Warning: loadFileToString failed for %s (ok=%d)' + #10, IndexPath, ok);
+                respBody := Body;
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            listing := '<html><body><h1>Index of /</h1><ul>';
+            name := findfirst(RootDir);
+            while (name <> '') do
+            begin
+                listing := listing + '<li><a href="/' + name + '">' + name + '</a></li>';
+                name := findnext();
+            end;
+            listing := listing + '</ul></body></html>';
+            respBody := listing;
+            logDetail := '(listing)';
+        end;
+    end
+    else if (path = '/index.html') then
+    begin
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                printf('Warning: loadFileToString failed for %s (ok=%d)' + #10, IndexPath, ok);
+                respBody := Body;
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            respBody := Body;
+            logDetail := 'index.html (default)';
+        end;
+    end
+    else
+    begin
+        if (length(path) > 0) and (copy(path, 1, 1) = '/') then
+            rel := copy(path, 2, length(path) - 1)
+        else
+            rel := path;
+        normalizePath(rel, rel);
+        fullPath := RootDir + '/' + rel;
+        if (fileexists(fullPath) = 1) then
+        begin
+            ok := loadFileToString(fullPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                contentType(rel, ctype);
+                logDetail := rel;
+            end
+            else
+            begin
+                respBody := '<html><body>Internal Server Error</body></html>';
+                code := 500;
+                logDetail := rel;
+            end;
+        end
+        else
+        begin
+            respBody := '<html><body>Not Found</body></html>';
+            code := 404;
+            logDetail := rel;
+        end;
+    end;
 
     // 4. Send Response (unchanged)
     len := length(respBody);
@@ -472,11 +433,27 @@ begin
 end;
 
 function copyDirectory(const src, dst: string): integer;
-var entries, name, entry, srcPath, dstPath: string;
+var
+    cpCmd, comspec, winCmd: string;
+    rc: integer;
+    entries, name, entry, srcPath, dstPath: string;
     idx, j, segLen, success: integer;
 begin
     if (isDirectory(src) = 0) then begin copyDirectory := 0; exit; end;
     mkdir(dst);
+
+    cpCmd := 'cp -R ''' + src + '/.'' ''' + dst + '''';
+    rc := dosExec('/bin/sh', '-c "' + cpCmd + '"');
+    if (rc = 0) then begin copyDirectory := 1; exit; end;
+
+    comspec := getenv('COMSPEC');
+    if (comspec <> '') then
+    begin
+        winCmd := '/C xcopy "' + src + '\*" "' + dst + '" /E /I /Y /Q';
+        rc := dosExec(comspec, winCmd);
+        if (rc = 0) then begin copyDirectory := 1; exit; end;
+    end;
+
     entries := '';
     name := findfirst(src);
     while (name <> '') do
@@ -494,6 +471,11 @@ begin
         if (segLen > 0) then
         begin
             entry := copy(entries, idx, segLen);
+            if (entry = '.') or (entry = '..') then
+            begin
+                idx := j + 1;
+                continue;
+            end;
             srcPath := src + '/' + entry;
             dstPath := dst + '/' + entry;
             if (isDirectory(srcPath) = 1) then
@@ -619,50 +601,102 @@ begin
 end;
 
 function defaultInstallRoot(): string;
-var scriptPath, dir: string;
+var envRoot: string;
 begin
-    scriptPath := canonicalizePath(paramstr(0));
-    if (scriptPath = '') then begin defaultInstallRoot := ''; exit; end;
-    dir := pathDirname(scriptPath);
-    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
-    dir := pathDirname(dir);
-    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
-    dir := pathDirname(dir);
-    if (dir = '') then begin defaultInstallRoot := ''; exit; end;
-    dir := pathDirname(dir);
-    defaultInstallRoot := dir;
+    envRoot := canonicalizePath(getenv('PSCAL_INSTALL_ROOT_RESOLVED'));
+    if (envRoot <> '') and (isDirectory(envRoot) = 1) then begin defaultInstallRoot := envRoot; exit; end;
+    envRoot := canonicalizePath(getenv('PSCAL_INSTALL_ROOT'));
+    if (envRoot <> '') and (isDirectory(envRoot) = 1) then begin defaultInstallRoot := envRoot; exit; end;
+    defaultInstallRoot := '';
+end;
+
+function substituteInstallRoot(const pattern: string): string;
+const PLACEHOLDER = '@PSCAL_INSTALL_ROOT_RESOLVED@';
+var idx, placeholderLen: integer;
+    envRoot, prefix, suffix, candidate: string;
+begin
+    candidate := pattern;
+    placeholderLen := length(PLACEHOLDER);
+    idx := pos(PLACEHOLDER, candidate);
+    if (idx > 0) then
+    begin
+        envRoot := getenv('PSCAL_INSTALL_ROOT_RESOLVED');
+        if (envRoot = '') then envRoot := getenv('PSCAL_INSTALL_ROOT');
+        if (envRoot <> '') then
+        begin
+            prefix := '';
+            if (idx > 1) then prefix := copy(candidate, 1, idx - 1);
+            suffix := '';
+            if (idx + placeholderLen <= length(candidate)) then
+            begin
+                suffix := copy(candidate, idx + placeholderLen, length(candidate) - (idx + placeholderLen) + 1);
+            end;
+            substituteInstallRoot := canonicalizePath(prefix + envRoot + suffix);
+            exit;
+        end
+        else
+        begin
+            substituteInstallRoot := '';
+            exit;
+        end;
+    end;
+    if (candidate <> '') then
+        substituteInstallRoot := canonicalizePath(candidate)
+    else
+        substituteInstallRoot := '';
+end;
+
+function normalizeDirCandidate(const rawPath: string): string;
+var candidate, canonical: string;
+begin
+    candidate := rawPath;
+    if (candidate = '') then begin normalizeDirCandidate := ''; exit; end;
+    canonical := canonicalizePath(candidate);
+    if (canonical <> '') then candidate := canonical;
+    if (isDirectory(candidate) = 1) then
+        normalizeDirCandidate := candidate
+    else
+        normalizeDirCandidate := '';
 end;
 
 procedure resolveAssetRoot(var result: string);
 var candidate, base, fallback: string;
 begin
-    candidate := ConfiguredAssetRoot;
-    if (isDirectory(candidate) = 1) then
-    begin
-        result := candidate;
-        exit;
-    end;
+    candidate := normalizeDirCandidate(substituteInstallRoot(ConfiguredAssetRoot));
+    if (candidate <> '') then begin result := candidate; exit; end;
+
+    candidate := normalizeDirCandidate(getenv('PSCAL_ASSET_ROOT'));
+    if (candidate <> '') then begin result := candidate; exit; end;
+
     base := defaultInstallRoot();
     if (base <> '') then
     begin
-        fallback := pathJoin(base, 'lib/misc/simple_web_server/htdocs');
-        if (isDirectory(fallback) = 1) then
-        begin
-            result := fallback;
-            exit;
-        end;
+        fallback := normalizeDirCandidate(pathJoin(base, 'misc/htdocs'));
+        if (fallback <> '') then begin result := fallback; exit; end;
+        fallback := normalizeDirCandidate(pathJoin(base, 'lib/misc/simple_web_server/htdocs'));
+        if (fallback <> '') then begin result := fallback; exit; end;
     end;
+
+    fallback := normalizeDirCandidate('lib/misc/simple_web_server/htdocs');
+    if (fallback <> '') then begin result := fallback; exit; end;
+    fallback := normalizeDirCandidate('misc/htdocs');
+    if (fallback <> '') then begin result := fallback; exit; end;
+
+    if (isDirectory('/usr/local/pscal/misc/htdocs') = 1) then begin result := '/usr/local/pscal/misc/htdocs'; exit; end;
+    if (isDirectory('/usr/local/pscal/lib/misc/simple_web_server/htdocs') = 1) then begin result := '/usr/local/pscal/lib/misc/simple_web_server/htdocs'; exit; end;
+    if (isDirectory('/usr/local/share/pscal/misc/htdocs') = 1) then begin result := '/usr/local/share/pscal/misc/htdocs'; exit; end;
     result := '';
 end;
 
 procedure resolveTempDir(var result: string);
 var dir: string;
 begin
-    dir := getenv('TMPDIR');
-    if (dir = '') then dir := getenv('TMP');
-    if (dir = '') then dir := getenv('TEMP');
-    if (dir = '') then dir := getenv('PWD');
-    if (dir = '') then dir := getenv('HOME');
+    dir := normalizeDirCandidate('/tmp');
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TMPDIR'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TMP'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TEMP'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('HOME'));
+    if (dir = '') then dir := normalizeDirCandidate('.');
     if (dir = '') then dir := '/tmp';
     result := dir;
 end;
@@ -678,51 +712,9 @@ end;
 
 function loadFileToString(const path: string; var data: string): integer;
 var
-    f: file of byte;
-    status, size, idx: integer;
-    value: byte;
-    procedure maybeDecodeDecimalHtml(var s: string);
-    var
-        i, n, len: integer;
-        decoded: string;
-        code: integer;
-        ch: string;
-    begin
-        len := length(s);
-        if (len = 0) then exit;
-        for i := 1 to len do
-        begin
-            if (s[i] = '%') and (i = len) then break;
-            if (s[i] < '0') or (s[i] > '9') then exit;
-        end;
-        decoded := '';
-        i := 1;
-        while (i <= len) do
-        begin
-            if (s[i] = '%') and (i = len) then break;
-            if (s[i] = '%') then exit;
-            if (s[i] = '1') and (i + 2 <= len) then
-            begin
-                ch := copy(s, i, 3);
-                i := i + 3;
-            end
-            else if (i + 1 <= len) then
-            begin
-                ch := copy(s, i, 2);
-                i := i + 2;
-            end
-            else exit;
-            code := 0;
-            for n := 1 to length(ch) do
-            begin
-                if (ch[n] < '0') or (ch[n] > '9') then exit;
-                code := code * 10 + (ord(ch[n]) - ord('0'));
-            end;
-            if (code < 0) or (code > 255) then exit;
-            decoded := decoded + chr(code);
-        end;
-        if (length(decoded) > 0) and (pos('<', decoded) > 0) then s := decoded;
-    end;
+    f: file of char;
+    status: integer;
+    ch: char;
 begin
     assign(f, path);
     {$I-} reset(f); {$I+}
@@ -734,14 +726,10 @@ begin
         exit;
     end;
 
-    size := filesize(f);
-    if (size < 0) then size := 0;
-    setlength(data, size);
-
-    idx := 1;
-    while (idx <= size) do
+    data := '';
+    while not eof(f) do
     begin
-        {$I-} read(f, value); {$I+}
+        {$I-} read(f, ch); {$I+}
         status := IOResult;
         if (status <> 0) then
         begin
@@ -750,15 +738,12 @@ begin
             loadFileToString := 0;
             exit;
         end;
-        data[idx] := chr(value);
-        idx := idx + 1;
+        data := data + ch;
     end;
 
     close(f);
-    maybeDecodeDecimalHtml(data);
     loadFileToString := 1;
 end;
-
 function saveStringToFile(const path, data: string): integer;
 var
     f: file of byte;
@@ -810,10 +795,22 @@ begin
     begin
         copied := copyDirectory(source, RootDir);
     end;
-    
-    if (copied = 0) or (fileexists(IndexPath) = 0) then
+    if (source <> '') then
+        printf('Asset root: %s' + #10, source)
+    else
+        printf('Asset root: (fallback inline page)' + #10);
+
+    if (copied = 0) and (source <> '') then
+        printf('Warning: failed to fully copy assets from %s' + #10, source);
+
+    if (fileexists(IndexPath) = 0) then
     begin
         saveStringToFile(IndexPath, Body);
+        printf('Using inline default index page.' + #10);
+    end
+    else
+    begin
+        printf('Copied sample site into %s' + #10, RootDir);
     end;
 end;
 
@@ -823,41 +820,55 @@ var
     parsed: integer;
     parsedOk: boolean;
     srv, bindrc, c: integer;
+    pollResult: integer;
+    lastHeartbeatHour, lastHeartbeatMinute: integer;
+    heartbeat_ts: string;
+    hbHour, hbMinute, hbSecond, hbHundredths: integer;
     
 begin
     initFiles;
+    lastHeartbeatHour := -1;
+    lastHeartbeatMinute := -1;
     // Param parsing (unchanged)
     if (paramcount >= 1) then
     begin
         a1 := paramstr(1);
-        parsedOk := tryParseInt(a1, parsed);
-        if parsedOk and (parsed > 0) and (parsed < 65536) then
+        if parsePort(a1, parsed) then
         begin
             Port := parsed;
             if (paramcount >= 2) then
             begin
-                RootDir := paramstr(2);
-                IndexPath := RootDir + '/index.html';
+                a2 := canonicalizePath(paramstr(2));
+                if (a2 <> '') then
+                begin
+                    RootDir := a2;
+                    IndexPath := RootDir + '/index.html';
+                end;
             end;
         end
         else
         begin
-            RootDir := a1;
-            IndexPath := RootDir + '/index.html';
+            a1 := canonicalizePath(a1);
+            if (a1 <> '') then
+            begin
+                RootDir := a1;
+                IndexPath := RootDir + '/index.html';
+            end;
             if (paramcount >= 2) then
             begin
                 a2 := paramstr(2);
-                parsedOk := tryParseInt(a2, parsed);
-                if parsedOk and (parsed > 0) and (parsed < 65536) then Port := parsed;
+                if parsePort(a2, parsed) then Port := parsed;
             end;
         end;
-        
-        mkdir(RootDir);
-        if (fileexists(IndexPath) = 0) then
+
+        if (RootDir <> '') then
         begin
-            saveStringToFile(IndexPath, Body);
+            mkdir(RootDir);
+            if (fileexists(IndexPath) = 0) then
+            begin
+                saveStringToFile(IndexPath, Body);
+            end;
         end;
-        
     end;
     
     printf('Serving %s on http://127.0.0.1:%d' + #10, IndexPath, Port);
@@ -876,14 +887,32 @@ begin
 
     while true do
     begin
-        c := socketaccept(srv);
-        if (c >= 0) then
+        gettime(hbHour, hbMinute, hbSecond, hbHundredths);
+        if (hbHour <> lastHeartbeatHour) or (hbMinute <> lastHeartbeatMinute) then
         begin
-            GAccepted := GAccepted + 1;
-            serveConn(c);
-            GServed := GServed + 1;
+            timestamp(heartbeat_ts);
+            printf('%s [heartbeat] accepted=%d served=%d' + #10,
+                   heartbeat_ts, GAccepted, GServed);
+            lastHeartbeatHour := hbHour;
+            lastHeartbeatMinute := hbMinute;
+        end;
+
+        pollResult := socketpoll(srv, 1000, 1);
+        if (pollResult > 0) then
+        begin
+            c := socketaccept(srv);
+            if (c >= 0) then
+            begin
+                GAccepted := GAccepted + 1;
+                serveConn(c);
+                GServed := GServed + 1;
+            end
+            else
+            begin
+                delay(5);
+            end;
         end
-        else
+        else if (pollResult < 0) then
         begin
             delay(10);
         end;

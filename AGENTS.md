@@ -13,6 +13,7 @@
 - Test manifests (e.g., `Tests/scope_verify/rea/tests/manifest.json`) are generated through the corresponding `build_manifest.py`; regenerate them when adding or editing cases to keep fixtures in sync.
 - For exsh tests that don't include PSCAL extenstions, the output should always be identical to what the bash shell would produce
 - For exsh shellbench (https://github.com/shellspec/shellbench) is used as both benchmarking and functionality verification
+- Appropriate tests should always be run.  It is NEVER appropriate not to test.  At the very least you should verify that modified code compiles
 
 ## Coding Practices
 - C11 style: 4-space indent, braces on same line, camelCase for functions, uppercase snake for macros.

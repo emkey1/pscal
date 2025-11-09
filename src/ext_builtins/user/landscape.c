@@ -1,14 +1,21 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "vm/string_sentinels.h"
+#include "runtime/shaders/terrain/terrain_shader.h"
 
 #ifdef SDL
 #include "backend_ast/sdl.h"
 #include <SDL2/SDL_opengl.h>
+#include "runtime/terrain/terrain_generator.h"
+#include "runtime/shaders/sky/sky_dome.h"
+#include "runtime/shaders/sky/cloud_layer.h"
 #endif
 
 #include <float.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 typedef struct NumericVarRef {
     Value* slot;
@@ -21,6 +28,43 @@ typedef struct ArrayArg {
     int lower;
     int upper;
 } ArrayArg;
+
+static const Value* landscapeResolveStringPointer(const Value* value) {
+    const Value* current = value;
+    int depth = 0;
+    while (current && current->type == TYPE_POINTER &&
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+        if (!current->ptr_val) {
+            return NULL;
+        }
+        current = (const Value*)current->ptr_val;
+        if (++depth > 16) {
+            return NULL;
+        }
+    }
+    return current;
+}
+
+static const char* landscapeValueToCString(const Value* value) {
+    if (!value) return NULL;
+    if (value->type == TYPE_STRING) {
+        return value->s_val ? value->s_val : "";
+    }
+    if (value->type == TYPE_POINTER) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)value->ptr_val;
+        }
+        const Value* resolved = landscapeResolveStringPointer(value);
+        if (!resolved) return NULL;
+        if (resolved->type == TYPE_STRING) {
+            return resolved->s_val ? resolved->s_val : "";
+        }
+        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+            return (const char*)resolved->ptr_val;
+        }
+    }
+    return NULL;
+}
 
 static bool sanityCheckNumericArray(VM* vm, const ArrayArg* array, int count, const char* name,
                                     const char* field) {
@@ -180,15 +224,105 @@ static float clampf(float v, float minVal, float maxVal) {
     return v;
 }
 
+#ifdef SDL
 static float saturatef(float value) {
     if (value < 0.0f) return 0.0f;
     if (value > 1.0f) return 1.0f;
     return value;
 }
 
-static float lerpf(float a, float b, float t) {
-    return a + (b - a) * t;
+static bool valueToBool(Value v, bool* out) {
+    if (out == NULL) return false;
+    if (v.type == TYPE_BOOLEAN) {
+        *out = AS_BOOLEAN(v);
+        return true;
+    }
+    if (IS_INTLIKE(v)) {
+        *out = AS_INTEGER(v) != 0;
+        return true;
+    }
+    if (isRealType(v.type)) {
+        *out = fabs((double)asLd(v)) > 1e-6;
+        return true;
+    }
+    return false;
 }
+
+static bool valueToFloat32(Value v, float* out) {
+    if (!out) return false;
+    if (isRealType(v.type)) {
+        *out = (float)asLd(v);
+        return true;
+    }
+    if (IS_INTLIKE(v)) {
+        *out = (float)AS_INTEGER(v);
+        return true;
+    }
+    return false;
+}
+
+typedef struct ProceduralTerrainState {
+    bool enabled;
+    bool initialised;
+    TerrainGenerator generator;
+    TerrainGeneratorConfig config;
+    int lastResolution;
+} ProceduralTerrainState;
+
+static ProceduralTerrainState gProceduralTerrain = {0};
+
+typedef struct SkyDomeState {
+    bool initialised;
+    SkyDome dome;
+} SkyDomeState;
+
+static SkyDomeState gSkyDome = {0};
+
+typedef struct CloudLayerState {
+    CloudLayerRenderer *renderer;
+} CloudLayerState;
+
+static CloudLayerState gCloudLayer = {0};
+
+static void ensureProceduralGenerator(void) {
+    if (!gProceduralTerrain.initialised) {
+        terrainGeneratorInit(&gProceduralTerrain.generator);
+        gProceduralTerrain.initialised = true;
+    }
+}
+
+static void ensureSkyDomeState(void) {
+    if (!gSkyDome.initialised) {
+        skyDomeInit(&gSkyDome.dome);
+        gSkyDome.initialised = true;
+    }
+}
+
+static void shutdownSkyDome(void) {
+    if (gSkyDome.initialised) {
+        skyDomeFree(&gSkyDome.dome);
+        gSkyDome.initialised = false;
+    }
+}
+
+static void shutdownCloudLayer(void) {
+    if (gCloudLayer.renderer) {
+        cloudLayerRendererShutdown(&gCloudLayer.renderer);
+    }
+}
+
+static void disableProceduralGenerator(void) {
+    if (gProceduralTerrain.initialised) {
+        terrainGeneratorFree(&gProceduralTerrain.generator);
+        gProceduralTerrain.initialised = false;
+    }
+    memset(&gProceduralTerrain.config, 0, sizeof(gProceduralTerrain.config));
+    gProceduralTerrain.enabled = false;
+    gProceduralTerrain.lastResolution = -1;
+    shutdownSkyDome();
+    shutdownCloudLayer();
+}
+#endif
 
 #ifdef SDL
 static bool ensureGlContext(VM* vm, const char* name) {
@@ -650,6 +784,69 @@ static Value vmBuiltinLandscapeBuildHeightField(VM* vm, int arg_count, Value* ar
     return makeVoid();
 }
 
+static Value vmBuiltinLandscapeConfigureProcedural(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeConfigureProcedural";
+#ifndef SDL
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm, "%s requires SDL support.", name);
+    return makeVoid();
+#else
+    if (arg_count != 9) {
+        runtimeError(vm, "%s expects 9 arguments (seed, amplitude, frequency, octaves, lacunarity, persistence, offsetX, offsetZ, useSimplex).",
+                     name);
+        return makeVoid();
+    }
+    if (!IS_INTLIKE(args[0]) ||
+        (!isRealType(args[1].type) && !IS_INTLIKE(args[1])) ||
+        (!isRealType(args[2].type) && !IS_INTLIKE(args[2])) ||
+        !IS_INTLIKE(args[3]) ||
+        (!isRealType(args[4].type) && !IS_INTLIKE(args[4])) ||
+        (!isRealType(args[5].type) && !IS_INTLIKE(args[5])) ||
+        (!isRealType(args[6].type) && !IS_INTLIKE(args[6])) ||
+        (!isRealType(args[7].type) && !IS_INTLIKE(args[7]))) {
+        runtimeError(vm, "%s received invalid parameter types.", name);
+        return makeVoid();
+    }
+
+    bool useSimplex = false;
+    if (!valueToBool(args[8], &useSimplex)) {
+        runtimeError(vm, "%s useSimplex parameter must be boolean or numeric.", name);
+        return makeVoid();
+    }
+
+    int octaves = (int)asI64(args[3]);
+    float amplitude = (float)asLd(args[1]);
+    if (octaves <= 0 || amplitude <= 0.0f) {
+        disableProceduralGenerator();
+        return makeVoid();
+    }
+
+    ensureProceduralGenerator();
+    TerrainGeneratorConfig config = gProceduralTerrain.config;
+    config.seed = (uint32_t)asI64(args[0]);
+    config.amplitude = amplitude;
+    config.frequency = (float)asLd(args[2]);
+    config.octaves = octaves;
+    config.lacunarity = (float)asLd(args[4]);
+    config.persistence = (float)asLd(args[5]);
+    config.offsetX = (float)asLd(args[6]);
+    config.offsetZ = (float)asLd(args[7]);
+    config.useSimplex = useSimplex;
+
+    if (config.frequency <= 0.0f) config.frequency = 0.01f;
+    if (config.lacunarity <= 0.0f) config.lacunarity = 2.0f;
+    if (config.persistence <= 0.0f) config.persistence = 0.5f;
+
+    gProceduralTerrain.config = config;
+    gProceduralTerrain.generator.config = config;
+    gProceduralTerrain.enabled = true;
+    gProceduralTerrain.lastResolution = -1;
+    gProceduralTerrain.generator.gpuDirty = true;
+    return makeVoid();
+#endif
+}
+
 static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args) {
     const char* name = "LandscapeBakeVertexData";
     if (arg_count != 16) {
@@ -739,6 +936,40 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
         return makeVoid();
     }
 
+    bool usedProcedural = false;
+#ifdef SDL
+    if (gProceduralTerrain.enabled) {
+        ensureProceduralGenerator();
+        TerrainGeneratorConfig config = gProceduralTerrain.config;
+        if (config.octaves < 1) config.octaves = 1;
+        if (terrainGeneratorGenerate(&gProceduralTerrain.generator,
+                                     terrainSize,
+                                     (float)minHeight,
+                                     (float)maxHeight,
+                                     (float)waterLevel,
+                                     (float)tileScale,
+                                     &config)) {
+            const TerrainVertex* vertices = terrainGeneratorVertices(&gProceduralTerrain.generator);
+            size_t count = terrainGeneratorVertexCount(&gProceduralTerrain.generator);
+            if (vertices && count == (size_t)vertexCount) {
+                for (size_t i = 0; i < count; ++i) {
+                    const TerrainVertex* v = &vertices[i];
+                    assignFloatValue(&sourceHeights.values[i], v->position[1]);
+                    assignFloatValue(&vertexHeights.values[i], v->position[1]);
+                    assignFloatValue(&vertexNormalX.values[i], v->normal[0]);
+                    assignFloatValue(&vertexNormalY.values[i], v->normal[1]);
+                    assignFloatValue(&vertexNormalZ.values[i], v->normal[2]);
+                    assignFloatValue(&vertexColorR.values[i], v->color[0]);
+                    assignFloatValue(&vertexColorG.values[i], v->color[1]);
+                    assignFloatValue(&vertexColorB.values[i], v->color[2]);
+                }
+                usedProcedural = true;
+                gProceduralTerrain.lastResolution = terrainSize;
+            }
+        }
+    }
+#endif
+
     double span = maxHeight - minHeight;
     if (span <= 0.0001) span = 1.0;
     double waterHeight = minHeight + span * waterLevel;
@@ -750,110 +981,53 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
     double twoTileScale = tileScale * 2.0;
     bool safeScale = fabs(twoTileScale) > 1e-6;
 
-    for (int z = 0; z <= terrainSize; ++z) {
-        for (int x = 0; x <= terrainSize; ++x) {
-            int idx = z * vertexStride + x;
-            double height = asLd(sourceHeights.values[idx]);
-            assignFloatValue(&vertexHeights.values[idx], height);
+    if (!usedProcedural) {
+        for (int z = 0; z <= terrainSize; ++z) {
+            for (int x = 0; x <= terrainSize; ++x) {
+                int idx = z * vertexStride + x;
+                double height = asLd(sourceHeights.values[idx]);
+                assignFloatValue(&vertexHeights.values[idx], height);
 
-            float left = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x - 1, z);
-            float right = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x + 1, z);
-            float down = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z - 1);
-            float up = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z + 1);
+                float left = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x - 1, z);
+                float right = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x + 1, z);
+                float down = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z - 1);
+                float up = landscapeHeightAt(sourceHeights.values, vertexStride, terrainSize, x, z + 1);
 
-            float dx = 0.0f;
-            float dz = 0.0f;
-            if (safeScale) {
-                dx = (float)((right - left) / twoTileScale);
-                dz = (float)((up - down) / twoTileScale);
-            }
-
-            float nx = -dx;
-            float ny = 1.0f;
-            float nz = -dz;
-            float length = sqrtf(nx * nx + ny * ny + nz * nz);
-            if (length <= 0.0001f) length = 1.0f;
-            nx /= length;
-            ny /= length;
-            nz /= length;
-
-            assignFloatValue(&vertexNormalX.values[idx], nx);
-            assignFloatValue(&vertexNormalY.values[idx], ny);
-            assignFloatValue(&vertexNormalZ.values[idx], nz);
-
-            double normalized = 0.0;
-            if (safeNormScale > 0.0) {
-                normalized = (height - minHeight) * safeNormScale;
-                if (normalized < 0.0) normalized = 0.0;
-                if (normalized > 1.0) normalized = 1.0;
-            }
-
-            float t = (float)normalized;
-            float r, g, b;
-            bool underwater = t < (float)waterLevel;
-            if (underwater) {
-                float denom = (float)waterLevel;
-                float depth = 0.0f;
-                if (denom > 1e-6f) {
-                    depth = (float)((waterLevel - normalized) / waterLevel);
+                float dx = 0.0f;
+                float dz = 0.0f;
+                if (safeScale) {
+                    dx = (float)((right - left) / twoTileScale);
+                    dz = (float)((up - down) / twoTileScale);
                 }
-                depth = clampf(depth, 0.0f, 1.0f);
-                float shore = 1.0f - depth;
-                r = 0.05f + 0.08f * depth + 0.10f * shore;
-                g = 0.32f + 0.36f * depth + 0.18f * shore;
-                b = 0.52f + 0.40f * depth + 0.12f * shore;
-            } else if (t < (float)(waterLevel + 0.06)) {
-                float w = (t - (float)waterLevel) / 0.06f;
-                r = 0.36f + 0.14f * w;
-                g = 0.34f + 0.20f * w;
-                b = 0.20f + 0.09f * w;
-            } else if (t < 0.62f) {
-                float w = (t - (float)(waterLevel + 0.06)) / 0.16f;
-                r = 0.24f + 0.18f * w;
-                g = 0.46f + 0.32f * w;
-                b = 0.22f + 0.12f * w;
-            } else if (t < 0.82f) {
-                float w = (t - 0.62f) / 0.20f;
-                r = 0.46f + 0.26f * w;
-                g = 0.40f + 0.22f * w;
-                b = 0.30f + 0.20f * w;
-            } else {
-                float w = (t - 0.82f) / 0.18f;
-                w = clampf(w, 0.0f, 1.0f);
-                float base = 0.84f + 0.14f * w;
-                r = base;
-                g = base;
-                b = base;
-                float frost = saturatef((t - 0.88f) / 0.12f);
-                float sunSpark = 0.75f + 0.25f * frost;
-                r = lerpf(r, sunSpark, frost * 0.4f);
-                g = lerpf(g, sunSpark, frost * 0.4f);
-                b = lerpf(b, sunSpark, frost * 0.6f);
+
+                float nx = -dx;
+                float ny = 1.0f;
+                float nz = -dz;
+                float length = sqrtf(nx * nx + ny * ny + nz * nz);
+                if (length <= 0.0001f) length = 1.0f;
+                nx /= length;
+                ny /= length;
+                nz /= length;
+
+                assignFloatValue(&vertexNormalX.values[idx], nx);
+                assignFloatValue(&vertexNormalY.values[idx], ny);
+                assignFloatValue(&vertexNormalZ.values[idx], nz);
+
+                double normalized = 0.0;
+                if (safeNormScale > 0.0) {
+                    normalized = (height - minHeight) * safeNormScale;
+                    if (normalized < 0.0) normalized = 0.0;
+                    if (normalized > 1.0) normalized = 1.0;
+                }
+
+                float t = (float)normalized;
+                float slope = clampf(1.0f - ny, 0.0f, 1.0f);
+                float paletteColor[3];
+                terrainShaderSampleGradient(t, (float)waterLevel, slope, paletteColor);
+                assignFloatValue(&vertexColorR.values[idx], paletteColor[0]);
+                assignFloatValue(&vertexColorG.values[idx], paletteColor[1]);
+                assignFloatValue(&vertexColorB.values[idx], paletteColor[2]);
             }
-
-            if (!underwater) {
-                float slope = 1.0f - ny;
-                slope = clampf(slope, 0.0f, 1.0f);
-                float cool = saturatef((0.58f - t) * 3.5f);
-                g += cool * 0.04f;
-                b += cool * 0.06f;
-                float alpine = saturatef((t - 0.68f) * 2.2f);
-                r = lerpf(r, r * 0.92f, alpine * 0.3f);
-                g = lerpf(g, g * 0.90f, alpine * 0.26f);
-                b = lerpf(b, b * 1.05f, alpine * 0.24f);
-                float slopeTint = slope * 0.6f;
-                r = lerpf(r, r * 0.78f, slopeTint);
-                g = lerpf(g, g * 0.74f, slopeTint);
-                b = lerpf(b, b * 0.86f, slopeTint);
-            }
-
-            r = saturatef(r);
-            g = saturatef(g);
-            b = saturatef(b);
-
-            assignFloatValue(&vertexColorR.values[idx], r);
-            assignFloatValue(&vertexColorG.values[idx], g);
-            assignFloatValue(&vertexColorB.values[idx], b);
         }
     }
 
@@ -907,6 +1081,142 @@ static Value vmBuiltinLandscapeBakeVertexData(VM* vm, int arg_count, Value* args
     }
 
     return makeVoid();
+}
+
+static void buildPresetList(size_t count,
+                            const char *(*labelFn)(size_t),
+                            char *buffer,
+                            size_t bufferSize) {
+    if (!buffer || bufferSize == 0) return;
+    buffer[0] = '\0';
+    size_t written = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const char *label = labelFn ? labelFn(i) : NULL;
+        if (!label) continue;
+        int n;
+        if (written > 0) {
+            n = snprintf(buffer + written, bufferSize - written, ", %s", label);
+        } else {
+            n = snprintf(buffer + written, bufferSize - written, "%s", label);
+        }
+        if (n < 0) {
+            break;
+        }
+        if ((size_t)n >= bufferSize - written) {
+            written = bufferSize - 1;
+            buffer[written] = '\0';
+            break;
+        }
+        written += (size_t)n;
+    }
+}
+
+static bool parsePalettePresetValue(VM* vm,
+                                    const Value* value,
+                                    TerrainPalettePreset* preset,
+                                    const char* name) {
+    if (!value || !preset) return false;
+    if (IS_INTLIKE(*value) || value->type == TYPE_BOOLEAN) {
+        long long idx = asI64(*value);
+        if (idx < 0 || idx >= (long long)terrainShaderPalettePresetCount()) {
+            char options[128];
+            buildPresetList(terrainShaderPalettePresetCount(), terrainShaderPalettePresetLabel, options, sizeof(options));
+            runtimeError(vm,
+                         "%s received palette index %lld out of range. Valid presets: %s.",
+                         name,
+                         idx,
+                         options);
+            return false;
+        }
+        *preset = (TerrainPalettePreset)idx;
+        return true;
+    }
+    if (isRealType(value->type)) {
+        long long idx = (long long)asLd(*value);
+        if (idx < 0 || idx >= (long long)terrainShaderPalettePresetCount()) {
+            char options[128];
+            buildPresetList(terrainShaderPalettePresetCount(), terrainShaderPalettePresetLabel, options, sizeof(options));
+            runtimeError(vm,
+                         "%s received palette index %lld out of range. Valid presets: %s.",
+                         name,
+                         idx,
+                         options);
+            return false;
+        }
+        *preset = (TerrainPalettePreset)idx;
+        return true;
+    }
+
+    const char* label = landscapeValueToCString(value);
+    if (!label) {
+        runtimeError(vm, "%s expects an integer preset index or preset name.", name);
+        return false;
+    }
+    if (!terrainShaderPalettePresetFromName(label, preset)) {
+        char options[128];
+        buildPresetList(terrainShaderPalettePresetCount(), terrainShaderPalettePresetLabel, options, sizeof(options));
+        runtimeError(vm,
+                     "%s received unknown palette preset '%s'. Valid presets: %s.",
+                     name,
+                     label,
+                     options);
+        return false;
+    }
+    return true;
+}
+
+static bool parseLightingPresetValue(VM* vm,
+                                     const Value* value,
+                                     TerrainLightingPreset* preset,
+                                     const char* name) {
+    if (!value || !preset) return false;
+    if (IS_INTLIKE(*value) || value->type == TYPE_BOOLEAN) {
+        long long idx = asI64(*value);
+        if (idx < 0 || idx >= (long long)terrainShaderLightingPresetCount()) {
+            char options[128];
+            buildPresetList(terrainShaderLightingPresetCount(), terrainShaderLightingPresetLabel, options, sizeof(options));
+            runtimeError(vm,
+                         "%s received lighting index %lld out of range. Valid presets: %s.",
+                         name,
+                         idx,
+                         options);
+            return false;
+        }
+        *preset = (TerrainLightingPreset)idx;
+        return true;
+    }
+    if (isRealType(value->type)) {
+        long long idx = (long long)asLd(*value);
+        if (idx < 0 || idx >= (long long)terrainShaderLightingPresetCount()) {
+            char options[128];
+            buildPresetList(terrainShaderLightingPresetCount(), terrainShaderLightingPresetLabel, options, sizeof(options));
+            runtimeError(vm,
+                         "%s received lighting index %lld out of range. Valid presets: %s.",
+                         name,
+                         idx,
+                         options);
+            return false;
+        }
+        *preset = (TerrainLightingPreset)idx;
+        return true;
+    }
+
+    const char* label = landscapeValueToCString(value);
+    if (!label) {
+        runtimeError(vm, "%s expects an integer preset index or preset name.", name);
+        return false;
+    }
+    if (!terrainShaderLightingPresetFromName(label, preset)) {
+        char options[128];
+        buildPresetList(terrainShaderLightingPresetCount(), terrainShaderLightingPresetLabel, options, sizeof(options));
+        runtimeError(vm,
+                     "%s received unknown lighting preset '%s'. Valid presets: %s.",
+                     name,
+                     label,
+                     options);
+        return false;
+    }
+    return true;
 }
 
 static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
@@ -1017,6 +1327,15 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
 #ifdef SDL
     if (!ensureGlContext(vm, name)) {
         return makeVoid();
+    }
+
+    if (gProceduralTerrain.enabled && gProceduralTerrain.initialised &&
+        gProceduralTerrain.lastResolution == terrainSize &&
+        terrainGeneratorVertexCount(&gProceduralTerrain.generator) == (size_t)vertexCount) {
+        if (terrainGeneratorEnsureUploaded(&gProceduralTerrain.generator)) {
+            terrainGeneratorDraw(&gProceduralTerrain.generator);
+            return makeVoid();
+        }
     }
 
     for (int z = 0; z < terrainSize; ++z) {
@@ -1224,7 +1543,109 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+static Value vmBuiltinLandscapeSetPalettePreset(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeSetPalettePreset";
+    if (arg_count != 1) {
+        runtimeError(vm, "%s expects 1 argument.", name);
+        return makeVoid();
+    }
+
+    TerrainPalettePreset preset;
+    if (!parsePalettePresetValue(vm, &args[0], &preset, name)) {
+        return makeVoid();
+    }
+
+    terrainShaderSetPalettePreset(preset);
+    return makeVoid();
+}
+
+static Value vmBuiltinLandscapeSetLightingPreset(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeSetLightingPreset";
+    if (arg_count != 1) {
+        runtimeError(vm, "%s expects 1 argument.", name);
+        return makeVoid();
+    }
+
+    TerrainLightingPreset preset;
+    if (!parseLightingPresetValue(vm, &args[0], &preset, name)) {
+        return makeVoid();
+    }
+
+    terrainShaderSetLightingPreset(preset);
+    return makeVoid();
+}
+
+#ifdef SDL
+static Value vmBuiltinLandscapeDrawCloudLayer(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeDrawCloudLayer";
+    if (arg_count != 10) {
+        runtimeError(vm, "%s expects 10 arguments.", name);
+        return makeVoid();
+    }
+
+    float values[10];
+    for (int i = 0; i < 10; ++i) {
+        if (!valueToFloat32(args[i], &values[i])) {
+            runtimeError(vm, "%s argument %d must be numeric.", name, i + 1);
+            return makeVoid();
+        }
+    }
+
+    if (!ensureGlContext(vm, name)) return makeVoid();
+
+    CloudLayerParams params;
+    memset(&params, 0, sizeof(params));
+    params.timeSeconds = values[0];
+    params.cameraOffsetX = values[1];
+    params.cameraOffsetZ = values[2];
+    params.parallaxScale = values[3];
+    params.coverage = values[4];
+    params.softness = values[5];
+    params.dayFactor = values[6];
+    params.sunDirection[0] = values[7];
+    params.sunDirection[1] = values[8];
+    params.sunDirection[2] = values[9];
+
+    if (!cloudLayerRendererDraw(&gCloudLayer.renderer, &params)) {
+        runtimeError(vm, "%s failed to render the cloud layer.", name);
+    }
+    return makeVoid();
+}
+
+static Value vmBuiltinLandscapeDrawSkyDome(VM* vm, int arg_count, Value* args) {
+    const char* name = "LandscapeDrawSkyDome";
+    if (arg_count != 0 && arg_count != 1) {
+        runtimeError(vm, "%s expects 0 or 1 argument.", name);
+        return makeVoid();
+    }
+
+    if (!ensureGlContext(vm, name)) return makeVoid();
+
+    ensureSkyDomeState();
+
+    float radius = 500.0f;
+    if (arg_count == 1) {
+        if (!valueToFloat32(args[0], &radius)) {
+            runtimeError(vm, "%s expects a numeric radius.", name);
+            return makeVoid();
+        }
+    }
+
+    if (!skyDomeEnsureUploaded(&gSkyDome.dome, 32, 16)) {
+        runtimeError(vm, "%s could not initialise sky dome geometry.", name);
+        return makeVoid();
+    }
+
+    const float* horizon = terrainShaderSkyHorizonColor();
+    const float* zenith = terrainShaderSkyZenithColor();
+    skyDomeDraw(&gSkyDome.dome, radius, horizon, zenith);
+    return makeVoid();
+}
+#endif
+
 void registerLandscapeBuiltins(void) {
+    registerVmBuiltin("landscapeconfigureprocedural", vmBuiltinLandscapeConfigureProcedural,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeConfigureProcedural");
     registerVmBuiltin("landscapedrawterrain", vmBuiltinLandscapeDrawTerrain,
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawTerrain");
     registerVmBuiltin("landscapedrawwater", vmBuiltinLandscapeDrawWater,
@@ -1237,4 +1658,14 @@ void registerLandscapeBuiltins(void) {
                       BUILTIN_TYPE_PROCEDURE, "LandscapeBuildHeightField");
     registerVmBuiltin("landscapebakevertexdata", vmBuiltinLandscapeBakeVertexData,
                       BUILTIN_TYPE_PROCEDURE, "LandscapeBakeVertexData");
+    registerVmBuiltin("landscapesetpalettepreset", vmBuiltinLandscapeSetPalettePreset,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetPalettePreset");
+    registerVmBuiltin("landscapesetlightingpreset", vmBuiltinLandscapeSetLightingPreset,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetLightingPreset");
+#ifdef SDL
+    registerVmBuiltin("landscapedrawskydome", vmBuiltinLandscapeDrawSkyDome,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawSkyDome");
+    registerVmBuiltin("landscapedrawcloudlayer", vmBuiltinLandscapeDrawCloudLayer,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
+#endif
 }

@@ -1,0 +1,480 @@
+#!/usr/bin/env clike
+#ifdef SDL_ENABLED
+// SDL Multi Bouncing Balls 3D demo rendered with the OpenGL helpers.
+// Ported to the CLike front end. Requires building Pscal with SDL support.
+
+const int WindowWidth = 1600;
+const int WindowHeight = 1000;
+
+float TargetFPS = 90.0;
+
+const int NumBalls = 320;
+const float BoxWidth = 1840.0;
+const float BoxHeight = 1020.0;
+const float BoxDepth = 800.0;
+const float WallElasticity = 1.08;
+float MinSpeed = 50.0;
+float MaxSpeed = 500.0;
+const float VelocityDrag = 0.995;
+
+float CameraDistance = 2000.0;
+const float InitialCameraPitch = -12.0;
+const float CameraOrbitSpeed = 0.0;
+const float ManualYawSpeed = 160.0;
+const float ManualPitchSpeed = 90.0;
+const float MinCameraPitch = -60.0;
+const float MaxCameraPitch = 25.0;
+
+const int ScanCodeLeft = 80;  // SDL_SCANCODE_LEFT
+const int ScanCodeRight = 79; // SDL_SCANCODE_RIGHT
+const int ScanCodeUp = 82;    // SDL_SCANCODE_UP
+const int ScanCodeDown = 81;  // SDL_SCANCODE_DOWN
+
+const int SphereStacks = 20;
+const int SphereSlices = 36;
+const float Pi = 3.1415926535;
+
+const int NumStars = 3610;
+const float StarInnerRadiusScale = 1.45;
+const float StarOuterRadiusScale = 2.85;
+const float LightStarSize = 22.0;
+const float LightStarBrightness = 1.0;
+const float LightStarTwinkleRate = 0.22;
+
+const float LightDirX = -0.55;
+const float LightDirY = -0.35;
+const float LightDirZ = 0.78;
+const float AmbientLevel = 0.18;
+
+float posX[NumBalls];
+float posY[NumBalls];
+float posZ[NumBalls];
+float velX[NumBalls];
+float velY[NumBalls];
+float velZ[NumBalls];
+float radii[NumBalls];
+float screenX[NumBalls];
+float screenY[NumBalls];
+float screenRadius[NumBalls];
+float depthShade[NumBalls];
+int colorR[NumBalls];
+int colorG[NumBalls];
+int colorB[NumBalls];
+
+float starX[NumStars];
+float starY[NumStars];
+float starZ[NumStars];
+float starSize[NumStars];
+float starBaseBrightness[NumStars];
+float starTwinkleRate[NumStars];
+float starPhase[NumStars];
+
+int quitRequestedFlag;
+int paused;
+int FrameDelay;
+float DeltaTime;
+float elapsedSeconds;
+float cameraYaw;
+float cameraPitch;
+float cameraYawVelocity;
+int lastFrameTicks;
+
+float random_unit() {
+    return random(10000) / 10000.0;
+}
+
+void init_balls() {
+    int i = 0;
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    while (i < NumBalls) {
+        float r = 12.0 + random(26);
+        float availX = BoxWidth - 2.0 * r;
+        float availY = BoxHeight - 2.0 * r;
+        float availZ = BoxDepth - 2.0 * r;
+        if (availX < 4.0) availX = 4.0;
+        if (availY < 4.0) availY = 4.0;
+        if (availZ < 4.0) availZ = 4.0;
+
+        radii[i] = r;
+        posX[i] = -halfWidth + r + random_unit() * availX;
+        posY[i] = -halfHeight + r + random_unit() * availY;
+        posZ[i] = -r - random_unit() * (BoxDepth - 2.0 * r);
+
+        int speedRange = (int)trunc(MaxSpeed - MinSpeed);
+        float speed = MinSpeed + random(speedRange + 1) + random_unit();
+        float yaw = random(360) * (Pi / 180.0);
+        float pitch = (random(121) - 60.0) * (Pi / 180.0);
+        float dirXY = cos(pitch);
+        velX[i] = cos(yaw) * dirXY * speed;
+        velY[i] = sin(pitch) * speed;
+        velZ[i] = sin(yaw) * dirXY * speed;
+
+        colorR[i] = 90 + random(150);
+        colorG[i] = 90 + random(150);
+        colorB[i] = 90 + random(150);
+        i = i + 1;
+    }
+}
+
+void init_stars() {
+    int i = 0;
+    float boxRadius = BoxWidth;
+    if (BoxHeight > boxRadius) boxRadius = BoxHeight;
+    if (BoxDepth > boxRadius) boxRadius = BoxDepth;
+    float innerRadius = boxRadius * StarInnerRadiusScale;
+    float cameraGuard = CameraDistance * 1.05;
+    if (cameraGuard > innerRadius) innerRadius = cameraGuard;
+    float outerRadius = boxRadius * StarOuterRadiusScale;
+    if (outerRadius < innerRadius + 1.0) outerRadius = innerRadius + 1.0;
+    float lightConstX = LightDirX;
+    float lightConstY = LightDirY;
+    float lightConstZ = LightDirZ;
+    float lightDirLength = sqrt(lightConstX * lightConstX + lightConstY * lightConstY + lightConstZ * lightConstZ);
+    if (lightDirLength < 0.00001) lightDirLength = 1.0;
+    float highlightDistance = innerRadius + 0.78 * (outerRadius - innerRadius);
+    float highlightScale = highlightDistance / lightDirLength;
+    starX[0] = 0.0 - lightConstX * highlightScale;
+    starY[0] = 0.0 - lightConstY * highlightScale;
+    starZ[0] = 0.0 - lightConstZ * highlightScale;
+    starSize[0] = LightStarSize;
+    starBaseBrightness[0] = LightStarBrightness;
+    starTwinkleRate[0] = LightStarTwinkleRate;
+    starPhase[0] = 0.0;
+    i = 1;
+    while (i < NumStars) {
+        float cosTheta = 2.0 * random_unit() - 1.0;
+        if (cosTheta > 1.0) cosTheta = 1.0;
+        if (cosTheta < -1.0) cosTheta = -1.0;
+        float sinSq = 1.0 - cosTheta * cosTheta;
+        if (sinSq < 0.0) sinSq = 0.0;
+        float sinTheta = sqrt(sinSq);
+        float phi = random_unit() * 2.0 * Pi;
+        float dirX = sinTheta * cos(phi);
+        float dirY = sinTheta * sin(phi);
+        float dirZ = cosTheta;
+        float distance = innerRadius + random_unit() * (outerRadius - innerRadius);
+        starX[i] = dirX * distance;
+        starY[i] = dirY * distance;
+        starZ[i] = dirZ * distance;
+        starSize[i] = 6.0 + random_unit() * 6.0;
+        starBaseBrightness[i] = 0.45 + random_unit() * 0.45;
+        starTwinkleRate[i] = 0.8 + random_unit() * 1.6;
+        starPhase[i] = random_unit() * 2.0 * Pi;
+        i = i + 1;
+    }
+}
+
+void setup_lighting() {
+    glcleardepth(1.0);
+    gldepthtest(1);
+    glenable("lighting");
+    glenable("light0");
+    glenable("color_material");
+    glenable("normalize");
+
+    glshademodel("smooth");
+    glcolormaterial("front", "ambient_and_diffuse");
+
+    float ambient = AmbientLevel;
+    gllightfv("light0", "ambient", ambient, ambient, ambient, 1.0);
+    gllightfv("light0", "diffuse", 0.90, 0.92, 0.95, 1.0);
+    gllightfv("light0", "specular", 0.85, 0.90, 0.95, 1.0);
+
+    glmaterialfv("front", "specular", 0.55, 0.60, 0.70, 1.0);
+    glmaterialf("front", "shininess", 42.0);
+}
+
+void draw_unit_sphere() {
+    bouncingballs3ddrawunitspherefast(SphereStacks, SphereSlices);
+}
+
+void draw_ball(int index) {
+    float baseR = colorR[index] / 255.0;
+    float baseG = colorG[index] / 255.0;
+    float baseB = colorB[index] / 255.0;
+
+    glpushmatrix();
+    gltranslatef(posX[index], posY[index], posZ[index]);
+    glscalef(radii[index], radii[index], radii[index]);
+    glcolor3f(baseR, baseG, baseB);
+    draw_unit_sphere();
+    glpopmatrix();
+}
+
+void draw_balls() {
+    int i = 0;
+    while (i < NumBalls) {
+        draw_ball(i);
+        i = i + 1;
+    }
+}
+
+void draw_star_field() {
+    float time = elapsedSeconds;
+    gldisable("lighting");
+    gldepthtest(0);
+    glenable("blend");
+    glblendfunc("src_alpha", "one");
+    glbegin("lines");
+        int i = 0;
+        while (i < NumStars) {
+            float sparklePhase = starPhase[i] + time * starTwinkleRate[i];
+            float sparkle = 0.55 + 0.45 * sin(sparklePhase);
+            if (sparkle < 0.0) sparkle = 0.0;
+            float brightness = starBaseBrightness[i] * sparkle;
+            float alpha = 0.35 + 0.45 * sparkle;
+            if (alpha > 1.0) alpha = 1.0;
+            float size = starSize[i];
+            float depthSize = size * 0.6;
+            glcolor4f(brightness, brightness, brightness + 0.10, alpha);
+            glvertex3f(starX[i] - size, starY[i], starZ[i]);
+            glvertex3f(starX[i] + size, starY[i], starZ[i]);
+            glvertex3f(starX[i], starY[i] - size, starZ[i]);
+            glvertex3f(starX[i], starY[i] + size, starZ[i]);
+            glvertex3f(starX[i], starY[i], starZ[i] - depthSize);
+            glvertex3f(starX[i], starY[i], starZ[i] + depthSize);
+            i = i + 1;
+        }
+    glend();
+    glblendfunc("src_alpha", "one_minus_src_alpha");
+    gldisable("blend");
+    gldepthtest(1);
+    glenable("lighting");
+}
+
+void draw_glass_box() {
+    float halfWidth = BoxWidth * 0.5;
+    float halfHeight = BoxHeight * 0.5;
+    float frontZ = -12.0;
+    float backZ = -BoxDepth;
+    float floorBackZ = backZ + 1.0;
+
+    gldisable("lighting");
+    glenable("blend");
+    glblendfunc("src_alpha", "one_minus_src_alpha");
+
+    glcolor4f(0.08, 0.12, 0.20, 1.00);
+    glbegin("quads");
+        glvertex3f(-halfWidth, -halfHeight, frontZ);
+        glvertex3f(halfWidth, -halfHeight, frontZ);
+        glvertex3f(halfWidth, -halfHeight, floorBackZ);
+        glvertex3f(-halfWidth, -halfHeight, floorBackZ);
+    glend();
+
+    int gridSteps = 12;
+    int i = 0;
+    glcolor4f(0.18, 0.26, 0.38, 0.30);
+    glbegin("lines");
+        while (i <= gridSteps) {
+            float t = (i * 1.0) / gridSteps;
+            float x = -halfWidth + t * BoxWidth;
+            glvertex3f(x, -halfHeight + 0.2, frontZ);
+            glvertex3f(x, -halfHeight + 0.2, floorBackZ);
+            float z = frontZ + t * (floorBackZ - frontZ);
+            glvertex3f(-halfWidth, -halfHeight + 0.2, z);
+            glvertex3f(halfWidth, -halfHeight + 0.2, z);
+            i = i + 1;
+        }
+    glend();
+
+    gldisable("blend");
+    glcolor3f(0.32, 0.46, 0.66);
+
+    glbegin("line_loop");
+        glvertex3f(-halfWidth, halfHeight, frontZ);
+        glvertex3f(halfWidth, halfHeight, frontZ);
+        glvertex3f(halfWidth, -halfHeight, frontZ);
+        glvertex3f(-halfWidth, -halfHeight, frontZ);
+    glend();
+
+    glbegin("line_loop");
+        glvertex3f(-halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, -halfHeight, backZ);
+        glvertex3f(-halfWidth, -halfHeight, backZ);
+    glend();
+
+    glbegin("lines");
+        glvertex3f(-halfWidth, halfHeight, frontZ);
+        glvertex3f(-halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, halfHeight, frontZ);
+        glvertex3f(halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, -halfHeight, frontZ);
+        glvertex3f(halfWidth, -halfHeight, backZ);
+        glvertex3f(-halfWidth, -halfHeight, frontZ);
+        glvertex3f(-halfWidth, -halfHeight, backZ);
+    glend();
+
+    glenable("blend");
+    glcolor4f(0.12, 0.18, 0.26, 0.26);
+    glbegin("quads");
+        glvertex3f(-halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, halfHeight, backZ);
+        glvertex3f(halfWidth, -halfHeight, backZ);
+        glvertex3f(-halfWidth, -halfHeight, backZ);
+    glend();
+
+    gldisable("blend");
+    glenable("lighting");
+}
+
+void draw_scene() {
+    glclearcolor(0.05, 0.07, 0.12, 1.0);
+    glclear();
+
+    glmatrixmode("projection");
+    glloadidentity();
+    float aspect = WindowWidth * 1.0 / WindowHeight;
+    glperspective(55.0, aspect, 24.0, 8000.0);
+
+    glmatrixmode("modelview");
+    glloadidentity();
+    gltranslatef(0.0, 0.0, -CameraDistance);
+    glrotatef(cameraPitch, 1.0, 0.0, 0.0);
+    glrotatef(cameraYaw, 0.0, 1.0, 0.0);
+
+    gllightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
+
+    draw_star_field();
+    draw_balls();
+    draw_glass_box();
+
+    glswapwindow();
+}
+
+void update_simulation(float deltaTime) {
+    if (paused) return;
+    bouncingballs3dstepultra(NumBalls, deltaTime, BoxWidth, BoxHeight, BoxDepth,
+        WallElasticity, MinSpeed, MaxSpeed, VelocityDrag,
+        CameraDistance, WindowWidth, WindowHeight,
+        &posX, &posY, &posZ, &velX, &velY, &velZ, &radii,
+        &screenX, &screenY, &screenRadius, &depthShade);
+    elapsedSeconds = elapsedSeconds + deltaTime;
+    cameraYaw = cameraYaw + deltaTime * cameraYawVelocity;
+    if (cameraYaw >= 360.0) {
+        cameraYaw = cameraYaw - 360.0;
+    }
+    if (cameraYaw < 0.0) {
+        cameraYaw = cameraYaw + 360.0;
+    }
+}
+
+void handle_input() {
+    int leftDown = iskeydown(ScanCodeLeft);
+    int rightDown = iskeydown(ScanCodeRight);
+    int upDown = iskeydown(ScanCodeUp);
+    int downDown = iskeydown(ScanCodeDown);
+
+    float yawInput = 0.0;
+    if (leftDown) yawInput = yawInput - 1.0;
+    if (rightDown) yawInput = yawInput + 1.0;
+    if (yawInput == 0.0) {
+        cameraYawVelocity = CameraOrbitSpeed;
+    } else {
+        cameraYawVelocity = yawInput * ManualYawSpeed;
+    }
+
+    if (upDown && !downDown) {
+        cameraPitch = cameraPitch + DeltaTime * ManualPitchSpeed;
+    } else if (downDown && !upDown) {
+        cameraPitch = cameraPitch - DeltaTime * ManualPitchSpeed;
+    }
+
+    if (cameraPitch > MaxCameraPitch) cameraPitch = MaxCameraPitch;
+    if (cameraPitch < MinCameraPitch) cameraPitch = MinCameraPitch;
+
+    int keyCode = pollkeyany();
+    while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
+            quitRequestedFlag = 1;
+        } else if (keyCode == ' ') {
+            paused = !paused;
+        }
+        keyCode = pollkeyany();
+    }
+}
+
+float compute_frame_delta() {
+    int currentTicks = getticks();
+    if (lastFrameTicks == 0) {
+        lastFrameTicks = currentTicks;
+        return DeltaTime;
+    }
+
+    int elapsedMs = currentTicks - lastFrameTicks;
+    lastFrameTicks = currentTicks;
+
+    if (elapsedMs < 0) {
+        return DeltaTime;
+    }
+
+    float delta = elapsedMs / 1000.0;
+    if (delta <= 0.0) {
+        return DeltaTime;
+    }
+
+    if (delta > 0.1) {
+        delta = 0.1;
+    }
+
+    return delta;
+}
+
+void init_app() {
+    initgraph3d(WindowWidth, WindowHeight, "CLike Multi Bouncing Balls 3D", 24, 8);
+    int gpuAccelerated = glishardwareaccelerated();
+    if (gpuAccelerated) {
+        printf("OpenGL acceleration: hardware (GPU).\n");
+    } else {
+        printf("OpenGL acceleration: software fallback.\n");
+    }
+    glviewport(0, 0, WindowWidth, WindowHeight);
+    glsetswapinterval(1);
+    setup_lighting();
+
+    FrameDelay = trunc(1000 / TargetFPS);
+    DeltaTime = 1.0 / TargetFPS;
+
+    float fpsBoost = 1.6;
+    float speedBoost = 2.3;
+    float cameraPull = 0.7;
+    bouncingballs3daccelerate(&TargetFPS, &FrameDelay, &DeltaTime,
+        &MinSpeed, &MaxSpeed, &CameraDistance,
+        fpsBoost, speedBoost, cameraPull);
+
+    randomize();
+    init_balls();
+    init_stars();
+
+    quitRequestedFlag = 0;
+    paused = 0;
+    elapsedSeconds = 0.0;
+    cameraYaw = 0.0;
+    cameraPitch = InitialCameraPitch;
+    cameraYawVelocity = CameraOrbitSpeed;
+    lastFrameTicks = getticks();
+}
+
+int main() {
+    init_app();
+    printf("Multi Bouncing Balls 3D (OpenGL) ... Press Q to quit, Space to pause.\n");
+    while (!quitRequestedFlag) {
+        if (quitrequested()) {
+            quitRequestedFlag = 1;
+            break;
+        }
+        float frameDelta = compute_frame_delta();
+        DeltaTime = frameDelta;
+        handle_input();
+        update_simulation(frameDelta);
+        draw_scene();
+        graphloop(FrameDelay);
+    }
+    closegraph3d();
+    printf("Demo finished.\n");
+    return 0;
+}
+#else
+int main() { printf("SDL not enabled\n"); return 0; }
+#endif

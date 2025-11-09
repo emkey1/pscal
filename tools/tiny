@@ -17,6 +17,7 @@ The output file can be executed with ``pscalvm``::
 """
 from __future__ import annotations
 
+import ctypes
 import re
 import struct
 import sys
@@ -53,6 +54,7 @@ def load_opcodes(root: Path) -> Dict[str, int]:
 # VarType enum (partial)
 TYPE_INTEGER = 2
 TYPE_STRING = 4
+INLINE_CACHE_SLOT_SIZE = ctypes.sizeof(ctypes.c_void_p)
 
 # ---------------------------------------------------------------------------
 # Lexer
@@ -306,6 +308,10 @@ class BytecodeBuilder:
             self.emit(self.opcodes["CONSTANT16"])
             self.emit_short(idx)
 
+    def emit_inline_cache_slot(self) -> None:
+        for _ in range(INLINE_CACHE_SLOT_SIZE):
+            self.emit(0)
+
 # ---------------------------------------------------------------------------
 # Compiler
 # ---------------------------------------------------------------------------
@@ -446,6 +452,7 @@ class tinyCompiler:
             else:
                 self.builder.emit(self.opcodes["GET_GLOBAL16"])
                 self.builder.emit_short(name_idx)
+            self.builder.emit_inline_cache_slot()
         elif isinstance(expr, BinOp):
             self.compile_expression(expr.left)
             self.compile_expression(expr.right)

@@ -18,6 +18,9 @@ Value vmBuiltinGlcolor3f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlcolor4f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlcullface(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGldepthtest(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGldepthmask(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGldepthfunc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGllinewidth(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlend(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlenable(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGldisable(struct VM_s* vm, int arg_count, Value* args);
@@ -40,6 +43,7 @@ Value vmBuiltinGltranslatef(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlvertex3f(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlviewport(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinGlishardwareaccelerated(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinGlsaveframebufferpng(struct VM_s* vm, int arg_count, Value* args);
 
 #ifdef __cplusplus
 }

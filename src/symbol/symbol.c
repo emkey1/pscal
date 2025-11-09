@@ -198,25 +198,18 @@ Symbol *lookupLocalSymbol(const char *name) {
  * @return A pointer to the found Symbol structure.
  */
 Symbol *lookupSymbol(const char *name) {
-    // Check local scope first
     Symbol *sym = lookupLocalSymbol(name);
-
-    // If not found in local scope, check global scope
     if (!sym) {
         sym = lookupGlobalSymbol(name);
     }
-
-    // If the symbol is still not found in either scope, it's a runtime error.
     if (!sym) {
         fprintf(stderr, "Runtime error: Symbol '%s' not found.\n", name);
 #ifdef DEBUG
-        dumpSymbolTable(); // Dump the tables for debugging the error
+        dumpSymbolTable();
 #endif
         EXIT_FAILURE_HANDLER();
     }
-
     DEBUG_PRINT("[DEBUG SYMBOL] lookupSymbol: '%s' found, type=%s\n", name, varTypeToString(sym->type));
-
     return sym;
 }
 
@@ -822,29 +815,33 @@ void nullifyPointerAliasesByAddrValue(HashTable* table, uintptr_t disposedAddrVa
  */
 // in src/symbol/symbol.c
 
-void updateSymbol(const char *name, Value val) {
-    // Look up the symbol in the symbol tables (local then global).
-    // lookupSymbol handles the "symbol not found" error and exits if necessary.
-    Symbol *sym = lookupSymbol(name);
-
-    #ifdef DEBUG // Debug print to show which symbol is being updated and its properties
-    fprintf(stderr, "[DEBUG updateSymbol] Attempting to update symbol '%s' (Type: %s, Value @ %p, is_const: %d, is_alias: %d, is_local_var: %d). Incoming value type: %s\n",
-            name, varTypeToString(sym->type), (void*)(sym ? sym->value : NULL),
-            sym ? sym->is_const : -1, sym ? sym->is_alias : -1, sym ? sym->is_local_var : -1,
+static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
+#ifdef DEBUG
+    fprintf(stderr,
+            "[DEBUG updateSymbol] Attempting to update symbol '%s' (Type: %s, Value @ %p, is_const: %d, is_alias: %d, is_local_var: %d). Incoming value type: %s\n",
+            name ? name : (sym && sym->name ? sym->name : "<unnamed>"),
+            sym ? varTypeToString(sym->type) : "<?>",
+            (void*)(sym ? sym->value : NULL),
+            sym ? sym->is_const : -1,
+            sym ? sym->is_alias : -1,
+            sym ? sym->is_local_var : -1,
             varTypeToString(val.type));
-    fflush(stderr); // Flush debug output immediately
-    #endif
-
-    // Check if the symbol is a constant. Constants cannot be reassigned.
-    if (sym->is_const) {
-        fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n", name);
+    fflush(stderr);
+#endif
+    if (!sym) {
+        fprintf(stderr, "Runtime error: Attempted to assign to NULL symbol reference.\n");
         freeValue(&val);
         EXIT_FAILURE_HANDLER();
     }
-
-    // Defensive check: Ensure the Symbol has an allocated Value structure to update.
+    if (sym->is_const) {
+        fprintf(stderr, "Runtime error: Cannot assign to constant '%s'.\n",
+                name ? name : (sym->name ? sym->name : "<unnamed>"));
+        freeValue(&val);
+        EXIT_FAILURE_HANDLER();
+    }
     if (!sym->value) {
-        fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer during assignment.\n", name);
+        fprintf(stderr, "Runtime error: Symbol '%s' has NULL value pointer during assignment.\n",
+                name ? name : (sym->name ? sym->name : "<unnamed>"));
         freeValue(&val);
         EXIT_FAILURE_HANDLER();
     }
@@ -882,10 +879,11 @@ void updateSymbol(const char *name, Value val) {
     }
 
     if (!types_compatible) {
-        fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for symbol '%s'.\n",
-                varTypeToString(val.type), varTypeToString(sym->type), name);
-        freeValue(&val);
-        EXIT_FAILURE_HANDLER();
+                fprintf(stderr, "Runtime error: Type mismatch. Cannot assign %s to %s for symbol '%s'.\n",
+                        varTypeToString(val.type), varTypeToString(sym->type),
+                        name ? name : (sym->name ? sym->name : "<unnamed>"));
+                freeValue(&val);
+                EXIT_FAILURE_HANDLER();
     }
     // --- End Type Compatibility Check ---
 
@@ -1085,6 +1083,16 @@ void updateSymbol(const char *name, Value val) {
 
     #ifdef DEBUG
     fprintf(stderr, "[DEBUG updateSymbol] Assignment to '%s' successful. Final value type: %s\n",
-            name, varTypeToString(sym->value->type));
+            name ? name : (sym->name ? sym->name : "<unnamed>"),
+            varTypeToString(sym->value->type));
     #endif
+}
+
+void updateSymbol(const char *name, Value val) {
+    Symbol *sym = lookupSymbol(name);
+    updateSymbolInternal(sym, name, val);
+}
+
+void updateSymbolDirect(Symbol *sym, const char *name, Value val) {
+    updateSymbolInternal(sym, name ? name : (sym ? sym->name : NULL), val);
 }

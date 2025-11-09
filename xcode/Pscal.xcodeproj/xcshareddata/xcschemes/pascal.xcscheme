@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1500"
+   LastUpgradeVersion = "2610"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "544FBF16FB3D4707AE577805"
+               BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
                BuildableName = "pscal-runner"
                BlueprintName = "pscal-runner"
                ReferencedContainer = "container:Pscal.xcodeproj">
@@ -165,7 +165,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "544FBF16FB3D4707AE577805"
+            BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
             BuildableName = "pscal-runner"
             BlueprintName = "pscal-runner"
             ReferencedContainer = "container:Pscal.xcodeproj">
@@ -195,7 +195,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "544FBF16FB3D4707AE577805"
+            BlueprintIdentifier = "042E9EE660D16CAF2B97C13D"
             BuildableName = "pscal-runner"
             BlueprintName = "pscal-runner"
             ReferencedContainer = "container:Pscal.xcodeproj">
