@@ -46,6 +46,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <errno.h>
+#include <limits.h>
 #ifdef SDL
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -62,6 +64,24 @@ static int s_vm_trace_head = 0;
 typedef struct {
     size_t partial_match_len;
 } CachedMessageScannerState;
+
+static char* canonicalizePath(const char* path) {
+    if (!path) {
+        return NULL;
+    }
+#ifdef _WIN32
+    char resolved[_MAX_PATH];
+    if (_fullpath(resolved, path, _MAX_PATH)) {
+        return _strdup(resolved);
+    }
+#else
+    char* resolved = realpath(path, NULL);
+    if (resolved) {
+        return resolved;
+    }
+#endif
+    return strdup(path);
+}
 
 static bool bufferContainsCachedMessage(const char *buf, size_t len, CachedMessageScannerState *state) {
     static const char cached_msg[] = "Loaded cached bytecode";
@@ -454,6 +474,12 @@ int main(int argc, char *argv[]) {
         return vmExitWithCleanup(EXIT_FAILURE);
     }
 
+    char* canonical_source_path = canonicalizePath(sourceFile);
+    if (canonical_source_path) {
+        sourceFile = canonical_source_path;
+        programName = canonical_source_path;
+    }
+
     // Initialize core systems
     initSymbolSystem();
 
@@ -465,6 +491,7 @@ int main(int argc, char *argv[]) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
+        if (canonical_source_path) free(canonical_source_path);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     fseek(file, 0, SEEK_END);
@@ -477,6 +504,7 @@ int main(int argc, char *argv[]) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
+        if (canonical_source_path) free(canonical_source_path);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     size_t bytes_read = fread(source_buffer, 1, fsize, file);
@@ -487,6 +515,7 @@ int main(int argc, char *argv[]) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
+        if (canonical_source_path) free(canonical_source_path);
         return vmExitWithCleanup(EXIT_FAILURE);
     }
     source_buffer[fsize] = '\0';
@@ -571,5 +600,8 @@ int main(int argc, char *argv[]) {
         free(preprocessed_source);
     }
     free(source_buffer); // Free the source code buffer
+    if (canonical_source_path) {
+        free(canonical_source_path);
+    }
     return vmExitWithCleanup(result);
 }
