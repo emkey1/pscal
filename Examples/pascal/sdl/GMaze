@@ -53,6 +53,31 @@ var
   SolutionMask: TMaskGrid;
   PixelWidth, PixelHeight: integer; { For SDL window size }
 
+{ --- NEW: StrToInt Function --- }
+function StrToInt(s: string): integer;
+var
+  val, i: integer;
+  ch: char;
+begin
+  val := 0;
+  for i := 1 to Length(s) do
+  begin
+    ch := s[i];
+    if (ch >= '0') and (ch <= '9') then
+    begin
+      { Convert char to digit and add to value }
+      val := (val * 10) + (Ord(ch) - Ord('0'));
+    end
+    else
+    begin
+      { Invalid character, return 0 }
+      StrToInt := 0;
+      Exit;
+    end;
+  end;
+  StrToInt := val;
+end;
+
 { --- All Helper Functions --- }
 
 function MazeIndex(row, col: integer): integer;
@@ -124,19 +149,51 @@ begin
     SolutionMask[i] := False;
 end;
 
+{ --- MODIFIED: ClampDimensions --- }
 procedure ClampDimensions;
+var
+  w_str, h_str: string;
+  w_val, h_val: integer;
 begin
-  CellsWidth := 80;
-  CellsHeight := 60;
+  { Check for command-line arguments }
+  if ParamCount = 2 then
+  begin
+    w_str := ParamStr(1);
+    h_str := ParamStr(2);
+    w_val := StrToInt(w_str);
+    h_val := StrToInt(h_str);
+
+    { Safety check for invalid input }
+    if (w_val > 0) and (h_val > 0) then
+    begin
+      CellsWidth := w_val;
+      CellsHeight := h_val;
+    end
+    else
+    begin
+      { Fallback to default on invalid input }
+      CellsWidth := 80;
+      CellsHeight := 60;
+    end;
+  end
+  else
+  begin
+    { Default values if no params are given }
+    CellsWidth := 80;
+    CellsHeight := 60;
+  end;
   
+  { Calculate maze grid dimensions based on cell count }
   MazeWidth := (CellsWidth * 2) + 1;
   MazeHeight := (CellsHeight * 2) + 1;
 
+  { Keep the original safety checks against max buffer size }
   if MazeWidth > MaxMazeWidth then MazeWidth := MaxMazeWidth;
   if MazeHeight > MaxMazeHeight then MazeHeight := MaxMazeHeight;
   if CellsWidth > MaxCellsWidth then CellsWidth := MaxCellsWidth;
   if CellsHeight > MaxCellsHeight then CellsHeight := MaxCellsHeight;
 
+  { Ensure minimum size }
   if MazeWidth < 3 then MazeWidth := 3;
   if MazeHeight < 3 then MazeHeight := 3;
   if CellsWidth < 1 then CellsWidth := 1;
@@ -407,7 +464,7 @@ begin
     Exit;
   end;
 
-  { --- FIX: Corrected typo 'goal_col' to 'goalCol' --- }
+  { --- BUG FIX: Was 'goal_col' --- }
   nextIdx := MazeIndex(goalRow, goalCol);
   while nextIdx <> -1 do
   begin
@@ -529,10 +586,8 @@ begin
     CarveEntranceAt(MazeHeight - 1, ExitCol);
 end;
 
-{ --- NEW: A replacement for FillRect using GL primitives --- }
 procedure GLFillRect(x, y, w, h: integer);
 begin
-  { We must use the GL built-ins from your docs }
   GLBegin(GL_QUADS);
     GLVertex3f(x, y, 0);
     GLVertex3f(x + w, y, 0);
@@ -547,8 +602,8 @@ var
   px, py: integer;
   idx: integer;
 begin
-  { 1. Clear the screen to black using GL commands }
-  GLClearColor(0.0, 0.0, 0.0, 1.0);
+  { 1. Clear the screen to WHITE }
+  GLClearColor(1.0, 1.0, 1.0, 1.0); { White }
   GLClear(GL_COLOR_BUFFER_BIT);
 
   { 2. Iterate over the maze grid and draw rectangles }
@@ -562,22 +617,21 @@ begin
 
       if showSolution and SolutionMask[idx] then
       begin
-        { Draw solution path in green (0, 200, 0) }
-        GLColor3f(0.0, 0.784, 0.0); { 200 / 255 = 0.784 }
+        { Draw solution path in green }
+        GLColor3f(0.0, 0.784, 0.0);
         GLFillRect(px, py, CellSize, CellSize);
       end
       else if IsWallCell(r, c) then
       begin
-        { Draw wall in light gray (200, 200, 200) }
-        GLColor3f(0.784, 0.784, 0.784);
+        { Draw walls in BLACK }
+        GLColor3f(0.0, 0.0, 0.0); { Black }
         GLFillRect(px, py, CellSize, CellSize);
       end;
+      { else: It's a passage (' '), which is the white background }
     end;
   end;
 
-  { 3. Draw text prompt - REMOVED as it's incompatible }
-
-  { 4. Flip the 3D buffer to the screen }
+  { 3. Flip the 3D buffer to the screen }
   GLSwapWindow;
 end;
 
@@ -597,22 +651,17 @@ begin
   ReadCommandKey := key;
 end;
 
-{ --- NEW: Helper to set up a 2D drawing matrix --- }
 procedure Set2DProjection(w, h: integer);
 begin
-  { Set up a simple 2D orthographic projection }
   GLMatrixMode(GL_PROJECTION);
   GLLoadIdentity;
   
-  { Use the standard GL 2D ortho projection }
-  { We scale Y inverted to match 0,0 top-left }
   GLScalef(2.0 / w, -2.0 / h, 1.0);
   GLTranslatef(-w / 2.0, -h / 2.0, 0);
 
   GLMatrixMode(GL_MODELVIEW);
   GLLoadIdentity;
   
-  { Disable 3D depth test, we're drawing in 2D }
   GLDisable(GL_DEPTH_TEST);
 end;
 
@@ -625,21 +674,20 @@ var
 begin
   Randomize;
   
+  { This will now check for command-line args }
   ClampDimensions;
   
-  { Calculate pixel size *without* space for text }
+  { Calculate pixel size }
   PixelWidth := MazeWidth * CellSize;
   PixelHeight := MazeHeight * CellSize;
 
   { 1. Use InitGraph3D with the 5-arg signature }
   InitGraph3D(PixelWidth, PixelHeight, 'SDL Maze Generator', 32, 0);
   
-  { 2. Init Text System - REMOVED }
-  
-  { 3. Set up the 2D projection }
+  { 2. Set up the 2D projection }
   Set2DProjection(PixelWidth, PixelHeight);
   
-  { 4. Generate Maze }
+  { 3. Generate Maze }
   InitializeMaze;
   ResetVisited;
   startRow := Random(CellsHeight);
@@ -652,10 +700,10 @@ begin
   
   ClearSolutionMask;
   
-  { 5. Draw the first frame }
+  { 4. Draw the first frame }
   DrawMaze(False);
   
-  { 6. Input loop }
+  { 5. Input loop }
   key := ReadCommandKey;
   if (UpCase(key) = 'S') then
   begin
@@ -668,16 +716,15 @@ begin
     end
     else
     begin
-      { We can't display an error message anymore }
-      { But we can flash the screen red }
-      GLColor3f(1.0, 0.0, 0.0);
-      GLFillRect(0, 0, PixelWidth, PixelHeight);
+      { Flash the screen red if solve fails }
+      GLClearColor(1.0, 0.0, 0.0, 1.0); { Red }
+      GLClear(GL_COLOR_BUFFER_BIT);
       GLSwapWindow;
       FlushPendingKeys;
       ReadKey;
     end;
   end;
   
-  { 7. Clean up 3D }
+  { 6. Clean up 3D }
   CloseGraph3D;
 end.
