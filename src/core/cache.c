@@ -1019,6 +1019,18 @@ static bool readChunkCore(FILE* f,
         if (!chunk->constants) {
             free(chunk->code);
             free(chunk->lines);
+            chunk->code = NULL;
+            chunk->lines = NULL;
+            RETURN_FALSE;
+        }
+        chunk->global_symbol_cache = (Symbol**)calloc((size_t)const_count, sizeof(Symbol*));
+        if (!chunk->global_symbol_cache) {
+            free(chunk->code);
+            free(chunk->lines);
+            free(chunk->constants);
+            chunk->code = NULL;
+            chunk->lines = NULL;
+            chunk->constants = NULL;
             RETURN_FALSE;
         }
     }
@@ -1149,6 +1161,7 @@ static bool readChunkCore(FILE* f,
             freeValue(sym->value);
             *(sym->value) = val;
             sym->is_const = true;
+            insertConstGlobalSymbol(name, *(sym->value));
         } else {
             freeValue(&val);
         }
@@ -1420,6 +1433,7 @@ static bool readValue(FILE* f, Value* out) {
             break; }
         case TYPE_CHAR:
             if (fread(&out->c_val, sizeof(out->c_val), 1, f) != 1) return false;
+            SET_INT_VALUE(out, out->c_val);
             break;
         case TYPE_STRING: {
             int len = 0;
