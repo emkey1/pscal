@@ -432,8 +432,15 @@ struct TerminalSnapshot {
     }
 
     private static func makeAttributedString(from row: [TerminalCell]) -> AttributedString {
+        var effectiveRow = row
+        while let last = effectiveRow.last, last.character == " " {
+            effectiveRow.removeLast()
+        }
         var attributed = AttributedString()
-        var currentAttributes = row.first?.attributes ?? TerminalAttributes()
+        guard !effectiveRow.isEmpty else {
+            return attributed
+        }
+        var currentAttributes = effectiveRow.first!.attributes
         var buffer = ""
 
         func flush() {
@@ -450,7 +457,7 @@ struct TerminalSnapshot {
             buffer.removeAll(keepingCapacity: true)
         }
 
-        for cell in row {
+        for cell in effectiveRow {
             if cell.attributes == currentAttributes {
                 buffer.append(cell.character)
             } else {
@@ -460,7 +467,7 @@ struct TerminalSnapshot {
             }
         }
         flush()
-        return attributed.trimmedTrailingSpaces()
+        return attributed
     }
 
     private static func resolvedColors(attributes: TerminalAttributes) -> (foreground: Color, background: Color) {
