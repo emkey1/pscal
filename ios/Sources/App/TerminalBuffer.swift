@@ -1,4 +1,5 @@
-import SwiftUI
+import Foundation
+import UIKit
 
 private struct TerminalCell {
     var character: Character
@@ -28,43 +29,43 @@ private enum TerminalColor: Equatable {
     case extended(Int)
     case rgb(Int, Int, Int)
 
-    func resolvedColor(isForeground: Bool) -> Color {
+    func resolvedUIColor(isForeground: Bool) -> UIColor {
         switch self {
         case .defaultForeground:
-            return Color.primary
+            return UIColor.label
         case .defaultBackground:
-            return Color(.systemBackground)
+            return UIColor.systemBackground
         case .ansi(let index):
-            let palette = [
-                Color(red: 0.0, green: 0.0, blue: 0.0),
-                Color(red: 0.86, green: 0.08, blue: 0.24),
-                Color(red: 0.0, green: 0.6, blue: 0.2),
-                Color(red: 0.97, green: 0.7, blue: 0.0),
-                Color(red: 0.2, green: 0.4, blue: 0.96),
-                Color(red: 0.55, green: 0.0, blue: 0.6),
-                Color(red: 0.0, green: 0.65, blue: 0.75),
-                Color(red: 0.93, green: 0.93, blue: 0.93),
-                Color(red: 0.3, green: 0.3, blue: 0.3),
-                Color(red: 1.0, green: 0.2, blue: 0.2),
-                Color(red: 0.13, green: 0.8, blue: 0.2),
-                Color(red: 1.0, green: 0.9, blue: 0.2),
-                Color(red: 0.35, green: 0.55, blue: 1.0),
-                Color(red: 0.88, green: 0.35, blue: 0.95),
-                Color(red: 0.0, green: 0.85, blue: 1.0),
-                Color(red: 1.0, green: 1.0, blue: 1.0)
+            let palette: [UIColor] = [
+                UIColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0),
+                UIColor(red: 0.86, green: 0.08, blue: 0.24, alpha: 1.0),
+                UIColor(red: 0.0, green: 0.6, blue: 0.2, alpha: 1.0),
+                UIColor(red: 0.97, green: 0.7, blue: 0.0, alpha: 1.0),
+                UIColor(red: 0.2, green: 0.4, blue: 0.96, alpha: 1.0),
+                UIColor(red: 0.55, green: 0.0, blue: 0.6, alpha: 1.0),
+                UIColor(red: 0.0, green: 0.65, blue: 0.75, alpha: 1.0),
+                UIColor(red: 0.93, green: 0.93, blue: 0.93, alpha: 1.0),
+                UIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 1.0),
+                UIColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0),
+                UIColor(red: 0.13, green: 0.8, blue: 0.2, alpha: 1.0),
+                UIColor(red: 1.0, green: 0.9, blue: 0.2, alpha: 1.0),
+                UIColor(red: 0.35, green: 0.55, blue: 1.0, alpha: 1.0),
+                UIColor(red: 0.88, green: 0.35, blue: 0.95, alpha: 1.0),
+                UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0),
+                UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
             ]
             return palette[max(0, min(index, palette.count - 1))]
         case .extended(let idx):
             return TerminalColor.colorForExtended(index: idx)
         case .rgb(let r, let g, let b):
-            return Color(red: Double(r) / 255.0, green: Double(g) / 255.0, blue: Double(b) / 255.0)
+            return UIColor(red: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0, alpha: 1.0)
         }
     }
 
-    private static func colorForExtended(index: Int) -> Color {
+    private static func colorForExtended(index: Int) -> UIColor {
         switch index {
         case 0...15:
-            return TerminalColor.ansi(index).resolvedColor(isForeground: true)
+            return TerminalColor.ansi(index).resolvedUIColor(isForeground: true)
         case 16...231:
             let idx = index - 16
             let r = idx / 36
@@ -73,13 +74,13 @@ private enum TerminalColor: Equatable {
             func component(_ value: Int) -> Double {
                 value == 0 ? 0 : Double(value * 40 + 55)
             }
-            return Color(red: component(r)/255.0, green: component(g)/255.0, blue: component(b)/255.0)
+            return UIColor(red: CGFloat(component(r)/255.0), green: CGFloat(component(g)/255.0), blue: CGFloat(component(b)/255.0), alpha: 1.0)
         case 232...255:
             let level = Double(index - 232) * 10.0 + 8.0
             let normalized = level / 255.0
-            return Color(red: normalized, green: normalized, blue: normalized)
+            return UIColor(red: CGFloat(normalized), green: CGFloat(normalized), blue: CGFloat(normalized), alpha: 1.0)
         default:
-            return Color.primary
+            return UIColor.label
         }
     }
 }
@@ -436,24 +437,18 @@ struct TerminalSnapshot {
         while let last = effectiveRow.last, last.character == " " {
             effectiveRow.removeLast()
         }
-        var attributed = AttributedString()
         guard !effectiveRow.isEmpty else {
-            return attributed
+            return AttributedString()
         }
+        let mutable = NSMutableAttributedString()
         var currentAttributes = effectiveRow.first!.attributes
         var buffer = ""
 
         func flush() {
             guard !buffer.isEmpty else { return }
-            var segment = AttributedString(buffer)
-            let colors = resolvedColors(attributes: currentAttributes)
-            segment.foregroundColor = colors.foreground
-            segment.backgroundColor = colors.background
-            segment.font = .system(.body, design: .monospaced).weight(currentAttributes.bold ? .bold : .regular)
-            if currentAttributes.underline {
-                segment.underlineStyle = Text.LineStyle(pattern: .solid, color: colors.foreground)
-            }
-            attributed += segment
+            let attrs = nsAttributes(for: currentAttributes)
+            let segment = NSAttributedString(string: buffer, attributes: attrs)
+            mutable.append(segment)
             buffer.removeAll(keepingCapacity: true)
         }
 
@@ -467,19 +462,35 @@ struct TerminalSnapshot {
             }
         }
         flush()
-        return attributed
+        return AttributedString(mutable)
     }
 
-    private static func resolvedColors(attributes: TerminalAttributes) -> (foreground: Color, background: Color) {
+    private static func nsAttributes(for attributes: TerminalAttributes) -> [NSAttributedString.Key: Any] {
+        let colors = resolvedColors(attributes: attributes)
+        let weight: UIFont.Weight = attributes.bold ? .bold : .regular
+        let font = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: weight)
+        var result: [NSAttributedString.Key: Any] = [
+            .foregroundColor: colors.foreground,
+            .backgroundColor: colors.background,
+            .font: font
+        ]
+        if attributes.underline {
+            result[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            result[.underlineColor] = colors.foreground
+        }
+        return result
+    }
+
+    private static func resolvedColors(attributes: TerminalAttributes) -> (foreground: UIColor, background: UIColor) {
         if attributes.inverse {
             return (
-                attributes.background.resolvedColor(isForeground: false),
-                attributes.foreground.resolvedColor(isForeground: true)
+                attributes.background.resolvedUIColor(isForeground: false),
+                attributes.foreground.resolvedUIColor(isForeground: true)
             )
         } else {
             return (
-                attributes.foreground.resolvedColor(isForeground: true),
-                attributes.background.resolvedColor(isForeground: false)
+                attributes.foreground.resolvedUIColor(isForeground: true),
+                attributes.background.resolvedUIColor(isForeground: false)
             )
         }
     }
