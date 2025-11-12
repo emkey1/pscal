@@ -46,6 +46,7 @@
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
+#include "common/frontend_kind.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -106,7 +107,14 @@ static char* resolveImportPath(const char* orig_path) {
     return NULL;
 }
 
-int main(int argc, char **argv) {
+int clike_main(int argc, char **argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_CLIKE);
+#define CLIKE_RETURN(value)            \
+    do {                               \
+        int __clike_rc = (value);      \
+        frontendPopKind(previousKind); \
+        return __clike_rc;             \
+    } while (0)
     // Keep terminal untouched for clike: no raw mode or color push
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
@@ -120,17 +128,17 @@ int main(int argc, char **argv) {
 
     if (argc == 1) {
         fprintf(stderr, "%s\n", CLIKE_USAGE);
-        return EXIT_FAILURE;
+        CLIKE_RETURN(EXIT_FAILURE);
     }
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", CLIKE_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            CLIKE_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "-v") == 0) {
             printf("Clike Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            CLIKE_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -148,7 +156,7 @@ int main(int argc, char **argv) {
             vm_trace_head = atoi(argv[i] + 16);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], CLIKE_USAGE);
-            return EXIT_FAILURE;
+            CLIKE_RETURN(EXIT_FAILURE);
         } else {
             path = argv[i];
             clike_params_start = i + 1;
@@ -159,25 +167,25 @@ int main(int argc, char **argv) {
     if (dump_ext_builtins_flag) {
         registerExtendedBuiltins();
         extBuiltinDumpInventory(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        CLIKE_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     if (!path) {
         fprintf(stderr, "Error: No source file specified.\n%s\n", CLIKE_USAGE);
-        return EXIT_FAILURE;
+        CLIKE_RETURN(EXIT_FAILURE);
     }
 
     FILE *f = fopen(path, "rb");
-    if (!f) { perror("open"); return EXIT_FAILURE; }
+    if (!f) { perror("open"); CLIKE_RETURN(EXIT_FAILURE); }
     fseek(f, 0, SEEK_END); long len = ftell(f); rewind(f);
     char *src = (char*)malloc(len + 1);
-    if (!src) { fclose(f); return EXIT_FAILURE; }
+    if (!src) { fclose(f); CLIKE_RETURN(EXIT_FAILURE); }
     size_t bytes_read = fread(src,1,len,f);
     if (bytes_read != (size_t)len) {
         fprintf(stderr, "Error reading source file '%s'\n", path);
         free(src);
         fclose(f);
-        return EXIT_FAILURE;
+        CLIKE_RETURN(EXIT_FAILURE);
     }
     src[len]='\0'; fclose(f);
 
@@ -197,7 +205,7 @@ int main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        CLIKE_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
 
     if (dump_ast_json_flag) {
@@ -207,7 +215,7 @@ int main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        return EXIT_SUCCESS;
+        CLIKE_RETURN(EXIT_SUCCESS);
     }
 
     if (clike_params_start < argc) {
@@ -227,7 +235,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return EXIT_FAILURE;
+        CLIKE_RETURN(EXIT_FAILURE);
     }
 
     if (clike_warning_count > 0) {
@@ -241,7 +249,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return clike_error_count > 255 ? 255 : clike_error_count;
+        CLIKE_RETURN(clike_error_count > 255 ? 255 : clike_error_count);
     }
     prog = optimizeClikeAST(prog);
 
@@ -253,7 +261,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return EXIT_FAILURE;
+        CLIKE_RETURN(EXIT_FAILURE);
     }
 
     char **dep_paths = NULL;
@@ -343,7 +351,7 @@ int main(int argc, char **argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
-        return EXIT_SUCCESS;
+        CLIKE_RETURN(EXIT_SUCCESS);
     }
 
     VM vm; initVM(&vm);
@@ -363,5 +371,12 @@ int main(int argc, char **argv) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
-    return result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE;
+    CLIKE_RETURN(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
+#undef CLIKE_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char **argv) {
+    return clike_main(argc, argv);
+}
+#endif

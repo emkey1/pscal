@@ -15,6 +15,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
+#include "common/frontend_kind.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -28,7 +29,14 @@ static void initSymbolSystemClike(void) {
     current_procedure_table = procedure_table;
 }
 
-int main(void) {
+int clike_repl_main(void) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_CLIKE);
+#define CLIKE_REPL_RETURN(value)        \
+    do {                                \
+        int __clike_rc = (value);       \
+        frontendPopKind(previousKind);  \
+        return __clike_rc;              \
+    } while (0)
     // Do not change terminal state for clike REPL; rely on normal TTY buffering
 
     struct termios raw_termios;
@@ -109,7 +117,7 @@ int main(void) {
             free(src);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return EXIT_FAILURE;
+            CLIKE_REPL_RETURN(EXIT_FAILURE);
         }
         initSymbolSystemClike();
         clikeRegisterBuiltins();
@@ -125,7 +133,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return EXIT_FAILURE;
+            CLIKE_REPL_RETURN(EXIT_FAILURE);
         }
         prog = optimizeClikeAST(prog);
 
@@ -139,7 +147,7 @@ int main(void) {
             if (procedure_table) freeHashTable(procedure_table);
             for (int i = 0; i < clike_import_count; ++i) free(clike_imports[i]);
             free(clike_imports); clike_imports = NULL; clike_import_count = 0;
-            return EXIT_FAILURE;
+            CLIKE_REPL_RETURN(EXIT_FAILURE);
         }
         if (clike_error_count == 0) {
             BytecodeChunk chunk; clikeCompile(prog, &chunk);
@@ -160,5 +168,12 @@ int main(void) {
         clike_error_count = 0;
         clike_warning_count = 0;
     }
-    return EXIT_SUCCESS;
+    CLIKE_REPL_RETURN(EXIT_SUCCESS);
 }
+#undef CLIKE_REPL_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(void) {
+    return clike_repl_main();
+}
+#endif

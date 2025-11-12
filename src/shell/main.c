@@ -26,6 +26,7 @@
 #include "Pascal/globals.h"
 #include "vm/vm.h"
 #include "symbol/symbol.h"
+#include "common/frontend_kind.h"
 
 int gParamCount = 0;
 char **gParamValues = NULL;
@@ -2712,11 +2713,24 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     return last_status;
 }
 
-int main(int argc, char **argv) {
+int exsh_main(int argc, char **argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_SHELL);
+#define EXSH_RETURN(value)              \
+    do {                                \
+        int __exsh_rc = (value);        \
+        frontendPopKind(previousKind);  \
+        return __exsh_rc;               \
+    } while (0)
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     options.quiet = true;
     options.suppress_warnings = true;
+
+#if defined(PSCAL_TARGET_IOS)
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#endif
+
     shellRuntimeSetArg0(options.frontend_path);
     shellRuntimeSetInteractive(false);
 
@@ -2730,11 +2744,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", SHELL_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "-v") == 0) {
             printf("Shell Frontend Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             options.dump_ast_json = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -2764,7 +2778,7 @@ int main(int argc, char **argv) {
                 }
                 const char *program_name = (slash && slash[1]) ? slash + 1 : program;
                 fprintf(stderr, "%s: -c: option requires an argument\n", program_name);
-                return vmExitWithCleanup(2);
+                EXSH_RETURN(vmExitWithCleanup(2));
             }
             command_string = argv[i + 1];
             if (i + 2 < argc) {
@@ -2776,7 +2790,7 @@ int main(int argc, char **argv) {
             break;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         } else {
             path = argv[i];
             arg_start_index = i + 1;
@@ -2786,7 +2800,7 @@ int main(int argc, char **argv) {
 
     if (dump_ext_builtins_flag) {
         shellDumpBuiltins(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     setenv("EXSH_LAST_STATUS", "0", 1);
@@ -2796,7 +2810,7 @@ int main(int argc, char **argv) {
         shellRuntimeSetInteractive(false);
         char *src = shellLoadFile(path);
         if (!src) {
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         }
         if (arg_start_index < argc) {
             gParamCount = argc - arg_start_index;
@@ -2810,7 +2824,7 @@ int main(int argc, char **argv) {
         (void)exit_requested;
         free(src);
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     if (command_string) {
@@ -2835,7 +2849,7 @@ int main(int argc, char **argv) {
         int status = shellRunSource(command_string, "<command>", &command_options, &exit_requested);
         (void)exit_requested;
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     gParamCount = 0;
@@ -2845,17 +2859,17 @@ int main(int argc, char **argv) {
         shellRuntimeSetInteractive(true);
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {
-            return vmExitWithCleanup(rc_status);
+            EXSH_RETURN(vmExitWithCleanup(rc_status));
         }
         shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     shellRuntimeSetInteractive(false);
     char *stdin_src = readStream(stdin);
     if (!stdin_src) {
-        return EXIT_FAILURE;
+        EXSH_RETURN(EXIT_FAILURE);
     }
 
     ShellRunOptions stdin_opts = options;
@@ -2865,5 +2879,12 @@ int main(int argc, char **argv) {
     int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
     (void)exit_requested;
     free(stdin_src);
-    return vmExitWithCleanup(status);
+    EXSH_RETURN(vmExitWithCleanup(status));
 }
+#undef EXSH_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#endif
