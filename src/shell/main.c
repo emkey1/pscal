@@ -28,9 +28,6 @@
 #include "symbol/symbol.h"
 #include "common/frontend_kind.h"
 
-int gParamCount = 0;
-char **gParamValues = NULL;
-
 static struct termios gInteractiveOriginalTermios;
 static volatile sig_atomic_t gInteractiveTermiosValid = 0;
 static struct sigaction gInteractiveOldSigintAction;

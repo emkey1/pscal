@@ -15,9 +15,6 @@
 #include "core/utils.h"
 #include "common/frontend_kind.h"
 
-int gParamCount = 0;
-char **gParamValues = NULL;
-
 static const char* USAGE =
     "Usage: pscaljson2bc [--dump-bytecode | --dump-bytecode-only] [-o <out.bc>] [<ast.json>]\n"
     "  If no input file is provided or '-' is used, reads from stdin.\n"

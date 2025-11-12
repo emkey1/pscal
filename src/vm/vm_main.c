@@ -10,9 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int gParamCount = 0;
-char **gParamValues = NULL;
-
 /* Local copy of initSymbolSystem from main.c to set up tables. */
 static void initSymbolSystem(void) {
 #ifdef DEBUG

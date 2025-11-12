@@ -50,9 +50,6 @@
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
 
-int gParamCount = 0;
-char **gParamValues = NULL;
-
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
     constGlobalSymbols = createHashTable();

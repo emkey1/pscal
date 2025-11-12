@@ -16,9 +16,6 @@
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 #include "common/frontend_kind.h"
-
-int gParamCount = 0;
-char **gParamValues = NULL;
 int clike_error_count = 0;
 int clike_warning_count = 0;
 
