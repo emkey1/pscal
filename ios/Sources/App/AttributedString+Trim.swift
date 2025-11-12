@@ -3,12 +3,12 @@ import Foundation
 extension AttributedString {
     func trimmedTrailingSpaces() -> AttributedString {
         var trimmed = self
-        var index = trimmed.endIndex
-        while index > trimmed.startIndex {
-            let previous = trimmed.index(before: index)
-            if trimmed[previous] == " " {
-                trimmed.removeSubrange(previous..<index)
-                index = previous
+        while trimmed.endIndex > trimmed.startIndex {
+            let before = trimmed.index(before: trimmed.endIndex)
+            let range = before..<trimmed.endIndex
+            let segment = trimmed[range]
+            if String(segment.characters) == " " {
+                trimmed.removeSubrange(range)
             } else {
                 break
             }
