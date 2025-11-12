@@ -13,6 +13,7 @@
 #include "core/utils.h"
 #include "core/types.h"
 #include "Pascal/globals.h"
+#include "common/frontend_kind.h"
 #include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
                            // though for bytecode compilation, we often build our own tables/mappings.
@@ -370,7 +371,7 @@ typedef struct FunctionCompilerState {
     bool returns_value;
 } FunctionCompilerState;
 
-FunctionCompilerState* current_function_compiler = NULL;
+static FunctionCompilerState* current_function_compiler = NULL;
 
 // Track global objects created with NEW so their hidden
 // vtable fields can be initialised after all vtables are defined.
@@ -2754,12 +2755,12 @@ typedef struct {
     char* name;
 } CompilerGlobalVarInfo;
 
-int compilerGlobalCount = 0;
+static int compilerGlobalCount = 0;
 
-CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS]; // MAX_GLOBALS from an appropriate header or defined here
+static CompilerGlobalVarInfo compilerGlobals[MAX_GLOBALS];
 
-CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
-int compilerConstantCount = 0;
+static CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
+static int compilerConstantCount = 0;
 
 static void initFunctionCompiler(FunctionCompilerState* fc) {
     fc->local_count = 0;
@@ -6393,9 +6394,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
 
-#ifdef FRONTEND_REA
-            // Fallback: receiver-aware method call mangle (Rea-only)
-            if (!proc_symbol && node->child_count > 0 && node->children[0]) {
+            if (frontendIsRea() && !proc_symbol && node->child_count > 0 && node->children[0]) {
                 AST* recv = node->children[0];
                 AST* tdef = recv->type_def;
                 // Resolve TYPE_REFERENCE chain
@@ -6450,7 +6449,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
             }
-#endif
 
             if (strcasecmp(calleeName, "printf") == 0) {
                 compilePrintf(node, chunk, line);

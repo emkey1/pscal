@@ -2263,27 +2263,7 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (shellRuntimeBuiltinDisabled(name)) {
         return false;
     }
-    static const char *kBuiltins[] = {
-        "cd",      "pwd",    "dirs",   "pushd",  "popd",   "exit",    "logout",  "exec",
-        "eval",    "export", "unset",  "setenv", "unsetenv","set",    "declare", "typeset",
-        "readonly","umask",  "command","hash",   "enable", "trap",   "local",   "let",     "break",
-        "continue","alias", "caller", "bind",   "shopt",  "history","jobs",   "disown",  "kill",
-        "fg",     "finger", "bg",     "wait",   "builtin","source", "read",   "printf",
-        "shift",  "return", "help",   "type",   "which", "test",   "[",      ":",      "unalias",
-        "getopts",
-        "mapfile","__shell_double_bracket",
-        "__shell_arithmetic", "times",  "echo",   "true",   "false", "WaitForThread"
-    };
-
-    size_t count = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
-    const char *canonical = shellBuiltinCanonicalName(name);
-    for (size_t i = 0; i < count; ++i) {
-        if (strcasecmp(name, kBuiltins[i]) == 0 ||
-            (canonical && strcasecmp(canonical, kBuiltins[i]) == 0)) {
-            return true;
-        }
-    }
-    return false;
+    return shellIsBuiltinName(name);
 }
 
 static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {

@@ -204,7 +204,7 @@ int shellRunSource(const char *source,
     bool sem_ctx_initialized = false;
     BytecodeChunk chunk;
     bool chunk_initialized = false;
-    VM vm;
+    VM *vm = NULL;
     bool vm_initialized = false;
     VM *previous_thread_owner = NULL;
     bool assigned_thread_owner = false;
@@ -281,19 +281,24 @@ int shellRunSource(const char *source,
         goto cleanup;
     }
 
-    initVM(&vm);
+    vm = (VM *)calloc(1, sizeof(VM));
+    if (!vm) {
+        fprintf(stderr, "shell: failed to allocate VM instance.\n");
+        goto cleanup;
+    }
+    initVM(vm);
     vm_initialized = true;
     previous_thread_owner = gShellThreadOwnerVm;
     if (!gShellThreadOwnerVm) {
-        gShellThreadOwnerVm = &vm;
+        gShellThreadOwnerVm = vm;
         assigned_thread_owner = true;
     }
-    vm.threadOwner = gShellThreadOwnerVm ? gShellThreadOwnerVm : &vm;
+    vm->threadOwner = gShellThreadOwnerVm ? gShellThreadOwnerVm : vm;
     if (options->vm_trace_head > 0) {
-        vm.trace_head_instructions = options->vm_trace_head;
+        vm->trace_head_instructions = options->vm_trace_head;
     }
 
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     int last_status = shellRuntimeLastStatus();
     exit_flag = shellRuntimeConsumeExitRequested();
     if (result == INTERPRET_RUNTIME_ERROR && exit_flag) {
@@ -327,8 +332,11 @@ cleanup:
     if (assigned_thread_owner) {
         gShellThreadOwnerVm = previous_thread_owner;
     }
-    if (vm_initialized) {
-        freeVM(&vm);
+    if (vm_initialized && vm) {
+        freeVM(vm);
+    }
+    if (vm) {
+        free(vm);
     }
     if (chunk_initialized) {
         freeBytecodeChunk(&chunk);

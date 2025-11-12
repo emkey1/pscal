@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef PSCAL_TARGET_IOS
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
 
 static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
@@ -2505,6 +2510,427 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
     shellUpdateStatus(0);
     return makeVoid();
 }
+
+static void shellCatEmitEscaped(int ch) {
+    if (ch == '\n') {
+        fputc('\n', stdout);
+        return;
+    }
+    if (ch == '\t') {
+        fputs("^I", stdout);
+        return;
+    }
+    if (ch == '\r') {
+        fputs("^M", stdout);
+        return;
+    }
+    if (ch < 32) {
+        fputc('^', stdout);
+        fputc(ch + 64, stdout);
+        return;
+    }
+    if (ch == 127) {
+        fputs("^?", stdout);
+        return;
+    }
+    if (ch & 0x80) {
+        fputs("M-", stdout);
+        shellCatEmitEscaped(ch & 0x7F);
+        return;
+    }
+    fputc(ch, stdout);
+}
+
+static int shellCatStream(FILE *stream, bool show_nonprinting) {
+    char buffer[4096];
+    while (true) {
+        size_t read_bytes = fread(buffer, 1, sizeof(buffer), stream);
+        if (read_bytes > 0) {
+            if (show_nonprinting) {
+                for (size_t i = 0; i < read_bytes; ++i) {
+                    shellCatEmitEscaped((unsigned char)buffer[i]);
+                }
+            } else {
+                if (fwrite(buffer, 1, read_bytes, stdout) != read_bytes) {
+                    return errno ? errno : 1;
+                }
+            }
+        }
+        if (read_bytes < sizeof(buffer)) {
+            if (feof(stream)) {
+                break;
+            }
+            if (ferror(stream)) {
+                return errno ? errno : 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int shellCatPath(const char *path, bool show_nonprinting) {
+    if (!path || strcmp(path, "-") == 0) {
+        return shellCatStream(stdin, show_nonprinting);
+    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "cat: %s: %s\n", path ? path : "", strerror(errno));
+        return errno ? errno : 1;
+    }
+    int rc = shellCatStream(fp, show_nonprinting);
+    fclose(fp);
+    if (rc != 0) {
+        fprintf(stderr, "cat: %s: %s\n", path, strerror(errno ? errno : EIO));
+    }
+    return rc;
+}
+
+Value vmBuiltinShellCat(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    bool show_nonprinting = false;
+    int index = 0;
+    while (index < arg_count) {
+        const Value *arg = &args[index];
+        if (arg->type != TYPE_STRING || !arg->s_val || arg->s_val[0] != '-') {
+            break;
+        }
+        const char *opt = arg->s_val + 1;
+        if (*opt == '\0') {
+            break;
+        }
+        for (; *opt; ++opt) {
+            if (*opt == 'v') {
+                show_nonprinting = true;
+            } else if (*opt == '-') {
+                opt++;
+                break;
+            } else {
+                runtimeError(vm, "cat: unknown option -- '%c'", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+        if (opt[-1] == '-') {
+            break;
+        }
+    }
+    int status = 0;
+    if (index >= arg_count) {
+        status = shellCatPath("-", show_nonprinting);
+    } else {
+        for (int i = index; i < arg_count; ++i) {
+            const Value *arg = &args[i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "cat: expected string arguments");
+                status = 1;
+                break;
+            }
+            int rc = shellCatPath(arg->s_val, show_nonprinting);
+            if (rc != 0 && status == 0) status = rc;
+        }
+    }
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "clear: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *sequence = "\x1B[2J\x1B[H";
+    if (fputs(sequence, stdout) == EOF) {
+        runtimeError(vm, "clear: failed to write escape sequence");
+        shellUpdateStatus(errno ? errno : 1);
+        return makeVoid();
+    }
+    fflush(stdout);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+#ifdef PSCAL_TARGET_IOS
+
+typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
+
+static Value shellRunToolBuiltin(VM *vm,
+                                 const char *tool_name,
+                                 ShellToolEntryFn entry,
+                                 FrontendKind target_kind,
+                                 int arg_count,
+                                 Value *args) {
+    FrontendKind previous_kind = frontendPushKind(target_kind);
+    if (!entry) {
+        runtimeError(vm, "%s: tool entrypoint unavailable", tool_name);
+        shellUpdateStatus(127);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    const int argc = arg_count + 1;
+    char **argv = (char **)calloc((size_t)argc, sizeof(char *));
+    if (!argv) {
+        runtimeError(vm, "%s: out of memory", tool_name);
+        shellUpdateStatus(1);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    argv[0] = strdup(tool_name);
+    if (!argv[0]) {
+        ok = false;
+    }
+
+    for (int i = 0; ok && i < arg_count; ++i) {
+        const Value *arg = &args[i];
+        if (arg->type != TYPE_STRING) {
+            runtimeError(vm, "%s: expected string arguments", tool_name);
+            ok = false;
+            break;
+        }
+        const char *src = arg->s_val ? arg->s_val : "";
+        argv[i + 1] = strdup(src);
+        if (!argv[i + 1]) {
+            runtimeError(vm, "%s: out of memory", tool_name);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        int status = entry(argc, argv);
+        fflush(NULL);
+        shellUpdateStatus(status);
+    } else {
+        shellUpdateStatus(1);
+    }
+
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+    Value result = makeVoid();
+    frontendPopKind(previous_kind);
+    return result;
+}
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellStringVector;
+
+static void shellStringVectorFree(ShellStringVector *vec) {
+    if (!vec) {
+        return;
+    }
+    for (size_t i = 0; i < vec->count; ++i) {
+        free(vec->items[i]);
+    }
+    free(vec->items);
+    vec->items = NULL;
+    vec->count = 0;
+    vec->capacity = 0;
+}
+
+static bool shellStringVectorPush(ShellStringVector *vec, const char *value) {
+    if (!vec || !value) {
+        return false;
+    }
+    if (vec->count == vec->capacity) {
+        size_t new_cap = vec->capacity ? vec->capacity * 2 : 32;
+        char **resized = (char **)realloc(vec->items, new_cap * sizeof(char *));
+        if (!resized) {
+            return false;
+        }
+        vec->items = resized;
+        vec->capacity = new_cap;
+    }
+    vec->items[vec->count] = strdup(value);
+    if (!vec->items[vec->count]) {
+        return false;
+    }
+    vec->count++;
+    return true;
+}
+
+static int shellLsCompare(const void *a, const void *b) {
+    const char *const *lhs = (const char *const *)a;
+    const char *const *rhs = (const char *const *)b;
+    return strcasecmp(*lhs, *rhs);
+}
+
+static int shellBuiltinListDirectory(const char *path, bool show_all) {
+    DIR *dir = opendir(path);
+    if (!dir) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    ShellStringVector entries = {0};
+    errno = 0;
+    struct dirent *dent;
+    while ((dent = readdir(dir)) != NULL) {
+        if (!show_all && dent->d_name[0] == '.') {
+            continue;
+        }
+        if (!shellStringVectorPush(&entries, dent->d_name)) {
+            errno = ENOMEM;
+            break;
+        }
+    }
+    int err = errno;
+    closedir(dir);
+
+    if (err && err != 0) {
+        shellStringVectorFree(&entries);
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(err));
+        return err;
+    }
+
+    qsort(entries.items, entries.count, sizeof(char *), shellLsCompare);
+    for (size_t i = 0; i < entries.count; ++i) {
+        printf("%s\n", entries.items[i]);
+    }
+    shellStringVectorFree(&entries);
+    return 0;
+}
+
+static int shellBuiltinListPath(const char *path, bool show_all, bool print_header, bool needs_spacing) {
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        printf("%s\n", path);
+        return 0;
+    }
+
+    if (print_header) {
+        if (needs_spacing) {
+            printf("\n");
+        }
+        printf("%s:\n", path);
+    }
+    return shellBuiltinListDirectory(path, show_all);
+}
+
+Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
+    bool show_all = false;
+    int index = 0;
+    while (index < arg_count) {
+        if (args[index].type != TYPE_STRING || !args[index].s_val) {
+            break;
+        }
+        const char *word = args[index].s_val;
+        if (word[0] != '-') {
+            break;
+        }
+        if (strcmp(word, "--") == 0) {
+            index++;
+            break;
+        }
+        for (const char *opt = word + 1; *opt; ++opt) {
+            if (*opt == 'a') {
+                show_all = true;
+            } else {
+                runtimeError(vm, "ls: unsupported option -%c", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+    }
+
+    int path_count = arg_count - index;
+    const char *default_path = ".";
+    const char **paths = NULL;
+    if (path_count <= 0) {
+        path_count = 1;
+        paths = &default_path;
+    } else {
+        paths = (const char **)malloc(sizeof(const char *) * (size_t)path_count);
+        if (!paths) {
+            runtimeError(vm, "ls: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        for (int i = 0; i < path_count; ++i) {
+            const Value *arg = &args[index + i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "ls: expected string path arguments");
+                free(paths);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            paths[i] = arg->s_val;
+        }
+    }
+
+    int final_status = 0;
+    for (int i = 0; i < path_count; ++i) {
+        int rc = shellBuiltinListPath(paths[i], show_all, path_count > 1, i > 0);
+        if (rc != 0 && final_status == 0) {
+            final_status = rc;
+        }
+    }
+    if (paths != &default_path) {
+        free(paths);
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+extern int pascal_main(int argc, char *argv[]);
+extern int clike_main(int argc, char *argv[]);
+extern int rea_main(int argc, char *argv[]);
+extern int pscalvm_main(int argc, char *argv[]);
+extern int pscaljson2bc_main(int argc, char **argv);
+#ifdef BUILD_DASCAL
+extern int dascal_main(int argc, char *argv[]);
+#endif
+#ifdef BUILD_PSCALD
+extern int pscald_main(int argc, char *argv[]);
+#endif
+
+Value vmBuiltinShellPascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pascal", pascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+#ifdef BUILD_DASCAL
+Value vmBuiltinShellDascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "dascal", dascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+Value vmBuiltinShellClike(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "clike", clike_main, FRONTEND_KIND_CLIKE, arg_count, args);
+}
+
+Value vmBuiltinShellRea(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "rea", rea_main, FRONTEND_KIND_REA, arg_count, args);
+}
+
+Value vmBuiltinShellPscalVm(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscalvm", pscalvm_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellPscalJson2bc(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscaljson2bc", pscaljson2bc_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+#ifdef BUILD_PSCALD
+Value vmBuiltinShellPscald(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscald", pscald_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+#endif /* PSCAL_TARGET_IOS */
 
 Value vmBuiltinShellDirs(VM *vm, int arg_count, Value *args) {
     (void)args;

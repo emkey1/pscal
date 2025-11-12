@@ -1,0 +1,25 @@
+Test: function_parameter_shadows_global
+Category: function_scope
+Expectation: runtime_ok
+Description: Function parameters hide globals of the same name without mutating them.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+Runtime Error: Operands must be numbers for arithmetic operation '+' (or strings/chars for '+'). Got UNKNOWN_VAR_TYPE and INTEGER
+[Error Location] Offset: 18, Line: 5
+--- source ---
+#include <stdio.h>
+
+        int total = 7;
+        int bump(int total) {
+            return total + 1;
+        }
+        int main() {
+            printf("bump=%d
+", bump(3));
+            printf("global=%d
+", total);
+            return 0;
+        }

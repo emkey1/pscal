@@ -1,0 +1,23 @@
+Test: const_shadow_by_local_allowed
+Category: const_scope
+Expectation: runtime_ok
+Description: A local mutable binding may shadow a constant without altering the constant value.
+Reason: stdout mismatch
+Exit code: 0
+--- stdout ---
+<empty>
+--- stderr ---
+<empty>
+--- source ---
+#include <stdio.h>
+
+        const int LIMIT = 5;
+        int main() {
+            int globalCopy = LIMIT;
+            int LIMIT = 2;
+            printf("local=%d
+", LIMIT);
+            printf("global=%d
+", globalCopy);
+            return 0;
+        }

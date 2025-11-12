@@ -493,6 +493,7 @@
 		56A210E6F2FE42E080B6C5F9 /* thread_wrappers.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = thread_wrappers.c; sourceTree = "<group>"; };
 		5ADCED7B98B5D256BF1350E4 /* sdl3d.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = sdl3d.c; sourceTree = "<group>"; };
 		5D4FC4902EBE871400C7AAAC /* pscal_paths.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = pscal_paths.h; sourceTree = "<group>"; };
+		5DE369DF2EC275E8000E5F61 /* ROADMAP_iPadOS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ROADMAP_iPadOS.md; sourceTree = "<group>"; };
 		603CB8D88480FB69231A3419 /* lexer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = lexer.c; sourceTree = "<group>"; };
 		62EB0C6A84789FFEB6DA8741 /* vm.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = vm.c; sourceTree = "<group>"; };
 		67C8CB8ECA652E6D97CE98AB /* version.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = version.c; sourceTree = "<group>"; };
@@ -806,6 +807,7 @@
 			children = (
 				62EB0C6A84789FFEB6DA8741 /* vm.c */,
 				FE348A219056E82B8E978094 /* vm_main.c */,
+				5DE369DF2EC275E8000E5F61 /* ROADMAP_iPadOS.md */,
 			);
 			path = vm;
 			sourceTree = "<group>";
@@ -867,7 +869,7 @@
 			path = yyjson;
 			sourceTree = "<group>";
 		};
-		9C309F6E02B5B2DFF3C2CA73 /* Pscal */ = {
+		9C309F6E02B5B2DFF3C2CA73 = {
 			isa = PBXGroup;
 			children = (
 				F183C122B5083933428FF159 /* src */,
@@ -1021,6 +1023,7 @@
 			buildConfigurationList = FC013A7165AF77834EB6083D /* Build configuration list for PBXNativeTarget "pscal-runner" */;
 			buildPhases = (
 				6225352F9B46B59DB9253B17 /* Sources */,
+				CF87CCB81C301B40727BD085 /* De-duplicate PSCAL core */,
 				0D70100BC7F7B0C188AB492A /* Frameworks */,
 			);
 			buildRules = (
@@ -1215,7 +1218,7 @@
 				en,
 				Base,
 			);
-			mainGroup = 9C309F6E02B5B2DFF3C2CA73 /* Pscal */;
+			mainGroup = 9C309F6E02B5B2DFF3C2CA73;
 			productRefGroup = 8B60E3824A4B5D0B534EFDAE /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -1232,6 +1235,28 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CF87CCB81C301B40727BD085 /* De-duplicate PSCAL core */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "De-duplicate PSCAL core";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"${PROJECT_DIR}/RunScriptPhase.sh\"";
+			showEnvVarsInLog = 1;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		109E48B35D8D9C12215F94AC /* Sources */ = {

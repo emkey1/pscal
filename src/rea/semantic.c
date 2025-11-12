@@ -84,6 +84,7 @@ static int gLoadedModuleCapacity = 0;
 static ReaModuleBindingList *gActiveBindings = NULL;
 static char **gModuleDirStack = NULL;
 static int gModuleDirDepth = 0;
+static int gModuleDirCapacity = 0;
 static char *reaDupString(const char *s);
 static char *duplicateDirName(const char *path);
 static char *tryResolveFromRepository(const char *relative, bool *out_exists);
@@ -198,20 +199,20 @@ static void freeDirStack(void) {
     free(gModuleDirStack);
     gModuleDirStack = NULL;
     gModuleDirDepth = 0;
+    gModuleDirCapacity = 0;
 }
 
 static bool ensureDirStackCapacity(int needed) {
-    static int capacity = 0;
-    if (capacity >= needed) return true;
-    int newCap = capacity ? capacity * 2 : 8;
+    if (gModuleDirCapacity >= needed) return true;
+    int newCap = gModuleDirCapacity ? gModuleDirCapacity * 2 : 8;
     while (newCap < needed) newCap *= 2;
     char **resized = (char **)realloc(gModuleDirStack, (size_t)newCap * sizeof(char *));
     if (!resized) return false;
-    for (int i = capacity; i < newCap; i++) {
+    for (int i = gModuleDirCapacity; i < newCap; i++) {
         resized[i] = NULL;
     }
     gModuleDirStack = resized;
-    capacity = newCap;
+    gModuleDirCapacity = newCap;
     return true;
 }
 

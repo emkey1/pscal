@@ -2621,6 +2621,10 @@ static int runInteractiveSession(const ShellRunOptions *options) {
 
     int last_status = shellRuntimeLastStatus();
     bool tty = isatty(STDIN_FILENO);
+    const char *force_no_tty = getenv("PSCAL_FORCE_NO_TTY");
+    if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
+        tty = false;
+    }
 
     while (true) {
         char *prompt_storage = shellResolveInteractivePrompt();

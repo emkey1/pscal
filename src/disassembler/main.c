@@ -32,12 +32,10 @@
 #include "symbol/symbol.h"
 #include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
+#include "common/frontend_kind.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-int gParamCount = 0;
-char **gParamValues = NULL;
 
 /* Initialize symbol tables needed for bytecode loading and disassembly. */
 static void initSymbolSystem(void) {
@@ -69,15 +67,22 @@ static void initSymbolSystem(void) {
 
 static const char *PSCALD_USAGE = "Usage: pscald <bytecode_file>\n";
 
-int main(int argc, char* argv[]) {
+int pscald_main(int argc, char* argv[]) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
+#define PSCALD_RETURN(value)            \
+    do {                                \
+        int __pscald_rc = (value);      \
+        frontendPopKind(previousKind);  \
+        return __pscald_rc;             \
+    } while (0)
     if (argc == 2 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
         printf("%s", PSCALD_USAGE);
-        return EXIT_SUCCESS;
+        PSCALD_RETURN(EXIT_SUCCESS);
     }
 
     if (argc != 2) {
         fprintf(stderr, "%s", PSCALD_USAGE);
-        return EXIT_FAILURE;
+        PSCALD_RETURN(EXIT_FAILURE);
     }
 
     const char* path = argv[1];
@@ -88,7 +93,7 @@ int main(int argc, char* argv[]) {
     initBytecodeChunk(&chunk);
     if (!loadBytecodeFromFile(path, &chunk)) {
         fprintf(stderr, "Failed to load bytecode from %s\n", path);
-        return EXIT_FAILURE;
+        PSCALD_RETURN(EXIT_FAILURE);
     }
 
     const char* disasm_name = bytecodeDisplayNameForPath(path);
@@ -98,6 +103,12 @@ int main(int argc, char* argv[]) {
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
-    return EXIT_SUCCESS;
+    PSCALD_RETURN(EXIT_SUCCESS);
 }
+#undef PSCALD_RETURN
 
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char* argv[]) {
+    return pscald_main(argc, argv);
+}
+#endif

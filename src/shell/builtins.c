@@ -1,5 +1,7 @@
 #include "shell/builtins.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"
+#include "common/builtin_shared.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,11 +43,28 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"getopts", "getopts", 48},
     {"mapfile", "mapfile", 49},
     {"readarray", "mapfile", 49},
+    {"cat", "cat", -1},
+    {"clear", "clear", -1},
+    {"cls", "clear", -1},
     {"jobs", "jobs", 17},
     {"fg", "fg", 18},
     {"bg", "bg", 19},
     {"wait", "wait", 20},
     {"WaitForThread", "waitforthread", 1056},
+#ifdef PSCAL_TARGET_IOS
+    {"ls", "ls", -1},
+    {"pascal", "pascal", -1},
+#ifdef BUILD_DASCAL
+    {"dascal", "dascal", -1},
+#endif
+    {"clike", "clike", -1},
+    {"rea", "rea", -1},
+    {"pscalvm", "pscalvm", -1},
+    {"pscaljson2bc", "pscaljson2bc", -1},
+#ifdef BUILD_PSCALD
+    {"pscald", "pscald", -1},
+#endif
+#endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},
     {"ThreadGetStatus", "threadgetstatus", -1},
@@ -112,7 +131,7 @@ static char *shellLowercase(const char *name) {
 }
 
 void shellRegisterBuiltins(HashTable *table) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!table) {
         return;
     }
@@ -141,7 +160,7 @@ void shellRegisterBuiltins(HashTable *table) {
 }
 
 int shellGetBuiltinId(const char *name) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!name) {
         return -1;
     }
@@ -178,7 +197,7 @@ bool shellIsBuiltinName(const char *name) {
 }
 
 void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!visitor) {
         return;
     }
@@ -199,3 +218,6 @@ void shellDumpBuiltins(FILE *out) {
         fprintf(out, "  %s\n", kShellBuiltins[i].name);
     }
 }
+#include "shell/builtins.h"
+#include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"

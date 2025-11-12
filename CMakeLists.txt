@@ -3,6 +3,14 @@ cmake_minimum_required(VERSION 3.24)
 project(pscal C)
 enable_testing()
 
+set(PSCAL_PLATFORM_IOS OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(PSCAL_PLATFORM_IOS ON)
+endif()
+if(PSCAL_PLATFORM_IOS)
+    add_compile_definitions(PSCAL_TARGET_IOS)
+endif()
+
 # ---- Version Generation Logic ----
 string(TIMESTAMP CURRENT_YEAR "%Y")
 string(TIMESTAMP CURRENT_MONTH "%m")
@@ -101,8 +109,26 @@ if(release)
     set(BUILD_PSCALD ON CACHE BOOL "Build the standalone bytecode decompiler" FORCE)
 endif()
 
+if(BUILD_DASCAL)
+    add_compile_definitions(BUILD_DASCAL)
+endif()
+if(BUILD_PSCALD)
+    add_compile_definitions(BUILD_PSCALD)
+endif()
+
+# Optionally emit static libraries (default when targeting iOS)
+set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT OFF)
+if(PSCAL_PLATFORM_IOS)
+    set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT ON)
+endif()
+option(PSCAL_BUILD_STATIC_LIBS "Build PSCAL static libraries for embedding runners" ${_PSCAL_BUILD_STATIC_LIBS_DEFAULT})
+
 # Optionally enable SDL-based features
-option(SDL "Enable SDL-based graphics and audio" ON)
+set(_PSCAL_SDL_DEFAULT ON)
+if(PSCAL_PLATFORM_IOS)
+    set(_PSCAL_SDL_DEFAULT OFF)
+endif()
+option(SDL "Enable SDL-based graphics and audio" ${_PSCAL_SDL_DEFAULT})
 if(release)
     set(SDL ON CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
 endif()
@@ -325,27 +351,58 @@ if(APPLE AND PSCAL_USE_BREW_CURL)
     endif()
 endif()
 
-find_package(CURL REQUIRED)
-find_package(Threads REQUIRED)
-if(TARGET CURL::libcurl)
-    message(STATUS "CURL: using imported target CURL::libcurl")
+set(_PSCAL_REQUIRE_CURL ON)
+if(PSCAL_PLATFORM_IOS)
+    set(_PSCAL_REQUIRE_CURL OFF)
+endif()
+
+find_package(CURL QUIET)
+if(NOT CURL_FOUND)
+    if(_PSCAL_REQUIRE_CURL)
+        message(FATAL_ERROR "libcurl is required for this configuration. Install libcurl dev headers or set PSCAL_USE_BREW_CURL=ON.")
+    else()
+        message(WARNING "libcurl not found; network builtins will be disabled for this build.")
+    endif()
 else()
-    message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
-    message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+    if(TARGET CURL::libcurl)
+        message(STATUS "CURL: using imported target CURL::libcurl")
+    else()
+        message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
+        message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+    endif()
+endif()
+
+set(PSCAL_HAS_LIBCURL ${CURL_FOUND})
+if(PSCAL_HAS_LIBCURL)
+    add_compile_definitions(PSCAL_HAS_LIBCURL)
+endif()
+if(NOT PSCAL_HAS_LIBCURL AND ENABLE_EXT_BUILTIN_OPENAI)
+    message(WARNING "Disabling OpenAI extended builtins: libcurl not available.")
+    set(ENABLE_EXT_BUILTIN_OPENAI OFF CACHE BOOL "Enable extended OpenAI builtins" FORCE)
+endif()
+
+find_package(Threads REQUIRED)
+
+if(PSCAL_HAS_LIBCURL)
+    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api.c)
+else()
+    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api_stub.c)
 endif()
 
 # ---- Source Files ----
-set(PSCAL_SOURCES
-    src/Pascal/main.c src/Pascal/globals.c
+set(PSCAL_CORE_SOURCES
+    src/Pascal/globals.c
     src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
-    src/Pascal/lexer.c src/Pascal/parser.c src/Pascal/semantic.c
-    src/ast/ast.c src/ast/closure_registry.c src/Pascal/opt.c
+    src/ast/ast.c src/ast/closure_registry.c
     src/symbol/symbol.c
     src/backend_ast/builtin.c
-    src/backend_ast/builtin_network_api.c
+    ${PSCAL_NETWORK_IMPL_SOURCE}
     src/backend_ast/shell_runtime_stub.c
+    src/backend_ast/thread_wrappers.c
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
+    src/common/runtime_params.c
+    src/common/frontend_kind.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -353,11 +410,12 @@ set(PSCAL_SOURCES
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
     src/runtime/shaders/sky/cloud_layer.c
+    src/common/frontend_symbol_wrappers.c
 )
 
 # --- Conditionally add SDL source files ---
 if(SDL)
-    list(APPEND PSCAL_SOURCES
+    list(APPEND PSCAL_CORE_SOURCES
         src/backend_ast/sdl.c
         src/backend_ast/sdl3d.c
         src/backend_ast/gl.c
@@ -368,8 +426,16 @@ endif()
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
 add_subdirectory(src/ext_builtins)
-list(APPEND PSCAL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND PSCAL_SOURCES src/third_party/yyjson/yyjson.c)
+list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
+
+set(PASCAL_FRONTEND_SOURCES
+    src/Pascal/main.c
+    src/Pascal/lexer.c
+    src/Pascal/parser.c
+    src/Pascal/semantic.c
+    src/Pascal/opt.c
+)
 
 # ---- Toolchain feature detection ----
 # Detect whether AddressSanitizer is usable before wiring it into dascal
@@ -393,9 +459,7 @@ endif()
 
 
 # ---- Executable Targets Function ----
-function(add_pscal_executable target_name)
-    add_executable(${target_name} ${PSCAL_SOURCES})
-    
+function(pscal_apply_common_compilation_settings target_name)
     if(SDL)
         target_include_directories(${target_name} PRIVATE
             ${SDL2_INCLUDE_DIRS}
@@ -403,10 +467,22 @@ function(add_pscal_executable target_name)
             ${PC_SDL2_MIXER_INCLUDE_DIRS}
             ${PC_SDL2_TTF_INCLUDE_DIRS}
         )
+        target_compile_definitions(${target_name} PRIVATE SDL)
     endif()
-    if(NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
+    if(PSCAL_HAS_LIBCURL AND NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
         target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
     endif()
+endfunction()
+
+add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
+pscal_apply_common_compilation_settings(pscal_core_static)
+target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
+
+function(add_pscal_executable target_name)
+    set(exec_sources ${ARGN})
+    add_executable(${target_name} ${exec_sources})
+    pscal_apply_common_compilation_settings(${target_name})
 
     if(SDL)
         # Add library search paths from pkg-config
@@ -446,16 +522,19 @@ function(add_pscal_executable target_name)
     endif()
 
     # CURL
-    if(TARGET CURL::libcurl)
-        list(APPEND TARGET_LINK_LIBS CURL::libcurl)
-    else()
-        list(APPEND TARGET_LINK_LIBS ${CURL_LIBRARIES})
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            list(APPEND TARGET_LINK_LIBS CURL::libcurl)
+        else()
+            list(APPEND TARGET_LINK_LIBS ${CURL_LIBRARIES})
+        endif()
     endif()
 
     if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
         list(APPEND TARGET_LINK_LIBS ${PSCAL_SQLITE_LIBS})
     endif()
 
+    list(APPEND TARGET_LINK_LIBS pscal_core_static)
     list(APPEND TARGET_LINK_LIBS m) # Math library
     list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
@@ -497,30 +576,85 @@ function(add_pscal_executable target_name)
     endif()
 endfunction()
 
-add_pscal_executable(pascal)
-target_compile_definitions(pascal PRIVATE FRONTEND_PASCAL)
-if(BUILD_DASCAL)
-    add_pscal_executable(dascal)
+function(pscal_add_static_library target_name)
+    set(options)
+    set(oneValueArgs FRONTEND KIND)
+    set(multiValueArgs SOURCES)
+    cmake_parse_arguments(PSLIB "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    if(NOT PSLIB_SOURCES)
+        message(FATAL_ERROR "pscal_add_static_library(${target_name}) requires SOURCES")
+    endif()
+
+    add_library(${target_name} STATIC ${PSLIB_SOURCES})
+    pscal_apply_common_compilation_settings(${target_name})
+    target_compile_definitions(${target_name} PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+
+    if(PSLIB_FRONTEND)
+        target_compile_definitions(${target_name} PRIVATE ${PSLIB_FRONTEND})
+    endif()
+
+    if(PSLIB_KIND STREQUAL "pascal")
+        target_compile_options(${target_name} PRIVATE -O3)
+        if(RELEASE_BUILD)
+            target_compile_definitions(${target_name} PRIVATE RELEASE)
+        else()
+            target_compile_definitions(${target_name} PRIVATE DEBUGNOT)
+        endif()
+    elseif(PSLIB_KIND STREQUAL "dascal")
+        target_compile_definitions(${target_name} PRIVATE DEBUG)
+        if(PSCAL_CAN_ENABLE_ASAN)
+            target_compile_options(${target_name} PRIVATE -fsanitize=address -g)
+        else()
+            target_compile_options(${target_name} PRIVATE -g)
+        endif()
+    elseif(PSLIB_KIND STREQUAL "hscal")
+        target_compile_definitions(${target_name} PRIVATE DEBUG SUPPRESS_EXIT)
+        target_compile_options(${target_name} PRIVATE -g)
+    endif()
+endfunction()
+
+if(NOT PSCAL_PLATFORM_IOS)
+    add_pscal_executable(pascal ${PASCAL_FRONTEND_SOURCES})
+    target_compile_definitions(pascal PRIVATE FRONTEND_PASCAL)
+endif()
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_pascal_static
+        FRONTEND FRONTEND_PASCAL
+        KIND pascal
+        SOURCES ${PASCAL_FRONTEND_SOURCES})
+    target_link_libraries(pscal_pascal_static PUBLIC pscal_core_static)
+endif()
+if(NOT PSCAL_PLATFORM_IOS AND BUILD_DASCAL)
+    add_pscal_executable(dascal ${PASCAL_FRONTEND_SOURCES})
+endif()
+if(PSCAL_BUILD_STATIC_LIBS AND BUILD_DASCAL)
+    add_library(pscal_dascal_static STATIC src/dascal/shim.c)
+    pscal_apply_common_compilation_settings(pscal_dascal_static)
+    target_link_libraries(pscal_dascal_static PUBLIC pscal_pascal_static)
 endif()
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
-set(PSCAL_VM_SOURCES ${PSCAL_SOURCES})
-list(REMOVE_ITEM PSCAL_VM_SOURCES src/Pascal/main.c)
-list(APPEND PSCAL_VM_SOURCES src/vm/vm_main.c)
-set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
-set(PSCAL_SOURCES ${PSCAL_VM_SOURCES})
-add_pscal_executable(pscalvm)
-set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+set(PSCAL_VM_SOURCES src/vm/vm_main.c)
+if(NOT PSCAL_PLATFORM_IOS)
+    add_pscal_executable(pscalvm ${PSCAL_VM_SOURCES})
+endif()
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_vm_static
+        SOURCES ${PSCAL_VM_SOURCES})
+    target_link_libraries(pscal_vm_static PUBLIC pscal_core_static)
+endif()
 
 if(BUILD_PSCALD)
-    set(DISASSEMBLER_SOURCES ${PSCAL_VM_SOURCES})
-    list(REMOVE_ITEM DISASSEMBLER_SOURCES src/vm/vm_main.c)
-    list(APPEND DISASSEMBLER_SOURCES src/disassembler/main.c)
-    set(PSCAL_SOURCES_BACKUP ${PSCAL_SOURCES})
-    set(PSCAL_SOURCES ${DISASSEMBLER_SOURCES})
-    add_pscal_executable(pscald)
-    set(PSCAL_SOURCES ${PSCAL_SOURCES_BACKUP})
+    set(DISASSEMBLER_SOURCES src/disassembler/main.c)
+    if(NOT PSCAL_PLATFORM_IOS)
+        add_pscal_executable(pscald ${DISASSEMBLER_SOURCES})
+    endif()
+    if(PSCAL_BUILD_STATIC_LIBS)
+        pscal_add_static_library(pscal_pscald_static
+            SOURCES ${DISASSEMBLER_SOURCES})
+        target_link_libraries(pscal_pscald_static PUBLIC pscal_core_static)
+    endif()
 endif()
 
 # exsh front-end executable
@@ -535,83 +669,77 @@ set(SHELL_SOURCES
     src/shell/runner.c
     src/shell/opt.c
     src/shell/stubs.c
-    src/backend_ast/builtin.c
     src/backend_ast/shell.c
-    src/backend_ast/builtin_network_api.c
-    src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
-    src/compiler/bytecode.c
-    src/vm/vm.c
-    src/symbol/symbol.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
 )
 
-list(APPEND SHELL_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
+list(APPEND SHELL_SOURCES
+    src/common/ast_shared.c
+    src/common/builtin_shared.c
+)
+
 list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
-list(APPEND SHELL_SOURCES src/third_party/yyjson/yyjson.c)
 
-if(SDL)
-    list(APPEND SHELL_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/sdl3d.c
-        src/backend_ast/gl.c
-        src/backend_ast/audio.c
-    )
-endif()
-
-add_executable(exsh ${SHELL_SOURCES})
-target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
-if(TARGET CURL::libcurl)
-    target_link_libraries(exsh PRIVATE CURL::libcurl m Threads::Threads)
-else()
-    target_link_libraries(exsh PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
-endif()
-
-if(SDL)
-    target_include_directories(exsh PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-    )
-
-    target_link_directories(exsh PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
-
-    set(EXSH_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND EXSH_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND EXSH_SDL_LIBS ${SDL2_LIBRARIES})
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(exsh ${SHELL_SOURCES})
+    target_link_libraries(exsh PRIVATE pscal_core_static)
+    target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(exsh PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(exsh PRIVATE ${CURL_LIBRARIES})
+        endif()
     endif()
-    list(APPEND EXSH_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
-    )
-    if(PSCAL_OPENGL_TARGET)
-        list(APPEND EXSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
-    elseif(OPENGL_LIBRARIES)
-        list(APPEND EXSH_SDL_LIBS ${OPENGL_LIBRARIES})
+    target_link_libraries(exsh PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
-    list(APPEND EXSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
-    list(REMOVE_DUPLICATES EXSH_SDL_LIBS)
-    target_link_libraries(exsh PRIVATE ${EXSH_SDL_LIBS})
-    target_compile_definitions(exsh PRIVATE SDL)
+
+    if(SDL)
+        target_include_directories(exsh PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
+
+        target_link_directories(exsh PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
+
+        set(EXSH_SDL_LIBS "")
+        if(TARGET SDL2::SDL2)
+            list(APPEND EXSH_SDL_LIBS SDL2::SDL2)
+        else()
+            list(APPEND EXSH_SDL_LIBS ${SDL2_LIBRARIES})
+        endif()
+        list(APPEND EXSH_SDL_LIBS
+            ${PC_SDL2_IMAGE_LIBRARIES}
+            ${PC_SDL2_MIXER_LIBRARIES}
+            ${PC_SDL2_TTF_LIBRARIES}
+            ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND EXSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND EXSH_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND EXSH_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES EXSH_SDL_LIBS)
+        target_link_libraries(exsh PRIVATE ${EXSH_SDL_LIBS})
+        target_compile_definitions(exsh PRIVATE SDL)
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_exsh_static
+        FRONTEND FRONTEND_SHELL
+        SOURCES ${SHELL_SOURCES})
+    target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
 endif()
 
 # Tiny C front-end executable
@@ -626,120 +754,114 @@ set(CLIKE_SOURCES
     src/clike/codegen.c
     src/clike/opt.c
     src/clike/preproc.c
-    src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
-    src/compiler/bytecode.c
-    src/vm/vm.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/thread_wrappers.c
-    src/backend_ast/shell_runtime_stub.c
-    src/symbol/symbol.c
     src/clike/stubs.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
 )
-
-# Include user-supplied builtins in clike as well
-list(APPEND CLIKE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND CLIKE_SOURCES src/third_party/yyjson/yyjson.c)
-
-# When SDL support is enabled, clike needs the same SDL backend sources
-# as the main executables to provide implementations for graphics and
-# audio builtins referenced from builtin.c.
-if(SDL)
-    list(APPEND CLIKE_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/sdl3d.c
-        src/backend_ast/gl.c
-        src/backend_ast/audio.c
-    )
-endif()
-
-add_executable(clike ${CLIKE_SOURCES})
-target_compile_definitions(clike PRIVATE FRONTEND_CLIKE)
-if(TARGET CURL::libcurl)
-    target_link_libraries(clike PRIVATE CURL::libcurl m Threads::Threads)
-else()
-    target_link_libraries(clike PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(clike PRIVATE ${PSCAL_SQLITE_LIBS})
-endif()
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
 list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
 list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
-add_executable(clike-repl ${CLIKE_REPL_SOURCES})
-if(TARGET CURL::libcurl)
-    target_link_libraries(clike-repl PRIVATE CURL::libcurl m Threads::Threads)
-else()
-    target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(clike-repl PRIVATE ${PSCAL_SQLITE_LIBS})
-endif()
 
-# When SDL support is enabled, clike needs the same SDL include paths,
-# library directories, and libraries as the other executables to compile
-# headers that reference SDL types.
-if(SDL)
-    target_include_directories(clike PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-    )
-
-    target_link_directories(clike PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
-
-    set(CLIKE_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND CLIKE_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND CLIKE_SDL_LIBS ${SDL2_LIBRARIES})
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(clike ${CLIKE_SOURCES})
+    target_compile_definitions(clike PRIVATE FRONTEND_CLIKE)
+    target_link_libraries(clike PRIVATE pscal_core_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(clike PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(clike PRIVATE ${CURL_LIBRARIES})
+        endif()
     endif()
-    list(APPEND CLIKE_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
-    )
-    if(PSCAL_OPENGL_TARGET)
-        list(APPEND CLIKE_SDL_LIBS ${PSCAL_OPENGL_TARGET})
-    elseif(OPENGL_LIBRARIES)
-        list(APPEND CLIKE_SDL_LIBS ${OPENGL_LIBRARIES})
+    target_link_libraries(clike PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(clike PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
-    list(APPEND CLIKE_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
-    list(REMOVE_DUPLICATES CLIKE_SDL_LIBS)
-    target_link_libraries(clike PRIVATE ${CLIKE_SDL_LIBS})
-    target_compile_definitions(clike PRIVATE SDL)
 
-    target_include_directories(clike-repl PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-    )
+    add_executable(clike-repl ${CLIKE_REPL_SOURCES})
+    target_link_libraries(clike-repl PRIVATE pscal_core_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(clike-repl PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(clike-repl PRIVATE ${CURL_LIBRARIES})
+        endif()
+    endif()
+    target_link_libraries(clike-repl PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(clike-repl PRIVATE ${PSCAL_SQLITE_LIBS})
+    endif()
 
-    target_link_directories(clike-repl PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
+    # When SDL support is enabled, clike needs the same SDL include paths,
+    # library directories, and libraries as the other executables to compile
+    # headers that reference SDL types.
+    if(SDL)
+        target_include_directories(clike PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
 
-    target_link_libraries(clike-repl PRIVATE ${CLIKE_SDL_LIBS})
-    target_compile_definitions(clike-repl PRIVATE SDL)
+        target_link_directories(clike PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
 
+        set(CLIKE_SDL_LIBS "")
+        if(TARGET SDL2::SDL2)
+            list(APPEND CLIKE_SDL_LIBS SDL2::SDL2)
+        else()
+            list(APPEND CLIKE_SDL_LIBS ${SDL2_LIBRARIES})
+        endif()
+        list(APPEND CLIKE_SDL_LIBS
+            ${PC_SDL2_IMAGE_LIBRARIES}
+            ${PC_SDL2_MIXER_LIBRARIES}
+            ${PC_SDL2_TTF_LIBRARIES}
+            ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND CLIKE_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND CLIKE_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND CLIKE_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES CLIKE_SDL_LIBS)
+        target_link_libraries(clike PRIVATE ${CLIKE_SDL_LIBS})
+        target_compile_definitions(clike PRIVATE SDL)
+
+        target_include_directories(clike-repl PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
+
+        target_link_directories(clike-repl PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
+
+        target_link_libraries(clike-repl PRIVATE ${CLIKE_SDL_LIBS})
+        target_compile_definitions(clike-repl PRIVATE SDL)
+
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_clike_static
+        FRONTEND FRONTEND_CLIKE
+        SOURCES ${CLIKE_SOURCES})
+    target_link_libraries(pscal_clike_static PUBLIC pscal_core_static)
+endif()
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_clike_repl_static
+        FRONTEND FRONTEND_CLIKE
+        SOURCES ${CLIKE_REPL_SOURCES})
+    target_link_libraries(pscal_clike_repl_static PUBLIC pscal_core_static)
 endif()
 
 # Rea front-end executable (placeholder)
@@ -749,346 +871,331 @@ set(REA_SOURCES
     src/rea/parser.c
     src/rea/semantic.c
     src/rea/builtins/thread.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
-    src/Pascal/lexer.c
-    src/Pascal/parser.c
-    src/ast/ast.c
-    src/ast/closure_registry.c
-    src/Pascal/globals.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/preproc.c src/core/version.c src/core/cache.c
-    src/compiler/bytecode.c
-    src/compiler/compiler.c
-    src/vm/vm.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/thread_wrappers.c
-    src/backend_ast/shell_runtime_stub.c
-    src/symbol/symbol.c
+    src/rea/type_stubs.c
 )
 
-list(APPEND REA_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND REA_SOURCES src/third_party/yyjson/yyjson.c)
-
-if(SDL)
-    list(APPEND REA_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/sdl3d.c
-        src/backend_ast/gl.c
-        src/backend_ast/audio.c
-    )
-endif()
-
-add_executable(rea ${REA_SOURCES})
-target_compile_definitions(rea PRIVATE FRONTEND_REA)
-if(TARGET CURL::libcurl)
-    target_link_libraries(rea PRIVATE CURL::libcurl m Threads::Threads)
-else()
-    target_link_libraries(rea PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(rea PRIVATE ${PSCAL_SQLITE_LIBS})
-endif()
-
-if(SDL)
-    target_include_directories(rea PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-    )
-
-    target_link_directories(rea PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
-
-    set(REA_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND REA_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND REA_SDL_LIBS ${SDL2_LIBRARIES})
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(rea ${REA_SOURCES})
+    target_compile_definitions(rea PRIVATE FRONTEND_REA)
+    target_link_libraries(rea PRIVATE pscal_core_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(rea PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(rea PRIVATE ${CURL_LIBRARIES})
+        endif()
     endif()
-    list(APPEND REA_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
-    )
-    if(PSCAL_OPENGL_TARGET)
-        list(APPEND REA_SDL_LIBS ${PSCAL_OPENGL_TARGET})
-    elseif(OPENGL_LIBRARIES)
-        list(APPEND REA_SDL_LIBS ${OPENGL_LIBRARIES})
+    target_link_libraries(rea PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(rea PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
-    list(APPEND REA_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
-    list(REMOVE_DUPLICATES REA_SDL_LIBS)
-    target_link_libraries(rea PRIVATE ${REA_SDL_LIBS})
-    target_compile_definitions(rea PRIVATE SDL)
+
+    if(SDL)
+        target_include_directories(rea PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
+
+        target_link_directories(rea PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
+
+        set(REA_SDL_LIBS "")
+        if(TARGET SDL2::SDL2)
+            list(APPEND REA_SDL_LIBS SDL2::SDL2)
+        else()
+            list(APPEND REA_SDL_LIBS ${SDL2_LIBRARIES})
+        endif()
+        list(APPEND REA_SDL_LIBS
+            ${PC_SDL2_IMAGE_LIBRARIES}
+            ${PC_SDL2_MIXER_LIBRARIES}
+            ${PC_SDL2_TTF_LIBRARIES}
+            ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND REA_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND REA_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND REA_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES REA_SDL_LIBS)
+        target_link_libraries(rea PRIVATE ${REA_SDL_LIBS})
+        target_compile_definitions(rea PRIVATE SDL)
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_rea_static
+        FRONTEND FRONTEND_REA
+        SOURCES ${REA_SOURCES})
+    target_link_libraries(pscal_rea_static PUBLIC pscal_core_static)
 endif()
 
 # ---- Examples ----
-add_subdirectory(Examples)
+if(NOT PSCAL_PLATFORM_IOS)
+    add_subdirectory(Examples)
 
-file(GLOB_RECURSE PSCAL_ALL_EXAMPLE_FILES
-    LIST_DIRECTORIES false
-    RELATIVE "${CMAKE_SOURCE_DIR}"
-    "Examples/*")
+    file(GLOB_RECURSE PSCAL_ALL_EXAMPLE_FILES
+        LIST_DIRECTORIES false
+        RELATIVE "${CMAKE_SOURCE_DIR}"
+        "Examples/*")
 
-set(PSCAL_CONFIGURED_EXAMPLES)
-foreach(example IN LISTS PSCAL_ALL_EXAMPLE_FILES)
-    unset(PSCAL_CONFIG_MARKER)
-    file(STRINGS "${CMAKE_SOURCE_DIR}/${example}" PSCAL_CONFIG_MARKER
-        REGEX "@PSCAL_INSTALL_ROOT")
-    if(PSCAL_CONFIG_MARKER)
-        list(APPEND PSCAL_CONFIGURED_EXAMPLES "${example}")
-    endif()
-endforeach()
-
-list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
-list(SORT PSCAL_CONFIGURED_EXAMPLES)
-set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
-set(PSCAL_CONFIGURE_EXAMPLE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/ConfigureExampleFile.cmake")
-set(PSCAL_CONFIGURED_EXAMPLE_OUTPUTS)
-foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
-    set(src "${CMAKE_SOURCE_DIR}/${example}")
-    set(dst "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}")
-    get_filename_component(dst_dir "${dst}" DIRECTORY)
-    add_custom_command(
-        OUTPUT "${dst}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_dir}"
-        COMMAND ${CMAKE_COMMAND}
-            -DINPUT_FILE=${src}
-            -DOUTPUT_FILE=${dst}
-            -DPSCAL_INSTALL_ROOT_RESOLVED=${PSCAL_INSTALL_ROOT_RESOLVED}
-            -P ${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}
-        DEPENDS "${src}" "${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}"
-        COMMENT "Configuring example ${example}"
-        VERBATIM
-    )
-    list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
-endforeach()
-add_custom_target(configured_examples ALL
-    DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
-
-# ---- optional install ----
-include(GNUInstallDirs)
-set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
-
-install(TARGETS pascal pscalvm clike clike-repl rea
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-if(BUILD_DASCAL)
-    install(TARGETS dascal
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-endif()
-if(BUILD_PSCALD)
-    install(TARGETS pscald
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-endif()
-
-# Ensure we can replace a running exsh binary (for example when users have it as
-# their login shell) by renaming the existing executable before installing the
-# new build. The backup is overwritten on subsequent installs.
-install(CODE [[
-    set(exsh_path "$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/exsh")
-    if(EXISTS "${exsh_path}" OR IS_SYMLINK "${exsh_path}")
-        set(exsh_backup "${exsh_path}.previous")
-        if(EXISTS "${exsh_backup}" OR IS_SYMLINK "${exsh_backup}")
-            file(REMOVE "${exsh_backup}")
+    set(PSCAL_CONFIGURED_EXAMPLES)
+    foreach(example IN LISTS PSCAL_ALL_EXAMPLE_FILES)
+        unset(PSCAL_CONFIG_MARKER)
+        file(STRINGS "${CMAKE_SOURCE_DIR}/${example}" PSCAL_CONFIG_MARKER
+            REGEX "@PSCAL_INSTALL_ROOT")
+        if(PSCAL_CONFIG_MARKER)
+            list(APPEND PSCAL_CONFIGURED_EXAMPLES "${example}")
         endif()
-        message(STATUS "Backing up existing exsh to ${exsh_backup}")
-        file(RENAME "${exsh_path}" "${exsh_backup}")
-    endif()
-]])
-install(TARGETS exsh
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endforeach()
 
-install(DIRECTORY lib/
-        DESTINATION "${_pscal_runtime_root}/lib"
-        USE_SOURCE_PERMISSIONS)
-install(DIRECTORY fonts/
-        DESTINATION "${_pscal_runtime_root}/fonts"
-        USE_SOURCE_PERMISSIONS)
-install(DIRECTORY etc/
-        DESTINATION "${_pscal_runtime_root}/etc"
-        USE_SOURCE_PERMISSIONS)
-install(DIRECTORY Examples/
-        DESTINATION "${_pscal_runtime_root}/Examples"
-        USE_SOURCE_PERMISSIONS)
-if(PSCAL_CONFIGURED_EXAMPLES)
+    list(REMOVE_DUPLICATES PSCAL_CONFIGURED_EXAMPLES)
+    list(SORT PSCAL_CONFIGURED_EXAMPLES)
+    set(PSCAL_CONFIGURED_EXAMPLES_DIR "${CMAKE_BINARY_DIR}/configured_examples")
+    set(PSCAL_CONFIGURE_EXAMPLE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/ConfigureExampleFile.cmake")
+    set(PSCAL_CONFIGURED_EXAMPLE_OUTPUTS)
+    foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
+        set(src "${CMAKE_SOURCE_DIR}/${example}")
+        set(dst "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}")
+        get_filename_component(dst_dir "${dst}" DIRECTORY)
+        add_custom_command(
+            OUTPUT "${dst}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${dst_dir}"
+            COMMAND ${CMAKE_COMMAND}
+                -DINPUT_FILE=${src}
+                -DOUTPUT_FILE=${dst}
+                -DPSCAL_INSTALL_ROOT_RESOLVED=${PSCAL_INSTALL_ROOT_RESOLVED}
+                -P ${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}
+            DEPENDS "${src}" "${PSCAL_CONFIGURE_EXAMPLE_SCRIPT}"
+            COMMENT "Configuring example ${example}"
+            VERBATIM
+        )
+        list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
+    endforeach()
+    add_custom_target(configured_examples ALL
+        DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
+endif()
+
+if(NOT PSCAL_PLATFORM_IOS)
+    # ---- optional install ----
+    include(GNUInstallDirs)
+    set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
+
+    install(TARGETS pascal pscalvm clike clike-repl rea
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    if(BUILD_DASCAL)
+        install(TARGETS dascal
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+    if(BUILD_PSCALD)
+        install(TARGETS pscald
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+
+    # Ensure we can replace a running exsh binary (for example when users have it as
+    # their login shell) by renaming the existing executable before installing the
+    # new build. The backup is overwritten on subsequent installs.
     install(CODE [[
-        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
-        if(CMAKE_CONFIGURATION_TYPES)
-            list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
-        endif()
-        execute_process(COMMAND ${_pscal_build_cmd}
-            RESULT_VARIABLE _pscal_configured_examples_result)
-        if(NOT _pscal_configured_examples_result EQUAL 0)
-            message(FATAL_ERROR "Failed to generate configured example files (configured_examples target)")
+        set(exsh_path "$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/exsh")
+        if(EXISTS "${exsh_path}" OR IS_SYMLINK "${exsh_path}")
+            set(exsh_backup "${exsh_path}.previous")
+            if(EXISTS "${exsh_backup}" OR IS_SYMLINK "${exsh_backup}")
+                file(REMOVE "${exsh_backup}")
+            endif()
+            message(STATUS "Backing up existing exsh to ${exsh_backup}")
+            file(RENAME "${exsh_path}" "${exsh_backup}")
         endif()
     ]])
-endif()
-foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
-    string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
-    get_filename_component(example_dir "${example_relative}" DIRECTORY)
-    install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
-            DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
-            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                       GROUP_READ GROUP_EXECUTE
-                       WORLD_READ WORLD_EXECUTE)
-endforeach()
-install(DIRECTORY Docs/
-        DESTINATION "${_pscal_runtime_root}/docs")
-install(DIRECTORY Tests/libs/
-        DESTINATION "${_pscal_runtime_root}/etc/tests"
-        USE_SOURCE_PERMISSIONS)
-install(DIRECTORY lib/rea/
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/rea"
-        USE_SOURCE_PERMISSIONS)
+    install(TARGETS exsh
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-install(CODE [[
-    set(ps_root "")
-    if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL ".")
-        set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-    elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
-        set(ps_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
-    else()
-        if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
-            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-        else()
-            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
-        endif()
+    install(DIRECTORY lib/
+            DESTINATION "${_pscal_runtime_root}/lib"
+            USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY fonts/
+            DESTINATION "${_pscal_runtime_root}/fonts"
+            USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY etc/
+            DESTINATION "${_pscal_runtime_root}/etc"
+            USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY Examples/
+            DESTINATION "${_pscal_runtime_root}/Examples"
+            USE_SOURCE_PERMISSIONS)
+    if(PSCAL_CONFIGURED_EXAMPLES)
+        install(CODE [[
+            set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
+            if(CMAKE_CONFIGURATION_TYPES)
+                list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
+            endif()
+            execute_process(COMMAND ${_pscal_build_cmd}
+                RESULT_VARIABLE _pscal_configured_examples_result)
+            if(NOT _pscal_configured_examples_result EQUAL 0)
+                message(FATAL_ERROR "Failed to generate configured example files (configured_examples target)")
+            endif()
+        ]])
     endif()
-    if(ps_root STREQUAL "")
-        return()
-    endif()
-
-    set(compat_targets
-        "${ps_root}/lib/pascal"
-        "${ps_root}/lib/clike"
-        "${ps_root}/lib/rea"
-        "${ps_root}/lib/misc")
-    set(compat_links
-        "${ps_root}/pascal/lib"
-        "${ps_root}/clike/lib"
-        "${ps_root}/rea/lib"
-        "${ps_root}/misc")
-
-    list(LENGTH compat_targets compat_count)
-    if(compat_count EQUAL 0)
-        return()
-    endif()
-
-    math(EXPR compat_last "${compat_count} - 1")
-    foreach(idx RANGE 0 ${compat_last})
-        list(GET compat_targets ${idx} compat_target)
-        list(GET compat_links ${idx} compat_link)
-
-        if(NOT EXISTS "${compat_target}" AND NOT IS_SYMLINK "${compat_target}")
-            continue()
-        endif()
-        if(EXISTS "${compat_link}" OR IS_SYMLINK "${compat_link}")
-            continue()
-        endif()
-
-        get_filename_component(compat_parent "${compat_link}" DIRECTORY)
-        file(MAKE_DIRECTORY "${compat_parent}")
-        file(CREATE_LINK "${compat_target}" "${compat_link}" SYMBOLIC)
+    foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
+        string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+        get_filename_component(example_dir "${example_relative}" DIRECTORY)
+        install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
+                DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
+                PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                           GROUP_READ GROUP_EXECUTE
+                           WORLD_READ WORLD_EXECUTE)
     endforeach()
-]])
+    install(DIRECTORY Docs/
+            DESTINATION "${_pscal_runtime_root}/docs")
+    install(DIRECTORY Tests/libs/
+            DESTINATION "${_pscal_runtime_root}/etc/tests"
+            USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY lib/rea/
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/rea"
+            USE_SOURCE_PERMISSIONS)
 
-add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
-add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
-add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
-set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
-add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
+    install(CODE [[
+        set(ps_root "")
+        if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL ".")
+            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+        elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
+            set(ps_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
+        else()
+            if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
+                set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+            else()
+                set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
+            endif()
+        endif()
+        if(ps_root STREQUAL "")
+            return()
+        endif()
+
+        set(compat_targets
+            "${ps_root}/lib/pascal"
+            "${ps_root}/lib/clike"
+            "${ps_root}/lib/rea"
+            "${ps_root}/lib/misc")
+        set(compat_links
+            "${ps_root}/pascal/lib"
+            "${ps_root}/clike/lib"
+            "${ps_root}/rea/lib"
+            "${ps_root}/misc")
+
+        list(LENGTH compat_targets compat_count)
+        if(compat_count EQUAL 0)
+            return()
+        endif()
+
+        math(EXPR compat_last "${compat_count} - 1")
+        foreach(idx RANGE 0 ${compat_last})
+            list(GET compat_targets ${idx} compat_target)
+            list(GET compat_links ${idx} compat_link)
+
+            if(NOT EXISTS "${compat_target}" AND NOT IS_SYMLINK "${compat_target}")
+                continue()
+            endif()
+            if(EXISTS "${compat_link}" OR IS_SYMLINK "${compat_link}")
+                continue()
+            endif()
+
+            get_filename_component(compat_parent "${compat_link}" DIRECTORY)
+            file(MAKE_DIRECTORY "${compat_parent}")
+            file(CREATE_LINK "${compat_target}" "${compat_link}" SYMBOLIC)
+        endforeach()
+    ]])
+endif()
+
+if(NOT PSCAL_PLATFORM_IOS)
+    add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
+    add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
+    add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
+    set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
+    add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
+endif()
 
 # ---- AST JSON to Bytecode tool ----
 set(JSON2BC_SOURCES
     src/tools/json2bc.c
     src/tools/ast_json_loader.c
     src/rea/type_stubs.c
-    src/ast/ast.c
-    lib/noise/noise.c
-    src/core/utils.c src/core/types.c src/core/list.c src/core/version.c src/core/cache.c
-    src/compiler/bytecode.c src/compiler/compiler.c
-    src/backend_ast/builtin.c src/backend_ast/builtin_network_api.c
-    src/backend_ast/shell_runtime_stub.c
-    src/backend_ast/sdl.c src/backend_ast/sdl3d.c src/backend_ast/gl.c src/backend_ast/audio.c
-    src/symbol/symbol.c
-    src/vm/vm.c
-    src/Pascal/globals.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
 )
-list(APPEND JSON2BC_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND JSON2BC_SOURCES src/third_party/yyjson/yyjson.c)
-add_executable(pscaljson2bc ${JSON2BC_SOURCES})
-if(TARGET CURL::libcurl)
-    target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl m Threads::Threads)
-else()
-    target_link_libraries(pscaljson2bc PRIVATE ${CURL_LIBRARIES} m Threads::Threads)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    target_link_libraries(pscaljson2bc PRIVATE ${PSCAL_SQLITE_LIBS})
-endif()
-if(SDL)
-    target_include_directories(pscaljson2bc PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
-    )
-    target_link_directories(pscaljson2bc PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
-    )
-    set(JSON2BC_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND JSON2BC_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND JSON2BC_SDL_LIBS ${SDL2_LIBRARIES})
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(pscaljson2bc ${JSON2BC_SOURCES})
+    target_link_libraries(pscaljson2bc PRIVATE pscal_core_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(pscaljson2bc PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(pscaljson2bc PRIVATE ${CURL_LIBRARIES})
+        endif()
     endif()
-    list(APPEND JSON2BC_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
-    )
-    if(PSCAL_OPENGL_TARGET)
-        list(APPEND JSON2BC_SDL_LIBS ${PSCAL_OPENGL_TARGET})
-    elseif(OPENGL_LIBRARIES)
-        list(APPEND JSON2BC_SDL_LIBS ${OPENGL_LIBRARIES})
+    target_link_libraries(pscaljson2bc PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(pscaljson2bc PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
-    list(APPEND JSON2BC_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
-    list(REMOVE_DUPLICATES JSON2BC_SDL_LIBS)
-    target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
-    target_compile_definitions(pscaljson2bc PRIVATE SDL)
+    if(SDL)
+        target_include_directories(pscaljson2bc PRIVATE
+            ${SDL2_INCLUDE_DIRS}
+            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL2_MIXER_INCLUDE_DIRS}
+            ${PC_SDL2_TTF_INCLUDE_DIRS}
+        )
+        target_link_directories(pscaljson2bc PRIVATE
+            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL2_MIXER_LIBRARY_DIRS}
+            ${PC_SDL2_TTF_LIBRARY_DIRS}
+        )
+        set(JSON2BC_SDL_LIBS "")
+        if(TARGET SDL2::SDL2)
+            list(APPEND JSON2BC_SDL_LIBS SDL2::SDL2)
+        else()
+            list(APPEND JSON2BC_SDL_LIBS ${SDL2_LIBRARIES})
+        endif()
+        list(APPEND JSON2BC_SDL_LIBS
+            ${PC_SDL2_IMAGE_LIBRARIES}
+            ${PC_SDL2_MIXER_LIBRARIES}
+            ${PC_SDL2_TTF_LIBRARIES}
+            ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL2_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND JSON2BC_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND JSON2BC_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND JSON2BC_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES JSON2BC_SDL_LIBS)
+        target_link_libraries(pscaljson2bc PRIVATE ${JSON2BC_SDL_LIBS})
+        target_compile_definitions(pscaljson2bc PRIVATE SDL)
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_json2bc_static
+        SOURCES ${JSON2BC_SOURCES})
+    target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
 endif()
 
 # Install the JSON→Bytecode tool alongside other binaries
-install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(NOT PSCAL_PLATFORM_IOS)
+    install(TARGETS pscaljson2bc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
-# ---- Optional shell completions ----
-option(PSCAL_INSTALL_COMPLETIONS "Install shell completion scripts for pscaljson2bc" ON)
-if(PSCAL_INSTALL_COMPLETIONS)
-    # Bash completion (standard location). Rename to the program name without extension
-    install(FILES tools/completions/pscaljson2bc.bash
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/bash-completion/completions"
-            RENAME pscaljson2bc)
-    # Zsh completion (site-functions). Ensure the filename begins with an underscore
-    install(FILES tools/completions/_pscaljson2bc
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/zsh/site-functions")
+    # ---- Optional shell completions ----
+    option(PSCAL_INSTALL_COMPLETIONS "Install shell completion scripts for pscaljson2bc" ON)
+    if(PSCAL_INSTALL_COMPLETIONS)
+        # Bash completion (standard location). Rename to the program name without extension
+        install(FILES tools/completions/pscaljson2bc.bash
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/bash-completion/completions"
+                RENAME pscaljson2bc)
+        # Zsh completion (site-functions). Ensure the filename begins with an underscore
+        install(FILES tools/completions/_pscaljson2bc
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/zsh/site-functions")
+    endif()
 endif()

@@ -18,6 +18,7 @@
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "Pascal/globals.h"
+#include "common/frontend_kind.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
@@ -397,33 +398,34 @@ static bool vmResolveStringIndex(VM* vm,
                                  size_t* out_offset,
                                  bool allow_length_query,
                                  bool* out_length_query) {
-#ifndef FRONTEND_SHELL
-    if (allow_length_query && raw_index == 0) {
+    if (!frontendIsShell()) {
+        if (allow_length_query && raw_index == 0) {
+            if (out_length_query) {
+                *out_length_query = true;
+            }
+            if (out_offset) {
+                *out_offset = 0;
+            }
+            return true;
+        }
+
+        if (raw_index < 1 || (size_t)raw_index > len) {
+            runtimeError(vm,
+                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                         raw_index,
+                         len);
+            return false;
+        }
+
         if (out_length_query) {
-            *out_length_query = true;
+            *out_length_query = false;
         }
         if (out_offset) {
-            *out_offset = 0;
+            *out_offset = (size_t)(raw_index - 1);
         }
         return true;
     }
 
-    if (raw_index < 1 || (size_t)raw_index > len) {
-        runtimeError(vm,
-                     "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                     raw_index,
-                     len);
-        return false;
-    }
-
-    if (out_length_query) {
-        *out_length_query = false;
-    }
-    if (out_offset) {
-        *out_offset = (size_t)(raw_index - 1);
-    }
-    return true;
-#else
     (void)allow_length_query;
     if (raw_index < 0 || (size_t)raw_index >= len) {
         runtimeError(vm,
@@ -440,7 +442,6 @@ static bool vmResolveStringIndex(VM* vm,
         *out_offset = (size_t)raw_index;
     }
     return true;
-#endif
 }
 
 static Value makeOwnedString(char* data, size_t len) {
@@ -456,11 +457,10 @@ static Value makeOwnedString(char* data, size_t len) {
 }
 
 static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
-#ifndef FRONTEND_SHELL
+    if (frontendIsShell()) {
+        return (unsigned long long)offset;
+    }
     return (unsigned long long)(offset + 1);
-#else
-    return (unsigned long long)offset;
-#endif
 }
 
 static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
@@ -3591,7 +3591,6 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
-#ifdef FRONTEND_SHELL
 static Value vmHostShellLastStatusHost(VM* vm) {
     return vmHostShellLastStatus(vm);
 }
@@ -3619,42 +3618,6 @@ static Value vmHostShellPollJobsHost(VM* vm) {
 static Value vmHostShellLoopIsReadyHost(VM* vm) {
     return vmHostShellLoopIsReady(vm);
 }
-#else
-static Value vmHostShellLastStatusHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckConditionHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopExecuteBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopAdvanceHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellPollJobsHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopIsReadyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-#endif
 
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
@@ -5626,13 +5589,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
                             freeValue(&operand);
                             break;
                         }
-#endif
 
                         push(vm, makePointer(&base_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
                         freeValue(&operand);
@@ -5864,15 +5825,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makeInt((long long)len));
                             freeValue(&operand);
                             break;
                         }
-#else
-                        (void)wants_length;
-#endif
 
                         char ch = base_val->s_val ? base_val->s_val[char_offset] : '\0';
                         push(vm, makeChar(ch));
@@ -6115,17 +6072,14 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-#ifndef FRONTEND_SHELL
                 } else if (pointer_to_lvalue.base_type_node == STRING_LENGTH_SENTINEL) {
-                    runtimeError(vm, "VM Error: Cannot assign to string length.");
-                    freeValue(&value_to_set);
-                    freeValue(&pointer_to_lvalue);
-                    return INTERPRET_RUNTIME_ERROR;
-                } else
-#else
-                } else
-#endif
-                {
+                    if (!frontendIsShell()) {
+                        runtimeError(vm, "VM Error: Cannot assign to string length.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else {
                     // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
@@ -6298,16 +6252,12 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     push(vm, makeChar(*char_target_addr));
-#ifndef FRONTEND_SHELL
-                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL) {
+                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL && !frontendIsShell()) {
                     // Special case: request for string length via element 0.
                     Value* str_val = (Value*)pointer_val.ptr_val;
                     size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
                     push(vm, makeInt((long long)len));
                 } else {
-#else
-                } else {
-#endif
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
@@ -6341,21 +6291,18 @@ comparison_error_label:
                          return INTERPRET_RUNTIME_ERROR;
                      }
                      result_char = str[char_offset];
-                 } else if (base_val.type == TYPE_CHAR) {
-#ifdef FRONTEND_SHELL
-                     if (pscal_index != 0) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 0, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#else
-                     if (pscal_index != 1) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#endif
-                     result_char = base_val.c_val;
+                } else if (base_val.type == TYPE_CHAR) {
+                    long long expected_index = frontendIsShell() ? 0 : 1;
+                    if (pscal_index != expected_index) {
+                        runtimeError(vm,
+                                     "Runtime Error: Index for a CHAR type must be %lld, got %lld.",
+                                     expected_index,
+                                     pscal_index);
+                        freeValue(&index_val);
+                        freeValue(&base_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    result_char = base_val.c_val;
                  } else {
                      runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
                      freeValue(&index_val); freeValue(&base_val);

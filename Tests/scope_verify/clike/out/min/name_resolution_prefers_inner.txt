@@ -1,0 +1,23 @@
+Test: name_resolution_prefers_inner
+Category: resolution_scope
+Expectation: runtime_ok
+Description: Lexical lookup should select the innermost binding first.
+Reason: stdout mismatch
+Exit code: 0
+--- stdout ---
+<empty>
+--- stderr ---
+<empty>
+--- source ---
+#include <stdio.h>
+
+        int value = 1;
+        int main() {
+            int globalCopy = value;
+            int value = 2;
+            printf("inner=%d
+", value);
+            printf("outer=%d
+", globalCopy);
+            return 0;
+        }

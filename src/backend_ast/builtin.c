@@ -3,6 +3,7 @@
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
+#include "common/frontend_kind.h"
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"
@@ -5061,6 +5062,50 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+static bool vmTraceStdoutEnabled(void) {
+    static int trace_mode = -1;
+    if (trace_mode < 0) {
+        const char *env = getenv("REA_TRACE_STDOUT");
+        if (!env || !*env) {
+            env = getenv("PSCAL_TRACE_STDOUT");
+        }
+        trace_mode = (env && *env && env[0] != '0') ? 1 : 0;
+    }
+    return trace_mode == 1;
+}
+
+static void vmTraceDescribeValue(const Value *val) {
+    if (!val) {
+        fprintf(stderr, "  [TRACE stdout] <null value>\n");
+        return;
+    }
+    switch (val->type) {
+        case TYPE_STRING:
+            fprintf(stderr, "  [TRACE stdout] string: \"%.*s\"\n",
+                    80, val->s_val ? val->s_val : "");
+            break;
+        case TYPE_CHAR:
+            fprintf(stderr, "  [TRACE stdout] char: %d\n", val->c_val);
+            break;
+        case TYPE_BOOLEAN:
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            fprintf(stderr, "  [TRACE stdout] int: %lld\n", (long long)AS_INTEGER(*val));
+            break;
+        case TYPE_REAL:
+        case TYPE_FLOAT:
+            fprintf(stderr, "  [TRACE stdout] real: %Lf\n", (long double)AS_REAL(*val));
+            break;
+        default:
+            fprintf(stderr, "  [TRACE stdout] value type %d\n", val->type);
+            break;
+    }
+}
+
 Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     if (arg_count < 1) {
         runtimeError(vm, "Write expects at least a newline flag.");
@@ -5130,6 +5175,10 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    bool trace_stdout = vmTraceStdoutEnabled() && (output_stream == stdout);
+    if (trace_stdout) {
+        fprintf(stderr, "[TRACE stdout] write call: newline=%d args=%d\n", newline ? 1 : 0, print_arg_count);
+    }
     bool color_was_applied = false;
     if (output_stream == stdout) {
         color_was_applied = applyCurrentTextAttributes(output_stream);
@@ -5144,6 +5193,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (!writeBinaryElement(output_stream, &val, binary_element_type, binary_element_size, &write_error)) {
                 last_io_error = write_error != 0 ? write_error : 1;
                 break;
+            }
+            if (trace_stdout) {
+                vmTraceDescribeValue(&val);
             }
             prev = val;
             has_prev = true;
@@ -5185,6 +5237,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (add_space) {
                 fputc(' ', output_stream);
             }
+        }
+        if (trace_stdout) {
+            vmTraceDescribeValue(&val);
         }
         if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
             fputs(val.i_val ? "1" : "0", output_stream);
@@ -5356,9 +5411,14 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
-    int res = system(cmd);
+    int result = -1;
+#ifdef PSCAL_TARGET_IOS
+    runtimeError(vm, "dosExec is unavailable on iOS builds.");
+#else
+    result = system(cmd);
+#endif
     free(cmd);
-    return makeInt(res);
+    return makeInt(result);
 }
 
 Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
@@ -6378,27 +6438,23 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
         runtimeError(vm, "%s received an unknown builtin identifier.", opName);
         return makeInt(-1);
     }
-    if (!threadBuiltinIsAllowlisted(builtin_id)) {
-        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
-        if (shellRuntimeSetLastStatusSticky) {
-            shellRuntimeSetLastStatusSticky(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
+        if (!threadBuiltinIsAllowlisted(builtin_id)) {
+            runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+            if (shellRuntimeSetLastStatusSticky) {
+                shellRuntimeSetLastStatusSticky(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
+            } else if (shellRuntimeSetLastStatus) {
+                shellRuntimeSetLastStatus(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
             }
-#endif
-        } else if (shellRuntimeSetLastStatus) {
-            shellRuntimeSetLastStatus(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
-            }
-#endif
+            return makeInt(-1);
         }
-        return makeInt(-1);
-    }
 
     int options_index = -1;
     ThreadRequestOptions options;

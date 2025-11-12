@@ -1,0 +1,20 @@
+Test: name_resolution_random_shadow_pass
+Category: resolution_scope
+Expectation: runtime_ok
+Description: Random identifier names still prefer the innermost binding.
+Reason: stdout mismatch
+Exit code: 0
+--- stdout ---
+<empty>
+--- stderr ---
+<empty>
+--- source ---
+#include <stdio.h>
+
+        int b6kosgpb = 10;
+        int main() {
+            int b6kosgpb = 20;
+            printf("inner=%d
+", b6kosgpb);
+            return 0;
+        }

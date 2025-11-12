@@ -67,6 +67,7 @@ extern int gWindowBottom;
 #define MAX_RECURSION_DEPTH 10
 extern int gParamCount;
 extern char **gParamValues;
+extern bool gParamValuesOwned;
 // extern AST *globalRoot; // Defined in main.c typically
 
 extern int last_io_error;

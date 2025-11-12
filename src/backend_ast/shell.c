@@ -1,3 +1,4 @@
+#include "common/frontend_kind.h"
 #include "shell/shell_runtime_state.inc"
 #include "shell/shell_command_utils.inc"
 #include "shell/shell_word_expansion.inc"
