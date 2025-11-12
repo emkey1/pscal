@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Darwin
 
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
@@ -75,20 +76,15 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     @objc
     public func consumeOutput(buffer: UnsafePointer<Int8>, length: Int) {
-        
-        // 1. THE CRITICAL FIX: Create a safe, deep copy of the C-buffer's data.
-        let dataCopy = Data(bytes: buffer, count: length)
+        guard length > 0 else { return }
+        let pointer = UnsafeMutableRawPointer(mutating: buffer)
+        let dataCopy = Data(bytesNoCopy: pointer, count: length, deallocator: .custom { rawPointer, _ in
+            free(rawPointer)
+        })
 
-        // 2. Dispatch all UI-related work to the main thread.
         DispatchQueue.main.async {
-            
-            // 3. (FIXED) Append the safe data to the terminal buffer.
             self.terminalBuffer.append(data: dataCopy)
-            
-            // 4. Get a snapshot of the buffer's new state.
             let snapshot = self.terminalBuffer.snapshot()
-            
-            // 5. Render that snapshot into strings and update the UI.
             self.screenLines = TerminalBuffer.render(snapshot: snapshot)
         }
     }

@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #if __has_include(<util.h>)
@@ -51,7 +52,12 @@ static void PSCALRuntimeDispatchOutput(const char *buffer, size_t length) {
     pthread_mutex_unlock(&s_runtime_mutex);
 
     if (handler && buffer && length > 0) {
-        handler(buffer, length, context);
+        char *heap_buffer = (char *)malloc(length);
+        if (!heap_buffer) {
+            return;
+        }
+        memcpy(heap_buffer, buffer, length);
+        handler(heap_buffer, length, context);
     }
 }
 
