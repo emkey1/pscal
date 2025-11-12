@@ -75,10 +75,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     private func consumeOutput(buffer: UnsafePointer<CChar>, length: Int) {
         guard length > 0 else { return }
-        let data = Data(bytes: buffer, count: length)
-        terminalBuffer.append(data: data)
-        let snapshot = terminalBuffer.snapshot()
+        let dataCopy = Data(bytes: buffer, count: length)
         DispatchQueue.main.async {
+            self.terminalBuffer.append(data: dataCopy)
+            let snapshot = self.terminalBuffer.snapshot()
             self.screenLines = TerminalBuffer.render(snapshot: snapshot)
         }
     }
