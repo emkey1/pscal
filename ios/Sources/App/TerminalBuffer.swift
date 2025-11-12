@@ -142,13 +142,13 @@ struct TerminalSnapshot {
         return TerminalSnapshot(lines: lines)
     }
 
-    static func render(snapshot: TerminalSnapshot) -> [AttributedString] {
+    static func render(snapshot: TerminalSnapshot) -> [NSAttributedString] {
         var rendered = snapshot.lines.map { makeAttributedString(from: $0) }
-        while rendered.count > 1, rendered.last?.characters.isEmpty == true {
+        while rendered.count > 1, rendered.last?.string.isEmpty == true {
             rendered.removeLast()
         }
         if rendered.isEmpty {
-            rendered = [AttributedString("")]
+            rendered = [NSAttributedString(string: "")]
         }
         return rendered
     }
@@ -432,13 +432,13 @@ struct TerminalSnapshot {
         }
     }
 
-    private static func makeAttributedString(from row: [TerminalCell]) -> AttributedString {
+    private static func makeAttributedString(from row: [TerminalCell]) -> NSAttributedString {
         var effectiveRow = row
         while let last = effectiveRow.last, last.character == " " {
             effectiveRow.removeLast()
         }
         guard !effectiveRow.isEmpty else {
-            return AttributedString()
+            return NSAttributedString(string: "")
         }
         let mutable = NSMutableAttributedString()
         var currentAttributes = effectiveRow.first!.attributes
@@ -462,7 +462,7 @@ struct TerminalSnapshot {
             }
         }
         flush()
-        return AttributedString(mutable)
+        return mutable.copy() as? NSAttributedString ?? NSAttributedString(string: "")
     }
 
     private static func nsAttributes(for attributes: TerminalAttributes) -> [NSAttributedString.Key: Any] {

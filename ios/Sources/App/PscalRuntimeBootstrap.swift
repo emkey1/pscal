@@ -4,7 +4,7 @@ import Foundation
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
 
-    @Published private(set) var screenLines: [AttributedString] = [AttributedString("Launching exsh...")]
+    @Published private(set) var screenLines: [NSAttributedString] = [NSAttributedString(string: "Launching exsh...")]
     @Published private(set) var exitStatus: Int32?
 
     private var started = false
@@ -36,7 +36,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         RuntimeAssetInstaller.shared.prepareWorkspace()
 
         DispatchQueue.main.async {
-            self.screenLines = [AttributedString("Launching exsh...")]
+            self.screenLines = [NSAttributedString(string: "Launching exsh...")]
             self.exitStatus = nil
         }
 

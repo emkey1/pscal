@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TerminalView: View {
     var body: some View {
@@ -17,11 +18,11 @@ private struct TerminalContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(runtime.screenLines.enumerated()), id: \.offset) { index, line in
-                            Text(line)
-                                .font(.system(.body, design: .monospaced))
+                            AttributedTextLine(line: line)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
+                                .background(Color(.systemBackground))
                                 .id(index)
                         }
                     }
@@ -70,5 +71,21 @@ struct TerminalView_Previews: PreviewProvider {
     static var previews: some View {
         TerminalView()
             .previewDevice("iPad Pro (11-inch) (4th generation)")
+    }
+}
+
+private struct AttributedTextLine: UIViewRepresentable {
+    let line: NSAttributedString
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.backgroundColor = .clear
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ uiView: UILabel, context: Context) {
+        uiView.attributedText = line
     }
 }
