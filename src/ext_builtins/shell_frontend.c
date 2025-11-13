@@ -101,6 +101,7 @@ void registerShellFrontendBuiltins(void) {
 #ifdef PSCAL_TARGET_IOS
     registerShellBuiltin(category, command_group, "ls", vmBuiltinShellLs);
     registerShellBuiltin(category, command_group, "cat", vmBuiltinShellCat);
+    registerShellBuiltin(category, command_group, "chmod", vmBuiltinShellChmod);
     registerShellBuiltin(category, command_group, "clear", vmBuiltinShellClear);
     registerShellBuiltin(category, command_group, "cls", vmBuiltinShellClear);
     registerShellBuiltin(category, command_group, "cat", vmBuiltinShellCat);

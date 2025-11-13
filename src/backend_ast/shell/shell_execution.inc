@@ -277,6 +277,12 @@ static int shellSpawnProcess(VM *vm,
                 _exit(status);
             }
 
+#if defined(PSCAL_TARGET_IOS)
+            int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+            if (shebang_status >= 0) {
+                _exit(shebang_status);
+            }
+#endif
             execvp(cmd->argv[0], cmd->argv);
             int err = errno;
             fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));

@@ -201,6 +201,7 @@ Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPascal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellChmod(struct VM_s* vm, int arg_count, Value* args);
 #ifdef BUILD_DASCAL
 Value vmBuiltinShellDascal(struct VM_s* vm, int arg_count, Value* args);
 #endif
@@ -258,6 +259,8 @@ bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);
 bool shellRuntimeExitOnSignal(void);
 size_t shellRuntimeHistoryCount(void);
+void shellRuntimeSetLastStatus(int status);
+void shellRuntimeSetLastStatusSticky(int status);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,
                                         char **out_line,

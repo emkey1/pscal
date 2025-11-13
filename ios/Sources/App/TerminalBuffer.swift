@@ -92,8 +92,8 @@ final class TerminalBuffer {
         case csi
     }
 
-    private let columns: Int
-    private let rows: Int
+    private var columns: Int
+    private var rows: Int
     private let maxScrollback: Int
 
     private var grid: [[TerminalCell]]
@@ -119,7 +119,31 @@ struct TerminalSnapshot {
         self.columns = max(10, columns)
         self.rows = max(4, rows)
         self.maxScrollback = max(0, scrollback)
-        self.grid = Array(repeating: Array(repeating: TerminalCell.blank(), count: self.columns), count: self.rows)
+        self.grid = Array(repeating: TerminalBuffer.makeBlankRow(width: self.columns), count: self.rows)
+    }
+
+    @discardableResult
+    func resize(columns newColumns: Int, rows newRows: Int) -> Bool {
+        var didChange = false
+        let clampedColumns = max(10, newColumns)
+        let clampedRows = max(4, newRows)
+        syncQueue.sync {
+            var mutated = false
+            if clampedColumns != columns {
+                adjustColumnCount(to: clampedColumns)
+                mutated = true
+            }
+            if clampedRows != rows {
+                adjustRowCount(to: clampedRows)
+                mutated = true
+            }
+            didChange = mutated
+        }
+        return didChange
+    }
+
+    func geometry() -> (columns: Int, rows: Int) {
+        return syncQueue.sync { (columns, rows) }
     }
 
     func append(data: Data) {
@@ -313,7 +337,7 @@ struct TerminalSnapshot {
         if scrollback.count > maxScrollback {
             scrollback.removeFirst()
         }
-        grid.append(Array(repeating: TerminalCell.blank(), count: columns))
+        grid.append(makeBlankRow())
     }
 
     private func clearScreen(mode: Int) {
@@ -322,18 +346,18 @@ struct TerminalSnapshot {
             clearLine(mode: 0)
             if cursorRow + 1 < rows {
                 for row in (cursorRow + 1)..<rows {
-                    grid[row] = Array(repeating: TerminalCell.blank(), count: columns)
+                    grid[row] = makeBlankRow()
                 }
             }
         case 1:
             clearLine(mode: 1)
             if cursorRow > 0 {
                 for row in 0..<cursorRow {
-                    grid[row] = Array(repeating: TerminalCell.blank(), count: columns)
+                    grid[row] = makeBlankRow()
                 }
             }
         case 2, 3:
-            grid = Array(repeating: Array(repeating: TerminalCell.blank(), count: columns), count: rows)
+            grid = Array(repeating: makeBlankRow(), count: rows)
             scrollback.removeAll()
             cursorRow = 0
             cursorCol = 0
@@ -433,15 +457,11 @@ struct TerminalSnapshot {
     }
 
     private static func makeAttributedString(from row: [TerminalCell]) -> NSAttributedString {
-        var effectiveRow = row
-        while let last = effectiveRow.last, last.character == " " {
-            effectiveRow.removeLast()
-        }
-        guard !effectiveRow.isEmpty else {
+        guard !row.isEmpty else {
             return NSAttributedString(string: "")
         }
         let mutable = NSMutableAttributedString()
-        var currentAttributes = effectiveRow.first!.attributes
+        var currentAttributes = row.first!.attributes
         var buffer = ""
 
         func flush() {
@@ -452,7 +472,7 @@ struct TerminalSnapshot {
             buffer.removeAll(keepingCapacity: true)
         }
 
-        for cell in effectiveRow {
+        for cell in row {
             if cell.attributes == currentAttributes {
                 buffer.append(cell.character)
             } else {
@@ -497,5 +517,72 @@ struct TerminalSnapshot {
 
     private func clamp(_ value: Int, lower: Int, upper: Int) -> Int {
         return max(lower, min(value, upper))
+    }
+
+    private func adjustColumnCount(to newColumns: Int) {
+        func resizeRow(_ row: inout [TerminalCell]) {
+            if newColumns > row.count {
+                row.append(contentsOf: Array(repeating: blankCell(), count: newColumns - row.count))
+            } else if newColumns < row.count {
+                row = Array(row.prefix(newColumns))
+            }
+        }
+
+        for index in scrollback.indices {
+            resizeRow(&scrollback[index])
+        }
+        for index in grid.indices {
+            resizeRow(&grid[index])
+        }
+        columns = newColumns
+        cursorCol = clamp(cursorCol, lower: 0, upper: max(newColumns - 1, 0))
+        if var saved = savedCursor {
+            saved.col = clamp(saved.col, lower: 0, upper: max(newColumns - 1, 0))
+            savedCursor = saved
+        }
+    }
+
+    private func adjustRowCount(to newRows: Int) {
+        if newRows > rows {
+            let blankRow = makeBlankRow()
+            for _ in 0..<(newRows - rows) {
+                grid.append(blankRow)
+            }
+        } else if newRows < rows {
+            let trimCount = rows - newRows
+            if trimCount > 0 {
+                let removed = grid.prefix(trimCount)
+                scrollback.append(contentsOf: removed)
+                if scrollback.count > maxScrollback {
+                    let overflow = scrollback.count - maxScrollback
+                    if overflow > 0 && overflow <= scrollback.count {
+                        scrollback.removeFirst(overflow)
+                    }
+                }
+                grid.removeFirst(min(trimCount, grid.count))
+                cursorRow = clamp(cursorRow - trimCount, lower: 0, upper: max(newRows - 1, 0))
+                if var saved = savedCursor {
+                    saved.row = clamp(saved.row - trimCount, lower: 0, upper: max(newRows - 1, 0))
+                    savedCursor = saved
+                }
+            }
+        }
+        rows = newRows
+    }
+
+    private static func blankCell(with attributes: TerminalAttributes = TerminalAttributes()) -> TerminalCell {
+        TerminalCell.blank(attributes: attributes)
+    }
+
+    private static func makeBlankRow(width: Int, attributes: TerminalAttributes = TerminalAttributes()) -> [TerminalCell] {
+        Array(repeating: TerminalCell.blank(attributes: attributes), count: width)
+    }
+
+    private func blankCell(attributes: TerminalAttributes? = nil) -> TerminalCell {
+        TerminalBuffer.blankCell(with: attributes ?? currentAttributes)
+    }
+
+    private func makeBlankRow(width: Int? = nil, attributes: TerminalAttributes? = nil) -> [TerminalCell] {
+        return TerminalBuffer.makeBlankRow(width: width ?? columns, attributes: attributes ?? currentAttributes)
     }
 }

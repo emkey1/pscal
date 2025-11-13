@@ -1,6 +1,5 @@
 #include "shell/runner.h"
 
-#include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
 #include "core/cache.h"
 #include "core/preproc.h"
@@ -10,6 +9,7 @@
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "symbol/symbol.h"
+#include "backend_ast/builtin.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 
@@ -17,12 +17,214 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <spawn.h>
+#include <sys/wait.h>
+extern char **environ;
+#endif
 
 static const char *const kShellCompilerId = "shell";
 
 static int gShellSymbolTableDepth = 0;
 static VM *gShellThreadOwnerVm = NULL;
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellReadShebangLine(const char *path, char **out_line) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (!path || !out_line) {
+        return false;
+    }
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    char buffer[512];
+    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    close(fd);
+    if (n <= 0) {
+        return false;
+    }
+    buffer[n] = '\0';
+    const unsigned char *bytes = (const unsigned char *)buffer;
+    size_t offset = 0;
+    if (n >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+        offset = 3;
+    }
+    if (buffer[offset] != '#' || buffer[offset + 1] != '!') {
+        return false;
+    }
+    const char *line_start = buffer + offset + 2;
+    while (*line_start == ' ' || *line_start == '\t') {
+        line_start++;
+    }
+    const char *line_end = line_start;
+    while (*line_end && *line_end != '\n' && *line_end != '\r') {
+        line_end++;
+    }
+    size_t line_len = (size_t)(line_end - line_start);
+    char *line = (char *)malloc(line_len + 1);
+    if (!line) {
+        return false;
+    }
+    memcpy(line, line_start, line_len);
+    line[line_len] = '\0';
+    *out_line = line;
+    return true;
+}
+
+static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
+    const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
+    if (!runner || !*runner) {
+        fprintf(stderr, "%s: PSCALI_TOOL_RUNNER_PATH is not set; rebuild the iOS helper binary.\n",
+                tool_name ? tool_name : "tool");
+        return 127;
+    }
+
+    size_t child_count = (size_t)argc + 1;
+    char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
+    if (!child_argv) {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name ? tool_name : "tool");
+        return 1;
+    }
+
+    child_argv[0] = (char *)runner;
+    for (int i = 0; i < argc; ++i) {
+        child_argv[i + 1] = argv[i];
+    }
+
+    pid_t pid = 0;
+    int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
+    free(child_argv);
+    if (spawn_rc != 0) {
+        fprintf(stderr, "%s: failed to launch tool runner: %s\n",
+                tool_name ? tool_name : "tool", strerror(spawn_rc));
+        return 127;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 127;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
+
+static const char *shellResolveToolName(const char *interpreter) {
+    if (!interpreter || !*interpreter) {
+        return NULL;
+    }
+    const char *base = strrchr(interpreter, '/');
+    base = base ? base + 1 : interpreter;
+    if (strcmp(base, "pascal") == 0) return "pascal";
+    if (strcmp(base, "clike") == 0) return "clike";
+    if (strcmp(base, "rea") == 0) return "rea";
+    if (strcmp(base, "pscalvm") == 0) return "pscalvm";
+    if (strcmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
+    if (strcmp(base, "dascal") == 0) return "dascal";
+    if (strcmp(base, "pscald") == 0) return "pscald";
+    return NULL;
+}
+
+int shellMaybeExecShebangTool(const char *path, char *const *argv) {
+    if (!path || !*path) {
+        return -1;
+    }
+    char *line = NULL;
+    if (!shellReadShebangLine(path, &line)) {
+        return -1;
+    }
+
+    char *tokens[8];
+    size_t token_count = 0;
+    char *saveptr = NULL;
+    char *token = strtok_r(line, " \t", &saveptr);
+    while (token && token_count < 8) {
+        tokens[token_count++] = token;
+        token = strtok_r(NULL, " \t", &saveptr);
+    }
+    if (token_count == 0) {
+        free(line);
+        return -1;
+    }
+
+    size_t interpreter_index = 0;
+    const char *interpreter = tokens[interpreter_index];
+    const char *base = strrchr(interpreter, '/');
+    base = base ? base + 1 : interpreter;
+    if (strcmp(base, "env") == 0 && token_count >= 2) {
+        interpreter_index = 1;
+        interpreter = tokens[interpreter_index];
+    }
+    const char *tool_name = shellResolveToolName(interpreter);
+    if (!tool_name) {
+        free(line);
+        return -1;
+    }
+
+    size_t shebang_argc = 0;
+    if (token_count > interpreter_index + 1) {
+        shebang_argc = token_count - (interpreter_index + 1);
+    }
+    size_t script_argc = 0;
+    if (argv) {
+        while (argv[1 + script_argc]) {
+            script_argc++;
+        }
+    }
+
+    size_t total_args = 1 + shebang_argc + 1 + script_argc;
+    char **tool_argv = (char **)calloc(total_args, sizeof(char *));
+    if (!tool_argv) {
+        free(line);
+        return EXIT_FAILURE;
+    }
+
+    bool ok = true;
+    size_t idx = 0;
+    tool_argv[idx++] = strdup(tool_name);
+    for (size_t i = 0; ok && i < shebang_argc; ++i) {
+        tool_argv[idx++] = strdup(tokens[interpreter_index + 1 + i]);
+        if (!tool_argv[idx - 1]) {
+            ok = false;
+        }
+    }
+    tool_argv[idx++] = strdup(path);
+    if (!tool_argv[idx - 1]) {
+        ok = false;
+    }
+    for (size_t i = 0; ok && i < script_argc; ++i) {
+        const char *arg = argv[1 + i];
+        tool_argv[idx++] = strdup(arg ? arg : "");
+        if (!tool_argv[idx - 1]) {
+            ok = false;
+        }
+    }
+
+    int status = EXIT_FAILURE;
+    if (ok) {
+        status = shellSpawnToolRunner(tool_name, (int)total_args, tool_argv);
+    } else {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name);
+    }
+
+    for (size_t i = 0; i < total_args; ++i) {
+        free(tool_argv[i]);
+    }
+    free(tool_argv);
+    free(line);
+    return status;
+}
+#endif
 void shellSymbolTableScopeInit(ShellSymbolTableScope *scope) {
     if (!scope) {
         return;

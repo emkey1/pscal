@@ -58,6 +58,27 @@ static void initSymbolSystemClike(void) {
     current_procedure_table = procedure_table;
 }
 
+static void resetClikeSymbolState(void) {
+    if (globalSymbols) {
+        freeHashTable(globalSymbols);
+        globalSymbols = NULL;
+    }
+    if (constGlobalSymbols) {
+        freeHashTable(constGlobalSymbols);
+        constGlobalSymbols = NULL;
+    }
+    if (procedure_table) {
+        freeHashTable(procedure_table);
+        procedure_table = NULL;
+    }
+    current_procedure_table = NULL;
+    if (type_table) {
+        freeTypeTableASTNodes();
+        freeTypeTable();
+        type_table = NULL;
+    }
+}
+
 static const char *CLIKE_USAGE =
     "Usage: clike <options> <source.cl> [program_parameters...]\n"
     "   Options:\n"
@@ -229,9 +250,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        if (globalSymbols) freeHashTable(globalSymbols);
-        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-        if (procedure_table) freeHashTable(procedure_table);
+        resetClikeSymbolState();
         CLIKE_RETURN(EXIT_FAILURE);
     }
 
@@ -243,9 +262,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        if (globalSymbols) freeHashTable(globalSymbols);
-        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-        if (procedure_table) freeHashTable(procedure_table);
+        resetClikeSymbolState();
         CLIKE_RETURN(clike_error_count > 255 ? 255 : clike_error_count);
     }
     prog = optimizeClikeAST(prog);
@@ -255,9 +272,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        if (globalSymbols) freeHashTable(globalSymbols);
-        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-        if (procedure_table) freeHashTable(procedure_table);
+        resetClikeSymbolState();
         CLIKE_RETURN(EXIT_FAILURE);
     }
 
@@ -345,9 +360,7 @@ int clike_main(int argc, char **argv) {
         clikeFreeStructs();
         free(src);
         if (pre_src) free(pre_src);
-        if (globalSymbols) freeHashTable(globalSymbols);
-        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-        if (procedure_table) freeHashTable(procedure_table);
+        resetClikeSymbolState();
         CLIKE_RETURN(EXIT_SUCCESS);
     }
 
@@ -365,9 +378,7 @@ int clike_main(int argc, char **argv) {
     clikeFreeStructs();
     free(src);
     if (pre_src) free(pre_src);
-    if (globalSymbols) freeHashTable(globalSymbols);
-    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-    if (procedure_table) freeHashTable(procedure_table);
+    resetClikeSymbolState();
     CLIKE_RETURN(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 #undef CLIKE_RETURN

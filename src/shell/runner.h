@@ -46,6 +46,9 @@ int shellRunSource(const char *source,
                    const char *path,
                    const ShellRunOptions *options,
                    bool *out_exit_requested);
+#if defined(PSCAL_TARGET_IOS)
+int shellMaybeExecShebangTool(const char *path, char *const *argv);
+#endif
 
 #ifdef __cplusplus
 }

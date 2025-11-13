@@ -12,7 +12,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
     private var handlerContext: UnsafeMutableRawPointer?
-    private let terminalBuffer = TerminalBuffer(columns: 100, rows: 32, scrollback: 400)
+    private let terminalBuffer: TerminalBuffer
+    private var lastAppliedGeometry: (columns: Int, rows: Int)
 
     private lazy var outputHandler: PSCALRuntimeOutputHandler = { data, length, context in
         guard let context, let base = data else { return }
@@ -26,6 +27,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
         bootstrap.handleExit(status: status)
     }
 
+    private init() {
+        let initialColumns = 80
+        let initialRows = 24
+        self.terminalBuffer = TerminalBuffer(columns: initialColumns, rows: initialRows, scrollback: 400)
+        self.lastAppliedGeometry = (initialColumns, initialRows)
+        PSCALRuntimeUpdateWindowSize(Int32(initialColumns), Int32(initialRows))
+    }
+
     func start() {
         let shouldStart = stateQueue.sync { () -> Bool in
             guard !started else { return false }
@@ -35,6 +44,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         guard shouldStart else { return }
 
         RuntimeAssetInstaller.shared.prepareWorkspace()
+        if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
+            setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
+        }
 
         DispatchQueue.main.async {
             self.screenLines = [NSAttributedString(string: "Launching exsh...")]
@@ -42,26 +54,18 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
 
         handlerContext = Unmanaged.passUnretained(self).toOpaque()
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("asan.log").path
-        let logPath = documentsPath ?? "/tmp/asan.log"
-        let asanOptions = "abort_on_error=1:halt_on_error=1:log_path=\(logPath)"
-        _ = asanOptions.withCString { cString in
-            setenv("ASAN_OPTIONS", cString, 1)
-        }
-        _ = logPath.withCString { cString in
-            PSCALRuntimeConfigureAsanReportPath(cString)
-        }
-        setenv("ASAN_SYMBOLIZER_PATH", "/usr/bin/atos", 1)
         PSCALRuntimeConfigureHandlers(outputHandler, exitHandler, handlerContext)
 
         launchQueue.async {
             let args = ["exsh"]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
+            let argc = Int32(cArgs.count)
+            cArgs.append(nil)
             defer {
                 cArgs.forEach { if let ptr = $0 { free(ptr) } }
             }
             cArgs.withUnsafeMutableBufferPointer { buffer in
-                _ = PSCALRuntimeLaunchExsh(Int32(buffer.count), buffer.baseAddress)
+                _ = PSCALRuntimeLaunchExsh(argc, buffer.baseAddress)
             }
         }
     }
@@ -71,6 +75,23 @@ final class PscalRuntimeBootstrap: ObservableObject {
         data.withUnsafeBytes { rawBuffer in
             guard let base = rawBuffer.bindMemory(to: CChar.self).baseAddress else { return }
             PSCALRuntimeSendInput(base, rawBuffer.count)
+        }
+    }
+
+    func updateTerminalSize(columns: Int, rows: Int) {
+        let clampedColumns = max(10, columns)
+        let clampedRows = max(4, rows)
+        guard clampedColumns != lastAppliedGeometry.columns || clampedRows != lastAppliedGeometry.rows else {
+            return
+        }
+        lastAppliedGeometry = (clampedColumns, clampedRows)
+        let resized = terminalBuffer.resize(columns: clampedColumns, rows: clampedRows)
+        PSCALRuntimeUpdateWindowSize(Int32(clampedColumns), Int32(clampedRows))
+        if resized {
+            let snapshot = terminalBuffer.snapshot()
+            DispatchQueue.main.async {
+                self.screenLines = TerminalBuffer.render(snapshot: snapshot)
+            }
         }
     }
 

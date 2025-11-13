@@ -27,6 +27,10 @@ int PSCALRuntimeIsRunning(void);
 /// Configures the destination file for AddressSanitizer crash reports when available.
 void PSCALRuntimeConfigureAsanReportPath(const char *path);
 
+/// Updates the PTY window size (columns/rows). Safe to call before launching;
+/// the size will be applied once exsh starts.
+void PSCALRuntimeUpdateWindowSize(int columns, int rows);
+
 #ifdef __cplusplus
 }
 #endif

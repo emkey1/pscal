@@ -11,6 +11,10 @@ if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS)
 endif()
 
+if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
+    add_library(pscal_common_frontend_shim STATIC src/ios/common_frontend_shim.c)
+endif()
+
 # ---- Version Generation Logic ----
 string(TIMESTAMP CURRENT_YEAR "%Y")
 string(TIMESTAMP CURRENT_MONTH "%m")
@@ -403,6 +407,8 @@ set(PSCAL_CORE_SOURCES
     src/core/cache.c
     src/common/runtime_params.c
     src/common/frontend_kind.c
+    src/common/runtime_paths.c
+    src/common/pascal_state.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -441,19 +447,23 @@ set(PASCAL_FRONTEND_SOURCES
 # Detect whether AddressSanitizer is usable before wiring it into dascal
 set(PSCAL_CAN_ENABLE_ASAN OFF)
 if(BUILD_DASCAL)
-    include(CheckCSourceCompiles)
-    set(_PSCAL_SAVED_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-    if(_PSCAL_SAVED_REQUIRED_FLAGS)
-        set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS} -fsanitize=address")
+    if(PSCAL_PLATFORM_IOS)
+        message(STATUS "AddressSanitizer disabled for iOS builds (runtime is unavailable on device/simulator targets).")
     else()
-        set(CMAKE_REQUIRED_FLAGS "-fsanitize=address")
-    endif()
-    check_c_source_compiles("#include <stdio.h>\nint main(void){return 0;}\n" PSCAL_HAS_ADDRESS_SANITIZER)
-    set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS}")
-    if(PSCAL_HAS_ADDRESS_SANITIZER)
-        set(PSCAL_CAN_ENABLE_ASAN ON)
-    else()
-        message(WARNING "AddressSanitizer (-fsanitize=address) is not available; building dascal without it.")
+        include(CheckCSourceCompiles)
+        set(_PSCAL_SAVED_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+        if(_PSCAL_SAVED_REQUIRED_FLAGS)
+            set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS} -fsanitize=address")
+        else()
+            set(CMAKE_REQUIRED_FLAGS "-fsanitize=address")
+        endif()
+        check_c_source_compiles("#include <stdio.h>\nint main(void){return 0;}\n" PSCAL_HAS_ADDRESS_SANITIZER)
+        set(CMAKE_REQUIRED_FLAGS "${_PSCAL_SAVED_REQUIRED_FLAGS}")
+        if(PSCAL_HAS_ADDRESS_SANITIZER)
+            set(PSCAL_CAN_ENABLE_ASAN ON)
+        else()
+            message(WARNING "AddressSanitizer (-fsanitize=address) is not available; building dascal without it.")
+        endif()
     endif()
 endif()
 
@@ -1181,6 +1191,28 @@ if(PSCAL_BUILD_STATIC_LIBS)
     pscal_add_static_library(pscal_json2bc_static
         SOURCES ${JSON2BC_SOURCES})
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
+endif()
+
+if(PSCAL_PLATFORM_IOS)
+    add_executable(pscal_tool_runner src/ios/tool_runner_main.c)
+    set(_tool_runner_libs
+        pscal_clike_static
+        pscal_rea_static
+        pscal_pascal_static
+        pscal_vm_static
+        pscal_json2bc_static
+        pscal_core_static
+        pscal_common_frontend_shim
+    )
+    if(TARGET pscal_dascal_static)
+        list(APPEND _tool_runner_libs pscal_dascal_static)
+    endif()
+    if(TARGET pscal_pscald_static)
+        list(APPEND _tool_runner_libs pscal_pscald_static)
+    endif()
+    list(REMOVE_DUPLICATES _tool_runner_libs)
+    target_link_libraries(pscal_tool_runner PRIVATE ${_tool_runner_libs} "-lsqlite3")
+    target_link_options(pscal_tool_runner PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()
 
 # Install the JSON→Bytecode tool alongside other binaries

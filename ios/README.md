@@ -28,10 +28,21 @@ As we implement each milestone the checklist above will be expanded and linked
 to the relevant commits.
 
 ## Building the SwiftUI Host
-1. Configure and build the iOS static archives via CMake. For example:
+1. Configure and build the iOS static archives (plus the standalone tool
+   runner) via CMake. For example:
    ```sh
    cmake --preset ios-simulator
-   cmake --build --preset ios-simulator --target pscal_exsh_static
+   cmake --build --preset ios-simulator --target \
+       pscal_core_static \
+       pscal_exsh_static \
+       pscal_pascal_static \
+       pscal_dascal_static \
+       pscal_clike_static \
+       pscal_rea_static \
+       pscal_vm_static \
+       pscal_json2bc_static \
+       pscal_pscald_static \
+       pscal_tool_runner
    ```
    Repeat with `--preset ios-device` for real hardware.
 2. Open `ios/PscalApp.xcodeproj` in Xcode. The target automatically adds
@@ -39,7 +50,10 @@ to the relevant commits.
    library/header search paths so it can find the CMake-produced archives and
    generated headers. Link `libpscal_core_static.a` along with the frontend
    archives (`libpscal_exsh_static.a`, `libpscal_pascal_static.a`, etc.) so the
-   shared runtime is available at link time.
+   shared runtime is available at link time. The `Embed Tool Runner` build phase
+   copies `pscal_tool_runner` from the corresponding CMake build directory into
+   the app bundle so the shell can launch the non-exsh frontends in a separate
+   process.
 3. Select the desired destination (e.g., "My Mac (Designed for iPad)" or an
    iPad simulator) and build/run. The app links against `libpscal_exsh_static.a`
    and starts `exsh_main` through the bridge.

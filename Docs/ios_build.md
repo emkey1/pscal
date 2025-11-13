@@ -145,3 +145,11 @@ This file will grow as each of the steps above lands; contributions welcome.
   (plus `PSCALI_WORKSPACE_ROOT`) so native code can locate the staged tree.
   This mirrors the macOS/Linux developer experience—`cd Examples/pascal/...`
   works the same way inside the iOS shell without requiring manual uploads.
+- In addition to `Examples`, the iOS bundle now ships with the same runtime
+  payload that normally installs to `/usr/local/pscal` (e.g. `lib/`, `fonts/`,
+  `etc/`, docs, and the test fixtures). `RuntimeAssetInstaller` copies those
+  directories into `~/Documents/pscal_runtime`, recreates the compatibility
+  symlinks (`pascal/lib`, `misc`, etc.), and points `PSCAL_INSTALL_ROOT`,
+  `PASCAL_LIB_DIR`, `CLIKE_LIB_DIR`, and the new `PSCALI_INSTALL_ROOT`
+  environment variable at that staged tree so the native compilers can find
+  their resources without touching the read-only system paths.

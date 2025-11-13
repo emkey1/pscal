@@ -57,6 +57,27 @@ static void initSymbolSystem(void) {
     current_procedure_table = procedure_table;
 }
 
+static void resetReaSymbolState(void) {
+    if (globalSymbols) {
+        freeHashTable(globalSymbols);
+        globalSymbols = NULL;
+    }
+    if (constGlobalSymbols) {
+        freeHashTable(constGlobalSymbols);
+        constGlobalSymbols = NULL;
+    }
+    if (procedure_table) {
+        freeHashTable(procedure_table);
+        procedure_table = NULL;
+    }
+    current_procedure_table = NULL;
+    if (type_table) {
+        freeTypeTableASTNodes();
+        freeTypeTable();
+        type_table = NULL;
+    }
+}
+
 static const char *REA_USAGE =
     "Usage: rea <options> <source.rea> [program_parameters...]\n"
     "   Options:\n"
@@ -258,11 +279,15 @@ static void collectUsesClauses(AST* node, List* out) {
 
 int rea_main(int argc, char **argv) {
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_REA);
-#define REA_RETURN(value)               \
-    do {                                \
-        int __rea_rc = (value);         \
-        frontendPopKind(previousKind);  \
-        return __rea_rc;                \
+#define REA_RETURN(value)                           \
+    do {                                            \
+        int __rea_rc = (value);                     \
+        if (reaSymbolStateActive) {                 \
+            resetReaSymbolState();                  \
+            reaSymbolStateActive = false;           \
+        }                                           \
+        frontendPopKind(previousKind);              \
+        return __rea_rc;                            \
     } while (0)
     const char *initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') {
@@ -279,6 +304,7 @@ int rea_main(int argc, char **argv) {
     int verbose_flag = 0;
     int strict_mode = 0;
     int argi = 1;
+    bool reaSymbolStateActive = false;
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             printf("%s", REA_USAGE);
@@ -359,6 +385,7 @@ int rea_main(int argc, char **argv) {
     // future bytecode-level CALL injection.
 
     initSymbolSystem();
+    reaSymbolStateActive = true;
     gSuppressWriteSpacing = 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
@@ -524,12 +551,6 @@ int rea_main(int argc, char **argv) {
     freeBytecodeChunk(&chunk);
     freeAST(program);
     freeProcedureTable();
-    freeTypeTableASTNodes();
-    freeTypeTable();
-
-    if (globalSymbols) freeHashTable(globalSymbols);
-    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-
     if (preprocessed_source) free(preprocessed_source);
     free(src);
     REA_RETURN(vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE));

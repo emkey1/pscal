@@ -54,6 +54,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
 #ifdef PSCAL_TARGET_IOS
     {"ls", "ls", -1},
     {"pascal", "pascal", -1},
+    {"chmod", "chmod", -1},
 #ifdef BUILD_DASCAL
     {"dascal", "dascal", -1},
 #endif

@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/ioctl.h>
 #if __has_include(<util.h>)
 #include <util.h>
 #else
@@ -34,6 +36,9 @@ static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_runtime_active = false;
 static int s_master_fd = -1;
 static pthread_t s_output_thread;
+static pthread_t s_runtime_thread;
+static int s_pending_columns = 80;
+static int s_pending_rows = 24;
 
 void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
                                    PSCALRuntimeExitHandler exit_handler,
@@ -81,6 +86,17 @@ static void *PSCALRuntimeOutputPump(void *_) {
     return NULL;
 }
 
+static void PSCALRuntimeApplyWindowSize(int fd, int columns, int rows) {
+    if (fd < 0 || columns <= 0 || rows <= 0) {
+        return;
+    }
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = (unsigned short)columns;
+    ws.ws_row = (unsigned short)rows;
+    ioctl(fd, TIOCSWINSZ, &ws);
+}
+
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active) {
@@ -98,7 +114,12 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 
     s_master_fd = master_fd;
     s_runtime_active = true;
+    s_runtime_thread = pthread_self();
+    const int initial_columns = s_pending_columns;
+    const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
+
+    PSCALRuntimeApplyWindowSize(master_fd, initial_columns, initial_rows);
 
     // Ensure stdio is line-buffered at most to reduce latency.
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -119,6 +140,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     int pump_fd = s_master_fd;
     s_master_fd = -1;
     s_runtime_active = false;
+    memset(&s_runtime_thread, 0, sizeof(s_runtime_thread));
     pthread_mutex_unlock(&s_runtime_mutex);
 
     if (pump_fd >= 0) {
@@ -176,4 +198,30 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path) {
 #else
     (void)path;
 #endif
+}
+
+void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
+    if (columns <= 0 || rows <= 0) {
+        return;
+    }
+
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", columns);
+    setenv("COLUMNS", buffer, 1);
+    snprintf(buffer, sizeof(buffer), "%d", rows);
+    setenv("LINES", buffer, 1);
+
+    pthread_mutex_lock(&s_runtime_mutex);
+    s_pending_columns = columns;
+    s_pending_rows = rows;
+    int fd = s_master_fd;
+    bool active = s_runtime_active;
+    pthread_t runtime_thread = s_runtime_thread;
+    pthread_mutex_unlock(&s_runtime_mutex);
+
+    PSCALRuntimeApplyWindowSize(fd, columns, rows);
+
+    if (active && runtime_thread) {
+        pthread_kill(runtime_thread, SIGWINCH);
+    }
 }

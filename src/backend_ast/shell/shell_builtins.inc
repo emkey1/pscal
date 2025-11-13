@@ -7,8 +7,12 @@
 #include <string.h>
 #ifdef PSCAL_TARGET_IOS
 #include <dirent.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include "common/pascal_state.h"
+extern char **environ;
 #endif
 
 static const char *shellTypesetArithmeticErrorFormat(void) {
@@ -2634,6 +2638,50 @@ Value vmBuiltinShellCat(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellChmod(VM *vm, int arg_count, Value *args) {
+#ifdef PSCAL_TARGET_IOS
+    if (arg_count < 2) {
+        runtimeError(vm, "chmod: usage: chmod MODE file [file ...]");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "chmod: invalid mode");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    char *endptr = NULL;
+    errno = 0;
+    long parsed = strtol(args[0].s_val, &endptr, 8);
+    if (errno != 0 || !endptr || *endptr != '\0' || parsed < 0 || parsed > 07777) {
+        runtimeError(vm, "chmod: %s: invalid mode", args[0].s_val);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    mode_t mode = (mode_t)parsed;
+    int final_status = 0;
+    for (int i = 1; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val || args[i].s_val[0] == '\0') {
+            runtimeError(vm, "chmod: expected file paths");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (chmod(args[i].s_val, mode) != 0) {
+            fprintf(stderr, "chmod: %s: %s\n", args[i].s_val, strerror(errno));
+            if (final_status == 0) {
+                final_status = errno ? errno : 1;
+            }
+        }
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+#else
+    runtimeError(vm, "chmod: not supported on this platform");
+    shellUpdateStatus(1);
+    return makeVoid();
+#endif
+}
+
 Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
     (void)args;
     if (arg_count != 0) {
@@ -2656,6 +2704,48 @@ Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
 
 typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
 
+static int shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
+    const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
+    if (!runner || !*runner) {
+        fprintf(stderr, "%s: PSCALI_TOOL_RUNNER_PATH is not set; rebuild the iOS helper binary.\n", tool_name);
+        return 127;
+    }
+
+    size_t child_count = (size_t)argc + 1; // runner path + tool argv vector
+    char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
+    if (!child_argv) {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name);
+        return 1;
+    }
+
+    child_argv[0] = (char *)runner;
+    for (int i = 0; i < argc; ++i) {
+        child_argv[i + 1] = argv[i];
+    }
+
+    pid_t pid = 0;
+    int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
+    free(child_argv);
+    if (spawn_rc != 0) {
+        fprintf(stderr, "%s: failed to launch tool runner: %s\n", tool_name, strerror(spawn_rc));
+        return 127;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 127;
+    }
+
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
+
 static Value shellRunToolBuiltin(VM *vm,
                                  const char *tool_name,
                                  ShellToolEntryFn entry,
@@ -2670,11 +2760,20 @@ static Value shellRunToolBuiltin(VM *vm,
         return makeVoid();
     }
 
+    PascalGlobalState pascal_state;
+    pascalPushGlobalState(&pascal_state);
+
+    const int saved_param_count = gParamCount;
+    char **saved_param_values = gParamValues;
+    bool saved_param_owned = gParamValuesOwned;
+
     const int argc = arg_count + 1;
-    char **argv = (char **)calloc((size_t)argc, sizeof(char *));
+    // Add one extra slot so argv[argc] stays NULL like a real C argv vector.
+    char **argv = (char **)calloc((size_t)(argc + 1), sizeof(char *));
     if (!argv) {
         runtimeError(vm, "%s: out of memory", tool_name);
         shellUpdateStatus(1);
+        pascalPopGlobalState(&pascal_state);
         frontendPopKind(previous_kind);
         return makeVoid();
     }
@@ -2701,7 +2800,7 @@ static Value shellRunToolBuiltin(VM *vm,
     }
 
     if (ok) {
-        int status = entry(argc, argv);
+        int status = shellSpawnToolProcess(tool_name, argc, argv);
         fflush(NULL);
         shellUpdateStatus(status);
     } else {
@@ -2712,6 +2811,12 @@ static Value shellRunToolBuiltin(VM *vm,
         free(argv[i]);
     }
     free(argv);
+
+    gParamCount = saved_param_count;
+    gParamValues = saved_param_values;
+    gParamValuesOwned = saved_param_owned;
+    pascalPopGlobalState(&pascal_state);
+
     Value result = makeVoid();
     frontendPopKind(previous_kind);
     return result;
@@ -7924,6 +8029,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "Print the current working directory.",
         "pwd",
         "Outputs the absolute path returned by getcwd(3).",
+        NULL,
+        0
+    },
+    {
+        "chmod",
+        "Change file permissions.",
+        "chmod MODE file [file ...]",
+        "Applies the octal MODE to each file path. Only numeric modes are supported "
+        "on iOS builds.",
         NULL,
         0
     },
