@@ -19,6 +19,7 @@
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "Pascal/globals.h"
 #include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
@@ -2300,12 +2301,12 @@ static void emitRuntimeLocation(VM* vm, const char* label) {
 }
 
 void runtimeWarning(VM* vm, const char* format, ...) {
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 
@@ -2327,12 +2328,12 @@ void runtimeError(VM* vm, const char* format, ...) {
         vm->abort_requested = true;
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 

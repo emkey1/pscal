@@ -473,12 +473,19 @@ struct TerminalSnapshot {
         }
 
         for cell in row {
+            let displayCharacter: Character = {
+                if cell.character.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) {
+                    return cell.character
+                }
+                return " "
+            }()
+
             if cell.attributes == currentAttributes {
-                buffer.append(cell.character)
+                buffer.append(displayCharacter)
             } else {
                 flush()
                 currentAttributes = cell.attributes
-                buffer.append(cell.character)
+                buffer.append(displayCharacter)
             }
         }
         flush()

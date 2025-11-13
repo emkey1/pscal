@@ -27,6 +27,7 @@
 #include "vm/vm.h"
 #include "symbol/symbol.h"
 #include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 
 static struct termios gInteractiveOriginalTermios;
 static volatile sig_atomic_t gInteractiveTermiosValid = 0;
@@ -1725,6 +1726,7 @@ static char *readInteractiveLine(const char *prompt,
                                  bool *out_eof,
                                  bool *out_editor_failed) {
     bool installed_sigint_handler = false;
+    const bool has_real_tty = pscalRuntimeStdinHasRealTTY();
     if (out_eof) {
         *out_eof = false;
     }
@@ -1736,54 +1738,63 @@ static char *readInteractiveLine(const char *prompt,
     }
 
     struct termios original_termios;
-    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-
-    struct termios raw_termios = original_termios;
-    raw_termios.c_lflag &= ~(ICANON | ECHO);
-    raw_termios.c_cc[VMIN] = 1;
-    raw_termios.c_cc[VTIME] = 0;
-    gInteractiveOriginalTermios = original_termios;
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveTermiosValid = 1;
-
+    struct termios raw_termios;
     struct sigaction sigint_action;
-    memset(&sigint_action, 0, sizeof(sigint_action));
-    sigemptyset(&sigint_action.sa_mask);
-    sigint_action.sa_handler = interactiveSigintHandler;
-    if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveHasOldSigint = 1;
-    installed_sigint_handler = true;
-
     struct sigaction sigtstp_action;
-    memset(&sigtstp_action, 0, sizeof(sigtstp_action));
-    sigemptyset(&sigtstp_action.sa_mask);
-    sigtstp_action.sa_handler = SIG_IGN;
-    if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
-        interactiveRestoreSigintHandler();
-        installed_sigint_handler = false;
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
+    if (has_real_tty) {
+        if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
         }
-        return NULL;
+
+        raw_termios = original_termios;
+        raw_termios.c_lflag &= ~(ICANON | ECHO);
+        raw_termios.c_cc[VMIN] = 1;
+        raw_termios.c_cc[VTIME] = 0;
+        gInteractiveOriginalTermios = original_termios;
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveTermiosValid = 1;
+
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        sigemptyset(&sigint_action.sa_mask);
+        sigint_action.sa_handler = interactiveSigintHandler;
+        if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigint = 1;
+        installed_sigint_handler = true;
+
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        sigemptyset(&sigtstp_action.sa_mask);
+        sigtstp_action.sa_handler = SIG_IGN;
+        if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
+            interactiveRestoreSigintHandler();
+            installed_sigint_handler = false;
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigtstp = 1;
+    } else {
+        memset(&original_termios, 0, sizeof(original_termios));
+        memset(&raw_termios, 0, sizeof(raw_termios));
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        gInteractiveTermiosValid = 0;
     }
-    gInteractiveHasOldSigtstp = 1;
 
     size_t capacity = 128;
     char *buffer = (char *)malloc(capacity);
@@ -1884,6 +1895,9 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 26) { /* Ctrl-Z */
+            if (!has_real_tty) {
+                continue;
+            }
             alt_dot_active = false;
             alt_dot_offset = 0;
             interactiveRestoreSigintHandler();
@@ -2617,7 +2631,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     exec_opts.exit_on_signal = false;
 
     int last_status = shellRuntimeLastStatus();
-    bool tty = isatty(STDIN_FILENO);
+    bool tty = pscalRuntimeStdinIsInteractive();
     const char *force_no_tty = getenv("PSCAL_FORCE_NO_TTY");
     if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
         tty = false;
@@ -2643,14 +2657,14 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         size_t line_capacity = 0;
         ssize_t read = 0;
         if (!line) {
-            if (isatty(STDIN_FILENO)) {
+            if (pscalRuntimeStdinIsInteractive()) {
                 fputs(prompt, stdout);
                 fflush(stdout);
             }
             read = getline(&line, &line_capacity, stdin);
             if (read < 0) {
                 free(line);
-                if (isatty(STDIN_FILENO)) {
+                if (pscalRuntimeStdinIsInteractive()) {
                     fputc('\n', stdout);
                 }
                 free(prompt_storage);
@@ -2685,7 +2699,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             free(line);
             continue;
         }
-        if (used_history && isatty(STDIN_FILENO)) {
+        if (used_history && pscalRuntimeStdinIsInteractive()) {
             printf("%s\n", expanded_line);
             fflush(stdout);
         }
@@ -2856,7 +2870,7 @@ int exsh_main(int argc, char **argv) {
     gParamCount = 0;
     gParamValues = NULL;
 
-    if (isatty(STDIN_FILENO)) {
+    if (pscalRuntimeStdinIsInteractive()) {
         shellRuntimeSetInteractive(true);
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {

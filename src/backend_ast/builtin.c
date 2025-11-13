@@ -4,6 +4,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
 #include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"
@@ -2548,7 +2549,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     size_t i = 0;
     char ch;
 
-    if (!isatty(STDIN_FILENO))
+    if (!pscalRuntimeStdinIsInteractive())
         return -1;
 
     if (vmTcgetattr(STDIN_FILENO, &oldt) < 0)
@@ -2641,7 +2642,7 @@ static void vmRestoreColorState(void) {
 // atexit handler: restore terminal settings and ensure cursor visibility
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
         if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
             perror("vmAtExitCleanup: write show_cursor");
@@ -2698,7 +2699,7 @@ void vmInitTerminalState(void) {
 // occurs before any terminal cleanup is performed.
 void vmPauseBeforeExit(void) {
     // Only pause when running interactively.
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+    if (!pscalRuntimeStdinIsInteractive() || !pscalRuntimeStdoutIsInteractive())
         return;
 
     sleep(10);
@@ -2784,7 +2785,7 @@ static int getCursorPosition(int *row, int *col) {
     *col = 1;
 
     // --- Check if Input is a Terminal ---
-    if (!isatty(STDIN_FILENO)) {
+    if (!pscalRuntimeStdinIsInteractive()) {
         fprintf(stderr, "Warning: Cannot get cursor position (stdin is not a TTY).\n");
         return 0; // Treat as non-critical failure, return default 1,1
     }
@@ -3129,7 +3130,7 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         bool color_was_applied = applyCurrentTextAttributes(stdout);
         fputs("\x1B[2J\x1B[H", stdout);
         if (color_was_applied) {
@@ -3281,7 +3282,7 @@ Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "PushScreen expects no arguments.");
         return makeVoid();
     }
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         vmPushColorState();
         if (vm_alt_screen_depth == 0) {
             const char enter_alt[] = "\x1B[?1049h";
@@ -3305,7 +3306,7 @@ Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
     if (vm_alt_screen_depth > 0) {
         vm_alt_screen_depth--;
         vmPopColorState();
-        if (isatty(STDOUT_FILENO)) {
+        if (pscalRuntimeStdoutIsInteractive()) {
             if (vm_alt_screen_depth == 0) {
                 const char exit_alt[] = "\x1B[?1049l";
                 if (write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1) != (ssize_t)(sizeof(exit_alt) - 1)) {

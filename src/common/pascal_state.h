@@ -48,6 +48,7 @@ typedef struct {
 
 void pascalPushGlobalState(PascalGlobalState *state);
 void pascalPopGlobalState(PascalGlobalState *state);
+void pascalInvalidateGlobalState(void);
 
 #ifdef __cplusplus
 }

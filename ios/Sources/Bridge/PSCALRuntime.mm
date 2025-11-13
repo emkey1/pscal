@@ -1,6 +1,8 @@
 #include "PSCALRuntime.h"
 
+#include <Foundation/Foundation.h>
 #include <errno.h>
+#include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -16,7 +18,9 @@
 #include <pty.h>
 #endif
 
-#if __has_include(<sanitizer/asan_interface.h>)
+#if defined(PSCAL_TARGET_IOS)
+#define PSCAL_HAS_ASAN_INTERFACE 0
+#elif __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
 #define PSCAL_HAS_ASAN_INTERFACE 1
 #include <sanitizer/asan_interface.h>
 #else
@@ -26,6 +30,7 @@
 extern "C" {
     // Forward declare exsh entrypoint exposed by the existing CLI target.
     int exsh_main(int argc, char* argv[]);
+    void pscalRuntimeSetVirtualTTYEnabled(bool enabled);
 }
 
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
@@ -35,6 +40,8 @@ static void *s_handler_context = NULL;
 static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_runtime_active = false;
 static int s_master_fd = -1;
+static int s_input_fd = -1;
+static bool s_using_virtual_tty = false;
 static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
 static int s_pending_columns = 80;
@@ -97,48 +104,113 @@ static void PSCALRuntimeApplyWindowSize(int fd, int columns, int rows) {
     ioctl(fd, TIOCSWINSZ, &ws);
 }
 
+static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd) {
+    if (!out_master_fd || !out_input_fd) {
+        return false;
+    }
+
+    int stdin_pipe[2] = {-1, -1};
+    int stdout_pipe[2] = {-1, -1};
+    if (pipe(stdin_pipe) != 0) {
+        return false;
+    }
+    if (pipe(stdout_pipe) != 0) {
+        close(stdin_pipe[0]);
+        close(stdin_pipe[1]);
+        return false;
+    }
+
+    if (dup2(stdin_pipe[0], STDIN_FILENO) < 0 ||
+        dup2(stdout_pipe[1], STDOUT_FILENO) < 0 ||
+        dup2(stdout_pipe[1], STDERR_FILENO) < 0) {
+        int saved = errno;
+        close(stdin_pipe[0]);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        errno = saved;
+        return false;
+    }
+
+    close(stdin_pipe[0]);
+    close(stdout_pipe[1]);
+
+    *out_master_fd = stdout_pipe[0];
+    *out_input_fd = stdin_pipe[1];
+    return true;
+}
+
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
+    NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active) {
         pthread_mutex_unlock(&s_runtime_mutex);
+        NSLog(@"PSCALRuntime: launch aborted (already running)");
         errno = EBUSY;
         return -1;
     }
 
+    bool using_virtual_tty = false;
     int master_fd = -1;
     int slave_fd = -1;
+    int input_fd = -1;
     if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) != 0) {
-        pthread_mutex_unlock(&s_runtime_mutex);
-        return -1;
+        int err = errno;
+        NSLog(@"PSCALRuntime: openpty failed (%d: %s); falling back to pipes", err, strerror(err));
+        if (!PSCALRuntimeInstallVirtualTTY(&master_fd, &input_fd)) {
+            pthread_mutex_unlock(&s_runtime_mutex);
+            errno = err;
+            return -1;
+        }
+        using_virtual_tty = true;
+        NSLog(@"PSCALRuntime: using virtual terminal pipes (master=%d)", master_fd);
+    } else {
+        input_fd = master_fd;
+        NSLog(@"PSCALRuntime: openpty succeeded (master=%d)", master_fd);
     }
 
     s_master_fd = master_fd;
+    s_input_fd = input_fd;
+    s_using_virtual_tty = using_virtual_tty;
     s_runtime_active = true;
     s_runtime_thread = pthread_self();
     const int initial_columns = s_pending_columns;
     const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
 
-    PSCALRuntimeApplyWindowSize(master_fd, initial_columns, initial_rows);
+    if (!using_virtual_tty) {
+        PSCALRuntimeApplyWindowSize(master_fd, initial_columns, initial_rows);
+        pscalRuntimeSetVirtualTTYEnabled(false);
+    } else {
+        pscalRuntimeSetVirtualTTYEnabled(true);
+    }
 
     // Ensure stdio is line-buffered at most to reduce latency.
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    // Redirect stdio to the PTY slave so exsh sees a real terminal.
-    dup2(slave_fd, STDIN_FILENO);
-    dup2(slave_fd, STDOUT_FILENO);
-    dup2(slave_fd, STDERR_FILENO);
-    close(slave_fd);
+    if (!using_virtual_tty) {
+        // Redirect stdio to the PTY slave so exsh sees a real terminal.
+        dup2(slave_fd, STDIN_FILENO);
+        dup2(slave_fd, STDOUT_FILENO);
+        dup2(slave_fd, STDERR_FILENO);
+        close(slave_fd);
+    }
 
     pthread_create(&s_output_thread, NULL, PSCALRuntimeOutputPump, NULL);
+    NSLog(@"PSCALRuntime: output pump thread started");
 
     int result = exsh_main(argc, argv);
+    NSLog(@"PSCALRuntime: exsh_main exited with status %d", result);
 
     // Tear down PTY + output pump.
     pthread_mutex_lock(&s_runtime_mutex);
     int pump_fd = s_master_fd;
+    int stdin_fd = s_input_fd;
+    bool virtual_tty = s_using_virtual_tty;
     s_master_fd = -1;
+    s_input_fd = -1;
+    s_using_virtual_tty = false;
     s_runtime_active = false;
     memset(&s_runtime_thread, 0, sizeof(s_runtime_thread));
     pthread_mutex_unlock(&s_runtime_mutex);
@@ -146,7 +218,13 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     if (pump_fd >= 0) {
         close(pump_fd);
     }
+    if (stdin_fd >= 0 && stdin_fd != pump_fd) {
+        close(stdin_fd);
+    }
     pthread_join(s_output_thread, NULL);
+    if (virtual_tty) {
+        pscalRuntimeSetVirtualTTYEnabled(false);
+    }
 
     pthread_mutex_lock(&s_runtime_mutex);
     PSCALRuntimeExitHandler exit_handler = s_exit_handler;
@@ -165,7 +243,7 @@ void PSCALRuntimeSendInput(const char *utf8, size_t length) {
         return;
     }
     pthread_mutex_lock(&s_runtime_mutex);
-    const int fd = s_master_fd;
+    const int fd = s_input_fd;
     pthread_mutex_unlock(&s_runtime_mutex);
     if (fd < 0) {
         return;
@@ -217,9 +295,12 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     int fd = s_master_fd;
     bool active = s_runtime_active;
     pthread_t runtime_thread = s_runtime_thread;
+    bool virtual_tty = s_using_virtual_tty;
     pthread_mutex_unlock(&s_runtime_mutex);
 
-    PSCALRuntimeApplyWindowSize(fd, columns, rows);
+    if (!virtual_tty) {
+        PSCALRuntimeApplyWindowSize(fd, columns, rows);
+    }
 
     if (active && runtime_thread) {
         pthread_kill(runtime_thread, SIGWINCH);

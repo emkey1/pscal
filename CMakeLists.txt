@@ -190,10 +190,6 @@ endif()
 if(ENABLE_EXT_BUILTIN_GRAPHICS)
     add_compile_definitions(ENABLE_EXT_BUILTIN_GRAPHICS)
 endif()
-if(ENABLE_EXT_BUILTIN_OPENAI)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
-endif()
-
 set(PSCAL_SQLITE_LIBS "")
 set(PSCAL_SQLITE_INCLUDE_DIRS "")
 if(ENABLE_EXT_BUILTIN_SQLITE)
@@ -385,6 +381,10 @@ if(NOT PSCAL_HAS_LIBCURL AND ENABLE_EXT_BUILTIN_OPENAI)
     set(ENABLE_EXT_BUILTIN_OPENAI OFF CACHE BOOL "Enable extended OpenAI builtins" FORCE)
 endif()
 
+if(ENABLE_EXT_BUILTIN_OPENAI)
+    add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
+endif()
+
 find_package(Threads REQUIRED)
 
 if(PSCAL_HAS_LIBCURL)
@@ -396,6 +396,7 @@ endif()
 # ---- Source Files ----
 set(PSCAL_CORE_SOURCES
     src/Pascal/globals.c
+    src/Pascal/type_registry.c
     src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
     src/ast/ast.c src/ast/closure_registry.c
     src/symbol/symbol.c
@@ -406,6 +407,7 @@ set(PSCAL_CORE_SOURCES
     src/compiler/bytecode.c src/compiler/compiler.c
     src/core/cache.c
     src/common/runtime_params.c
+    src/common/runtime_tty.c
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
@@ -416,7 +418,6 @@ set(PSCAL_CORE_SOURCES
     src/runtime/shaders/terrain/terrain_shader.c
     src/runtime/shaders/sky/sky_dome.c
     src/runtime/shaders/sky/cloud_layer.c
-    src/common/frontend_symbol_wrappers.c
 )
 
 # --- Conditionally add SDL source files ---
@@ -434,6 +435,9 @@ endif()
 add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
+if(PSCAL_PLATFORM_IOS)
+    list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
+endif()
 
 set(PASCAL_FRONTEND_SOURCES
     src/Pascal/main.c
@@ -487,7 +491,9 @@ endfunction()
 add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
 pscal_apply_common_compilation_settings(pscal_core_static)
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
-target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
+if(PSCAL_PLATFORM_IOS)
+    target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
+endif()
 
 function(add_pscal_executable target_name)
     set(exec_sources ${ARGN})
@@ -627,13 +633,11 @@ if(NOT PSCAL_PLATFORM_IOS)
     add_pscal_executable(pascal ${PASCAL_FRONTEND_SOURCES})
     target_compile_definitions(pascal PRIVATE FRONTEND_PASCAL)
 endif()
-if(PSCAL_BUILD_STATIC_LIBS)
-    pscal_add_static_library(pscal_pascal_static
-        FRONTEND FRONTEND_PASCAL
-        KIND pascal
-        SOURCES ${PASCAL_FRONTEND_SOURCES})
-    target_link_libraries(pscal_pascal_static PUBLIC pscal_core_static)
-endif()
+pscal_add_static_library(pscal_pascal_static
+    FRONTEND FRONTEND_PASCAL
+    KIND pascal
+    SOURCES ${PASCAL_FRONTEND_SOURCES})
+target_link_libraries(pscal_pascal_static PUBLIC pscal_core_static)
 if(NOT PSCAL_PLATFORM_IOS AND BUILD_DASCAL)
     add_pscal_executable(dascal ${PASCAL_FRONTEND_SOURCES})
 endif()
@@ -887,7 +891,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_core_static)
+    target_link_libraries(rea PRIVATE pscal_core_static pscal_pascal_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)

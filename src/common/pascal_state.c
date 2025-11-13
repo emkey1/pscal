@@ -141,3 +141,16 @@ void pascalPopGlobalState(PascalGlobalState *state) {
     dumpExec = state->dumpExec;
 #endif
 }
+
+void pascalInvalidateGlobalState(void) {
+    globalSymbols = NULL;
+    constGlobalSymbols = NULL;
+    localSymbols = NULL;
+    procedure_table = NULL;
+    current_procedure_table = NULL;
+    current_function_symbol = NULL;
+    type_table = NULL;
+#ifdef DEBUG
+    inserted_global_names = NULL;
+#endif
+}

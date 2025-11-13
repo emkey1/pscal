@@ -2196,7 +2196,7 @@ static bool shellEvaluateFileUnary(const char *op,
             *out_result = false;
             return true;
         }
-        *out_result = (fd >= 0 && isatty((int)fd));
+        *out_result = (fd >= 0 && pscalRuntimeFdIsInteractive((int)fd));
         return true;
     }
 
@@ -2704,11 +2704,13 @@ Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
 
 typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
 
+static const int kShellToolRunnerUnavailable = -32768;
+
 static int shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
     const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
     if (!runner || !*runner) {
-        fprintf(stderr, "%s: PSCALI_TOOL_RUNNER_PATH is not set; rebuild the iOS helper binary.\n", tool_name);
-        return 127;
+        (void)tool_name;
+        return kShellToolRunnerUnavailable;
     }
 
     size_t child_count = (size_t)argc + 1; // runner path + tool argv vector
@@ -2726,6 +2728,9 @@ static int shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
     pid_t pid = 0;
     int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
     free(child_argv);
+    if (spawn_rc == EPERM || spawn_rc == ENOSYS) {
+        return kShellToolRunnerUnavailable;
+    }
     if (spawn_rc != 0) {
         fprintf(stderr, "%s: failed to launch tool runner: %s\n", tool_name, strerror(spawn_rc));
         return 127;
@@ -2801,6 +2806,15 @@ static Value shellRunToolBuiltin(VM *vm,
 
     if (ok) {
         int status = shellSpawnToolProcess(tool_name, argc, argv);
+        if (status == kShellToolRunnerUnavailable) {
+            if (entry) {
+                status = entry(argc, argv);
+                pascalInvalidateGlobalState();
+            } else {
+                fprintf(stderr, "%s: tool runner unavailable and no builtin entry.\n", tool_name);
+                status = 127;
+            }
+        }
         fflush(NULL);
         shellUpdateStatus(status);
     } else {

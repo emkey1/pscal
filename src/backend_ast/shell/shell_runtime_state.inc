@@ -3336,7 +3336,7 @@ static void shellInitJobControlState(void) {
         return;
     }
 
-    if (!isatty(gShellRuntime.tty_fd)) {
+    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
         return;
     }
@@ -3374,7 +3374,7 @@ static void shellEnsureJobControl(void) {
         return;
     }
 
-    if (!isatty(gShellRuntime.tty_fd)) {
+    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.job_control_enabled = false;
         gShellRuntime.tty_fd = -1;
         return;
