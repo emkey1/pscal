@@ -5,16 +5,17 @@ import Darwin
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
 
-    @Published private(set) var screenLines: [NSAttributedString] = [NSAttributedString(string: "Launching exsh...")]
+    @Published private(set) var screenText: NSAttributedString = NSAttributedString(string: "Launching exsh...")
     @Published private(set) var exitStatus: Int32?
 
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
+    // Dedicated pthread stack for the runtime (libdispatch workers are ~512KB).
+    private let runtimeStackSizeBytes = 4 * 1024 * 1024
     private var handlerContext: UnsafeMutableRawPointer?
     private let terminalBuffer: TerminalBuffer
     private var lastAppliedGeometry: (columns: Int, rows: Int)
-
     private lazy var outputHandler: PSCALRuntimeOutputHandler = { data, length, context in
         guard let context, let base = data else { return }
         let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context).takeUnretainedValue()
@@ -49,7 +50,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
 
         DispatchQueue.main.async {
-            self.screenLines = [NSAttributedString(string: "Launching exsh...")]
+            self.screenText = NSAttributedString(string: "Launching exsh...")
             self.exitStatus = nil
         }
 
@@ -65,7 +66,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 cArgs.forEach { if let ptr = $0 { free(ptr) } }
             }
             cArgs.withUnsafeMutableBufferPointer { buffer in
-                _ = PSCALRuntimeLaunchExsh(argc, buffer.baseAddress)
+                let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
+                _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
             }
         }
     }
@@ -88,26 +90,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let resized = terminalBuffer.resize(columns: clampedColumns, rows: clampedRows)
         PSCALRuntimeUpdateWindowSize(Int32(clampedColumns), Int32(clampedRows))
         if resized {
-            let snapshot = terminalBuffer.snapshot()
-            DispatchQueue.main.async {
-                self.screenLines = TerminalBuffer.render(snapshot: snapshot)
-            }
+            scheduleRender()
         }
     }
 
     @objc
     public func consumeOutput(buffer: UnsafePointer<Int8>, length: Int) {
         guard length > 0 else { return }
-        let pointer = UnsafeMutableRawPointer(mutating: buffer)
-        let dataCopy = Data(bytesNoCopy: pointer, count: length, deallocator: .custom { rawPointer, _ in
-            free(rawPointer)
-        })
-
-        DispatchQueue.main.async {
-            self.terminalBuffer.append(data: dataCopy)
-            let snapshot = self.terminalBuffer.snapshot()
-            self.screenLines = TerminalBuffer.render(snapshot: snapshot)
-        }
+        let dataCopy = Data(bytes: buffer, count: length)
+        free(UnsafeMutableRawPointer(mutating: buffer))
+        terminalBuffer.append(data: dataCopy)
+        scheduleRender()
     }
 
     private func handleExit(status: Int32) {
@@ -117,5 +110,24 @@ final class PscalRuntimeBootstrap: ObservableObject {
         DispatchQueue.main.async {
             self.exitStatus = status
         }
+    }
+
+    private func scheduleRender() {
+        let snapshot = terminalBuffer.snapshot()
+        DispatchQueue.main.async {
+            self.screenText = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
+        }
+    }
+
+    private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> NSAttributedString {
+        let lines = TerminalBuffer.render(snapshot: snapshot)
+        let result = NSMutableAttributedString()
+        for (index, line) in lines.enumerated() {
+            result.append(line)
+            if index < lines.count - 1 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+        }
+        return result
     }
 }

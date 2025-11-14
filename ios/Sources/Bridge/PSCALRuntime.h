@@ -18,6 +18,10 @@ void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
 /// Returns -1 if a runtime is already active or the PTY could not be created.
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]);
 
+/// Launches exsh on a dedicated pthread with an explicit stack size (in bytes).
+/// Useful on iOS where the default libdispatch worker stack is too small for the compilers.
+int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSizeBytes);
+
 /// Writes UTF-8 input into the running exsh instance (no-op if not active).
 void PSCALRuntimeSendInput(const char *utf8, size_t length);
 

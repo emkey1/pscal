@@ -21,23 +21,9 @@ private struct TerminalContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(runtime.screenLines.enumerated()), id: \.offset) { index, line in
-                            AttributedTextLine(line: line)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(index)
-                        }
-                    }
-                }
+            TerminalTextView(text: runtime.screenText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemBackground))
-                .onChange(of: runtime.screenLines.count) { count in
-                    withAnimation {
-                        proxy.scrollTo(max(count - 1, 0), anchor: .bottom)
-                    }
-                }
-            }
 
             Divider()
 
@@ -53,17 +39,17 @@ private struct TerminalContentView: View {
         .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .onTapGesture {
-            focusAnchor += 1
+            focusAnchor &+= 1
         }
         .overlay(alignment: .bottomLeading) {
             TerminalInputBridge(focusAnchor: $focusAnchor, onInput: handleInput)
-                .frame(width: 0, height: 0)
+                .frame(width: 1, height: 1)
                 .allowsHitTesting(false)
         }
         .onAppear {
             updateTerminalGeometry()
             runtime.start()
-            focusAnchor += 1
+            focusAnchor &+= 1
         }
         .onChange(of: availableSize) { _ in
             updateTerminalGeometry()
@@ -130,18 +116,31 @@ private enum TerminalGeometryCalculator {
     }
 }
 
-private struct AttributedTextLine: UIViewRepresentable {
-    let line: NSAttributedString
+private struct TerminalTextView: UIViewRepresentable {
+    let text: NSAttributedString
 
-    func makeUIView(context: Context) -> UILabel {
-        let label = UILabel()
-        label.numberOfLines = 0
-        label.backgroundColor = .clear
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+        textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.alwaysBounceVertical = true
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return textView
     }
 
-    func updateUIView(_ uiView: UILabel, context: Context) {
-        uiView.attributedText = line
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.attributedText = text
+        let length = text.length
+        guard length > 0 else { return }
+        let bottomRange = NSRange(location: length - 1, length: 1)
+        DispatchQueue.main.async {
+            let currentLength = uiView.attributedText.length
+            guard bottomRange.location < currentLength else { return }
+            uiView.scrollRangeToVisible(bottomRange)
+        }
     }
 }

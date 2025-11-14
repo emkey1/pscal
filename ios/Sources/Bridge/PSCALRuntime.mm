@@ -238,6 +238,52 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     return result;
 }
 
+typedef struct {
+    int argc;
+    char **argv;
+    int result;
+} PSCALRuntimeThreadContext;
+
+static void *PSCALRuntimeThreadMain(void *arg) {
+    PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
+    context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
+    return NULL;
+}
+
+int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSizeBytes) {
+    const size_t defaultStack = 4ull * 1024ull * 1024ull; // 4 MiB
+    const size_t minStack = (size_t)PTHREAD_STACK_MIN;
+    size_t requestedStack = stackSizeBytes > 0 ? stackSizeBytes : defaultStack;
+    if (requestedStack < minStack) {
+        requestedStack = minStack;
+    }
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    int err = pthread_attr_setstacksize(&attr, requestedStack);
+    if (err != 0) {
+        pthread_attr_destroy(&attr);
+        errno = err;
+        return -1;
+    }
+
+    PSCALRuntimeThreadContext context = {
+        .argc = argc,
+        .argv = argv,
+        .result = 0
+    };
+    pthread_t thread;
+    err = pthread_create(&thread, &attr, PSCALRuntimeThreadMain, &context);
+    pthread_attr_destroy(&attr);
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+
+    pthread_join(thread, NULL);
+    return context.result;
+}
+
 void PSCALRuntimeSendInput(const char *utf8, size_t length) {
     if (!utf8 || length == 0) {
         return;

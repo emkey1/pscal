@@ -85,6 +85,34 @@ private enum TerminalColor: Equatable {
     }
 }
 
+private struct TerminalFontCacheKey: Hashable {
+    let pointSize: CGFloat
+    let weightRawValue: CGFloat
+}
+
+private final class TerminalFontCache {
+    private var cache: [TerminalFontCacheKey: UIFont] = [:]
+    private let lock = NSLock()
+
+    func font(pointSize: CGFloat, weight: UIFont.Weight) -> UIFont {
+        let key = TerminalFontCacheKey(pointSize: pointSize, weightRawValue: weight.rawValue)
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache[key] {
+            return cached
+        }
+        let font = UIFont.monospacedSystemFont(ofSize: pointSize, weight: weight)
+        cache[key] = font
+        return font
+    }
+
+    func clear() {
+        lock.lock()
+        cache.removeAll()
+        lock.unlock()
+    }
+}
+
 final class TerminalBuffer {
     private enum ParserState {
         case normal
@@ -109,6 +137,15 @@ final class TerminalBuffer {
     private var currentParameter = ""
     private var csiPrivateMode = false
 
+    private static let fontCache = TerminalFontCache()
+    private static let fontCacheNotificationToken: NSObjectProtocol = {
+        NotificationCenter.default.addObserver(forName: UIContentSizeCategory.didChangeNotification,
+                                               object: nil,
+                                               queue: nil) { _ in
+            TerminalBuffer.fontCache.clear()
+        }
+    }()
+
 private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
 
 struct TerminalSnapshot {
@@ -116,6 +153,7 @@ struct TerminalSnapshot {
 }
 
     init(columns: Int = 80, rows: Int = 24, scrollback: Int = 500) {
+        _ = TerminalBuffer.fontCacheNotificationToken
         self.columns = max(10, columns)
         self.rows = max(4, rows)
         self.maxScrollback = max(0, scrollback)
@@ -495,7 +533,7 @@ struct TerminalSnapshot {
     private static func nsAttributes(for attributes: TerminalAttributes) -> [NSAttributedString.Key: Any] {
         let colors = resolvedColors(attributes: attributes)
         let weight: UIFont.Weight = attributes.bold ? .bold : .regular
-        let font = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: weight)
+        let font = cachedFont(for: weight)
         var result: [NSAttributedString.Key: Any] = [
             .foregroundColor: colors.foreground,
             .backgroundColor: colors.background,
@@ -506,6 +544,11 @@ struct TerminalSnapshot {
             result[.underlineColor] = colors.foreground
         }
         return result
+    }
+
+    private static func cachedFont(for weight: UIFont.Weight) -> UIFont {
+        let pointSize = UIFont.preferredFont(forTextStyle: .body).pointSize
+        return fontCache.font(pointSize: pointSize, weight: weight)
     }
 
     private static func resolvedColors(attributes: TerminalAttributes) -> (foreground: UIColor, background: UIColor) {
