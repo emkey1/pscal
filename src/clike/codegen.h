@@ -5,5 +5,6 @@
 #include "compiler/bytecode.h"
 
 void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk);
+void clikeResetCodegenState(void);
 
 #endif

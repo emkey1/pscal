@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 #if __has_include(<util.h>)
 #include <util.h>
 #else
@@ -31,6 +32,7 @@ extern "C" {
     // Forward declare exsh entrypoint exposed by the existing CLI target.
     int exsh_main(int argc, char* argv[]);
     void pscalRuntimeSetVirtualTTYEnabled(bool enabled);
+    bool pscalRuntimeVirtualTTYEnabled(void);
 }
 
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
@@ -46,6 +48,32 @@ static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
 static int s_pending_columns = 80;
 static int s_pending_rows = 24;
+
+static void PSCALRuntimeConfigurePtySlave(int fd) {
+    if (fd < 0) {
+        return;
+    }
+    struct termios term;
+    if (tcgetattr(fd, &term) != 0) {
+        return;
+    }
+    term.c_lflag |= (ICANON | ECHO | ECHOE | ECHOK | ECHONL);
+#ifdef ECHOCTL
+    term.c_lflag &= ~ECHOCTL;
+#endif
+#ifdef ECHOKE
+    term.c_lflag &= ~ECHOKE;
+#endif
+    term.c_iflag |= (ICRNL | IXON);
+#ifdef IUTF8
+    term.c_iflag |= IUTF8;
+#endif
+    term.c_oflag |= (OPOST | ONLCR);
+    term.c_cflag |= (CS8 | CREAD);
+    term.c_cc[VMIN] = 1;
+    term.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSANOW, &term);
+}
 
 void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
                                    PSCALRuntimeExitHandler exit_handler,
@@ -165,6 +193,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         using_virtual_tty = true;
         NSLog(@"PSCALRuntime: using virtual terminal pipes (master=%d)", master_fd);
     } else {
+        PSCALRuntimeConfigurePtySlave(slave_fd);
         input_fd = master_fd;
         NSLog(@"PSCALRuntime: openpty succeeded (master=%d)", master_fd);
     }
@@ -351,4 +380,8 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     if (active && runtime_thread) {
         pthread_kill(runtime_thread, SIGWINCH);
     }
+}
+
+int PSCALRuntimeIsVirtualTTY(void) {
+    return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }

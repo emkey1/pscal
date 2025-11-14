@@ -4,6 +4,7 @@
 #include "core/list.h"
 #include "compiler/compiler.h"
 #include "Pascal/parser.h"
+#include "Pascal/type_registry.h"
 #include "core/utils.h"
 #include "core/types.h"
 #include "globals.h"
@@ -70,8 +71,6 @@ static void registerRecordMethods(Parser *parser, const char *recordName, AST *r
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
-static TypeEntry *findTypeEntry(const char *name);
-static void reserveTypePlaceholder(const char *name, VarType kind);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -1291,116 +1290,6 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
                 sym->name, (void*)proc_table_param, (void*)sym->type_def, varTypeToString(sym->type));
     }
     #endif
-}
-
-static TypeEntry *findTypeEntry(const char *name) {
-    if (!name) {
-        return NULL;
-    }
-
-    for (TypeEntry *entry = type_table; entry; entry = entry->next) {
-        if (entry->name && strcasecmp(entry->name, name) == 0) {
-            return entry;
-        }
-    }
-
-    return NULL;
-}
-
-static void reserveTypePlaceholder(const char *name, VarType kind) {
-    if (!name) {
-        return;
-    }
-
-    TypeEntry *existing = findTypeEntry(name);
-    if (existing) {
-        if (!existing->typeAST) {
-            AST *placeholder = newASTNode(AST_INTERFACE, NULL);
-            setTypeAST(placeholder, kind);
-            existing->typeAST = placeholder;
-        } else if (existing->typeAST->var_type == TYPE_UNKNOWN && kind != TYPE_UNKNOWN) {
-            setTypeAST(existing->typeAST, kind);
-        }
-        return;
-    }
-
-    TypeEntry *entry = malloc(sizeof(TypeEntry));
-    if (!entry) {
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->name = strdup(name);
-    if (!entry->name) {
-        free(entry);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    AST *placeholder = newASTNode(AST_INTERFACE, NULL);
-    if (!placeholder) {
-        free(entry->name);
-        free(entry);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    setTypeAST(placeholder, kind);
-    entry->typeAST = placeholder;
-    entry->next = type_table;
-    type_table = entry;
-}
-
-void insertType(const char *name, AST *typeAST) {
-    if (!name || !typeAST) {
-        return;
-    }
-
-    TypeEntry *existing = findTypeEntry(name);
-    AST *copy = copyAST(typeAST);
-    if (!copy) {
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    if (existing) {
-        if (existing->typeAST) {
-            freeAST(existing->typeAST);
-        }
-        existing->typeAST = copy;
-        return;
-    }
-
-    TypeEntry *entry = malloc(sizeof(TypeEntry));
-    if (!entry) {
-        freeAST(copy);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->name = strdup(name);
-    if (!entry->name) {
-        free(entry);
-        freeAST(copy);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->typeAST = copy;
-    entry->next = type_table;
-    type_table = entry;
-}
-
-AST *lookupType(const char *name) {
-    TypeEntry *entry = type_table;
-    while (entry) {
-        // Ensure entry->name is not NULL before comparing
-        if (entry->name && name && strcasecmp(entry->name, name) == 0) { // <<< USE strcasecmp
-            return entry->typeAST;
-        }
-        entry = entry->next;
-    }
-    return NULL;
 }
 
 
@@ -4174,4 +4063,3 @@ static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken) {
     if (typeNameCopy) free(typeNameCopy);
     return typeRef;
 }
-

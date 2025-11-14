@@ -89,6 +89,14 @@ static void pscaliInitRuntimePaths(void) {
     s_runtime_paths.fonts_dir = pscaliJoinPath(s_runtime_paths.install_root, "fonts");
     s_runtime_paths.sounds_dir = pscaliJoinPath(s_runtime_paths.lib_dir, "sounds");
     s_runtime_paths.misc_dir = pscaliJoinPath(s_runtime_paths.install_root, "misc");
+
+    const char *etc_override = getenv("PSCALI_ETC_ROOT");
+    if (etc_override && *etc_override) {
+        if (s_runtime_paths.etc_dir) {
+            free(s_runtime_paths.etc_dir);
+        }
+        s_runtime_paths.etc_dir = pscaliDuplicateString(etc_override);
+    }
 }
 
 static void pscaliEnsureRuntimePaths(void) {

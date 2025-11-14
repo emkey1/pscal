@@ -353,6 +353,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
         freeAST(GlobalAST);
         GlobalAST = NULL;
     }
+    compilerResetState();
 #ifdef SDL
     sdlCleanupAtExit();
 #endif

@@ -35,6 +35,9 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 /// the size will be applied once exsh starts.
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 
+/// Returns non-zero when the runtime is using the virtual TTY fallback (pipes).
+int PSCALRuntimeIsVirtualTTY(void);
+
 #ifdef __cplusplus
 }
 #endif

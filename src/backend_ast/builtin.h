@@ -199,6 +199,8 @@ Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
 #ifdef PSCAL_TARGET_IOS
 Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLess(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellMore(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPascal(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellChmod(struct VM_s* vm, int arg_count, Value* args);
@@ -209,6 +211,7 @@ Value vmBuiltinShellClike(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellRea(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPscalVm(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPscalJson2bc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExshTool(struct VM_s* vm, int arg_count, Value* args);
 #ifdef BUILD_PSCALD
 Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
 #endif

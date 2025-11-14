@@ -916,6 +916,10 @@ typedef struct {
     bool background;
     int last_status;
     pid_t pgid;
+#if defined(PSCAL_TARGET_IOS)
+    bool in_process;
+    char *spool_input_path;
+#endif
 } ShellPipelineContext;
 
 typedef struct {

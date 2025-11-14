@@ -123,6 +123,7 @@ final class TerminalBuffer {
     private var columns: Int
     private var rows: Int
     private let maxScrollback: Int
+    private let dsrResponder: ((Data) -> Void)?
 
     private var grid: [[TerminalCell]]
     private var scrollback: [[TerminalCell]] = []
@@ -136,6 +137,7 @@ final class TerminalBuffer {
     private var csiParameters: [Int] = []
     private var currentParameter = ""
     private var csiPrivateMode = false
+    private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
 
     private static let fontCache = TerminalFontCache()
     private static let fontCacheNotificationToken: NSObjectProtocol = {
@@ -146,13 +148,22 @@ final class TerminalBuffer {
         }
     }()
 
-private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
-
 struct TerminalSnapshot {
+    struct Cursor {
+        let row: Int
+        let col: Int
+    }
+
     fileprivate let lines: [[TerminalCell]]
+    let cursor: Cursor?
+    let defaultBackground: UIColor
 }
 
-    init(columns: Int = 80, rows: Int = 24, scrollback: Int = 500) {
+    init(columns: Int = 80,
+         rows: Int = 24,
+         scrollback: Int = 500,
+         dsrResponder: ((Data) -> Void)? = nil) {
+        self.dsrResponder = dsrResponder
         _ = TerminalBuffer.fontCacheNotificationToken
         self.columns = max(10, columns)
         self.rows = max(4, rows)
@@ -198,15 +209,40 @@ struct TerminalSnapshot {
     }
 
     func snapshot() -> TerminalSnapshot {
-        let lines = syncQueue.sync {
-            Array(scrollback.suffix(maxScrollback)) + grid
+        return syncQueue.sync {
+            let retainedScrollback = Array(scrollback.suffix(maxScrollback))
+            let combinedLines = retainedScrollback + grid
+            let cursorInfo: TerminalSnapshot.Cursor?
+            if cursorHidden {
+                cursorInfo = nil
+            } else {
+                cursorInfo = TerminalSnapshot.Cursor(row: retainedScrollback.count + cursorRow,
+                                                     col: cursorCol)
+            }
+            let referenceRow = grid.last ?? grid.first
+            let referenceAttributes = referenceRow?.first?.attributes ?? TerminalAttributes()
+            let backgroundColor = TerminalBuffer.resolvedColors(attributes: referenceAttributes).background
+            return TerminalSnapshot(lines: combinedLines,
+                                    cursor: cursorInfo,
+                                    defaultBackground: backgroundColor)
         }
-        return TerminalSnapshot(lines: lines)
+    }
+
+    func echoUserInput(_ text: String) {
+        guard !text.isEmpty else { return }
+        syncQueue.sync {
+            for scalar in text.unicodeScalars {
+                handleEchoScalar(scalar)
+            }
+        }
     }
 
     static func render(snapshot: TerminalSnapshot) -> [NSAttributedString] {
         var rendered = snapshot.lines.map { makeAttributedString(from: $0) }
-        while rendered.count > 1, rendered.last?.string.isEmpty == true {
+        let cursorRow = snapshot.cursor?.row
+        while rendered.count > 1,
+              rendered.last?.string.isEmpty == true,
+              (cursorRow == nil || cursorRow! < rendered.count - 1) {
             rendered.removeLast()
         }
         if rendered.isEmpty {
@@ -315,6 +351,8 @@ struct TerminalSnapshot {
             clearLine(mode: csiParameters.first ?? 0)
         case 0x6D: // m
             applySGR()
+        case 0x6E: // n (DSR request)
+            handleDSRRequest()
         case 0x73: // s
             savedCursor = (cursorRow, cursorCol)
         case 0x75: // u
@@ -339,8 +377,7 @@ struct TerminalSnapshot {
         guard let mode = csiParameters.first else { return }
         switch mode {
         case 25:
-            cursorHidden = !on
-            _ = cursorHidden
+            cursorHidden = false
         default:
             break
         }
@@ -349,6 +386,27 @@ struct TerminalSnapshot {
     private func moveCursor(rowOffset: Int, colOffset: Int) {
         cursorRow = clamp(cursorRow + rowOffset, lower: 0, upper: rows - 1)
         cursorCol = clamp(cursorCol + colOffset, lower: 0, upper: columns - 1)
+    }
+
+    private func handleDSRRequest() {
+        guard let request = csiParameters.first else { return }
+        switch request {
+        case 5:
+            sendDSRResponse("\u{001B}[0n")
+        case 6:
+            let row = cursorRow + 1
+            let col = cursorCol + 1
+            sendDSRResponse("\u{001B}[\(row);\(col)R")
+        default:
+            break
+        }
+    }
+
+    private func sendDSRResponse(_ string: String) {
+        guard let responder = dsrResponder, let data = string.data(using: .utf8) else {
+            return
+        }
+        responder(data)
     }
 
     private func insertCharacter(_ character: Character) {
@@ -634,5 +692,45 @@ struct TerminalSnapshot {
 
     private func makeBlankRow(width: Int? = nil, attributes: TerminalAttributes? = nil) -> [TerminalCell] {
         return TerminalBuffer.makeBlankRow(width: width ?? columns, attributes: attributes ?? currentAttributes)
+    }
+
+    private func handleEchoScalar(_ scalar: UnicodeScalar) {
+        let value = scalar.value
+        switch value {
+        case 0x1B:
+            parserState = .normal
+            return
+        case 0x0A, 0x0D, 0x09:
+            currentAttributes = attributesAtCursor()
+            process(byte: UInt8(value))
+        case 0x08:
+            process(byte: 0x08)
+        case 0x7F:
+            applyBackspaceErase()
+        default:
+            guard value >= 0x20 && value <= 0x7E else { return }
+            currentAttributes = attributesAtCursor()
+            process(byte: UInt8(value))
+        }
+    }
+
+    private func attributesAtCursor() -> TerminalAttributes {
+        if cursorRow >= 0 && cursorRow < grid.count &&
+            cursorCol >= 0 && cursorCol < columns {
+            return grid[cursorRow][cursorCol].attributes
+        }
+        if let lastRow = grid.last, let first = lastRow.first {
+            return first.attributes
+        }
+        return currentAttributes
+    }
+
+    private func applyBackspaceErase() {
+        process(byte: 0x08)
+        if cursorRow >= 0 && cursorRow < grid.count &&
+            cursorCol >= 0 && cursorCol < columns {
+            let attrs = grid[cursorRow][cursorCol].attributes
+            grid[cursorRow][cursorCol] = TerminalCell.blank(attributes: attrs)
+        }
     }
 }

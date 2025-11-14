@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Combine
+import QuartzCore
 
 struct TerminalView: View {
     var body: some View {
@@ -20,10 +21,13 @@ private struct TerminalContentView: View {
     @State private var focusAnchor: Int = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            TerminalTextView(text: runtime.screenText)
+        let background = runtime.terminalBackgroundColor
+        return VStack(spacing: 0) {
+            TerminalTextView(text: runtime.screenText,
+                             cursor: runtime.cursorInfo,
+                             backgroundColor: background)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground))
+                .background(Color(background))
 
             Divider()
 
@@ -36,7 +40,7 @@ private struct TerminalContentView: View {
                     .background(Color(.secondarySystemBackground))
             }
         }
-        .background(Color(.systemBackground))
+        .background(Color(background))
         .contentShape(Rectangle())
         .onTapGesture {
             focusAnchor &+= 1
@@ -118,22 +122,27 @@ private enum TerminalGeometryCalculator {
 
 private struct TerminalTextView: UIViewRepresentable {
     let text: NSAttributedString
+    let cursor: TerminalCursorInfo?
+    let backgroundColor: UIColor
 
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+    func makeUIView(context: Context) -> TerminalDisplayTextView {
+        let textView = TerminalDisplayTextView()
         textView.isEditable = false
         textView.isSelectable = true
         textView.isScrollEnabled = true
-        textView.backgroundColor = .clear
+        textView.backgroundColor = backgroundColor
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
         textView.alwaysBounceVertical = true
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.font = TerminalFontMetrics.displayFont
         return textView
     }
 
-    func updateUIView(_ uiView: UITextView, context: Context) {
+    func updateUIView(_ uiView: TerminalDisplayTextView, context: Context) {
         uiView.attributedText = text
+        uiView.cursorInfo = cursor
+        uiView.backgroundColor = backgroundColor
         let length = text.length
         guard length > 0 else { return }
         let bottomRange = NSRange(location: length - 1, length: 1)
@@ -142,5 +151,83 @@ private struct TerminalTextView: UIViewRepresentable {
             guard bottomRange.location < currentLength else { return }
             uiView.scrollRangeToVisible(bottomRange)
         }
+    }
+}
+
+private enum TerminalFontMetrics {
+    static var displayFont: UIFont {
+        UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
+    }
+
+    static var characterWidth: CGFloat {
+        let font = displayFont
+        return max(1, ("W" as NSString).size(withAttributes: [.font: font]).width)
+    }
+
+    static var lineHeight: CGFloat {
+        displayFont.lineHeight
+    }
+}
+
+final class TerminalDisplayTextView: UITextView {
+    var cursorInfo: TerminalCursorInfo? {
+        didSet { updateCursorLayer() }
+    }
+
+    private let cursorLayer: CALayer = {
+        let layer = CALayer()
+        layer.backgroundColor = UIColor.systemOrange.cgColor
+        layer.opacity = 0
+        return layer
+    }()
+
+    private var blinkAnimationAdded = false
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        layer.addSublayer(cursorLayer)
+        isEditable = false
+        isScrollEnabled = true
+        textContainerInset = .zero
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateCursorLayer()
+    }
+
+    override var contentOffset: CGPoint {
+        didSet { updateCursorLayer() }
+    }
+
+    private func updateCursorLayer() {
+        guard let info = cursorInfo else {
+            cursorLayer.opacity = 0
+            return
+        }
+
+        let charWidth = TerminalFontMetrics.characterWidth
+        let lineHeight = TerminalFontMetrics.lineHeight
+        let x = CGFloat(info.column) * charWidth - contentOffset.x + textContainerInset.left
+        let y = CGFloat(info.row) * lineHeight - contentOffset.y + textContainerInset.top
+        cursorLayer.frame = CGRect(x: x, y: y, width: max(1, charWidth), height: lineHeight)
+
+        if !blinkAnimationAdded {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = 1
+            animation.toValue = 0
+            animation.duration = 0.8
+            animation.autoreverses = true
+            animation.repeatCount = .infinity
+            cursorLayer.add(animation, forKey: "blink")
+            blinkAnimationAdded = true
+        }
+
+        cursorLayer.opacity = 1
     }
 }

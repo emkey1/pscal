@@ -34,6 +34,7 @@
 #include "clike/codegen.h"
 #include "clike/builtins.h"
 #include "clike/semantics.h"
+#include "clike/state.h"
 #include "clike/errors.h"
 #include "clike/opt.h"
 #include "clike/preproc.h"
@@ -56,27 +57,6 @@ static void initSymbolSystemClike(void) {
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
-}
-
-static void resetClikeSymbolState(void) {
-    if (globalSymbols) {
-        freeHashTable(globalSymbols);
-        globalSymbols = NULL;
-    }
-    if (constGlobalSymbols) {
-        freeHashTable(constGlobalSymbols);
-        constGlobalSymbols = NULL;
-    }
-    if (procedure_table) {
-        freeHashTable(procedure_table);
-        procedure_table = NULL;
-    }
-    current_procedure_table = NULL;
-    if (type_table) {
-        freeTypeTableASTNodes();
-        freeTypeTable();
-        type_table = NULL;
-    }
 }
 
 static const char *CLIKE_USAGE =
@@ -133,6 +113,8 @@ int clike_main(int argc, char **argv) {
         frontendPopKind(previousKind); \
         return __clike_rc;             \
     } while (0)
+    clike_error_count = 0;
+    clike_warning_count = 0;
     // Keep terminal untouched for clike: no raw mode or color push
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
@@ -250,7 +232,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        resetClikeSymbolState();
+        clikeResetSymbolState();
         CLIKE_RETURN(EXIT_FAILURE);
     }
 
@@ -262,7 +244,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        resetClikeSymbolState();
+        clikeResetSymbolState();
         CLIKE_RETURN(clike_error_count > 255 ? 255 : clike_error_count);
     }
     prog = optimizeClikeAST(prog);
@@ -272,7 +254,7 @@ int clike_main(int argc, char **argv) {
         freeASTClike(prog);
         clikeFreeStructs();
         free(src);
-        resetClikeSymbolState();
+        clikeResetSymbolState();
         CLIKE_RETURN(EXIT_FAILURE);
     }
 
@@ -360,7 +342,7 @@ int clike_main(int argc, char **argv) {
         clikeFreeStructs();
         free(src);
         if (pre_src) free(pre_src);
-        resetClikeSymbolState();
+        clikeResetSymbolState();
         CLIKE_RETURN(EXIT_SUCCESS);
     }
 
@@ -378,7 +360,7 @@ int clike_main(int argc, char **argv) {
     clikeFreeStructs();
     free(src);
     if (pre_src) free(pre_src);
-    resetClikeSymbolState();
+    clikeResetSymbolState();
     CLIKE_RETURN(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 #undef CLIKE_RETURN

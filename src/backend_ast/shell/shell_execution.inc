@@ -1,4 +1,27 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
+
+#if defined(PSCAL_TARGET_IOS)
+static int gShellPagerVirtualTTYFd = -1;
+
+static void shellPagerPushVirtualTTYOverride(int fd) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+    }
+    gShellPagerVirtualTTYFd = fd;
+}
+
+static void shellPagerPopVirtualTTYOverride(void) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+        gShellPagerVirtualTTYFd = -1;
+    }
+}
+
+static int shellPagerGetVirtualTTYOverride(void) {
+    return gShellPagerVirtualTTYFd;
+}
+#endif
+
 static void shellHashRecordExecution(const char *name);
 static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *out_cmd) {
     if (!out_cmd) {
@@ -401,6 +424,14 @@ static void shellResetPipeline(void) {
     if (!ctx->active) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->spool_input_path) {
+        unlink(ctx->spool_input_path);
+        free(ctx->spool_input_path);
+        ctx->spool_input_path = NULL;
+    }
+    ctx->in_process = false;
+#endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
@@ -440,6 +471,13 @@ static void shellAbortPipeline(void) {
         return;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->spool_input_path) {
+        unlink(ctx->spool_input_path);
+        free(ctx->spool_input_path);
+        ctx->spool_input_path = NULL;
+    }
+#endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
@@ -485,6 +523,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     ctx->last_status = 0;
     ctx->background = false;
     ctx->pgid = -1;
+#if defined(PSCAL_TARGET_IOS)
+    ctx->in_process = true;
+#endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
         shellResetPipeline();
@@ -497,7 +538,11 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
             return false;
         }
     }
-    if (stages > 1) {
+    if (stages > 1
+#if defined(PSCAL_TARGET_IOS)
+        && !ctx->in_process
+#endif
+    ) {
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
@@ -523,6 +568,19 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 
     int final_status = ctx->last_status;
     pid_t job_pgid = (ctx->pgid > 0) ? ctx->pgid : ((ctx->launched > 0) ? ctx->pids[0] : -1);
+
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->in_process) {
+        if (ctx->negated) {
+            final_status = (final_status == 0) ? 1 : 0;
+        }
+        ctx->last_status = final_status;
+        shellResetPipeline();
+        shellUpdateStatus(final_status);
+        shellRuntimeProcessPendingSignals();
+        return final_status;
+    }
+#endif
 
     if (!ctx->background) {
         shellEnsureJobControl();
@@ -959,6 +1017,213 @@ redir_error:
     return false;
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static void shellPipelineCleanupSpoolPath(char **path) {
+    if (!path || !*path) {
+        return;
+    }
+    unlink(*path);
+    free(*path);
+    *path = NULL;
+}
+
+static int shellPipelineCreateSpoolFile(char **out_path) {
+    const char *tmp_root = getenv("TMPDIR");
+    if (!tmp_root || !*tmp_root) {
+        tmp_root = "/tmp";
+    }
+    char tmpl[PATH_MAX];
+    size_t root_len = strlen(tmp_root);
+    if (root_len + 20 >= sizeof(tmpl)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    snprintf(tmpl, sizeof(tmpl), "%s/pscal-pipe-XXXXXX", tmp_root);
+    int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        return -1;
+    }
+    if (out_path) {
+        *out_path = strdup(tmpl);
+        if (!*out_path) {
+            int saved = errno ? errno : ENOMEM;
+            close(fd);
+            unlink(tmpl);
+            errno = saved;
+            return -1;
+        }
+    } else {
+        unlink(tmpl);
+    }
+    return fd;
+}
+
+static int shellRunBuiltinInProcess(VM *vm,
+                                    ShellCommand *cmd,
+                                    int stdin_fd,
+                                    int stdout_fd,
+                                    int stderr_fd,
+                                    bool apply_exec_redirs) {
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    size_t backup_capacity = 0;
+    int status = 127;
+    bool applied_redirs = false;
+
+    if (stdin_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stdin_fd, STDIN_FILENO) < 0) {
+            goto cleanup;
+        }
+    }
+    if (stdout_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
+            goto cleanup;
+        }
+    }
+    if (stderr_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stderr_fd, STDERR_FILENO) < 0) {
+            goto cleanup;
+        }
+    }
+
+    if (apply_exec_redirs) {
+        if (!shellApplyExecRedirections(vm, cmd, &backups, &backup_count)) {
+            goto cleanup;
+        }
+        applied_redirs = true;
+    }
+
+    bool builtin_ran = shellInvokeBuiltin(vm, cmd);
+    if (!builtin_ran) {
+        runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
+        shellUpdateStatus(127);
+    }
+    shellFlushStandardStreams();
+    status = gShellRuntime.last_status;
+
+cleanup:
+    if (applied_redirs) {
+        shellRestoreExecRedirections(backups, backup_count);
+    } else if (backups) {
+        shellRestoreExecRedirections(backups, backup_count);
+    }
+    shellFreeExecRedirBackups(backups, backup_count);
+    return status;
+}
+
+static bool shellPipelineExecuteStageInProcess(VM *vm,
+                                               ShellPipelineContext *ctx,
+                                               ShellCommand *cmd,
+                                               size_t stage_pos,
+                                               bool pipeline_head,
+                                               bool pipeline_tail) {
+    if (cmd->background) {
+        runtimeError(vm, "pipelines cannot run in background on this platform");
+        shellUpdateStatus(1);
+        return false;
+    }
+
+    int stdin_fd = -1;
+    int stdout_fd = -1;
+    int stderr_fd = -1;
+    char *input_spool_path = NULL;
+    char *next_spool_path = NULL;
+    bool ok = false;
+#if defined(PSCAL_TARGET_IOS)
+    bool pushed_virtual_tty = false;
+#endif
+
+    if (!pipeline_head) {
+        input_spool_path = ctx->spool_input_path;
+        ctx->spool_input_path = NULL;
+        if (!input_spool_path) {
+            runtimeError(vm, "pipeline: missing intermediate buffer");
+            shellUpdateStatus(1);
+            return false;
+        }
+        stdin_fd = open(input_spool_path, O_RDONLY);
+        if (stdin_fd < 0) {
+            runtimeError(vm, "pipeline: failed to open intermediate buffer: %s",
+                         strerror(errno));
+            shellUpdateStatus(errno ? errno : 1);
+            return false;
+        }
+    }
+
+    bool need_spool = !pipeline_tail;
+    if (need_spool) {
+        stdout_fd = shellPipelineCreateSpoolFile(&next_spool_path);
+        if (stdout_fd < 0) {
+            runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));
+            shellUpdateStatus(errno ? errno : 1);
+            goto cleanup;
+        }
+    }
+
+    if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos] && stdout_fd >= 0) {
+        stderr_fd = stdout_fd;
+    }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (stdin_fd >= 0 && !pushed_virtual_tty) {
+        int dup_fd = dup(STDIN_FILENO);
+        if (dup_fd >= 0) {
+            shellPagerPushVirtualTTYOverride(dup_fd);
+            pushed_virtual_tty = true;
+        }
+    }
+#endif
+
+    bool apply_exec_redirs = !(ctx->stage_count > 1);
+    int status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
+    ctx->last_status = status;
+    ctx->pids[stage_pos] = 0;
+    ctx->launched = stage_pos + 1;
+    ok = true;
+
+cleanup:
+    if (stdin_fd >= 0) {
+        close(stdin_fd);
+    }
+    if (input_spool_path) {
+        shellPipelineCleanupSpoolPath(&input_spool_path);
+    }
+    if (stdout_fd >= 0) {
+        close(stdout_fd);
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (pushed_virtual_tty) {
+        shellPagerPopVirtualTTYOverride();
+        pushed_virtual_tty = false;
+    }
+#endif
+    if (ok && need_spool) {
+        ctx->spool_input_path = next_spool_path;
+        next_spool_path = NULL;
+    }
+    if (next_spool_path) {
+        shellPipelineCleanupSpoolPath(&next_spool_path);
+    }
+
+    if (ok && pipeline_tail) {
+        ctx->background = cmd->background;
+        shellFinishPipeline(cmd);
+        shellRuntimeProcessPendingSignals();
+    }
+
+    return ok;
+}
+#endif /* PSCAL_TARGET_IOS */
+
 static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
     if (!shellCommandIsExecBuiltin(cmd)) {
         return false;
@@ -1018,13 +1283,19 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     bool pipeline_head = cmd->is_pipeline_head;
     bool pipeline_tail = cmd->is_pipeline_tail;
-    if (ctx->active && cmd->pipeline_index >= 0) {
-        size_t stage_count = ctx->stage_count;
-        int index = cmd->pipeline_index;
-        if (index >= 0 && (size_t)index < stage_count) {
-            pipeline_head = (index == 0);
-            pipeline_tail = ((size_t)index + 1 == stage_count);
+    size_t stage_pos = 0;
+    if (ctx->active) {
+        size_t stage_count = ctx->stage_count ? ctx->stage_count : 1;
+        if (cmd->pipeline_index >= 0) {
+            stage_pos = (size_t)cmd->pipeline_index;
+        } else {
+            stage_pos = ctx->launched;
         }
+        if (stage_pos >= stage_count) {
+            stage_pos = stage_count - 1;
+        }
+        pipeline_head = (stage_pos == 0);
+        pipeline_tail = ((stage_pos + 1) >= stage_count);
     }
     ShellAssignmentBackup *assignment_backups = NULL;
     size_t assignment_backup_count = 0;
@@ -1133,7 +1404,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        size_t idx = (size_t)cmd->pipeline_index;
+        size_t idx = stage_pos;
         if (idx >= ctx->stage_count) {
             if (assignments_applied) {
                 shellRestoreAssignments(assignment_backups, assignment_backup_count);
@@ -1146,7 +1417,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        if (ctx->stage_count > 1) {
+        bool pipeline_uses_pipes = true;
+#if defined(PSCAL_TARGET_IOS)
+        pipeline_uses_pipes = !ctx->in_process;
+#endif
+        if (pipeline_uses_pipes && ctx->stage_count > 1) {
             if (!pipeline_head) {
                 stdin_fd = ctx->pipes[idx - 1][0];
             }
@@ -1154,9 +1429,32 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 stdout_fd = ctx->pipes[idx][1];
             }
         }
-        if (ctx->merge_stderr && idx < ctx->stage_count && ctx->merge_stderr[idx]) {
+        if (pipeline_uses_pipes &&
+            ctx->merge_stderr && idx < ctx->stage_count && ctx->merge_stderr[idx]) {
             stderr_fd = stdout_fd;
         }
+#if defined(PSCAL_TARGET_IOS)
+        if (ctx->in_process) {
+            bool stage_ok = shellPipelineExecuteStageInProcess(vm,
+                                                               ctx,
+                                                               cmd,
+                                                               stage_pos,
+                                                               pipeline_head,
+                                                               pipeline_tail);
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
+            if (!stage_ok) {
+                shellAbortPipeline();
+            }
+            shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
+            return makeVoid();
+        }
+#endif
     } else {
         if (shellCommandIsExecBuiltin(cmd)) {
             shellExecuteExecBuiltin(vm, cmd);

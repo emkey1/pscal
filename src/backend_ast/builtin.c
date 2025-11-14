@@ -12,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <poll.h>
 #include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
@@ -2779,6 +2780,8 @@ static int getCursorPosition(int *row, int *col) {
     char ch;
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
+    bool virtualTTY = pscalRuntimeVirtualTTYEnabled() && !pscalRuntimeStdinHasRealTTY();
+    bool termiosApplied = false;
 
     // Default row/col in case of non-critical failure
     *row = 1;
@@ -2790,25 +2793,28 @@ static int getCursorPosition(int *row, int *col) {
         return 0; // Treat as non-critical failure, return default 1,1
     }
 
-    // --- Save Current Terminal Settings ---
-    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
-        perror("getCursorPosition: tcgetattr failed");
-        return -1; // Critical failure
-    }
+    if (!virtualTTY) {
+        // --- Save Current Terminal Settings ---
+        if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
+            perror("getCursorPosition: tcgetattr failed");
+            return -1; // Critical failure
+        }
 
-    // --- Prepare and Set Raw Mode ---
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
-    newt.c_cc[VMIN] = 0;              // Non-blocking read
-    newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
+        // --- Prepare and Set Raw Mode ---
+        newt = oldt;
+        newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
+        newt.c_cc[VMIN] = 0;              // Non-blocking read
+        newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
 
-    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
-        int setup_errno = errno;
-        perror("getCursorPosition: tcsetattr (set raw) failed");
-        // Attempt to restore original settings even if setting new ones failed
-        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
-        errno = setup_errno; // Restore errno for accurate reporting
-        return -1; // Critical failure
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
+            int setup_errno = errno;
+            perror("getCursorPosition: tcsetattr (set raw) failed");
+            // Attempt to restore original settings even if setting new ones failed
+            vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
+            errno = setup_errno; // Restore errno for accurate reporting
+            return -1; // Critical failure
+        }
+        termiosApplied = true;
     }
 
     // --- Write DSR Query ---
@@ -2825,22 +2831,44 @@ static int getCursorPosition(int *row, int *col) {
     memset(buf, 0, sizeof(buf));
     i = 0;
     while (i < (int)sizeof(buf) - 1) {
-        errno = 0; // Clear errno before read
-        ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-        read_errno = errno; // Store errno immediately after read
+        if (virtualTTY) {
+            struct pollfd pfd;
+            pfd.fd = STDIN_FILENO;
+            pfd.events = POLLIN;
+            int poll_rc = poll(&pfd, 1, 200);
+            if (poll_rc <= 0) {
+                if (poll_rc == 0) {
+                    fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
+                } else {
+                    perror("getCursorPosition: poll failed");
+                }
+                break;
+            }
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            if (bytes_read <= 0) {
+                if (bytes_read < 0) {
+                    perror("getCursorPosition: read failed");
+                }
+                break;
+            }
+        } else {
+            errno = 0; // Clear errno before read
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            read_errno = errno; // Store errno immediately after read
 
-        if (bytes_read < 0) { // Read error
-             // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
-             if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
-                 fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-             } else {
-                 perror("getCursorPosition: read failed");
-             }
-             break; // Exit loop on any read error or timeout
-        }
-        if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
-             fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
-             break;
+            if (bytes_read < 0) { // Read error
+                 // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
+                 if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
+                     fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
+                 } else {
+                     perror("getCursorPosition: read failed");
+                 }
+                 break; // Exit loop on any read error or timeout
+            }
+            if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
+                 fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
+                 break;
+            }
         }
 
         // Store character and check for terminator 'R'
@@ -2852,9 +2880,11 @@ static int getCursorPosition(int *row, int *col) {
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Restore Original Terminal Settings ---
-    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
-        perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
-        // Continue processing, but be aware terminal might be left in raw mode
+    if (termiosApplied) {
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
+            // Continue processing, but be aware terminal might be left in raw mode
+        }
     }
 
     // --- Parse Response ---

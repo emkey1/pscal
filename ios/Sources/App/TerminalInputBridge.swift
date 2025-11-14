@@ -9,16 +9,31 @@ struct TerminalInputBridge: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> TerminalInputView {
-        let view = TerminalInputView()
+    func makeUIView(context: Context) -> TerminalKeyInputView {
+        let view = TerminalKeyInputView()
+        view.backgroundColor = .clear
+        view.textColor = .clear
+        view.tintColor = .clear
+        view.isScrollEnabled = false
+        view.text = ""
+        view.autocorrectionType = .no
+        view.autocapitalizationType = .none
+        view.spellCheckingType = .no
+        view.smartQuotesType = .no
+        view.smartInsertDeleteType = .no
+        view.smartDashesType = .no
+        view.keyboardAppearance = .dark
         view.onInput = onInput
+        context.coordinator.view = view
+        view.inputAssistantItem.leadingBarButtonGroups = []
+        view.inputAssistantItem.trailingBarButtonGroups = []
         DispatchQueue.main.async {
             view.becomeFirstResponder()
         }
         return view
     }
 
-    func updateUIView(_ uiView: TerminalInputView, context: Context) {
+    func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
         uiView.onInput = onInput
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
@@ -29,93 +44,76 @@ struct TerminalInputBridge: UIViewRepresentable {
     }
 
     final class Coordinator {
+        weak var view: TerminalKeyInputView?
         var focusAnchor: Int = 0
     }
 }
 
-final class TerminalInputView: UIView, UIKeyInput, UITextInputTraits {
+final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
 
-    // UITextInputTraits
-    var autocorrectionType: UITextAutocorrectionType = .no
-    var spellCheckingType: UITextSpellCheckingType = .no
-    var keyboardType: UIKeyboardType = .default
-    var keyboardAppearance: UIKeyboardAppearance = .default
-    var returnKeyType: UIReturnKeyType = .default
-    var enablesReturnKeyAutomatically: Bool = false
-    var isSecureTextEntry: Bool = false
-    var textContentType: UITextContentType! = .none
-    var smartQuotesType: UITextSmartQuotesType = .no
-    var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
-    var smartDashesType: UITextSmartDashesType = .no
+    override var canBecomeFirstResponder: Bool { true }
 
-    override var canBecomeFirstResponder: Bool {
-        true
-    }
-
-    var hasText: Bool { false }
-
-    func insertText(_ text: String) {
+    override func insertText(_ text: String) {
         onInput?(text)
     }
 
-    func deleteBackward() {
+    override func deleteBackward() {
         onInput?("\u{7F}")
     }
 
+    override func caretRect(for position: UITextPosition) -> CGRect { .zero }
+
+    override func selectionRects(for range: UITextRange) -> [UITextSelectionRect] { [] }
+
+    override var selectedTextRange: UITextRange? {
+        get { nil }
+        set { }
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        var handledAll = true
+        var unhandled: Set<UIPress> = []
         for press in presses {
             if !handle(press: press) {
-                handledAll = false
+                unhandled.insert(press)
             }
         }
-        if !handledAll {
-            super.pressesBegan(presses, with: event)
+        if !unhandled.isEmpty {
+            super.pressesBegan(unhandled, with: event)
         }
     }
 
     private func handle(press: UIPress) -> Bool {
         guard let key = press.key else { return false }
 
-        switch key.keyCode {
-        case .keyboardUpArrow:
-            emit("\u{1B}[A")
-            return true
-        case .keyboardDownArrow:
-            emit("\u{1B}[B")
-            return true
-        case .keyboardLeftArrow:
-            emit("\u{1B}[D")
-            return true
-        case .keyboardRightArrow:
-            emit("\u{1B}[C")
-            return true
-        case .keyboardDeleteForward:
-            emit("\u{1B}[3~")
-            return true
-        case .keyboardDeleteOrBackspace:
-            emit("\u{7F}")
-            return true
-        default:
-            break
-        }
-
-        if key.modifierFlags.contains(.control) {
-            let chars = key.charactersIgnoringModifiers.lowercased()
-            guard let scalar = chars.unicodeScalars.first else { return false }
+        if key.modifierFlags.contains(.control),
+           let scalar = key.charactersIgnoringModifiers.lowercased().unicodeScalars.first {
             let value = scalar.value
             if value >= 0x40, value <= 0x7F,
                let ctrlScalar = UnicodeScalar(value & 0x1F) {
-                emit(String(ctrlScalar))
+                onInput?(String(ctrlScalar))
                 return true
             }
         }
 
+        switch key.keyCode {
+        case .keyboardUpArrow:
+            onInput?("\u{1B}[A"); return true
+        case .keyboardDownArrow:
+            onInput?("\u{1B}[B"); return true
+        case .keyboardLeftArrow:
+            onInput?("\u{1B}[D"); return true
+        case .keyboardRightArrow:
+            onInput?("\u{1B}[C"); return true
+        case .keyboardDeleteForward:
+            onInput?("\u{1B}[3~"); return true
+        case .keyboardReturnOrEnter:
+            onInput?("\n"); return true
+        case .keyboardEscape:
+            onInput?("\u{1B}"); return true
+        default:
+            break
+        }
         return false
-    }
-
-    private func emit(_ text: String) {
-        onInput?(text)
     }
 }

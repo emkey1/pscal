@@ -107,9 +107,10 @@ set(PSCAL_INSTALL_ROOT_DESTINATION "${_pscal_runtime_dest}")
 
 # Optionally build additional binaries
 option(BUILD_DASCAL "Build the dascal debugging binary" OFF)
+# The dascal debugger is no longer shipped on any platform.
+set(BUILD_DASCAL OFF CACHE BOOL "Build the dascal debugging binary" FORCE)
 option(BUILD_PSCALD "Build the standalone bytecode decompiler" ON)
 if(release)
-    set(BUILD_DASCAL OFF CACHE BOOL "Build the dascal debugging binary" FORCE)
     set(BUILD_PSCALD ON CACHE BOOL "Build the standalone bytecode decompiler" FORCE)
 endif()
 
@@ -768,7 +769,7 @@ set(CLIKE_SOURCES
     src/clike/codegen.c
     src/clike/opt.c
     src/clike/preproc.c
-    src/clike/stubs.c
+    src/clike/state.c
 )
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
@@ -777,7 +778,6 @@ list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
 
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(clike ${CLIKE_SOURCES})
-    target_compile_definitions(clike PRIVATE FRONTEND_CLIKE)
     target_link_libraries(clike PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
@@ -867,7 +867,6 @@ endif()
 
 if(PSCAL_BUILD_STATIC_LIBS)
     pscal_add_static_library(pscal_clike_static
-        FRONTEND FRONTEND_CLIKE
         SOURCES ${CLIKE_SOURCES})
     target_link_libraries(pscal_clike_static PUBLIC pscal_core_static)
 endif()
@@ -884,6 +883,7 @@ set(REA_SOURCES
     src/rea/lexer.c
     src/rea/parser.c
     src/rea/semantic.c
+    src/rea/state.c
     src/rea/builtins/thread.c
     src/rea/type_stubs.c
 )

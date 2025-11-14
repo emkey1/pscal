@@ -1,12 +1,15 @@
 import Combine
 import Foundation
 import Darwin
+import UIKit
 
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
 
     @Published private(set) var screenText: NSAttributedString = NSAttributedString(string: "Launching exsh...")
     @Published private(set) var exitStatus: Int32?
+    @Published private(set) var cursorInfo: TerminalCursorInfo?
+    @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
 
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
@@ -31,7 +34,16 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private init() {
         let initialColumns = 80
         let initialRows = 24
-        self.terminalBuffer = TerminalBuffer(columns: initialColumns, rows: initialRows, scrollback: 400)
+        self.terminalBuffer = TerminalBuffer(columns: initialColumns,
+                                             rows: initialRows,
+                                             scrollback: 400,
+                                             dsrResponder: { data in
+            data.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                let pointer = base.assumingMemoryBound(to: CChar.self)
+                PSCALRuntimeSendInput(pointer, buffer.count)
+            }
+        })
         self.lastAppliedGeometry = (initialColumns, initialRows)
         PSCALRuntimeUpdateWindowSize(Int32(initialColumns), Int32(initialRows))
     }
@@ -52,6 +64,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         DispatchQueue.main.async {
             self.screenText = NSAttributedString(string: "Launching exsh...")
             self.exitStatus = nil
+            self.terminalBackgroundColor = UIColor.systemBackground
         }
 
         handlerContext = Unmanaged.passUnretained(self).toOpaque()
@@ -74,6 +87,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func send(_ text: String) {
         guard let data = text.data(using: .utf8), !data.isEmpty else { return }
+        echoLocallyIfNeeded(text)
         data.withUnsafeBytes { rawBuffer in
             guard let base = rawBuffer.bindMemory(to: CChar.self).baseAddress else { return }
             PSCALRuntimeSendInput(base, rawBuffer.count)
@@ -112,22 +126,66 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    private func scheduleRender() {
+    private func scheduleRender(preserveBackground: Bool = false) {
         let snapshot = terminalBuffer.snapshot()
+        let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
+        let backgroundColor = snapshot.defaultBackground
         DispatchQueue.main.async {
-            self.screenText = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
+            self.screenText = renderResult.text
+            self.cursorInfo = renderResult.cursor
+            if !preserveBackground {
+                self.terminalBackgroundColor = backgroundColor
+            }
         }
     }
 
-    private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> NSAttributedString {
+    private func shouldEchoLocally() -> Bool {
+        return PSCALRuntimeIsVirtualTTY() != 0
+    }
+
+    private func echoLocallyIfNeeded(_ text: String) {
+        guard shouldEchoLocally(), shouldEchoText(text) else { return }
+        terminalBuffer.echoUserInput(text)
+        scheduleRender(preserveBackground: true)
+    }
+
+    private func shouldEchoText(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if scalar.value == 0x1B {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> (text: NSAttributedString, cursor: TerminalCursorInfo?) {
         let lines = TerminalBuffer.render(snapshot: snapshot)
         let result = NSMutableAttributedString()
+        let cursorRow = snapshot.cursor?.row
+        let cursorCol = snapshot.cursor?.col ?? 0
+        var resolvedCursorRow: Int?
+        if let row = cursorRow, !lines.isEmpty {
+            resolvedCursorRow = min(max(row, 0), lines.count - 1)
+        }
         for (index, line) in lines.enumerated() {
             result.append(line)
             if index < lines.count - 1 {
                 result.append(NSAttributedString(string: "\n"))
             }
         }
-        return result
+        let cursorInfo: TerminalCursorInfo?
+        if let row = resolvedCursorRow {
+            let line = lines[row]
+            let clampedColumn = min(cursorCol, line.length)
+            cursorInfo = TerminalCursorInfo(row: row, column: clampedColumn)
+        } else {
+            cursorInfo = nil
+        }
+        return (result, cursorInfo)
     }
+}
+
+struct TerminalCursorInfo: Equatable {
+    let row: Int
+    let column: Int
 }

@@ -1275,5 +1275,23 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
     }
     free(modules);
 
-    for (int i = 0; i < functionCount; ++i) free(functions[i].name);
+    for (int i = 0; i < functionCount; ++i) {
+        free(functions[i].name);
+        functions[i].name = NULL;
+    }
+}
+
+void clikeResetSemanticsState(void) {
+    vtFree(&globalVars);
+    for (int i = 0; i < functionCount; ++i) {
+        if (functions[i].name) {
+            free(functions[i].name);
+            functions[i].name = NULL;
+        }
+        functions[i].type = TYPE_UNKNOWN;
+        functions[i].has_definition = 0;
+        functions[i].defined_line = 0;
+        functions[i].defined_column = 0;
+    }
+    functionCount = 0;
 }

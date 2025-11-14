@@ -1,4 +1,5 @@
 #include "common/pascal_state.h"
+#include "compiler/compiler.h"
 
 #include <string.h>
 
@@ -153,4 +154,5 @@ void pascalInvalidateGlobalState(void) {
 #ifdef DEBUG
     inserted_global_names = NULL;
 #endif
+    compilerResetState();
 }

@@ -28,4 +28,7 @@ void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk);
 
 void finalizeBytecode(BytecodeChunk* chunk);
 
+// Reset compiler singletons/global state between invocations.
+void compilerResetState(void);
+
 #endif // PSCAL_COMPILER_H

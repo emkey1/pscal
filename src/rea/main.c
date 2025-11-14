@@ -45,6 +45,7 @@
 #include "common/frontend_kind.h"
 #include "rea/builtins/thread.h"
 #include "rea/parser.h"
+#include "rea/state.h"
 #include "rea/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
@@ -55,27 +56,6 @@ static void initSymbolSystem(void) {
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
-}
-
-static void resetReaSymbolState(void) {
-    if (globalSymbols) {
-        freeHashTable(globalSymbols);
-        globalSymbols = NULL;
-    }
-    if (constGlobalSymbols) {
-        freeHashTable(constGlobalSymbols);
-        constGlobalSymbols = NULL;
-    }
-    if (procedure_table) {
-        freeHashTable(procedure_table);
-        procedure_table = NULL;
-    }
-    current_procedure_table = NULL;
-    if (type_table) {
-        freeTypeTableASTNodes();
-        freeTypeTable();
-        type_table = NULL;
-    }
 }
 
 static const char *REA_USAGE =
@@ -283,7 +263,7 @@ int rea_main(int argc, char **argv) {
     do {                                            \
         int __rea_rc = (value);                     \
         if (reaSymbolStateActive) {                 \
-            resetReaSymbolState();                  \
+            reaResetSymbolState();                  \
             reaSymbolStateActive = false;           \
         }                                           \
         frontendPopKind(previousKind);              \

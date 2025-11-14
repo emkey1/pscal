@@ -4529,6 +4529,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
+    resetCompilerConstants();
     compiler_had_error = false;
     current_function_compiler = NULL;
     compiler_defined_myself_global = false;
@@ -4588,6 +4589,7 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
+    resetCompilerConstants();
     compiler_had_error = false;
     current_function_compiler = NULL;
     int saved_myself_flag = compiler_defined_myself_global;
@@ -4648,6 +4650,55 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
         popVTableTrackerState();
     }
     return !compiler_had_error;
+}
+
+void compilerResetState(void) {
+    current_compilation_unit_name = NULL;
+    gCurrentProgramRoot = NULL;
+    current_class_const_table = NULL;
+    current_class_record_type = NULL;
+    current_function_compiler = NULL;
+    current_label_table = NULL;
+    compiler_defined_myself_global = false;
+    compiler_myself_global_name_idx = -1;
+    compilerGlobalCount = 0;
+    resetCompilerConstants();
+    compiler_had_error = false;
+    postpone_global_initializers = false;
+    resetAddressConstantTracking();
+    if (address_constant_entries) {
+        free(address_constant_entries);
+        address_constant_entries = NULL;
+    }
+    address_constant_capacity = 0;
+    clearCurrentVTableTracker();
+    tracked_vtable_chunk = NULL;
+    if (vtable_tracker_stack) {
+        for (int i = 0; i < vtable_tracker_depth; ++i) {
+            if (vtable_tracker_stack[i].classes) {
+                freeVTableClassList(vtable_tracker_stack[i].classes,
+                                    vtable_tracker_stack[i].count);
+            }
+        }
+        free(vtable_tracker_stack);
+        vtable_tracker_stack = NULL;
+    }
+    vtable_tracker_depth = 0;
+    vtable_tracker_capacity = 0;
+    emitted_vtable_classes = NULL;
+    emitted_vtable_count = 0;
+    emitted_vtable_capacity = 0;
+    if (pending_global_vtables) {
+        free(pending_global_vtables);
+        pending_global_vtables = NULL;
+    }
+    pending_global_vtable_count = 0;
+    if (deferred_global_initializers) {
+        free(deferred_global_initializers);
+        deferred_global_initializers = NULL;
+    }
+    deferred_global_initializer_count = 0;
+    deferred_global_initializer_capacity = 0;
 }
 
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx) {

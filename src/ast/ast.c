@@ -1712,14 +1712,64 @@ VarType getBuiltinReturnType(const char* name) {
     return TYPE_VOID;
 }
 
-AST *copyAST(AST *node) {
+typedef struct {
+    AST *original;
+    AST *copy;
+} ASTCopyPair;
+
+typedef struct {
+    ASTCopyPair *pairs;
+    size_t count;
+    size_t capacity;
+} ASTCopyContext;
+
+static AST *lookupCopiedNode(ASTCopyContext *ctx, AST *original) {
+    if (!ctx || !original) return NULL;
+    for (size_t i = 0; i < ctx->count; ++i) {
+        if (ctx->pairs[i].original == original) {
+            return ctx->pairs[i].copy;
+        }
+    }
+    return NULL;
+}
+
+static bool registerCopiedNode(ASTCopyContext *ctx, AST *original, AST *copy) {
+    if (!ctx || !original || !copy) return false;
+    if (ctx->count == ctx->capacity) {
+        size_t newCap = ctx->capacity ? ctx->capacity * 2 : 32;
+        ASTCopyPair *newPairs = realloc(ctx->pairs, newCap * sizeof(ASTCopyPair));
+        if (!newPairs) {
+            return false;
+        }
+        ctx->pairs = newPairs;
+        ctx->capacity = newCap;
+    }
+    ctx->pairs[ctx->count].original = original;
+    ctx->pairs[ctx->count].copy = copy;
+    ctx->count++;
+    return true;
+}
+
+static void popCopiedNode(ASTCopyContext *ctx) {
+    if (ctx && ctx->count > 0) {
+        ctx->count--;
+    }
+}
+
+static AST *copyASTRecursive(AST *node, ASTCopyContext *ctx) {
     if (!node) return NULL;
+
+    AST *memo = lookupCopiedNode(ctx, node);
+    if (memo) {
+        return memo;
+    }
+
     AST *newNode = newASTNode(node->type, node->token);
-    if (!newNode) return NULL;
-    // Ensure fresh node isn't marked as freed
+    if (!newNode) {
+        return NULL;
+    }
     newNode->freed = false;
 
-    // Copy all scalar fields
     newNode->var_type = node->var_type;
     newNode->by_ref = node->by_ref;
     newNode->is_global_scope = node->is_global_scope;
@@ -1727,38 +1777,46 @@ AST *copyAST(AST *node) {
     newNode->is_forward_decl = node->is_forward_decl;
     newNode->is_virtual = node->is_virtual;
     newNode->i_val = node->i_val;
-    // Preserve pointers for unit_list and symbol_table (shallow copy).
-    // These structures are managed elsewhere and do not require deep copies
-    // when duplicating the AST node.  Retaining the symbol_table pointer is
-    // especially important for procedure declarations that contain nested
-    // routines; the VM relies on this table at runtime to resolve calls to
-    // inner procedures by their bytecode address.
     newNode->unit_list = node->unit_list;
     newNode->symbol_table = node->symbol_table;
     newNode->type_def = NULL;
-    
-    // Handle children first
-    AST *copiedLeft = copyAST(node->left);
-    AST *copiedExtra = copyAST(node->extra);
+
+    if (!registerCopiedNode(ctx, node, newNode)) {
+        freeAST(newNode);
+        EXIT_FAILURE_HANDLER();
+        return NULL;
+    }
+
+    AST *copiedLeft = copyASTRecursive(node->left, ctx);
+    AST *copiedExtra = copyASTRecursive(node->extra, ctx);
     AST *copiedRight = NULL;
 
     if (node->type == AST_TYPE_REFERENCE) {
-        // For a type reference, do not deep copy the 'right' pointer.
-        // It points to a canonical definition in the type_table.
-        // Just copy the pointer value itself.
         copiedRight = node->right;
     } else {
-        // For all other node types, perform a recursive deep copy.
-        copiedRight = copyAST(node->right);
+        copiedRight = copyASTRecursive(node->right, ctx);
     }
-    
-    // Now set the pointers and parents
+
+    if (node->left && !copiedLeft) {
+        popCopiedNode(ctx);
+        freeAST(newNode);
+        return NULL;
+    }
+    if (node->extra && !copiedExtra) {
+        popCopiedNode(ctx);
+        freeAST(newNode);
+        return NULL;
+    }
+    if (node->right && node->type != AST_TYPE_REFERENCE && !copiedRight) {
+        popCopiedNode(ctx);
+        freeAST(newNode);
+        return NULL;
+    }
+
     newNode->left = copiedLeft;
     if (newNode->left) newNode->left->parent = newNode;
-    
+
     newNode->right = copiedRight;
-    // Only set the parent pointer if we made a deep copy.
-    // Do NOT change the parent of a node from the type_table.
     if (newNode->right && node->type != AST_TYPE_REFERENCE) {
         newNode->right->parent = newNode;
     }
@@ -1766,36 +1824,60 @@ AST *copyAST(AST *node) {
     newNode->extra = copiedExtra;
     if (newNode->extra) newNode->extra->parent = newNode;
 
-    // Mirror the original node's type_def pointer without deep copying to
-    // preserve canonical type nodes and avoid recursion.
     if (node->type_def) {
-        newNode->type_def = (node->type_def == node->right)
-                               ? newNode->right
-                               : node->type_def;
+        if (node->type_def == node->right) {
+            newNode->type_def = newNode->right;
+        } else {
+            AST *resolved = lookupCopiedNode(ctx, node->type_def);
+            newNode->type_def = resolved ? resolved : node->type_def;
+        }
     }
-    
-    // Children copy logic remains the same
+
     if (node->child_count > 0 && node->children) {
         newNode->child_capacity = node->child_count;
         newNode->child_count = node->child_count;
         newNode->children = malloc(sizeof(AST*) * newNode->child_capacity);
-        if (!newNode->children) { freeAST(newNode); return NULL; }
-        for (int i = 0; i < newNode->child_count; i++) newNode->children[i] = NULL;
-
+        if (!newNode->children) {
+            popCopiedNode(ctx);
+            freeAST(newNode);
+            EXIT_FAILURE_HANDLER();
+            return NULL;
+        }
+        for (int i = 0; i < newNode->child_count; i++) {
+            newNode->children[i] = NULL;
+        }
         for (int i = 0; i < node->child_count; i++) {
-            newNode->children[i] = copyAST(node->children[i]);
-            if (!newNode->children[i] && node->children[i]) {
-                 for(int j = 0; j < i; ++j) freeAST(newNode->children[j]);
-                 free(newNode->children); newNode->children = NULL;
-                 newNode->child_count = 0; newNode->child_capacity = 0;
-                 freeAST(newNode); return NULL;
-             }
+            AST *childCopy = copyASTRecursive(node->children[i], ctx);
+            if (node->children[i] && !childCopy) {
+                for (int j = 0; j <= i; j++) {
+                    if (newNode->children[j]) freeAST(newNode->children[j]);
+                }
+                free(newNode->children);
+                newNode->children = NULL;
+                newNode->child_count = 0;
+                newNode->child_capacity = 0;
+                popCopiedNode(ctx);
+                freeAST(newNode);
+                return NULL;
+            }
+            newNode->children[i] = childCopy;
             if (newNode->children[i]) newNode->children[i]->parent = newNode;
         }
     } else {
-        newNode->children = NULL; newNode->child_count = 0; newNode->child_capacity = 0;
+        newNode->children = NULL;
+        newNode->child_count = 0;
+        newNode->child_capacity = 0;
     }
+
     return newNode;
+}
+
+AST *copyAST(AST *node) {
+    if (!node) return NULL;
+    ASTCopyContext ctx = {0};
+    AST *result = copyASTRecursive(node, &ctx);
+    free(ctx.pairs);
+    return result;
 }
 
 bool verifyASTLinks(AST *node, AST *expectedParent) {
