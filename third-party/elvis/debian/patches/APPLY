@@ -1,0 +1,12 @@
+    disable the instman.sh script - we manually install the manpages
+    in debian/rules:
+disable-instman
+
+    debianize some links in the manual:
+doc-man-location
+
+    patch Makefile to remove doc/elvfmt.man:
+make-rm-elvfmtman
+
+    adapt the printdoc script and the documentation of it
+printdoc-debian
