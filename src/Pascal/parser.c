@@ -3511,7 +3511,7 @@ AST *simpleExpression(Parser *parser) {
     }
 
     // Parse the first term
-    node = term(parser);
+    node = pascalTerm(parser);
     if (!node || node->type == AST_NOOP) {
         // term should have reported error
         if(signToken) freeToken(signToken); // Free sign token if unused
@@ -3537,7 +3537,7 @@ AST *simpleExpression(Parser *parser) {
         if (!opCopied) { EXIT_FAILURE_HANDLER(); }
         eat(parser, opOriginal->type); // Eat original op token
 
-        AST *right = term(parser); // Parse the next term
+        AST *right = pascalTerm(parser); // Parse the next term
         if (!right || right->type == AST_NOOP) {
             // term should have reported error
             // errorParser(parser, "Expected term after additive operator"); // Already reported
@@ -3559,7 +3559,7 @@ AST *simpleExpression(Parser *parser) {
 
 // term: Parses factors combined with multiplicative operators (*, /, DIV, MOD, AND, SHL, SHR).
 // term ::= factor { multiplicative_op factor }
-AST *term(Parser *parser) {
+AST *pascalTerm(Parser *parser) {
     AST *node = factor(parser);
     if (!node || node->type == AST_NOOP) {
        // factor should have reported error

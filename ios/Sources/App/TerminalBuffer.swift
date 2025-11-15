@@ -127,11 +127,15 @@ final class TerminalBuffer {
 
     private var grid: [[TerminalCell]]
     private var scrollback: [[TerminalCell]] = []
+    private var scrollRegionTop: Int
+    private var scrollRegionBottom: Int
     private var cursorRow: Int = 0
     private var cursorCol: Int = 0
     private var savedCursor: (row: Int, col: Int)?
     private var cursorHidden: Bool = false
     private var currentAttributes = TerminalAttributes()
+    private var originModeEnabled: Bool = false
+    private var suppressNextRemoteLF: Bool = false
 
     private var parserState: ParserState = .normal
     private var csiParameters: [Int] = []
@@ -169,6 +173,8 @@ struct TerminalSnapshot {
         self.rows = max(4, rows)
         self.maxScrollback = max(0, scrollback)
         self.grid = Array(repeating: TerminalBuffer.makeBlankRow(width: self.columns), count: self.rows)
+        self.scrollRegionTop = 0
+        self.scrollRegionBottom = self.rows - 1
     }
 
     @discardableResult
@@ -185,6 +191,9 @@ struct TerminalSnapshot {
             if clampedRows != rows {
                 adjustRowCount(to: clampedRows)
                 mutated = true
+            }
+            if mutated {
+                clampScrollRegionBounds()
             }
             didChange = mutated
         }
@@ -251,12 +260,22 @@ struct TerminalSnapshot {
         return rendered
     }
 
-    private func process(byte: UInt8) {
+    private func process(byte: UInt8, fromEcho: Bool = false) {
+        if !fromEcho && byte != 0x0A && byte != 0x0D {
+            suppressNextRemoteLF = false
+        }
         switch parserState {
         case .normal:
             switch byte {
             case 0x0A: // LF
-                newLine()
+                if !fromEcho && suppressNextRemoteLF {
+                    suppressNextRemoteLF = false
+                    break
+                }
+                newLine(resetColumn: true)
+                if fromEcho {
+                    suppressNextRemoteLF = true
+                }
             case 0x0D: // CR
                 cursorCol = 0
             case 0x08: // BS
@@ -289,6 +308,12 @@ struct TerminalSnapshot {
             csiParameters.removeAll()
             currentParameter = ""
             csiPrivateMode = false
+        case 0x44: // 'D' index
+            newLine(resetColumn: false)
+            parserState = .normal
+        case 0x45: // 'E' next line
+            newLine(resetColumn: true)
+            parserState = .normal
         case 0x37: // '7' save cursor
             savedCursor = (cursorRow, cursorCol)
             parserState = .normal
@@ -297,6 +322,12 @@ struct TerminalSnapshot {
                 cursorRow = saved.row
                 cursorCol = saved.col
             }
+            parserState = .normal
+        case 0x4D: // 'M' reverse index
+            reverseIndex()
+            parserState = .normal
+        case 0x63: // 'c' full reset
+            resetState()
             parserState = .normal
         default:
             parserState = .normal
@@ -332,6 +363,8 @@ struct TerminalSnapshot {
 
     private func handleCSICommand(_ command: UInt8) {
         switch command {
+        case 0x40: // @
+            insertBlankCharacters(max(1, csiParameters.first ?? 1))
         case 0x41: // A
             moveCursor(rowOffset: -(csiParameters.first ?? 1), colOffset: 0)
         case 0x42: // B
@@ -340,19 +373,51 @@ struct TerminalSnapshot {
             moveCursor(rowOffset: 0, colOffset: csiParameters.first ?? 1)
         case 0x44: // D
             moveCursor(rowOffset: 0, colOffset: -(csiParameters.first ?? 1))
+        case 0x45: // E
+            let amount = max(1, csiParameters.first ?? 1)
+            cursorRow = clampRow(cursorRow + amount)
+            cursorCol = 0
+        case 0x46: // F
+            let amount = max(1, csiParameters.first ?? 1)
+            cursorRow = clampRow(cursorRow - amount)
+            cursorCol = 0
+        case 0x47: // G
+            let column = clamp((csiParameters.first ?? 1) - 1, lower: 0, upper: columns - 1)
+            cursorCol = column
         case 0x48, 0x66: // H, f
-            let row = (csiParameters.first ?? 1) - 1
-            let col = (csiParameters.dropFirst().first ?? 1) - 1
-            cursorRow = clamp(row, lower: 0, upper: rows - 1)
-            cursorCol = clamp(col, lower: 0, upper: columns - 1)
+            cursorRow = resolvedRow(from: csiParameters.first)
+            cursorCol = clamp((csiParameters.dropFirst().first ?? 1) - 1, lower: 0, upper: columns - 1)
         case 0x4A: // J
             clearScreen(mode: csiParameters.first ?? 0)
         case 0x4B: // K
             clearLine(mode: csiParameters.first ?? 0)
+        case 0x4C: // L
+            insertLines(max(1, csiParameters.first ?? 1))
+        case 0x4D: // M
+            deleteLines(max(1, csiParameters.first ?? 1))
+        case 0x50: // P
+            deleteCharacters(max(1, csiParameters.first ?? 1))
+        case 0x53: // S
+            scrollRegionUp(by: max(1, csiParameters.first ?? 1), trackScrollback: isFullScrollRegion)
+        case 0x54: // T
+            scrollRegionDown(by: max(1, csiParameters.first ?? 1))
+        case 0x58: // X
+            eraseCharacters(max(1, csiParameters.first ?? 1))
         case 0x6D: // m
             applySGR()
         case 0x6E: // n (DSR request)
             handleDSRRequest()
+        case 0x72: // r (set scroll region)
+            setScrollRegion(topParameter: csiParameters.first,
+                            bottomParameter: csiParameters.dropFirst().first)
+        case 0x61: // a (HPR)
+            moveCursor(rowOffset: 0, colOffset: csiParameters.first ?? 1)
+        case 0x65: // e (VPR)
+            moveCursor(rowOffset: csiParameters.first ?? 1, colOffset: 0)
+        case 0x64: // d (VPA)
+            cursorRow = resolvedRow(from: csiParameters.first)
+        case 0x63: // c (DA)
+            handleDeviceAttributes()
         case 0x73: // s
             savedCursor = (cursorRow, cursorCol)
         case 0x75: // u
@@ -376,15 +441,19 @@ struct TerminalSnapshot {
     private func handleDECPrivate(on: Bool) {
         guard let mode = csiParameters.first else { return }
         switch mode {
+        case 6:
+            originModeEnabled = on
+            cursorRow = originModeEnabled ? scrollRegionTop : 0
+            cursorCol = 0
         case 25:
-            cursorHidden = false
+            cursorHidden = !on
         default:
             break
         }
     }
 
     private func moveCursor(rowOffset: Int, colOffset: Int) {
-        cursorRow = clamp(cursorRow + rowOffset, lower: 0, upper: rows - 1)
+        cursorRow = clampRow(cursorRow + rowOffset)
         cursorCol = clamp(cursorCol + colOffset, lower: 0, upper: columns - 1)
     }
 
@@ -392,17 +461,17 @@ struct TerminalSnapshot {
         guard let request = csiParameters.first else { return }
         switch request {
         case 5:
-            sendDSRResponse("\u{001B}[0n")
+            sendTerminalResponse("\u{001B}[0n")
         case 6:
             let row = cursorRow + 1
             let col = cursorCol + 1
-            sendDSRResponse("\u{001B}[\(row);\(col)R")
+            sendTerminalResponse("\u{001B}[\(row);\(col)R")
         default:
             break
         }
     }
 
-    private func sendDSRResponse(_ string: String) {
+    private func sendTerminalResponse(_ string: String) {
         guard let responder = dsrResponder, let data = string.data(using: .utf8) else {
             return
         }
@@ -414,26 +483,24 @@ struct TerminalSnapshot {
         cursorCol += 1
         if cursorCol >= columns {
             cursorCol = 0
-            newLine()
+            newLine(resetColumn: true)
         }
     }
 
-    private func newLine() {
+    private func newLine(resetColumn: Bool) {
+        let wasWithinRegion = cursorRow >= scrollRegionTop && cursorRow <= scrollRegionBottom
         cursorRow += 1
-        if cursorRow >= rows {
-            scrollUp()
+        if wasWithinRegion && cursorRow > scrollRegionBottom {
+            scrollRegionUp(by: 1, trackScrollback: isFullScrollRegion)
+            cursorRow = scrollRegionBottom
+        } else if cursorRow >= rows {
             cursorRow = rows - 1
         }
-        cursorCol = 0
-    }
-
-    private func scrollUp() {
-        let firstLine = grid.removeFirst()
-        scrollback.append(firstLine)
-        if scrollback.count > maxScrollback {
-            scrollback.removeFirst()
+        if resetColumn {
+            cursorCol = 0
+        } else {
+            cursorCol = clamp(cursorCol, lower: 0, upper: columns - 1)
         }
-        grid.append(makeBlankRow())
     }
 
     private func clearScreen(mode: Int) {
@@ -550,6 +617,174 @@ struct TerminalSnapshot {
         default:
             return (nil, 0)
         }
+    }
+
+    private func clampRow(_ value: Int) -> Int {
+        if originModeEnabled {
+            return clamp(value, lower: scrollRegionTop, upper: scrollRegionBottom)
+        }
+        return clamp(value, lower: 0, upper: rows - 1)
+    }
+
+    private func resolvedRow(from parameter: Int?) -> Int {
+        let base = clamp((parameter ?? 1) - 1, lower: 0, upper: rows - 1)
+        if originModeEnabled {
+            let relativeMax = max(scrollRegionBottom - scrollRegionTop, 0)
+            let relative = clamp(base, lower: 0, upper: relativeMax)
+            return scrollRegionTop + relative
+        }
+        return base
+    }
+
+    private func handleDeviceAttributes() {
+        let response = "\u{001B}[?1;0c"
+        sendTerminalResponse(response)
+    }
+
+    private func reverseIndex() {
+        if cursorRow > scrollRegionTop && cursorRow <= scrollRegionBottom {
+            cursorRow -= 1
+        } else if cursorRow == scrollRegionTop {
+            scrollRegionDown(by: 1)
+        } else {
+            cursorRow = max(cursorRow - 1, 0)
+        }
+    }
+
+    private func setScrollRegion(topParameter: Int?, bottomParameter: Int?) {
+        let maxRowIndex = max(rows - 1, 0)
+        let resolvedTop = clamp((topParameter ?? 1) - 1, lower: 0, upper: maxRowIndex)
+        var resolvedBottom = clamp((bottomParameter ?? rows) - 1, lower: 0, upper: maxRowIndex)
+        if resolvedBottom < resolvedTop {
+            resolvedBottom = resolvedTop
+        }
+        scrollRegionTop = resolvedTop
+        scrollRegionBottom = resolvedBottom
+        if originModeEnabled {
+            cursorRow = scrollRegionTop
+        } else {
+            cursorRow = 0
+        }
+        cursorCol = 0
+    }
+
+    private func clampScrollRegionBounds() {
+        let maxRowIndex = max(rows - 1, 0)
+        scrollRegionTop = clamp(scrollRegionTop, lower: 0, upper: maxRowIndex)
+        scrollRegionBottom = clamp(scrollRegionBottom, lower: scrollRegionTop, upper: maxRowIndex)
+        cursorRow = clampRow(cursorRow)
+    }
+
+    private var isFullScrollRegion: Bool {
+        return scrollRegionTop == 0 && scrollRegionBottom == rows - 1
+    }
+
+    private func scrollRegionUp(by count: Int, trackScrollback: Bool = false) {
+        guard scrollRegionTop <= scrollRegionBottom else { return }
+        let height = scrollRegionBottom - scrollRegionTop + 1
+        let amount = clamp(count, lower: 1, upper: height)
+        for _ in 0..<amount {
+            let removed = grid.remove(at: scrollRegionTop)
+            if trackScrollback {
+                appendScrollbackLine(removed)
+            }
+            grid.insert(makeBlankRow(), at: scrollRegionBottom)
+        }
+    }
+
+    private func scrollRegionDown(by count: Int) {
+        guard scrollRegionTop <= scrollRegionBottom else { return }
+        let height = scrollRegionBottom - scrollRegionTop + 1
+        let amount = clamp(count, lower: 1, upper: height)
+        for _ in 0..<amount {
+            _ = grid.remove(at: scrollRegionBottom)
+            grid.insert(makeBlankRow(), at: scrollRegionTop)
+        }
+    }
+
+    private func insertLines(_ count: Int) {
+        guard cursorRow >= scrollRegionTop && cursorRow <= scrollRegionBottom else { return }
+        let available = scrollRegionBottom - cursorRow + 1
+        let amount = clamp(count, lower: 1, upper: available)
+        for _ in 0..<amount {
+            grid.insert(makeBlankRow(), at: cursorRow)
+            grid.remove(at: scrollRegionBottom + 1)
+        }
+    }
+
+    private func deleteLines(_ count: Int) {
+        guard cursorRow >= scrollRegionTop && cursorRow <= scrollRegionBottom else { return }
+        let available = scrollRegionBottom - cursorRow + 1
+        let amount = clamp(count, lower: 1, upper: available)
+        for _ in 0..<amount {
+            grid.remove(at: cursorRow)
+            grid.insert(makeBlankRow(), at: scrollRegionBottom)
+        }
+    }
+
+    private func insertBlankCharacters(_ count: Int) {
+        guard cursorRow >= 0 && cursorRow < grid.count else { return }
+        guard cursorCol >= 0 && cursorCol < columns else { return }
+        let available = columns - cursorCol
+        guard available > 0 else { return }
+        let amount = min(max(1, count), available)
+        var line = grid[cursorRow]
+        for _ in 0..<amount {
+            line.insert(blankCell(), at: cursorCol)
+            line.removeLast()
+        }
+        grid[cursorRow] = line
+    }
+
+    private func deleteCharacters(_ count: Int) {
+        guard cursorRow >= 0 && cursorRow < grid.count else { return }
+        guard cursorCol >= 0 && cursorCol < columns else { return }
+        let available = columns - cursorCol
+        guard available > 0 else { return }
+        let amount = min(max(1, count), available)
+        var line = grid[cursorRow]
+        line.removeSubrange(cursorCol..<(cursorCol + amount))
+        line.append(contentsOf: Array(repeating: blankCell(), count: amount))
+        grid[cursorRow] = line
+    }
+
+    private func eraseCharacters(_ count: Int) {
+        guard cursorRow >= 0 && cursorRow < grid.count else { return }
+        guard cursorCol >= 0 && cursorCol < columns else { return }
+        guard count > 0 else { return }
+        let end = min(columns, cursorCol + count)
+        guard end > cursorCol else { return }
+        for index in cursorCol..<end {
+            grid[cursorRow][index] = blankCell()
+        }
+    }
+
+    private func appendScrollbackLine(_ line: [TerminalCell]) {
+        scrollback.append(line)
+        if scrollback.count > maxScrollback {
+            let overflow = scrollback.count - maxScrollback
+            if overflow > 0 {
+                scrollback.removeFirst(overflow)
+            }
+        }
+    }
+
+    private func resetState() {
+        currentAttributes.reset()
+        scrollback.removeAll()
+        grid = Array(repeating: makeBlankRow(), count: rows)
+        cursorRow = 0
+        cursorCol = 0
+        savedCursor = nil
+        cursorHidden = false
+        originModeEnabled = false
+        suppressNextRemoteLF = false
+        parserState = .normal
+        csiParameters.removeAll()
+        currentParameter = ""
+        csiPrivateMode = false
+        scrollRegionTop = 0
+        scrollRegionBottom = rows - 1
     }
 
     private static func makeAttributedString(from row: [TerminalCell]) -> NSAttributedString {
@@ -702,15 +937,15 @@ struct TerminalSnapshot {
             return
         case 0x0A, 0x0D, 0x09:
             currentAttributes = attributesAtCursor()
-            process(byte: UInt8(value))
+            process(byte: UInt8(value), fromEcho: true)
         case 0x08:
-            process(byte: 0x08)
+            process(byte: 0x08, fromEcho: true)
         case 0x7F:
             applyBackspaceErase()
         default:
             guard value >= 0x20 && value <= 0x7E else { return }
             currentAttributes = attributesAtCursor()
-            process(byte: UInt8(value))
+            process(byte: UInt8(value), fromEcho: true)
         }
     }
 
@@ -726,7 +961,7 @@ struct TerminalSnapshot {
     }
 
     private func applyBackspaceErase() {
-        process(byte: 0x08)
+        process(byte: 0x08, fromEcho: true)
         if cursorRow >= 0 && cursorRow < grid.count &&
             cursorCol >= 0 && cursorCol < columns {
             let attrs = grid[cursorRow][cursorCol].attributes

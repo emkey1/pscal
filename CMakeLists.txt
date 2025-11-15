@@ -80,6 +80,11 @@ configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_pa
 include_directories("${CMAKE_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
+if(PSCAL_PLATFORM_IOS)
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/elvis")
+    configure_file(third-party/elvis/config_pscal_ios.h "${CMAKE_BINARY_DIR}/generated/elvis/config.h" COPYONLY)
+endif()
+
 # Resolve the final runtime destination so install rules can write directly to
 # either an absolute override or the default path under the chosen prefix.
 set(PSCAL_INSTALL_ROOT_RESOLVED "${PSCAL_INSTALL_ROOT}")
@@ -412,6 +417,9 @@ set(PSCAL_CORE_SOURCES
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
+    src/smallclu/core.c
+    src/smallclu/integration.c
+    src/smallclu/elvis_app.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -427,8 +435,86 @@ if(SDL)
         src/backend_ast/sdl.c
         src/backend_ast/sdl3d.c
         src/backend_ast/gl.c
-        src/backend_ast/audio.c
+    src/backend_ast/audio.c
     )
+endif()
+
+if(PSCAL_PLATFORM_IOS)
+    set(ELVIS_CORE_SOURCES
+        third-party/elvis/autocmd.c
+        third-party/elvis/buffer.c
+        third-party/elvis/calc.c
+        third-party/elvis/color.c
+        third-party/elvis/cut.c
+        third-party/elvis/descr.c
+        third-party/elvis/digraph.c
+        third-party/elvis/display.c
+        third-party/elvis/dmhex.c
+        third-party/elvis/dmmarkup.c
+        third-party/elvis/dmnormal.c
+        third-party/elvis/dmsyntax.c
+        third-party/elvis/draw.c
+        third-party/elvis/event.c
+        third-party/elvis/ex.c
+        third-party/elvis/exaction.c
+        third-party/elvis/exconfig.c
+        third-party/elvis/exedit.c
+        third-party/elvis/exmake.c
+        third-party/elvis/exsubst.c
+        third-party/elvis/fold.c
+        third-party/elvis/ftp.c
+        third-party/elvis/gui.c
+        third-party/elvis/guicurs.c
+        third-party/elvis/guitcap.c
+        third-party/elvis/guiopen.c
+        third-party/elvis/http.c
+        third-party/elvis/input.c
+        third-party/elvis/io.c
+        third-party/elvis/lowbuf.c
+        third-party/elvis/lp.c
+        third-party/elvis/lpescape.c
+        third-party/elvis/lpovrtyp.c
+        third-party/elvis/lpps.c
+        third-party/elvis/main.c
+        third-party/elvis/map.c
+        third-party/elvis/mark.c
+        third-party/elvis/message.c
+        third-party/elvis/misc.c
+        third-party/elvis/more.c
+        third-party/elvis/move.c
+        third-party/elvis/need.c
+        third-party/elvis/operator.c
+        third-party/elvis/optglob.c
+        third-party/elvis/options.c
+        third-party/elvis/regexp.c
+        third-party/elvis/region.c
+        third-party/elvis/regsub.c
+        third-party/elvis/safe.c
+        third-party/elvis/scan.c
+        third-party/elvis/search.c
+        third-party/elvis/session.c
+        third-party/elvis/spell.c
+        third-party/elvis/state.c
+        third-party/elvis/tag.c
+        third-party/elvis/tagsrch.c
+        third-party/elvis/tagelvis.c
+        third-party/elvis/tinytcap.c
+        third-party/elvis/url.c
+        third-party/elvis/vi.c
+        third-party/elvis/vicmd.c
+        third-party/elvis/window.c
+        third-party/elvis/fmt.c
+        third-party/elvis/ref.c
+        third-party/elvis/osunix/osblock.c
+        third-party/elvis/osunix/osdir.c
+        third-party/elvis/osunix/osprg.c
+        third-party/elvis/osunix/ostext.c
+        third-party/elvis/osunix/osnet.c
+        third-party/elvis/osunix/tcaphelp.c
+    )
+    list(APPEND PSCAL_CORE_SOURCES ${ELVIS_CORE_SOURCES})
+    set_property(SOURCE ${ELVIS_CORE_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS "exit=elvis_exit")
+    set_property(SOURCE third-party/elvis/main.c APPEND PROPERTY COMPILE_DEFINITIONS "main=elvis_main_entry")
 endif()
 
 # ---- Extended builtins ----
@@ -492,6 +578,13 @@ endfunction()
 add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
 pscal_apply_common_compilation_settings(pscal_core_static)
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(PSCAL_PLATFORM_IOS)
+    target_include_directories(pscal_core_static PRIVATE
+        third-party/elvis
+        third-party/elvis/osunix
+        "${CMAKE_BINARY_DIR}/generated/elvis"
+    )
+endif()
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
 endif()
@@ -1197,6 +1290,11 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
 endif()
 
+add_executable(smallclu
+    src/smallclu/main.c
+)
+target_link_libraries(smallclu PRIVATE pscal_core_static)
+
 if(PSCAL_PLATFORM_IOS)
     add_executable(pscal_tool_runner src/ios/tool_runner_main.c)
     set(_tool_runner_libs
@@ -1234,4 +1332,9 @@ if(NOT PSCAL_PLATFORM_IOS)
         install(FILES tools/completions/_pscaljson2bc
                 DESTINATION "${CMAKE_INSTALL_DATADIR}/zsh/site-functions")
     endif()
+endif()
+
+if(PSCAL_PLATFORM_IOS)
+    install(DIRECTORY third-party/elvis/data/ DESTINATION "${_pscal_runtime_dest}/lib/elvis/data")
+    install(DIRECTORY third-party/elvis/doc/ DESTINATION "${_pscal_runtime_dest}/lib/elvis/doc")
 endif()

@@ -33,6 +33,7 @@ extern "C" {
     int exsh_main(int argc, char* argv[]);
     void pscalRuntimeSetVirtualTTYEnabled(bool enabled);
     bool pscalRuntimeVirtualTTYEnabled(void);
+    void pscalRuntimeRegisterVirtualTTYFd(int std_fd, int fd);
 }
 
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
@@ -160,6 +161,9 @@ static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd)
         return false;
     }
 
+    pscalRuntimeRegisterVirtualTTYFd(STDIN_FILENO, STDIN_FILENO);
+    pscalRuntimeRegisterVirtualTTYFd(STDOUT_FILENO, STDOUT_FILENO);
+    pscalRuntimeRegisterVirtualTTYFd(STDERR_FILENO, STDERR_FILENO);
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
 

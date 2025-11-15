@@ -57,6 +57,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"ls", "ls", -1},
     {"pascal", "pascal", -1},
     {"chmod", "chmod", -1},
+    {"elvis", "elvis", -1},
 #ifdef BUILD_DASCAL
     {"dascal", "dascal", -1},
 #endif

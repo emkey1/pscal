@@ -18,11 +18,27 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent(".examples.version", isDirectory: false)
     }
 
+    static var sysfilesDirectory: URL {
+        documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
+    }
+
+    static var sysfilesTmpDirectory: URL {
+        sysfilesDirectory.appendingPathComponent("tmp", isDirectory: true)
+    }
+
     static var workspaceEtcDirectory: URL {
-        documentsDirectory.appendingPathComponent("etc", isDirectory: true)
+        sysfilesDirectory.appendingPathComponent("etc", isDirectory: true)
     }
 
     static var workspaceEtcVersionMarker: URL {
+        sysfilesDirectory.appendingPathComponent(".etc.version", isDirectory: false)
+    }
+
+    static var legacyEtcDirectory: URL {
+        documentsDirectory.appendingPathComponent("etc", isDirectory: true)
+    }
+
+    static var legacyEtcVersionMarker: URL {
         documentsDirectory.appendingPathComponent(".etc.version", isDirectory: false)
     }
 
@@ -49,6 +65,12 @@ final class RuntimeAssetInstaller {
         guard let bundleRoot = Bundle.main.resourceURL else {
             NSLog("PSCAL iOS: missing bundle resource root; cannot configure runtime paths.")
             return
+        }
+
+        do {
+            try ensureSysfilesDirectoriesExist()
+        } catch {
+            NSLog("PSCAL iOS: failed to initialize sysfiles directory: %@", error.localizedDescription)
         }
 
         installWorkspaceExamplesIfNeeded(bundleRoot: bundleRoot)
@@ -142,13 +164,15 @@ final class RuntimeAssetInstaller {
             return
         }
 
+        migrateLegacyEtcIfNeeded()
+
         let workspaceEtc = RuntimePaths.workspaceEtcDirectory
         if needsWorkspaceEtcRefresh() {
             do {
                 if fileManager.fileExists(atPath: workspaceEtc.path) || isSymbolicLink(at: workspaceEtc) {
                     try fileManager.removeItem(at: workspaceEtc)
                 }
-                try ensureDocumentsDirectoryExists()
+                try ensureSysfilesDirectoriesExist()
                 try fileManager.copyItem(at: bundledEtc, to: workspaceEtc)
                 try writeWorkspaceEtcVersionMarker()
                 NSLog("PSCAL iOS: installed etc assets to %@", workspaceEtc.path)
@@ -229,6 +253,12 @@ final class RuntimeAssetInstaller {
                 setenv("PSCALI_ETC_ROOT", bundledEtc.path, 1)
             }
         }
+
+        let sysfilesPath = RuntimePaths.sysfilesDirectory.path
+        setenv("PSCALI_SYSFILES_ROOT", sysfilesPath, 1)
+        let tmpPath = RuntimePaths.sysfilesTmpDirectory.path
+        setenv("TMPDIR", tmpPath, 1)
+        setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {
@@ -258,6 +288,7 @@ final class RuntimeAssetInstaller {
     }
 
     private func writeWorkspaceEtcVersionMarker() throws {
+        try ensureSysfilesDirectoriesExist()
         let data = (assetsVersion + "\n").data(using: .utf8) ?? Data()
         try data.write(to: RuntimePaths.workspaceEtcVersionMarker, options: [.atomic])
     }
@@ -312,6 +343,43 @@ final class RuntimeAssetInstaller {
                 }
             } catch {
                 continue
+            }
+        }
+    }
+
+    private func ensureSysfilesDirectoriesExist() throws {
+        try ensureDocumentsDirectoryExists()
+        if !fileManager.fileExists(atPath: RuntimePaths.sysfilesDirectory.path) {
+            try fileManager.createDirectory(at: RuntimePaths.sysfilesDirectory, withIntermediateDirectories: true)
+        }
+        if !fileManager.fileExists(atPath: RuntimePaths.sysfilesTmpDirectory.path) {
+            try fileManager.createDirectory(at: RuntimePaths.sysfilesTmpDirectory, withIntermediateDirectories: true)
+        }
+    }
+
+    private func migrateLegacyEtcIfNeeded() {
+        let legacyEtc = RuntimePaths.legacyEtcDirectory
+        let newEtc = RuntimePaths.workspaceEtcDirectory
+        if fileManager.fileExists(atPath: legacyEtc.path) &&
+            !fileManager.fileExists(atPath: newEtc.path) {
+            do {
+                try ensureSysfilesDirectoriesExist()
+                try fileManager.moveItem(at: legacyEtc, to: newEtc)
+                NSLog("PSCAL iOS: migrated etc directory to %@", newEtc.path)
+            } catch {
+                NSLog("PSCAL iOS: failed to migrate legacy etc directory: %@", error.localizedDescription)
+            }
+        }
+
+        let legacyMarker = RuntimePaths.legacyEtcVersionMarker
+        let newMarker = RuntimePaths.workspaceEtcVersionMarker
+        if fileManager.fileExists(atPath: legacyMarker.path) &&
+            !fileManager.fileExists(atPath: newMarker.path) {
+            do {
+                try ensureSysfilesDirectoriesExist()
+                try fileManager.moveItem(at: legacyMarker, to: newMarker)
+            } catch {
+                NSLog("PSCAL iOS: failed to migrate etc version marker: %@", error.localizedDescription)
             }
         }
     }

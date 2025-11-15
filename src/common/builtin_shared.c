@@ -1,11 +1,13 @@
 #include "common/builtin_shared.h"
 #include "ext_builtins/register.h"
+#include "smallclu/smallclu.h"
 #include <pthread.h>
 
 static pthread_once_t g_extended_builtin_once = PTHREAD_ONCE_INIT;
 
 static void sharedRegisterExtendedBuiltinsOnce(void) {
     registerExtendedBuiltins();
+    smallcluRegisterBuiltins();
 }
 
 void sharedRegisterExtendedBuiltins(void) {
