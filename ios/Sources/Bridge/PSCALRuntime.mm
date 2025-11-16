@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <string>
 #include <termios.h>
 #if __has_include(<util.h>)
 #include <util.h>
@@ -49,6 +50,7 @@ static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
 static int s_pending_columns = 80;
 static int s_pending_rows = 24;
+static NSFileHandle *s_debug_log_handle = nil;
 
 static void PSCALRuntimeConfigurePtySlave(int fd) {
     if (fd < 0) {
@@ -101,6 +103,62 @@ static void PSCALRuntimeDispatchOutput(const char *buffer, size_t length) {
         handler(heap_buffer, length, context);
     }
 }
+/***********/
+static void PSCALRuntimeEnsureDebugLog(void) {
+    if (s_debug_log_handle) {
+        return;
+    }
+    NSArray<NSURL *> *dirs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
+    NSURL *doc = dirs.firstObject;
+    if (!doc) {
+        return;
+    }
+    NSURL *logURL = [doc URLByAppendingPathComponent:@"elvis_debug.log"];
+    [[NSFileManager defaultManager] createFileAtPath:logURL.path contents:nil attributes:nil];
+    NSError *error = nil;
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:logURL error:&error];
+    if (!handle) {
+        NSLog(@"PSCALRuntime: failed to open debug log: %@", error.localizedDescription);
+        return;
+    }
+    [handle seekToEndOfFile];
+    s_debug_log_handle = handle;
+}
+
+void pscalRuntimeDebugLog(const char *message) {
+    if (!message) return;
+    NSString *line = [NSString stringWithUTF8String:message];
+    if (!line) {
+        line = @"(log conversion failure)";
+    }
+    NSLog(@"%@", line);
+    PSCALRuntimeEnsureDebugLog();
+    if (s_debug_log_handle) {
+        NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+        [s_debug_log_handle writeData:data];
+        [s_debug_log_handle synchronizeFile];
+    }
+}
+
+static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
+    std::string trimmed = line;
+    while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
+        trimmed.pop_back();
+    }
+    static const char *kSuppressedFragments[] = {
+        "TextInputActionsAnalytics",
+        "inputOperation = dismissAutoFillPanel",
+        "PSCALRuntime: using virtual terminal pipes",
+        "OSLOG",
+        "Falling back to first defined description for UIWindowSceneSessionRoleApplication"
+    };
+    for (size_t i = 0; i < sizeof(kSuppressedFragments) / sizeof(kSuppressedFragments[0]); ++i) {
+        if (trimmed.find(kSuppressedFragments[i]) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static void *PSCALRuntimeOutputPump(void *_) {
     (void)_;
@@ -116,6 +174,10 @@ static void *PSCALRuntimeOutputPump(void *_) {
         }
         if (nread == 0) {
             break; // EOF
+        }
+        std::string chunk(buffer, (size_t)nread);
+        if (PSCALRuntimeShouldSuppressLogLine(chunk)) {
+            continue;
         }
         PSCALRuntimeDispatchOutput(buffer, (size_t)nread);
     }
@@ -389,3 +451,4 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
 int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }
+#import <Foundation/Foundation.h>

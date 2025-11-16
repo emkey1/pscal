@@ -26,6 +26,9 @@ bool pscalRuntimeStdinHasRealTTY(void);
 bool pscalRuntimeStdoutHasRealTTY(void);
 bool pscalRuntimeStderrHasRealTTY(void);
 
+int pscalRuntimeDetectWindowRows(void);
+int pscalRuntimeDetectWindowCols(void);
+
 #ifdef __cplusplus
 }
 #endif

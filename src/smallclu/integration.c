@@ -92,6 +92,28 @@ DEFINE_SMALLCLU_WRAPPER("cat", cat)
 DEFINE_SMALLCLU_WRAPPER("clear", clear)
 DEFINE_SMALLCLU_WRAPPER("cls", cls)
 DEFINE_SMALLCLU_WRAPPER("editor", editor)
+DEFINE_SMALLCLU_WRAPPER("date", date)
+DEFINE_SMALLCLU_WRAPPER("cal", cal)
+DEFINE_SMALLCLU_WRAPPER("head", head)
+DEFINE_SMALLCLU_WRAPPER("tail", tail)
+DEFINE_SMALLCLU_WRAPPER("touch", touch)
+DEFINE_SMALLCLU_WRAPPER("grep", grep)
+DEFINE_SMALLCLU_WRAPPER("wc", wc)
+DEFINE_SMALLCLU_WRAPPER("du", du)
+DEFINE_SMALLCLU_WRAPPER("find", find)
+DEFINE_SMALLCLU_WRAPPER("stty", stty)
+DEFINE_SMALLCLU_WRAPPER("resize", resize)
+DEFINE_SMALLCLU_WRAPPER("sort", sort)
+DEFINE_SMALLCLU_WRAPPER("uniq", uniq)
+DEFINE_SMALLCLU_WRAPPER("sed", sed)
+DEFINE_SMALLCLU_WRAPPER("cut", cut)
+DEFINE_SMALLCLU_WRAPPER("tr", tr)
+DEFINE_SMALLCLU_WRAPPER("id", id)
+#if defined(PSCAL_TARGET_IOS)
+DEFINE_SMALLCLU_WRAPPER("cp", cp)
+DEFINE_SMALLCLU_WRAPPER("mv", mv)
+DEFINE_SMALLCLU_WRAPPER("rm", rm)
+#endif
 #if defined(PSCAL_TARGET_IOS)
 DEFINE_SMALLCLU_WRAPPER("elvis", elvis)
 #endif
@@ -111,7 +133,27 @@ static void smallcluRegisterBuiltinsOnce(void) {
     registerVmBuiltin("clear", vmBuiltinSmallclu_clear, BUILTIN_TYPE_PROCEDURE, "clear");
     registerVmBuiltin("cls", vmBuiltinSmallclu_cls, BUILTIN_TYPE_PROCEDURE, "cls");
     registerVmBuiltin("editor", vmBuiltinSmallclu_editor, BUILTIN_TYPE_PROCEDURE, "editor");
+    registerVmBuiltin("date", vmBuiltinSmallclu_date, BUILTIN_TYPE_PROCEDURE, "date");
+    registerVmBuiltin("cal", vmBuiltinSmallclu_cal, BUILTIN_TYPE_PROCEDURE, "cal");
+    registerVmBuiltin("head", vmBuiltinSmallclu_head, BUILTIN_TYPE_PROCEDURE, "head");
+    registerVmBuiltin("tail", vmBuiltinSmallclu_tail, BUILTIN_TYPE_PROCEDURE, "tail");
+    registerVmBuiltin("touch", vmBuiltinSmallclu_touch, BUILTIN_TYPE_PROCEDURE, "touch");
+    registerVmBuiltin("grep", vmBuiltinSmallclu_grep, BUILTIN_TYPE_PROCEDURE, "grep");
+    registerVmBuiltin("wc", vmBuiltinSmallclu_wc, BUILTIN_TYPE_PROCEDURE, "wc");
+    registerVmBuiltin("du", vmBuiltinSmallclu_du, BUILTIN_TYPE_PROCEDURE, "du");
+    registerVmBuiltin("find", vmBuiltinSmallclu_find, BUILTIN_TYPE_PROCEDURE, "find");
+    registerVmBuiltin("stty", vmBuiltinSmallclu_stty, BUILTIN_TYPE_PROCEDURE, "stty");
+    registerVmBuiltin("resize", vmBuiltinSmallclu_resize, BUILTIN_TYPE_PROCEDURE, "resize");
+    registerVmBuiltin("sort", vmBuiltinSmallclu_sort, BUILTIN_TYPE_PROCEDURE, "sort");
+    registerVmBuiltin("uniq", vmBuiltinSmallclu_uniq, BUILTIN_TYPE_PROCEDURE, "uniq");
+    registerVmBuiltin("sed", vmBuiltinSmallclu_sed, BUILTIN_TYPE_PROCEDURE, "sed");
+    registerVmBuiltin("cut", vmBuiltinSmallclu_cut, BUILTIN_TYPE_PROCEDURE, "cut");
+    registerVmBuiltin("tr", vmBuiltinSmallclu_tr, BUILTIN_TYPE_PROCEDURE, "tr");
+    registerVmBuiltin("id", vmBuiltinSmallclu_id, BUILTIN_TYPE_PROCEDURE, "id");
 #if defined(PSCAL_TARGET_IOS)
+    registerVmBuiltin("cp", vmBuiltinSmallclu_cp, BUILTIN_TYPE_PROCEDURE, "cp");
+    registerVmBuiltin("mv", vmBuiltinSmallclu_mv, BUILTIN_TYPE_PROCEDURE, "mv");
+    registerVmBuiltin("rm", vmBuiltinSmallclu_rm, BUILTIN_TYPE_PROCEDURE, "rm");
     registerVmBuiltin("elvis", vmBuiltinSmallclu_elvis, BUILTIN_TYPE_PROCEDURE, "elvis");
 #endif
 }

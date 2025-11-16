@@ -54,6 +54,10 @@ extern GUI	guiquit;
 extern GUI	guiscript;
 #endif
 
+#ifdef GUI_PSCAL
+extern GUI	guipscal;
+#endif
+
 #ifdef GUI_WIN32
 extern GUI	guiwin32;
 #endif

@@ -26,6 +26,10 @@ private enum RuntimePaths {
         sysfilesDirectory.appendingPathComponent("tmp", isDirectory: true)
     }
 
+    static var homeDirectory: URL {
+        sysfilesDirectory.appendingPathComponent("home", isDirectory: true)
+    }
+
     static var workspaceEtcDirectory: URL {
         sysfilesDirectory.appendingPathComponent("etc", isDirectory: true)
     }
@@ -82,6 +86,8 @@ final class RuntimeAssetInstaller {
             NSLog("PSCAL iOS: failed to switch working directory to %@", workspacePath)
         }
         setenv("PSCALI_WORKSPACE_ROOT", workspacePath, 1)
+
+        installSkelHomeIfNeeded()
     }
 
     func ensureToolRunnerExecutable() -> String? {
@@ -259,6 +265,7 @@ final class RuntimeAssetInstaller {
         let tmpPath = RuntimePaths.sysfilesTmpDirectory.path
         setenv("TMPDIR", tmpPath, 1)
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
+        setenv("HOME", RuntimePaths.homeDirectory.path, 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {
@@ -279,6 +286,61 @@ final class RuntimeAssetInstaller {
         if !fileManager.fileExists(atPath: RuntimePaths.documentsDirectory.path) {
             try fileManager.createDirectory(at: RuntimePaths.documentsDirectory,
                                             withIntermediateDirectories: true)
+        }
+    }
+
+    private func installSkelHomeIfNeeded() {
+        guard let bundleRoot = Bundle.main.resourceURL else {
+            return
+        }
+        let skel = bundleRoot.appendingPathComponent("etc/skel", isDirectory: true)
+        let home = RuntimePaths.homeDirectory
+        guard fileManager.fileExists(atPath: skel.path) else {
+            return
+        }
+        do {
+            let entries = try fileManager.contentsOfDirectory(atPath: skel.path)
+            for entry in entries where entry != ".DS_Store" {
+                let source = skel.appendingPathComponent(entry)
+                let destination = home.appendingPathComponent(entry)
+                syncSkelEntry(from: source, to: destination, isExshrc: (entry == ".exshrc"))
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to enumerate skel dir: %@", error.localizedDescription)
+        }
+    }
+
+    private func syncSkelEntry(from source: URL, to destination: URL, isExshrc: Bool) {
+        guard let data = try? Data(contentsOf: source),
+              let newContents = String(data: data, encoding: .utf8) else {
+            return
+        }
+        if !fileManager.fileExists(atPath: destination.path) {
+            do {
+                try newContents.write(to: destination, atomically: true, encoding: .utf8)
+            } catch {
+                NSLog("PSCAL iOS: failed to write .exshrc: %@", error.localizedDescription)
+            }
+            return
+        }
+        guard isExshrc,
+              let oldData = try? Data(contentsOf: destination),
+              let oldContents = String(data: oldData, encoding: .utf8) else {
+            do {
+                try newContents.write(to: destination, atomically: true, encoding: .utf8)
+            } catch {
+                NSLog("PSCAL iOS: failed to update %@: %@", destination.lastPathComponent, error.localizedDescription)
+            }
+            return
+        }
+        let containsShortPrompt = oldContents.contains("\\W")
+        let containsFullPrompt = oldContents.contains("\\w")
+        if !containsShortPrompt && containsFullPrompt {
+            do {
+                try newContents.write(to: destination, atomically: true, encoding: .utf8)
+            } catch {
+                NSLog("PSCAL iOS: failed to update .exshrc: %@", error.localizedDescription)
+            }
         }
     }
 
@@ -354,6 +416,9 @@ final class RuntimeAssetInstaller {
         }
         if !fileManager.fileExists(atPath: RuntimePaths.sysfilesTmpDirectory.path) {
             try fileManager.createDirectory(at: RuntimePaths.sysfilesTmpDirectory, withIntermediateDirectories: true)
+        }
+        if !fileManager.fileExists(atPath: RuntimePaths.homeDirectory.path) {
+            try fileManager.createDirectory(at: RuntimePaths.homeDirectory, withIntermediateDirectories: true)
         }
     }
 

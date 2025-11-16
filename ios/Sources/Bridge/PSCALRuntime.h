@@ -38,6 +38,8 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 /// Returns non-zero when the runtime is using the virtual TTY fallback (pipes).
 int PSCALRuntimeIsVirtualTTY(void);
 
+void pscalRuntimeDebugLog(const char *message);
+
 #ifdef __cplusplus
 }
 #endif

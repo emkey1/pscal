@@ -212,6 +212,9 @@ Value vmBuiltinShellRea(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPscalVm(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPscalJson2bc(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellExshTool(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellGwin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellResize(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellElvisDump(struct VM_s* vm, int arg_count, Value* args);
 #ifdef BUILD_PSCALD
 Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
 #endif

@@ -1077,6 +1077,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stdin_fd, STDIN_FILENO) < 0) {
             goto cleanup;
         }
+        clearerr(stdin);
     }
     if (stdout_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
@@ -1085,6 +1086,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
             goto cleanup;
         }
+        clearerr(stdout);
     }
     if (stderr_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
@@ -1093,6 +1095,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stderr_fd, STDERR_FILENO) < 0) {
             goto cleanup;
         }
+        clearerr(stderr);
     }
 
     if (apply_exec_redirs) {

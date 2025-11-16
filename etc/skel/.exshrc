@@ -42,7 +42,7 @@ fi
 # the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
 # minimal "exsh$" prompt so scripts are unaffected.
 if [ -t 1 ]; then
-    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]\u@\h \[\033[1;34m\]\W\[\033[0m\]\$ "
+    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]\u@\h \[\033[1;34m\]\W\[\033[0m\] ⚡ "
 else
     export PS1="exsh$ "
 fi

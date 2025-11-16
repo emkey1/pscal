@@ -14,6 +14,7 @@
 #undef GUI_CURSES
 #define GUI_TERMCAP
 #define GUI_OPEN
+#define GUI_PSCAL
 
 /* Display modes & optional features */
 #define DISPLAY_HEX
@@ -47,7 +48,7 @@
 #define FEATURE_MKEXRC
 #define FEATURE_NORMAL
 #define FEATURE_PROTO
-#undef FEATURE_RAM
+#define FEATURE_RAM
 #define FEATURE_RCSID
 #define FEATURE_REGION
 #define FEATURE_SHOWTAG

@@ -139,6 +139,9 @@ static char	*CQ;		/* :cQ=: normal cursor */
 static char	*CX;		/* :cX=: cursor used for EX command/entry */
 static char	*CV;		/* :cV=: cursor used for VI command mode */
 static char	*CI;		/* :cI=: cursor used for VI input mode */
+static char	emptyseq[] = "";
+
+static ELVBOOL	forceSanitizeTermcap = ElvFalse;
 static char	*CR;		/* :cR=: cursor used for VI replace mode */
 #ifdef FEATURE_MISC
 static char	*GS;		/* :GS=:as=: start graphic character mode */
@@ -442,9 +445,9 @@ void ttysuspend()
 
 	/* restore some things */
 	if (CQ) tputs(CQ, 1, ttych);	/* restore cursor shape */
-	if (TE) tputs(TE, 1, ttych);	/* restore terminal mode/page */
+	if (TE && *TE) tputs(TE, 1, ttych);	/* restore terminal mode/page */
 	viscreen = 0;
-	if (KE) tputs(KE, 1, ttych);	/* restore keypad mode */
+	if (KE && *KE) tputs(KE, 1, ttych);	/* restore keypad mode */
 	if (RC) tputs(RC, 1, ttych);	/* restore cursor & attributes */
 
 	/* no cursor movement for terminals with te capability */
@@ -472,9 +475,9 @@ void ttyresume(ELVBOOL sendstr)
 	{
 		ttych('\r');
 		tputs(CE, (int)o_ttycolumns, ttych);
-		if (TI) tputs(TI, 1, ttych);
+		if (TI && *TI) tputs(TI, 1, ttych);
 		viscreen = 1;
-		if (KS) tputs(KS, 1, ttych);
+		if (KS && *KS) tputs(KS, 1, ttych);
 	}
 
 	/* reset, so we don't try any suspicious optimizations */
@@ -657,6 +660,10 @@ static void starttcap()
 	mayhave(&TE, "te");
 	pair(&SC, &RC, "sc", "rc");	/* cursor save/restore */
 	pair(&KS, &KE, "ks", "ke");	/* keypad enable/disable */
+	TI = emptyseq;
+	TE = emptyseq;
+	KS = emptyseq;
+	KE = emptyseq;
 	mayhave(&AF, "AF");
 	if (tgetnum("sg") <= 0)
 	{
@@ -712,6 +719,7 @@ static void starttcap()
 		CX = CI = CQ;
 		CR = CV;
 	}
+	CQ = CV = CX = CI = CR = emptyseq;
 
 #ifdef FEATURE_MISC
 	/* graphic characters */
@@ -1295,6 +1303,7 @@ static int test()
 	char	dummy[40], *dummyptr;
 	const char *forceEnv = getenv("PSCALI_FORCE_TERMCAP");
 	ELVBOOL forceTermcap = (forceEnv && *forceEnv);
+	forceSanitizeTermcap = ElvTrue;
 
 	/* get terminal type.  If no type, then return 0 */
 	term = ttytermtype();

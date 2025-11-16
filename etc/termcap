@@ -1,0 +1,16 @@
+pscali|PSCALI terminal:
+:am:bs:xn:mi:ms:
+:co#80:li#24:it#8:
+:cl=\E[H\E[2J:cd=\E[J:ce=\E[K:
+:cm=\E[%i%p1%d;%p2%dH:ho=\E[H:
+:up=\E[A:do=\E[B:nd=\E[C:le=\E[D:
+:AL=\E[%dL:DL=\E[%dM:al=\E[L:dl=\E[M:
+:IC=\E[%d@:DC=\E[%dP:ic=\E[@:dc=\E[P:
+:so=\E[7m:se=\E[27m:
+:us=\E[4m:ue=\E[24m:
+:md=\E[1m:mr=\E[7m:me=\E[0m:
+:vi=\E[?25l:ve=\E[?25h:
+:sr=\EM:SF=\E[%dS:SR=\E[%dT:
+:cs=\E[%i%p1%d;%p2%dr:
+:sc=\E7:rc=\E8:
+:ks=:ke=:ti=:te=:

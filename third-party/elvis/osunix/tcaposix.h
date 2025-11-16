@@ -19,6 +19,7 @@ static void catchsig(int signo);
 
 static struct termios	oldtermio;	/* original tty mode */
 static struct termios	newtermio;	/* cbreak/noecho tty mode */
+static ELVBOOL		pscali_no_ttyraw = ElvFalse;
 
 
 /* this function is used to catch signals */
@@ -32,6 +33,10 @@ static void ttyinit2()
 {
 	/* get the old tty state */
 	tcgetattr(ttykbd, &oldtermio);
+	{
+		const char *flag = getenv("PSCALI_NO_TTYRAW");
+		pscali_no_ttyraw = (flag && *flag) ? ElvTrue : ElvFalse;
+	}
 }
 
 /* switch to the tty state that elvis runs in */
@@ -57,6 +62,15 @@ void ttyraw(char *erasekey)
 # endif
 #endif
 	signal(SIGQUIT, SIG_IGN);
+
+	if (pscali_no_ttyraw)
+	{
+		if (erasekey)
+		{
+			*erasekey = ELVCTRL('H');
+		}
+		return;
+	}
 
 	/* switch to raw mode */
 	ospeed = cfgetospeed(&oldtermio);
@@ -89,6 +103,10 @@ void ttyraw(char *erasekey)
 /* switch back to the original tty state */
 void ttynormal()
 {
+	if (pscali_no_ttyraw)
+	{
+		return;
+	}
 	tcsetattr(ttykbd, TCSADRAIN, &oldtermio);
 }
 
@@ -103,6 +121,11 @@ int ttyread(char *buf, int len, int timeout)
 
 	/* clear the "caught" variable */
 	caught = 0;
+
+	if (pscali_no_ttyraw)
+	{
+		return (int)read(ttykbd, buf, (unsigned)len);
+	}
 
 #ifndef SA_NOMASK
 	/* make sure the signal catcher hasn't been reset */

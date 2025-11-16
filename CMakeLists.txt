@@ -467,6 +467,7 @@ if(PSCAL_PLATFORM_IOS)
         third-party/elvis/guicurs.c
         third-party/elvis/guitcap.c
         third-party/elvis/guiopen.c
+        third-party/elvis/guipscal.c
         third-party/elvis/http.c
         third-party/elvis/input.c
         third-party/elvis/io.c

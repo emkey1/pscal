@@ -28,6 +28,9 @@ int main(int argc, char **argv);
  */
 static GUI *allguis[] =
 {
+#ifdef GUI_PSCAL
+	&guipscal,
+#endif
 #ifdef GUI_WIN32
 	&guiwin32
 #endif
@@ -509,7 +512,15 @@ static int choosegui(int argc, char * * argv)
 	 * environment variable.
 	 */
 	if (!o_gui)
-		o_gui = toCHAR(getenv("ELVISGUI"));
+	{
+		const char *envgui = getenv("ELVISGUI");
+		if (envgui && *envgui) {
+			fprintf(stderr, "[elvis main] ELVISGUI=%s\n", envgui);
+		} else {
+			fprintf(stderr, "[elvis main] ELVISGUI not set\n");
+		}
+		o_gui = toCHAR(envgui);
+	}
 
 	/* find the specified GUI, or the first available if none specified */
 	if (o_gui)
@@ -547,10 +558,12 @@ static int choosegui(int argc, char * * argv)
 		{
 			if (j >= 0)
 			{
+				fprintf(stderr, "[elvis main] selecting fallback GUI index %d\n", j);
 				i = j;
 			}
 			else
 			{
+				fprintf(stderr, "[elvis main] no gui available\n");
 				msg(MSG_ERROR, "no gui available");
 				exit(0);
 			}

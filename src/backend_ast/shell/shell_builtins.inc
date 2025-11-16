@@ -18,6 +18,8 @@
 #include "clike/state.h"
 #include "rea/state.h"
 extern char **environ;
+extern void pscalShowGwinMessage(const char *message);
+extern void pscalElvisDump(void);
 
 static void shellInvalidateFrontendState(FrontendKind kind) {
     switch (kind) {
@@ -3276,6 +3278,106 @@ Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
     shellUpdateStatus(0);
     return makeVoid();
 }
+
+#ifdef PSCAL_TARGET_IOS
+static void shellApplyWindowSize(int rows, int cols) {
+    if (rows <= 0 || cols <= 0) {
+        return;
+    }
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", rows);
+    setenv("LINES", buffer, 1);
+    snprintf(buffer, sizeof(buffer), "%d", cols);
+    setenv("COLUMNS", buffer, 1);
+    printf("\x1b[8;%d;%dt", rows, cols);
+    fflush(stdout);
+}
+
+Value vmBuiltinShellResize(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "resize: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    int rows = pscalRuntimeDetectWindowRows();
+    int cols = pscalRuntimeDetectWindowCols();
+    if (rows <= 0 || cols <= 0) {
+        runtimeError(vm, "resize: unable to detect terminal size");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellApplyWindowSize(rows, cols);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
+    char *piped_message = NULL;
+    if (!pscalRuntimeStdinIsInteractive()) {
+        size_t cap = 1024;
+        size_t len = 0;
+        piped_message = (char *)malloc(cap);
+        if (piped_message) {
+            int ch = 0;
+            while ((ch = fgetc(stdin)) != EOF) {
+                if (len + 1 >= cap) {
+                    size_t new_cap = cap * 2;
+                    char *resized = (char *)realloc(piped_message, new_cap);
+                    if (!resized) {
+                        free(piped_message);
+                        piped_message = NULL;
+                        break;
+                    }
+                    piped_message = resized;
+                    cap = new_cap;
+                }
+                piped_message[len++] = (char)ch;
+            }
+            if (piped_message) {
+                while (len > 0 && (piped_message[len - 1] == '\n' || piped_message[len - 1] == '\r')) {
+                    len--;
+                }
+                piped_message[len] = '\0';
+                if (len == 0) {
+                    free(piped_message);
+                    piped_message = NULL;
+                }
+            }
+        }
+    }
+
+    const char *message = piped_message ? piped_message : "gwin for the win";
+    if (arg_count > 0) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val) {
+            runtimeError(vm, "gwin: expected an optional message string");
+            shellUpdateStatus(1);
+            free(piped_message);
+            return makeVoid();
+        }
+        message = args[0].s_val;
+    }
+    pscalShowGwinMessage(message);
+    shellUpdateStatus(0);
+    if (piped_message) {
+        free(piped_message);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinShellElvisDump(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "elvisdump: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    pscalElvisDump();
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+#endif
 
 #ifdef PSCAL_TARGET_IOS
 

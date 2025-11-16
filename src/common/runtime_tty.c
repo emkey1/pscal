@@ -1,6 +1,8 @@
 #include "common/runtime_tty.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -120,4 +122,40 @@ bool pscalRuntimeStdoutHasRealTTY(void) {
 
 bool pscalRuntimeStderrHasRealTTY(void) {
     return pscalRuntimeFdHasRealTTY(STDERR_FILENO);
+}
+
+static int pscalRuntimeParseEnvInt(const char *name) {
+    const char *value = getenv(name);
+    if (!value || !*value) {
+        return -1;
+    }
+    char *endptr = NULL;
+    long parsed = strtol(value, &endptr, 10);
+    if (!endptr || *endptr != '\0' || parsed <= 0 || parsed > 1000) {
+        return -1;
+    }
+    return (int)parsed;
+}
+
+static int pscalRuntimeDetectDimension(bool rows) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        unsigned short value = rows ? ws.ws_row : ws.ws_col;
+        if (value > 0) {
+            return (int)value;
+        }
+    }
+    int envValue = pscalRuntimeParseEnvInt(rows ? "LINES" : "COLUMNS");
+    if (envValue > 0) {
+        return envValue;
+    }
+    return rows ? 24 : 80;
+}
+
+int pscalRuntimeDetectWindowRows(void) {
+    return pscalRuntimeDetectDimension(true);
+}
+
+int pscalRuntimeDetectWindowCols(void) {
+    return pscalRuntimeDetectDimension(false);
 }

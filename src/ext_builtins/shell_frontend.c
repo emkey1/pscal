@@ -119,5 +119,8 @@ void registerShellFrontendBuiltins(void) {
 #ifdef BUILD_PSCALD
     registerShellBuiltin(category, command_group, "pscald", vmBuiltinShellPscald);
 #endif
+    registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
+    registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
+    registerShellBuiltin(category, command_group, "elvisdump", vmBuiltinShellElvisDump);
 #endif
 }

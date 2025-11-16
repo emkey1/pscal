@@ -40,8 +40,7 @@ static int nblks;
 /* This function creates a new block file, and returns ElvTrue if successful,
  * or ElvFalse if failed because the file was already busy.
  */
-ELVBOOL blkopen(ELVBOOL force, BLK *buf)
-{
+ELVBOOL blkopen(ELVBOOL force, BLK *buf) {
 static char	dfltname[1024];
 	char	dir[1024];
 	struct stat st;
@@ -49,8 +48,7 @@ static char	dfltname[1024];
 	long	oldcount;
 
 #ifdef FEATURE_RAM
-	if (o_session && !CHARcmp(o_session, toCHAR("ram")))
-	{
+	if (o_session && !CHARcmp(o_session, toCHAR("ram"))) {
 		nblks = 1024;
 		blklist = (BLK **)calloc(nblks, sizeof(BLK *));
 		blklist[0] = (BLK *)malloc(o_blksize);
@@ -63,18 +61,15 @@ static char	dfltname[1024];
 	 * defaults until we find an existing file (if we're trying to
 	 * recover) or a non-existent file (if we're not trying to recover).
 	 */
-	if (!o_session)
-	{
+	if (!o_session) {
 		/* search through sessionpath for a writable directory */
 		if (!o_sessionpath)
 			o_sessionpath = toCHAR("~:.");
 		size_t dircap = sizeof(dir);
-		for (i = 0, *dir = '\0'; o_sessionpath[i] && !*dir; )
-		{
+		for (i = 0, *dir = '\0'; o_sessionpath[i] && !*dir; ) {
 			/* copy next name from o_sessionpath to dfltname */
 			j = 0;
-			if (o_sessionpath[i] == '~' && !elvalnum(o_sessionpath[i + 1]))
-			{
+			if (o_sessionpath[i] == '~' && !elvalnum(o_sessionpath[i + 1])) {
 				const char *home = tochar8(o_home);
 				size_t homelen = home ? strlen(home) : 0;
 				if (homelen >= dircap) homelen = dircap - 1;
@@ -82,8 +77,7 @@ static char	dfltname[1024];
 				j = (int)homelen;
 				i++;
 			}
-			while (o_sessionpath[i] && o_sessionpath[i] != ':')
-			{
+			while (o_sessionpath[i] && o_sessionpath[i] != ':') {
 				if ((size_t)j + 1 >= dircap) {
 					/* segment too long; skip this entry */
 					while (o_sessionpath[i] && o_sessionpath[i] != ':') {
@@ -107,28 +101,23 @@ static char	dfltname[1024];
 			 	? (st.st_mode & S_IRWXU) == S_IRWXU
 			 	: st.st_gid == getegid()
 			 		? (st.st_mode & S_IRWXG) == S_IRWXG
-			 		: (st.st_mode & S_IRWXO) == S_IRWXO))
-			{
+			 		: (st.st_mode & S_IRWXO) == S_IRWXO)) {
 				*dir = '\0';
 			}
 		}
-		if (!*dir)
-		{
+		if (!*dir) {
 			msg(MSG_FATAL, "set SESSIONPATH to a writable directory");
 		}
-		if (!o_directory)
-		{
+		if (!o_directory) {
 			optpreset(o_directory, CHARkdup(toCHAR(dir)), OPT_FREE);
 		}
 
 		/* choose the name of a session file */
 		i = 1;
 		oldcount = 0;
-		do
-		{
+		do {
 			/* protect against trying a ridiculous number of names */
-			if (i >= 1000)
-			{
+			if (i >= 1000) {
 				msg(MSG_FATAL, o_recovering
 					? "[s]no session file found in $1"
 					: "[s]too many session files in $1", dir);
@@ -140,14 +129,12 @@ static char	dfltname[1024];
 			 * can print a warning later, so the user will know
 			 * he should delete it or recover it eventually.
 			 */
-			if (!o_recovering && access(dfltname, W_OK) == 0)
-			{
+			if (!o_recovering && access(dfltname, W_OK) == 0) {
 				oldcount++;
 			}
 
 			/* if user wants to cancel, then fail */
-			if (chosengui->poll && (*chosengui->poll)(ElvFalse))
-			{
+			if (chosengui->poll && (*chosengui->poll)(ElvFalse)) {
 				return ElvFalse;
 			}
 		} while (o_recovering ? (access(dfltname, F_OK) != 0)
@@ -159,13 +146,10 @@ static char	dfltname[1024];
 	}
 
 	/* Try to open the session file (if not opened in the above loop) */
-	if (fd < 0 && (fd = open(tochar8(o_session), O_RDWR|O_BINARY)) >= 0)
-	{
+	if (fd < 0 && (fd = open(tochar8(o_session), O_RDWR|O_BINARY)) >= 0) {
 		/* we're opening an existing session -- definitely not temporary */
 		o_tempsession = ElvFalse;
-	}
-	else
-	{
+	} else {
 		/* either we're about to open an existing session that was
 		 * explicitly named via "-f session", or we have already
 		 * created a temporary session and just need to initialize it.
@@ -181,15 +165,12 @@ static char	dfltname[1024];
 
 		/* either way, we now have an open session.  Initialize it! */
 		o_newsession = ElvTrue;
-		if (write(fd, (char *)buf, (unsigned)o_blksize) < o_blksize)
-		{
+		if (write(fd, (char *)buf, (unsigned)o_blksize) < o_blksize) {
 			close(fd);
 			unlink(tochar8(o_session));
 			fd = -1;
 			errno = ENOSPC;
-		}
-		else
-		{
+		} else {
 			lseek(fd, 0L, 0);
 		}
 	}
@@ -201,12 +182,10 @@ static char	dfltname[1024];
 	 * If already marked as "in use" and !force, then fail.
 	 */
 	/* lockf(fd, LOCK, sizeof buf->super); */
-	if (read(fd, (char *)buf, sizeof buf->super) != sizeof buf->super)
-	{
+	if (read(fd, (char *)buf, sizeof buf->super) != sizeof buf->super) {
 		msg(MSG_FATAL, "blkopen's read failed");
 	}
-	if (buf->super.inuse && !force)
-	{
+	if (buf->super.inuse && !force) {
 		/* lockf(fd, ULOCK, o_blksize); */
 		return ElvFalse;
 	}
@@ -221,8 +200,7 @@ static char	dfltname[1024];
 
 
 /* This function closes the session file, given its handle */
-void blkclose(BLK *buf)
-{
+void blkclose(BLK *buf) {
 	if (fd < 0)
 		return;
 	blkread(buf, 0);
@@ -230,8 +208,7 @@ void blkclose(BLK *buf)
 	blkwrite(buf, 0);
 	close(fd);
 	fd = -1;
-	if (o_tempsession)
-	{
+	if (o_tempsession) {
 		unlink(tochar8(o_session));
 	}
 }
@@ -245,10 +222,8 @@ void blkwrite(BLK *buf, _BLKNO_ blkno)
 {
 #ifdef FEATURE_RAM
 	/* store it in RAM */
-	if (nblks > 0)
-	{
-		if (blkno >= nblks)
-		{
+	if (nblks > 0) {
+		if (blkno >= nblks) {
 			blklist = (BLK **)realloc(blklist,
 						(nblks + 1024) * sizeof(BLK *));
 			memset(&blklist[nblks], 0, 1024 * sizeof(BLK *));
@@ -263,8 +238,7 @@ void blkwrite(BLK *buf, _BLKNO_ blkno)
 
 	/* write the block */
 	lseek(fd, (off_t)blkno * (off_t)o_blksize, 0);
-	if (write(fd, (char *)buf, (size_t)o_blksize) != o_blksize)
-	{
+	if (write(fd, (char *)buf, (size_t)o_blksize) != o_blksize) {
 		msg(MSG_FATAL, "blkwrite failed");
 	}
 }
@@ -276,8 +250,7 @@ void blkwrite(BLK *buf, _BLKNO_ blkno)
 void blkread(BLK *buf, _BLKNO_ blkno)
 {
 #ifdef FEATURE_RAM
-	if (nblks > 0)
-	{
+	if (nblks > 0) {
 		memcpy(buf, blklist[blkno], o_blksize);
 		return;
 	}
@@ -285,8 +258,7 @@ void blkread(BLK *buf, _BLKNO_ blkno)
 
 	/* read the block */
 	lseek(fd, (off_t)blkno * o_blksize, 0);
-	if (read(fd, (char *)buf, (size_t)o_blksize) != o_blksize)
-	{
+	if (read(fd, (char *)buf, (size_t)o_blksize) != o_blksize) {
 		msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
 	}
 }

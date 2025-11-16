@@ -14,31 +14,11 @@
 #include <unistd.h>
 
 extern int elvis_main_entry(int argc, char **argv);
+void pscalRuntimeDebugLog(const char *message);
 
 static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
-
-static const char *smallcluEmbeddedVt100Termcap(void) {
-    return "vt100|vt100-am|dec vt100:"
-           ":am:bs:xn:km:mi:ms:xo:"
-           ":co#80:li#24:it#8:"
-           ":cl=\\E[H\\E[2J:cd=\\E[J:ce=\\E[K:"
-           ":cm=\\E[%i%p1%d;%p2%dH:ho=\\E[H:"
-           ":up=\\E[A:do=\\E[B:nd=\\E[C:le=\\E[D:"
-           ":AL=\\E[%dL:DL=\\E[%dM:al=\\E[L:dl=\\E[M:"
-           ":IC=\\E[%d@:DC=\\E[%dP:ic=\\E[@:dc=\\E[P:"
-           ":ks=\\E[?1h\\E=:ke=\\E[?1l\\E>:"
-           ":ti=\\E[?1049h:te=\\E[?1049l:"
-           ":so=\\E[7m:se=\\E[27m:"
-           ":us=\\E[4m:ue=\\E[24m:"
-           ":md=\\E[1m:mr=\\E[7m:me=\\E[0m:mh=\\E[2m:"
-           ":vi=\\E[?25l:ve=\\E[?25h:vs=\\E[?25h:"
-           ":sr=\\EM:SF=\\E[%dS:SR=\\E[%dT:"
-           ":cs=\\E[%i%p1%d;%p2%dr:"
-           ":sc=\\E7:rc=\\E8:"
-           ":as=\\E(0:ae=\\E(B:";
-}
 
 static char *smallcluOverrideEnv(const char *name, const char *value) {
     const char *current = getenv(name);
@@ -122,9 +102,16 @@ int smallcluRunElvis(int argc, char **argv) {
     char *saved_elvis_path = smallcluOverrideEnv("ELVISPATH", elvis_path);
     char *saved_term = smallcluOverrideEnv("TERM", "vt100");
     char *saved_elvis_term = smallcluOverrideEnv("ELVISTERM", "vt100");
-    char *saved_elvis_gui = smallcluOverrideEnv("ELVISGUI", "termcap");
+    char *saved_elvis_gui = smallcluOverrideEnv("ELVISGUI", "pscal");
     char *saved_force_termcap = smallcluOverrideEnv("PSCALI_FORCE_TERMCAP", "1");
-    char *saved_termcap = smallcluOverrideEnv("TERMCAP", smallcluEmbeddedVt100Termcap());
+    char *saved_no_ttyraw = smallcluOverrideEnv("PSCALI_NO_TTYRAW", "1");
+    char termcapPath[PATH_MAX];
+    const char *sysRoot = getenv("PSCALI_SYSFILES_ROOT");
+    if (!sysRoot || !*sysRoot) {
+        sysRoot = ".";
+    }
+    snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
+    char *saved_termcap = smallcluOverrideEnv("TERMCAP", termcapPath);
 
     int wrapped_argc = argc + 2;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
@@ -139,9 +126,29 @@ int smallcluRunElvis(int argc, char **argv) {
     }
     wrapped_argv[0] = argv[0];
     wrapped_argv[1] = "-G";
-    wrapped_argv[2] = "termcap";
+    wrapped_argv[2] = "pscal";
     for (int i = 1; i < argc; ++i) {
         wrapped_argv[i + 2] = argv[i];
+    }
+    pscalRuntimeDebugLog("[smallclu] launching elvis_main_entry");
+    for (int i = 0; i < wrapped_argc; ++i) {
+        if (wrapped_argv[i]) {
+            size_t len = strlen(wrapped_argv[i]) + 32;
+            char *buf = (char *)malloc(len);
+            if (buf) {
+                snprintf(buf, len, "[smallclu] argv[%d]=%s", i, wrapped_argv[i]);
+                pscalRuntimeDebugLog(buf);
+                free(buf);
+            }
+        }
+    }
+    const char *env = getenv("ELVISGUI");
+    if (env) {
+        size_t len = strlen(env) + 64;
+        char *buf = (char *)malloc(len);
+        snprintf(buf, len, "[smallclu] ELVISGUI=%s", env);
+        pscalRuntimeDebugLog(buf);
+        free(buf);
     }
 
     int status = 0;
@@ -152,12 +159,17 @@ int smallcluRunElvis(int argc, char **argv) {
     status = g_elvis_exit_status;
     g_elvis_exit_active = false;
 
+    char resultBuf[64];
+    snprintf(resultBuf, sizeof(resultBuf), "[smallclu] elvis_main_entry returned %d", status);
+    pscalRuntimeDebugLog(resultBuf);
+
     free(wrapped_argv);
     smallcluRestoreEnv("ELVISPATH", saved_elvis_path);
     smallcluRestoreEnv("TERM", saved_term);
     smallcluRestoreEnv("ELVISTERM", saved_elvis_term);
     smallcluRestoreEnv("ELVISGUI", saved_elvis_gui);
     smallcluRestoreEnv("PSCALI_FORCE_TERMCAP", saved_force_termcap);
+    smallcluRestoreEnv("PSCALI_NO_TTYRAW", saved_no_ttyraw);
     smallcluRestoreEnv("TERMCAP", saved_termcap);
     free(elvis_path);
     return status;

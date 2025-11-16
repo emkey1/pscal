@@ -23,6 +23,7 @@
 #include "core/cache.h"
 #include "compiler/bytecode.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"
 #include "Pascal/globals.h"
 #include "vm/vm.h"
 #include "symbol/symbol.h"
@@ -728,7 +729,7 @@ static char *shellFormatPrompt(const char *input) {
 static char *shellResolveInteractivePrompt(void) {
     const char *env_prompt = getenv("PS1");
     if (!env_prompt || !*env_prompt) {
-        env_prompt = "exsh$ ";
+        env_prompt = "\\e[38;5;39mexsh\\e[0m \\e[1;35m\\W\\e[0m ⚡ ";
     }
     char *formatted = shellFormatPrompt(env_prompt);
     if (formatted) {
@@ -2740,6 +2741,8 @@ int exsh_main(int argc, char **argv) {
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     options.quiet = true;
     options.suppress_warnings = true;
+
+    registerShellFrontendBuiltins();
 
 #if defined(PSCAL_TARGET_IOS)
     setvbuf(stdout, NULL, _IONBF, 0);

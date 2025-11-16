@@ -32,9 +32,9 @@ private enum TerminalColor: Equatable {
     func resolvedUIColor(isForeground: Bool) -> UIColor {
         switch self {
         case .defaultForeground:
-            return UIColor.label
+            return TerminalFontSettings.shared.foregroundColor
         case .defaultBackground:
-            return UIColor.systemBackground
+            return TerminalFontSettings.shared.backgroundColor
         case .ansi(let index):
             let palette: [UIColor] = [
                 UIColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0),
@@ -124,6 +124,7 @@ final class TerminalBuffer {
     private var rows: Int
     private let maxScrollback: Int
     private let dsrResponder: ((Data) -> Void)?
+    private var resizeRequestHandler: ((Int, Int) -> Void)?
 
     private var grid: [[TerminalCell]]
     private var scrollback: [[TerminalCell]] = []
@@ -136,6 +137,8 @@ final class TerminalBuffer {
     private var currentAttributes = TerminalAttributes()
     private var originModeEnabled: Bool = false
     private var suppressNextRemoteLF: Bool = false
+    private var utf8ContinuationBytes: Int = 0
+    private var utf8Codepoint: UInt32 = 0
 
     private var parserState: ParserState = .normal
     private var csiParameters: [Int] = []
@@ -151,6 +154,8 @@ final class TerminalBuffer {
             TerminalBuffer.fontCache.clear()
         }
     }()
+    private let inputQueue = DispatchQueue(label: "com.pscal.terminal.input", attributes: .concurrent)
+    private var bufferedInput: [UInt8] = []
 
 struct TerminalSnapshot {
     struct Cursor {
@@ -161,13 +166,35 @@ struct TerminalSnapshot {
     fileprivate let lines: [[TerminalCell]]
     let cursor: Cursor?
     let defaultBackground: UIColor
+    let visibleRows: Int
+
+    var lineCount: Int {
+        return lines.count
+    }
+
+    func clampedRow(_ row: Int) -> Int {
+        guard !lines.isEmpty else { return 0 }
+        return max(0, min(row, lines.count - 1))
+    }
+
+    func clampedColumn(row: Int, column: Int) -> Int {
+        guard row >= 0 && row < lines.count else { return 0 }
+        return max(0, min(column, lines[row].count))
+    }
+
+    func utf16Offset(row: Int, column: Int) -> Int {
+        guard row >= 0 && row < lines.count else { return 0 }
+        return TerminalBuffer.utf16Offset(in: lines[row], column: column)
+    }
 }
 
     init(columns: Int = 80,
          rows: Int = 24,
          scrollback: Int = 500,
-         dsrResponder: ((Data) -> Void)? = nil) {
+         dsrResponder: ((Data) -> Void)? = nil,
+         resizeHandler: ((Int, Int) -> Void)? = nil) {
         self.dsrResponder = dsrResponder
+        self.resizeRequestHandler = resizeHandler
         _ = TerminalBuffer.fontCacheNotificationToken
         self.columns = max(10, columns)
         self.rows = max(4, rows)
@@ -175,6 +202,10 @@ struct TerminalSnapshot {
         self.grid = Array(repeating: TerminalBuffer.makeBlankRow(width: self.columns), count: self.rows)
         self.scrollRegionTop = 0
         self.scrollRegionBottom = self.rows - 1
+    }
+
+    func setResizeHandler(_ handler: ((Int, Int) -> Void)?) {
+        resizeRequestHandler = handler
     }
 
     @discardableResult
@@ -205,16 +236,35 @@ struct TerminalSnapshot {
     }
 
     func append(data: Data) {
-        let decoded = String(decoding: data, as: UTF8.self)
+        inputQueue.async(flags: .barrier) {
+            self.bufferedInput.append(contentsOf: data)
+        }
+        drainInputBuffer()
+    }
+
+    private func drainInputBuffer() {
+        var pending: [UInt8] = []
+        inputQueue.sync {
+            pending = bufferedInput
+            bufferedInput.removeAll()
+        }
+        guard !pending.isEmpty else { return }
         syncQueue.sync {
-            for scalar in decoded.unicodeScalars {
-                if scalar.value <= 0x7F {
-                    process(byte: UInt8(scalar.value))
-                } else {
-                    insertCharacter(Character(scalar))
-                }
+            for byte in pending {
+                process(byte: byte)
             }
         }
+    }
+
+    func consumeInput(count: Int) -> [UInt8] {
+        var result: [UInt8] = []
+        inputQueue.sync {
+            guard count > 0 else { return }
+            let slice = bufferedInput.prefix(count)
+            result.append(contentsOf: slice)
+            bufferedInput.removeFirst(result.count)
+        }
+        return result
     }
 
     func snapshot() -> TerminalSnapshot {
@@ -233,7 +283,8 @@ struct TerminalSnapshot {
             let backgroundColor = TerminalBuffer.resolvedColors(attributes: referenceAttributes).background
             return TerminalSnapshot(lines: combinedLines,
                                     cursor: cursorInfo,
-                                    defaultBackground: backgroundColor)
+                                    defaultBackground: backgroundColor,
+                                    visibleRows: rows)
         }
     }
 
@@ -249,8 +300,10 @@ struct TerminalSnapshot {
     static func render(snapshot: TerminalSnapshot) -> [NSAttributedString] {
         var rendered = snapshot.lines.map { makeAttributedString(from: $0) }
         let cursorRow = snapshot.cursor?.row
+        let minimumRows = max(1, snapshot.visibleRows)
         while rendered.count > 1,
               rendered.last?.string.isEmpty == true,
+              rendered.count > minimumRows,
               (cursorRow == nil || cursorRow! < rendered.count - 1) {
             rendered.removeLast()
         }
@@ -268,6 +321,7 @@ struct TerminalSnapshot {
         case .normal:
             switch byte {
             case 0x0A: // LF
+                resetUTF8Decoder()
                 if !fromEcho && suppressNextRemoteLF {
                     suppressNextRemoteLF = false
                     break
@@ -277,27 +331,79 @@ struct TerminalSnapshot {
                     suppressNextRemoteLF = true
                 }
             case 0x0D: // CR
+                resetUTF8Decoder()
                 cursorCol = 0
             case 0x08: // BS
+                resetUTF8Decoder()
                 if cursorCol > 0 {
                     cursorCol -= 1
                 }
             case 0x09: // TAB
+                resetUTF8Decoder()
                 let nextStop = ((cursorCol / 8) + 1) * 8
                 cursorCol = min(nextStop, columns - 1)
             case 0x1B: // ESC
+                resetUTF8Decoder()
                 parserState = .escape
             case 0x07: // BEL
+                resetUTF8Decoder()
                 break
             default:
                 if byte >= 0x20 {
-                    insertCharacter(Character(UnicodeScalar(byte)))
+                    if let scalar = decodeUTF8Byte(byte) {
+                        insertCharacter(Character(scalar))
+                    }
                 }
             }
         case .escape:
             handleEscape(byte)
         case .csi:
             handleCSIByte(byte)
+        }
+    }
+
+    private func resetUTF8Decoder() {
+        utf8ContinuationBytes = 0
+        utf8Codepoint = 0
+    }
+
+    private func decodeUTF8Byte(_ byte: UInt8) -> UnicodeScalar? {
+        if utf8ContinuationBytes == 0 {
+            switch byte {
+            case 0x00...0x7F:
+                return UnicodeScalar(byte)
+            case 0xC2...0xDF:
+                utf8ContinuationBytes = 1
+                utf8Codepoint = UInt32(byte & 0x1F)
+                return nil
+            case 0xE0...0xEF:
+                utf8ContinuationBytes = 2
+                utf8Codepoint = UInt32(byte & 0x0F)
+                return nil
+            case 0xF0...0xF4:
+                utf8ContinuationBytes = 3
+                utf8Codepoint = UInt32(byte & 0x07)
+                return nil
+            default:
+                resetUTF8Decoder()
+                return UnicodeScalar(0xFFFD)
+            }
+        } else {
+            if (byte & 0xC0) != 0x80 {
+                resetUTF8Decoder()
+                return UnicodeScalar(0xFFFD)
+            }
+            utf8Codepoint = (utf8Codepoint << 6) | UInt32(byte & 0x3F)
+            utf8ContinuationBytes -= 1
+            if utf8ContinuationBytes == 0 {
+                let value = utf8Codepoint
+                resetUTF8Decoder()
+                if let scalar = UnicodeScalar(value) {
+                    return scalar
+                }
+                return UnicodeScalar(0xFFFD)
+            }
+            return nil
         }
     }
 
@@ -433,6 +539,8 @@ struct TerminalSnapshot {
             if csiPrivateMode {
                 handleDECPrivate(on: false)
             }
+        case 0x74: // t (window ops)
+            handleWindowCommand()
         default:
             break
         }
@@ -447,6 +555,20 @@ struct TerminalSnapshot {
             cursorCol = 0
         case 25:
             cursorHidden = !on
+        default:
+            break
+        }
+    }
+
+    private func handleWindowCommand() {
+        guard let command = csiParameters.first else { return }
+        switch command {
+        case 8:
+            if csiParameters.count >= 3 {
+                let rows = max(4, csiParameters[1])
+                let columns = max(10, csiParameters[2])
+                resizeRequestHandler?(columns, rows)
+            }
         default:
             break
         }
@@ -787,7 +909,21 @@ struct TerminalSnapshot {
         scrollRegionBottom = rows - 1
     }
 
-    private static func makeAttributedString(from row: [TerminalCell]) -> NSAttributedString {
+    fileprivate static func utf16Offset(in row: [TerminalCell], column: Int) -> Int {
+        guard !row.isEmpty else { return 0 }
+        let clamped = max(0, min(column, row.count))
+        var offset = 0
+        if clamped == 0 {
+            return 0
+        }
+        for idx in 0..<clamped {
+            let scalarCount = String(row[idx].character).utf16.count
+            offset += scalarCount
+        }
+        return offset
+    }
+
+    fileprivate static func makeAttributedString(from row: [TerminalCell]) -> NSAttributedString {
         guard !row.isEmpty else {
             return NSAttributedString(string: "")
         }
@@ -840,7 +976,7 @@ struct TerminalSnapshot {
     }
 
     private static func cachedFont(for weight: UIFont.Weight) -> UIFont {
-        let pointSize = UIFont.preferredFont(forTextStyle: .body).pointSize
+        let pointSize = TerminalFontSettings.shared.pointSize
         return fontCache.font(pointSize: pointSize, weight: weight)
     }
 
@@ -936,16 +1072,22 @@ struct TerminalSnapshot {
             parserState = .normal
             return
         case 0x0A, 0x0D, 0x09:
+            resetUTF8Decoder()
             currentAttributes = attributesAtCursor()
             process(byte: UInt8(value), fromEcho: true)
         case 0x08:
+            resetUTF8Decoder()
             process(byte: 0x08, fromEcho: true)
         case 0x7F:
+            resetUTF8Decoder()
             applyBackspaceErase()
         default:
-            guard value >= 0x20 && value <= 0x7E else { return }
+            guard value >= 0x20 else { return }
             currentAttributes = attributesAtCursor()
-            process(byte: UInt8(value), fromEcho: true)
+            let utf8Bytes = Array(String(scalar).utf8)
+            for byte in utf8Bytes {
+                process(byte: byte, fromEcho: true)
+            }
         }
     }
 
