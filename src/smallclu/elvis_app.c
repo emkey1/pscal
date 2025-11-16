@@ -112,6 +112,11 @@ int smallcluRunElvis(int argc, char **argv) {
     }
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallcluOverrideEnv("TERMCAP", termcapPath);
+    const char *tmpDir = getenv("TMPDIR");
+    char *saved_session_path = NULL;
+    if (tmpDir && *tmpDir) {
+        saved_session_path = smallcluOverrideEnv("SESSIONPATH", tmpDir);
+    }
 
     int wrapped_argc = argc + 2;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
@@ -171,6 +176,9 @@ int smallcluRunElvis(int argc, char **argv) {
     smallcluRestoreEnv("PSCALI_FORCE_TERMCAP", saved_force_termcap);
     smallcluRestoreEnv("PSCALI_NO_TTYRAW", saved_no_ttyraw);
     smallcluRestoreEnv("TERMCAP", saved_termcap);
+    if (saved_session_path || (tmpDir && *tmpDir)) {
+        smallcluRestoreEnv("SESSIONPATH", saved_session_path);
+    }
     free(elvis_path);
     return status;
 }

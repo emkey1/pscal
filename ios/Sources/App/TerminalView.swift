@@ -390,6 +390,9 @@ final class TerminalRendererContainerView: UIView {
                 elvisSnapshot: ElvisSnapshot?) {
         if isElvisMode, let snapshot = elvisSnapshot {
             applyElvisSnapshot(snapshot, backgroundColor: backgroundColor)
+            terminalView.cursorTextOffset = nil
+            terminalView.cursorInfo = nil
+            return
         } else {
             lastElvisSnapshotText = nil
             terminalView.attributedText = text
@@ -403,16 +406,10 @@ final class TerminalRendererContainerView: UIView {
     private func applyElvisSnapshot(_ snapshot: ElvisSnapshot, backgroundColor: UIColor) {
         if lastElvisSnapshotText != snapshot.text {
             lastElvisSnapshotText = snapshot.text
-            let activeFont = terminalView.font ?? resolvedFont
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: activeFont,
-                .foregroundColor: TerminalFontSettings.shared.foregroundColor
-            ]
-            terminalView.attributedText = NSAttributedString(string: snapshot.text, attributes: attrs)
+            terminalView.text = snapshot.text
         }
-        terminalView.cursorTextOffset = snapshot.cursor?.textOffset
-        terminalView.cursorInfo = snapshot.cursor
         terminalView.backgroundColor = backgroundColor
+        terminalView.textColor = TerminalFontSettings.shared.foregroundColor
     }
 
     private func scrollToBottom(textView: UITextView, text: NSAttributedString) {
