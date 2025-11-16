@@ -188,8 +188,8 @@ struct TerminalSnapshot {
     }
 }
 
-    init(columns: Int = 80,
-         rows: Int = 24,
+    init(columns: Int,
+         rows: Int,
          scrollback: Int = 500,
          dsrResponder: ((Data) -> Void)? = nil,
          resizeHandler: ((Int, Int) -> Void)? = nil) {

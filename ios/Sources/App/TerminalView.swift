@@ -2,12 +2,27 @@ import SwiftUI
 import UIKit
 import Combine
 import QuartzCore
+import CoreText
+
+@_silgen_name("pscalRuntimeDebugLog")
+private func c_terminalDebugLog(_ message: UnsafePointer<CChar>) -> Void
+
+private func terminalViewLog(_ message: String) {
+    message.withCString { c_terminalDebugLog($0) }
+}
 
 final class TerminalFontSettings: ObservableObject {
+    struct FontOption: Identifiable, Equatable {
+        let id: String
+        let displayName: String
+        let postScriptName: String?
+    }
+
     static let shared = TerminalFontSettings()
     static let appearanceDidChangeNotification = Notification.Name("TerminalFontSettingsAppearanceDidChange")
 
     private let storageKey = "com.pscal.terminal.fontPointSize"
+    private let fontNameKey = "com.pscal.terminal.fontName"
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
     let minimumPointSize: CGFloat = 10.0
@@ -16,8 +31,14 @@ final class TerminalFontSettings: ObservableObject {
     @Published var pointSize: CGFloat = 14.0
     @Published var backgroundColor: UIColor = .systemBackground
     @Published var foregroundColor: UIColor = .label
+    @Published private(set) var selectedFontID: String
+
+    let fontOptions: [FontOption]
 
     private init() {
+        fontOptions = TerminalFontSettings.buildFontOptions()
+        selectedFontID = fontOptions.first?.id ?? "system"
+
         let stored = UserDefaults.standard.double(forKey: storageKey)
         let initialPointSize: CGFloat
         if stored > 0 {
@@ -32,6 +53,12 @@ final class TerminalFontSettings: ObservableObject {
         pointSize = clamp(initialPointSize)
         backgroundColor = loadColor(key: backgroundKey, fallback: .systemBackground)
         foregroundColor = loadColor(key: foregroundKey, fallback: .label)
+
+        let storedFontID = UserDefaults.standard.string(forKey: fontNameKey)
+        let envFontName = ProcessInfo.processInfo.environment["PSCALI_FONT_NAME"]
+        selectedFontID = TerminalFontSettings.resolveInitialFontID(storedID: storedFontID,
+                                                                   envName: envFontName,
+                                                                   options: fontOptions)
     }
 
     func clamp(_ size: CGFloat) -> CGFloat {
@@ -39,7 +66,19 @@ final class TerminalFontSettings: ObservableObject {
     }
 
     var currentFont: UIFont {
-        UIFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        font(forPointSize: pointSize)
+    }
+
+    private var selectedFontOption: FontOption {
+        fontOptions.first(where: { $0.id == selectedFontID }) ?? fontOptions.first!
+    }
+
+    func font(forPointSize size: CGFloat) -> UIFont {
+        if let name = selectedFontOption.postScriptName,
+           let custom = UIFont(name: name, size: size) {
+            return custom
+        }
+        return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     func updatePointSize(_ newSize: CGFloat) {
@@ -47,6 +86,16 @@ final class TerminalFontSettings: ObservableObject {
         guard clamped != pointSize else { return }
         pointSize = clamped
         UserDefaults.standard.set(Double(clamped), forKey: storageKey)
+        notifyChange()
+    }
+
+    func updateFontSelection(_ identifier: String) {
+        guard identifier != selectedFontID,
+              fontOptions.contains(where: { $0.id == identifier }) else {
+            return
+        }
+        selectedFontID = identifier
+        UserDefaults.standard.set(identifier, forKey: fontNameKey)
         notifyChange()
     }
 
@@ -91,6 +140,81 @@ final class TerminalFontSettings: ObservableObject {
     private func notifyChange() {
         NotificationCenter.default.post(name: TerminalFontSettings.appearanceDidChangeNotification, object: nil)
     }
+
+    private static func buildFontOptions() -> [FontOption] {
+        var options: [FontOption] = [
+            FontOption(id: "system", displayName: "System Monospaced", postScriptName: nil)
+        ]
+
+        guard let postScriptNames = CTFontManagerCopyAvailablePostScriptNames() as? [String] else {
+            return options
+        }
+
+        var regularByFamily: [String: FontOption] = [:]
+        var fallbackByFamily: [String: FontOption] = [:]
+
+        for name in postScriptNames {
+            let font = CTFontCreateWithName(name as CFString, 0, nil)
+            let traits = CTFontGetSymbolicTraits(font)
+            if !traits.contains(.monoSpaceTrait) {
+                continue
+            }
+            let familyName = (CTFontCopyName(font, kCTFontFamilyNameKey) as String?) ?? name
+            let styleName = (CTFontCopyName(font, kCTFontStyleNameKey) as String?)?.lowercased() ?? ""
+            let familyKey = familyName.lowercased()
+            let option = FontOption(id: name, displayName: familyName, postScriptName: name)
+            let isRegular = styleName.isEmpty ||
+                styleName.contains("regular") ||
+                styleName.contains("roman") ||
+                styleName.contains("plain") ||
+                styleName.contains("normal")
+            if isRegular {
+                regularByFamily[familyKey] = option
+            } else if fallbackByFamily[familyKey] == nil {
+                fallbackByFamily[familyKey] = option
+            }
+        }
+
+        let allFamilies = Set(regularByFamily.keys).union(fallbackByFamily.keys).sorted()
+        for key in allFamilies {
+            if let option = regularByFamily[key] ?? fallbackByFamily[key] {
+                if !options.contains(where: { $0.id == option.id }) {
+                    options.append(option)
+                }
+            }
+        }
+
+        return options
+    }
+
+    private static func resolveInitialFontID(storedID: String?,
+                                             envName: String?,
+                                             options: [FontOption]) -> String {
+        if let storedID,
+           options.contains(where: { $0.id == storedID }) {
+            return storedID
+        }
+        if let envName,
+           let match = resolveOption(fromName: envName, options: options) {
+            return match.id
+        }
+        return options.first?.id ?? "system"
+    }
+
+    private static func resolveOption(fromName name: String, options: [FontOption]) -> FontOption? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return options.first(where: { option in
+            if option.id.caseInsensitiveCompare(trimmed) == .orderedSame {
+                return true
+            }
+            if let postScript = option.postScriptName,
+               postScript.caseInsensitiveCompare(trimmed) == .orderedSame {
+                return true
+            }
+            return option.displayName.caseInsensitiveCompare(trimmed) == .orderedSame
+        })
+    }
 }
 
 struct TerminalView: View {
@@ -101,6 +225,7 @@ struct TerminalView: View {
         KeyboardAwareContainer(
             content: GeometryReader { proxy in
                 TerminalContentView(availableSize: proxy.size,
+                                    safeAreaInsets: proxy.safeAreaInsets,
                                     fontSettings: fontSettings)
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
@@ -124,13 +249,17 @@ struct TerminalView: View {
 }
 
 private struct TerminalContentView: View {
+    private static let topPadding: CGFloat = 32.0
     let availableSize: CGSize
+    let safeAreaInsets: EdgeInsets
     @ObservedObject private var fontSettings: TerminalFontSettings
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
     @State private var focusAnchor: Int = 0
+    @State private var lastLoggedMetrics: TerminalGeometryMetrics?
 
-    init(availableSize: CGSize, fontSettings: TerminalFontSettings) {
+    init(availableSize: CGSize, safeAreaInsets: EdgeInsets, fontSettings: TerminalFontSettings) {
         self.availableSize = availableSize
+        self.safeAreaInsets = safeAreaInsets
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
     }
 
@@ -162,7 +291,7 @@ private struct TerminalContentView: View {
                     .background(Color(.secondarySystemBackground))
             }
         }
-        .padding(.top, 32)
+        .padding(.top, Self.topPadding)
         .background(Color(fontSettings.backgroundColor))
         .contentShape(Rectangle())
         .onTapGesture {
@@ -189,6 +318,15 @@ private struct TerminalContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIContentSizeCategory.didChangeNotification)) { _ in
             updateTerminalGeometry()
         }
+        .onChange(of: safeAreaInsets) { _ in
+            updateTerminalGeometry()
+        }
+        .onChange(of: fontSettings.pointSize) { _ in
+            updateTerminalGeometry()
+        }
+        .onReceive(fontSettings.$selectedFontID) { _ in
+            updateTerminalGeometry()
+        }
     }
 
     private func handleInput(_ text: String) {
@@ -197,10 +335,37 @@ private struct TerminalContentView: View {
 
     private func updateTerminalGeometry() {
         let showingStatus = runtime.exitStatus != nil
+        let font = fontSettings.currentFont
         guard let metrics = TerminalGeometryCalculator.metrics(for: availableSize,
-                                                               showingStatus: showingStatus)
-                ?? TerminalGeometryCalculator.fallbackMetrics(showingStatus: showingStatus) else {
+                                                               safeAreaInsets: safeAreaInsets,
+                                                               topPadding: Self.topPadding,
+                                                               showingStatus: showingStatus,
+                                                               font: font)
+                ?? TerminalGeometryCalculator.fallbackMetrics(showingStatus: showingStatus, font: font) else {
             return
+        }
+        if lastLoggedMetrics != metrics {
+            let char = TerminalGeometryCalculator.characterMetrics(for: font)
+            let usable = TerminalGeometryCalculator.usableDimensions(for: availableSize,
+                                                                     safeAreaInsets: safeAreaInsets,
+                                                                     topPadding: Self.topPadding,
+                                                                     showingStatus: showingStatus)
+            terminalViewLog(String(format: "[TerminalView] available %.1fx%.1f safe(top=%.1f bottom=%.1f leading=%.1f trailing=%.1f) usable %.1fx%.1f font=%@ %.2fpt char(%.2f x %.2f) -> rows=%d cols=%d",
+                                   availableSize.width,
+                                   availableSize.height,
+                                   safeAreaInsets.top,
+                                   safeAreaInsets.bottom,
+                                   safeAreaInsets.leading,
+                                   safeAreaInsets.trailing,
+                                   usable.width,
+                                   usable.height,
+                                   font.fontName,
+                                   font.pointSize,
+                                   char.width,
+                                   char.lineHeight,
+                                   metrics.rows,
+                                   metrics.columns))
+            lastLoggedMetrics = metrics
         }
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
@@ -224,22 +389,45 @@ enum TerminalGeometryCalculator {
     private static let statusOverlayHeight: CGFloat = 32.0
     private static let dividerHeight: CGFloat = 1.0 / UIScreen.main.scale
 
-    static func metrics(for size: CGSize, showingStatus: Bool) -> TerminalGeometryMetrics? {
+    static func characterMetrics(for font: UIFont) -> (width: CGFloat, lineHeight: CGFloat) {
+        let width = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
+        let height = font.lineHeight + verticalRowPadding
+        return (width, height)
+    }
+
+    static func usableDimensions(for size: CGSize,
+                                 safeAreaInsets: EdgeInsets,
+                                 topPadding: CGFloat,
+                                 showingStatus: Bool) -> (width: CGFloat, height: CGFloat) {
+        let leadingInset = max(0, safeAreaInsets.leading)
+        let trailingInset = max(0, safeAreaInsets.trailing)
+        let topInset = max(0, safeAreaInsets.top) + max(0, topPadding)
+        let bottomInset = max(0, safeAreaInsets.bottom)
+
+        let width = max(0, size.width - horizontalPadding - leadingInset - trailingInset)
+        var height = max(0, size.height - topInset - bottomInset)
+        if showingStatus {
+            height -= statusOverlayHeight
+        }
+        height -= dividerHeight
+        return (width, height)
+    }
+
+    static func metrics(for size: CGSize,
+                        safeAreaInsets: EdgeInsets,
+                        topPadding: CGFloat,
+                        showingStatus: Bool,
+                        font: UIFont) -> TerminalGeometryMetrics? {
         guard size.width > 0, size.height > 0 else { return nil }
 
-        let font = UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
-        let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
-        let lineHeight = font.lineHeight + verticalRowPadding
+        let char = characterMetrics(for: font)
+        let usable = usableDimensions(for: size,
+                                      safeAreaInsets: safeAreaInsets,
+                                      topPadding: topPadding,
+                                      showingStatus: showingStatus)
 
-        let usableWidth = max(0, size.width - horizontalPadding)
-        var usableHeight = size.height
-        if showingStatus {
-            usableHeight -= statusOverlayHeight
-        }
-        usableHeight -= dividerHeight
-
-        let rawColumns = Int(floor(usableWidth / charWidth))
-        let rawRows = Int(floor(usableHeight / lineHeight))
+        let rawColumns = Int(floor(usable.width / char.width))
+        let rawRows = Int(floor(usable.height / char.lineHeight))
         guard rawColumns > 0, rawRows > 0 else { return nil }
 
         return TerminalGeometryMetrics(
@@ -248,8 +436,12 @@ enum TerminalGeometryCalculator {
         )
     }
 
-    static func fallbackMetrics(showingStatus: Bool) -> TerminalGeometryMetrics? {
-        return metrics(for: UIScreen.main.bounds.size, showingStatus: showingStatus)
+    static func fallbackMetrics(showingStatus: Bool, font: UIFont) -> TerminalGeometryMetrics? {
+        return metrics(for: UIScreen.main.bounds.size,
+                       safeAreaInsets: EdgeInsets(),
+                       topPadding: 0,
+                       showingStatus: showingStatus,
+                       font: font)
     }
 }
 
@@ -364,7 +556,7 @@ final class TerminalRendererContainerView: UIView {
 
     func applyFont(pointSize: CGFloat) {
         let clamped = TerminalFontSettings.shared.clamp(pointSize)
-        let font = UIFont.monospacedSystemFont(ofSize: clamped, weight: .regular)
+        let font = TerminalFontSettings.shared.font(forPointSize: clamped)
         if terminalView.font != font {
             terminalView.font = font
             terminalView.typingAttributes[.font] = font
@@ -420,6 +612,12 @@ final class TerminalRendererContainerView: UIView {
             let currentLength = textView.attributedText.length
             guard bottomRange.location < currentLength else { return }
             textView.scrollRangeToVisible(bottomRange)
+            let contentHeight = textView.contentSize.height
+            let boundsHeight = textView.bounds.height
+            let yOffset = max(-textView.contentInset.top, contentHeight - boundsHeight + textView.contentInset.bottom)
+            if yOffset.isFinite {
+                textView.setContentOffset(CGPoint(x: -textView.contentInset.left, y: yOffset), animated: false)
+            }
         }
     }
 }
@@ -509,6 +707,22 @@ struct TerminalSettingsView: View {
     private var content: some View {
         NavigationView {
             Form {
+                Section(header: Text("Font")) {
+                    Picker("Font",
+                           selection: Binding(get: {
+                        settings.selectedFontID
+                    }, set: { newValue in
+                        settings.updateFontSelection(newValue)
+                    })) {
+                        ForEach(settings.fontOptions) { option in
+                            Text(option.displayName).tag(option.id)
+                        }
+                    }
+                    let previewFont = settings.font(forPointSize: 16)
+                    Text("Sample AaBb123")
+                        .font(Font(previewFont))
+                        .foregroundColor(Color(settings.foregroundColor))
+                }
                 Section(header: Text("Font Size")) {
                     Slider(value: Binding(get: {
                         Double(settings.pointSize)

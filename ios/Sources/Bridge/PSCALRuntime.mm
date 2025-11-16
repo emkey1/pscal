@@ -1,6 +1,7 @@
 #include "PSCALRuntime.h"
 
 #include <Foundation/Foundation.h>
+#include <UIKit/UIKit.h>
 #include <errno.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>
@@ -48,9 +49,47 @@ static int s_input_fd = -1;
 static bool s_using_virtual_tty = false;
 static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
-static int s_pending_columns = 80;
-static int s_pending_rows = 24;
+static int s_pending_columns = 0;
+static int s_pending_rows = 0;
 static NSFileHandle *s_debug_log_handle = nil;
+
+static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
+    CGFloat pointSize = 14.0;
+    const char *sizeEnv = getenv("PSCALI_FONT_SIZE");
+    if (sizeEnv) {
+        double parsed = atof(sizeEnv);
+        if (parsed > 0.0) {
+            pointSize = (CGFloat)parsed;
+        }
+    }
+    UIFont *resolved = nil;
+    const char *fontEnv = getenv("PSCALI_FONT_NAME");
+    if (fontEnv && fontEnv[0] != '\0') {
+        NSString *fontName = [NSString stringWithUTF8String:fontEnv];
+        if (fontName.length > 0) {
+            resolved = [UIFont fontWithName:fontName size:pointSize];
+        }
+    }
+    if (!resolved) {
+        resolved = [UIFont monospacedSystemFontOfSize:pointSize weight:UIFontWeightRegular];
+    }
+    return resolved;
+}
+
+static void PSCALRuntimeEnsurePendingWindowSizeLocked(void) {
+    if (s_pending_columns > 0 && s_pending_rows > 0) {
+        return;
+    }
+    UIFont *font = PSCALRuntimeResolveDefaultUIFont();
+    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    NSDictionary *attributes = @{ NSFontAttributeName: font };
+    CGFloat charWidth = MAX(1.0, [@"W" sizeWithAttributes:attributes].width);
+    CGFloat lineHeight = MAX(1.0, font.lineHeight);
+    int computedColumns = (int)floor(screenSize.width / charWidth);
+    int computedRows = (int)floor(screenSize.height / lineHeight);
+    s_pending_columns = MAX(10, computedColumns);
+    s_pending_rows = MAX(4, computedRows);
+}
 
 static void PSCALRuntimeConfigurePtySlave(int fd) {
     if (fd < 0) {
@@ -243,6 +282,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         errno = EBUSY;
         return -1;
     }
+    PSCALRuntimeEnsurePendingWindowSizeLocked();
 
     bool using_virtual_tty = false;
     int master_fd = -1;

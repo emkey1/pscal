@@ -186,8 +186,12 @@ static char	dfltname[1024];
 		msg(MSG_FATAL, "blkopen's read failed");
 	}
 	if (buf->super.inuse && !force) {
+#ifdef PSCALI_IGNORE_SESSION_LOCKS
+		buf->super.inuse = getpid();
+#else
 		/* lockf(fd, ULOCK, o_blksize); */
 		return ElvFalse;
+#endif
 	}
 	buf->super.inuse = getpid();
 	lseek(fd, 0L, 0);

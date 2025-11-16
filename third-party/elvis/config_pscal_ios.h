@@ -48,7 +48,8 @@
 #define FEATURE_MKEXRC
 #define FEATURE_NORMAL
 #define FEATURE_PROTO
-#define FEATURE_RAM
+/* Disable RAM session storage; always use disk-backed temp files */
+#undef FEATURE_RAM
 #define FEATURE_RCSID
 #define FEATURE_REGION
 #define FEATURE_SHOWTAG
@@ -98,3 +99,6 @@
 /* Default option values */
 #define OSLPOUT "!lp -s"
 #define OSLIBPATH "~/.elvis:/etc/elvis:/usr/share/elvis/:/usr/share/elvis/doc/"
+
+/* PSCAL-specific helpers */
+#define PSCALI_IGNORE_SESSION_LOCKS 1

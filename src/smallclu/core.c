@@ -73,46 +73,49 @@ static int smallcluSedCommand(int argc, char **argv);
 static int smallcluCutCommand(int argc, char **argv);
 static int smallcluTrCommand(int argc, char **argv);
 static int smallcluIdCommand(int argc, char **argv);
+static int smallcluMkdirCommand(int argc, char **argv);
 static const char *smallcluLeafName(const char *path);
 static int smallcluBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static int smallcluRemovePathWithLabel(const char *label, const char *path, bool recursive);
 static int smallcluCopyFile(const char *label, const char *src, const char *dst);
+static int smallcluMkdirParents(const char *path, mode_t mode);
 #if defined(PSCAL_TARGET_IOS)
 static int smallcluElvisCommand(int argc, char **argv);
 #endif
 
 static const SmallcluApplet kSmallcluApplets[] = {
+    {"cal", smallcluCalCommand, "Show a simple calendar"},
     {"cat", smallcluCatCommand, "Concatenate files"},
     {"clear", smallcluClearCommand, "Clear the terminal"},
     {"cls", smallcluClearCommand, "Clear the terminal"},
+    {"cp", smallcluCpCommand, "Copy files"},
+    {"cut", smallcluCutCommand, "Extract fields from lines"},
+    {"date", smallcluDateCommand, "Display current date/time"},
+    {"du", smallcluDuCommand, "Summarize disk usage"},
     {"echo", smallcluEchoCommand, "Print arguments"},
     {"editor", smallcluEditorCommand, "Minimal raw-mode editor"},
-    {"less", smallcluPagerCommand, "Paginate file contents"},
-    {"ls", smallcluLsCommand, "List directory contents"},
-    {"more", smallcluPagerCommand, "Paginate file contents"},
-    {"date", smallcluDateCommand, "Display current date/time"},
-    {"cal", smallcluCalCommand, "Show a simple calendar"},
-    {"head", smallcluHeadCommand, "Print the first lines of files"},
-    {"tail", smallcluTailCommand, "Print the last lines of files"},
-    {"touch", smallcluTouchCommand, "Update file timestamps"},
-    {"grep", smallcluGrepCommand, "Search for patterns"},
-    {"wc", smallcluWcCommand, "Count lines/words/bytes"},
-    {"du", smallcluDuCommand, "Summarize disk usage"},
-    {"find", smallcluFindCommand, "Search for files"},
-    {"stty", smallcluSttyCommand, "Adjust terminal rows/columns"},
-    {"resize", smallcluResizeCommand, "Synchronize terminal rows/columns"},
-    {"sort", smallcluSortCommand, "Sort lines of text"},
-    {"uniq", smallcluUniqCommand, "Report or omit repeated lines"},
-    {"sed", smallcluSedCommand, "Stream editor for simple substitutions"},
-    {"cut", smallcluCutCommand, "Extract fields from lines"},
-    {"tr", smallcluTrCommand, "Translate or delete characters"},
-    {"id", smallcluIdCommand, "Print user identity information"},
-    {"cp", smallcluCpCommand, "Copy files"},
-    {"mv", smallcluMvCommand, "Move or rename files"},
-    {"rm", smallcluRmCommand, "Remove files"},
 #if defined(PSCAL_TARGET_IOS)
     {"elvis", smallcluElvisCommand, "Elvis text editor"},
 #endif
+    {"find", smallcluFindCommand, "Search for files"},
+    {"grep", smallcluGrepCommand, "Search for patterns"},
+    {"head", smallcluHeadCommand, "Print the first lines of files"},
+    {"id", smallcluIdCommand, "Print user identity information"},
+    {"less", smallcluPagerCommand, "Paginate file contents"},
+    {"ls", smallcluLsCommand, "List directory contents"},
+    {"mkdir", smallcluMkdirCommand, "Create directories"},
+    {"more", smallcluPagerCommand, "Paginate file contents"},
+    {"mv", smallcluMvCommand, "Move or rename files"},
+    {"resize", smallcluResizeCommand, "Synchronize terminal rows/columns"},
+    {"rm", smallcluRmCommand, "Remove files"},
+    {"sed", smallcluSedCommand, "Stream editor for simple substitutions"},
+    {"sort", smallcluSortCommand, "Sort lines of text"},
+    {"stty", smallcluSttyCommand, "Adjust terminal rows/columns"},
+    {"tail", smallcluTailCommand, "Print the last lines of files"},
+    {"touch", smallcluTouchCommand, "Update file timestamps"},
+    {"tr", smallcluTrCommand, "Translate or delete characters"},
+    {"uniq", smallcluUniqCommand, "Report or omit repeated lines"},
+    {"wc", smallcluWcCommand, "Count lines/words/bytes"},
 };
 
 static size_t kSmallcluAppletCount = sizeof(kSmallcluApplets) / sizeof(kSmallcluApplets[0]);
@@ -2349,6 +2352,60 @@ static int smallcluCopyFile(const char *label, const char *src, const char *dst)
     return status;
 }
 
+static int smallcluMkdirParents(const char *path, mode_t mode) {
+    if (!path || !*path) {
+        errno = EINVAL;
+        return -1;
+    }
+    char *mutable_path = strdup(path);
+    if (!mutable_path) {
+        errno = ENOMEM;
+        return -1;
+    }
+    size_t len = strlen(mutable_path);
+    while (len > 1 && mutable_path[len - 1] == '/') {
+        mutable_path[len - 1] = '\0';
+        len--;
+    }
+    if (len == 0) {
+        free(mutable_path);
+        errno = EINVAL;
+        return -1;
+    }
+    for (char *cursor = mutable_path + 1; *cursor; ++cursor) {
+        if (*cursor == '/') {
+            *cursor = '\0';
+            if (mutable_path[0] != '\0') {
+                if (mkdir(mutable_path, mode) != 0 && errno != EEXIST) {
+                    int err = errno;
+                    free(mutable_path);
+                    errno = err;
+                    return -1;
+                }
+            }
+            *cursor = '/';
+            while (*(cursor + 1) == '/') {
+                cursor++;
+            }
+        }
+    }
+    if (mkdir(path, mode) != 0) {
+        if (errno == EEXIST) {
+            struct stat st;
+            if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                free(mutable_path);
+                return 0;
+            }
+        }
+        int err = errno;
+        free(mutable_path);
+        errno = err;
+        return -1;
+    }
+    free(mutable_path);
+    return 0;
+}
+
 static int smallcluRmCommand(int argc, char **argv) {
     int recursive = 0;
     int opt;
@@ -2371,6 +2428,42 @@ static int smallcluRmCommand(int argc, char **argv) {
     for (int i = optind; i < argc; ++i) {
         if (smallcluRemovePathWithLabel("rm", argv[i], recursive != 0) != 0) {
             status = 1;
+        }
+    }
+    return status;
+}
+
+static int smallcluMkdirCommand(int argc, char **argv) {
+    int parents = 0;
+    int opt;
+    optind = 1;
+    while ((opt = getopt(argc, argv, "p")) != -1) {
+        switch (opt) {
+            case 'p':
+                parents = 1;
+                break;
+            default:
+                fprintf(stderr, "mkdir: invalid option -- %c\n", optopt);
+                return 1;
+        }
+    }
+    if (optind >= argc) {
+        fprintf(stderr, "mkdir: missing operand\n");
+        return 1;
+    }
+    int status = 0;
+    for (int i = optind; i < argc; ++i) {
+        const char *target = argv[i];
+        if (parents) {
+            if (smallcluMkdirParents(target, 0777) != 0) {
+                fprintf(stderr, "mkdir: %s: %s\n", target, strerror(errno));
+                status = 1;
+            }
+        } else {
+            if (mkdir(target, 0777) != 0) {
+                fprintf(stderr, "mkdir: %s: %s\n", target, strerror(errno));
+                status = 1;
+            }
         }
     }
     return status;

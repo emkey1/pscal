@@ -328,10 +328,7 @@ final class TerminalElvisViewController: UIViewController {
 
     private static func buildPreferredElvisFont(for traits: UITraitCollection) -> UIFont {
         let pointSize = resolvedFontPointSize(for: traits)
-        if let custom = UIFont(name: "Menlo-Regular", size: pointSize) {
-            return custom
-        }
-        return UIFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        return TerminalFontSettings.shared.font(forPointSize: pointSize)
     }
 
     private static func resolvedFontPointSize(for traits: UITraitCollection) -> CGFloat {

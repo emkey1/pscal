@@ -79,7 +79,9 @@ static int psinit(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
+#ifdef FEATURE_RAM
 	optpreset(o_session, toCHAR("ram"), OPT_LOCK);
+#endif
 	mainwin.rows = psResolveRows();
 	mainwin.columns = psResolveColumns();
 	mainwin.cursorRow = 0;

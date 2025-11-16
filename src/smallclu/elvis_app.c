@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 extern int elvis_main_entry(int argc, char **argv);
 void pscalRuntimeDebugLog(const char *message);
@@ -19,6 +20,7 @@ void pscalRuntimeDebugLog(const char *message);
 static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
+static char *g_elvis_session_dir = NULL;
 
 static char *smallcluOverrideEnv(const char *name, const char *value) {
     const char *current = getenv(name);
@@ -37,6 +39,29 @@ static void smallcluRestoreEnv(const char *name, char *saved) {
         free(saved);
     } else {
         unsetenv(name);
+    }
+}
+
+static void smallcluCleanupDirectory(const char *path, bool removeSelf) {
+    if (!path || !*path) {
+        return;
+    }
+    DIR *dir = opendir(path);
+    if (!dir) {
+        return;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        char pathbuf[PATH_MAX];
+        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, entry->d_name);
+        unlink(pathbuf);
+    }
+    closedir(dir);
+    if (removeSelf) {
+        rmdir(path);
     }
 }
 
@@ -63,6 +88,50 @@ static void smallcluCleanupSessionFiles(void) {
         unlink(pathbuf);
     }
     closedir(dir);
+}
+
+#define ELVIS_SESSION_MAGIC 0x0200DEADL
+#define ELVIS_SESSION_MAGIC_SWAPPED 0xADDE0002L
+
+static void smallcluCleanupLegacyRamSession(void) {
+    const char *legacyName = "ram";
+    struct stat st;
+    if (stat(legacyName, &st) != 0 || !S_ISREG(st.st_mode)) {
+        return;
+    }
+    FILE *fp = fopen(legacyName, "rb");
+    if (!fp) {
+        return;
+    }
+    unsigned long magic = 0;
+    size_t readBytes = fread(&magic, 1, sizeof(magic), fp);
+    fclose(fp);
+    if (readBytes == sizeof(magic) &&
+        (magic == ELVIS_SESSION_MAGIC || magic == ELVIS_SESSION_MAGIC_SWAPPED)) {
+        unlink(legacyName);
+    }
+}
+
+static const char *smallcluEnsureSessionDirectory(void) {
+    if (g_elvis_session_dir && *g_elvis_session_dir) {
+        return g_elvis_session_dir;
+    }
+    const char *tmpDir = getenv("TMPDIR");
+    if (!tmpDir || !*tmpDir) {
+        return NULL;
+    }
+    char templatePath[PATH_MAX];
+    snprintf(templatePath, sizeof(templatePath), "%s/pscal_elvis.%06uXXXXXX", tmpDir, arc4random_uniform(999999));
+    char *dirString = strdup(templatePath);
+    if (!dirString) {
+        return NULL;
+    }
+    if (!mkdtemp(dirString)) {
+        free(dirString);
+        return NULL;
+    }
+    g_elvis_session_dir = dirString;
+    return g_elvis_session_dir;
 }
 
 static char *smallcluBuildElvisPath(void) {
@@ -98,6 +167,7 @@ int smallcluRunElvis(int argc, char **argv) {
     }
 
     smallcluCleanupSessionFiles();
+    smallcluCleanupLegacyRamSession();
 
     char *saved_elvis_path = smallcluOverrideEnv("ELVISPATH", elvis_path);
     char *saved_term = smallcluOverrideEnv("TERM", "vt100");
@@ -113,8 +183,12 @@ int smallcluRunElvis(int argc, char **argv) {
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallcluOverrideEnv("TERMCAP", termcapPath);
     const char *tmpDir = getenv("TMPDIR");
+    const char *session_dir = smallcluEnsureSessionDirectory();
     char *saved_session_path = NULL;
-    if (tmpDir && *tmpDir) {
+    if (session_dir) {
+        smallcluCleanupDirectory(session_dir, false);
+        saved_session_path = smallcluOverrideEnv("SESSIONPATH", session_dir);
+    } else if (tmpDir && *tmpDir) {
         saved_session_path = smallcluOverrideEnv("SESSIONPATH", tmpDir);
     }
 
@@ -176,9 +250,10 @@ int smallcluRunElvis(int argc, char **argv) {
     smallcluRestoreEnv("PSCALI_FORCE_TERMCAP", saved_force_termcap);
     smallcluRestoreEnv("PSCALI_NO_TTYRAW", saved_no_ttyraw);
     smallcluRestoreEnv("TERMCAP", saved_termcap);
-    if (saved_session_path || (tmpDir && *tmpDir)) {
-        smallcluRestoreEnv("SESSIONPATH", saved_session_path);
+    if (session_dir) {
+        smallcluCleanupDirectory(session_dir, false);
     }
+    smallcluRestoreEnv("SESSIONPATH", saved_session_path);
     free(elvis_path);
     return status;
 }

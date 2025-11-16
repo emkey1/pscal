@@ -110,6 +110,7 @@ DEFINE_SMALLCLU_WRAPPER("cut", cut)
 DEFINE_SMALLCLU_WRAPPER("tr", tr)
 DEFINE_SMALLCLU_WRAPPER("id", id)
 #if defined(PSCAL_TARGET_IOS)
+DEFINE_SMALLCLU_WRAPPER("mkdir", mkdir)
 DEFINE_SMALLCLU_WRAPPER("cp", cp)
 DEFINE_SMALLCLU_WRAPPER("mv", mv)
 DEFINE_SMALLCLU_WRAPPER("rm", rm)
@@ -151,6 +152,7 @@ static void smallcluRegisterBuiltinsOnce(void) {
     registerVmBuiltin("tr", vmBuiltinSmallclu_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclu_id, BUILTIN_TYPE_PROCEDURE, "id");
 #if defined(PSCAL_TARGET_IOS)
+    registerVmBuiltin("mkdir", vmBuiltinSmallclu_mkdir, BUILTIN_TYPE_PROCEDURE, "mkdir");
     registerVmBuiltin("cp", vmBuiltinSmallclu_cp, BUILTIN_TYPE_PROCEDURE, "cp");
     registerVmBuiltin("mv", vmBuiltinSmallclu_mv, BUILTIN_TYPE_PROCEDURE, "mv");
     registerVmBuiltin("rm", vmBuiltinSmallclu_rm, BUILTIN_TYPE_PROCEDURE, "rm");

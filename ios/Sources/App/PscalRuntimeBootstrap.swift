@@ -51,13 +51,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private init() {
-        let initialColumns = 80
-        let initialRows = 24
-        let initialMetrics = TerminalGeometryMetrics(columns: initialColumns, rows: initialRows)
+        let initialMetrics = PscalRuntimeBootstrap.defaultGeometryMetrics()
+        runtimeDebugLog("[Geometry] bootstrap size columns=\(initialMetrics.columns) rows=\(initialMetrics.rows)")
         self.geometryBySource = [.main: initialMetrics, .elvis: initialMetrics]
         self.activeGeometry = initialMetrics
-        self.terminalBuffer = TerminalBuffer(columns: initialColumns,
-                                             rows: initialRows,
+        self.terminalBuffer = TerminalBuffer(columns: initialMetrics.columns,
+                                             rows: initialMetrics.rows,
                                              scrollback: 400,
                                              dsrResponder: { data in
             data.withUnsafeBytes { buffer in
@@ -69,7 +68,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         self.terminalBuffer.setResizeHandler { [weak self] columns, rows in
             self?.handleTerminalResizeRequest(columns: columns, rows: rows)
         }
-        PSCALRuntimeUpdateWindowSize(Int32(initialColumns), Int32(initialRows))
+        PSCALRuntimeUpdateWindowSize(Int32(initialMetrics.columns), Int32(initialMetrics.rows))
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                      object: nil,
                                                                      queue: .main) { [weak self] _ in
@@ -127,10 +126,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
+        runtimeDebugLog("[Geometry] main update request columns=\(columns) rows=\(rows)")
         updateGeometry(from: .main, columns: columns, rows: rows)
     }
 
     func updateElvisWindowSize(columns: Int, rows: Int) {
+        runtimeDebugLog("[Geometry] elvis update request columns=\(columns) rows=\(rows)")
         updateGeometry(from: .elvis, columns: columns, rows: rows)
     }
 
@@ -153,8 +154,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func handleTerminalResizeRequest(columns: Int, rows: Int) {
-        _ = columns
-        _ = rows
+        runtimeDebugLog("[Geometry] remote resize request columns=\(columns) rows=\(rows); reasserting active \(activeGeometry.columns)x\(activeGeometry.rows)")
         DispatchQueue.main.async {
             self.refreshActiveGeometry(forceRuntimeUpdate: true)
         }
@@ -246,11 +246,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let desiredMetrics = geometryBySource[desiredSource] ?? geometryBySource[.main] ?? activeGeometry
         let geometryChanged = desiredMetrics != activeGeometry || desiredSource != activeGeometrySource
         if geometryChanged {
+            runtimeDebugLog("[Geometry] switching to \(desiredSource) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
             activeGeometry = desiredMetrics
             activeGeometrySource = desiredSource
             let shouldResize = (desiredSource == .main)
             applyActiveGeometry(resizeTerminalBuffer: shouldResize, forceRuntimeUpdate: true)
         } else if forceRuntimeUpdate {
+            runtimeDebugLog("[Geometry] refreshing existing geometry source=\(desiredSource) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
             applyActiveGeometry(resizeTerminalBuffer: false, forceRuntimeUpdate: true)
         } else {
             activeGeometrySource = desiredSource
@@ -273,8 +275,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         if forceRuntimeUpdate || resizeTerminalBuffer {
+            runtimeDebugLog("[Geometry] applying runtime window size columns=\(metrics.columns) rows=\(metrics.rows) resizeBuffer=\(resizeTerminalBuffer) force=\(forceRuntimeUpdate)")
             PSCALRuntimeUpdateWindowSize(Int32(metrics.columns), Int32(metrics.rows))
         }
+    }
+
+    private static func defaultGeometryMetrics() -> TerminalGeometryMetrics {
+        let font = TerminalFontSettings.shared.currentFont
+        let screenSize = UIScreen.main.bounds.size
+        let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
+        let lineHeight = max(1.0, font.lineHeight)
+        let columns = max(10, Int(floor(screenSize.width / charWidth)))
+        let rows = max(4, Int(floor(screenSize.height / lineHeight)))
+        return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
 
     private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> (text: NSAttributedString, cursor: TerminalCursorInfo?) {
