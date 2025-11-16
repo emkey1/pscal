@@ -276,16 +276,13 @@ struct TerminalSnapshot {
             let startIndex = max(0, cursorRowIndex + 1 - rows)
             let endIndex = min(totalLines, startIndex + rows)
             var trimmedLines = Array(combinedLines[startIndex..<endIndex])
-            let paddingAvailable = max(0, startIndex)
             let deficit = rows - trimmedLines.count
             var paddingCount = 0
             if deficit > 0 {
-                paddingCount = min(deficit, paddingAvailable)
-                if paddingCount > 0 {
-                    let padStart = max(0, startIndex - paddingCount)
-                    let paddingLines = Array(combinedLines[padStart..<startIndex])
-                    trimmedLines = paddingLines + trimmedLines
-                }
+                paddingCount = deficit
+                let blankRow = TerminalBuffer.makeBlankRow(width: columns)
+                let paddingLines = Array(repeating: blankRow, count: paddingCount)
+                trimmedLines = paddingLines + trimmedLines
             }
 
             let cursorInfo: TerminalSnapshot.Cursor?
