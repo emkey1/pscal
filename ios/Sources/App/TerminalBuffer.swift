@@ -271,20 +271,45 @@ struct TerminalSnapshot {
         return syncQueue.sync {
             let retainedScrollback = Array(scrollback.suffix(maxScrollback))
             let combinedLines = retainedScrollback + grid
+            let cursorRowIndex = cursorHidden ? cursorRow : (retainedScrollback.count + cursorRow)
+            let totalLines = combinedLines.count
+            let startIndex = max(0, cursorRowIndex + 1 - rows)
+            let endIndex = min(totalLines, startIndex + rows)
+            var trimmedLines = Array(combinedLines[startIndex..<endIndex])
+            let paddingAvailable = max(0, startIndex)
+            let deficit = rows - trimmedLines.count
+            var paddingCount = 0
+            if deficit > 0 {
+                paddingCount = min(deficit, paddingAvailable)
+                if paddingCount > 0 {
+                    let padStart = max(0, startIndex - paddingCount)
+                    let paddingLines = Array(combinedLines[padStart..<startIndex])
+                    trimmedLines = paddingLines + trimmedLines
+                }
+            }
+
             let cursorInfo: TerminalSnapshot.Cursor?
             if cursorHidden {
                 cursorInfo = nil
             } else {
-                cursorInfo = TerminalSnapshot.Cursor(row: retainedScrollback.count + cursorRow,
-                                                     col: cursorCol)
+                let adjustedRow = cursorRowIndex - startIndex + paddingCount
+                cursorInfo = TerminalSnapshot.Cursor(row: max(0, adjustedRow), col: cursorCol)
             }
+
             let referenceRow = grid.last ?? grid.first
             let referenceAttributes = referenceRow?.first?.attributes ?? TerminalAttributes()
             let backgroundColor = TerminalBuffer.resolvedColors(attributes: referenceAttributes).background
-            return TerminalSnapshot(lines: combinedLines,
+
+            return TerminalSnapshot(lines: trimmedLines,
                                     cursor: cursorInfo,
                                     defaultBackground: backgroundColor,
-                                    visibleRows: rows)
+                                    visibleRows: trimmedLines.count)
+        }
+    }
+
+    func reset() {
+        syncQueue.sync {
+            resetState()
         }
     }
 
@@ -299,16 +324,12 @@ struct TerminalSnapshot {
 
     static func render(snapshot: TerminalSnapshot) -> [NSAttributedString] {
         var rendered = snapshot.lines.map { makeAttributedString(from: $0) }
-        let cursorRow = snapshot.cursor?.row
-        let minimumRows = max(1, snapshot.visibleRows)
-        while rendered.count > 1,
-              rendered.last?.string.isEmpty == true,
-              rendered.count > minimumRows,
-              (cursorRow == nil || cursorRow! < rendered.count - 1) {
-            rendered.removeLast()
-        }
         if rendered.isEmpty {
             rendered = [NSAttributedString(string: "")]
+        }
+        let desiredRows = max(1, snapshot.visibleRows)
+        if rendered.count > desiredRows {
+            rendered = Array(rendered.suffix(desiredRows))
         }
         return rendered
     }
@@ -927,6 +948,7 @@ struct TerminalSnapshot {
         guard !row.isEmpty else {
             return NSAttributedString(string: "")
         }
+        let onlySpaces = row.allSatisfy { $0.character == " " }
         let mutable = NSMutableAttributedString()
         var currentAttributes = row.first!.attributes
         var buffer = ""
@@ -956,6 +978,9 @@ struct TerminalSnapshot {
             }
         }
         flush()
+        if onlySpaces {
+            return NSAttributedString(string: "")
+        }
         return mutable.copy() as? NSAttributedString ?? NSAttributedString(string: "")
     }
 

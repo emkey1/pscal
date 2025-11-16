@@ -74,6 +74,9 @@ static int smallcluCutCommand(int argc, char **argv);
 static int smallcluTrCommand(int argc, char **argv);
 static int smallcluIdCommand(int argc, char **argv);
 static int smallcluMkdirCommand(int argc, char **argv);
+static int smallcluLnCommand(int argc, char **argv);
+static int smallcluTypeCommand(int argc, char **argv);
+static int smallcluFileCommand(int argc, char **argv);
 static const char *smallcluLeafName(const char *path);
 static int smallcluBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static int smallcluRemovePathWithLabel(const char *label, const char *path, bool recursive);
@@ -97,11 +100,13 @@ static const SmallcluApplet kSmallcluApplets[] = {
 #if defined(PSCAL_TARGET_IOS)
     {"elvis", smallcluElvisCommand, "Elvis text editor"},
 #endif
+    {"file", smallcluFileCommand, "Identify file types"},
     {"find", smallcluFindCommand, "Search for files"},
     {"grep", smallcluGrepCommand, "Search for patterns"},
     {"head", smallcluHeadCommand, "Print the first lines of files"},
     {"id", smallcluIdCommand, "Print user identity information"},
     {"less", smallcluPagerCommand, "Paginate file contents"},
+    {"ln", smallcluLnCommand, "Create links"},
     {"ls", smallcluLsCommand, "List directory contents"},
     {"mkdir", smallcluMkdirCommand, "Create directories"},
     {"more", smallcluPagerCommand, "Paginate file contents"},
@@ -114,6 +119,7 @@ static const SmallcluApplet kSmallcluApplets[] = {
     {"tail", smallcluTailCommand, "Print the last lines of files"},
     {"touch", smallcluTouchCommand, "Update file timestamps"},
     {"tr", smallcluTrCommand, "Translate or delete characters"},
+    {"type", smallcluTypeCommand, "Describe command names"},
     {"uniq", smallcluUniqCommand, "Report or omit repeated lines"},
     {"wc", smallcluWcCommand, "Count lines/words/bytes"},
 };
@@ -2464,6 +2470,160 @@ static int smallcluMkdirCommand(int argc, char **argv) {
                 fprintf(stderr, "mkdir: %s: %s\n", target, strerror(errno));
                 status = 1;
             }
+        }
+    }
+    return status;
+}
+
+static int smallcluFileCommand(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "file: missing operand\n");
+        return 1;
+    }
+    int status = 0;
+    unsigned char buffer[512];
+    for (int i = 1; i < argc; ++i) {
+        const char *path = argv[i];
+        struct stat st;
+        if (lstat(path, &st) != 0) {
+            fprintf(stderr, "file: %s: %s\n", path, strerror(errno));
+            status = 1;
+            continue;
+        }
+        printf("%s: ", path);
+        if (S_ISDIR(st.st_mode)) {
+            printf("directory\n");
+        } else if (S_ISLNK(st.st_mode)) {
+            char target[PATH_MAX];
+            ssize_t len = readlink(path, target, sizeof(target) - 1);
+            if (len >= 0) {
+                target[len] = '\0';
+                printf("symbolic link to '%s'\n", target);
+            } else {
+                printf("symbolic link (unreadable target)\n");
+            }
+        } else if (S_ISCHR(st.st_mode)) {
+            printf("character device\n");
+        } else if (S_ISBLK(st.st_mode)) {
+            printf("block device\n");
+        } else if (S_ISFIFO(st.st_mode)) {
+            printf("named pipe\n");
+        } else if (S_ISSOCK(st.st_mode)) {
+            printf("socket\n");
+        } else if (S_ISREG(st.st_mode)) {
+            FILE *fp = fopen(path, "rb");
+            if (!fp) {
+                printf("regular file (unreadable)\n");
+                status = 1;
+                continue;
+            }
+            size_t read_bytes = fread(buffer, 1, sizeof(buffer), fp);
+            fclose(fp);
+            int is_text = 1;
+            for (size_t b = 0; b < read_bytes; ++b) {
+                unsigned char c = buffer[b];
+                if (c == 0 || (c < 0x09) || (c > 0x0D && c < 0x20 && c != 0x1B)) {
+                    is_text = 0;
+                    break;
+                }
+            }
+            printf(is_text ? "ASCII text\n" : "binary data\n");
+        } else {
+            printf("unknown file type\n");
+        }
+    }
+    return status;
+}
+
+static int smallcluLnCommand(int argc, char **argv) {
+    int symbolic = 0;
+    int opt;
+    optind = 1;
+    while ((opt = getopt(argc, argv, "s")) != -1) {
+        switch (opt) {
+            case 's':
+                symbolic = 1;
+                break;
+            default:
+                fprintf(stderr, "ln: invalid option -- %c\n", optopt);
+                return 1;
+        }
+    }
+    if (argc - optind < 2) {
+        fprintf(stderr, "ln: missing file operand\n");
+        return 1;
+    }
+    const char *target = argv[optind];
+    const char *linkname = argv[optind + 1];
+    int status = 0;
+    if (symbolic) {
+        if (symlink(target, linkname) != 0) {
+            fprintf(stderr, "ln: cannot create symbolic link '%s': %s\n", linkname, strerror(errno));
+            status = 1;
+        }
+    } else {
+        if (link(target, linkname) != 0) {
+            fprintf(stderr, "ln: cannot create link '%s': %s\n", linkname, strerror(errno));
+            status = 1;
+        }
+    }
+    return status;
+}
+
+static char *smallcluSearchPath(const char *name) {
+    if (!name || !*name) {
+        return NULL;
+    }
+    if (strchr(name, '/')) {
+        if (access(name, X_OK) == 0) {
+            return strdup(name);
+        }
+        return NULL;
+    }
+    const char *env = getenv("PATH");
+    if (!env || !*env) {
+        return NULL;
+    }
+    char *copy = strdup(env);
+    if (!copy) {
+        return NULL;
+    }
+    char *token = strtok(copy, ":");
+    while (token) {
+        char candidate[PATH_MAX];
+        if (snprintf(candidate, sizeof(candidate), "%s/%s", token, name) < (int)sizeof(candidate)) {
+            if (access(candidate, X_OK) == 0) {
+                char *result = strdup(candidate);
+                free(copy);
+                return result;
+            }
+        }
+        token = strtok(NULL, ":");
+    }
+    free(copy);
+    return NULL;
+}
+
+static int smallcluTypeCommand(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "type: missing operand\n");
+        return 1;
+    }
+    int status = 0;
+    for (int i = 1; i < argc; ++i) {
+        const char *name = argv[i];
+        const SmallcluApplet *applet = smallcluFindApplet(name);
+        if (applet) {
+            printf("%s is a smallclu applet\n", name);
+            continue;
+        }
+        char *path = smallcluSearchPath(name);
+        if (path) {
+            printf("%s is %s\n", name, path);
+            free(path);
+        } else {
+            fprintf(stderr, "type: %s not found\n", name);
+            status = 1;
         }
     }
     return status;

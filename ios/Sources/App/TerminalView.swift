@@ -605,13 +605,13 @@ final class TerminalRendererContainerView: UIView {
     }
 
     private func scrollToBottom(textView: UITextView, text: NSAttributedString) {
-        let length = text.length
-        guard length > 0 else { return }
-        let bottomRange = NSRange(location: length - 1, length: 1)
         DispatchQueue.main.async {
+            textView.layoutIfNeeded()
             let currentLength = textView.attributedText.length
-            guard bottomRange.location < currentLength else { return }
-            textView.scrollRangeToVisible(bottomRange)
+            if currentLength > 0 {
+                let bottomRange = NSRange(location: max(0, currentLength - 1), length: 1)
+                textView.scrollRangeToVisible(bottomRange)
+            }
             let contentHeight = textView.contentSize.height
             let boundsHeight = textView.bounds.height
             let yOffset = max(-textView.contentInset.top, contentHeight - boundsHeight + textView.contentInset.bottom)

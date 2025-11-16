@@ -591,7 +591,7 @@ static ShellOptionEntry gShellOptions[] = {
     {"dirspell", false},
     {"dotglob", false},
     {"execfail", false},
-    {"expand_aliases", false},
+    {"expand_aliases", true},
     {"extdebug", false},
     {"extglob", false},
     {"extquote", true},

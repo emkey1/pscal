@@ -20,7 +20,6 @@ void pscalRuntimeDebugLog(const char *message);
 static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
-static char *g_elvis_session_dir = NULL;
 
 static char *smallcluOverrideEnv(const char *name, const char *value) {
     const char *current = getenv(name);
@@ -112,16 +111,12 @@ static void smallcluCleanupLegacyRamSession(void) {
     }
 }
 
-static const char *smallcluEnsureSessionDirectory(void) {
-    if (g_elvis_session_dir && *g_elvis_session_dir) {
-        return g_elvis_session_dir;
-    }
-    const char *tmpDir = getenv("TMPDIR");
-    if (!tmpDir || !*tmpDir) {
+static char *smallcluCreateSessionDirectory(const char *baseTmp) {
+    if (!baseTmp || !*baseTmp) {
         return NULL;
     }
     char templatePath[PATH_MAX];
-    snprintf(templatePath, sizeof(templatePath), "%s/pscal_elvis.%06uXXXXXX", tmpDir, arc4random_uniform(999999));
+    snprintf(templatePath, sizeof(templatePath), "%s/pscal_elvis.%06uXXXXXX", baseTmp, arc4random_uniform(999999));
     char *dirString = strdup(templatePath);
     if (!dirString) {
         return NULL;
@@ -130,8 +125,7 @@ static const char *smallcluEnsureSessionDirectory(void) {
         free(dirString);
         return NULL;
     }
-    g_elvis_session_dir = dirString;
-    return g_elvis_session_dir;
+    return dirString;
 }
 
 static char *smallcluBuildElvisPath(void) {
@@ -166,9 +160,6 @@ int smallcluRunElvis(int argc, char **argv) {
         return 1;
     }
 
-    smallcluCleanupSessionFiles();
-    smallcluCleanupLegacyRamSession();
-
     char *saved_elvis_path = smallcluOverrideEnv("ELVISPATH", elvis_path);
     char *saved_term = smallcluOverrideEnv("TERM", "vt100");
     char *saved_elvis_term = smallcluOverrideEnv("ELVISTERM", "vt100");
@@ -183,16 +174,8 @@ int smallcluRunElvis(int argc, char **argv) {
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallcluOverrideEnv("TERMCAP", termcapPath);
     const char *tmpDir = getenv("TMPDIR");
-    const char *session_dir = smallcluEnsureSessionDirectory();
-    char *saved_session_path = NULL;
-    if (session_dir) {
-        smallcluCleanupDirectory(session_dir, false);
-        saved_session_path = smallcluOverrideEnv("SESSIONPATH", session_dir);
-    } else if (tmpDir && *tmpDir) {
-        saved_session_path = smallcluOverrideEnv("SESSIONPATH", tmpDir);
-    }
 
-    int wrapped_argc = argc + 2;
+    int wrapped_argc = argc + 4;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
     if (!wrapped_argv) {
         fprintf(stderr, "elvis: out of memory\n");
@@ -206,8 +189,10 @@ int smallcluRunElvis(int argc, char **argv) {
     wrapped_argv[0] = argv[0];
     wrapped_argv[1] = "-G";
     wrapped_argv[2] = "pscal";
+    wrapped_argv[3] = "-f";
+    wrapped_argv[4] = "ram";
     for (int i = 1; i < argc; ++i) {
-        wrapped_argv[i + 2] = argv[i];
+        wrapped_argv[i + 4] = argv[i];
     }
     pscalRuntimeDebugLog("[smallclu] launching elvis_main_entry");
     for (int i = 0; i < wrapped_argc; ++i) {
@@ -250,10 +235,6 @@ int smallcluRunElvis(int argc, char **argv) {
     smallcluRestoreEnv("PSCALI_FORCE_TERMCAP", saved_force_termcap);
     smallcluRestoreEnv("PSCALI_NO_TTYRAW", saved_no_ttyraw);
     smallcluRestoreEnv("TERMCAP", saved_termcap);
-    if (session_dir) {
-        smallcluCleanupDirectory(session_dir, false);
-    }
-    smallcluRestoreEnv("SESSIONPATH", saved_session_path);
     free(elvis_path);
     return status;
 }

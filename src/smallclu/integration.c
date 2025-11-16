@@ -109,11 +109,13 @@ DEFINE_SMALLCLU_WRAPPER("sed", sed)
 DEFINE_SMALLCLU_WRAPPER("cut", cut)
 DEFINE_SMALLCLU_WRAPPER("tr", tr)
 DEFINE_SMALLCLU_WRAPPER("id", id)
+DEFINE_SMALLCLU_WRAPPER("file", file)
 #if defined(PSCAL_TARGET_IOS)
 DEFINE_SMALLCLU_WRAPPER("mkdir", mkdir)
 DEFINE_SMALLCLU_WRAPPER("cp", cp)
 DEFINE_SMALLCLU_WRAPPER("mv", mv)
 DEFINE_SMALLCLU_WRAPPER("rm", rm)
+DEFINE_SMALLCLU_WRAPPER("ln", ln)
 #endif
 #if defined(PSCAL_TARGET_IOS)
 DEFINE_SMALLCLU_WRAPPER("elvis", elvis)
@@ -151,11 +153,13 @@ static void smallcluRegisterBuiltinsOnce(void) {
     registerVmBuiltin("cut", vmBuiltinSmallclu_cut, BUILTIN_TYPE_PROCEDURE, "cut");
     registerVmBuiltin("tr", vmBuiltinSmallclu_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclu_id, BUILTIN_TYPE_PROCEDURE, "id");
+    registerVmBuiltin("file", vmBuiltinSmallclu_file, BUILTIN_TYPE_PROCEDURE, "file");
 #if defined(PSCAL_TARGET_IOS)
     registerVmBuiltin("mkdir", vmBuiltinSmallclu_mkdir, BUILTIN_TYPE_PROCEDURE, "mkdir");
     registerVmBuiltin("cp", vmBuiltinSmallclu_cp, BUILTIN_TYPE_PROCEDURE, "cp");
     registerVmBuiltin("mv", vmBuiltinSmallclu_mv, BUILTIN_TYPE_PROCEDURE, "mv");
     registerVmBuiltin("rm", vmBuiltinSmallclu_rm, BUILTIN_TYPE_PROCEDURE, "rm");
+    registerVmBuiltin("ln", vmBuiltinSmallclu_ln, BUILTIN_TYPE_PROCEDURE, "ln");
     registerVmBuiltin("elvis", vmBuiltinSmallclu_elvis, BUILTIN_TYPE_PROCEDURE, "elvis");
 #endif
 }

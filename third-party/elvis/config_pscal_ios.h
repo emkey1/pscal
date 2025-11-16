@@ -48,8 +48,6 @@
 #define FEATURE_MKEXRC
 #define FEATURE_NORMAL
 #define FEATURE_PROTO
-/* Disable RAM session storage; always use disk-backed temp files */
-#undef FEATURE_RAM
 #define FEATURE_RCSID
 #define FEATURE_REGION
 #define FEATURE_SHOWTAG

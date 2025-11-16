@@ -64,6 +64,299 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
     return true;
 }
 
+static bool shellAliasBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char ch) {
+    if (!buffer || !length || !capacity) {
+        return false;
+    }
+    if (*length + 1 >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 32 : (*capacity * 2);
+        while (new_capacity < (*length + 2)) {
+            new_capacity *= 2;
+        }
+        char *resized = (char *)realloc(*buffer, new_capacity);
+        if (!resized) {
+            return false;
+        }
+        *buffer = resized;
+        *capacity = new_capacity;
+    }
+    (*buffer)[(*length)++] = ch;
+    return true;
+}
+
+static bool shellAliasFlushWord(char ***out_words,
+                                size_t *out_count,
+                                size_t *out_capacity,
+                                char **buffer,
+                                size_t *length) {
+    if (!out_words || !out_count || !out_capacity || !buffer || !length) {
+        return false;
+    }
+    if (*length == 0) {
+        return true;
+    }
+    char *word = (char *)malloc(*length + 1);
+    if (!word) {
+        return false;
+    }
+    memcpy(word, *buffer, *length);
+    word[*length] = '\0';
+    if (*out_count >= *out_capacity) {
+        size_t new_capacity = (*out_capacity == 0) ? 4 : (*out_capacity * 2);
+        char **resized = (char **)realloc(*out_words, new_capacity * sizeof(char *));
+        if (!resized) {
+            free(word);
+            return false;
+        }
+        *out_words = resized;
+        *out_capacity = new_capacity;
+    }
+    (*out_words)[(*out_count)++] = word;
+    *length = 0;
+    return true;
+}
+
+static void shellAliasFreeWordList(char **words, size_t count) {
+    if (!words) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(words[i]);
+    }
+    free(words);
+}
+
+static bool shellAliasTokenizeValue(const char *value, char ***out_words, size_t *out_count) {
+    if (out_words) {
+        *out_words = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!value || *value == '\0') {
+        return true;
+    }
+
+    char **words = NULL;
+    size_t word_count = 0;
+    size_t word_capacity = 0;
+    char *buffer = NULL;
+    size_t buffer_len = 0;
+    size_t buffer_capacity = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool escaping = false;
+
+    for (const char *cursor = value; *cursor; ++cursor) {
+        char c = *cursor;
+        if (escaping) {
+            if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            escaping = false;
+            continue;
+        }
+        if (in_single) {
+            if (c == '\'') {
+                in_single = false;
+            } else {
+                if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                    shellAliasFreeWordList(words, word_count);
+                    free(buffer);
+                    return false;
+                }
+            }
+            continue;
+        }
+        if (in_double) {
+            if (c == '"') {
+                in_double = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaping = true;
+                continue;
+            }
+            if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            continue;
+        }
+        if (c == '\\') {
+            escaping = true;
+            continue;
+        }
+        if (c == '\'') {
+            in_single = true;
+            continue;
+        }
+        if (c == '"') {
+            in_double = true;
+            continue;
+        }
+        if (isspace((unsigned char)c)) {
+            if (!shellAliasFlushWord(&words, &word_count, &word_capacity, &buffer, &buffer_len)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            continue;
+        }
+        if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+            shellAliasFreeWordList(words, word_count);
+            free(buffer);
+            return false;
+        }
+    }
+    if (escaping) {
+        if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, '\\')) {
+            shellAliasFreeWordList(words, word_count);
+            free(buffer);
+            return false;
+        }
+    }
+    if (!shellAliasFlushWord(&words, &word_count, &word_capacity, &buffer, &buffer_len)) {
+        shellAliasFreeWordList(words, word_count);
+        free(buffer);
+        return false;
+    }
+
+    free(buffer);
+    if (out_words) {
+        *out_words = words;
+    } else {
+        shellAliasFreeWordList(words, word_count);
+    }
+    if (out_count) {
+        *out_count = word_count;
+    }
+    return true;
+}
+
+static bool shellAliasApplyTokens(ShellCommand *cmd, char **alias_words, size_t alias_count) {
+    if (!cmd || !cmd->argv) {
+        shellAliasFreeWordList(alias_words, alias_count);
+        return false;
+    }
+
+    size_t remaining = (cmd->argc > 0) ? (cmd->argc - 1) : 0;
+    size_t new_argc = alias_count + remaining;
+    char **new_argv = (char **)calloc(new_argc + 1, sizeof(char *));
+    if (!new_argv) {
+        shellAliasFreeWordList(alias_words, alias_count);
+        return false;
+    }
+
+    size_t dest = 0;
+    for (size_t i = 0; i < alias_count; ++i) {
+        new_argv[dest++] = alias_words[i];
+        alias_words[i] = NULL;
+    }
+    for (size_t i = 1; i < cmd->argc; ++i) {
+        new_argv[dest++] = cmd->argv[i];
+        cmd->argv[i] = NULL;
+    }
+
+    if (cmd->argc > 0 && cmd->argv[0]) {
+        free(cmd->argv[0]);
+    }
+    free(cmd->argv);
+    if (new_argc == 0) {
+        free(new_argv);
+        cmd->argv = NULL;
+        cmd->argc = 0;
+        shellAliasFreeWordList(alias_words, alias_count);
+        return true;
+    }
+    cmd->argv = new_argv;
+    cmd->argc = new_argc;
+    cmd->argv[cmd->argc] = NULL;
+
+    free(alias_words);
+    return true;
+}
+
+static bool shellExpandAliasOnce(ShellCommand *cmd, const char *value) {
+    if (!cmd || !value) {
+        return true;
+    }
+    char **alias_words = NULL;
+    size_t alias_count = 0;
+    if (!shellAliasTokenizeValue(value, &alias_words, &alias_count)) {
+        return false;
+    }
+    if (alias_count == 0 && cmd->argc <= 1) {
+        if (cmd->argc == 1 && cmd->argv) {
+            free(cmd->argv[0]);
+            free(cmd->argv);
+            cmd->argv = NULL;
+            cmd->argc = 0;
+        }
+        shellAliasFreeWordList(alias_words, alias_count);
+        return true;
+    }
+    bool ok = shellAliasApplyTokens(cmd, alias_words, alias_count);
+    return ok;
+}
+
+static bool shellExpandAliasesIfNeeded(VM *vm, ShellCommand *cmd) {
+    if (!cmd || cmd->argc == 0 || cmd->ignore_functions) {
+        return true;
+    }
+    if (!shellShoptOptionEnabled("expand_aliases")) {
+        return true;
+    }
+    int depth = 0;
+    const int kMaxAliasDepth = 16;
+    const char *expanded_names[kMaxAliasDepth];
+    size_t expanded_count = 0;
+    while (cmd->argc > 0 && depth < kMaxAliasDepth) {
+        const char *name = cmd->argv[0];
+        if (!name) {
+            break;
+        }
+        bool already_expanded = false;
+        for (size_t i = 0; i < expanded_count; ++i) {
+            if (strcmp(expanded_names[i], name) == 0) {
+                already_expanded = true;
+                break;
+            }
+        }
+        if (already_expanded) {
+            break;
+        }
+        ShellAlias *alias = shellFindAlias(name);
+        if (!alias || !alias->value) {
+            break;
+        }
+        if (!shellExpandAliasOnce(cmd, alias->value)) {
+            if (vm) {
+                runtimeError(vm, "shell exec: failed to expand alias '%s'", name);
+            }
+            return false;
+        }
+        if (expanded_count < kMaxAliasDepth) {
+            expanded_names[expanded_count++] = alias->name ? alias->name : name;
+        }
+        if (!cmd->argv || cmd->argc == 0 || !cmd->argv[0]) {
+            break;
+        }
+        depth++;
+    }
+    if (depth >= kMaxAliasDepth) {
+        if (vm) {
+            const char *label = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<alias>";
+            runtimeError(vm, "shell exec: alias expansion depth exceeded for '%s'", label);
+        }
+        return false;
+    }
+    return true;
+}
+
 typedef enum {
     SHELL_REDIR_OP_OPEN,
     SHELL_REDIR_OP_DUP,
@@ -1279,6 +1572,12 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
     shellRuntimeProcessPendingSignals();
     if (shellLoopSkipActive()) {
+        shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
+        return makeVoid();
+    }
+    if (!shellExpandAliasesIfNeeded(vm, cmd)) {
+        shellUpdateStatus(1);
         shellFreeCommand(cmd);
         shellScalarCacheInvalidate();
         return makeVoid();

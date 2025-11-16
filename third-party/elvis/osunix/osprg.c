@@ -2,6 +2,7 @@
 
 #include <sys/types.h>
 #include <unistd.h>
+#include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -19,7 +20,7 @@ char id_osprg[] = "$Id: osprg.c,v 2.13 2003/10/17 17:41:23 steve Exp $";
 #define SHELL	(o_shell ? tochar8(o_shell) : "/bin/sh")
 
 static char	*command;	/* the command to run */
-static char	tempfname[100];	/* name of temp file */
+static char	tempfname[PATH_MAX];	/* name of temp file */
 static int	writefd;	/* fd used for writing to program's stdin */
 static int	readfd;		/* fd used for reading program's stdout */
 static int	pid;		/* process ID of program */
@@ -54,7 +55,13 @@ ELVBOOL prgopen(char *cmd, ELVBOOL willwrite, ELVBOOL willread)
 		command = safedup(cmd);
 
 		/* create a temporary file for feeding the program's stdin */
-		sprintf(tempfname, "%s/elvis%d.tmp", TMPDIR, (int)getpid());
+		if (snprintf(tempfname, sizeof(tempfname), "%s/elvis%d.tmp", TMPDIR, (int)getpid()) >= (int)sizeof(tempfname))
+		{
+			msg(MSG_ERROR, "tmp path too long");
+			safefree(command);
+			command = NULL;
+			return ElvFalse;
+		}
 		writefd = open(tempfname, O_WRONLY|O_CREAT|O_EXCL, 0600);
 		if (writefd < 0)
 		{

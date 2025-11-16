@@ -89,10 +89,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
         }
 
+        terminalBuffer.reset()
         DispatchQueue.main.async {
             self.screenText = NSAttributedString(string: "Launching exsh...")
             self.exitStatus = nil
             self.terminalBackgroundColor = UIColor.systemBackground
+            self.cursorInfo = nil
         }
 
         handlerContext = Unmanaged.passUnretained(self).toOpaque()
