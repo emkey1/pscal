@@ -66,6 +66,11 @@ string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
+include_directories("${CMAKE_SOURCE_DIR}")
+include_directories("${CMAKE_SOURCE_DIR}/src")
+include_directories("${CMAKE_SOURCE_DIR}/src/core")
+include_directories("${CMAKE_SOURCE_DIR}/src/Pascal")
+include_directories("${CMAKE_SOURCE_DIR}/src/symbol")
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
 # Resolve the final runtime destination so install rules can write directly to
@@ -106,6 +111,7 @@ option(SDL "Enable SDL-based graphics and audio" ON)
 if(release)
     set(SDL ON CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
 endif()
+option(PSCAL_USE_SDL3 "Prefer SDL3 over SDL2 when SDL support is enabled (falls back automatically)" OFF)
 set(PSCAL_SDL_PLATFORM_LIBS "")
 
 # ---- Extended builtin categories ----
@@ -115,6 +121,39 @@ option(ENABLE_EXT_BUILTIN_SYSTEM "Enable extended system builtins" ON)
 option(ENABLE_EXT_BUILTIN_USER "Enable extended user builtins" ON)
 option(ENABLE_EXT_BUILTIN_YYJSON "Enable extended yyjson builtins" ON)
 option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
+set(PSCAL_SQLITE_LIBS "")
+if(ENABLE_EXT_BUILTIN_SQLITE)
+    set(_PSCAL_SQLITE_FOUND FALSE)
+    find_package(SQLite3 QUIET)
+    if(SQLite3_FOUND)
+        set(_PSCAL_SQLITE_FOUND TRUE)
+        if(TARGET SQLite::SQLite3)
+            set(PSCAL_SQLITE_LIBS SQLite::SQLite3)
+        else()
+            set(PSCAL_SQLITE_LIBS ${SQLite3_LIBRARIES})
+            if(SQLite3_INCLUDE_DIRS)
+                include_directories(${SQLite3_INCLUDE_DIRS})
+            endif()
+        endif()
+    else()
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(PC_SQLITE3 QUIET sqlite3)
+            if(PC_SQLITE3_FOUND)
+                set(_PSCAL_SQLITE_FOUND TRUE)
+                set(PSCAL_SQLITE_LIBS ${PC_SQLITE3_LIBRARIES} ${PC_SQLITE3_LDFLAGS_OTHER})
+                if(PC_SQLITE3_INCLUDE_DIRS)
+                    include_directories(${PC_SQLITE3_INCLUDE_DIRS})
+                endif()
+            endif()
+        endif()
+    endif()
+    if(NOT _PSCAL_SQLITE_FOUND)
+        message(WARNING "SQLite3 development files not found; disabling extended sqlite builtins.")
+        set(ENABLE_EXT_BUILTIN_SQLITE OFF CACHE BOOL "Enable extended sqlite builtins" FORCE)
+        set(PSCAL_SQLITE_LIBS "")
+    endif()
+endif()
 
 # Default the 3D extended builtins to ON whenever SDL support is enabled so
 # the bundled 3D demos (which rely on the physics helpers) continue to work
@@ -122,159 +161,148 @@ option(ENABLE_EXT_BUILTIN_SQLITE "Enable extended sqlite builtins" ON)
 # toggle on the command line.
 set(_ENABLE_EXT_BUILTIN_3D_DEFAULT OFF)
 if(SDL)
-    set(_ENABLE_EXT_BUILTIN_3D_DEFAULT ON)
-endif()
-option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ${_ENABLE_EXT_BUILTIN_3D_DEFAULT})
-option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
-option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
-if(release)
-    set(ENABLE_EXT_BUILTIN_MATH ON CACHE BOOL "Enable extended math builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_STRINGS ON CACHE BOOL "Enable extended string builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_SYSTEM ON CACHE BOOL "Enable extended system builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_USER ON CACHE BOOL "Enable extended user builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_YYJSON ON CACHE BOOL "Enable extended yyjson builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_SQLITE ON CACHE BOOL "Enable extended sqlite builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_3D ON CACHE BOOL "Enable extended 3D builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_GRAPHICS ON CACHE BOOL "Enable extended graphics builtins" FORCE)
-    set(ENABLE_EXT_BUILTIN_OPENAI ON CACHE BOOL "Enable extended OpenAI builtins" FORCE)
-endif()
-
-if(ENABLE_EXT_BUILTIN_MATH)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_MATH)
-endif()
-if(ENABLE_EXT_BUILTIN_STRINGS)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_STRINGS)
-endif()
-if(ENABLE_EXT_BUILTIN_SYSTEM)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_SYSTEM)
-endif()
-if(ENABLE_EXT_BUILTIN_YYJSON)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_YYJSON)
-endif()
-if(ENABLE_EXT_BUILTIN_USER)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_USER)
-endif()
-if(ENABLE_EXT_BUILTIN_3D)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_3D)
-endif()
-if(ENABLE_EXT_BUILTIN_GRAPHICS)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_GRAPHICS)
-endif()
-if(ENABLE_EXT_BUILTIN_OPENAI)
-    add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
-endif()
-
-set(PSCAL_SQLITE_LIBS "")
-set(PSCAL_SQLITE_INCLUDE_DIRS "")
-if(ENABLE_EXT_BUILTIN_SQLITE)
-    find_package(SQLite3 QUIET)
-    if(SQLite3_FOUND)
-        add_compile_definitions(ENABLE_EXT_BUILTIN_SQLITE)
-        if(SQLite3_LIBRARIES)
-            set(PSCAL_SQLITE_LIBS ${SQLite3_LIBRARIES})
-        endif()
-        if(SQLite3_INCLUDE_DIRS)
-            set(PSCAL_SQLITE_INCLUDE_DIRS ${SQLite3_INCLUDE_DIRS})
-        endif()
-    else()
-        if(release)
-            message(FATAL_ERROR "-Drelease requires SQLite3 development files so extended sqlite builtins can be enabled.")
-        else()
-            message(WARNING "SQLite3 development files not found; disabling sqlite extended builtins. Set -DENABLE_EXT_BUILTIN_SQLITE=OFF to silence this warning.")
-            set(ENABLE_EXT_BUILTIN_SQLITE OFF CACHE BOOL "Enable extended sqlite builtins" FORCE)
-        endif()
-    endif()
-endif()
-
-# ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
-if(APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
-    execute_process(
-        COMMAND xcrun --sdk macosx --show-sdk-path
-        OUTPUT_VARIABLE _MACOSX_SDK_PATH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(_MACOSX_SDK_PATH AND EXISTS "${_MACOSX_SDK_PATH}/usr/include")
-        set(CMAKE_OSX_SYSROOT "${_MACOSX_SDK_PATH}" CACHE PATH "Selected macOS SDK" FORCE)
-        message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
-    endif()
-endif()
-
-# ---- Include Directories (Project Structure) ----
-include_directories(
-    src
-    src/core
-    src/Pascal
-    src/clike
-    src/symbol
-    src/backend_ast
-    src/compiler
-    src/vm
-    src/third_party/yyjson
-    lib
-)
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
-    include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
-endif()
-
-# ---- Dependencies ----
-set(PSCAL_OPENGL_TARGET "")
-
-if(SDL)
+    set(PSCALI_SDL_IMAGE_FALLBACK_TO_SDL2 OFF)
+    set(PSCALI_SDL_MIXER_FALLBACK_TO_SDL2 OFF)
+    set(PSCALI_SDL_TTF_FALLBACK_TO_SDL2 OFF)
     find_package(PkgConfig REQUIRED)
 
-    set(_PSCAL_SDL2_FOUND FALSE)
-    set(_PSCAL_SDL2_PROVIDER "")
+    set(PSCAL_SDL_INCLUDE_DIRS "")
+    set(PSCAL_SDL_LIBRARIES "")
+    set(PSCAL_SDL_CORE_LINK_LIBS "")
+    set(_PSCAL_SDL_PROVIDER "")
+    set(_PSCAL_SDL_SELECTED_MAJOR "")
 
-    # --- SDL2 Core (CMake config first, pkg-config fallback) ---
-    find_package(SDL2 QUIET)
-    if(SDL2_FOUND)
-        set(_PSCAL_SDL2_FOUND TRUE)
-        set(_PSCAL_SDL2_PROVIDER "CMake package")
-    else()
-        pkg_check_modules(PC_SDL2 QUIET sdl2)
-        if(PC_SDL2_FOUND)
-            set(_PSCAL_SDL2_FOUND TRUE)
-            set(_PSCAL_SDL2_PROVIDER "pkg-config")
-            set(SDL2_INCLUDE_DIRS ${PC_SDL2_INCLUDE_DIRS})
-            set(SDL2_LIBRARIES ${PC_SDL2_LIBRARIES})
-        endif()
+    set(_PSCAL_SDL_CANDIDATES "2")
+    if(PSCAL_USE_SDL3)
+        set(_PSCAL_SDL_CANDIDATES "3;2")
     endif()
 
-    if(NOT _PSCAL_SDL2_FOUND)
-        if(release)
-            message(FATAL_ERROR "-Drelease requires SDL2 development files so SDL-dependent builtins can be enabled.")
+    foreach(_PSCAL_SDL_MAJOR IN LISTS _PSCAL_SDL_CANDIDATES)
+        set(_PSCAL_SDL_FOUND FALSE)
+        set(_PSCAL_SDL_PROVIDER "")
+
+        if(_PSCAL_SDL_MAJOR EQUAL 3)
+            find_package(SDL3 QUIET CONFIG)
+            if(TARGET SDL3::SDL3)
+                set(_PSCAL_SDL_FOUND TRUE)
+                set(_PSCAL_SDL_PROVIDER "CMake package")
+                set(PSCAL_SDL_CORE_LINK_LIBS SDL3::SDL3)
+                if(DEFINED SDL3_INCLUDE_DIRS)
+                    set(PSCAL_SDL_INCLUDE_DIRS ${SDL3_INCLUDE_DIRS})
+                endif()
+            endif()
+            if(NOT _PSCAL_SDL_FOUND)
+                pkg_check_modules(PC_SDL_CORE QUIET sdl3)
+                if(PC_SDL_CORE_FOUND)
+                    set(_PSCAL_SDL_FOUND TRUE)
+                    set(_PSCAL_SDL_PROVIDER "pkg-config")
+                    set(PSCAL_SDL_INCLUDE_DIRS ${PC_SDL_CORE_INCLUDE_DIRS})
+                    set(PSCAL_SDL_CORE_LINK_LIBS ${PC_SDL_CORE_LIBRARIES})
+                endif()
+            endif()
+            if(_PSCAL_SDL_FOUND)
+                set(_PSCAL_SDL_ADDONS_FOUND TRUE)
+
+                foreach(_addon IN ITEMS IMAGE MIXER TTF)
+                    string(TOLOWER "${_addon}" _addon_lower)
+                    set(_preferred "SDL3_${_addon_lower}")
+                    set(_fallback "SDL2_${_addon_lower}")
+                    set(_found_var "_PSCAL_SDL_${_addon}_FOUND")
+                    set(${_found_var} FALSE)
+                    foreach(_candidate ${_preferred} ${_fallback})
+                        pkg_check_modules(PC_SDL_${_addon} QUIET ${_candidate})
+                        if(PC_SDL_${_addon}_FOUND)
+                            set(${_found_var} TRUE)
+                            if(NOT _candidate STREQUAL ${_preferred})
+                                message(WARNING "${_preferred} not found; using ${_candidate} with the SDL3 core.")
+                                if(_addon STREQUAL "IMAGE")
+                                    set(PSCALI_SDL_IMAGE_FALLBACK_TO_SDL2 ON)
+                                elseif(_addon STREQUAL "MIXER")
+                                    set(PSCALI_SDL_MIXER_FALLBACK_TO_SDL2 ON)
+                                elseif(_addon STREQUAL "TTF")
+                                    set(PSCALI_SDL_TTF_FALLBACK_TO_SDL2 ON)
+                                endif()
+                            endif()
+                            break()
+                        endif()
+                    endforeach()
+
+                    if(NOT ${_found_var})
+                        set(_PSCAL_SDL_ADDONS_FOUND FALSE)
+                        break()
+                    endif()
+                endforeach()
+
+                if(NOT _PSCAL_SDL_ADDONS_FOUND)
+                    set(_PSCAL_SDL_FOUND FALSE)
+                endif()
+            endif()
         else()
-            message(WARNING "SDL2 development files not found; disabling SDL support. Re-run with -DSDL=OFF to silence this warning.")
+            find_package(SDL2 QUIET)
+            if(SDL2_FOUND)
+                set(_PSCAL_SDL_FOUND TRUE)
+                set(_PSCAL_SDL_PROVIDER "CMake package")
+                if(TARGET SDL2::SDL2)
+                    set(PSCAL_SDL_CORE_LINK_LIBS SDL2::SDL2)
+                endif()
+                if(DEFINED SDL2_INCLUDE_DIRS)
+                    set(PSCAL_SDL_INCLUDE_DIRS ${SDL2_INCLUDE_DIRS})
+                endif()
+            endif()
+            if(NOT _PSCAL_SDL_FOUND)
+                pkg_check_modules(PC_SDL_CORE QUIET sdl2)
+                if(PC_SDL_CORE_FOUND)
+                    set(_PSCAL_SDL_FOUND TRUE)
+                    set(_PSCAL_SDL_PROVIDER "pkg-config")
+                    set(PSCAL_SDL_INCLUDE_DIRS ${PC_SDL_CORE_INCLUDE_DIRS})
+                    set(PSCAL_SDL_CORE_LINK_LIBS ${PC_SDL_CORE_LIBRARIES})
+                endif()
+            endif()
+            if(_PSCAL_SDL_FOUND)
+                pkg_check_modules(PC_SDL_IMAGE REQUIRED SDL2_image)
+                pkg_check_modules(PC_SDL_MIXER REQUIRED SDL2_mixer)
+                pkg_check_modules(PC_SDL_TTF REQUIRED SDL2_ttf)
+            endif()
+        endif()
+
+        if(_PSCAL_SDL_FOUND)
+            set(_PSCAL_SDL_SELECTED_MAJOR ${_PSCAL_SDL_MAJOR})
+            break()
+        elseif(_PSCAL_SDL_MAJOR EQUAL 3)
+            if(DEFINED _PSCAL_SDL_ADDONS_FOUND AND NOT _PSCAL_SDL_ADDONS_FOUND)
+                message(WARNING "SDL3 add-on libraries (image/mixer/ttf) not fully available; falling back to SDL2.")
+            else()
+                message(WARNING "SDL3 development headers not found; falling back to SDL2.")
+            endif()
+        endif()
+    endforeach()
+
+    if(NOT _PSCAL_SDL_SELECTED_MAJOR)
+        if(release)
+            message(FATAL_ERROR "-Drelease requires SDL development files so SDL-dependent builtins can be enabled.")
+        else()
+            message(WARNING "SDL development files not found; disabling SDL support. Re-run with -DSDL=OFF to silence this warning.")
             set(SDL OFF)
             set(SDL OFF CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
         endif()
     else()
         add_compile_definitions(SDL)
-        message(STATUS "SDL2 detected via ${_PSCAL_SDL2_PROVIDER}")
-        message(STATUS "SDL2 Core Include Dirs: ${SDL2_INCLUDE_DIRS}")
-        message(STATUS "SDL2 Core Libraries Variable: ${SDL2_LIBRARIES}") # e.g., /path/to/libSDL2.dylib or SDL2::SDL2
-
-        # --- SDL2_image ---
-        pkg_check_modules(PC_SDL2_IMAGE REQUIRED SDL2_image)
-        message(STATUS "SDL2_image (pkg-config) Include Dirs: ${PC_SDL2_IMAGE_INCLUDE_DIRS}")
-        message(STATUS "SDL2_image (pkg-config) Libs: ${PC_SDL2_IMAGE_LIBRARIES}")
-        message(STATUS "SDL2_image (pkg-config) Lib Dirs: ${PC_SDL2_IMAGE_LIBRARY_DIRS}")
-        message(STATUS "SDL2_image (pkg-config) Other LDFLAGS: ${PC_SDL2_IMAGE_LDFLAGS_OTHER}")
-
-        # --- SDL2_mixer ---
-        pkg_check_modules(PC_SDL2_MIXER REQUIRED SDL2_mixer)
-        message(STATUS "SDL2_mixer (pkg-config) Include Dirs: ${PC_SDL2_MIXER_INCLUDE_DIRS}")
-        message(STATUS "SDL2_mixer (pkg-config) Libs: ${PC_SDL2_MIXER_LIBRARIES}")
-        message(STATUS "SDL2_mixer (pkg-config) Lib Dirs: ${PC_SDL2_MIXER_LIBRARY_DIRS}")
-        message(STATUS "SDL2_mixer (pkg-config) Other LDFLAGS: ${PC_SDL2_MIXER_LDFLAGS_OTHER}")
-
-        # --- SDL2_ttf ---
-        pkg_check_modules(PC_SDL2_TTF REQUIRED SDL2_ttf)
-        message(STATUS "SDL2_ttf (pkg-config) Include Dirs: ${PC_SDL2_TTF_INCLUDE_DIRS}")
-        message(STATUS "SDL2_ttf (pkg-config) Libs: ${PC_SDL2_TTF_LIBRARIES}")
-        message(STATUS "SDL2_ttf (pkg-config) Lib Dirs: ${PC_SDL2_TTF_LIBRARY_DIRS}")
-        message(STATUS "SDL2_ttf (pkg-config) Other LDFLAGS: ${PC_SDL2_TTF_LDFLAGS_OTHER}")
+        if(_PSCAL_SDL_SELECTED_MAJOR EQUAL 3)
+            add_compile_definitions(PSCALI_SDL3)
+            if(PSCALI_SDL_IMAGE_FALLBACK_TO_SDL2)
+                add_compile_definitions(PSCALI_SDL_IMAGE_FALLBACK_TO_SDL2)
+            endif()
+            if(PSCALI_SDL_MIXER_FALLBACK_TO_SDL2)
+                add_compile_definitions(PSCALI_SDL_MIXER_FALLBACK_TO_SDL2)
+            endif()
+            if(PSCALI_SDL_TTF_FALLBACK_TO_SDL2)
+                add_compile_definitions(PSCALI_SDL_TTF_FALLBACK_TO_SDL2)
+            endif()
+        endif()
+        message(STATUS "SDL${_PSCAL_SDL_SELECTED_MAJOR} detected via ${_PSCAL_SDL_PROVIDER}")
+        if(PSCAL_SDL_INCLUDE_DIRS)
+            message(STATUS "SDL Include Dirs: ${PSCAL_SDL_INCLUDE_DIRS}")
+        endif()
 
         if(UNIX AND NOT APPLE)
             find_package(X11)
@@ -398,10 +426,10 @@ function(add_pscal_executable target_name)
     
     if(SDL)
         target_include_directories(${target_name} PRIVATE
-            ${SDL2_INCLUDE_DIRS}
-            ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-            ${PC_SDL2_MIXER_INCLUDE_DIRS}
-            ${PC_SDL2_TTF_INCLUDE_DIRS}
+            ${PSCAL_SDL_INCLUDE_DIRS}
+            ${PC_SDL_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL_MIXER_INCLUDE_DIRS}
+            ${PC_SDL_TTF_INCLUDE_DIRS}
         )
     endif()
     if(NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
@@ -411,9 +439,9 @@ function(add_pscal_executable target_name)
     if(SDL)
         # Add library search paths from pkg-config
         target_link_directories(${target_name} PRIVATE
-            ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-            ${PC_SDL2_MIXER_LIBRARY_DIRS}
-            ${PC_SDL2_TTF_LIBRARY_DIRS}
+            ${PC_SDL_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL_MIXER_LIBRARY_DIRS}
+            ${PC_SDL_TTF_LIBRARY_DIRS}
         )
     endif()
 
@@ -421,22 +449,18 @@ function(add_pscal_executable target_name)
     set(TARGET_LINK_LIBS "")
 
     if(SDL)
-        # Core SDL2
-        if(TARGET SDL2::SDL2)
-            list(APPEND TARGET_LINK_LIBS SDL2::SDL2)
-        else()
-            list(APPEND TARGET_LINK_LIBS ${SDL2_LIBRARIES})
-        endif()
+        # Core SDL
+        list(APPEND TARGET_LINK_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
 
         # SDL Extensions - using the library names from pkg-config
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LIBRARIES})
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LIBRARIES})
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LIBRARIES})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_IMAGE_LIBRARIES})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_MIXER_LIBRARIES})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_TTF_LIBRARIES})
 
         # Add other linker flags from pkg-config (these might include rpath, etc.)
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_IMAGE_LDFLAGS_OTHER})
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_MIXER_LDFLAGS_OTHER})
-        list(APPEND TARGET_LINK_LIBS ${PC_SDL2_TTF_LDFLAGS_OTHER})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_IMAGE_LDFLAGS_OTHER})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_MIXER_LDFLAGS_OTHER})
+        list(APPEND TARGET_LINK_LIBS ${PC_SDL_TTF_LDFLAGS_OTHER})
         if(PSCAL_OPENGL_TARGET)
             list(APPEND TARGET_LINK_LIBS ${PSCAL_OPENGL_TARGET})
         elseif(OPENGL_LIBRARIES)
@@ -577,31 +601,27 @@ endif()
 
 if(SDL)
     target_include_directories(exsh PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${PSCAL_SDL_INCLUDE_DIRS}
+        ${PC_SDL_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL_MIXER_INCLUDE_DIRS}
+        ${PC_SDL_TTF_INCLUDE_DIRS}
     )
 
     target_link_directories(exsh PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
     )
 
     set(EXSH_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND EXSH_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND EXSH_SDL_LIBS ${SDL2_LIBRARIES})
-    endif()
+    list(APPEND EXSH_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
     list(APPEND EXSH_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
     )
     if(PSCAL_OPENGL_TARGET)
         list(APPEND EXSH_SDL_LIBS ${PSCAL_OPENGL_TARGET})
@@ -688,31 +708,27 @@ endif()
 # headers that reference SDL types.
 if(SDL)
     target_include_directories(clike PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${PSCAL_SDL_INCLUDE_DIRS}
+        ${PC_SDL_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL_MIXER_INCLUDE_DIRS}
+        ${PC_SDL_TTF_INCLUDE_DIRS}
     )
 
     target_link_directories(clike PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
     )
 
     set(CLIKE_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND CLIKE_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND CLIKE_SDL_LIBS ${SDL2_LIBRARIES})
-    endif()
+    list(APPEND CLIKE_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
     list(APPEND CLIKE_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
     )
     if(PSCAL_OPENGL_TARGET)
         list(APPEND CLIKE_SDL_LIBS ${PSCAL_OPENGL_TARGET})
@@ -725,16 +741,16 @@ if(SDL)
     target_compile_definitions(clike PRIVATE SDL)
 
     target_include_directories(clike-repl PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${PSCAL_SDL_INCLUDE_DIRS}
+        ${PC_SDL_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL_MIXER_INCLUDE_DIRS}
+        ${PC_SDL_TTF_INCLUDE_DIRS}
     )
 
     target_link_directories(clike-repl PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
     )
 
     target_link_libraries(clike-repl PRIVATE ${CLIKE_SDL_LIBS})
@@ -795,31 +811,27 @@ endif()
 
 if(SDL)
     target_include_directories(rea PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${PSCAL_SDL_INCLUDE_DIRS}
+        ${PC_SDL_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL_MIXER_INCLUDE_DIRS}
+        ${PC_SDL_TTF_INCLUDE_DIRS}
     )
 
     target_link_directories(rea PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
     )
 
     set(REA_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND REA_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND REA_SDL_LIBS ${SDL2_LIBRARIES})
-    endif()
+    list(APPEND REA_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
     list(APPEND REA_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
     )
     if(PSCAL_OPENGL_TARGET)
         list(APPEND REA_SDL_LIBS ${PSCAL_OPENGL_TARGET})
@@ -1043,29 +1055,25 @@ if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
 endif()
 if(SDL)
     target_include_directories(pscaljson2bc PRIVATE
-        ${SDL2_INCLUDE_DIRS}
-        ${PC_SDL2_IMAGE_INCLUDE_DIRS}
-        ${PC_SDL2_MIXER_INCLUDE_DIRS}
-        ${PC_SDL2_TTF_INCLUDE_DIRS}
+        ${PSCAL_SDL_INCLUDE_DIRS}
+        ${PC_SDL_IMAGE_INCLUDE_DIRS}
+        ${PC_SDL_MIXER_INCLUDE_DIRS}
+        ${PC_SDL_TTF_INCLUDE_DIRS}
     )
     target_link_directories(pscaljson2bc PRIVATE
-        ${PC_SDL2_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL2_MIXER_LIBRARY_DIRS}
-        ${PC_SDL2_TTF_LIBRARY_DIRS}
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
     )
     set(JSON2BC_SDL_LIBS "")
-    if(TARGET SDL2::SDL2)
-        list(APPEND JSON2BC_SDL_LIBS SDL2::SDL2)
-    else()
-        list(APPEND JSON2BC_SDL_LIBS ${SDL2_LIBRARIES})
-    endif()
+    list(APPEND JSON2BC_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
     list(APPEND JSON2BC_SDL_LIBS
-        ${PC_SDL2_IMAGE_LIBRARIES}
-        ${PC_SDL2_MIXER_LIBRARIES}
-        ${PC_SDL2_TTF_LIBRARIES}
-        ${PC_SDL2_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL2_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL2_TTF_LDFLAGS_OTHER}
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
     )
     if(PSCAL_OPENGL_TARGET)
         list(APPEND JSON2BC_SDL_LIBS ${PSCAL_OPENGL_TARGET})

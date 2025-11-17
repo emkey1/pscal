@@ -1,8 +1,8 @@
 #ifndef UTILS_H
 #define UTILS_H
-#include "parser.h"
-#include "symbol.h"
-#include "vm.h"
+#include "Pascal/parser.h"
+#include "symbol/symbol.h"
+#include "vm/vm.h"
 
 #define PASCAL_DEFAULT_FLOAT_PRECISION 6
 /* =======================

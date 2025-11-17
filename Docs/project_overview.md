@@ -17,7 +17,7 @@ custom front ends or extending VM builtins are in
 [`standalone_vm_frontends.md`](standalone_vm_frontends.md) and
 [`extended_builtins.md`](extended_builtins.md).
 
-All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
+All frontends generate a compact bytecode stream that is executed by the VM. This virtual machine provides a rich set of built-in routines and offers optional integrations with **SDL2/SDL3** for graphics and audio, and **libcurl** for networking. The system is designed to be easily extensible, allowing for the addition of new built-in functions.
 
 ---
 
@@ -68,7 +68,7 @@ The project follows a classic compiler and virtual machine design:
 * C compiler with C11 support
 * [CMake](https://cmake.org/) 3.24 or newer
 * [libcurl](https://curl.se/libcurl/)
-* **Optional**: SDL2, SDL2\_image, SDL2\_mixer and SDL2\_ttf when building with `-DSDL=ON`
+* **Optional**: SDL2 or SDL3 (plus the matching `SDL*_image`, `SDL*_mixer`, and `SDL*_ttf` add-ons) when building with `-DSDL=ON`
 
 ---
 

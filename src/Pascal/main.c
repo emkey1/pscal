@@ -49,8 +49,8 @@
 #include <errno.h>
 #include <limits.h>
 #ifdef SDL
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_TTF_HEADER
 #endif
 #include "vm/vm.h"
 // ast.h is already included via globals.h or directly, no need for duplicate

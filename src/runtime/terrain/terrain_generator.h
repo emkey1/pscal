@@ -6,13 +6,14 @@
 #include <stdint.h>
 
 #ifdef SDL
+#include "core/sdl_headers.h"
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
-#include <SDL2/SDL_opengl.h>
+#include PSCALI_SDL_OPENGL_HEADER
 #if defined(__has_include)
-#if __has_include(<SDL2/SDL_opengl_glext.h>)
-#include <SDL2/SDL_opengl_glext.h>
+#if __has_include(PSCALI_SDL_OPENGL_GLEXT_HEADER)
+#include PSCALI_SDL_OPENGL_GLEXT_HEADER
 #endif
 #endif
 #endif
