@@ -1,0 +1,422 @@
+#!/usr/bin/env pascal
+program SimplePong;
+
+uses SysUtils;
+
+{ This program demonstrates basic SDL graphics,
+  input handling, paddle collision, score keeping, and a score limit.
+  The computer AI is now limited by a maximum paddle speed and has imperfect targeting.
+  Physics are enhanced: paddle vertical movement affects ball's vertical speed on collision.
+  Exiting by closing the window or pressing 'q' is added.
+  Sound effects for paddle and wall hits are added.
+}
+
+// Assuming built-in SDL procedures, audio functions, and utility functions
+// are globally available or imported via a unit.
+// Assuming a global boolean flag (e.g., break_requested) is set by GraphLoop
+// when the window is closed or 'q' is pressed.
+
+const
+  ConfiguredFontPath = '/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontFallbacks: array[0..2] of string = (
+    'fonts/Roboto/static/Roboto-Regular.ttf',
+    '../fonts/Roboto/static/Roboto-Regular.ttf',
+    '../../fonts/Roboto/static/Roboto-Regular.ttf'
+  );
+
+function ResolveFontPath: string;
+var
+  baseDir, candidate: string;
+  i: Integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0 then
+  begin
+    if FileExists(ConfiguredFontPath) then
+    begin
+      ResolveFontPath := ConfiguredFontPath;
+      exit;
+    end;
+  end;
+
+  if FileExists(LegacyFontPath) then
+  begin
+    ResolveFontPath := LegacyFontPath;
+    exit;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(RepoFontFallbacks) to High(RepoFontFallbacks) do
+  begin
+    candidate := ExpandFileName(baseDir + RepoFontFallbacks[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveFontPath := candidate;
+      exit;
+    end;
+  end;
+
+  ResolveFontPath := ConfiguredFontPath;
+end;
+
+var
+  WindowWidth, WindowHeight : Integer;
+  PlayerPaddleY, ComputerPaddleY : Integer;
+  PaddleWidth, PaddleHeight : Integer;
+  BallX, BallY : Integer;
+  BallSize : Integer;
+  BallSpeedX, BallSpeedY : Integer;
+  KeepRunning : Boolean;
+
+  // Variables for mouse input
+  MouseX, MouseY, MouseButtons : Integer;
+
+  // Variables for score keeping
+  ScorePlayer, ScoreComputer : Integer;
+
+  // Constants for game settings
+  MaxScore : Integer;
+
+  // Font settings (adjust filename and size as needed for your system)
+  FontFileName : String;
+  FontSize : Integer;
+
+  // Variables to hold score strings
+  PlayerScoreStr, ComputerScoreStr : String;
+
+  // Variable for computer paddle speed
+  ComputerPaddleSpeed : Integer;
+
+  // Variables for calculating computer paddle movement
+  DesiredComputerPaddleY : Integer;
+  MoveDistance : Integer;
+
+  // Variables to hold Sound IDs
+  SoundID_PaddleHit : Integer;
+  SoundID_WallHit : Integer;
+
+  PrevPlayerPaddleY : Integer;
+  PrevComputerPaddleY : Integer;
+
+  PlayerPaddleSpeedY : Integer;
+  ComputerPaddleSpeedY : Integer;
+
+  // <<< Factor to control how much paddle speed affects ball Y speed >>>
+  // Adjust this value (e.g., 2, 4, 6, 8). Lower value means paddle speed
+  // has a GREATER effect on the ball's vertical speed.
+  PaddleEffectFactor : Integer;
+
+  // Optional: Maximum vertical speed for the ball to prevent it from going too fast
+  // MaxBallSpeedY : Integer;
+
+
+  // The global break_requested flag is assumed to be set by GraphLoop
+  // if the window is closed or 'q' is pressed.
+  // No explicit Pascal variable is needed here if we check the global flag directly
+  // or if GraphLoop modifies KeepRunning (less ideal).
+  // Let's assume GraphLoop sets break_requested.
+
+begin
+  // --- Initialization ---
+  WindowWidth := 800;
+  WindowHeight := 600;
+  InitGraph(WindowWidth, WindowHeight, 'Pascal Simple Pong');
+
+  // Randomize the random number generator
+  Randomize;
+
+  // --- Text System Initialization ---
+  // NOTE: Adjust the font file path if needed for your system
+  FontFileName := ResolveFontPath; // Prefer installed prefix; fall back to repo/system locations
+  FontSize := 24;
+  InitTextSystem(FontFileName, FontSize);
+
+  // <<< Sound System Initialization and Loading >>>
+  InitSoundSystem;
+  writeln('Sound system initialized.');
+
+  // Load sound files (using the names from the sound generation program)
+  SoundID_PaddleHit := LoadSound('paddle_hit.wav');
+  if SoundID_PaddleHit = -1 then // Check for error return value
+  begin
+    writeln('Error loading paddle_hit.wav! Sound effects may be missing.');
+    // Decide how to handle: continue without sound or halt. Let's continue.
+  end;
+
+  SoundID_WallHit := LoadSound('wall_hit.wav');
+  if SoundID_WallHit = -1 then // Check for error return value
+  begin
+    writeln('Error loading wall_hit.wav! Sound effects may be missing.');
+    // Continue
+  end;
+  // <<< END Sound System Initialization and Loading >>>
+
+
+  // --- Game Setup (Initial State) ---
+  PaddleWidth := 10;
+  PaddleHeight := 80;
+
+  PlayerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
+  ComputerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
+
+  // <<< Initialize previous paddle positions >>>
+  PrevPlayerPaddleY := PlayerPaddleY;
+  PrevComputerPaddleY := ComputerPaddleY;
+
+  BallSize := 8;
+  BallX := WindowWidth div 2;
+  BallY := WindowHeight div 2;
+
+  BallSpeedX := 4;
+  BallSpeedY := 4;
+
+  ScorePlayer := 0;
+  ScoreComputer := 0;
+  MaxScore := 5;
+
+  ComputerPaddleSpeed := 4; // You can experiment with this value now
+
+  // <<< Set the paddle effect factor >>>
+  PaddleEffectFactor := 6; // Start with a factor of 6 (experimentation needed)
+  // MaxBallSpeedY := 10; // Optional: set max ball speed if clamping is used
+
+
+  KeepRunning := True;
+
+  // --- Main Game Loop ---
+  while KeepRunning and not QuitRequested() do
+  begin
+    // <<< Update previous paddle positions at the start of the frame >>>
+    PrevPlayerPaddleY := PlayerPaddleY;
+    PrevComputerPaddleY := ComputerPaddleY;
+
+    // --- Input ---
+    GetMouseState(MouseX, MouseY, MouseButtons);
+
+    PlayerPaddleY := MouseY - PaddleHeight div 2;
+
+    // Clamp player paddle Y position
+    if PlayerPaddleY < 0 then
+      PlayerPaddleY := 0;
+    if PlayerPaddleY > WindowHeight - PaddleHeight then
+      PlayerPaddleY := WindowHeight - PaddleHeight;
+
+    // --- Game Logic ---
+    BallX := BallX + BallSpeedX;
+    BallY := BallY + BallSpeedY;
+
+    // Limited Speed AI with imperfect targeting
+    // Calculate DesiredComputerPaddleY.
+    // Aim for a slightly random vertical position when the ball is moving towards the computer.
+    // This makes the AI less precise.
+    if BallSpeedX > 0 then // Only add imperfection when ball is moving towards computer
+    begin
+      DesiredComputerPaddleY := BallY - PaddleHeight div 2; // Ideal perfect target
+
+      // Add a random vertical offset
+      DesiredComputerPaddleY := DesiredComputerPaddleY + (Random(PaddleHeight div 2) - PaddleHeight div 4);
+
+      // Clamp the desired position within screen bounds before calculating movement
+      if DesiredComputerPaddleY < 0 then DesiredComputerPaddleY := 0;
+      if DesiredComputerPaddleY > WindowHeight - PaddleHeight then DesiredComputerPaddleY := WindowHeight - PaddleHeight;
+
+    end
+    else // Ball is moving away from the computer, just keep paddle centered vertically
+    begin
+      DesiredComputerPaddleY := BallY - PaddleHeight div 3;
+    end;
+
+    // Calculate the actual distance to move this frame, capped by ComputerPaddleSpeed
+    MoveDistance := DesiredComputerPaddleY - ComputerPaddleY;
+
+    // Move the paddle based on the capped speed
+    if MoveDistance > ComputerPaddleSpeed then
+    begin
+      ComputerPaddleY := ComputerPaddleY + ComputerPaddleSpeed;
+    end
+    else if MoveDistance < -ComputerPaddleSpeed then
+    begin
+      ComputerPaddleY := ComputerPaddleY - ComputerPaddleSpeed;
+    end
+    else
+    begin
+      // Move directly to the desired position if close enough.
+      ComputerPaddleY := DesiredComputerPaddleY;
+    end;
+
+    // Clamp computer paddle Y position after moving it
+    if ComputerPaddleY < 0 then
+      ComputerPaddleY := 0;
+    if ComputerPaddleY > WindowHeight - PaddleHeight then
+      ComputerPaddleY := WindowHeight - PaddleHeight;
+
+    // Collision Detection (Ball with Top/Bottom Walls)
+    if (BallY <= 0) or (BallY + BallSize >= WindowHeight) then
+    begin
+      BallSpeedY := -BallSpeedY;
+      // Play Wall Hit Sound
+      if SoundID_WallHit <> -1 then
+        PlaySound(SoundID_WallHit);
+    end;
+
+    // Collision Detection (Ball with Paddles)
+    // Player Paddle Collision (left side)
+    if (BallX <= PaddleWidth) and
+       (BallSpeedX < 0) and
+       (BallY + BallSize >= PlayerPaddleY) and
+       (BallY <= PlayerPaddleY + PaddleHeight)
+    then
+    begin
+      BallSpeedX := -BallSpeedX;
+
+      // <<< Calculate Player Paddle's vertical speed and apply effect >>>
+      PlayerPaddleSpeedY := PlayerPaddleY - PrevPlayerPaddleY; // Speed = current Y - previous Y
+      BallSpeedY := BallSpeedY + (PlayerPaddleSpeedY div PaddleEffectFactor); // Adjust ball Y speed
+
+      // Optional: Clamp BallSpeedY to prevent it from getting too fast vertically
+      // if Abs(BallSpeedY) > MaxBallSpeedY then
+      // begin
+      //    if BallSpeedY > 0 then BallSpeedY := MaxBallSpeedY
+      //    else BallSpeedY := -MaxBallSpeedY;
+      // end;
+
+      // Play Paddle Hit Sound
+      if SoundID_PaddleHit <> -1 then
+        PlaySound(SoundID_PaddleHit);
+    end;
+
+    // Computer Paddle Collision (right side)
+    if (BallX + BallSize >= WindowWidth - PaddleWidth) and
+       (BallSpeedX > 0) and
+       (BallY + BallSize >= ComputerPaddleY) and
+       (BallY <= ComputerPaddleY + PaddleHeight)
+    then
+    begin
+      BallSpeedX := -BallSpeedX;
+
+      // <<< Calculate Computer Paddle's vertical speed and apply effect >>>
+      ComputerPaddleSpeedY := ComputerPaddleY - PrevComputerPaddleY; // Speed = current Y - previous Y
+      BallSpeedY := BallSpeedY + (ComputerPaddleSpeedY div PaddleEffectFactor); // Adjust ball Y speed
+
+      // Optional: Clamp BallSpeedY
+      // if Abs(BallSpeedY) > MaxBallSpeedY then
+      // begin
+      //    if BallSpeedY > 0 then BallSpeedY := MaxBallSpeedY
+      //    else BallSpeedY := -MaxBallSpeedY;
+      // end;
+
+
+      // Play Paddle Hit Sound
+      if SoundID_PaddleHit <> -1 then
+        PlaySound(SoundID_PaddleHit);
+    end;
+
+
+    // --- Scoring and Ball Reset ---
+    if (BallX < 0) then // Ball went past player paddle (computer scores)
+    begin
+      ScoreComputer := ScoreComputer + 1;
+
+      BallX := WindowWidth div 2;
+      BallY := WindowHeight div 2;
+
+      BallSpeedX := 4; // Serve towards player (adjust initial speed if needed)
+      if Random(2) = 1 then BallSpeedY := 4 else BallSpeedY := -4; // Randomize initial vertical direction
+
+
+      if ScoreComputer >= MaxScore then
+      begin
+        KeepRunning := False;
+      end;
+    end;
+
+    if (BallX + BallSize > WindowWidth) then // Ball went past computer paddle (player scores)
+    begin
+      ScorePlayer := ScorePlayer + 1;
+
+      BallX := WindowWidth div 2;
+      BallY := WindowHeight div 2;
+
+      BallSpeedX := -4; // Serve towards computer (adjust initial speed if needed)
+      if Random(2) = 1 then BallSpeedY := 4 else BallSpeedY := -4; // Randomize initial vertical direction
+
+
+      if ScorePlayer >= MaxScore then
+      begin
+        KeepRunning := False;
+      end;
+    end;
+
+
+    // --- Rendering ---
+    ClearDevice;
+
+    SetRGBColor(255, 255, 255); // White
+
+    //Draw the Player Paddle
+    FillRect(0, PlayerPaddleY, PaddleWidth - 1, PlayerPaddleY + PaddleHeight - 1);
+
+    //Draw the Computer Paddle
+    FillRect(WindowWidth - PaddleWidth, ComputerPaddleY, WindowWidth - 1, ComputerPaddleY + PaddleHeight - 1);
+
+    //Draw the Ball
+    FillRect(BallX, BallY, BallX + BallSize - 1, BallY + BallSize - 1);
+
+    //--- Draw Scores ---
+    PlayerScoreStr := 'Player: ' + IntToStr(ScorePlayer);
+    ComputerScoreStr := 'Computer: ' + IntToStr(ScoreComputer);
+
+    SetRGBColor(255, 255, 0); // Yellow
+
+    OutTextXY(20, 20, PlayerScoreStr);
+    OutTextXY(WindowWidth - 150, 20, ComputerScoreStr);
+
+    //--- End Draw Scores ---
+
+
+    //Present the rendered frame to the window
+    UpdateScreen;
+
+    // Process SDL events and delay.
+    GraphLoop(16);
+
+  end; // while KeepRunning and not QuitRequested()
+
+  //--- Game Over / Final Screen ---
+  ClearDevice;
+  SetRGBColor(255, 255, 255); // White text
+
+  // Display message based on exit reason or score limit
+  if QuitRequested() then // Check if the user quit
+  begin
+    OutTextXY(WindowWidth div 2 - 50, WindowHeight div 2, 'Quit');
+  end
+  else // Game ended because score limit reached
+  begin
+    if ScorePlayer >= MaxScore then
+      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Player Wins!')
+    else if ScoreComputer >= MaxScore then
+      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Computer Wins!');
+  end;
+
+  UpdateScreen; // Show the final screen message
+  WaitKeyEvent; // Wait for any key press or window close before cleaning up
+
+  // Sound System Cleanup
+  if SoundID_PaddleHit <> -1 then
+    FreeSound(SoundID_PaddleHit);
+
+  if SoundID_WallHit <> -1 then
+    FreeSound(SoundID_WallHit);
+
+  QuitSoundSystem; // Shut down the sound system
+
+  QuitTextSystem; // Cleanup text system
+  CloseGraph; // Cleanup graphics
+
+end. // Final program END.

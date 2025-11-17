@@ -3,6 +3,10 @@
 
 
 #include "elvis.h"
+#ifdef GUI_PSCAL
+extern void pscalRuntimeDebugLog(const char *message);
+extern GUI guipscal;
+#endif
 #ifdef FEATURE_RCSID
 char id_vicmd[] = "$Id: vicmd.c,v 2.84 2003/12/28 20:33:29 steve Exp $";
 #endif
@@ -575,11 +579,19 @@ RESULT v_window(WINDOW win, VIINFO *vinf)
 	}
 
 	/* did we find a window? */
-	if (!next)
-	{
-		msg(MSG_ERROR, "no such window");
-		return RESULT_ERROR;
-	}
+    if (!next)
+    {
+#ifdef GUI_PSCAL
+        if (gui == &guipscal)
+        {
+            char logbuf[160];
+            snprintf(logbuf, sizeof(logbuf), "[pscal-vicmd] no-such-window command=%d count=%ld",(int)vinf->command, (long)vinf->count);
+            pscalRuntimeDebugLog(logbuf);
+        }
+#endif
+        msg(MSG_ERROR, "no such window");
+        return RESULT_ERROR;
+    }
 
 	/* go to the requested window */
 	if (gui->focusgw)

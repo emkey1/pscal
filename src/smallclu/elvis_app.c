@@ -9,10 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <limits.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 extern int elvis_main_entry(int argc, char **argv);
 void pscalRuntimeDebugLog(const char *message);
@@ -39,93 +37,6 @@ static void smallcluRestoreEnv(const char *name, char *saved) {
     } else {
         unsetenv(name);
     }
-}
-
-static void smallcluCleanupDirectory(const char *path, bool removeSelf) {
-    if (!path || !*path) {
-        return;
-    }
-    DIR *dir = opendir(path);
-    if (!dir) {
-        return;
-    }
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-        char pathbuf[PATH_MAX];
-        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", path, entry->d_name);
-        unlink(pathbuf);
-    }
-    closedir(dir);
-    if (removeSelf) {
-        rmdir(path);
-    }
-}
-
-static void smallcluCleanupSessionFiles(void) {
-    const char *tmpDir = getenv("TMPDIR");
-    if (!tmpDir || !*tmpDir) {
-        return;
-    }
-    DIR *dir = opendir(tmpDir);
-    if (!dir) {
-        return;
-    }
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "elvis", 5) != 0) {
-            continue;
-        }
-        const char *suffix = strrchr(entry->d_name, '.');
-        if (!suffix || strcmp(suffix, ".ses") != 0) {
-            continue;
-        }
-        char pathbuf[PATH_MAX];
-        snprintf(pathbuf, sizeof(pathbuf), "%s/%s", tmpDir, entry->d_name);
-        unlink(pathbuf);
-    }
-    closedir(dir);
-}
-
-#define ELVIS_SESSION_MAGIC 0x0200DEADL
-#define ELVIS_SESSION_MAGIC_SWAPPED 0xADDE0002L
-
-static void smallcluCleanupLegacyRamSession(void) {
-    const char *legacyName = "ram";
-    struct stat st;
-    if (stat(legacyName, &st) != 0 || !S_ISREG(st.st_mode)) {
-        return;
-    }
-    FILE *fp = fopen(legacyName, "rb");
-    if (!fp) {
-        return;
-    }
-    unsigned long magic = 0;
-    size_t readBytes = fread(&magic, 1, sizeof(magic), fp);
-    fclose(fp);
-    if (readBytes == sizeof(magic) &&
-        (magic == ELVIS_SESSION_MAGIC || magic == ELVIS_SESSION_MAGIC_SWAPPED)) {
-        unlink(legacyName);
-    }
-}
-
-static char *smallcluCreateSessionDirectory(const char *baseTmp) {
-    if (!baseTmp || !*baseTmp) {
-        return NULL;
-    }
-    char templatePath[PATH_MAX];
-    snprintf(templatePath, sizeof(templatePath), "%s/pscal_elvis.%06uXXXXXX", baseTmp, arc4random_uniform(999999));
-    char *dirString = strdup(templatePath);
-    if (!dirString) {
-        return NULL;
-    }
-    if (!mkdtemp(dirString)) {
-        free(dirString);
-        return NULL;
-    }
-    return dirString;
 }
 
 static char *smallcluBuildElvisPath(void) {
@@ -173,8 +84,6 @@ int smallcluRunElvis(int argc, char **argv) {
     }
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallcluOverrideEnv("TERMCAP", termcapPath);
-    const char *tmpDir = getenv("TMPDIR");
-
     int wrapped_argc = argc + 4;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
     if (!wrapped_argv) {

@@ -394,8 +394,21 @@ void insertConstGlobalSymbol(const char *name, Value val) {
         fprintf(stderr, "Internal error: constGlobalSymbols hash table is NULL during insertConstGlobalSymbol.\n");
         EXIT_FAILURE_HANDLER();
     }
-    if (hashTableLookup(constGlobalSymbols, name)) {
-        return; // Already inserted
+    Symbol *existing = hashTableLookup(constGlobalSymbols, name);
+    if (existing) {
+        existing->type = val.type;
+        existing->is_const = true;
+        if (existing->value) {
+            freeValue(existing->value);
+        } else {
+            existing->value = malloc(sizeof(Value));
+            if (!existing->value) {
+                fprintf(stderr, "Memory allocation error (malloc Value) in insertConstGlobalSymbol\n");
+                EXIT_FAILURE_HANDLER();
+            }
+        }
+        *(existing->value) = makeCopyOfValue(&val);
+        return;
     }
 
     Symbol *new_symbol = malloc(sizeof(Symbol));

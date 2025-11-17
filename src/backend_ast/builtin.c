@@ -50,7 +50,7 @@ void shellRuntimeSetLastStatusSticky(int status);
 
 /* SDL-backed builtins are registered dynamically when available. */
 #ifdef SDL
-#include "backend_ast/sdl.h"
+#include "backend_ast/pscal_sdl_runtime.h"
 #define SDL_READKEY_BUFFER_CAPACITY 8
 static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
 static int gSdlReadKeyBufferStart = 0;

@@ -1,0 +1,578 @@
+#!/usr/bin/env rea
+// Uses SDL for graphics and input handling
+
+const int BoardWidth = 18;
+const int BoardHeight = 18;
+const int CellSize = 30;
+
+const int FBlockCount = 7;
+const int RotationCount = 4;
+const int BlocksPerPiece = 5;
+
+int FBlockOffsets[FBlockCount][RotationCount][BlocksPerPiece * 2];
+int FBlockColorR[FBlockCount];
+int FBlockColorG[FBlockCount];
+int FBlockColorB[FBlockCount];
+bool FBlockDataInitialized = false;
+
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+str resolveFontPath() {
+    str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+    str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+    str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+    if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+        return ConfiguredFontPath;
+    }
+    if (fileexists(legacyFontPath)) {
+        return legacyFontPath;
+    }
+    if (fileexists(repoFontPath1)) {
+        return repoFontPath1;
+    }
+    return repoFontPath2;
+}
+
+void initializeFBlockData() {
+    if (FBlockDataInitialized) {
+        return;
+    }
+    FBlockDataInitialized = true;
+
+// Autumn in The Dalles
+FBlockColorR[0] = 64;  FBlockColorG[0] = 224; FBlockColorB[0] = 208; // I - Turquoise (Columbia River)
+FBlockColorR[1] = 255; FBlockColorG[1] = 195; FBlockColorB[1] = 0;   // O - Gold (Aspen Leaves)
+FBlockColorR[2] = 178; FBlockColorG[2] = 34;  FBlockColorB[2] = 34;  // T - Firebrick Red
+FBlockColorR[3] = 154; FBlockColorG[3] = 205; FBlockColorB[3] = 50;  // S - Olive Green
+FBlockColorR[4] = 218; FBlockColorG[4] = 112; FBlockColorB[4] = 214; // Z - Orchid / Fuchsia
+FBlockColorR[5] = 210; FBlockColorG[5] = 105; FBlockColorB[5] = 30;  // J - Chocolate Brown
+FBlockColorR[6] = 95;  FBlockColorG[6] = 75;  FBlockColorB[6] = 139; // L - Deep Slate Blue (Evening Sky)
+
+    int baseOffsets[FBlockCount][BlocksPerPiece * 2];
+
+    // I5 Piece (5-block I)
+    baseOffsets[0][0] = 0; baseOffsets[0][1] = 1;
+    baseOffsets[0][2] = 1; baseOffsets[0][3] = 1; // Pivot
+    baseOffsets[0][4] = 2; baseOffsets[0][5] = 1;
+    baseOffsets[0][6] = 3; baseOffsets[0][7] = 1;
+    baseOffsets[0][8] = 4; baseOffsets[0][9] = 1;
+
+    // P Piece
+    baseOffsets[1][0] = 0; baseOffsets[1][1] = 0;
+    baseOffsets[1][2] = 1; baseOffsets[1][3] = 0;
+    baseOffsets[1][4] = 0; baseOffsets[1][5] = 1; // Pivot
+    baseOffsets[1][6] = 1; baseOffsets[1][7] = 1;
+    baseOffsets[1][8] = 2; baseOffsets[1][9] = 1;
+
+    // T5 Piece
+    baseOffsets[2][0] = 0; baseOffsets[2][1] = 0;
+    baseOffsets[2][2] = 1; baseOffsets[2][3] = 0; // Pivot
+    baseOffsets[2][4] = 2; baseOffsets[2][5] = 0;
+    baseOffsets[2][6] = 1; baseOffsets[2][7] = 1;
+    baseOffsets[2][8] = 1; baseOffsets[2][9] = 2; // (Not used, just to fill array)
+
+    // Y Piece
+    baseOffsets[3][0] = 1; baseOffsets[3][1] = 0;
+    baseOffsets[3][2] = 0; baseOffsets[3][3] = 1;
+    baseOffsets[3][4] = 1; baseOffsets[3][5] = 1; // Pivot
+    baseOffsets[3][6] = 2; baseOffsets[3][7] = 1;
+    baseOffsets[3][8] = 1; baseOffsets[3][9] = 2;
+
+    // F Piece
+    baseOffsets[4][0] = 1; baseOffsets[4][1] = 0;
+    baseOffsets[4][2] = 2; baseOffsets[4][3] = 0;
+    baseOffsets[4][4] = 0; baseOffsets[4][5] = 1;
+    baseOffsets[4][6] = 1; baseOffsets[4][7] = 1; // Pivot
+    baseOffsets[4][8] = 1; baseOffsets[4][9] = 2;
+
+    // U Piece
+    baseOffsets[5][0] = 0; baseOffsets[5][1] = 0;
+    baseOffsets[5][2] = 2; baseOffsets[5][3] = 0;
+    baseOffsets[5][4] = 0; baseOffsets[5][5] = 1;
+    baseOffsets[5][6] = 1; baseOffsets[5][7] = 1; // Pivot
+    baseOffsets[5][8] = 2; baseOffsets[5][9] = 1;
+
+    // L5 Piece
+    baseOffsets[6][0] = 0; baseOffsets[6][1] = 0;
+    baseOffsets[6][2] = 0; baseOffsets[6][3] = 1;
+    baseOffsets[6][4] = 0; baseOffsets[6][5] = 2; // Pivot
+    baseOffsets[6][6] = 1; baseOffsets[6][7] = 2;
+    baseOffsets[6][8] = 0; baseOffsets[6][9] = 3; // (Not used, just to fill array)
+
+
+    int shape;
+    for (shape = 0; shape < FBlockCount; shape = shape + 1) {
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int baseX = baseOffsets[shape][block * 2];
+            int baseY = baseOffsets[shape][block * 2 + 1];
+
+            // Rotation 0 (spawn)
+            FBlockOffsets[shape][0][block * 2] = baseX;
+            FBlockOffsets[shape][0][block * 2 + 1] = baseY;
+
+            // Rotation 1 (90 degrees clockwise)
+            FBlockOffsets[shape][1][block * 2] = 3 - baseY;
+            FBlockOffsets[shape][1][block * 2 + 1] = baseX;
+
+            // Rotation 2 (180 degrees)
+            FBlockOffsets[shape][2][block * 2] = 3 - baseX;
+            FBlockOffsets[shape][2][block * 2 + 1] = 3 - baseY;
+
+            // Rotation 3 (270 degrees)
+            FBlockOffsets[shape][3][block * 2] = baseY;
+            FBlockOffsets[shape][3][block * 2 + 1] = 3 - baseX;
+        }
+
+        int rotation;
+        for (rotation = 0; rotation < RotationCount; rotation = rotation + 1) {
+            int minX = FBlockOffsets[shape][rotation][0];
+            int minY = FBlockOffsets[shape][rotation][1];
+            for (block = 0; block < BlocksPerPiece; block = block + 1) {
+                int idx = block * 2;
+                if (FBlockOffsets[shape][rotation][idx] < minX) {
+                    minX = FBlockOffsets[shape][rotation][idx];
+                }
+                if (FBlockOffsets[shape][rotation][idx + 1] < minY) {
+                    minY = FBlockOffsets[shape][rotation][idx + 1];
+                }
+            }
+            for (block = 0; block < BlocksPerPiece; block = block + 1) {
+                int idx = block * 2;
+                FBlockOffsets[shape][rotation][idx] = FBlockOffsets[shape][rotation][idx] - minX;
+                FBlockOffsets[shape][rotation][idx + 1] = FBlockOffsets[shape][rotation][idx + 1] - minY;
+            }
+        }
+    }
+}
+
+class Board {
+    int grid[BoardWidth * BoardHeight];
+    int score;
+    int level;
+    int lines;
+
+    void fillCell(int offsetX, int offsetY, int gridX, int gridY) {
+        int cellLeft = offsetX + gridX * CellSize;
+        int cellTop = offsetY + gridY * CellSize;
+        int cellRight = cellLeft + CellSize - 1;
+        int cellBottom = cellTop + CellSize - 1;
+        fillrect(cellLeft, cellTop, cellRight, cellBottom);
+    }
+    
+    void Board() {
+        myself.score = 0;
+        myself.level = 1;
+        myself.lines = 0;
+        int i;
+        for (i = 0; i < BoardWidth * BoardHeight; i = i + 1) {
+            myself.grid[i] = 0;
+        }
+    }
+    
+    bool isValidPosition(int x, int y) {
+        return (x >= 0 && x < BoardWidth && y >= 0 && y < BoardHeight);
+    }
+    
+    bool isCollision(int x, int y, int shapeIndex, int rotation) {
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = FBlockOffsets[shapeIndex][rotation][block * 2];
+            int offsetY = FBlockOffsets[shapeIndex][rotation][block * 2 + 1];
+            int newX = x + offsetX;
+            int newY = y + offsetY;
+
+            if (newX < 0 || newX >= BoardWidth) {
+                return true;
+            }
+            if (newY >= BoardHeight) {
+                return true;
+            }
+            if (newY >= 0 && myself.grid[newY * BoardWidth + newX] != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool placePiece(int x, int y, int shapeIndex, int rotation, int color) {
+        bool lockedOut = false;
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = FBlockOffsets[shapeIndex][rotation][block * 2];
+            int offsetY = FBlockOffsets[shapeIndex][rotation][block * 2 + 1];
+            int newX = x + offsetX;
+            int newY = y + offsetY;
+            if (newY < 0) {
+                lockedOut = true;
+            } else if (newY < BoardHeight && newX >= 0 && newX < BoardWidth) {
+                myself.grid[newY * BoardWidth + newX] = color;
+            }
+        }
+        return lockedOut;
+    }
+    
+    void clearLines() {
+        int linesCleared = 0;
+        int i, j, k;
+
+        for (i = BoardHeight - 1; i >= 0; i = i - 1) {
+            bool fullLine = true;
+            for (j = 0; j < BoardWidth; j = j + 1) {
+                if (myself.grid[i * BoardWidth + j] == 0) {
+                    fullLine = false;
+                    break;
+                }
+            }
+            
+            if (fullLine) {
+                linesCleared = linesCleared + 1;
+                // Shift all lines above down
+                for (k = i; k > 0; k = k - 1) {
+                    for (j = 0; j < BoardWidth; j = j + 1) {
+                        myself.grid[k * BoardWidth + j] = myself.grid[(k - 1) * BoardWidth + j];
+                    }
+                }
+                // Clear top line
+                for (j = 0; j < BoardWidth; j = j + 1) {
+                    myself.grid[j] = 0;
+                }
+                i = i + 1; // Check same row again
+            }
+        }
+        
+        if (linesCleared > 0) {
+            myself.lines = myself.lines + linesCleared;
+            myself.score = myself.score + linesCleared * 100 * myself.level;
+            if (myself.lines >= myself.level * 10) {
+                myself.level = myself.level + 1;
+            }
+        }
+    }
+    
+    void draw(int offsetX, int offsetY) {
+        int i, j;
+        for (i = 0; i < BoardHeight; i = i + 1) {
+            for (j = 0; j < BoardWidth; j = j + 1) {
+                int value = myself.grid[i * BoardWidth + j];
+                if (value != 0) {
+                    int r = value % 256;
+                    int g = int(value / 256) % 256;
+                    int b = int(value / 65536);
+                    setrgbcolor(r, g, b);
+                    myself.fillCell(offsetX, offsetY, j, i);
+                }
+            }
+        }
+    }
+
+    void drawWithActivePiece(int offsetX, int offsetY, bool includeActive,
+                              int x, int y, int shapeIndex, int rotation, int color) {
+        if (!includeActive) {
+            myself.draw(offsetX, offsetY);
+            return;
+        }
+
+        int modifiedIndices[BlocksPerPiece];
+        int previousValues[BlocksPerPiece];
+        int modifiedCount = 0;
+
+        int block;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetXBlock = FBlockOffsets[shapeIndex][rotation][block * 2];
+            int offsetYBlock = FBlockOffsets[shapeIndex][rotation][block * 2 + 1];
+            int drawX = x + offsetXBlock;
+            int drawY = y + offsetYBlock;
+            if (drawX >= 0 && drawX < BoardWidth && drawY >= 0 && drawY < BoardHeight) {
+                int cellIndex = drawY * BoardWidth + drawX;
+                modifiedIndices[modifiedCount] = cellIndex;
+                previousValues[modifiedCount] = myself.grid[cellIndex];
+                myself.grid[cellIndex] = color;
+                modifiedCount = modifiedCount + 1;
+            }
+        }
+
+        myself.draw(offsetX, offsetY);
+
+        int i;
+        for (i = 0; i < modifiedCount; i = i + 1) {
+            myself.grid[modifiedIndices[i]] = previousValues[i];
+        }
+    }
+    
+    int getScore() { return myself.score; }
+    int getLevel() { return myself.level; }
+    int getLines() { return myself.lines; }
+}
+
+class Game {
+    const int BoardX = 50;
+    const int BoardY = 20;
+    const int WindowWidth = 620;
+    const int WindowHeight = BoardY + BoardHeight * CellSize + 60;
+    
+    Board board;
+    int currentShapeIndex;
+    int currentRotation;
+    int currentColor;
+    int currentX;
+    int currentY;
+    int nextShapeIndex;
+    bool gameOver;
+    int frameDelay;
+    float dropTime;
+    float lastDrop;
+    
+    void Game() {
+        initializeFBlockData();
+        myself.board = new Board();
+        myself.gameOver = false;
+        myself.frameDelay = 1000 / 60; // ~60 FPS
+        myself.dropTime = 0.5; // seconds per drop
+        myself.lastDrop = 0.0;
+        myself.currentShapeIndex = 0;
+        myself.currentRotation = 0;
+        myself.nextShapeIndex = random(FBlockCount);
+        myself.spawnPiece();
+    }
+
+    int computeSpawnX(int shapeIndex) {
+        int block;
+        int maxX = 0;
+        for (block = 0; block < BlocksPerPiece; block = block + 1) {
+            int offsetX = FBlockOffsets[shapeIndex][0][block * 2];
+            if (offsetX > maxX) {
+                maxX = offsetX;
+            }
+        }
+        int pieceWidth = maxX + 1;
+        int spawnX = (BoardWidth - pieceWidth) / 2;
+        if (spawnX < 0) {
+            spawnX = 0;
+        }
+        return spawnX;
+    }
+
+    void spawnPiece() {
+        myself.currentShapeIndex = myself.nextShapeIndex;
+        myself.currentRotation = 0;
+        myself.currentColor = FBlockColorR[myself.currentShapeIndex] +
+                              FBlockColorG[myself.currentShapeIndex] * 256 +
+                              FBlockColorB[myself.currentShapeIndex] * 65536;
+        myself.nextShapeIndex = random(FBlockCount);
+        myself.currentX = myself.computeSpawnX(myself.currentShapeIndex);
+        myself.currentY = -2;
+
+        if (myself.board.isCollision(myself.currentX, myself.currentY,
+                                     myself.currentShapeIndex, myself.currentRotation)) {
+            myself.gameOver = true;
+        }
+    }
+
+    void movePiece(int dx, int dy) {
+        if (!myself.gameOver &&
+            !myself.board.isCollision(myself.currentX + dx, myself.currentY + dy,
+                                      myself.currentShapeIndex, myself.currentRotation)) {
+            myself.currentX = myself.currentX + dx;
+            myself.currentY = myself.currentY + dy;
+        }
+    }
+
+    void rotatePiece() {
+        if (!myself.gameOver) {
+            int newRotation = (myself.currentRotation + 1) % RotationCount;
+            if (!myself.board.isCollision(myself.currentX, myself.currentY,
+                                          myself.currentShapeIndex, newRotation)) {
+                myself.currentRotation = newRotation;
+            } else if (!myself.board.isCollision(myself.currentX - 1, myself.currentY,
+                                                 myself.currentShapeIndex, newRotation)) {
+                myself.currentX = myself.currentX - 1;
+                myself.currentRotation = newRotation;
+            } else if (!myself.board.isCollision(myself.currentX + 1, myself.currentY,
+                                                 myself.currentShapeIndex, newRotation)) {
+                myself.currentX = myself.currentX + 1;
+                myself.currentRotation = newRotation;
+            }
+        }
+    }
+    
+    void hardDrop() {
+        if (!myself.gameOver) {
+            while (!myself.board.isCollision(myself.currentX, myself.currentY + 1,
+                                             myself.currentShapeIndex, myself.currentRotation)) {
+                myself.currentY = myself.currentY + 1;
+            }
+            myself.lockPiece();
+        }
+    }
+
+    void lockPiece() {
+        bool lockedOut = myself.board.placePiece(myself.currentX, myself.currentY,
+                                                myself.currentShapeIndex, myself.currentRotation,
+                                                myself.currentColor);
+        myself.board.clearLines();
+        if (lockedOut) {
+            myself.gameOver = true;
+        } else {
+            myself.spawnPiece();
+        }
+    }
+
+    void update(float deltaTime) {
+        if (myself.gameOver) return;
+
+        myself.lastDrop = myself.lastDrop + deltaTime;
+        if (myself.lastDrop >= myself.dropTime) {
+            if (!myself.board.isCollision(myself.currentX, myself.currentY + 1,
+                                          myself.currentShapeIndex, myself.currentRotation)) {
+                myself.currentY = myself.currentY + 1;
+            } else {
+                myself.lockPiece();
+            }
+            myself.lastDrop = 0.0;
+        }
+    }
+    
+    void draw() {
+        cleardevice();
+        
+        // Draw board background
+        setrgbcolor(30, 30, 30);
+        int boardRight = BoardX + BoardWidth * CellSize + 5;
+        int boardBottom = BoardY + BoardHeight * CellSize + 5;
+        fillrect(BoardX - 5, BoardY - 5, boardRight, boardBottom);
+        
+        // Draw grid lines
+        setrgbcolor(60, 60, 60);
+        int i;
+        for (i = 0; i <= BoardWidth; i = i + 1) {
+            drawline(BoardX + i * CellSize, BoardY, BoardX + i * CellSize, BoardY + BoardHeight * CellSize);
+        }
+        for (i = 0; i <= BoardHeight; i = i + 1) {
+            drawline(BoardX, BoardY + i * CellSize, BoardX + BoardWidth * CellSize, BoardY + i * CellSize);
+        }
+        
+        // Draw the board along with the active falling piece
+        myself.board.drawWithActivePiece(BoardX, BoardY, !myself.gameOver,
+                                         myself.currentX, myself.currentY,
+                                         myself.currentShapeIndex, myself.currentRotation,
+                                         myself.currentColor);
+        
+        // Draw score info
+        setrgbcolor(255, 255, 255);
+        str scoreStr = "Score: " + inttostr(myself.board.getScore());
+        outtextxy(20, 570, scoreStr);
+        
+        str levelStr = "Level: " + inttostr(myself.board.getLevel());
+        outtextxy(150, 570, levelStr);
+        
+        str linesStr = "Lines: " + inttostr(myself.board.getLines());
+        outtextxy(250, 570, linesStr);
+        
+        if (myself.gameOver) {
+            str gameOverStr = "GAME OVER - Press Q to quit";
+            outtextxy(BoardX + 10,
+                      BoardY + (BoardHeight * CellSize) // 2 - 20,
+                      gameOverStr);
+        }
+        
+        updatescreen();
+    }
+    
+    bool handleInput() {
+        int keyCode = pollkeyany();
+        while (keyCode != 0) {
+            if (keyCode == 'q' || keyCode == 'Q') {
+                return true; // Quit
+            }
+
+            if (keyCode == 1073741904) {
+                if (!myself.gameOver) myself.movePiece(-1, 0); // SDL left
+            } else if (keyCode == 1073741903) {
+                if (!myself.gameOver) myself.movePiece(1, 0); // SDL right
+            } else if (keyCode == 1073741906) {
+                if (!myself.gameOver) myself.rotatePiece(); // SDL up
+            } else if (keyCode == 1073741905) {
+                if (!myself.gameOver) myself.movePiece(0, 1); // SDL down
+            } else if (keyCode == 0 || keyCode == 224) {
+                int extCode = pollkeyany();
+                if (extCode == 75) {
+                    if (!myself.gameOver) myself.movePiece(-1, 0);
+                } else if (extCode == 77) {
+                    if (!myself.gameOver) myself.movePiece(1, 0);
+                } else if (extCode == 72) {
+                    if (!myself.gameOver) myself.rotatePiece();
+                } else if (extCode == 80) {
+                    if (!myself.gameOver) myself.movePiece(0, 1);
+                }
+            } else {
+                if (keyCode >= 0 && keyCode <= 255) {
+                    char c = tochar(keyCode);
+                    char key = toupper(c);
+                    if (!myself.gameOver) {
+                        switch (key) {
+                            case 'A':
+                                myself.movePiece(-1, 0);
+                                break;
+                            case 'D':
+                                myself.movePiece(1, 0);
+                                break;
+                            case 'S':
+                                myself.movePiece(0, 1);
+                                break;
+                            case 'W':
+                                myself.rotatePiece();
+                                break;
+                        }
+                        if (c == ' ') {
+                            myself.hardDrop();
+                        }
+                    }
+                }
+            }
+            keyCode = pollkeyany();
+        }
+
+        return false; // Continue running
+    }
+    
+    void run() {
+        initgraph(WindowWidth, WindowHeight, "Rea Block Game");
+        inittextsystem(resolveFontPath(), 18);
+        randomize();
+
+        writeln("Block Game - Use A/D or "+
+                "Left/Right to move, S or Down to drop, W or Up to rotate, Space for hard drop. Press Q to quit.");
+        
+        float lastTime = 0.0;
+        bool quit = false;
+        
+        while (!quit && !myself.gameOver) {
+            float currentTime = getticks() / 1000.0;
+            float deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+            
+            if (deltaTime > 0.1) deltaTime = 0.1; // Cap at 100ms
+            
+            myself.update(deltaTime);
+            
+            if (myself.handleInput()) {
+                quit = true;
+            }
+            
+            myself.draw();
+            graphloop(int(myself.frameDelay));
+        }
+        
+        if (myself.gameOver) {
+            writeln("Game Over! Final Score: ", myself.board.getScore());
+        }
+        
+        closegraph();
+        writeln("Thanks for playing Block Game!");
+    }
+}
+
+Game mygame = new Game();
+mygame.run();

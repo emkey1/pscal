@@ -1,0 +1,808 @@
+#!/usr/bin/env pascal
+program DisplayWeatherJson;
+
+uses CRT, SysUtils;
+
+const
+  TEMPERATURE_DECIMAL_PLACES = 1;
+  CONFIGURED_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';
+
+function DefaultApiKeyPath: string;
+begin
+  DefaultApiKeyPath := CONFIGURED_API_KEY_PATH;
+end;
+
+function RoundToDecimalPlaces(value: double; decimals: integer): double;
+var
+  factor: double;
+  i: integer;
+begin
+  factor := 1.0;
+  if decimals > 0 then
+    for i := 1 to decimals do
+      factor := factor * 10.0;
+  RoundToDecimalPlaces := Round(value * factor) / factor;
+end;
+
+function ParseIntOrDefault(value: string; defaultValue: longint): longint;
+var
+  parsedValue: longint;
+  code: integer;
+begin
+  val(value, parsedValue, code);
+  if code = 0 then
+    ParseIntOrDefault := parsedValue
+  else
+    ParseIntOrDefault := defaultValue;
+end;
+
+function TwoDigit(value: int64): string;
+begin
+  if value < 10 then
+    TwoDigit := '0' + IntToStr(value)
+  else
+    TwoDigit := IntToStr(value);
+end;
+
+function FormatUnixTime(timestamp: int64): string;
+const
+  SECONDS_PER_DAY = 86400;
+  UNIX_TO_GREGORIAN_OFFSET_DAYS = 719468;
+var
+  days, secondsInDay: int64;
+  era, doe, yoe, doy, mp: int64;
+  year, month, day: int64;
+  hour, minute, second: int64;
+begin
+  days := timestamp div SECONDS_PER_DAY;
+  secondsInDay := timestamp mod SECONDS_PER_DAY;
+  if secondsInDay < 0 then
+  begin
+    secondsInDay := secondsInDay + SECONDS_PER_DAY;
+    Dec(days);
+  end;
+
+  days := days + UNIX_TO_GREGORIAN_OFFSET_DAYS;
+
+  era := days div 146097;
+  doe := days - era * 146097;
+  yoe := (doe - doe div 1460 + doe div 36524 - doe div 146096) div 365;
+  year := yoe + era * 400;
+  doy := doe - (365 * yoe + yoe div 4 - yoe div 100);
+  mp := (5 * doy + 2) div 153;
+  day := doy - (153 * mp + 2) div 5 + 1;
+  month := mp + 3 - 12 * (mp div 10);
+  year := year + (mp div 10);
+  hour := secondsInDay div 3600;
+  minute := (secondsInDay mod 3600) div 60;
+  second := secondsInDay mod 60;
+
+  FormatUnixTime := IntToStr(year) + '-' + TwoDigit(month) + '-' + TwoDigit(day)
+    + ' ' + TwoDigit(hour) + ':' + TwoDigit(minute) + ':' + TwoDigit(second);
+end;
+
+function FormatUnixTimeWithOffset(timestamp: int64; offset: int64;
+  hasOffset: boolean): string;
+var
+  adjusted: int64;
+begin
+  adjusted := timestamp;
+  if hasOffset then
+    adjusted := adjusted + offset;
+  FormatUnixTimeWithOffset := FormatUnixTime(adjusted);
+end;
+
+function FormatTimezoneOffset(offset: int64): string;
+var
+  sign: string;
+  absOffset, hours, minutes: int64;
+begin
+  if offset >= 0 then
+    sign := '+'
+  else
+    sign := '-';
+  absOffset := Abs(offset);
+  hours := absOffset div 3600;
+  minutes := (absOffset mod 3600) div 60;
+  FormatTimezoneOffset := 'UTC' + sign + TwoDigit(hours) + ':' + TwoDigit(minutes);
+end;
+
+function FormatWindDirection(degrees: double): string;
+const
+  Directions: array[0..7] of string =
+    ('N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW');
+var
+  normalized: double;
+  index: integer;
+begin
+  if degrees < 0 then
+  begin
+    FormatWindDirection := 'Unknown';
+    exit;
+  end;
+
+  normalized := degrees;
+  while normalized < 0.0 do
+    normalized := normalized + 360.0;
+  while normalized >= 360.0 do
+    normalized := normalized - 360.0;
+
+  index := Trunc((normalized + 22.5) / 45.0) mod 8;
+  FormatWindDirection := Directions[index];
+end;
+
+var
+  response: string;
+  ms: mstream;
+  url: string;
+  currentZipCode, apiKeyFromFile: string;
+  doc, root: integer;
+  codHandle, messageHandle: integer;
+  locationHandle, weatherArrayHandle, weatherEntryHandle: integer;
+  descriptionHandle, weatherMainHandle: integer;
+  mainHandle, tempHandle, humidityHandle: integer;
+  feelsLikeHandle, tempMinHandle, tempMaxHandle, pressureHandle: integer;
+  coordHandle, latHandle, lonHandle: integer;
+  windHandle, windSpeedHandle, windDegHandle, windGustHandle: integer;
+  cloudsHandle, cloudsValueHandle: integer;
+  visibilityHandle: integer;
+  rainHandle, rain1hHandle, rain3hHandle: integer;
+  snowHandle, snow1hHandle, snow3hHandle: integer;
+  sysHandle, countryHandle, sunriseHandle, sunsetHandle: integer;
+  timezoneHandle, dtHandle: integer;
+  location, description, weatherMain, country: string;
+  timezoneString, codType, errorMessage: string;
+  tempC, tempF, feelsLikeC, feelsLikeF: double;
+  tempMinC, tempMinF, tempMaxC, tempMaxF: double;
+  windSpeed, windDeg, windGust: double;
+  rain1h, rain3h, snow1h, snow3h: double;
+  lat, lon: double;
+  humidity, pressure, visibility, cloudiness: integer;
+  timezoneOffset: int64;
+  statusCode: longint;
+  observationTime, sunriseTime, sunsetTime: int64;
+  tempFound, humidityFound, windFound: boolean;
+  feelsLikeFound, tempMinFound, tempMaxFound, pressureFound: boolean;
+  visibilityFound, cloudinessFound: boolean;
+  latFound, lonFound: boolean;
+  windDirectionFound, windGustFound: boolean;
+  rain1hFound, rain3hFound, snow1hFound, snow3hFound: boolean;
+  timezoneFound, observationFound, sunriseFound, sunsetFound: boolean;
+  statusOk: boolean;
+
+function TryReadApiKeyFromFile(filename: string): string;
+var
+  keyFile: Text;
+  keyRead: string;
+begin
+  TryReadApiKeyFromFile := '';
+  assign(keyFile, filename);
+  {$I-}
+  reset(keyFile);
+  {$I+}
+
+  if IOResult <> 0 then
+    exit;
+
+  if eof(keyFile) then
+  begin
+    close(keyFile);
+    exit;
+  end;
+
+  readln(keyFile, keyRead);
+  close(keyFile);
+
+  keyRead := Trim(keyRead);
+  if keyRead <> '' then
+    TryReadApiKeyFromFile := keyRead;
+end;
+
+function LoadApiKey(): string;
+var
+  envKey, homeDir, keyPath, keyFromFile: string;
+begin
+  envKey := GetEnv('OPENWEATHER_API_KEY');
+  if envKey <> '' then
+  begin
+    LoadApiKey := envKey;
+    exit;
+  end;
+
+  homeDir := GetEnv('HOME');
+  if homeDir <> '' then
+  begin
+    if homeDir[length(homeDir)] = '/' then
+      keyPath := homeDir + '.pscal/etc/openweathermap.key'
+    else
+      keyPath := homeDir + '/.pscal/etc/openweathermap.key';
+
+    keyFromFile := TryReadApiKeyFromFile(keyPath);
+    if keyFromFile <> '' then
+    begin
+      LoadApiKey := keyFromFile;
+      exit;
+    end;
+  end
+  else
+    keyPath := '~/.pscal/etc/openweathermap.key';
+
+  keyFromFile := TryReadApiKeyFromFile(DefaultApiKeyPath);
+  if keyFromFile <> '' then
+  begin
+    LoadApiKey := keyFromFile;
+    exit;
+  end;
+
+  writeln('Error: Unable to determine OpenWeather API key.');
+  writeln('Set the OPENWEATHER_API_KEY environment variable or create ', keyPath,
+          ' with your OpenWeather API key.');
+  halt(1);
+end;
+
+begin
+  if not HasExtBuiltin('yyjson', 'YyjsonRead') then
+  begin
+    writeln('Error: This demo requires the yyjson extended built-ins.');
+    writeln('Rebuild with ENABLE_EXT_BUILTIN_YYJSON=ON to enable them.');
+    halt(1);
+  end;
+
+  apiKeyFromFile := LoadApiKey();
+
+  if ParamCount >= 1 then
+  begin
+    ClrScr;
+    currentZipCode := ParamStr(1);
+  end
+  else
+  begin
+    writeln;
+    writeln('Usage: weather_json <zipcode>');
+    halt(1);
+  end;
+
+  writeln('Fetching weather data for ', currentZipCode, '...');
+  writeln;
+
+  url := 'http://api.openweathermap.org/data/2.5/weather?zip='
+         + currentZipCode + ',us&appid=' + apiKeyFromFile + '&units=metric';
+
+  ms := apiSend(url, '');
+  response := apiReceive(ms);
+  MStreamFree(ms);
+
+  doc := YyjsonRead(response);
+  if doc < 0 then
+  begin
+    writeln('Error: Failed to parse weather service response as JSON.');
+    halt(1);
+  end;
+
+  root := YyjsonGetRoot(doc);
+  if root < 0 then
+  begin
+    writeln('Error: Failed to obtain JSON root object.');
+    YyjsonDocFree(doc);
+    halt(1);
+  end;
+
+  statusOk := True;
+  statusCode := 0;
+  errorMessage := '';
+
+  codHandle := YyjsonGetKey(root, 'cod');
+  if codHandle >= 0 then
+  begin
+    codType := LowerCase(YyjsonGetType(codHandle));
+    if Pos('str', codType) = 1 then
+      statusCode := ParseIntOrDefault(YyjsonGetString(codHandle), 0)
+    else
+      statusCode := YyjsonGetInt(codHandle);
+    statusOk := statusCode = 200;
+    YyjsonFreeValue(codHandle);
+  end;
+
+  if not statusOk then
+  begin
+    messageHandle := YyjsonGetKey(root, 'message');
+    if messageHandle >= 0 then
+    begin
+      errorMessage := YyjsonGetString(messageHandle);
+      YyjsonFreeValue(messageHandle);
+    end;
+    writeln('Error: OpenWeatherMap returned status ', statusCode);
+    if errorMessage <> '' then
+      writeln('Message: ', errorMessage);
+    YyjsonFreeValue(root);
+    YyjsonDocFree(doc);
+    halt(1);
+  end;
+
+  timezoneString := 'UTC';
+  timezoneOffset := 0;
+  timezoneFound := False;
+  observationFound := False;
+  sunriseFound := False;
+  sunsetFound := False;
+  latFound := False;
+  lonFound := False;
+  tempFound := False;
+  humidityFound := False;
+  feelsLikeFound := False;
+  tempMinFound := False;
+  tempMaxFound := False;
+  pressureFound := False;
+  visibilityFound := False;
+  cloudinessFound := False;
+  windFound := False;
+  windDirectionFound := False;
+  windGustFound := False;
+  rain1hFound := False;
+  rain3hFound := False;
+  snow1hFound := False;
+  snow3hFound := False;
+
+  tempC := 0.0;
+  tempF := 0.0;
+  feelsLikeC := 0.0;
+  feelsLikeF := 0.0;
+  tempMinC := 0.0;
+  tempMinF := 0.0;
+  tempMaxC := 0.0;
+  tempMaxF := 0.0;
+  humidity := 0;
+  pressure := 0;
+  visibility := 0;
+  cloudiness := 0;
+  windSpeed := 0.0;
+  windDeg := -1.0;
+  windGust := 0.0;
+  rain1h := 0.0;
+  rain3h := 0.0;
+  snow1h := 0.0;
+  snow3h := 0.0;
+  lat := 0.0;
+  lon := 0.0;
+  observationTime := 0;
+  sunriseTime := 0;
+  sunsetTime := 0;
+
+  location := '';
+  country := '';
+  weatherMain := '';
+  description := '';
+
+  locationHandle := YyjsonGetKey(root, 'name');
+  if locationHandle >= 0 then
+  begin
+    location := YyjsonGetString(locationHandle);
+    YyjsonFreeValue(locationHandle);
+  end;
+
+  weatherArrayHandle := YyjsonGetKey(root, 'weather');
+  if weatherArrayHandle >= 0 then
+  begin
+    if YyjsonGetLength(weatherArrayHandle) > 0 then
+    begin
+      weatherEntryHandle := YyjsonGetIndex(weatherArrayHandle, 0);
+      if weatherEntryHandle >= 0 then
+      begin
+        weatherMainHandle := YyjsonGetKey(weatherEntryHandle, 'main');
+        if weatherMainHandle >= 0 then
+        begin
+          weatherMain := YyjsonGetString(weatherMainHandle);
+          YyjsonFreeValue(weatherMainHandle);
+        end;
+        descriptionHandle := YyjsonGetKey(weatherEntryHandle, 'description');
+        if descriptionHandle >= 0 then
+        begin
+          description := YyjsonGetString(descriptionHandle);
+          YyjsonFreeValue(descriptionHandle);
+        end;
+        YyjsonFreeValue(weatherEntryHandle);
+      end;
+    end;
+    YyjsonFreeValue(weatherArrayHandle);
+  end;
+
+  coordHandle := YyjsonGetKey(root, 'coord');
+  if coordHandle >= 0 then
+  begin
+    latHandle := YyjsonGetKey(coordHandle, 'lat');
+    if latHandle >= 0 then
+    begin
+      lat := YyjsonGetNumber(latHandle);
+      latFound := True;
+      YyjsonFreeValue(latHandle);
+    end;
+    lonHandle := YyjsonGetKey(coordHandle, 'lon');
+    if lonHandle >= 0 then
+    begin
+      lon := YyjsonGetNumber(lonHandle);
+      lonFound := True;
+      YyjsonFreeValue(lonHandle);
+    end;
+    YyjsonFreeValue(coordHandle);
+  end;
+
+  sysHandle := YyjsonGetKey(root, 'sys');
+  if sysHandle >= 0 then
+  begin
+    countryHandle := YyjsonGetKey(sysHandle, 'country');
+    if countryHandle >= 0 then
+    begin
+      country := YyjsonGetString(countryHandle);
+      YyjsonFreeValue(countryHandle);
+    end;
+    sunriseHandle := YyjsonGetKey(sysHandle, 'sunrise');
+    if sunriseHandle >= 0 then
+    begin
+      sunriseTime := YyjsonGetInt(sunriseHandle);
+      sunriseFound := True;
+      YyjsonFreeValue(sunriseHandle);
+    end;
+    sunsetHandle := YyjsonGetKey(sysHandle, 'sunset');
+    if sunsetHandle >= 0 then
+    begin
+      sunsetTime := YyjsonGetInt(sunsetHandle);
+      sunsetFound := True;
+      YyjsonFreeValue(sunsetHandle);
+    end;
+    YyjsonFreeValue(sysHandle);
+  end;
+
+  timezoneHandle := YyjsonGetKey(root, 'timezone');
+  if timezoneHandle >= 0 then
+  begin
+    timezoneOffset := YyjsonGetInt(timezoneHandle);
+    timezoneFound := True;
+    timezoneString := FormatTimezoneOffset(timezoneOffset);
+    YyjsonFreeValue(timezoneHandle);
+  end;
+
+  dtHandle := YyjsonGetKey(root, 'dt');
+  if dtHandle >= 0 then
+  begin
+    observationTime := YyjsonGetInt(dtHandle);
+    observationFound := True;
+    YyjsonFreeValue(dtHandle);
+  end;
+
+  mainHandle := YyjsonGetKey(root, 'main');
+  if mainHandle >= 0 then
+  begin
+    tempHandle := YyjsonGetKey(mainHandle, 'temp');
+    if tempHandle >= 0 then
+    begin
+      tempC := RoundToDecimalPlaces(YyjsonGetNumber(tempHandle),
+        TEMPERATURE_DECIMAL_PLACES);
+      tempFound := True;
+      YyjsonFreeValue(tempHandle);
+    end;
+
+    feelsLikeHandle := YyjsonGetKey(mainHandle, 'feels_like');
+    if feelsLikeHandle >= 0 then
+    begin
+      feelsLikeC := RoundToDecimalPlaces(YyjsonGetNumber(feelsLikeHandle),
+        TEMPERATURE_DECIMAL_PLACES);
+      feelsLikeFound := True;
+      YyjsonFreeValue(feelsLikeHandle);
+    end;
+
+    tempMinHandle := YyjsonGetKey(mainHandle, 'temp_min');
+    if tempMinHandle >= 0 then
+    begin
+      tempMinC := RoundToDecimalPlaces(YyjsonGetNumber(tempMinHandle),
+        TEMPERATURE_DECIMAL_PLACES);
+      tempMinFound := True;
+      YyjsonFreeValue(tempMinHandle);
+    end;
+
+    tempMaxHandle := YyjsonGetKey(mainHandle, 'temp_max');
+    if tempMaxHandle >= 0 then
+    begin
+      tempMaxC := RoundToDecimalPlaces(YyjsonGetNumber(tempMaxHandle),
+        TEMPERATURE_DECIMAL_PLACES);
+      tempMaxFound := True;
+      YyjsonFreeValue(tempMaxHandle);
+    end;
+
+    pressureHandle := YyjsonGetKey(mainHandle, 'pressure');
+    if pressureHandle >= 0 then
+    begin
+      pressure := YyjsonGetInt(pressureHandle);
+      pressureFound := True;
+      YyjsonFreeValue(pressureHandle);
+    end;
+
+    humidityHandle := YyjsonGetKey(mainHandle, 'humidity');
+    if humidityHandle >= 0 then
+    begin
+      humidity := YyjsonGetInt(humidityHandle);
+      humidityFound := True;
+      YyjsonFreeValue(humidityHandle);
+    end;
+
+    YyjsonFreeValue(mainHandle);
+  end;
+
+  visibilityHandle := YyjsonGetKey(root, 'visibility');
+  if visibilityHandle >= 0 then
+  begin
+    visibility := YyjsonGetInt(visibilityHandle);
+    visibilityFound := True;
+    YyjsonFreeValue(visibilityHandle);
+  end;
+
+  cloudsHandle := YyjsonGetKey(root, 'clouds');
+  if cloudsHandle >= 0 then
+  begin
+    cloudsValueHandle := YyjsonGetKey(cloudsHandle, 'all');
+    if cloudsValueHandle >= 0 then
+    begin
+      cloudiness := YyjsonGetInt(cloudsValueHandle);
+      cloudinessFound := True;
+      YyjsonFreeValue(cloudsValueHandle);
+    end;
+    YyjsonFreeValue(cloudsHandle);
+  end;
+
+  windHandle := YyjsonGetKey(root, 'wind');
+  if windHandle >= 0 then
+  begin
+    windSpeedHandle := YyjsonGetKey(windHandle, 'speed');
+    if windSpeedHandle >= 0 then
+    begin
+      windSpeed := YyjsonGetNumber(windSpeedHandle);
+      windFound := True;
+      YyjsonFreeValue(windSpeedHandle);
+    end;
+
+    windDegHandle := YyjsonGetKey(windHandle, 'deg');
+    if windDegHandle >= 0 then
+    begin
+      windDeg := YyjsonGetNumber(windDegHandle);
+      windDirectionFound := True;
+      YyjsonFreeValue(windDegHandle);
+    end;
+
+    windGustHandle := YyjsonGetKey(windHandle, 'gust');
+    if windGustHandle >= 0 then
+    begin
+      windGust := YyjsonGetNumber(windGustHandle);
+      windGustFound := True;
+      YyjsonFreeValue(windGustHandle);
+    end;
+
+    YyjsonFreeValue(windHandle);
+  end;
+
+  rainHandle := YyjsonGetKey(root, 'rain');
+  if rainHandle >= 0 then
+  begin
+    rain1hHandle := YyjsonGetKey(rainHandle, '1h');
+    if rain1hHandle >= 0 then
+    begin
+      rain1h := YyjsonGetNumber(rain1hHandle);
+      rain1hFound := True;
+      YyjsonFreeValue(rain1hHandle);
+    end;
+    rain3hHandle := YyjsonGetKey(rainHandle, '3h');
+    if rain3hHandle >= 0 then
+    begin
+      rain3h := YyjsonGetNumber(rain3hHandle);
+      rain3hFound := True;
+      YyjsonFreeValue(rain3hHandle);
+    end;
+    YyjsonFreeValue(rainHandle);
+  end;
+
+  snowHandle := YyjsonGetKey(root, 'snow');
+  if snowHandle >= 0 then
+  begin
+    snow1hHandle := YyjsonGetKey(snowHandle, '1h');
+    if snow1hHandle >= 0 then
+    begin
+      snow1h := YyjsonGetNumber(snow1hHandle);
+      snow1hFound := True;
+      YyjsonFreeValue(snow1hHandle);
+    end;
+    snow3hHandle := YyjsonGetKey(snowHandle, '3h');
+    if snow3hHandle >= 0 then
+    begin
+      snow3h := YyjsonGetNumber(snow3hHandle);
+      snow3hFound := True;
+      YyjsonFreeValue(snow3hHandle);
+    end;
+    YyjsonFreeValue(snowHandle);
+  end;
+
+  if tempFound then
+  begin
+    tempF := tempC * 9.0 / 5.0 + 32.0;
+    tempF := RoundToDecimalPlaces(tempF, TEMPERATURE_DECIMAL_PLACES);
+  end;
+  if feelsLikeFound then
+  begin
+    feelsLikeF := feelsLikeC * 9.0 / 5.0 + 32.0;
+    feelsLikeF := RoundToDecimalPlaces(feelsLikeF, TEMPERATURE_DECIMAL_PLACES);
+  end;
+  if tempMinFound then
+  begin
+    tempMinF := tempMinC * 9.0 / 5.0 + 32.0;
+    tempMinF := RoundToDecimalPlaces(tempMinF, TEMPERATURE_DECIMAL_PLACES);
+  end;
+  if tempMaxFound then
+  begin
+    tempMaxF := tempMaxC * 9.0 / 5.0 + 32.0;
+    tempMaxF := RoundToDecimalPlaces(tempMaxF, TEMPERATURE_DECIMAL_PLACES);
+  end;
+
+  writeln('--- Current Weather ---');
+
+  if location <> '' then
+  begin
+    if country <> '' then
+      writeln('Location:       ', location, ', ', country)
+    else
+      writeln('Location:       ', location);
+  end
+  else if country <> '' then
+    writeln('Location:       ', country)
+  else
+    writeln('Location:       Not Found');
+
+  if latFound and lonFound then
+  begin
+    if lat >= 0.0 then
+      write('Coordinates:    ', Abs(lat):0:2, '° N')
+    else
+      write('Coordinates:    ', Abs(lat):0:2, '° S');
+    if lon >= 0.0 then
+      writeln(', ', Abs(lon):0:2, '° E')
+    else
+      writeln(', ', Abs(lon):0:2, '° W');
+  end
+  else if latFound then
+  begin
+    if lat >= 0.0 then
+      writeln('Coordinates:    ', Abs(lat):0:2, '° N')
+    else
+      writeln('Coordinates:    ', Abs(lat):0:2, '° S');
+  end
+  else if lonFound then
+  begin
+    if lon >= 0.0 then
+      writeln('Coordinates:    ', Abs(lon):0:2, '° E')
+    else
+      writeln('Coordinates:    ', Abs(lon):0:2, '° W');
+  end
+  else
+    writeln('Coordinates:    Not Found');
+
+  if timezoneFound then
+    writeln('Timezone:       ', timezoneString)
+  else
+    writeln('Timezone:       Not Found');
+
+  if observationFound then
+    writeln('Observed:       ',
+      FormatUnixTimeWithOffset(observationTime, timezoneOffset, timezoneFound),
+      ' (', timezoneString, ')')
+  else
+    writeln('Observed:       Not Found');
+
+  if sunriseFound then
+    writeln('Sunrise:        ',
+      FormatUnixTimeWithOffset(sunriseTime, timezoneOffset, timezoneFound),
+      ' (', timezoneString, ')')
+  else
+    writeln('Sunrise:        Not Found');
+
+  if sunsetFound then
+    writeln('Sunset:         ',
+      FormatUnixTimeWithOffset(sunsetTime, timezoneOffset, timezoneFound),
+      ' (', timezoneString, ')')
+  else
+    writeln('Sunset:         Not Found');
+
+  if weatherMain <> '' then
+    writeln('Conditions:     ', weatherMain)
+  else
+    writeln('Conditions:     Not Found');
+
+  if description <> '' then
+    writeln('Description:    ', description)
+  else
+    writeln('Description:    Not Found');
+
+  if tempFound then
+    writeln('Temperature:    ', tempC:0:1, ' C (', tempF:0:1, ' F)')
+  else
+    writeln('Temperature:    Not Found');
+
+  if feelsLikeFound then
+    writeln('Feels Like:     ', feelsLikeC:0:1, ' C (', feelsLikeF:0:1, ' F)')
+  else
+    writeln('Feels Like:     Not Found');
+
+  if tempMinFound then
+    writeln('Temp (Min):     ', tempMinC:0:1, ' C (', tempMinF:0:1, ' F)')
+  else
+    writeln('Temp (Min):     Not Found');
+
+  if tempMaxFound then
+    writeln('Temp (Max):     ', tempMaxC:0:1, ' C (', tempMaxF:0:1, ' F)')
+  else
+    writeln('Temp (Max):     Not Found');
+
+  if humidityFound then
+    writeln('Humidity:       ', humidity, '%')
+  else
+    writeln('Humidity:       Not Found');
+
+  if pressureFound then
+    writeln('Pressure:       ', pressure, ' hPa')
+  else
+    writeln('Pressure:       Not Found');
+
+  if visibilityFound then
+    writeln('Visibility:     ', visibility, ' m (', visibility / 1000.0:0:1, ' km)')
+  else
+    writeln('Visibility:     Not Found');
+
+  if cloudinessFound then
+    writeln('Cloud Cover:    ', cloudiness, '%')
+  else
+    writeln('Cloud Cover:    Not Found');
+
+  if windFound then
+  begin
+    write('Wind:           ', windSpeed:0:1, ' m/s');
+    if windDirectionFound then
+      write(' ', FormatWindDirection(windDeg), ' (', windDeg:0:0, '°)');
+    if windGustFound then
+      write(', gusts ', windGust:0:1, ' m/s');
+    writeln;
+  end
+  else
+    writeln('Wind:           Not Found');
+
+  if rain1hFound or rain3hFound then
+  begin
+    write('Rain:           ');
+    if rain1hFound then
+      write(rain1h:0:1, ' mm (1h)');
+    if rain3hFound then
+    begin
+      if rain1hFound then
+        write(', ');
+      write(rain3h:0:1, ' mm (3h)');
+    end;
+    writeln;
+  end
+  else
+    writeln('Rain:           Not Reported');
+
+  if snow1hFound or snow3hFound then
+  begin
+    write('Snow:           ');
+    if snow1hFound then
+      write(snow1h:0:1, ' mm (1h)');
+    if snow3hFound then
+    begin
+      if snow1hFound then
+        write(', ');
+      write(snow3h:0:1, ' mm (3h)');
+    end;
+    writeln;
+  end
+  else
+    writeln('Snow:           Not Reported');
+
+  writeln;
+
+  YyjsonFreeValue(root);
+  YyjsonDocFree(doc);
+end.

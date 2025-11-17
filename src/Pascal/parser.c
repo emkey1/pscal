@@ -1303,6 +1303,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
 
 AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     main_parser->current_unit_name_context = NULL;
+    resetCompilerConstants();
     Token *copiedProgToken = copyToken(main_parser->current_token);
     if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
     DEBUG_PRINT("buildProgramAST: About to eat PROGRAM. Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");

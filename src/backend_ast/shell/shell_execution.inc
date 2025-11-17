@@ -311,7 +311,7 @@ static bool shellExpandAliasesIfNeeded(VM *vm, ShellCommand *cmd) {
         return true;
     }
     int depth = 0;
-    const int kMaxAliasDepth = 16;
+    enum { kMaxAliasDepth = 16 };
     const char *expanded_names[kMaxAliasDepth];
     size_t expanded_count = 0;
     while (cmd->argc > 0 && depth < kMaxAliasDepth) {
@@ -1067,6 +1067,16 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     return true;
 }
 
+static void shellResetStandardStream(int fd) {
+    if (fd == STDIN_FILENO) {
+        clearerr(stdin);
+    } else if (fd == STDOUT_FILENO) {
+        clearerr(stdout);
+    } else if (fd == STDERR_FILENO) {
+        clearerr(stderr);
+    }
+}
+
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count) {
     if (!backups) {
         return;
@@ -1075,8 +1085,10 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t c
         ShellExecRedirBackup *backup = &backups[i];
         if (backup->saved_valid && backup->saved_fd >= 0) {
             dup2(backup->saved_fd, backup->target_fd);
+            shellResetStandardStream(backup->target_fd);
         } else if (backup->was_closed) {
             close(backup->target_fd);
+            shellResetStandardStream(backup->target_fd);
         }
     }
 }
@@ -1150,6 +1162,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(fd);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(fd);
                 if (target_fd == STDOUT_FILENO) {
                     stdout_redirected = true;
@@ -1167,6 +1180,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(err ? err : 1);
                         goto redir_error;
                     }
+                    shellResetStandardStream(target_fd);
                 } else {
                     if (redir->dup_target_fd < 0) {
                         runtimeError(vm, "exec: invalid file descriptor %d", redir->dup_target_fd);
@@ -1180,6 +1194,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(err ? err : 1);
                         goto redir_error;
                     }
+                    shellResetStandardStream(target_fd);
                 }
                 break;
             }
@@ -1221,6 +1236,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(pipefd[0]);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(pipefd[0]);
                 break;
             }
@@ -1278,6 +1294,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(pipefd[0]);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(pipefd[0]);
                 break;
             }
@@ -1370,7 +1387,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stdin_fd, STDIN_FILENO) < 0) {
             goto cleanup;
         }
-        clearerr(stdin);
+        shellResetStandardStream(STDIN_FILENO);
     }
     if (stdout_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
@@ -1379,7 +1396,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
             goto cleanup;
         }
-        clearerr(stdout);
+        shellResetStandardStream(STDOUT_FILENO);
     }
     if (stderr_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
@@ -1388,7 +1405,7 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (dup2(stderr_fd, STDERR_FILENO) < 0) {
             goto cleanup;
         }
-        clearerr(stderr);
+        shellResetStandardStream(STDERR_FILENO);
     }
 
     if (apply_exec_redirs) {

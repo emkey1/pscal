@@ -2,7 +2,7 @@
 #ifndef symbol_h
 #define symbol_h
 
-#include "types.h" // For VarType, Value (which includes FieldValue and TypeEntry)
+#include "core/types.h" // For VarType, Value (which includes FieldValue and TypeEntry)
 
 // Forward declare AST as its full definition might not be needed here,
 // and ast.h includes symbol.h creating a potential for cycles if not careful.

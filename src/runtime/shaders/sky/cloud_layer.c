@@ -1,3 +1,9 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/shaders/sky/cloud_layer.h"
 
 #ifdef SDL

@@ -51,8 +51,40 @@ struct TerminalInputBridge: UIViewRepresentable {
 
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
+    private struct RepeatCommand {
+        let command: UIKeyCommand
+        let output: String
+    }
+
+    private lazy var repeatKeyCommands: [RepeatCommand] = {
+        var commands: [RepeatCommand] = []
+        func makeCommand(input: String, output: String, modifiers: UIKeyModifierFlags = []) {
+            let command = UIKeyCommand(input: input,
+                                       modifierFlags: modifiers,
+                                       action: #selector(handleRepeatCommand(_:)))
+            if #available(iOS 15.0, *) {
+                command.wantsPriorityOverSystemBehavior = true
+            }
+            commands.append(RepeatCommand(command: command, output: output))
+        }
+
+        makeCommand(input: "h", output: "h")
+        makeCommand(input: "j", output: "j")
+        makeCommand(input: "k", output: "k")
+        makeCommand(input: "l", output: "l")
+        makeCommand(input: UIKeyCommand.inputUpArrow, output: "\u{1B}[A")
+        makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
+        makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
+        makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
+        makeCommand(input: "\r", output: "\n")
+        return commands
+    }()
 
     override var canBecomeFirstResponder: Bool { true }
+
+    override var keyCommands: [UIKeyCommand]? {
+        repeatKeyCommands.map { $0.command }
+    }
 
     override func insertText(_ text: String) {
         onInput?(text)
@@ -83,6 +115,40 @@ final class TerminalKeyInputView: UITextView {
         }
     }
 
+    override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled: Set<UIPress> = []
+        for press in presses {
+            if !handle(press: press) {
+                unhandled.insert(press)
+            }
+        }
+        if !unhandled.isEmpty {
+            super.pressesChanged(unhandled, with: event)
+        }
+    }
+
+    @objc private func handleRepeatCommand(_ command: UIKeyCommand) {
+        if let match = repeatKeyCommands.first(where: { $0.command === command }) {
+            onInput?(match.output)
+            return
+        }
+        guard let input = command.input else { return }
+        switch input {
+        case UIKeyCommand.inputUpArrow:
+            onInput?("\u{1B}[A")
+        case UIKeyCommand.inputDownArrow:
+            onInput?("\u{1B}[B")
+        case UIKeyCommand.inputLeftArrow:
+            onInput?("\u{1B}[D")
+        case UIKeyCommand.inputRightArrow:
+            onInput?("\u{1B}[C")
+        case "\r":
+            onInput?("\n")
+        default:
+            onInput?(input)
+        }
+    }
+
     private func handle(press: UIPress) -> Bool {
         guard let key = press.key else { return false }
 
@@ -107,8 +173,6 @@ final class TerminalKeyInputView: UITextView {
             onInput?("\u{1B}[C"); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
-        case .keyboardReturnOrEnter:
-            onInput?("\n"); return true
         case .keyboardEscape:
             onInput?("\u{1B}"); return true
         default:

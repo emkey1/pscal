@@ -9760,7 +9760,15 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     }
 
     bool status_flag = true;
+    bool consumed = false;
     if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+    } else if (thread_vm && thread_vm != vm &&
+               vmThreadTakeResult(vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+        thread_vm = vm;
+    }
+    if (consumed) {
         shellUpdateStatus(status_flag ? 0 : 1);
     } else {
         shellUpdateStatus(0);

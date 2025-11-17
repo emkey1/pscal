@@ -580,10 +580,18 @@ final class TerminalRendererContainerView: UIView {
                 backgroundColor: UIColor,
                 isElvisMode: Bool,
                 elvisSnapshot: ElvisSnapshot?) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                self.update(text: text,
+                            cursor: cursor,
+                            backgroundColor: backgroundColor,
+                            isElvisMode: isElvisMode,
+                            elvisSnapshot: elvisSnapshot)
+            }
+            return
+        }
         if isElvisMode, let snapshot = elvisSnapshot {
             applyElvisSnapshot(snapshot, backgroundColor: backgroundColor)
-            terminalView.cursorTextOffset = nil
-            terminalView.cursorInfo = nil
             return
         } else {
             lastElvisSnapshotText = nil
@@ -602,24 +610,78 @@ final class TerminalRendererContainerView: UIView {
         }
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
+
+        if let commandCursor = elvisCommandLineCursor(from: snapshot) {
+            terminalView.cursorTextOffset = commandCursor.textOffset
+            terminalView.cursorInfo = commandCursor
+            scrollToCursor(textView: terminalView,
+                           cursorOffset: commandCursor.textOffset,
+                           preferBottomInset: Self.commandLinePadding)
+        } else if let cursor = snapshot.cursor {
+            terminalView.cursorTextOffset = cursor.textOffset
+            terminalView.cursorInfo = cursor
+            scrollToCursor(textView: terminalView, cursorOffset: cursor.textOffset)
+        } else {
+            terminalView.cursorTextOffset = nil
+            terminalView.cursorInfo = nil
+            scrollToBottom(textView: terminalView, text: terminalView.attributedText)
+        }
     }
 
     private func scrollToBottom(textView: UITextView, text: NSAttributedString) {
-        DispatchQueue.main.async {
-            textView.layoutIfNeeded()
-            let currentLength = textView.attributedText.length
-            if currentLength > 0 {
-                let bottomRange = NSRange(location: max(0, currentLength - 1), length: 1)
-                textView.scrollRangeToVisible(bottomRange)
-            }
-            let contentHeight = textView.contentSize.height
-            let boundsHeight = textView.bounds.height
-            let yOffset = max(-textView.contentInset.top, contentHeight - boundsHeight + textView.contentInset.bottom)
-            if yOffset.isFinite {
-                textView.setContentOffset(CGPoint(x: -textView.contentInset.left, y: yOffset), animated: false)
-            }
+        textView.layoutIfNeeded()
+        let currentLength = textView.attributedText.length
+        if currentLength > 0 {
+            let bottomRange = NSRange(location: max(0, currentLength - 1), length: 1)
+            textView.scrollRangeToVisible(bottomRange)
+        }
+        let contentHeight = textView.contentSize.height
+        let boundsHeight = textView.bounds.height
+        let yOffset = max(-textView.contentInset.top, contentHeight - boundsHeight + textView.contentInset.bottom)
+        if yOffset.isFinite {
+            textView.setContentOffset(CGPoint(x: -textView.contentInset.left, y: yOffset), animated: false)
         }
     }
+
+    private func scrollToCursor(textView: UITextView,
+                                cursorOffset: Int,
+                                preferBottomInset: CGFloat = 0) {
+        textView.layoutIfNeeded()
+        let length = textView.attributedText.length
+        guard length > 0 else {
+            textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+            return
+        }
+        let clamped = max(0, min(cursorOffset, length - 1))
+        let range = NSRange(location: clamped, length: 1)
+        textView.scrollRangeToVisible(range)
+        if preferBottomInset > 0 {
+            var offset = textView.contentOffset
+            offset.y += preferBottomInset
+            textView.setContentOffset(offset, animated: false)
+        }
+    }
+
+    private func elvisCommandLineCursor(from snapshot: ElvisSnapshot) -> TerminalCursorInfo? {
+        let lines = snapshot.text.components(separatedBy: "\n")
+        guard let lastLine = lines.last, !lastLine.isEmpty else {
+            return nil
+        }
+        guard let first = lastLine.first, Self.commandLinePrefixes.contains(first) else {
+            return nil
+        }
+        if let cursor = snapshot.cursor,
+           cursor.row == max(0, lines.count - 1) {
+            return nil
+        }
+        let totalLength = (snapshot.text as NSString).length
+        let column = lastLine.utf16.count
+        let rowIndex = max(0, lines.count - 1)
+        return TerminalCursorInfo(row: rowIndex, column: column, textOffset: totalLength)
+    }
+
+    private static let commandLinePrefixes: Set<Character> = [":", "/", "?"]
+    private static let commandLinePadding: CGFloat = 8.0
 }
 
 final class TerminalDisplayTextView: UITextView {

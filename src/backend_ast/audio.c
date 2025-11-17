@@ -6,14 +6,6 @@
 #include "pscal_paths.h"
 #include <stdio.h>
 #include <string.h> // For strdup
-#ifdef SDL
-#include "core/sdl_headers.h"
-#if defined(PSCALI_SDL3)
-#include <SDL3/SDL.h>
-#else
-#include <SDL2/SDL.h>
-#endif
-#endif
 #include "vm/vm.h" // <<< ADDED: For VM struct and runtimeError prototype
 
 

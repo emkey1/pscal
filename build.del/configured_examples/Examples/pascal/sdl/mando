@@ -1,0 +1,211 @@
+#!/usr/bin/env pascal
+PROGRAM MandelbrotWithStatus;
+
+// USES System; // Implicit for Sqrt, Trunc, WriteLn etc. if not global
+
+CONST
+  WindowWidth   = 1024;
+  WindowHeight  = 768;
+  WindowTitle   = 'Mandelbrot Set (SDL)';
+//  MaxIterations = 255;
+  MaxIterations = 128;
+  StatusUpdateInterval = 20; // Print status every 20 rows
+  ScreenUpdateInterval = 4;  // Refresh SDL window periodically to reduce event overhead
+  MandelBytesPerPixel = 4;
+  RepoFontPath    = 'fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath  = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  ConfiguredFontPath = '/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  DefaultFontSize = 18;
+
+TYPE
+  PixelBuffer = ARRAY[0..(WindowWidth * WindowHeight * MandelBytesPerPixel) - 1] OF Byte;
+  MandelColor = RECORD
+    R, G, B : Byte;
+  END;
+  MandelColorTable = ARRAY[0..MaxIterations] OF MandelColor;
+
+VAR
+  Px, Py        : Integer; // Pixel coordinates
+  x0, y0        : Real;    // Coordinates in the complex plane
+  x, y          : Real;    // Current z value
+  xTemp         : Real;
+  Iteration     : Integer;
+
+  MinRe         : Real;
+  MaxRe         : Real;
+  MinIm         : Real;
+  MaxIm         : Real;
+
+  ReRange, ImRange : Real;
+  ScaleRe, ScaleIm : Real;
+  CurrentMaxX, CurrentMaxY : Integer;
+  ViewPixelWidth, ViewPixelHeight : Integer;
+
+  MandelTextureID : Integer;
+  PixelData : PixelBuffer;
+  BufferBaseIdx : Integer;
+  RowStride : Integer;
+  RowPixelIndex : Integer;
+
+  PercentDone : Integer;
+  TextSystemInitialized : Boolean;
+  SelectedFontPath : String;
+  ColorTable : MandelColorTable;
+  ColorIdx : Integer;
+  CurrentColor : MandelColor;
+  CurrentY0 : Real;
+
+BEGIN
+  MinRe := -2.0;
+  MaxRe := 1.0;
+  MinIM := -1.2;
+
+  // Initial message to the terminal
+  WriteLn('Calculating Mandelbrot set for a ', WindowWidth, 'x', WindowHeight, ' window.');
+  WriteLn('The graphics window will update as the calculation progresses.');
+  WriteLn;
+  WriteLn('Progress updates will be shown here in the terminal.');
+  WriteLn('-----------------------------------------------------');
+  // You could add a Delay(1000) here if you want users to definitely see the message
+
+  TextSystemInitialized := False;
+  SelectedFontPath := '';
+
+  InitGraph(WindowWidth, WindowHeight, WindowTitle);
+
+  IF (Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0) AND FileExists(ConfiguredFontPath) THEN
+    SelectedFontPath := ConfiguredFontPath
+  ELSE IF FileExists(LegacyFontPath) THEN
+    SelectedFontPath := LegacyFontPath
+  ELSE IF FileExists(RepoFontPath) THEN
+    SelectedFontPath := RepoFontPath;
+
+  IF SelectedFontPath <> '' THEN
+  BEGIN
+    InitTextSystem(SelectedFontPath, DefaultFontSize);
+    TextSystemInitialized := True;
+    WriteLn('Initialized SDL text system with font: ', SelectedFontPath);
+  END
+  ELSE
+  BEGIN
+    WriteLn('Warning: Unable to locate a font file for SDL text rendering.');
+    WriteLn('SDL status text will be disabled for this session.');
+  END;
+  MandelTextureID := CreateTexture(WindowWidth, WindowHeight);
+  IF MandelTextureID < 0 THEN
+  BEGIN
+    WriteLn('Error: unable to create texture.');
+    Halt;
+  END;
+  ClearDevice;  UpdateScreen;  // show blank window immediately
+
+  CurrentMaxX := GetMaxX;
+  CurrentMaxY := GetMaxY;
+  ViewPixelWidth  := CurrentMaxX + 1;
+  ViewPixelHeight := CurrentMaxY + 1;
+
+  ReRange := MaxRe - MinRe;
+  MaxIm := MinIm + (ReRange * ViewPixelHeight) / ViewPixelWidth;
+  ImRange := MaxIm - MinIm;
+
+  IF ViewPixelWidth > 1 THEN ScaleRe := ReRange / (ViewPixelWidth - 1)
+  ELSE IF ViewPixelWidth = 1 THEN ScaleRe := ReRange ELSE ScaleRe := 0;
+  IF ViewPixelHeight > 1 THEN ScaleIm := ImRange / (ViewPixelHeight - 1)
+  ELSE IF ViewPixelHeight = 1 THEN ScaleIm := ImRange ELSE ScaleIm := 0;
+
+  FOR ColorIdx := 0 TO MaxIterations DO
+  BEGIN
+    IF ColorIdx = MaxIterations THEN
+    BEGIN
+      ColorTable[ColorIdx].R := Byte(0);
+      ColorTable[ColorIdx].G := Byte(0);
+      ColorTable[ColorIdx].B := Byte(0);
+    END
+    ELSE
+    BEGIN
+      ColorTable[ColorIdx].R := Byte((ColorIdx * 5) AND $FF);
+      ColorTable[ColorIdx].G := Byte((ColorIdx * 7 + 85) AND $FF);
+      ColorTable[ColorIdx].B := Byte((ColorIdx * 11 + 170) AND $FF);
+    END;
+  END;
+
+  // Initialize progress tracking
+  PercentDone := 0;
+
+  // Main loop through each pixel, updating texture progressively
+  RowStride := ViewPixelWidth * MandelBytesPerPixel;
+  BufferBaseIdx := 0;
+  y0 := MaxIm;
+  FOR Py := 0 TO ViewPixelHeight - 1 DO
+  BEGIN
+    CurrentY0 := y0;
+    x0 := MinRe;
+    RowPixelIndex := BufferBaseIdx;
+    FOR Px := 0 TO ViewPixelWidth - 1 DO
+    BEGIN
+      x := 0.0;
+      y := 0.0;
+      Iteration := 0;
+
+      WHILE (x*x + y*y <= 4.0) AND (Iteration < MaxIterations) DO
+      BEGIN
+        xTemp := x*x - y*y + x0;
+        y     := 2*x*y + CurrentY0;
+        x     := xTemp;
+        Iteration := Iteration + 1;
+      END;
+
+      CurrentColor := ColorTable[Iteration];
+      PixelData[RowPixelIndex + 0] := CurrentColor.R;
+      PixelData[RowPixelIndex + 1] := CurrentColor.G;
+      PixelData[RowPixelIndex + 2] := CurrentColor.B;
+      PixelData[RowPixelIndex + 3] := Byte(255);
+
+      RowPixelIndex := RowPixelIndex + MandelBytesPerPixel;
+      x0 := x0 + ScaleRe;
+    END; // END FOR Px
+
+    // Status Update Logic
+    // Py is 0-indexed, CurrentMaxY is max index. (CurrentMaxY + 1) is total rows.
+    IF (Py + 1) MOD StatusUpdateInterval = 0 THEN // After every 'StatusUpdateInterval' rows
+    BEGIN
+        PercentDone := Trunc( (Py + 1) * 100.0 / (CurrentMaxY + 1) );
+        WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately ', PercentDone, '% complete...');
+    END
+    ELSE IF Py = CurrentMaxY THEN // Ensure a 100% message on the last row if not caught by interval
+    BEGIN
+        WriteLn('Processing row ', Py + 1, ' of ', CurrentMaxY + 1, '. Approximately 100% complete...');
+    END;
+
+    // Periodic texture and screen update so the window displays while calculating
+    IF ((Py + 1) MOD ScreenUpdateInterval = 0) OR (Py = ViewPixelHeight - 1) THEN
+    BEGIN
+      UpdateTexture(MandelTextureID, PixelData);
+      ClearDevice;
+      RenderCopy(MandelTextureID);
+      IF TextSystemInitialized THEN
+        OutTextXY(8, 8, 'Rendering...');
+      UpdateScreen;
+      GraphLoop(0);
+    END;
+
+    BufferBaseIdx := BufferBaseIdx + RowStride;
+    y0 := y0 - ScaleIm;
+  END; // END FOR Py
+
+  WriteLn('-----------------------------------------------------');
+  WriteLn('Calculation complete! Displaying Mandelbrot set.');
+
+  UpdateTexture(MandelTextureID, PixelData);
+  ClearDevice;
+  RenderCopy(MandelTextureID);
+  UpdateScreen;
+
+  GraphLoop(100);
+  ReadKey;
+
+  DestroyTexture(MandelTextureID);
+  IF TextSystemInitialized THEN
+    QuitTextSystem;
+  CloseGraph;
+END.

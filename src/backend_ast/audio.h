@@ -9,11 +9,7 @@
 
 #ifdef SDL
 #include "core/sdl_headers.h"
-#if defined(PSCALI_SDL3)
-#include <SDL3/SDL.h>
-#else
-#include <SDL2/SDL.h>
-#endif
+#include PSCALI_SDL_HEADER
 #include PSCALI_SDL_MIXER_HEADER
 #include "types.h"
 #include "ast/ast.h"

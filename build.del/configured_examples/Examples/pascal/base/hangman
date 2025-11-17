@@ -1,0 +1,325 @@
+#!/usr/bin/env pascal
+program HangmanGame;
+
+uses CRT, SysUtils;
+
+const
+  MAX_WRONG = 8;  { maximum number of wrong guesses }
+  MIN_LENGTH = 4; { minimum length of word }
+  MAX_LENGTH = 7; { maximum length of word }
+  CONFIGURED_WORDS_PATH = '/usr/local/pscal/etc/words';
+  DEFAULT_WORDS_PATH = '/etc/words';
+  REPO_WORDS_FALLBACKS: array[0..2] of string = (
+    '../../etc/words',
+    '../etc/words',
+    'etc/words'
+  );
+
+function ResolveWordsPath: string;
+var
+  baseDir, candidate: string;
+  i: integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', CONFIGURED_WORDS_PATH) = 0 then
+  begin
+    if FileExists(CONFIGURED_WORDS_PATH) then
+    begin
+      ResolveWordsPath := CONFIGURED_WORDS_PATH;
+      exit;
+    end;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(REPO_WORDS_FALLBACKS) to High(REPO_WORDS_FALLBACKS) do
+  begin
+    candidate := ExpandFileName(baseDir + REPO_WORDS_FALLBACKS[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveWordsPath := candidate;
+      exit;
+    end;
+  end;
+
+  if FileExists(DEFAULT_WORDS_PATH) then
+    ResolveWordsPath := DEFAULT_WORDS_PATH
+  else
+    ResolveWordsPath := CONFIGURED_WORDS_PATH;
+end;
+
+var
+  chosen: string;
+  display: string;
+  guessed: string;
+  letter: char;
+  i, wrong: integer;
+  found: boolean;
+
+{ Convert a string to uppercase }
+function UpperCaseStr(s: string): string;
+var
+  i: integer;
+begin
+  for i := 1 to length(s) do
+    s[i] := UpCase(s[i]);
+  UpperCaseStr := s;
+end;
+
+{ Sorts the characters in a string in alphabetical order }
+procedure SortString(var s: string);
+var
+  i, j: integer;
+  temp: char;
+begin
+  for i := 1 to length(s) - 1 do
+    for j := i + 1 to length(s) do
+      if s[i] > s[j] then
+      begin
+        temp := s[i];
+        s[i] := s[j];
+        s[j] := temp;
+      end;
+end;
+
+{ Choose a random word of length 4 to 6 from a text file }
+function ChooseRandomWord: string;
+var
+  f: Text;
+  word: string;
+  filename: string;
+  validCount, target: integer;
+begin
+  filename := ResolveWordsPath;  { Prefer installed prefix; fall back to repo/system locations }
+  ChooseRandomWord := '';  
+  assign(f, filename);
+  {$I-}
+  reset(f);
+  {$I+}
+  if IOResult <> 0 then
+  begin
+    writeln('Error opening file: ', filename);
+    halt(1);
+  end;
+  validCount := 0;
+  while not eof(f) do
+  begin
+    readln(f, word);
+    if (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
+      inc(validCount);
+  end;
+  close(f);
+  if validCount = 0 then
+  begin
+    writeln('No valid words found.');
+    halt(1);
+  end;
+  target := Random(validCount) + 1;
+  assign(f, filename);
+  {$I-}
+  reset(f);
+  {$I+}
+  if IOResult <> 0 then
+  begin
+    writeln('Error reopening file: ', filename);
+    halt(1);
+  end;
+  validCount := 0;
+  while (not eof(f)) and (ChooseRandomWord = '') do
+  begin
+    readln(f, word);
+    if (length(word) >= MIN_LENGTH) and (length(word) <= MAX_LENGTH) then
+    begin
+      inc(validCount);
+      if validCount = target then
+        ChooseRandomWord := UpperCaseStr(word);
+    end;
+  end;
+  close(f);
+end;
+
+{ Draw the hangman graphic based on the number of wrong guesses }
+procedure DrawHangman(wrong: integer);
+begin
+  case wrong of
+    0: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('          |');
+         writeln('          |');
+         writeln('          |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    1: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('          |');
+         writeln('          |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    2: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('      |   |');
+         writeln('          |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    3: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|   |');
+         writeln('          |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    4: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|\  |');
+         writeln('          |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    5: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|\  |');
+         writeln('     /    |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    6: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|\  |');
+         writeln('     / \  |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    7: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|\  |');
+         writeln('    _/ \  |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+    8: begin
+         writeln('      +---+');
+         writeln('      |   |');
+         writeln('      O   |');
+         writeln('     /|\  |');
+         writeln('    _/ \_ |');
+         writeln('          |');
+         writeln('   ==========');
+       end;
+  end;
+end;
+
+{ Main program block }
+begin
+  Randomize;
+  chosen := ChooseRandomWord;
+
+  { Build the display string (underscores) and initialize guessed letters }
+  display := '';
+  guessed := '';
+  for i := 1 to length(chosen) do
+    display := display + '_';
+
+  wrong := 0;
+  ClrScr;
+
+  { Display title and instructions with color }
+  GotoXY(1,1);
+  TextColor(2);  
+  writeln('Welcome to Hangman!');
+  GotoXY(1,2);
+  writeln(' (Guess a letter)');
+  TextColor(7);   { Default }
+
+  { Display initial word (underscores) }
+  GotoXY(1,4);
+  writeln('    ', display);
+
+  { Draw initial hangman }
+  GotoXY(1,6);
+  DrawHangman(wrong);
+
+  while (wrong < MAX_WRONG) and (display <> chosen) do
+  begin
+    { Sort guessed letters before displaying }
+    SortString(guessed);
+    GotoXY(1,15);
+    if length(guessed) > 0 then
+      writeln('Letters chosen so far: ', guessed);
+
+    GotoXY(1,17);
+    write('Enter a letter: ');
+    readln(letter);
+    letter := UpCase(letter);
+    if pos(letter, guessed) = 0 then
+      guessed := guessed + letter;
+
+    found := false;
+    for i := 1 to length(chosen) do
+    begin
+      if chosen[i] = letter then
+      begin
+        display[i] := letter;
+        found := true;
+      end;
+    end;
+
+    ClrScr;
+    GotoXY(1,1);
+    if not found then
+    begin
+      TextColor(12);  { LightRed }
+      writeln('Wrong guess!');
+      TextColor(7);
+      wrong := wrong + 1;
+      writeln('Attempts left: ', MAX_WRONG - wrong);
+    end
+    else
+    begin
+      TextColor(10);  { LightGreen }
+      writeln('Correct guess!');
+      TextColor(7);
+      writeln('Attempts left: ', MAX_WRONG - wrong);
+    end;
+
+    GotoXY(1,4);
+    writeln('    ', display);
+
+    GotoXY(1,6);
+    DrawHangman(wrong);
+  end;
+
+  GotoXY(1,15);
+  if display = chosen then
+  begin
+    TextColor(10);  { LightGreen }
+    writeln('Congratulations, you guessed the word!');
+  end
+  else
+  begin
+    TextColor(12);  { LightRed }
+    writeln('Game over. The word was: ', chosen);
+  end;
+  TextColor(7);
+  writeln;
+end.

@@ -3,6 +3,32 @@
 
 
 #include "elvis.h"
+#ifdef GUI_PSCAL
+extern void pscalRuntimeDebugLog(const char *message);
+
+static void pscalLogModifiedBuffers(const char *context)
+{
+	BUFFER b;
+	char line[256];
+	if (!context)
+	{
+		context = "unknown";
+	}
+	snprintf(line, sizeof(line), "[pscal-exconfig] context=%s checking buffers", context);
+	pscalRuntimeDebugLog(line);
+	for (b = elvis_buffers; b; b = buflist(b))
+	{
+		if (!o_internal(b) && o_modified(b))
+		{
+			const CHAR *fname = o_filename(b) ? o_filename(b) : o_bufname(b);
+			const char *label = fname ? tochar8(fname) : "<unnamed>";
+			snprintf(line, sizeof(line), "[pscal-exconfig] modified buffer=%s changes=%ld",
+				label ? label : "<null>", (long)b->changes);
+			pscalRuntimeDebugLog(line);
+		}
+	}
+}
+#endif
 #ifdef FEATURE_RCSID
 char id_exconfig[] = "$Id: exconfig.c,v 2.154 2004/03/21 23:24:41 steve Exp $";
 #endif
@@ -2431,6 +2457,9 @@ RESULT	ex_xit(EXINFO * xinf)
 			if (!o_internal(b) && o_modified(b)
 				&& (xinf->command == EX_CLOSE || b != buf))
 			{
+#ifdef GUI_PSCAL
+				pscalLogModifiedBuffers("check-other-buffers");
+#endif
 				/* We've found a modified, unsaved user buffer.
 				 * If the command is :q! then we want to
 				 * discard all buffers; otherwise we want to

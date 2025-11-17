@@ -1,7 +1,8 @@
 #ifdef SDL
-#include "sdl.h"
+#include "pscal_sdl_runtime.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "sdl_ios_dispatch.h"
 
 static bool sdlGlSetAttribute(SDL_GLattr attr, int value) {
 #if defined(PSCALI_SDL3)
@@ -27,7 +28,7 @@ static bool sdlGlSetSwapIntervalValue(int interval) {
 #endif
 }
 
-Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
     if (arg_count != 5 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING
         || !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
         runtimeError(vm, "VM Error: InitGraph3D expects (Integer, Integer, String, Integer, Integer)");
@@ -121,6 +122,7 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
 #endif
 #endif
     sdlEnsureInputWatch();
+    sdlFlushSpuriousQuitEvents();
 
     if (!sdlTextInputActive()) {
         sdlStartTextInput();
@@ -129,17 +131,20 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinClosegraph3d(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinClosegraph3d) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph3D expects 0 arguments.");
     cleanupSdlWindowResources();
     return makeVoid();
 }
 
-Value vmBuiltinGlsetswapinterval(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlsetswapinterval) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "GLSetSwapInterval expects 1 integer argument.");
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    return makeVoid();
+#else
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
         runtimeError(vm, "Runtime error: GLSetSwapInterval requires an active OpenGL window. Call InitGraph3D first.");
         return makeVoid();
@@ -151,13 +156,17 @@ Value vmBuiltinGlsetswapinterval(VM* vm, int arg_count, Value* args) {
     }
 
     return makeVoid();
+#endif
 }
 
-Value vmBuiltinGlswapwindow(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlswapwindow) {
     if (arg_count != 0) {
         runtimeError(vm, "GLSwapWindow expects 0 arguments.");
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    return makeVoid();
+#else
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
         runtimeError(vm, "Runtime error: GLSwapWindow requires an active OpenGL window. Call InitGraph3D first.");
         return makeVoid();
@@ -165,6 +174,7 @@ Value vmBuiltinGlswapwindow(VM* vm, int arg_count, Value* args) {
 
     SDL_GL_SwapWindow(gSdlWindow);
     return makeVoid();
+#endif
 }
 
 #endif // SDL

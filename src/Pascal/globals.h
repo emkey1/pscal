@@ -9,7 +9,7 @@
 
 #include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
-#include "backend_ast/sdl.h"   // For SDL related externs or types if any directly in globals.h
+#include "backend_ast/pscal_sdl_runtime.h"   // For SDL related externs or types if any directly in globals.h
                    // (It's better if specific SDL globals are in sdl.h and sdl.c)
 #endif
 

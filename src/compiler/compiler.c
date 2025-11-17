@@ -4529,7 +4529,6 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
-    resetCompilerConstants();
     compiler_had_error = false;
     current_function_compiler = NULL;
     compiler_defined_myself_global = false;
@@ -4589,7 +4588,6 @@ bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     }
     gCurrentProgramRoot = rootNode;
     compilerGlobalCount = 0;
-    resetCompilerConstants();
     compiler_had_error = false;
     current_function_compiler = NULL;
     int saved_myself_flag = compiler_defined_myself_global;
@@ -5175,6 +5173,15 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     *(sym->value) = makeCopyOfValue(&const_val);
                     sym->is_const = true;
                 }
+
+                insertGlobalSymbol(node->token->value, const_val.type, actual_type_def_node);
+                Symbol* global_sym = lookupGlobalSymbol(node->token->value);
+                if (global_sym && global_sym->value) {
+                    freeValue(global_sym->value);
+                    *(global_sym->value) = makeCopyOfValue(&const_val);
+                    global_sym->is_const = true;
+                }
+                insertConstGlobalSymbol(node->token->value, const_val);
             }
 
             freeValue(&const_val);
@@ -6944,7 +6951,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     (param_index == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
-                    (strcasecmp(calleeName, "getscreensize") == 0) ||
+                    (strcasecmp(calleeName, "getscreensize") == 0 && param_index <= 1) || // First two parameters are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && param_index > 0) || // Width and Height are VAR
                     (strcasecmp(calleeName, "str") == 0 && param_index == 1) ||
                     /* Date/time routines return values via VAR parameters */
@@ -8439,6 +8446,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     } else if (functionName && param_index == 0 && strcasecmp(functionName, "eof") == 0) {
                         // Built-in EOF takes its file parameter by reference
                         is_var_param = true;
+                    } else if (!func_symbol && functionName) {
+                        if ((strcasecmp(functionName, "GetMouseState") == 0 && param_index <= 3) ||
+                            (strcasecmp(functionName, "GetScreenSize") == 0 && param_index <= 1)) {
+                            is_var_param = true;
+                        }
                     }
 
                     if (is_var_param) {

@@ -2905,4 +2905,9 @@ int exsh_main(int argc, char **argv) {
 int main(int argc, char **argv) {
     return exsh_main(argc, argv);
 }
+#elif defined(PSCAL_TARGET_IOS)
+#include "SDL_main.h"
+int SDL_main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
 #endif

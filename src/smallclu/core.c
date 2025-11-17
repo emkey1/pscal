@@ -28,6 +28,23 @@
 #define O_CLOEXEC 0
 #endif
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#define SMALLCLU_GETOPT_NEEDS_OPTRESET 1
+#else
+#define SMALLCLU_GETOPT_NEEDS_OPTRESET 0
+#endif
+
+#if SMALLCLU_GETOPT_NEEDS_OPTRESET
+extern int optreset;
+#endif
+
+static void smallcluResetGetopt(void) {
+    optind = 1;
+#if SMALLCLU_GETOPT_NEEDS_OPTRESET
+    optreset = 1;
+#endif
+}
+
 enum {
     PAGER_KEY_ARROW_UP = 1000,
     PAGER_KEY_ARROW_DOWN,
@@ -597,6 +614,28 @@ static void print_long_listing(const char *filename, const struct stat *s) {
     putchar('\n');
 }
 
+static int print_path_entry_with_stat(const char *path,
+                                      const char *label,
+                                      bool long_format,
+                                      const struct stat *stat_buf) {
+    struct stat local_stat;
+    const struct stat *st = stat_buf;
+    if (!st) {
+        if (lstat(path, &local_stat) == -1) {
+            fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+            return 1;
+        }
+        st = &local_stat;
+    }
+
+    if (long_format) {
+        print_long_listing(label ? label : path, st);
+    } else {
+        printf("%s\n", label ? label : path);
+    }
+    return 0;
+}
+
 static char *join_path(const char *base, const char *name) {
     if (!base || !*base || strcmp(base, ".") == 0) {
         return strdup(name);
@@ -617,43 +656,117 @@ static char *join_path(const char *base, const char *name) {
 }
 
 static int print_path_entry(const char *path, const char *label, bool long_format) {
-    struct stat stat_buf;
-    if (lstat(path, &stat_buf) == -1) {
-        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
-        return 1;
-    }
-    if (long_format) {
-        print_long_listing(label ? label : path, &stat_buf);
-    } else {
-        printf("%s\n", label ? label : path);
-    }
-    return 0;
+    return print_path_entry_with_stat(path, label, long_format, NULL);
 }
 
-static int list_directory(const char *path, bool show_all, bool long_format) {
+typedef struct {
+    char *name;
+    char *full_path;
+    struct stat stat_buf;
+} SmallcluLsEntry;
+
+static void free_ls_entries(SmallcluLsEntry *entries, size_t count) {
+    if (!entries) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(entries[i].name);
+        free(entries[i].full_path);
+    }
+    free(entries);
+}
+
+static int compare_ls_entries_by_mtime(const void *lhs, const void *rhs) {
+    const SmallcluLsEntry *a = (const SmallcluLsEntry *)lhs;
+    const SmallcluLsEntry *b = (const SmallcluLsEntry *)rhs;
+    if (a->stat_buf.st_mtime > b->stat_buf.st_mtime) {
+        return -1;
+    }
+    if (a->stat_buf.st_mtime < b->stat_buf.st_mtime) {
+        return 1;
+    }
+    return strcmp(a->name, b->name);
+}
+
+static int list_directory(const char *path,
+                          bool show_all,
+                          bool long_format,
+                          bool sort_by_time) {
     DIR *d = opendir(path);
     if (!d) {
         fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
 
-    struct dirent *dir;
+    SmallcluLsEntry *entries = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
     int status = 0;
+
+    struct dirent *dir;
     while ((dir = readdir(d)) != NULL) {
         const char *filename = dir->d_name;
         if (!show_all && filename[0] == '.') {
             continue;
         }
+
         char *full_path = join_path(path, filename);
         if (!full_path) {
             fprintf(stderr, "ls: %s/%s: %s\n", path, filename, strerror(ENOMEM));
             status = 1;
             break;
         }
-        status |= print_path_entry(full_path, filename, long_format);
-        free(full_path);
+
+        struct stat stat_buf;
+        if (lstat(full_path, &stat_buf) == -1) {
+            fprintf(stderr, "ls: %s: %s\n", full_path, strerror(errno));
+            free(full_path);
+            status = 1;
+            continue;
+        }
+
+        char *name_copy = strdup(filename);
+        if (!name_copy) {
+            fprintf(stderr, "ls: %s/%s: %s\n", path, filename, strerror(ENOMEM));
+            free(full_path);
+            status = 1;
+            break;
+        }
+
+        if (count == capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : 64;
+            SmallcluLsEntry *new_entries = (SmallcluLsEntry *)realloc(entries,
+                                                                      new_capacity * sizeof(SmallcluLsEntry));
+            if (!new_entries) {
+                fprintf(stderr, "ls: %s: %s\n", path, strerror(ENOMEM));
+                free(name_copy);
+                free(full_path);
+                status = 1;
+                break;
+            }
+            entries = new_entries;
+            capacity = new_capacity;
+        }
+
+        entries[count].name = name_copy;
+        entries[count].full_path = full_path;
+        entries[count].stat_buf = stat_buf;
+        ++count;
     }
     closedir(d);
+
+    if (sort_by_time && count > 1) {
+        qsort(entries, count, sizeof(entries[0]), compare_ls_entries_by_mtime);
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        status |= print_path_entry_with_stat(entries[i].full_path,
+                                             entries[i].name,
+                                             long_format,
+                                             &entries[i].stat_buf);
+    }
+
+    free_ls_entries(entries, count);
     return status ? 1 : 0;
 }
 
@@ -719,15 +832,19 @@ static int smallcluEchoCommand(int argc, char **argv) {
 static int smallcluLsCommand(int argc, char **argv) {
     int show_all = 0;
     int long_format = 0;
+    int sort_by_time = 0;
     int opt;
-    optind = 1;
-    while ((opt = getopt(argc, argv, "al")) != -1) {
+    smallcluResetGetopt();
+    while ((opt = getopt(argc, argv, "alt")) != -1) {
         switch (opt) {
             case 'a':
                 show_all = 1;
                 break;
             case 'l':
                 long_format = 1;
+                break;
+            case 't':
+                sort_by_time = 1;
                 break;
             default:
                 return 1;
@@ -737,7 +854,7 @@ static int smallcluLsCommand(int argc, char **argv) {
     int status = 0;
     int paths_start = optind;
     if (paths_start >= argc) {
-        return list_directory(".", show_all, long_format);
+        return list_directory(".", show_all, long_format, sort_by_time);
     }
 
     int remaining = argc - paths_start;
@@ -757,7 +874,7 @@ static int smallcluLsCommand(int argc, char **argv) {
                 }
                 printf("%s:\n", path);
             }
-            status |= list_directory(path, show_all, long_format);
+            status |= list_directory(path, show_all, long_format, sort_by_time);
         } else {
             status |= print_path_entry(path, path, long_format);
         }
@@ -2111,7 +2228,46 @@ static int smallcluWcCommand(int argc, char **argv) {
     return status;
 }
 
-static long long smallcluDuVisit(const char *path, int *status) {
+typedef struct {
+    int summarize_only;
+    int use_kilobytes;
+    int human_readable;
+} SmallcluDuOptions;
+
+static void smallcluDuPrintSize(long long bytes,
+                                const char *path,
+                                const SmallcluDuOptions *opts) {
+    if (opts && opts->human_readable) {
+        static const char units[] = {'B', 'K', 'M', 'G', 'T', 'P', 'E'};
+        double value = (double)bytes;
+        size_t unit = 0;
+        while (value >= 1024.0 && unit < (sizeof(units) / sizeof(units[0])) - 1) {
+            value /= 1024.0;
+            unit++;
+        }
+        if (unit == 0 || value >= 10.0) {
+            printf("%.0f%c\t%s\n", value, units[unit], path);
+        } else {
+            printf("%.1f%c\t%s\n", value, units[unit], path);
+        }
+        return;
+    }
+
+    long long value = bytes;
+    if (opts && opts->use_kilobytes) {
+        if (value >= 0) {
+            value = (value + 1023) / 1024;
+        } else {
+            value = -(((-value) + 1023) / 1024);
+        }
+    }
+    printf("%lld\t%s\n", value, path);
+}
+
+static long long smallcluDuVisit(const char *path,
+                                 int *status,
+                                 const SmallcluDuOptions *opts,
+                                 int depth) {
     struct stat st;
     if (lstat(path, &st) != 0) {
         fprintf(stderr, "du: %s: %s\n", path, strerror(errno));
@@ -2137,21 +2293,42 @@ static long long smallcluDuVisit(const char *path, int *status) {
                 if (status) *status = 1;
                 continue;
             }
-            total += smallcluDuVisit(child, status);
+            total += smallcluDuVisit(child, status, opts, depth + 1);
         }
         closedir(dir);
     }
-    printf("%lld\t%s\n", total, path);
+    if (!opts || !opts->summarize_only || depth == 0) {
+        smallcluDuPrintSize(total, path, opts);
+    }
     return total;
 }
 
 static int smallcluDuCommand(int argc, char **argv) {
+    SmallcluDuOptions opts = {0, 0, 0};
+    int opt;
+    smallcluResetGetopt();
+    while ((opt = getopt(argc, argv, "skh")) != -1) {
+        switch (opt) {
+            case 's':
+                opts.summarize_only = 1;
+                break;
+            case 'k':
+                opts.use_kilobytes = 1;
+                break;
+            case 'h':
+                opts.human_readable = 1;
+                break;
+            default:
+                return 1;
+        }
+    }
+
     int status = 0;
-    if (argc <= 1) {
-        smallcluDuVisit(".", &status);
+    if (optind >= argc) {
+        smallcluDuVisit(".", &status, &opts, 0);
     } else {
-        for (int i = 1; i < argc; ++i) {
-            smallcluDuVisit(argv[i], &status);
+        for (int i = optind; i < argc; ++i) {
+            smallcluDuVisit(argv[i], &status, &opts, 0);
         }
     }
     return status ? 1 : 0;
@@ -2415,7 +2592,7 @@ static int smallcluMkdirParents(const char *path, mode_t mode) {
 static int smallcluRmCommand(int argc, char **argv) {
     int recursive = 0;
     int opt;
-    optind = 1;
+    smallcluResetGetopt();
     while ((opt = getopt(argc, argv, "r")) != -1) {
         switch (opt) {
             case 'r':
@@ -2442,7 +2619,7 @@ static int smallcluRmCommand(int argc, char **argv) {
 static int smallcluMkdirCommand(int argc, char **argv) {
     int parents = 0;
     int opt;
-    optind = 1;
+    smallcluResetGetopt();
     while ((opt = getopt(argc, argv, "p")) != -1) {
         switch (opt) {
             case 'p':
@@ -2538,7 +2715,7 @@ static int smallcluFileCommand(int argc, char **argv) {
 static int smallcluLnCommand(int argc, char **argv) {
     int symbolic = 0;
     int opt;
-    optind = 1;
+    smallcluResetGetopt();
     while ((opt = getopt(argc, argv, "s")) != -1) {
         switch (opt) {
             case 's':
