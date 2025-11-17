@@ -9,9 +9,9 @@
 #include "Pascal/documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
-#include "symbol.h"
+#include "symbol/symbol.h"
 #include "types.h"
-#include "builtin.h"
+#include "backend_ast/builtin.h"
 #include "common/runtime_tty.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO

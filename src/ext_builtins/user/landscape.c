@@ -6,7 +6,7 @@
 
 #ifdef SDL
 #include "backend_ast/sdl.h"
-#include <SDL2/SDL_opengl.h>
+#include PSCALI_SDL_OPENGL_HEADER
 #include "runtime/terrain/terrain_generator.h"
 #include "runtime/shaders/sky/sky_dome.h"
 #include "runtime/shaders/sky/cloud_layer.h"

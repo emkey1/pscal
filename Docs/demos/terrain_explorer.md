@@ -9,7 +9,7 @@ The terrain explorer showcases the procedural landscape renderer that ships with
    cmake -S . -B build -DSDL=ON
    ```
    If the configure step reports that SDL support was disabled, install the
-   SDL2 and SDL2_image development headers for your platform and rerun the
+   SDL2/SDL3 and SDL_image development headers for your platform and rerun the
    command so that the screenshot helper can be compiled.
 2. Build the Rea front end and bundled extensions:
    ```

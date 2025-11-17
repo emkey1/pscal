@@ -4,7 +4,8 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 
-#include <SDL2/SDL_opengl.h>
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_OPENGL_HEADER
 #include <stdbool.h>
 #include <strings.h>
 #include <math.h>
@@ -1232,7 +1233,11 @@ Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     }
 
     int accelerated = 0;
+#if defined(PSCALI_SDL3)
+    if (!SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated)) {
+#else
     if (SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated) != 0) {
+#endif
         runtimeError(vm, "GLIsHardwareAccelerated: SDL_GL_GetAttribute failed: %s", SDL_GetError());
         return makeBoolean(false);
     }

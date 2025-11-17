@@ -2,9 +2,14 @@
 #define PSCAL_SDL_H
 
 #ifdef SDL
+#include "core/sdl_headers.h"
+#if defined(PSCALI_SDL3)
+#include <SDL3/SDL.h>
+#else
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-#include <SDL2/SDL_image.h>
+#endif
+#include PSCALI_SDL_TTF_HEADER
+#include PSCALI_SDL_IMAGE_HEADER
 #include "core/types.h"
 #include <stdbool.h>
 
@@ -39,6 +44,9 @@ bool sdlIsGraphicsActive(void);
 bool sdlHasPendingKeycode(void);
 SDL_Keycode sdlWaitNextKeycode(void);
 bool sdlPollNextKey(SDL_Keycode* outCode);
+bool sdlTextInputActive(void);
+void sdlStartTextInput(void);
+void sdlStopTextInput(void);
 
 
 // System Functions

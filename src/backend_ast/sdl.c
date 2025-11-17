@@ -5,11 +5,15 @@
 //  Created by Michael Miller on 5/7/25.
 //
 #ifdef SDL
+#include "core/sdl_headers.h"
+#if defined(PSCALI_SDL3)
+#include <SDL3/SDL.h>
+#else
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-// Include SDL_mixer header directly
-#include <SDL2/SDL_mixer.h>
-#include <SDL2/SDL_syswm.h>
+#endif
+#include PSCALI_SDL_TTF_HEADER
+#include PSCALI_SDL_MIXER_HEADER
+#include PSCALI_SDL_SYSWM_HEADER
 // Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
 #include "audio.h"
 
@@ -49,6 +53,7 @@ int gSdlFontSize   = 16;
 SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
 int gSdlTextureWidths[MAX_SDL_TEXTURES];
 int gSdlTextureHeights[MAX_SDL_TEXTURES];
+int gSdlTextureAccesses[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
@@ -64,6 +69,81 @@ static bool gX11WmAtomsInitialized = false;
 static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
+static const int kTextureAccessInvalid = -1;
+
+#if defined(PSCALI_SDL3)
+static bool isWindowCloseEvent(const SDL_Event* event) {
+    return event && event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+}
+#else
+static bool isWindowCloseEvent(const SDL_Event* event) {
+    return event && event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE;
+}
+#endif
+
+bool sdlTextInputActive(void) {
+#if defined(PSCALI_SDL3)
+    if (!gSdlWindow) {
+        return false;
+    }
+    return SDL_TextInputActive(gSdlWindow);
+#else
+    return SDL_IsTextInputActive();
+#endif
+}
+
+void sdlStartTextInput(void) {
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        SDL_StartTextInput(gSdlWindow);
+    }
+#else
+    SDL_StartTextInput();
+#endif
+}
+
+void sdlStopTextInput(void) {
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        SDL_StopTextInput(gSdlWindow);
+    }
+#else
+    SDL_StopTextInput();
+#endif
+}
+
+static void applyWindowBorderOffsets(int* winX, int* winY) {
+    if (!winX || !winY) {
+        return;
+    }
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        int borderTop = 0, borderLeft = 0, borderBottom = 0, borderRight = 0;
+        if (SDL_GetWindowBordersSize(gSdlWindow,
+                                     &borderTop,
+                                     &borderLeft,
+                                     &borderBottom,
+                                     &borderRight)) {
+            *winX += borderLeft;
+            *winY += borderTop;
+        }
+    }
+#elif defined(SDL_VERSION_ATLEAST)
+#if SDL_VERSION_ATLEAST(2,0,5)
+    if (gSdlWindow) {
+        int borderTop = 0, borderLeft = 0, borderBottom = 0, borderRight = 0;
+        if (SDL_GetWindowBordersSize(gSdlWindow,
+                                     &borderTop,
+                                     &borderLeft,
+                                     &borderBottom,
+                                     &borderRight) == 0) {
+            *winX += borderLeft;
+            *winY += borderTop;
+        }
+    }
+#endif
+#endif
+}
 
 static bool isPrintableKeycode(SDL_Keycode code) {
     return code >= 32 && code <= 126;
@@ -143,6 +223,7 @@ static void enqueueUtf8Text(const char* text) {
     }
 }
 
+#if PSCALI_HAS_SYSWM
 static void handleSysWmEvent(const SDL_Event* event) {
 #ifdef SDL_VIDEO_DRIVER_X11
     if (!event || event->type != SDL_SYSWMEVENT) {
@@ -190,6 +271,11 @@ static void handleSysWmEvent(const SDL_Event* event) {
     (void)event;
 #endif
 }
+#else
+static void handleSysWmEvent(const SDL_Event* event) {
+    (void)event;
+}
+#endif
 
 static bool dequeuePendingKeycode(SDL_Keycode* outCode) {
     if (gPendingKeyCount == 0) {
@@ -221,10 +307,12 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
         return 0;
     }
 
+#if PSCALI_HAS_SYSWM
     if (event->type == SDL_SYSWMEVENT) {
         handleSysWmEvent(event);
         return 0;
     }
+#endif
 
     if (event->type == SDL_QUIT) {
         break_requested = 1;
@@ -361,6 +449,7 @@ void initializeTextureSystem(void) {
         gSdlTextures[i] = NULL;
         gSdlTextureWidths[i] = 0;
         gSdlTextureHeights[i] = 0;
+        gSdlTextureAccesses[i] = kTextureAccessInvalid;
     }
 }
 
@@ -378,8 +467,8 @@ void sdlEnsureInputWatch(void) {
 void cleanupSdlWindowResources(void) {
     resetPendingKeycodes();
 
-    if (gSdlInitialized && SDL_IsTextInputActive()) {
-        SDL_StopTextInput();
+    if (gSdlInitialized && sdlTextInputActive()) {
+        sdlStopTextInput();
     }
 
     if (gSdlGLContext) {
@@ -524,8 +613,12 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         gSdlInitialized = true;
 
         // Allow clicks to focus the window on macOS and avoid dropped initial events
+#ifdef SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+#endif
+#if PSCALI_HAS_SYSWM
         SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+#endif
     }
 
     cleanupSdlWindowResources();
@@ -539,7 +632,15 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     
+    gSdlWindow = NULL;
+#if defined(PSCALI_SDL3)
+    gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_SHOWN);
+    if (gSdlWindow) {
+        SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#else
     gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+#endif
     if (!gSdlWindow) {
         runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
         return makeVoid();
@@ -548,7 +649,15 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     gSdlWidth = width;
     gSdlHeight = height;
 
+    gSdlRenderer = NULL;
+#if defined(PSCALI_SDL3)
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
+    if (gSdlRenderer) {
+        SDL_SetRenderVSync(gSdlRenderer, 1);
+    }
+#else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
     if (!gSdlRenderer) {
         runtimeError(vm, "Runtime error: SDL_CreateRenderer failed: %s", SDL_GetError());
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
@@ -564,15 +673,17 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     SDL_PumpEvents(); // Process any pending events so the window becomes visible
     SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
 #if SDL_VERSION_ATLEAST(2,0,5)
+#ifndef PSCALI_SDL3
     SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
+#endif
 #endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
     sdlEnsureInputWatch();
 
-    if (!SDL_IsTextInputActive()) {
-        SDL_StartTextInput();
+    if (!sdlTextInputActive()) {
+        sdlStartTextInput();
     }
 
     return makeVoid();
@@ -645,7 +756,11 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
         c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
     }
 
+#if defined(PSCALI_SDL3)
+    if (!SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch)) {
+#else
     if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
+#endif
         runtimeError(vm, "SDL_UpdateTexture failed: %s", SDL_GetError());
     }
 
@@ -688,7 +803,7 @@ Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GetTicks expects 0 arguments.");
         return makeInt(0);
     }
-    return makeInt((long long)SDL_GetTicks());
+    return makeInt((long long)PSCAL_SDL_GET_TICKS());
 }
 
 Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
@@ -734,15 +849,34 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
         }
     } else {
         bool initialized_video = false;
-        Uint32 was_init = SDL_WasInit(SDL_INIT_VIDEO);
+        Uint32 was_init = PSCAL_SDL_WAS_INIT(SDL_INIT_VIDEO);
         if ((was_init & SDL_INIT_VIDEO) == 0) {
-            if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+            if (PSCAL_SDL_INIT_SUBSYSTEM(SDL_INIT_VIDEO) != 0) {
                 runtimeError(vm, "Unable to initialize SDL video subsystem for GetScreenSize: %s", SDL_GetError());
                 return makeVoid();
             }
             initialized_video = true;
         }
 
+#if defined(PSCALI_SDL3)
+        SDL_DisplayID displayId = SDL_GetPrimaryDisplay();
+        const SDL_DisplayMode* mode = NULL;
+        if (displayId) {
+            mode = SDL_GetDesktopDisplayMode(displayId);
+            if (!mode) {
+                mode = SDL_GetCurrentDisplayMode(displayId);
+            }
+        }
+        if (!mode || mode->w <= 0 || mode->h <= 0) {
+            if (initialized_video) {
+                PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
+            }
+            runtimeError(vm, "Unable to query display size for GetScreenSize: %s", SDL_GetError());
+            return makeVoid();
+        }
+        width = mode->w;
+        height = mode->h;
+#else
         SDL_DisplayMode mode;
         int display_status = SDL_GetDesktopDisplayMode(0, &mode);
         if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
@@ -751,7 +885,7 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
 
         if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
             if (initialized_video) {
-                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
             }
             runtimeError(vm, "Unable to query display size for GetScreenSize: %s", SDL_GetError());
             return makeVoid();
@@ -759,9 +893,10 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
 
         width = mode.w;
         height = mode.h;
+#endif
 
         if (initialized_video) {
-            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
         }
     }
 
@@ -863,14 +998,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
     int win_x = 0, win_y = 0;
     SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
-#if SDL_VERSION_ATLEAST(2,0,5)
-    int border_top = 0, border_left = 0, border_bottom = 0, border_right = 0;
-    if (SDL_GetWindowBordersSize(gSdlWindow, &border_top, &border_left,
-                                 &border_bottom, &border_right) == 0) {
-        win_x += border_left;
-        win_y += border_top;
-    }
-#endif
+    applyWindowBorderOffsets(&win_x, &win_y);
     mse_x = global_x - win_x;
     mse_y = global_y - win_y;
     int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
@@ -966,6 +1094,9 @@ Value vmBuiltinDestroytexture(VM* vm, int arg_count, Value* args) {
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
         SDL_DestroyTexture(gSdlTextures[textureID]);
         gSdlTextures[textureID] = NULL;
+        gSdlTextureWidths[textureID] = 0;
+        gSdlTextureHeights[textureID] = 0;
+        gSdlTextureAccesses[textureID] = kTextureAccessInvalid;
     }
     return makeVoid();
 }
@@ -1011,6 +1142,8 @@ Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text, color);
     if (!surf) return makeInt(-1);
 
+    int surfaceWidth = surf->w;
+    int surfaceHeight = surf->h;
     SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
     SDL_FreeSurface(surf);
     if (!tex) return makeInt(-1);
@@ -1020,7 +1153,9 @@ Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     if (free_slot == -1) { SDL_DestroyTexture(tex); return makeInt(-1); }
 
     gSdlTextures[free_slot] = tex;
-    SDL_QueryTexture(tex, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    gSdlTextureWidths[free_slot] = surfaceWidth;
+    gSdlTextureHeights[free_slot] = surfaceHeight;
+    gSdlTextureAccesses[free_slot] = SDL_TEXTUREACCESS_STATIC;
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
 
     return makeInt(free_slot);
@@ -1094,6 +1229,7 @@ Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
     gSdlTextures[textureID] = newTexture;
     gSdlTextureWidths[textureID] = width;
     gSdlTextureHeights[textureID] = height;
+    gSdlTextureAccesses[textureID] = SDL_TEXTUREACCESS_TARGET;
     return makeInt(textureID);
 }
 
@@ -1119,6 +1255,7 @@ Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
     gSdlTextures[textureID] = newTexture;
     gSdlTextureWidths[textureID] = width;
     gSdlTextureHeights[textureID] = height;
+    gSdlTextureAccesses[textureID] = SDL_TEXTUREACCESS_STREAMING;
     return makeInt(textureID);
 }
 
@@ -1262,14 +1399,25 @@ Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
     SDL_Rect pixelRect = {x, y, 1, 1};
     Uint8 rgba[4] = {0, 0, 0, 0};
 
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
-    if (!surface) { runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError()); return makeVoid(); }
+#if defined(PSCALI_SDL3)
+    SDL_Surface* surface = SDL_RenderReadPixels(gSdlRenderer, &pixelRect);
+    if (!surface) {
+        runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
+        return makeVoid();
+    }
+#else
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) {
+        runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError());
+        return makeVoid();
+    }
 
     if (SDL_RenderReadPixels(gSdlRenderer, &pixelRect, surface->format->format, surface->pixels, surface->pitch) != 0) {
         runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
         SDL_FreeSurface(surface);
         return makeVoid();
     }
+#endif
 
     Uint32 pixelValue = ((Uint32*)surface->pixels)[0];
     SDL_GetRGBA(pixelValue, surface->format, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
@@ -1298,12 +1446,25 @@ Value vmBuiltinLoadimagetotexture(VM* vm, int arg_count, Value* args) {
     int free_slot = findFreeTextureID();
     if (free_slot == -1) { runtimeError(vm, "No free texture slots available for LoadImageToTexture."); return makeInt(-1); }
 
-    SDL_Texture* newTexture = IMG_LoadTexture(gSdlRenderer, filePath);
-    if (!newTexture) { runtimeError(vm, "Failed to load image '%s' as texture: %s", filePath, IMG_GetError()); return makeInt(-1); }
+    SDL_Surface* surface = IMG_Load(filePath);
+    if (!surface) {
+        runtimeError(vm, "Failed to load image '%s': %s", filePath, IMG_GetError());
+        return makeInt(-1);
+    }
+
+    SDL_Texture* newTexture = SDL_CreateTextureFromSurface(gSdlRenderer, surface);
+    if (!newTexture) {
+        runtimeError(vm, "Failed to create texture from '%s': %s", filePath, SDL_GetError());
+        SDL_FreeSurface(surface);
+        return makeInt(-1);
+    }
 
     gSdlTextures[free_slot] = newTexture;
-    SDL_QueryTexture(newTexture, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    gSdlTextureWidths[free_slot] = surface->w;
+    gSdlTextureHeights[free_slot] = surface->h;
+    gSdlTextureAccesses[free_slot] = SDL_TEXTUREACCESS_STATIC;
     SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+    SDL_FreeSurface(surface);
     return makeInt(free_slot);
 }
 
@@ -1445,16 +1606,11 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_Texture* targetTexture = NULL;
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID] != NULL) {
-        Uint32 format;
-        int access;
-        int w, h;
-        if (SDL_QueryTexture(gSdlTextures[textureID], &format, &access, &w, &h) == 0) {
-            if (access == SDL_TEXTUREACCESS_TARGET) {
-                targetTexture = gSdlTextures[textureID];
-            } else {
-                runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
-            }
-        } else { runtimeError(vm, "Could not query texture %d for SetRenderTarget: %s", textureID, SDL_GetError()); }
+        if (gSdlTextureAccesses[textureID] == SDL_TEXTUREACCESS_TARGET) {
+            targetTexture = gSdlTextures[textureID];
+        } else {
+            runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
+        }
     } else if (textureID >= MAX_SDL_TEXTURES || (textureID >=0 && gSdlTextures[textureID] == NULL)) {
         runtimeError(vm, "Invalid TextureID %d passed to SetRenderTarget. Defaulting to screen.", textureID);
     }
@@ -1506,17 +1662,23 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+#if PSCALI_HAS_SYSWM
+#if PSCALI_HAS_SYSWM
+#if PSCALI_HAS_SYSWM
         if (event.type == SDL_SYSWMEVENT) {
             handleSysWmEvent(&event);
             continue;
         }
+#endif
+#endif
+#endif
 
         if (event.type == SDL_QUIT) {
             atomic_store(&break_requested, 1);
             return false;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
@@ -1526,7 +1688,7 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
                 atomic_store(&break_requested, 1);
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }
@@ -1576,15 +1738,17 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     int waiting = 1;
     while (waiting) {
         if (SDL_WaitEvent(&event)) {
+#if PSCALI_HAS_SYSWM
             if (event.type == SDL_SYSWMEVENT) {
                 handleSysWmEvent(&event);
                 continue;
             }
+#endif
 
             if (event.type == SDL_QUIT) {
                 break_requested = 1;
                 waiting = 0;
-            } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+            } else if (isWindowCloseEvent(&event)) {
                 continue;
             } else if (event.type == SDL_KEYDOWN) {
                 SDL_Keycode sym = event.key.keysym.sym;
@@ -1592,7 +1756,7 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
                     atomic_store(&break_requested, 1);
                 }
 
-                bool textActive = SDL_IsTextInputActive();
+                bool textActive = sdlTextInputActive();
                 if (!textActive || !isPrintableKeycode(sym)) {
                     enqueuePendingKeycode(sym);
                     waiting = 0;
@@ -1710,8 +1874,8 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
-        Uint32 startTime = SDL_GetTicks();
-        Uint32 targetTime = startTime + (Uint32)ms;
+        Uint64 startTime = PSCAL_SDL_GET_TICKS();
+        Uint64 targetTime = startTime + (Uint64)ms;
         SDL_Event event;
 
         /*
@@ -1724,17 +1888,19 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
             SDL_PumpEvents();
 
             while (SDL_PollEvent(&event)) {
+#if PSCALI_HAS_SYSWM
                 if (event.type == SDL_SYSWMEVENT) {
                     handleSysWmEvent(&event);
                     continue;
                 }
+#endif
 
                 if (event.type == SDL_QUIT) {
                     break_requested = 1;
                     return makeVoid();
                 }
 
-                if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                if (isWindowCloseEvent(&event)) {
                     /* Swallow window close requests; _NET_WM_PING is handled separately in handleSysWmEvent. */
                     continue;
                 }
@@ -1745,7 +1911,7 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                         atomic_store(&break_requested, 1);
                     }
 
-                    bool textActive = SDL_IsTextInputActive();
+                    bool textActive = sdlTextInputActive();
                     if (!textActive || !isPrintableKeycode(sym)) {
                         enqueuePendingKeycode(sym);
                     }
@@ -1758,18 +1924,18 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 return makeVoid();
             }
 
-            Uint32 now = SDL_GetTicks();
+            Uint64 now = PSCAL_SDL_GET_TICKS();
             if (now >= targetTime) {
                 break;
             }
 
-            Uint32 remaining = targetTime - now;
+            Uint64 remaining = targetTime - now;
             if (remaining > 10) {
                 remaining = 10;
             }
 
             if (remaining > 0) {
-                SDL_Delay(remaining);
+                SDL_Delay((Uint32)remaining);
             }
         }
     }
@@ -1836,7 +2002,7 @@ static void pumpKeyEvents(void) {
             continue;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
@@ -1846,7 +2012,7 @@ static void pumpKeyEvents(void) {
                 atomic_store(&break_requested, 1);
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }
@@ -1891,7 +2057,7 @@ SDL_Keycode sdlWaitNextKeycode(void) {
             return SDLK_UNKNOWN;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
@@ -1901,7 +2067,7 @@ SDL_Keycode sdlWaitNextKeycode(void) {
                 atomic_store(&break_requested, 1);
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }

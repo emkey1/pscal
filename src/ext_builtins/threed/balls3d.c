@@ -4,7 +4,7 @@
 
 #ifdef SDL
 #include "backend_ast/sdl.h"
-#include <SDL2/SDL_opengl.h>
+#include PSCALI_SDL_OPENGL_HEADER
 #endif
 
 #include <limits.h>
