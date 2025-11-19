@@ -180,8 +180,17 @@ void pscalRuntimeDebugLog(const char *message) {
     PSCALRuntimeEnsureDebugLog();
     if (s_debug_log_handle) {
         NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
-        [s_debug_log_handle writeData:data];
-        [s_debug_log_handle synchronizeFile];
+        @try {
+            [s_debug_log_handle writeData:data];
+            [s_debug_log_handle synchronizeFile];
+        } @catch (NSException *exception) {
+            NSLog(@"PSCALRuntime: debug log write failed (%@); disabling log file", exception.reason);
+            @try {
+                [s_debug_log_handle closeFile];
+            } @catch (__unused NSException *closeException) {
+            }
+            s_debug_log_handle = nil;
+        }
     }
 }
 
@@ -281,6 +290,9 @@ static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd)
 
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
+#ifdef SIGPIPE
+    signal(SIGPIPE, SIG_IGN);
+#endif
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active) {
         pthread_mutex_unlock(&s_runtime_mutex);
@@ -341,7 +353,9 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     pthread_create(&s_output_thread, NULL, PSCALRuntimeOutputPump, NULL);
     NSLog(@"PSCALRuntime: output pump thread started");
 
+#if PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3
     PSCALRuntimeEnsureSDLReady();
+#endif
     int result = exsh_main(argc, argv);
     NSLog(@"PSCALRuntime: exsh_main exited with status %d", result);
 

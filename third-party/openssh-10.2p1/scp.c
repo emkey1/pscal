@@ -108,6 +108,9 @@
 #if defined(HAVE_STRNVIS) && defined(HAVE_VIS_H) && !defined(BROKEN_STRNVIS)
 #include <vis.h>
 #endif
+#ifdef PSCAL_TARGET_IOS
+int fnmatch(const char *, const char *, int);
+#endif
 
 #include "xmalloc.h"
 #include "ssh.h"
@@ -121,6 +124,10 @@
 
 #include "sftp-common.h"
 #include "sftp-client.h"
+#ifdef PSCAL_TARGET_IOS
+#include "pscal_runtime_hooks.h"
+static void pscal_scp_cleanup_handler(int);
+#endif
 
 extern char *__progname;
 
@@ -145,7 +152,11 @@ int verbose_mode = 0;
 LogLevel log_level = SYSLOG_LEVEL_INFO;
 
 /* This is set to zero if the progressmeter is not desired. */
+#if defined(PSCAL_TARGET_IOS)
+extern int showprogress;
+#else
 int showprogress = 1;
+#endif
 
 /*
  * This is set to non-zero if remote-remote copy should be piped
@@ -168,7 +179,11 @@ size_t sftp_copy_buflen;
 size_t sftp_nrequests;
 
 /* Needed for sftp */
+#if defined(PSCAL_TARGET_IOS)
+extern volatile sig_atomic_t interrupted;
+#else
 volatile sig_atomic_t interrupted = 0;
+#endif
 
 int sftp_glob(struct sftp_conn *, const char *, int,
     int (*)(const char *, int), glob_t *); /* proto for sftp-glob.c */
@@ -468,6 +483,10 @@ main(int argc, char **argv)
 	sanitise_stdfd();
 
 	msetlocale();
+
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_register_cleanup(pscal_scp_cleanup_handler);
+#endif
 
 	/* Copy argv, because we modify it */
 	argv0 = argv[0];
@@ -2249,9 +2268,17 @@ lostconn(int signo)
 		exit(1);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static void
+pscal_scp_cleanup_handler(int i)
+#else
 void
 cleanup_exit(int i)
+#endif
 {
+#if defined(PSCAL_TARGET_IOS)
+	(void)i;
+#endif
 	if (remin > 0)
 		close(remin);
 	if (remout > 0)
@@ -2264,5 +2291,7 @@ cleanup_exit(int i)
 		(void)waitpid(do_cmd_pid, NULL, 0);
 	if (do_cmd_pid2 > 0)
 		(void)waitpid(do_cmd_pid2, NULL, 0);
+#if !defined(PSCAL_TARGET_IOS)
 	exit(i);
+#endif
 }

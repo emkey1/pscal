@@ -7,6 +7,8 @@
 char id_exedit[] = "$Id: exedit.c,v 2.71 2004/03/19 16:28:59 steve Exp $";
 #endif
 
+extern CHAR dmspreprocessor(WINDOW win);
+
 
 /* This command implements the :insert, :append, and :change commands */
 RESULT	ex_append(EXINFO * xinf)

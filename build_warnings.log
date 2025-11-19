@@ -20,11 +20,11 @@
 [20/131] Building C object CMakeFiles/pscal_core_static.dir/src/common/runtime_paths.c.o
 [21/131] Building C object CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.o
 [22/131] Building C object CMakeFiles/pscal_core_static.dir/src/core/cache.c.o
-[23/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o
-[24/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o
+[23/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o
+[24/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o
 [25/131] Building C object CMakeFiles/pscal_core_static.dir/lib/noise/noise.c.o
 [26/131] Building C object CMakeFiles/pscal_core_static.dir/src/runtime/shaders/shader_common.c.o
-[27/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o
+[27/131] Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o
 [28/131] Building C object CMakeFiles/pscal_core_static.dir/src/runtime/terrain/terrain_generator.c.o
 [29/131] Building C object CMakeFiles/pscal_core_static.dir/src/runtime/shaders/sky/sky_dome.c.o
 [30/131] Building C object CMakeFiles/pscal_core_static.dir/src/runtime/shaders/terrain/terrain_shader.c.o

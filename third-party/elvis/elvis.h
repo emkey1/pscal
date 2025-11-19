@@ -174,6 +174,9 @@ extern ELVBOOL stdin_not_kbd;
 #include "elvisio.h"
 #include "lp.h"
 #include "calc.h"
+#ifdef FEATURE_CALC
+extern CHAR *calcelement(CHAR *set, CHAR *element);
+#endif
 #include "more.h"
 #include "digraph.h"
 #include "tag.h"

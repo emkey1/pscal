@@ -599,7 +599,11 @@ final class TerminalRendererContainerView: UIView {
             terminalView.cursorTextOffset = cursor?.textOffset
             terminalView.cursorInfo = cursor
             terminalView.backgroundColor = backgroundColor
-            scrollToBottom(textView: terminalView, text: text)
+            if let cursorOffset = cursor?.textOffset {
+                scrollToCursor(textView: terminalView, cursorOffset: cursorOffset)
+            } else {
+                scrollToBottom(textView: terminalView, text: text)
+            }
         }
     }
 
@@ -664,20 +668,40 @@ final class TerminalRendererContainerView: UIView {
 
     private func elvisCommandLineCursor(from snapshot: ElvisSnapshot) -> TerminalCursorInfo? {
         let lines = snapshot.text.components(separatedBy: "\n")
-        guard let lastLine = lines.last, !lastLine.isEmpty else {
+        guard !lines.isEmpty else {
             return nil
         }
-        guard let first = lastLine.first, Self.commandLinePrefixes.contains(first) else {
-            return nil
-        }
-        if let cursor = snapshot.cursor,
-           cursor.row == max(0, lines.count - 1) {
-            return nil
+        var offsets: [Int] = []
+        offsets.reserveCapacity(lines.count)
+        var runningOffset = 0
+        for (index, line) in lines.enumerated() {
+            offsets.append(runningOffset)
+            runningOffset += (line as NSString).length
+            if index < lines.count - 1 {
+                runningOffset += 1
+            }
         }
         let totalLength = (snapshot.text as NSString).length
-        let column = lastLine.utf16.count
-        let rowIndex = max(0, lines.count - 1)
-        return TerminalCursorInfo(row: rowIndex, column: column, textOffset: totalLength)
+        for rowIndex in stride(from: lines.count - 1, through: 0, by: -1) {
+            let line = lines[rowIndex]
+            let trimmedLeading = line.drop(while: { $0 == " " })
+            if trimmedLeading.isEmpty {
+                continue
+            }
+            guard let first = trimmedLeading.first,
+                  Self.commandLinePrefixes.contains(first) else {
+                if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                    continue
+                }
+                break
+            }
+            let lastNonSpaceIndex = line.lastIndex(where: { $0 != " " }) ?? line.startIndex
+            let visibleSubstring = line[line.startIndex...lastNonSpaceIndex]
+            let columnUTF16 = String(visibleSubstring).utf16.count
+            let textOffset = min(offsets[rowIndex] + columnUTF16, totalLength)
+            return TerminalCursorInfo(row: rowIndex, column: columnUTF16, textOffset: textOffset)
+        }
+        return nil
     }
 
     private static let commandLinePrefixes: Set<Character> = [":", "/", "?"]

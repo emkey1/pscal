@@ -7,6 +7,8 @@
 char id_ex[] = "$Id: ex.c,v 2.244 2004/03/26 21:33:27 steve Exp $";
 #endif
 
+extern CHAR *calcelement(CHAR *set, CHAR *element);
+
 #if USE_PROTOTYPES
 static void skipwhitespace(CHAR **refp);
 static ELVBOOL parsewindowid(CHAR **refp, EXINFO *xinf);

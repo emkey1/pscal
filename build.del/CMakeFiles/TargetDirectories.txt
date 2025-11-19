@@ -9,7 +9,7 @@
 /Users/mke/PBuild/build/CMakeFiles/rea.dir
 /Users/mke/PBuild/build/CMakeFiles/configured_examples.dir
 /Users/mke/PBuild/build/CMakeFiles/pscaljson2bc.dir
-/Users/mke/PBuild/build/CMakeFiles/smallclu.dir
+/Users/mke/PBuild/build/CMakeFiles/smallclue.dir
 /Users/mke/PBuild/build/CMakeFiles/test.dir
 /Users/mke/PBuild/build/CMakeFiles/edit_cache.dir
 /Users/mke/PBuild/build/CMakeFiles/rebuild_cache.dir

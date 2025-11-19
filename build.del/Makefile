@@ -315,17 +315,17 @@ pscaljson2bc/fast:
 .PHONY : pscaljson2bc/fast
 
 #=============================================================================
-# Target rules for targets named smallclu
+# Target rules for targets named smallclue
 
 # Build rule for target.
-smallclu: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 smallclu
-.PHONY : smallclu
+smallclue: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 smallclue
+.PHONY : smallclue
 
 # fast build rule for target.
-smallclu/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/build
-.PHONY : smallclu/fast
+smallclue/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/build
+.PHONY : smallclue/fast
 
 #=============================================================================
 # Target rules for targets named run_basic_examples
@@ -2805,101 +2805,101 @@ src/shell/stubs.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/exsh.dir/build.make CMakeFiles/exsh.dir/src/shell/stubs.c.s
 .PHONY : src/shell/stubs.c.s
 
-src/smallclu/core.o: src/smallclu/core.c.o
-.PHONY : src/smallclu/core.o
+src/smallclue/core.o: src/smallclue/core.c.o
+.PHONY : src/smallclue/core.o
 
 # target to build an object file
-src/smallclu/core.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o
-.PHONY : src/smallclu/core.c.o
+src/smallclue/core.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o
+.PHONY : src/smallclue/core.c.o
 
-src/smallclu/core.i: src/smallclu/core.c.i
-.PHONY : src/smallclu/core.i
+src/smallclue/core.i: src/smallclue/core.c.i
+.PHONY : src/smallclue/core.i
 
 # target to preprocess a source file
-src/smallclu/core.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.i
-.PHONY : src/smallclu/core.c.i
+src/smallclue/core.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.i
+.PHONY : src/smallclue/core.c.i
 
-src/smallclu/core.s: src/smallclu/core.c.s
-.PHONY : src/smallclu/core.s
+src/smallclue/core.s: src/smallclue/core.c.s
+.PHONY : src/smallclue/core.s
 
 # target to generate assembly for a file
-src/smallclu/core.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.s
-.PHONY : src/smallclu/core.c.s
+src/smallclue/core.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.s
+.PHONY : src/smallclue/core.c.s
 
-src/smallclu/elvis_app.o: src/smallclu/elvis_app.c.o
-.PHONY : src/smallclu/elvis_app.o
+src/smallclue/elvis_app.o: src/smallclue/elvis_app.c.o
+.PHONY : src/smallclue/elvis_app.o
 
 # target to build an object file
-src/smallclu/elvis_app.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o
-.PHONY : src/smallclu/elvis_app.c.o
+src/smallclue/elvis_app.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o
+.PHONY : src/smallclue/elvis_app.c.o
 
-src/smallclu/elvis_app.i: src/smallclu/elvis_app.c.i
-.PHONY : src/smallclu/elvis_app.i
+src/smallclue/elvis_app.i: src/smallclue/elvis_app.c.i
+.PHONY : src/smallclue/elvis_app.i
 
 # target to preprocess a source file
-src/smallclu/elvis_app.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.i
-.PHONY : src/smallclu/elvis_app.c.i
+src/smallclue/elvis_app.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.i
+.PHONY : src/smallclue/elvis_app.c.i
 
-src/smallclu/elvis_app.s: src/smallclu/elvis_app.c.s
-.PHONY : src/smallclu/elvis_app.s
+src/smallclue/elvis_app.s: src/smallclue/elvis_app.c.s
+.PHONY : src/smallclue/elvis_app.s
 
 # target to generate assembly for a file
-src/smallclu/elvis_app.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.s
-.PHONY : src/smallclu/elvis_app.c.s
+src/smallclue/elvis_app.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.s
+.PHONY : src/smallclue/elvis_app.c.s
 
-src/smallclu/integration.o: src/smallclu/integration.c.o
-.PHONY : src/smallclu/integration.o
+src/smallclue/integration.o: src/smallclue/integration.c.o
+.PHONY : src/smallclue/integration.o
 
 # target to build an object file
-src/smallclu/integration.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o
-.PHONY : src/smallclu/integration.c.o
+src/smallclue/integration.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o
+.PHONY : src/smallclue/integration.c.o
 
-src/smallclu/integration.i: src/smallclu/integration.c.i
-.PHONY : src/smallclu/integration.i
+src/smallclue/integration.i: src/smallclue/integration.c.i
+.PHONY : src/smallclue/integration.i
 
 # target to preprocess a source file
-src/smallclu/integration.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.i
-.PHONY : src/smallclu/integration.c.i
+src/smallclue/integration.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.i
+.PHONY : src/smallclue/integration.c.i
 
-src/smallclu/integration.s: src/smallclu/integration.c.s
-.PHONY : src/smallclu/integration.s
+src/smallclue/integration.s: src/smallclue/integration.c.s
+.PHONY : src/smallclue/integration.s
 
 # target to generate assembly for a file
-src/smallclu/integration.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.s
-.PHONY : src/smallclu/integration.c.s
+src/smallclue/integration.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/pscal_core_static.dir/build.make CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.s
+.PHONY : src/smallclue/integration.c.s
 
-src/smallclu/main.o: src/smallclu/main.c.o
-.PHONY : src/smallclu/main.o
+src/smallclue/main.o: src/smallclue/main.c.o
+.PHONY : src/smallclue/main.o
 
 # target to build an object file
-src/smallclu/main.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/src/smallclu/main.c.o
-.PHONY : src/smallclu/main.c.o
+src/smallclue/main.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/src/smallclue/main.c.o
+.PHONY : src/smallclue/main.c.o
 
-src/smallclu/main.i: src/smallclu/main.c.i
-.PHONY : src/smallclu/main.i
+src/smallclue/main.i: src/smallclue/main.c.i
+.PHONY : src/smallclue/main.i
 
 # target to preprocess a source file
-src/smallclu/main.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/src/smallclu/main.c.i
-.PHONY : src/smallclu/main.c.i
+src/smallclue/main.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/src/smallclue/main.c.i
+.PHONY : src/smallclue/main.c.i
 
-src/smallclu/main.s: src/smallclu/main.c.s
-.PHONY : src/smallclu/main.s
+src/smallclue/main.s: src/smallclue/main.c.s
+.PHONY : src/smallclue/main.s
 
 # target to generate assembly for a file
-src/smallclu/main.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/src/smallclu/main.c.s
-.PHONY : src/smallclu/main.c.s
+src/smallclue/main.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/src/smallclue/main.c.s
+.PHONY : src/smallclue/main.c.s
 
 src/symbol/symbol.o: src/symbol/symbol.c.o
 .PHONY : src/symbol/symbol.o
@@ -3075,7 +3075,7 @@ help:
 	@echo "... pscaljson2bc"
 	@echo "... pscalvm"
 	@echo "... rea"
-	@echo "... smallclu"
+	@echo "... smallclue"
 	@echo "... lib/noise/noise.o"
 	@echo "... lib/noise/noise.i"
 	@echo "... lib/noise/noise.s"
@@ -3370,18 +3370,18 @@ help:
 	@echo "... src/shell/stubs.o"
 	@echo "... src/shell/stubs.i"
 	@echo "... src/shell/stubs.s"
-	@echo "... src/smallclu/core.o"
-	@echo "... src/smallclu/core.i"
-	@echo "... src/smallclu/core.s"
-	@echo "... src/smallclu/elvis_app.o"
-	@echo "... src/smallclu/elvis_app.i"
-	@echo "... src/smallclu/elvis_app.s"
-	@echo "... src/smallclu/integration.o"
-	@echo "... src/smallclu/integration.i"
-	@echo "... src/smallclu/integration.s"
-	@echo "... src/smallclu/main.o"
-	@echo "... src/smallclu/main.i"
-	@echo "... src/smallclu/main.s"
+	@echo "... src/smallclue/core.o"
+	@echo "... src/smallclue/core.i"
+	@echo "... src/smallclue/core.s"
+	@echo "... src/smallclue/elvis_app.o"
+	@echo "... src/smallclue/elvis_app.i"
+	@echo "... src/smallclue/elvis_app.s"
+	@echo "... src/smallclue/integration.o"
+	@echo "... src/smallclue/integration.i"
+	@echo "... src/smallclue/integration.s"
+	@echo "... src/smallclue/main.o"
+	@echo "... src/smallclue/main.i"
+	@echo "... src/smallclue/main.s"
 	@echo "... src/symbol/symbol.o"
 	@echo "... src/symbol/symbol.i"
 	@echo "... src/symbol/symbol.s"

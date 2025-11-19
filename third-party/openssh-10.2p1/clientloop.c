@@ -81,6 +81,15 @@
 #include <unistd.h>
 #include <limits.h>
 
+#ifdef PSCAL_TARGET_IOS
+static int pscal_disabled_system(const char *cmd)
+{
+	(void)cmd;
+	return -1;
+}
+#define system(cmd) pscal_disabled_system(cmd)
+#endif
+
 #include "openbsd-compat/sys-queue.h"
 #include "xmalloc.h"
 #include "ssh.h"
@@ -106,6 +115,10 @@
 #include "msg.h"
 #include "ssherr.h"
 #include "hostfile.h"
+#ifdef PSCAL_TARGET_IOS
+#include "pscal_runtime_hooks.h"
+static void pscal_clientloop_cleanup(int);
+#endif
 
 /* Permitted RSA signature algorithms for UpdateHostkeys proofs */
 #define HOSTKEY_PROOF_RSA_ALGS	"rsa-sha2-512,rsa-sha2-256"
@@ -185,6 +198,14 @@ struct global_confirm {
 TAILQ_HEAD(global_confirms, global_confirm);
 static struct global_confirms global_confirms =
     TAILQ_HEAD_INITIALIZER(global_confirms);
+
+#ifdef PSCAL_TARGET_IOS
+void
+pscal_clientloop_register_cleanup(void)
+{
+	pscal_openssh_register_cleanup(pscal_clientloop_cleanup);
+}
+#endif
 
 static void quit_message(const char *fmt, ...)
     __attribute__((__format__ (printf, 1, 2)));
@@ -315,6 +336,10 @@ client_x11_get_proto(struct ssh *ssh, const char *display,
 		xauth_path = NULL;
 	}
 
+#ifdef PSCAL_TARGET_IOS
+	if (xauth_path != NULL)
+		debug2("x11_get_proto: xauth unavailable on iOS");
+#else
 	if (xauth_path != NULL) {
 		/*
 		 * Handle FamilyLocal case where $DISPLAY does
@@ -413,6 +438,7 @@ client_x11_get_proto(struct ssh *ssh, const char *display,
 			free(cmd);
 		}
 	}
+#endif /* PSCAL_TARGET_IOS */
 
 	if (do_unlink) {
 		unlink(xauthfile);
@@ -2848,6 +2874,17 @@ client_stop_mux(void)
 }
 
 /* client specific fatal cleanup */
+#if defined(PSCAL_TARGET_IOS)
+static void
+pscal_clientloop_cleanup(int i)
+{
+	(void)i;
+	leave_raw_mode(options.request_tty == REQUEST_TTY_FORCE);
+	if (options.control_path != NULL && muxserver_sock != -1)
+		unlink(options.control_path);
+	ssh_kill_proxy_command();
+}
+#else
 void
 cleanup_exit(int i)
 {
@@ -2857,3 +2894,4 @@ cleanup_exit(int i)
 	ssh_kill_proxy_command();
 	_exit(i);
 }
+#endif

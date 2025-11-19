@@ -152,6 +152,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.async {
             self.exitStatus = status
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.start()
+            }
         }
     }
 
@@ -430,12 +433,21 @@ final class ElvisTerminalBridge {
         }
     }
 
+    private func normalizeRow(_ row: Int) -> Int {
+        guard state.rows > 0 else { return 0 }
+        var normalized = row
+        while normalized < 0 {
+            normalized += state.rows
+        }
+        return normalized % max(1, state.rows)
+    }
+
     func draw(row: Int, column: Int, text: UnsafePointer<CChar>?, length: Int) {
         guard let text, length > 0 else { return }
         let buffer = UnsafeBufferPointer(start: text, count: length)
         stateQueue.sync(flags: .barrier) {
             guard state.active, state.rows > 0, state.columns > 0 else { return }
-            let targetRow = max(0, min(row, state.rows - 1))
+            let targetRow = max(0, min(normalizeRow(row), state.rows - 1))
             var targetCol = max(0, min(column, state.columns - 1))
             for byte in buffer {
                 if targetCol >= state.columns {

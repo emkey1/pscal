@@ -380,47 +380,47 @@ CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.s"
 	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/common/pascal_state.c -o CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.s
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o: CMakeFiles/pscal_core_static.dir/flags.make
-CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o: /Users/mke/PBuild/src/smallclu/core.c
-CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o -c /Users/mke/PBuild/src/smallclu/core.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o: CMakeFiles/pscal_core_static.dir/flags.make
+CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o: /Users/mke/PBuild/src/smallclue/core.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o -c /Users/mke/PBuild/src/smallclue/core.c
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.i"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclu/core.c > CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.i
+CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.i"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclue/core.c > CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.i
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.s"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclu/core.c -o CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.s
+CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.s"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclue/core.c -o CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.s
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o: CMakeFiles/pscal_core_static.dir/flags.make
-CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o: /Users/mke/PBuild/src/smallclu/integration.c
-CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o -c /Users/mke/PBuild/src/smallclu/integration.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o: CMakeFiles/pscal_core_static.dir/flags.make
+CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o: /Users/mke/PBuild/src/smallclue/integration.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o -c /Users/mke/PBuild/src/smallclue/integration.c
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.i"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclu/integration.c > CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.i
+CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.i"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclue/integration.c > CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.i
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.s"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclu/integration.c -o CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.s
+CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.s"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclue/integration.c -o CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.s
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o: CMakeFiles/pscal_core_static.dir/flags.make
-CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o: /Users/mke/PBuild/src/smallclu/elvis_app.c
-CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o -c /Users/mke/PBuild/src/smallclu/elvis_app.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o: CMakeFiles/pscal_core_static.dir/flags.make
+CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o: /Users/mke/PBuild/src/smallclue/elvis_app.c
+CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o: CMakeFiles/pscal_core_static.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building C object CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o -MF CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o.d -o CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o -c /Users/mke/PBuild/src/smallclue/elvis_app.c
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.i"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclu/elvis_app.c > CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.i
+CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.i"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/mke/PBuild/src/smallclue/elvis_app.c > CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.i
 
-CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.s"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclu/elvis_app.c -o CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.s
+CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.s"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/mke/PBuild/src/smallclue/elvis_app.c -o CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.s
 
 CMakeFiles/pscal_core_static.dir/src/vm/vm.c.o: CMakeFiles/pscal_core_static.dir/flags.make
 CMakeFiles/pscal_core_static.dir/src/vm/vm.c.o: /Users/mke/PBuild/src/vm/vm.c
@@ -1006,9 +1006,9 @@ pscal_core_static_OBJECTS = \
 "CMakeFiles/pscal_core_static.dir/src/common/frontend_kind.c.o" \
 "CMakeFiles/pscal_core_static.dir/src/common/runtime_paths.c.o" \
 "CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.o" \
-"CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o" \
-"CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o" \
-"CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o" \
+"CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o" \
+"CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o" \
+"CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o" \
 "CMakeFiles/pscal_core_static.dir/src/vm/vm.c.o" \
 "CMakeFiles/pscal_core_static.dir/lib/noise/noise.c.o" \
 "CMakeFiles/pscal_core_static.dir/src/runtime/terrain/terrain_generator.c.o" \
@@ -1075,9 +1075,9 @@ libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/common/runtime_tty.
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/common/frontend_kind.c.o
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/common/runtime_paths.c.o
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/common/pascal_state.c.o
-libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclu/core.c.o
-libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclu/integration.c.o
-libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclu/elvis_app.c.o
+libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclue/core.c.o
+libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclue/integration.c.o
+libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/smallclue/elvis_app.c.o
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/vm/vm.c.o
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/lib/noise/noise.c.o
 libpscal_core_static.a: CMakeFiles/pscal_core_static.dir/src/runtime/terrain/terrain_generator.c.o

@@ -186,6 +186,8 @@ final class RuntimeAssetInstaller {
                 NSLog("PSCAL iOS: failed to install etc assets: %@", error.localizedDescription)
             }
         }
+
+        ensureEtcSubdirectoryNamed("ssh", bundleRoot: bundleRoot)
     }
 
     private func needsWorkspaceExamplesRefresh() -> Bool {
@@ -211,6 +213,49 @@ final class RuntimeAssetInstaller {
             return true
         }
         return recorded != assetsVersion
+    }
+
+    private func ensureEtcSubdirectoryNamed(_ name: String, bundleRoot: URL) {
+        let bundledEtc = bundleRoot.appendingPathComponent("etc", isDirectory: true)
+        let bundleSubdirectory = bundledEtc.appendingPathComponent(name, isDirectory: true)
+        guard fileManager.fileExists(atPath: bundleSubdirectory.path) else {
+            return
+        }
+        let workspaceSubdirectory = RuntimePaths.workspaceEtcDirectory.appendingPathComponent(name, isDirectory: true)
+        do {
+            try ensureSysfilesDirectoriesExist()
+            var isDirectory: ObjCBool = false
+            let exists = fileManager.fileExists(atPath: workspaceSubdirectory.path, isDirectory: &isDirectory)
+            if !exists || !isDirectory.boolValue {
+                if exists {
+                    try fileManager.removeItem(at: workspaceSubdirectory)
+                }
+                try fileManager.createDirectory(at: workspaceSubdirectory, withIntermediateDirectories: true)
+            }
+            try copyMissingItems(from: bundleSubdirectory, to: workspaceSubdirectory)
+        } catch {
+            NSLog("PSCAL iOS: failed to sync etc/%@ assets: %@", name, error.localizedDescription)
+        }
+    }
+
+    private func copyMissingItems(from source: URL, to destination: URL) throws {
+        let entries = try fileManager.contentsOfDirectory(atPath: source.path)
+        for entry in entries where entry != ".DS_Store" {
+            let sourceURL = source.appendingPathComponent(entry)
+            let destinationURL = destination.appendingPathComponent(entry)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else {
+                continue
+            }
+            if isDirectory.boolValue {
+                if !fileManager.fileExists(atPath: destinationURL.path, isDirectory: nil) {
+                    try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+                }
+                try copyMissingItems(from: sourceURL, to: destinationURL)
+            } else if !fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            }
+        }
     }
 
     private func needsWorkspaceEtcRefresh() -> Bool {
@@ -266,6 +311,7 @@ final class RuntimeAssetInstaller {
         setenv("TMPDIR", tmpPath, 1)
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
         setenv("HOME", RuntimePaths.homeDirectory.path, 1)
+        setenv("TERM", "xterm-256color", 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {

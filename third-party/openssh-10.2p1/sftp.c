@@ -75,7 +75,11 @@ static volatile pid_t sshpid = -1;
 int quiet = 0;
 
 /* This is set to 0 if the progressmeter is not desired. */
+#if defined(PSCAL_TARGET_IOS)
+extern int showprogress;
+#else
 int showprogress = 1;
+#endif
 
 /* When this option is set, we always recursively download/upload directories */
 int global_rflag = 0;
@@ -90,7 +94,11 @@ int global_pflag = 0;
 int global_fflag = 0;
 
 /* SIGINT received during command processing */
+#if defined(PSCAL_TARGET_IOS)
+extern volatile sig_atomic_t interrupted;
+#else
 volatile sig_atomic_t interrupted = 0;
+#endif
 
 /* I wish qsort() took a separate ctx for the comparison function...*/
 int sort_flag;

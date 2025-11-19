@@ -6,6 +6,15 @@ enable_testing()
 set(PSCAL_PLATFORM_IOS OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(PSCAL_PLATFORM_IOS ON)
+elseif(APPLE AND CMAKE_OSX_SYSROOT)
+    string(TOLOWER "${CMAKE_OSX_SYSROOT}" _pscal_sysroot_lower)
+    if(_pscal_sysroot_lower MATCHES "iphoneos" OR _pscal_sysroot_lower MATCHES "iphonesimulator")
+        set(PSCAL_PLATFORM_IOS ON)
+    endif()
+else()
+    find_package(OpenSSL REQUIRED)
+    set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
+    set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
 endif()
 if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS)
@@ -78,12 +87,107 @@ string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
-file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
 if(PSCAL_PLATFORM_IOS)
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/elvis")
-    configure_file(third-party/elvis/config_pscal_ios.h "${CMAKE_BINARY_DIR}/generated/elvis/config.h" COPYONLY)
+    set(PSCAL_OPENSSL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/openssl-3.6.0")
+    if(NOT EXISTS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure")
+        message(FATAL_ERROR "third-party/openssl-3.6.0 not found; please add the OpenSSL sources")
+    endif()
+    find_program(PSCAL_PERL_EXECUTABLE perl REQUIRED)
+    find_program(PSCAL_MAKE_EXECUTABLE make REQUIRED)
+
+    if(CMAKE_OSX_SYSROOT MATCHES "Simulator")
+        set(_pscal_openssl_target "iossimulator-xcrun")
+    else()
+        set(_pscal_openssl_target "ios64-cross")
+    endif()
+
+    get_filename_component(_pscal_sdk_dir "${CMAKE_OSX_SYSROOT}" DIRECTORY)
+    get_filename_component(_pscal_cross_top "${_pscal_sdk_dir}" DIRECTORY)
+    get_filename_component(_pscal_cross_sdk "${CMAKE_OSX_SYSROOT}" NAME)
+
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(_pscal_openssl_min_version "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    else()
+        set(_pscal_openssl_min_version "15.0")
+    endif()
+    if(PSCALI_IOS_PLATFORM STREQUAL "SIMULATOR")
+        set(_pscal_openssl_version_flag "-mios-simulator-version-min=${_pscal_openssl_min_version}")
+    else()
+        set(_pscal_openssl_version_flag "-miphoneos-version-min=${_pscal_openssl_min_version}")
+    endif()
+    if(CMAKE_OSX_ARCHITECTURES)
+        string(REPLACE ";" " " _pscal_openssl_arch "${CMAKE_OSX_ARCHITECTURES}")
+    else()
+        set(_pscal_openssl_arch "arm64")
+    endif()
+
+    set(PSCAL_OPENSSL_BUILD_DIR "${CMAKE_BINARY_DIR}/third-party/openssl/build")
+    set(PSCAL_OPENSSL_INSTALL_DIR "${CMAKE_BINARY_DIR}/third-party/openssl/install")
+    set(_pscal_openssl_stamp_file "${PSCAL_OPENSSL_INSTALL_DIR}/.pscal_openssl_target")
+    set(_pscal_openssl_stamp_value "${_pscal_openssl_target};${_pscal_openssl_version_flag};${_pscal_openssl_arch}")
+    if(EXISTS "${_pscal_openssl_stamp_file}")
+        file(READ "${_pscal_openssl_stamp_file}" _pscal_openssl_stamp_content)
+        string(STRIP "${_pscal_openssl_stamp_content}" _pscal_openssl_stamp_content)
+        if(NOT _pscal_openssl_stamp_content STREQUAL _pscal_openssl_stamp_value)
+            message(STATUS "OpenSSL deployment target changed; resetting cached build/install directories")
+            file(REMOVE_RECURSE "${PSCAL_OPENSSL_BUILD_DIR}" "${PSCAL_OPENSSL_INSTALL_DIR}")
+        endif()
+    endif()
+    file(MAKE_DIRECTORY "${PSCAL_OPENSSL_BUILD_DIR}")
+    file(MAKE_DIRECTORY("${PSCAL_OPENSSL_INSTALL_DIR}"))
+    file(MAKE_DIRECTORY("${PSCAL_OPENSSL_INSTALL_DIR}/include"))
+    file(WRITE "${_pscal_openssl_stamp_file}" "${_pscal_openssl_stamp_value}\n")
+
+    set(_pscal_openssl_configure
+        ${PSCAL_PERL_EXECUTABLE} "${PSCAL_OPENSSL_SOURCE_DIR}/Configure"
+        ${_pscal_openssl_target} no-shared no-dso no-tests
+        --prefix=${PSCAL_OPENSSL_INSTALL_DIR} --openssldir=${PSCAL_OPENSSL_INSTALL_DIR}/ssl
+    )
+
+    set(_pscal_openssl_env
+        "CC=${CMAKE_C_COMPILER}"
+        "CROSS_TOP=${_pscal_cross_top}"
+        "CROSS_SDK=${_pscal_cross_sdk}"
+        "CFLAGS=${CMAKE_C_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${CMAKE_OSX_SYSROOT} ${_pscal_openssl_version_flag} -fembed-bitcode"
+        "CXXFLAGS=${CMAKE_CXX_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${CMAKE_OSX_SYSROOT} ${_pscal_openssl_version_flag} -fembed-bitcode"
+        "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+    )
+
+    add_custom_command(
+        OUTPUT "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a" "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
+        COMMAND ${CMAKE_COMMAND} -E env ${_pscal_openssl_env} ${_pscal_openssl_configure}
+        COMMAND ${CMAKE_COMMAND} -E env ${_pscal_openssl_env} ${PSCAL_MAKE_EXECUTABLE} build_libs
+        COMMAND ${CMAKE_COMMAND} -E env ${_pscal_openssl_env} ${PSCAL_MAKE_EXECUTABLE} install_dev
+        WORKING_DIRECTORY "${PSCAL_OPENSSL_BUILD_DIR}"
+        DEPENDS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure"
+        COMMENT "Building OpenSSL for iOS"
+        VERBATIM
+    )
+
+    add_custom_target(pscal_openssl ALL
+        DEPENDS "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a" "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a")
+
+    add_library(pscal_openssl_crypto STATIC IMPORTED)
+    set_target_properties(pscal_openssl_crypto PROPERTIES
+        IMPORTED_LOCATION "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${PSCAL_OPENSSL_INSTALL_DIR}/include")
+    add_dependencies(pscal_openssl_crypto pscal_openssl)
+
+    add_library(pscal_openssl_ssl STATIC IMPORTED)
+    set_target_properties(pscal_openssl_ssl PROPERTIES
+        IMPORTED_LOCATION "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${PSCAL_OPENSSL_INSTALL_DIR}/include"
+        INTERFACE_LINK_LIBRARIES pscal_openssl_crypto)
+    add_dependencies(pscal_openssl_ssl pscal_openssl)
 endif()
+file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
+
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/elvis")
+configure_file(third-party/elvis/config_pscal_ios.h "${CMAKE_BINARY_DIR}/generated/elvis/config.h" COPYONLY)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
+configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
+    "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
 
 # Resolve the final runtime destination so install rules can write directly to
 # either an absolute override or the default path under the chosen prefix.
@@ -574,12 +678,14 @@ set(PSCAL_CORE_SOURCES
     src/core/cache.c
     src/common/runtime_params.c
     src/common/runtime_tty.c
+    src/common/pscal_terminal_host.c
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
-    src/smallclu/core.c
-    src/smallclu/integration.c
-    src/smallclu/elvis_app.c
+    src/smallclue/core.c
+    src/smallclue/integration.c
+    src/smallclue/elvis_app.c
+    src/smallclue/openssh_app.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -589,6 +695,217 @@ set(PSCAL_CORE_SOURCES
     src/runtime/shaders/sky/cloud_layer.c
 )
 
+set(PSCAL_OPENSSH_ROOT third-party/openssh-10.2p1)
+set(PSCAL_OPENSSH_COMMON_SOURCES
+        ${PSCAL_OPENSSH_ROOT}/pscal_ios_shim.c
+        ${PSCAL_OPENSSH_ROOT}/addr.c
+        ${PSCAL_OPENSSH_ROOT}/addrmatch.c
+        ${PSCAL_OPENSSH_ROOT}/atomicio.c
+        ${PSCAL_OPENSSH_ROOT}/authfd.c
+        ${PSCAL_OPENSSH_ROOT}/authfile.c
+        ${PSCAL_OPENSSH_ROOT}/bitmap.c
+        ${PSCAL_OPENSSH_ROOT}/canohost.c
+        ${PSCAL_OPENSSH_ROOT}/channels.c
+        ${PSCAL_OPENSSH_ROOT}/chacha.c
+        ${PSCAL_OPENSSH_ROOT}/cipher.c
+        ${PSCAL_OPENSSH_ROOT}/cipher-aes.c
+        ${PSCAL_OPENSSH_ROOT}/cipher-aesctr.c
+        ${PSCAL_OPENSSH_ROOT}/cipher-chachapoly.c
+        ${PSCAL_OPENSSH_ROOT}/cipher-chachapoly-libcrypto.c
+        ${PSCAL_OPENSSH_ROOT}/compat.c
+        ${PSCAL_OPENSSH_ROOT}/digest-libc.c
+        ${PSCAL_OPENSSH_ROOT}/digest-openssl.c
+        ${PSCAL_OPENSSH_ROOT}/dispatch.c
+        ${PSCAL_OPENSSH_ROOT}/dns.c
+        ${PSCAL_OPENSSH_ROOT}/dh.c
+        ${PSCAL_OPENSSH_ROOT}/ed25519.c
+        ${PSCAL_OPENSSH_ROOT}/entropy.c
+        ${PSCAL_OPENSSH_ROOT}/fatal.c
+        ${PSCAL_OPENSSH_ROOT}/hash.c
+        ${PSCAL_OPENSSH_ROOT}/hmac.c
+        ${PSCAL_OPENSSH_ROOT}/kex.c
+        ${PSCAL_OPENSSH_ROOT}/kex-names.c
+        ${PSCAL_OPENSSH_ROOT}/kexc25519.c
+        ${PSCAL_OPENSSH_ROOT}/kexdh.c
+        ${PSCAL_OPENSSH_ROOT}/kexecdh.c
+        ${PSCAL_OPENSSH_ROOT}/kexgen.c
+        ${PSCAL_OPENSSH_ROOT}/kexgex.c
+        ${PSCAL_OPENSSH_ROOT}/kexgexc.c
+        ${PSCAL_OPENSSH_ROOT}/kexgexs.c
+        ${PSCAL_OPENSSH_ROOT}/kexmlkem768x25519.c
+        ${PSCAL_OPENSSH_ROOT}/kexsntrup761x25519.c
+        ${PSCAL_OPENSSH_ROOT}/krl.c
+        ${PSCAL_OPENSSH_ROOT}/log.c
+        ${PSCAL_OPENSSH_ROOT}/mac.c
+        ${PSCAL_OPENSSH_ROOT}/match.c
+        ${PSCAL_OPENSSH_ROOT}/misc.c
+        ${PSCAL_OPENSSH_ROOT}/misc-agent.c
+        ${PSCAL_OPENSSH_ROOT}/moduli.c
+        ${PSCAL_OPENSSH_ROOT}/hostfile.c
+        ${PSCAL_OPENSSH_ROOT}/monitor_fdpass.c
+        ${PSCAL_OPENSSH_ROOT}/msg.c
+        ${PSCAL_OPENSSH_ROOT}/nchan.c
+        ${PSCAL_OPENSSH_ROOT}/packet.c
+        ${PSCAL_OPENSSH_ROOT}/platform-misc.c
+        ${PSCAL_OPENSSH_ROOT}/platform-pledge.c
+        ${PSCAL_OPENSSH_ROOT}/platform-tracing.c
+        ${PSCAL_OPENSSH_ROOT}/poly1305.c
+        ${PSCAL_OPENSSH_ROOT}/progressmeter.c
+        ${PSCAL_OPENSSH_ROOT}/readpass.c
+        ${PSCAL_OPENSSH_ROOT}/rijndael.c
+        ${PSCAL_OPENSSH_ROOT}/sftp-realpath.c
+        ${PSCAL_OPENSSH_ROOT}/smult_curve25519_ref.c
+        ${PSCAL_OPENSSH_ROOT}/sntrup761.c
+        ${PSCAL_OPENSSH_ROOT}/ssh_api.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-ed25519.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-ecdsa.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-sk.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-rsa.c
+        ${PSCAL_OPENSSH_ROOT}/sshbuf.c
+        ${PSCAL_OPENSSH_ROOT}/sshbuf-getput-basic.c
+        ${PSCAL_OPENSSH_ROOT}/sshbuf-getput-crypto.c
+        ${PSCAL_OPENSSH_ROOT}/sshbuf-io.c
+        ${PSCAL_OPENSSH_ROOT}/sshbuf-misc.c
+        ${PSCAL_OPENSSH_ROOT}/ssherr.c
+        ${PSCAL_OPENSSH_ROOT}/sshkey.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-pkcs11-client.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-sk-client.c
+        ${PSCAL_OPENSSH_ROOT}/ttymodes.c
+        ${PSCAL_OPENSSH_ROOT}/umac.c
+        ${PSCAL_OPENSSH_ROOT}/umac128.c
+        ${PSCAL_OPENSSH_ROOT}/utf8.c
+        ${PSCAL_OPENSSH_ROOT}/xmalloc.c
+        ${PSCAL_OPENSSH_ROOT}/pscal_runtime_hooks.c
+    )
+    set(PSCAL_OPENSSH_CLIENT_SOURCES
+        ${PSCAL_OPENSSH_ROOT}/clientloop.c
+        ${PSCAL_OPENSSH_ROOT}/mux.c
+        ${PSCAL_OPENSSH_ROOT}/readconf.c
+        ${PSCAL_OPENSSH_ROOT}/ssh.c
+        ${PSCAL_OPENSSH_ROOT}/sshconnect.c
+        ${PSCAL_OPENSSH_ROOT}/sshconnect2.c
+        ${PSCAL_OPENSSH_ROOT}/sshtty.c
+    )
+    set(PSCAL_OPENSSH_SCP_SOURCES ${PSCAL_OPENSSH_ROOT}/scp.c)
+    set(PSCAL_OPENSSH_SFTP_SOURCES
+        ${PSCAL_OPENSSH_ROOT}/sftp.c
+        ${PSCAL_OPENSSH_ROOT}/sftp-client.c
+        ${PSCAL_OPENSSH_ROOT}/sftp-common.c
+        ${PSCAL_OPENSSH_ROOT}/sftp-glob.c
+        ${PSCAL_OPENSSH_ROOT}/sftp-usergroup.c
+    )
+    set(PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/arc4random.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/arc4random_uniform.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/base64.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/basename.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bcrypt_pbkdf.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bindresvport.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/blowfish.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/daemon.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/dirname.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/explicit_bzero.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/fmt_scaled.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/fnmatch.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/freezero.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/getcwd.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/getgrouplist.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/getopt_long.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/glob.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/inet_aton.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/inet_ntoa.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/inet_ntop.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/md5.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/memmem.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/mktemp.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/pwcache.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/readpassphrase.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/reallocarray.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/recallocarray.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/rresvport.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/setenv.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/setproctitle.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/sha1.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/sha2.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/sigact.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strcasestr.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strlcat.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strlcpy.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strmode.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strndup.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strnlen.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strptime.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strsep.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strtoll.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strtonum.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strtoul.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/strtoull.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/timingsafe_bcmp.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/vis.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-asprintf.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-closefrom.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-cygwin_util.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-err.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-flock.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-getentropy.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-getline.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-getpagesize.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-getpeereid.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-malloc.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-misc.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-nextstep.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-openpty.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-poll.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-pselect.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-setres_id.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-signal.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-snprintf.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-statvfs.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-timegm.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/bsd-waitpid.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/fake-rfc2553.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/kludge-fd_set.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/libressl-api-compat.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/openssl-compat.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-aix.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-irix.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-linux.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-net.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-prngd.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-solaris.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/port-uw.c
+        ${PSCAL_OPENSSH_ROOT}/openbsd-compat/xcrypt.c
+    )
+    if(PSCAL_PLATFORM_IOS)
+        list(APPEND PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES
+            ${PSCAL_OPENSSH_ROOT}/pscal_getrrset_stub.c)
+    else()
+        list(APPEND PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES
+            ${PSCAL_OPENSSH_ROOT}/openbsd-compat/getrrsetbyname.c)
+    endif()
+
+set(PSCAL_OPENSSH_SOURCES
+    ${PSCAL_OPENSSH_COMMON_SOURCES}
+    ${PSCAL_OPENSSH_CLIENT_SOURCES}
+    ${PSCAL_OPENSSH_SCP_SOURCES}
+    ${PSCAL_OPENSSH_SFTP_SOURCES}
+    ${PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES}
+)
+
+list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
+set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+    APPEND PROPERTY INCLUDE_DIRECTORIES
+    "${CMAKE_BINARY_DIR}/generated/openssh"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat}")
+set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+    APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS)
+set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/ssh.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_ssh_main)
+set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/scp.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_scp_main)
+set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/sftp.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_sftp_main)
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES
@@ -608,8 +925,7 @@ if(SDL)
     endif()
 endif()
 
-if(PSCAL_PLATFORM_IOS)
-    set(ELVIS_CORE_SOURCES
+set(ELVIS_CORE_SOURCES
         third-party/elvis/autocmd.c
         third-party/elvis/buffer.c
         third-party/elvis/calc.c
@@ -680,11 +996,10 @@ if(PSCAL_PLATFORM_IOS)
         third-party/elvis/osunix/ostext.c
         third-party/elvis/osunix/osnet.c
         third-party/elvis/osunix/tcaphelp.c
-    )
-    list(APPEND PSCAL_CORE_SOURCES ${ELVIS_CORE_SOURCES})
-    set_property(SOURCE ${ELVIS_CORE_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS "exit=elvis_exit")
-    set_property(SOURCE third-party/elvis/main.c APPEND PROPERTY COMPILE_DEFINITIONS "main=elvis_main_entry")
-endif()
+)
+list(APPEND PSCAL_CORE_SOURCES ${ELVIS_CORE_SOURCES})
+set_property(SOURCE ${ELVIS_CORE_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS "exit=elvis_exit")
+set_property(SOURCE third-party/elvis/main.c APPEND PROPERTY COMPILE_DEFINITIONS "main=elvis_main_entry")
 
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
@@ -747,16 +1062,36 @@ endfunction()
 add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
 pscal_apply_common_compilation_settings(pscal_core_static)
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+target_link_libraries(pscal_core_static PUBLIC
+    ${PSCAL_OPENSSL_SSL_TARGET}
+    ${PSCAL_OPENSSL_CRYPTO_TARGET}
+    z resolv)
 if(PSCAL_PLATFORM_IOS)
-    target_include_directories(pscal_core_static PRIVATE
-        third-party/elvis
-        third-party/elvis/osunix
-        "${CMAKE_BINARY_DIR}/generated/elvis"
-    )
+    add_dependencies(pscal_core_static pscal_openssl)
+    target_include_directories(pscal_core_static PUBLIC
+        "${PSCAL_OPENSSL_INSTALL_DIR}/include")
+    add_custom_command(TARGET pscal_core_static POST_BUILD
+        COMMAND /usr/bin/libtool -static
+            -o "$<TARGET_FILE:pscal_core_static>.merged"
+            "$<TARGET_FILE:pscal_core_static>"
+            "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a"
+            "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "$<TARGET_FILE:pscal_core_static>.merged"
+            "$<TARGET_FILE:pscal_core_static>"
+        COMMAND ${CMAKE_COMMAND} -E remove
+            "$<TARGET_FILE:pscal_core_static>.merged"
+        COMMENT "Embedding OpenSSL archives into libpscal_core_static.a for iOS")
 endif()
+target_include_directories(pscal_core_static BEFORE PRIVATE
+    third-party/elvis
+    third-party/elvis/osunix
+    "${CMAKE_BINARY_DIR}/generated/elvis"
+)
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
 endif()
+
 
 function(add_pscal_executable target_name)
     set(exec_sources ${ARGN})
@@ -1439,8 +1774,12 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
 endif()
 
+add_executable(smallclue
+    src/smallclue/main.c
+)
+target_link_libraries(smallclue PRIVATE pscal_core_static)
 add_executable(smallclu
-    src/smallclu/main.c
+    src/smallclue/main.c
 )
 target_link_libraries(smallclu PRIVATE pscal_core_static)
 

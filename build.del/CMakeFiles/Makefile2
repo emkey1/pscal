@@ -74,7 +74,7 @@ all: CMakeFiles/clike-repl.dir/all
 all: CMakeFiles/rea.dir/all
 all: CMakeFiles/configured_examples.dir/all
 all: CMakeFiles/pscaljson2bc.dir/all
-all: CMakeFiles/smallclu.dir/all
+all: CMakeFiles/smallclue.dir/all
 all: src/ext_builtins/all
 all: Examples/all
 .PHONY : all
@@ -91,7 +91,7 @@ codegen: CMakeFiles/clike-repl.dir/codegen
 codegen: CMakeFiles/rea.dir/codegen
 codegen: CMakeFiles/configured_examples.dir/codegen
 codegen: CMakeFiles/pscaljson2bc.dir/codegen
-codegen: CMakeFiles/smallclu.dir/codegen
+codegen: CMakeFiles/smallclue.dir/codegen
 codegen: src/ext_builtins/codegen
 codegen: Examples/codegen
 .PHONY : codegen
@@ -113,7 +113,7 @@ clean: CMakeFiles/clike-repl.dir/clean
 clean: CMakeFiles/rea.dir/clean
 clean: CMakeFiles/configured_examples.dir/clean
 clean: CMakeFiles/pscaljson2bc.dir/clean
-clean: CMakeFiles/smallclu.dir/clean
+clean: CMakeFiles/smallclue.dir/clean
 clean: src/ext_builtins/clean
 clean: Examples/clean
 .PHONY : clean
@@ -718,36 +718,36 @@ CMakeFiles/pscaljson2bc.dir/clean:
 .PHONY : CMakeFiles/pscaljson2bc.dir/clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/smallclu.dir
+# Target rules for target CMakeFiles/smallclue.dir
 
 # All Build rule for target.
-CMakeFiles/smallclu.dir/all: CMakeFiles/pscal_core_static.dir/all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=99,100 "Built target smallclu"
-.PHONY : CMakeFiles/smallclu.dir/all
+CMakeFiles/smallclue.dir/all: CMakeFiles/pscal_core_static.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=99,100 "Built target smallclue"
+.PHONY : CMakeFiles/smallclue.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/smallclu.dir/rule: cmake_check_build_system
+CMakeFiles/smallclue.dir/rule: cmake_check_build_system
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/mke/PBuild/build/CMakeFiles 44
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/smallclu.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/smallclue.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/mke/PBuild/build/CMakeFiles 0
-.PHONY : CMakeFiles/smallclu.dir/rule
+.PHONY : CMakeFiles/smallclue.dir/rule
 
 # Convenience name for target.
-smallclu: CMakeFiles/smallclu.dir/rule
-.PHONY : smallclu
+smallclue: CMakeFiles/smallclue.dir/rule
+.PHONY : smallclue
 
 # codegen rule for target.
-CMakeFiles/smallclu.dir/codegen:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=99,100 "Finished codegen for target smallclu"
-.PHONY : CMakeFiles/smallclu.dir/codegen
+CMakeFiles/smallclue.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/mke/PBuild/build/CMakeFiles --progress-num=99,100 "Finished codegen for target smallclue"
+.PHONY : CMakeFiles/smallclue.dir/codegen
 
 # clean rule for target.
-CMakeFiles/smallclu.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclu.dir/build.make CMakeFiles/smallclu.dir/clean
-.PHONY : CMakeFiles/smallclu.dir/clean
+CMakeFiles/smallclue.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/smallclue.dir/build.make CMakeFiles/smallclue.dir/clean
+.PHONY : CMakeFiles/smallclue.dir/clean
 
 #=============================================================================
 # Target rules for target Examples/CMakeFiles/run_basic_examples.dir

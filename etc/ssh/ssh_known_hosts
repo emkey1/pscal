@@ -1,0 +1,2 @@
+# PSCAL default system-wide known_hosts file.
+# Entries added here will be visible to all ssh clients.

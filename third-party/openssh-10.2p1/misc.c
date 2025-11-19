@@ -20,6 +20,13 @@
 
 #include "includes.h"
 
+#ifdef PSCAL_TARGET_IOS
+# undef HAVE_NLIST_H
+# undef HAVE_NLIST
+# include <dispatch/dispatch.h>
+# include <Block.h>
+#endif
+
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -32,7 +39,9 @@
 #include <limits.h>
 #include <libgen.h>
 #include <poll.h>
+#ifdef HAVE_NLIST_H
 #include <nlist.h>
+#endif
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -399,6 +408,10 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 {
 	int optval = 0;
 	socklen_t optlen = sizeof(optval);
+#ifdef PSCAL_TARGET_IOS
+	__block volatile sig_atomic_t cancelled = 0;
+	dispatch_block_t watchdog = NULL;
+#endif
 
 	/* No timeout: just do a blocking connect() */
 	if (timeoutp == NULL || *timeoutp <= 0)
@@ -417,8 +430,37 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		break;
 	}
 
-	if (waitfd(sockfd, timeoutp, POLLIN | POLLOUT, NULL) == -1)
+#ifdef PSCAL_TARGET_IOS
+	watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
+		cancelled = 1;
+		shutdown(sockfd, SHUT_RDWR);
+	});
+	dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW,
+	    (int64_t)(*timeoutp) * NSEC_PER_MSEC);
+	dispatch_after(delay, dispatch_get_main_queue(), watchdog);
+#endif
+
+	if (waitfd(sockfd, timeoutp, POLLIN | POLLOUT,
+#ifdef PSCAL_TARGET_IOS
+	    (volatile sig_atomic_t *)&cancelled
+#else
+	    NULL
+#endif
+	    ) == -1) {
+#ifdef PSCAL_TARGET_IOS
+		if (watchdog) {
+			dispatch_block_cancel(watchdog);
+			Block_release(watchdog);
+		}
+#endif
 		return -1;
+	}
+#ifdef PSCAL_TARGET_IOS
+	if (watchdog) {
+		dispatch_block_cancel(watchdog);
+		Block_release(watchdog);
+	}
+#endif
 
 	/* Completed or failed */
 	if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &optval, &optlen) == -1) {
@@ -3177,3 +3219,6 @@ get_homedir(void)
 
 	return NULL;
 }
+#ifdef PSCAL_TARGET_IOS
+#include <dispatch/dispatch.h>
+#endif

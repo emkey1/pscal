@@ -167,7 +167,7 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/rea.dir/DependInfo.cmake"
   "CMakeFiles/configured_examples.dir/DependInfo.cmake"
   "CMakeFiles/pscaljson2bc.dir/DependInfo.cmake"
-  "CMakeFiles/smallclu.dir/DependInfo.cmake"
+  "CMakeFiles/smallclue.dir/DependInfo.cmake"
   "Examples/CMakeFiles/run_basic_examples.dir/DependInfo.cmake"
   "Examples/CMakeFiles/run_threads_procptr_demo.dir/DependInfo.cmake"
   "Examples/CMakeFiles/run_http_fetch_demo.dir/DependInfo.cmake"

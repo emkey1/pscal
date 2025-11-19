@@ -1,2 +1,2 @@
-# Empty dependencies file for smallclu.
+# Empty dependencies file for smallclue.
 # This may be replaced when dependencies are built.

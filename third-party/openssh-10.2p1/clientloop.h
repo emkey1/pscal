@@ -80,4 +80,6 @@ void	muxserver_listen(struct ssh *);
 int	muxclient(const char *);
 void	mux_exit_message(struct ssh *, Channel *, int);
 void	mux_tty_alloc_failed(struct ssh *ssh, Channel *);
-
+#if defined(PSCAL_TARGET_IOS)
+void	pscal_clientloop_register_cleanup(void);
+#endif

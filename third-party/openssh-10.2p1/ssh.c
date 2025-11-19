@@ -744,6 +744,10 @@ main(int ac, char **av)
 
 	msetlocale();
 
+#ifdef PSCAL_TARGET_IOS
+	pscal_clientloop_register_cleanup();
+#endif
+
 	/*
 	 * Initialize option structure to indicate that no values have been
 	 * set.

@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/Users/mke/PBuild/src/smallclu/main.c" "CMakeFiles/smallclu.dir/src/smallclu/main.c.o" "gcc" "CMakeFiles/smallclu.dir/src/smallclu/main.c.o.d"
+  "/Users/mke/PBuild/src/smallclue/main.c" "CMakeFiles/smallclue.dir/src/smallclue/main.c.o" "gcc" "CMakeFiles/smallclue.dir/src/smallclue/main.c.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

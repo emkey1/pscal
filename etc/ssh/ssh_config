@@ -1,0 +1,15 @@
+#
+# PSCAL default ssh client configuration.
+#
+# This is copied into the app sandbox (sysfiles/etc/ssh) on first launch
+# so user modifications will persist across updates.
+#
+
+Host *
+    SendEnv LANG LC_*
+    GSSAPIAuthentication no
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    StrictHostKeyChecking ask
+    UserKnownHostsFile ~/.ssh/known_hosts
+    GlobalKnownHostsFile /etc/ssh/ssh_known_hosts

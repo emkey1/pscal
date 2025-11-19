@@ -271,11 +271,10 @@ struct TerminalSnapshot {
         return syncQueue.sync {
             let retainedScrollback = Array(scrollback.suffix(maxScrollback))
             let combinedLines = retainedScrollback + grid
-            let cursorRowIndex = cursorHidden ? cursorRow : (retainedScrollback.count + cursorRow)
             let totalLines = combinedLines.count
-            let startIndex = max(0, cursorRowIndex + 1 - rows)
-            let endIndex = min(totalLines, startIndex + rows)
-            var trimmedLines = Array(combinedLines[startIndex..<endIndex])
+            let visibleStart = max(0, totalLines - rows)
+            let visibleEnd = min(totalLines, visibleStart + rows)
+            var trimmedLines = Array(combinedLines[visibleStart..<visibleEnd])
             let deficit = rows - trimmedLines.count
             var paddingCount = 0
             if deficit > 0 {
@@ -289,8 +288,14 @@ struct TerminalSnapshot {
             if cursorHidden {
                 cursorInfo = nil
             } else {
-                let adjustedRow = cursorRowIndex - startIndex + paddingCount
-                cursorInfo = TerminalSnapshot.Cursor(row: max(0, adjustedRow), col: cursorCol)
+                let absoluteCursorRow = retainedScrollback.count + cursorRow
+                let adjustedRow = absoluteCursorRow - visibleStart + paddingCount
+                if adjustedRow >= 0 && adjustedRow < trimmedLines.count {
+                    let clampedCol = clamp(cursorCol, lower: 0, upper: columns - 1)
+                    cursorInfo = TerminalSnapshot.Cursor(row: adjustedRow, col: clampedCol)
+                } else {
+                    cursorInfo = nil
+                }
             }
 
             let referenceRow = grid.last ?? grid.first

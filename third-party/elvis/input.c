@@ -7,6 +7,8 @@
 char id_input[] = "$Id: input.c,v 2.84 2003/12/28 20:29:47 steve Exp $";
 #endif
 
+extern CHAR *calcelement(CHAR *set, CHAR *element);
+
 /* These data types are used to store the parsing state for input mode
  * commands.  This is very simple, since most commands are only one keystroke
  * long. (The only exceptions are that INP_QUOTE is two keystrokes long, and

@@ -18,6 +18,20 @@
 
 #include "config.h"
 
+#ifdef PSCAL_TARGET_IOS
+# undef HAVE_NLIST_H
+# undef HAVE_NLIST
+# undef HAVE_FNMATCH_H
+# undef HAVE_FNMATCH
+# undef HAVE_SYS_RANDOM_H
+# undef HAVE_SYS_PTRACE_H
+# undef HAVE_READPASSPHRASE
+# undef HAVE_READPASSPHRASE_H
+# include "pscal_runtime_hooks.h"
+# define exit cleanup_exit
+# define _exit cleanup_exit
+#endif
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* activate extra prototypes for glibc */
 #endif
@@ -85,6 +99,9 @@
 #ifdef HAVE_STDINT_H
 # include <stdint.h>
 #endif
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 #include <termios.h>
 #ifdef HAVE_SYS_BITYPES_H
 # include <sys/bitypes.h> /* For u_intXX_t */
@@ -126,8 +143,15 @@
 # include <pam/pam_appl.h>
 #endif
 #endif
-#ifdef HAVE_READPASSPHRASE_H
+#if defined(HAVE_FNMATCH_H)
+# include <fnmatch.h>
+#else
+# include "openbsd-compat/fnmatch.h"
+#endif
+#if defined(HAVE_READPASSPHRASE_H)
 # include <readpassphrase.h>
+#else
+# include "openbsd-compat/readpassphrase.h"
 #endif
 
 #ifdef HAVE_IA_H
@@ -158,6 +182,9 @@
 #endif
 
 #include <errno.h>
+#ifdef PSCAL_TARGET_IOS
+# include "pscal_ios_shim.h"
+#endif
 
 /*
  * On HP-UX 11.11, shadow.h and prot.h provide conflicting declarations
