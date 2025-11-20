@@ -71,6 +71,7 @@ typedef enum InterfaceBoxingResult {
 
 static AST* resolveTypeAlias(AST* type_node);
 static AST* getRecordTypeFromExpr(AST* expr);
+static AST* resolveInterfaceAST(AST* typeNode);
 static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
                                                           AST* valueExpr,
                                                           BytecodeChunk* chunk,
@@ -1638,6 +1639,24 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
         Symbol* sym = lookupSymbolOptional(expr->token->value);
         if (sym && sym->type_def) {
             type_node = resolveTypeAlias(sym->type_def);
+        }
+    }
+
+    if (!type_node && current_function_compiler && current_function_compiler->returns_value &&
+        expr->type == AST_VARIABLE && expr->token && expr->token->value) {
+        const char* varName = expr->token->value;
+        bool isFunctionResult =
+            (strcasecmp(varName, "result") == 0) ||
+            (current_function_compiler->name &&
+             strcasecmp(varName, current_function_compiler->name) == 0);
+        if (isFunctionResult && current_function_compiler->function_symbol &&
+            current_function_compiler->function_symbol->type_def &&
+            current_function_compiler->function_symbol->type_def->type == AST_FUNCTION_DECL) {
+            AST* returnDecl = current_function_compiler->function_symbol->type_def->right;
+            AST* resolvedReturn = resolveInterfaceAST(returnDecl);
+            if (resolvedReturn) {
+                type_node = resolvedReturn;
+            }
         }
     }
 
