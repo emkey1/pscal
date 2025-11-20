@@ -1027,7 +1027,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      #ifdef DEBUG
                      fprintf(stderr, "[DEBUG makeValueForType] String length specified by identifier '%s'. Looking up constant...\n", const_name);
                      #endif
-                     Symbol *constSym = lookupSymbol(const_name);
+                     Symbol *constSym = lookupSymbolOptional(const_name);
 
                     if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INT32) {
                           parsed_len = constSym->value->i_val;
@@ -1525,8 +1525,15 @@ void freeValue(Value *v) {
                     (void*)v, (void*)v->base_type_node);
             fflush(stderr);
 #endif
+            if (v->ptr_val && v->base_type_node == OWNED_POINTER_SENTINEL) {
+                Value* owned = (Value*)v->ptr_val;
+                freeValue(owned);
+                free(owned);
+            }
             v->ptr_val = NULL;
-            // v->base_type_node = NULL; // Generally, base_type_node should persist as it defines the pointer's *type*
+            if (v->base_type_node == OWNED_POINTER_SENTINEL) {
+                v->base_type_node = NULL;
+            }
             break;
 
         case TYPE_STRING:

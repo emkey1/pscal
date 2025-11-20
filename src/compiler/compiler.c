@@ -35,8 +35,6 @@ static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
 
-static AST* resolveTypeAlias(AST* type_node);
-
 typedef struct {
     int constant_index;
     int original_address;
@@ -64,6 +62,22 @@ typedef struct {
     int count;
     int capacity;
 } VTableTrackerState;
+
+typedef enum InterfaceBoxingResult {
+    INTERFACE_BOX_NOT_NEEDED = 0,
+    INTERFACE_BOX_DONE = 1,
+    INTERFACE_BOX_FAILED = -1
+} InterfaceBoxingResult;
+
+static AST* resolveTypeAlias(AST* type_node);
+static AST* getRecordTypeFromExpr(AST* expr);
+static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
+                                                          AST* valueExpr,
+                                                          BytecodeChunk* chunk,
+                                                          int line,
+                                                          bool recoverWithNil,
+                                                          bool strictRecord);
+static bool emitImplicitMyselfFieldValue(BytecodeChunk* chunk, int line, const char* fieldName);
 static BytecodeChunk* tracked_vtable_chunk = NULL;
 static char** emitted_vtable_classes = NULL;
 static int emitted_vtable_count = 0;
@@ -1041,10 +1055,10 @@ static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
         return;
     }
 
-    if (var_decl->var_type == TYPE_ARRAY && initializer->type == AST_ARRAY_LITERAL) {
+        if (var_decl->var_type == TYPE_ARRAY && initializer->type == AST_ARRAY_LITERAL) {
         AST* array_type = actual_type_def_node;
         int dimension_count = array_type ? array_type->child_count : 0;
-        if (dimension_count == 1) {
+            if (dimension_count == 1) {
             AST* sub = array_type->children[0];
             Value low_v = evaluateCompileTimeValue(sub->left);
             Value high_v = evaluateCompileTimeValue(sub->right);
@@ -1067,15 +1081,17 @@ static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
             int constIdx = addConstantToChunk(chunk, &arr_val);
             freeValue(&arr_val);
             emitConstant(chunk, constIdx, getLine(var_decl));
+            } else {
+                compileRValue(initializer, chunk, getLine(initializer));
+                maybeAutoBoxInterfaceForType(actual_type_def_node, initializer, chunk, getLine(initializer), true, false);
+            }
         } else {
+            bool prev_global_init = compiling_global_var_init;
+            bool set_global_guard = (current_function_compiler == NULL && initializer->type == AST_NEW);
+            if (set_global_guard) compiling_global_var_init = true;
             compileRValue(initializer, chunk, getLine(initializer));
-        }
-    } else {
-        bool prev_global_init = compiling_global_var_init;
-        bool set_global_guard = (current_function_compiler == NULL && initializer->type == AST_NEW);
-        if (set_global_guard) compiling_global_var_init = true;
-        compileRValue(initializer, chunk, getLine(initializer));
-        if (set_global_guard) compiling_global_var_init = prev_global_init;
+            maybeAutoBoxInterfaceForType(actual_type_def_node, initializer, chunk, getLine(initializer), true, false);
+            if (set_global_guard) compiling_global_var_init = prev_global_init;
         if (set_global_guard && initializer->token && initializer->token->value) {
             char* lower_cls = strdup(initializer->token->value);
             if (!lower_cls) {
@@ -1619,7 +1635,7 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
 
     AST* type_node = resolveTypeAlias(expr->type_def);
     if (!type_node && expr->type == AST_VARIABLE && expr->token && expr->token->value) {
-        Symbol* sym = lookupSymbol(expr->token->value);
+        Symbol* sym = lookupSymbolOptional(expr->token->value);
         if (sym && sym->type_def) {
             type_node = resolveTypeAlias(sym->type_def);
         }
@@ -2129,6 +2145,224 @@ static bool validateInterfaceImplementation(AST* recordType, AST* interfaceType,
     return success;
 }
 
+static void emitInterfaceBoxingCall(BytecodeChunk* chunk,
+                                    AST* recordType,
+                                    AST* interfaceType,
+                                    const char* fallbackInterfaceName,
+                                    int line) {
+    if (!chunk || !recordType || !interfaceType) {
+        return;
+    }
+
+    emitConstant(chunk, addNilConstant(chunk), line);
+    writeBytecodeChunk(chunk, SWAP, line);
+
+    const char* className = getTypeNameFromAST(recordType);
+    if ((!className || className[0] == '\0') && recordType->token && recordType->token->value) {
+        className = recordType->token->value;
+    }
+    if (!className) {
+        className = "";
+    }
+    int classNameIndex = addStringConstant(chunk, className);
+    emitConstant(chunk, classNameIndex, line);
+
+    const char* ifaceName = getTypeNameFromAST(interfaceType);
+    if ((!ifaceName || ifaceName[0] == '\0') && interfaceType->token && interfaceType->token->value) {
+        ifaceName = interfaceType->token->value;
+    }
+    if ((!ifaceName || ifaceName[0] == '\0') && fallbackInterfaceName) {
+        ifaceName = fallbackInterfaceName;
+    }
+    if (!ifaceName) {
+        ifaceName = "";
+    }
+    int ifaceNameIndex = addStringConstant(chunk, ifaceName);
+    emitConstant(chunk, ifaceNameIndex, line);
+
+    writeBytecodeChunk(chunk, CALL_HOST, line);
+    writeBytecodeChunk(chunk, (uint8_t)HOST_FN_BOX_INTERFACE, line);
+}
+static InterfaceBoxingResult autoBoxInterfaceValue(AST* interfaceAst,
+                                                   AST* valueExpr,
+                                                   BytecodeChunk* chunk,
+                                                   int line,
+                                                   const char* contextName,
+                                                   bool recoverWithNil,
+                                                   bool strictRecord) {
+    if (!interfaceAst || !valueExpr || !chunk) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+
+    if (valueExpr->var_type == TYPE_INTERFACE || getInterfaceTypeFromExpression(valueExpr)) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+
+    AST* interfaceType = resolveInterfaceAST(interfaceAst);
+    if (!interfaceType) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+
+    AST* recordType = getRecordTypeFromExpr(valueExpr);
+    recordType = resolveRecordAST(recordType);
+    if ((!recordType || recordType->type != AST_RECORD_TYPE)) {
+        if (strictRecord) {
+            const char* ifaceName = getReadableTypeName(interfaceType);
+            fprintf(stderr,
+                    "L%d: Compiler Error: Expression cannot be converted to interface '%s'.\n",
+                    line,
+                    ifaceName);
+            compiler_had_error = true;
+            if (recoverWithNil) {
+                writeBytecodeChunk(chunk, POP, line);
+                emitConstant(chunk, addNilConstant(chunk), line);
+            }
+            return INTERFACE_BOX_FAILED;
+        }
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+
+    if (!recordTypeHasVTable(recordType)) {
+        const char* ifaceName = getReadableTypeName(interfaceType);
+        const char* recordName = getReadableTypeName(recordType);
+        fprintf(stderr,
+                "L%d: Compiler Error: Only class records with virtual methods can be assigned to interface '%s' (record '%s').\n",
+                line,
+                ifaceName,
+                recordName);
+        compiler_had_error = true;
+        if (recoverWithNil) {
+            writeBytecodeChunk(chunk, POP, line);
+            emitConstant(chunk, addNilConstant(chunk), line);
+        }
+        return INTERFACE_BOX_FAILED;
+    }
+
+    if (!validateInterfaceImplementation(recordType, interfaceType, line)) {
+        if (recoverWithNil) {
+            writeBytecodeChunk(chunk, POP, line);
+            emitConstant(chunk, addNilConstant(chunk), line);
+        }
+        return INTERFACE_BOX_FAILED;
+    }
+
+    emitInterfaceBoxingCall(chunk, recordType, interfaceType, contextName, line);
+    return INTERFACE_BOX_DONE;
+}
+
+static InterfaceBoxingResult maybeAutoBoxInterfaceForExpression(AST* targetExpr,
+                                                                AST* valueExpr,
+                                                                BytecodeChunk* chunk,
+                                                                int line,
+                                                                bool recoverWithNil) {
+    if (!targetExpr) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+    AST* interfaceType = getInterfaceTypeFromExpression(targetExpr);
+    if (!interfaceType) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+    const char* fallback = getReadableTypeName(interfaceType);
+    return autoBoxInterfaceValue(interfaceType, valueExpr, chunk, line, fallback, recoverWithNil, false);
+}
+
+static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
+                                                          AST* valueExpr,
+                                                          BytecodeChunk* chunk,
+                                                          int line,
+                                                          bool recoverWithNil,
+                                                          bool strictRecord) {
+    if (!interfaceType) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+    AST* resolved = resolveInterfaceAST(interfaceType);
+    if (!resolved) {
+        return INTERFACE_BOX_NOT_NEEDED;
+    }
+    const char* fallback = getReadableTypeName(resolved);
+    return autoBoxInterfaceValue(resolved, valueExpr, chunk, line, fallback, recoverWithNil, strictRecord);
+}
+
+static AST* getParameterTypeAST(AST* param_node) {
+    if (!param_node) {
+        return NULL;
+    }
+    if (param_node->type_def) {
+        return param_node->type_def;
+    }
+    if (param_node->right) {
+        return param_node->right;
+    }
+    AST* parent = param_node->parent;
+    if (parent && parent->type == AST_VAR_DECL) {
+        if (parent->type_def) {
+            return parent->type_def;
+        }
+        if (parent->right) {
+            return parent->right;
+        }
+        return parent;
+    }
+    return param_node;
+}
+
+static AST* getInterfaceASTForParam(AST* param_node, AST* param_type) {
+    if (param_type) {
+        AST* candidate = resolveInterfaceAST(param_type);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    if (param_node) {
+        AST* candidate = resolveInterfaceAST(param_node);
+        if (candidate) {
+            return candidate;
+        }
+        if (param_node->type_def) {
+            candidate = resolveInterfaceAST(param_node->type_def);
+            if (candidate) {
+                return candidate;
+            }
+        }
+        if (param_node->right) {
+            candidate = resolveInterfaceAST(param_node->right);
+            if (candidate) {
+                return candidate;
+            }
+        }
+        AST* parent = param_node->parent;
+        if (parent) {
+            candidate = resolveInterfaceAST(parent);
+            if (candidate) {
+                return candidate;
+            }
+            if (parent->type_def) {
+                candidate = resolveInterfaceAST(parent->type_def);
+                if (candidate) {
+                    return candidate;
+                }
+            }
+            if (parent->right) {
+                candidate = resolveInterfaceAST(parent->right);
+                if (candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+static bool isInterfaceParameterNode(AST* param_node, AST* param_type) {
+    if ((param_type && param_type->var_type == TYPE_INTERFACE) ||
+        (param_node && param_node->var_type == TYPE_INTERFACE) ||
+        (param_node && param_node->parent && param_node->parent->var_type == TYPE_INTERFACE)) {
+        return true;
+    }
+    return getInterfaceASTForParam(param_node, param_type) != NULL;
+}
+
 static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName) {
     interfaceType = resolveInterfaceAST(interfaceType);
     if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
@@ -2448,6 +2682,36 @@ static bool recordTypeHasVTable(AST* recordType) {
     return false;
 }
 
+static bool emitImplicitMyselfFieldValue(BytecodeChunk* chunk, int line, const char* fieldName) {
+    if (!chunk || !fieldName || !current_class_record_type) {
+        return false;
+    }
+
+    AST* recordType = resolveTypeAlias(current_class_record_type);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return false;
+    }
+
+    int fieldOffset = getRecordFieldOffset(recordType, fieldName);
+    if (fieldOffset < 0) {
+        return false;
+    }
+    if (recordTypeHasVTable(recordType)) {
+        fieldOffset++;
+    }
+
+    int myself_idx = ensureMyselfGlobalNameIndex(chunk);
+    emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16, myself_idx, line);
+    if (fieldOffset <= UINT8_MAX) {
+        writeBytecodeChunk(chunk, LOAD_FIELD_VALUE, line);
+        writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+    } else {
+        writeBytecodeChunk(chunk, LOAD_FIELD_VALUE16, line);
+        emitShort(chunk, (uint16_t)fieldOffset, line);
+    }
+    return true;
+}
+
 // Compare two type AST nodes structurally.
 static bool compareTypeNodes(AST* a, AST* b) {
     a = resolveTypeAlias(a);
@@ -2514,8 +2778,41 @@ static bool isSubclassOf(AST* sub, AST* base) {
 static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     if (!param_type || !arg_node) return false;
 
+    if (param_type->var_type == TYPE_INTERFACE) {
+        return true;
+    }
+
     AST* param_actual = resolveTypeAlias(param_type);
     if (!param_actual) return false;
+
+    bool interfaceParam = false;
+    AST* param_interface_candidate = param_actual;
+    if ((!param_interface_candidate || param_interface_candidate->type == AST_VAR_DECL) &&
+        param_type->type == AST_VAR_DECL && param_type->right) {
+        param_interface_candidate = resolveTypeAlias(param_type->right);
+    }
+    if (resolveInterfaceAST(param_interface_candidate)) {
+        interfaceParam = true;
+    } else if (param_type->var_type == TYPE_INTERFACE) {
+        interfaceParam = true;
+    } else if (param_type->type == AST_TYPE_REFERENCE) {
+        AST* alias = resolveTypeAlias(param_type);
+        if (resolveInterfaceAST(alias)) {
+            interfaceParam = true;
+        }
+    }
+    if (interfaceParam) {
+        if (arg_node->var_type == TYPE_INTERFACE) {
+            return true;
+        }
+        if (arg_node->var_type == TYPE_RECORD) {
+            return true;
+        }
+        AST* recordType = getRecordTypeFromExpr(arg_node);
+        if (recordType && resolveRecordAST(recordType)) {
+            return true;
+        }
+    }
 
     // Resolve the argument's actual type as well.  The argument node carries a
     // full type definition in `type_def`, which may itself be a type alias.
@@ -5080,9 +5377,11 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 emitConstant(chunk, constIdx, getLine(node));
                             } else {
                                 compileRValue(node->left, chunk, getLine(node->left));
+                                maybeAutoBoxInterfaceForType(actual_type_def_node, node->left, chunk, getLine(node->left), true, false);
                             }
                         } else {
                             compileRValue(node->left, chunk, getLine(node->left));
+                            maybeAutoBoxInterfaceForType(actual_type_def_node, node->left, chunk, getLine(node->left), true, false);
                         }
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
@@ -5775,6 +6074,14 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_RETURN: {
             if (node->left) {
                 compileRValue(node->left, chunk, getLine(node->left));
+                AST* func_decl = (current_function_compiler && current_function_compiler->function_symbol)
+                                     ? current_function_compiler->function_symbol->type_def
+                                     : NULL;
+                AST* return_type = NULL;
+                if (func_decl && func_decl->type == AST_FUNCTION_DECL) {
+                    return_type = func_decl->right;
+                }
+                maybeAutoBoxInterfaceForType(return_type, node->left, chunk, getLine(node->left), true, false);
             }
             writeBytecodeChunk(chunk, RETURN, line);
             break;
@@ -6140,6 +6447,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
+                maybeAutoBoxInterfaceForExpression(lvalue, rvalue, chunk, line, false);
 
                 if (current_function_compiler && current_function_compiler->returns_value &&
                     current_function_compiler->name && lvalue->type == AST_VARIABLE &&
@@ -6608,12 +6916,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             continue;
                         }
 
-                        AST* param_type = param_node->type_def ? param_node->type_def
-                                                               : (param_node->right ? param_node->right : param_node);
+                        AST* param_type = getParameterTypeAST(param_node);
+                        if (isInterfaceParameterNode(param_node, param_type)) {
+                            continue;
+                        }
                         bool match = typesMatch(param_type, arg_node, false);
                         if (!match) {
+                            if (getInterfaceASTForParam(param_node, param_type)) {
+                                continue;
+                            }
                             AST* param_actual = resolveTypeAlias(param_type);
                             AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                            if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
+                                continue;
+                            }
                             if (param_actual && arg_actual) {
                                 if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
                                     fprintf(stderr,
@@ -6719,12 +7035,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
-                        AST* param_type = param_node->type_def ? param_node->type_def
-                                                            : (param_node->right ? param_node->right : param_node);
-                        bool match = typesMatch(param_type, arg_node, callee_is_builtin);
-                        if (!match) {
-                            AST* param_actual = resolveTypeAlias(param_type);
-                            AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                    AST* param_type = getParameterTypeAST(param_node);
+                    if (isInterfaceParameterNode(param_node, param_type)) {
+                        continue;
+                    }
+                    bool match = typesMatch(param_type, arg_node, callee_is_builtin);
+                    if (!match) {
+                        if (getInterfaceASTForParam(param_node, param_type)) {
+                            continue;
+                        }
+                        AST* param_actual = resolveTypeAlias(param_type);
+                        AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
+                            if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
+                                continue;
+                            }
                             if (param_actual && arg_actual) {
                                 if (param_actual->var_type == TYPE_ARRAY && arg_actual->var_type != TYPE_ARRAY) {
                                 fprintf(stderr,
@@ -6892,6 +7216,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
+                    AST* param_type_hint = NULL;
 
                     if (haveParamMetadata) {
                         int arg_index = i - interfaceArgStart;
@@ -6899,6 +7224,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             AST* paramGroup = ifaceParams[arg_index].group;
                             if (paramGroup && paramGroup->by_ref) {
                                 is_var_param = true;
+                            }
+                            if (paramGroup) {
+                                param_type_hint = paramGroup->right ? paramGroup->right : paramGroup;
                             }
                         }
                     } else if (methodSignature) {
@@ -6910,6 +7238,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             if (param_node && param_node->by_ref) {
                                 is_var_param = true;
                             }
+                            if (param_node) {
+                                param_type_hint = param_node->type_def ? param_node->type_def
+                                                                      : (param_node->right ? param_node->right : param_node);
+                            }
                         }
                     }
 
@@ -6917,6 +7249,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
                         compileRValue(arg_node, chunk, getLine(arg_node));
+                        maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
                 }
@@ -6944,6 +7277,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 AST* arg_node = node->children[i];
                 int param_index = i - receiver_offset;
                 bool is_var_param = false;
+                AST* param_type_hint = NULL;
                 if (is_read_proc && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) {
                     is_var_param = true;
                 }
@@ -6981,11 +7315,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     if (param_node && param_node->by_ref) {
                         is_var_param = true;
                     }
+                    if (param_node) {
+                        param_type_hint = param_node->right ? param_node->right : param_node;
+                    }
                 }
                 else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
                     AST* param_node = proc_symbol->type_def->children[param_index];
                     if (param_node && param_node->by_ref) {
                         is_var_param = true;
+                    }
+                    if (param_node) {
+                        param_type_hint = param_node->type_def ? param_node->type_def
+                                                               : (param_node->right ? param_node->right : param_node);
                     }
                 }
 
@@ -6993,6 +7334,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     compileLValue(arg_node, chunk, getLine(arg_node));
                 } else {
                     compileRValue(arg_node, chunk, getLine(arg_node));
+                    maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                 }
             }
 
@@ -7644,6 +7986,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (const_val_ptr) {
                             emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
                         } else {
+                            if (emitImplicitMyselfFieldValue(chunk, line, varName)) {
+                                break;
+                            }
                             DBG_PRINTF("[dbg] RV %s -> global line=%d\n", varName, line);
                             int nameIndex = addStringConstant(chunk, varName);
                             emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
@@ -7838,6 +8183,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
+                maybeAutoBoxInterfaceForExpression(lvalue, rvalue, chunk, line, true);
                 writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
 
                 if (current_function_compiler && current_function_compiler->returns_value &&
@@ -8318,16 +8664,22 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 for (int i = interfaceArgStart; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
+                    AST* param_type_hint = NULL;
                     int meta_index = i + metadataOffset;
                     if (func_symbol->type_def &&
                         meta_index >= 0 && meta_index < func_symbol->type_def->child_count) {
                         AST* param_node = func_symbol->type_def->children[meta_index];
                         if (param_node && param_node->by_ref) is_var_param = true;
+                        if (param_node) {
+                            param_type_hint = param_node->type_def ? param_node->type_def
+                                                                   : (param_node->right ? param_node->right : param_node);
+                        }
                     }
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
                         compileRValue(arg_node, chunk, getLine(arg_node));
+                        maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
                 }
@@ -8438,10 +8790,15 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
                     int param_index = i - receiver_offset;
                     bool is_var_param = false;
+                    AST* param_type_hint = NULL;
                     if (func_symbol && func_symbol->type_def && param_index < func_symbol->type_def->child_count) {
                         AST* param_node = func_symbol->type_def->children[param_index];
                         if (param_node && param_node->by_ref) {
                             is_var_param = true;
+                        }
+                        if (param_node) {
+                            param_type_hint = param_node->type_def ? param_node->type_def
+                                                                   : (param_node->right ? param_node->right : param_node);
                         }
                     } else if (functionName && param_index == 0 && strcasecmp(functionName, "eof") == 0) {
                         // Built-in EOF takes its file parameter by reference
@@ -8457,6 +8814,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
                         compileRValue(arg_node, chunk, getLine(arg_node));
+                        maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                 }
             }
@@ -8488,59 +8846,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         }
 
                         AST* argNode = (receiver_offset < node->child_count) ? node->children[receiver_offset] : NULL;
-                        AST* argType = argNode ? resolveTypeAlias(argNode->type_def) : NULL;
-                        AST* recordType = NULL;
-                        if (argType && argType->type == AST_POINTER_TYPE) {
-                            recordType = resolveTypeAlias(argType->right);
-                        } else {
-                            recordType = argType;
-                        }
-
-                        if (!recordType || recordType->type != AST_RECORD_TYPE || !recordTypeHasVTable(recordType)) {
-                            fprintf(stderr,
-                                    "L%d: Compiler Error: Only class records with virtual methods can be cast to interface '%s'.\n",
-                                    line,
-                                    functionName ? functionName : "<anonymous>");
-                            compiler_had_error = true;
-                            writeBytecodeChunk(chunk, POP, line);
-                            emitConstant(chunk, addNilConstant(chunk), line);
+                        InterfaceBoxingResult boxed = autoBoxInterfaceValue(
+                            resolvedCast,
+                            argNode,
+                            chunk,
+                            line,
+                            functionName ? functionName : "",
+                            true,
+                            true);
+                        if (boxed == INTERFACE_BOX_FAILED) {
                             break;
                         }
-
-                        if (!validateInterfaceImplementation(recordType, resolvedCast, line)) {
-                            writeBytecodeChunk(chunk, POP, line);
-                            emitConstant(chunk, addNilConstant(chunk), line);
-                            break;
-                        }
-
-                        writeBytecodeChunk(chunk, DUP, line);
-                        writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
-                        writeBytecodeChunk(chunk, (uint8_t)0, line);
-                        writeBytecodeChunk(chunk, SWAP, line);
-
-                        const char* className = getTypeNameFromAST(recordType);
-                        if ((!className || className[0] == '\0') && recordType && recordType->token && recordType->token->value) {
-                            className = recordType->token->value;
-                        }
-                        if (!className) {
-                            className = "";
-                        }
-                        int classNameIndex = addStringConstant(chunk, className);
-                        emitConstant(chunk, classNameIndex, line);
-
-                        const char* ifaceName = getTypeNameFromAST(resolvedCast);
-                        if ((!ifaceName || ifaceName[0] == '\0') && resolvedCast->token && resolvedCast->token->value) {
-                            ifaceName = resolvedCast->token->value;
-                        }
-                        if (!ifaceName) {
-                            ifaceName = functionName ? functionName : "";
-                        }
-
-                        int typeNameIndex = addStringConstant(chunk, ifaceName);
-                        emitConstant(chunk, typeNameIndex, line);
-
-                        writeBytecodeChunk(chunk, CALL_HOST, line);
-                        writeBytecodeChunk(chunk, (uint8_t)HOST_FN_BOX_INTERFACE, line);
                         break;
                     }
                     if (call_arg_count != 1) {

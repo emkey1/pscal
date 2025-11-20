@@ -1,0 +1,31 @@
+program InterfaceAutoBoxing;
+
+type
+  ILogger = interface
+    procedure Log(const msg: string);
+  end;
+
+  TInlineLogger = record
+    Prefix: string;
+    procedure Log(const msg: string);
+  end;
+
+procedure TInlineLogger.Log(const msg: string);
+begin
+  writeln(Prefix, msg);
+end;
+
+procedure Broadcast(const tag: string; const logger: ILogger);
+begin
+  logger.Log(tag);
+end;
+
+var
+  inlineLogger: TInlineLogger;
+  sink: ILogger;
+begin
+  inlineLogger.Prefix := '[inline] ';
+  sink := inlineLogger;
+  sink.Log('assigned');
+  Broadcast('param', inlineLogger);
+end.

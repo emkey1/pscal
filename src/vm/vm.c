@@ -2441,6 +2441,14 @@ static void push(VM* vm, Value value) { // Using your original name 'push'
     vm->stackTop++;
 }
 
+static Value copyInterfaceReceiverAlias(Value* receiverCell) {
+    Value alias = copyValueForStack(receiverCell);
+    if (alias.type == TYPE_POINTER && alias.base_type_node == OWNED_POINTER_SENTINEL) {
+        alias.base_type_node = NULL;
+    }
+    return alias;
+}
+
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
     if (!table) return NULL;
     for (int i = 0; i < HASHTABLE_SIZE; i++) {
@@ -3056,6 +3064,61 @@ static Value vmHostBoxInterface(VM* vm) {
         }
     }
 
+    if (!tableSlotPtr && receiverVal.type == TYPE_POINTER && receiverVal.ptr_val) {
+        bool invalid_type = false;
+        Value* existingRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!invalid_type && existingRecord && existingRecord->type == TYPE_RECORD) {
+            FieldValue* hiddenField = existingRecord->record_val;
+            if (hiddenField) {
+                tableSlotPtr = &hiddenField->value;
+                tableValuePtr = tableSlotPtr;
+                if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+                    tableValuePtr = (Value*)tableValuePtr->ptr_val;
+                }
+            }
+        }
+    }
+
+    if (receiverVal.type != TYPE_POINTER) {
+        Value* clone = (Value*)malloc(sizeof(Value));
+        if (!clone) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Out of memory boxing interface receiver.");
+            return makeNil();
+        }
+        *clone = makeCopyOfValue(&receiverVal);
+        receiverVal = makePointer(clone, NULL);
+        receiverVal.base_type_node = OWNED_POINTER_SENTINEL;
+
+        bool invalid_type = false;
+        Value* clonedRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!clonedRecord || invalid_type || clonedRecord->type != TYPE_RECORD) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Unable to resolve cloned receiver for interface boxing.");
+            return makeNil();
+        }
+        FieldValue* hiddenField = clonedRecord->record_val;
+        if (!hiddenField) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Cloned receiver lacks vtable storage.");
+            return makeNil();
+        }
+        tableSlotPtr = &hiddenField->value;
+        tableValuePtr = tableSlotPtr;
+        if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+            tableValuePtr = (Value*)tableValuePtr->ptr_val;
+        }
+    }
+
     const char* class_name_str = (classNameVal.type == TYPE_STRING && classNameVal.s_val)
                                      ? classNameVal.s_val
                                      : NULL;
@@ -3110,6 +3173,10 @@ static Value vmHostBoxInterface(VM* vm) {
     }
 
     *receiverCell = makeCopyOfValue(&receiverVal);
+    if (receiverCell->type == TYPE_POINTER && receiverCell->base_type_node == NULL &&
+        receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverCell->base_type_node = OWNED_POINTER_SENTINEL;
+    }
     *tableCell = makePointer(tableValuePtr, NULL);
     const char* class_identity_source = class_name_str ? class_name_str : "";
     size_t class_identity_len = strlen(class_identity_source);
@@ -3142,6 +3209,9 @@ static Value vmHostBoxInterface(VM* vm) {
     releaseClosureEnv(payload);
     freeValue(&classNameVal);
     freeValue(&typeNameVal);
+    if (receiverVal.type == TYPE_POINTER && receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverVal.base_type_node = NULL;
+    }
     freeValue(&receiverVal);
     freeValue(&tablePtrVal);
     return iface;
@@ -3259,13 +3329,13 @@ static Value vmHostInterfaceLookup(VM* vm) {
         return makeNil();
     }
 
-    Value receiverCopy = copyValueForStack(receiverCell);
+    Value receiverCopy = copyInterfaceReceiverAlias(receiverCell);
 
     if (vm->vmGlobalSymbols) {
         pthread_mutex_lock(&globals_mutex);
         Symbol* myselfSym = hashTableLookup(vm->vmGlobalSymbols, "myself");
         if (myselfSym) {
-            updateSymbol("myself", copyValueForStack(receiverCell));
+            updateSymbol("myself", copyInterfaceReceiverAlias(receiverCell));
         }
         pthread_mutex_unlock(&globals_mutex);
     }
@@ -3350,7 +3420,7 @@ static Value vmHostInterfaceAssert(VM* vm) {
         return makeNil();
     }
 
-    Value result = copyValueForStack(receiverCell);
+    Value result = copyInterfaceReceiverAlias(receiverCell);
 
     freeValue(&targetTypeVal);
     freeValue(&ifaceVal);

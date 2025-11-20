@@ -67,6 +67,7 @@ typedef struct SymbolTable_s HashTable;
 
 // --- Public Symbol Table Interface Prototypes ---
 Symbol *lookupSymbol(const char *name);
+Symbol *lookupSymbolOptional(const char *name);
 Symbol *lookupGlobalSymbol(const char *name);
 Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);

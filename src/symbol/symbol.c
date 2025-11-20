@@ -197,11 +197,16 @@ Symbol *lookupLocalSymbol(const char *name) {
  * @param name The symbol name string to look up.
  * @return A pointer to the found Symbol structure.
  */
-Symbol *lookupSymbol(const char *name) {
+Symbol *lookupSymbolOptional(const char *name) {
     Symbol *sym = lookupLocalSymbol(name);
     if (!sym) {
         sym = lookupGlobalSymbol(name);
     }
+    return sym;
+}
+
+Symbol *lookupSymbol(const char *name) {
+    Symbol *sym = lookupSymbolOptional(name);
     if (!sym) {
         fprintf(stderr, "Runtime error: Symbol '%s' not found.\n", name);
 #ifdef DEBUG
