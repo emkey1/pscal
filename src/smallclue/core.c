@@ -8,6 +8,9 @@
 #include "common/runtime_tty.h"
 #include "smallclue/elvis_app.h"
 #include "smallclue/openssh_app.h"
+#if defined(PSCAL_HAS_LIBCURL)
+#include <curl/curl.h>
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -172,6 +175,8 @@ static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
+static int smallclueCurlCommand(int argc, char **argv);
+static int smallclueWgetCommand(int argc, char **argv);
 
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
@@ -182,6 +187,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"clear", smallclueClearCommand, "Clear the terminal"},
     {"cls", smallclueClearCommand, "Clear the terminal"},
     {"cp", smallclueCpCommand, "Copy files"},
+    {"curl", smallclueCurlCommand, "Transfer data from URLs"},
     {"cut", smallclueCutCommand, "Extract fields from lines"},
     {"date", smallclueDateCommand, "Display current date/time"},
     {"dirname", smallclueDirnameCommand, "Strip last path component"},
@@ -226,6 +232,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"uniq", smallclueUniqCommand, "Report or omit repeated lines"},
     {"vi", smallclueElvisCommand, "Alias for Elvis text editor"},
     {"wc", smallclueWcCommand, "Count lines/words/bytes"},
+    {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
     {"xargs", smallclueXargsCommand, "Build command lines from stdin"},
 };
 
@@ -1643,6 +1650,98 @@ static int markdownInteractiveSelectDocument(void) {
     return smallclueMarkdownDisplayPath(selected);
 }
 
+#if defined(PSCAL_HAS_LIBCURL)
+static size_t smallclueCurlWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    FILE *dest = (FILE *)userp;
+    size_t bytes = size * nmemb;
+    if (bytes == 0) return 0;
+    if (fwrite(contents, 1, bytes, dest) != bytes) {
+        return 0;
+    }
+    return bytes;
+}
+#endif
+
+static void smallclueUrlSuggestFilename(const char *url, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    buffer[0] = '\0';
+    if (!url || !*url) {
+        strncpy(buffer, "index.html", buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+        return;
+    }
+    const char *start = strstr(url, "://");
+    start = start ? start + 3 : url;
+    const char *leaf = strrchr(start, '/');
+    leaf = (leaf && leaf[1] != '\0') ? leaf + 1 : start;
+    while (*leaf == '/') {
+        leaf++;
+    }
+    const char *end = leaf;
+    while (*end && *end != '?' && *end != '#') {
+        end++;
+    }
+    size_t len = (size_t)(end - leaf);
+    if (len == 0) {
+        strncpy(buffer, "index.html", buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+        return;
+    }
+    if (len >= buffer_size) {
+        len = buffer_size - 1;
+    }
+    memcpy(buffer, leaf, len);
+    buffer[len] = '\0';
+}
+
+static int smallclueHttpFetch(const char *cmd_name, const char *url, const char *destinationPath) {
+#if !defined(PSCAL_HAS_LIBCURL)
+    fprintf(stderr, "%s: networking support is unavailable in this build.\n", cmd_name ? cmd_name : "curl");
+    return 1;
+#else
+    if (!url || !*url) {
+        fprintf(stderr, "%s: missing URL\n", cmd_name ? cmd_name : "curl");
+        return 1;
+    }
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "%s: failed to initialise libcurl\n", cmd_name ? cmd_name : "curl");
+        return 1;
+    }
+    FILE *dest = stdout;
+    bool close_dest = false;
+    if (destinationPath && destinationPath[0] != '\0' && strcmp(destinationPath, "-") != 0) {
+        dest = fopen(destinationPath, "wb");
+        if (!dest) {
+            fprintf(stderr, "%s: %s: %s\n", cmd_name ? cmd_name : "curl", destinationPath, strerror(errno));
+            curl_easy_cleanup(curl);
+            return 1;
+        }
+        close_dest = true;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "smallclue-http/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, smallclueCurlWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, dest);
+    CURLcode res = curl_easy_perform(curl);
+    if (close_dest) {
+        fclose(dest);
+    } else {
+        fflush(dest);
+    }
+    if (res != CURLE_OK) {
+        fprintf(stderr, "%s: %s: %s\n", cmd_name ? cmd_name : "curl", url, curl_easy_strerror(res));
+        curl_easy_cleanup(curl);
+        return 1;
+    }
+    curl_easy_cleanup(curl);
+    return 0;
+#endif
+}
+
 static int cat_file(const char *path) {
     int status = 0;
     if (!path || strcmp(path, "-") == 0) {
@@ -2561,6 +2660,92 @@ static int smallclueMarkdownCommand(int argc, char **argv) {
     int status = 0;
     for (int i = optind; i < argc; ++i) {
         status |= smallclueMarkdownDisplayPath(argv[i]);
+    }
+    return status ? 1 : 0;
+}
+
+static int smallclueCurlCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    const char *output_path = NULL;
+    int use_remote_name = 0;
+    int opt;
+    while ((opt = getopt(argc, argv, "o:O")) != -1) {
+        switch (opt) {
+            case 'o':
+                output_path = optarg;
+                break;
+            case 'O':
+                use_remote_name = 1;
+                break;
+            default:
+                fprintf(stderr, "usage: curl [-o file | -O] url...\n");
+                return 1;
+        }
+    }
+    if (output_path && use_remote_name) {
+        fprintf(stderr, "curl: -o and -O may not be used together\n");
+        return 1;
+    }
+    if (optind >= argc) {
+        fprintf(stderr, "curl: missing URL\n");
+        return 1;
+    }
+    if (output_path && (argc - optind) != 1) {
+        fprintf(stderr, "curl: -o is only supported with a single URL\n");
+        return 1;
+    }
+    int status = 0;
+    for (int i = optind; i < argc; ++i) {
+        const char *url = argv[i];
+        const char *destination = NULL;
+        char derived[PATH_MAX];
+        if (output_path) {
+            destination = output_path;
+        } else if (use_remote_name) {
+            smallclueUrlSuggestFilename(url, derived, sizeof(derived));
+            destination = derived;
+        }
+        status |= smallclueHttpFetch("curl", url, destination);
+    }
+    return status ? 1 : 0;
+}
+
+static int smallclueWgetCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    const char *output_path = NULL;
+    int opt;
+    while ((opt = getopt(argc, argv, "O:")) != -1) {
+        switch (opt) {
+            case 'O':
+                output_path = optarg;
+                break;
+            default:
+                fprintf(stderr, "usage: wget [-O file] url...\n");
+                return 1;
+        }
+    }
+    if (optind >= argc) {
+        fprintf(stderr, "wget: missing URL\n");
+        return 1;
+    }
+    if (output_path && (argc - optind) != 1) {
+        fprintf(stderr, "wget: -O is only supported with a single URL\n");
+        return 1;
+    }
+    int status = 0;
+    for (int i = optind; i < argc; ++i) {
+        const char *url = argv[i];
+        const char *destination = output_path;
+        char derived[PATH_MAX];
+        if (!destination) {
+            smallclueUrlSuggestFilename(url, derived, sizeof(derived));
+            destination = derived;
+        }
+        int rc = smallclueHttpFetch("wget", url, destination);
+        if (rc == 0) {
+            printf("Saved %s -> %s\n", url, destination ? destination : "(stdout)");
+        }
+        status |= rc;
     }
     return status ? 1 : 0;
 }

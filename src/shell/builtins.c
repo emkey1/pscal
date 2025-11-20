@@ -58,6 +58,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"chmod", "chmod", -1},
     {"clike", "clike", -1},
     {"cp", "cp", -1},
+    {"curl", "curl", -1},
     {"cut", "cut", -1},
     {"date", "date", -1},
     {"du", "du", -1},
@@ -108,6 +109,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"ssh", "ssh", -1},
     {"uniq", "uniq", -1},
     {"wc", "wc", -1},
+    {"wget", "wget", -1},
     {"elvisdump", "elvisdump", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},

@@ -106,6 +106,7 @@ DEFINE_SMALLCLUE_WRAPPER("sort", sort)
 DEFINE_SMALLCLUE_WRAPPER("uniq", uniq)
 DEFINE_SMALLCLUE_WRAPPER("sed", sed)
 DEFINE_SMALLCLUE_WRAPPER("cut", cut)
+DEFINE_SMALLCLUE_WRAPPER("curl", curl)
 DEFINE_SMALLCLUE_WRAPPER("tr", tr)
 DEFINE_SMALLCLUE_WRAPPER("id", id)
 DEFINE_SMALLCLUE_WRAPPER("pwd", pwd)
@@ -142,6 +143,7 @@ DEFINE_SMALLCLUE_WRAPPER("vi", vi)
 DEFINE_SMALLCLUE_WRAPPER("less", less)
 DEFINE_SMALLCLUE_WRAPPER("ls", ls)
 DEFINE_SMALLCLUE_WRAPPER("md", md)
+DEFINE_SMALLCLUE_WRAPPER("wget", wget)
 DEFINE_SMALLCLUE_WRAPPER("more", more)
 
 #undef DEFINE_SMALLCLUE_WRAPPER
@@ -171,6 +173,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("uniq", vmBuiltinSmallclue_uniq, BUILTIN_TYPE_PROCEDURE, "uniq");
     registerVmBuiltin("sed", vmBuiltinSmallclue_sed, BUILTIN_TYPE_PROCEDURE, "sed");
     registerVmBuiltin("cut", vmBuiltinSmallclue_cut, BUILTIN_TYPE_PROCEDURE, "cut");
+    registerVmBuiltin("curl", vmBuiltinSmallclue_curl, BUILTIN_TYPE_PROCEDURE, "curl");
     registerVmBuiltin("tr", vmBuiltinSmallclue_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclue_id, BUILTIN_TYPE_PROCEDURE, "id");
     registerVmBuiltin("file", vmBuiltinSmallclue_file, BUILTIN_TYPE_PROCEDURE, "file");
@@ -202,6 +205,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("elvis", vmBuiltinSmallclue_elvis, BUILTIN_TYPE_PROCEDURE, "elvis");
     registerVmBuiltin("vi", vmBuiltinSmallclue_vi, BUILTIN_TYPE_PROCEDURE, "vi");
 #endif
+    registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
 }
 
 void smallclueRegisterBuiltins(void) {

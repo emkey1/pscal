@@ -1778,10 +1778,16 @@ add_executable(smallclue
     src/smallclue/main.c
 )
 target_link_libraries(smallclue PRIVATE pscal_core_static)
+if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
+    target_link_libraries(smallclue PRIVATE CURL::libcurl)
+endif()
 add_executable(smallclu
     src/smallclue/main.c
 )
 target_link_libraries(smallclu PRIVATE pscal_core_static)
+if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
+    target_link_libraries(smallclu PRIVATE CURL::libcurl)
+endif()
 
 if(PSCAL_PLATFORM_IOS)
     add_executable(pscal_tool_runner src/ios/tool_runner_main.c)
