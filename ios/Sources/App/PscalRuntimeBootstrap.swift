@@ -3,12 +3,82 @@ import Foundation
 import Darwin
 import UIKit
 
-@_silgen_name("pscalRuntimeDebugLog")
-private func c_pscalRuntimeDebugLog(_ message: UnsafePointer<CChar>) -> Void
+private let runtimeLogMirrorsToConsole: Bool = {
+    guard let value = ProcessInfo.processInfo.environment["PSCALI_RUNTIME_STDERR"] else {
+        return false
+    }
+    return value != "0"
+}()
 
-private func runtimeDebugLog(_ message: String) {
-    _ = message.withCString { ptr in
-        c_pscalRuntimeDebugLog(ptr)
+func runtimeDebugLog(_ message: String) {
+    appendRuntimeDebugLog(message)
+}
+
+@_cdecl("pscalRuntimeDebugLog")
+func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
+    guard let message else { return }
+    appendRuntimeDebugLog(String(cString: message))
+}
+
+private final class RuntimeLogger {
+    static let runtime = RuntimeLogger(filename: "pscal_runtime.log")
+
+    private let queue: DispatchQueue
+    private let fileURL: URL
+    private static let formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static func logsDirectoryURL() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return documents
+            .appendingPathComponent("var", isDirectory: true)
+            .appendingPathComponent("log", isDirectory: true)
+    }
+
+    private init(filename: String) {
+        self.queue = DispatchQueue(label: "com.pscal.runtime.log.\(filename)", qos: .utility)
+        self.fileURL = RuntimeLogger.logsDirectoryURL().appendingPathComponent(filename, isDirectory: false)
+    }
+
+    func append(_ message: String) {
+        let timestamp = RuntimeLogger.formatter.string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        queue.async {
+            let directory = self.fileURL.deletingLastPathComponent()
+            let fileManager = FileManager.default
+            if !fileManager.fileExists(atPath: directory.path) {
+                try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+            if fileManager.fileExists(atPath: self.fileURL.path) {
+                do {
+                    let handle = try FileHandle(forWritingTo: self.fileURL)
+                    defer { try? handle.close() }
+                    do {
+                        try handle.seekToEnd()
+                    } catch {
+                        // ignore seek errors, fall through to write (which appends at current position)
+                    }
+                    handle.write(data)
+                } catch {
+                    try? data.write(to: self.fileURL, options: .atomic)
+                }
+            } else {
+                try? data.write(to: self.fileURL, options: .atomic)
+            }
+        }
+    }
+}
+
+private func appendRuntimeDebugLog(_ message: String) {
+    guard !message.isEmpty else { return }
+    RuntimeLogger.runtime.append(message)
+    if runtimeLogMirrorsToConsole {
+        NSLog("%@", message)
     }
 }
 
@@ -147,12 +217,18 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func handleExit(status: Int32) {
+        runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); scheduling restart")
+        let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
+        RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         stateQueue.async {
             self.started = false
         }
         DispatchQueue.main.async {
             self.exitStatus = status
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            let restartDelay: TimeInterval = 0.1
+            runtimeDebugLog("[Runtime] restarting exsh in \(restartDelay)s after status \(status)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + restartDelay) {
+                runtimeDebugLog("[Runtime] relaunching exsh after prior exit status \(status)")
                 self.start()
             }
         }

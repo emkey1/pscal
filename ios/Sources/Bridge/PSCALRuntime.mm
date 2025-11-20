@@ -57,7 +57,6 @@ static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
 static int s_pending_columns = 0;
 static int s_pending_rows = 0;
-static NSFileHandle *s_debug_log_handle = nil;
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -70,7 +69,7 @@ static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     }
     UIFont *resolved = nil;
     const char *fontEnv = getenv("PSCALI_FONT_NAME");
-    if (fontEnv && fontEnv[0] != '\0') {
+    if (fontEnv && fontEnv[0] != '\0' && fontEnv[0] != '.') {
         NSString *fontName = [NSString stringWithUTF8String:fontEnv];
         if (fontName.length > 0) {
             resolved = [UIFont fontWithName:fontName size:pointSize];
@@ -149,51 +148,6 @@ static void PSCALRuntimeDispatchOutput(const char *buffer, size_t length) {
     }
 }
 /***********/
-static void PSCALRuntimeEnsureDebugLog(void) {
-    if (s_debug_log_handle) {
-        return;
-    }
-    NSArray<NSURL *> *dirs = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
-    NSURL *doc = dirs.firstObject;
-    if (!doc) {
-        return;
-    }
-    NSURL *logURL = [doc URLByAppendingPathComponent:@"elvis_debug.log"];
-    [[NSFileManager defaultManager] createFileAtPath:logURL.path contents:nil attributes:nil];
-    NSError *error = nil;
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:logURL error:&error];
-    if (!handle) {
-        NSLog(@"PSCALRuntime: failed to open debug log: %@", error.localizedDescription);
-        return;
-    }
-    [handle seekToEndOfFile];
-    s_debug_log_handle = handle;
-}
-
-void pscalRuntimeDebugLog(const char *message) {
-    if (!message) return;
-    NSString *line = [NSString stringWithUTF8String:message];
-    if (!line) {
-        line = @"(log conversion failure)";
-    }
-    NSLog(@"%@", line);
-    PSCALRuntimeEnsureDebugLog();
-    if (s_debug_log_handle) {
-        NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
-        @try {
-            [s_debug_log_handle writeData:data];
-            [s_debug_log_handle synchronizeFile];
-        } @catch (NSException *exception) {
-            NSLog(@"PSCALRuntime: debug log write failed (%@); disabling log file", exception.reason);
-            @try {
-                [s_debug_log_handle closeFile];
-            } @catch (__unused NSException *closeException) {
-            }
-            s_debug_log_handle = nil;
-        }
-    }
-}
-
 static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
     std::string trimmed = line;
     while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {

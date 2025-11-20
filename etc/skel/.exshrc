@@ -66,11 +66,16 @@ fi
 # environments expose a slimmed-down `ls` (e.g. the iPad smallclue bundle),
 # so probe for the fancy flags before enabling them so `ls` keeps working.
 _exshrc_ls_supports() {
+    if builtin ls "$@" >/dev/null 2>&1; then
+        return 0
+    fi
     command ls "$@" >/dev/null 2>&1
 }
 
 if _exshrc_ls_supports --color=auto; then
-    alias ls='ls --color=auto'
+    alias ls='builtin ls --color=auto'
+else
+    alias ls='builtin ls'
 fi
 
 if _exshrc_ls_supports -alF; then
@@ -98,6 +103,8 @@ alias ..='cd ..'
 alias ...='cd ../..'
 alias reload='. ~/.exshrc'
 alias hist='history'
+
+alias reset='stty reset'
 
 # ---------------------------------------------------------------------------
 # Thread pool tuning & metrics
@@ -175,3 +182,5 @@ fi
 if [ -r "$HOME/.exshrc.local" ]; then
     . "$HOME/.exshrc.local"
 fi
+
+alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

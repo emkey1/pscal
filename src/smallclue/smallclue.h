@@ -3,6 +3,12 @@
 
 #include <stddef.h>
 
+#if defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#define SMALLCLUE_HAS_IFADDRS 1
+#else
+#define SMALLCLUE_HAS_IFADDRS 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -22,7 +22,7 @@ final class TerminalFontSettings: ObservableObject {
     static let appearanceDidChangeNotification = Notification.Name("TerminalFontSettingsAppearanceDidChange")
     static let preferencesDidChangeNotification = Notification.Name("TerminalPreferencesDidChange")
 
-    private static let minPointSizeValue: CGFloat = 10.0
+    private static let minPointSizeValue: CGFloat = 6.0
     private static let maxPointSizeValue: CGFloat = 28.0
     private let storageKey = "com.pscal.terminal.fontPointSize"
     private let fontNameKey = "com.pscal.terminal.fontName"
@@ -92,6 +92,7 @@ final class TerminalFontSettings: ObservableObject {
 
     func font(forPointSize size: CGFloat) -> UIFont {
         if let name = selectedFontOption.postScriptName,
+           !name.hasPrefix("."),
            let custom = UIFont(name: name, size: size) {
             return custom
         }
@@ -171,6 +172,9 @@ final class TerminalFontSettings: ObservableObject {
         var fallbackByFamily: [String: FontOption] = [:]
 
         for name in postScriptNames {
+            if name.hasPrefix(".") {
+                continue
+            }
             let font = CTFontCreateWithName(name as CFString, 0, nil)
             let traits = CTFontGetSymbolicTraits(font)
             if !traits.contains(.monoSpaceTrait) {

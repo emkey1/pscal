@@ -109,6 +109,10 @@ DEFINE_SMALLCLUE_WRAPPER("cut", cut)
 DEFINE_SMALLCLUE_WRAPPER("curl", curl)
 DEFINE_SMALLCLUE_WRAPPER("tr", tr)
 DEFINE_SMALLCLUE_WRAPPER("id", id)
+#if SMALLCLUE_HAS_IFADDRS
+DEFINE_SMALLCLUE_WRAPPER("ipaddr", ipaddr)
+#endif
+DEFINE_SMALLCLUE_WRAPPER("df", df)
 DEFINE_SMALLCLUE_WRAPPER("pwd", pwd)
 DEFINE_SMALLCLUE_WRAPPER("chmod", chmod)
 DEFINE_SMALLCLUE_WRAPPER("true", truecmd)
@@ -126,6 +130,7 @@ DEFINE_SMALLCLUE_WRAPPER("file", file)
 DEFINE_SMALLCLUE_WRAPPER("scp", scp)
 DEFINE_SMALLCLUE_WRAPPER("sftp", sftp)
 DEFINE_SMALLCLUE_WRAPPER("ssh", ssh)
+DEFINE_SMALLCLUE_WRAPPER("ssh-keygen", sshkeygen)
 #if defined(PSCAL_TARGET_IOS)
 DEFINE_SMALLCLUE_WRAPPER("mkdir", mkdir)
 DEFINE_SMALLCLUE_WRAPPER("cp", cp)
@@ -176,6 +181,10 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("curl", vmBuiltinSmallclue_curl, BUILTIN_TYPE_PROCEDURE, "curl");
     registerVmBuiltin("tr", vmBuiltinSmallclue_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclue_id, BUILTIN_TYPE_PROCEDURE, "id");
+#if SMALLCLUE_HAS_IFADDRS
+    registerVmBuiltin("ipaddr", vmBuiltinSmallclue_ipaddr, BUILTIN_TYPE_PROCEDURE, "ipaddr");
+#endif
+    registerVmBuiltin("df", vmBuiltinSmallclue_df, BUILTIN_TYPE_PROCEDURE, "df");
     registerVmBuiltin("file", vmBuiltinSmallclue_file, BUILTIN_TYPE_PROCEDURE, "file");
     registerVmBuiltin("pwd", vmBuiltinSmallclue_pwd, BUILTIN_TYPE_PROCEDURE, "pwd");
     registerVmBuiltin("chmod", vmBuiltinSmallclue_chmod, BUILTIN_TYPE_PROCEDURE, "chmod");
@@ -193,6 +202,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("scp", vmBuiltinSmallclue_scp, BUILTIN_TYPE_PROCEDURE, "scp");
     registerVmBuiltin("sftp", vmBuiltinSmallclue_sftp, BUILTIN_TYPE_PROCEDURE, "sftp");
     registerVmBuiltin("ssh", vmBuiltinSmallclue_ssh, BUILTIN_TYPE_PROCEDURE, "ssh");
+    registerVmBuiltin("ssh-keygen", vmBuiltinSmallclue_sshkeygen, BUILTIN_TYPE_PROCEDURE, "ssh-keygen");
 #if defined(PSCAL_TARGET_IOS)
     registerVmBuiltin("mkdir", vmBuiltinSmallclue_mkdir, BUILTIN_TYPE_PROCEDURE, "mkdir");
     registerVmBuiltin("cp", vmBuiltinSmallclue_cp, BUILTIN_TYPE_PROCEDURE, "cp");

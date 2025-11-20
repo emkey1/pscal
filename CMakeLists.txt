@@ -180,6 +180,14 @@ if(PSCAL_PLATFORM_IOS)
         INTERFACE_INCLUDE_DIRECTORIES "${PSCAL_OPENSSL_INSTALL_DIR}/include"
         INTERFACE_LINK_LIBRARIES pscal_openssl_crypto)
     add_dependencies(pscal_openssl_ssl pscal_openssl)
+    set(PSCAL_OPENSSL_SSL_TARGET pscal_openssl_ssl)
+    set(PSCAL_OPENSSL_CRYPTO_TARGET pscal_openssl_crypto)
+    if(NOT TARGET OpenSSL::Crypto)
+        add_library(OpenSSL::Crypto ALIAS pscal_openssl_crypto)
+    endif()
+    if(NOT TARGET OpenSSL::SSL)
+        add_library(OpenSSL::SSL ALIAS pscal_openssl_ssl)
+    endif()
 endif()
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
@@ -595,50 +603,119 @@ if(SDL)
     endif()
 endif()
 
-# --- CURL (two-path strategy) ---
-# Option A (default): use system SDK curl via FindCURL (imported target CURL::libcurl)
-# Option B (opt-in): prefer Homebrew curl for OpenSSL, etc.
-option(PSCAL_USE_BREW_CURL "Prefer Homebrew-provided curl over the macOS SDK one" OFF)
-if(APPLE AND PSCAL_USE_BREW_CURL)
-    # Hint FindCURL using Homebrew prefix and pkg-config
-    execute_process(
-        COMMAND brew --prefix curl
-        OUTPUT_VARIABLE _BREW_CURL_PREFIX
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(_BREW_CURL_PREFIX AND EXISTS "${_BREW_CURL_PREFIX}")
-        list(PREPEND CMAKE_PREFIX_PATH "${_BREW_CURL_PREFIX}")
-        # Propagate pkg-config hint for libcurl.pc
-        if(DEFINED ENV{PKG_CONFIG_PATH})
-            set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
-        else()
-            set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig")
-        endif()
-        message(STATUS "Hinting CURL with Homebrew prefix: ${_BREW_CURL_PREFIX}")
-    else()
-        message(WARNING "PSCAL_USE_BREW_CURL=ON but Homebrew curl not found; falling back to system CURL.")
-    endif()
-endif()
-
-set(_PSCAL_REQUIRE_CURL ON)
+# --- CURL (system vs bundled) ---
+# Option A: build against a bundled libcurl (default on iOS where the SDK does not provide one).
+# Option B: rely on the system SDK via FindCURL (with optional Homebrew hints on macOS).
+set(_PSCAL_DEFAULT_BUNDLED_CURL OFF)
 if(PSCAL_PLATFORM_IOS)
-    set(_PSCAL_REQUIRE_CURL OFF)
+    set(_PSCAL_DEFAULT_BUNDLED_CURL ON)
 endif()
+option(PSCAL_USE_BUNDLED_CURL "Build libcurl from third-party/curl-8.17.0" ${_PSCAL_DEFAULT_BUNDLED_CURL})
 
-find_package(CURL QUIET)
-if(NOT CURL_FOUND)
-    if(_PSCAL_REQUIRE_CURL)
-        message(FATAL_ERROR "libcurl is required for this configuration. Install libcurl dev headers or set PSCAL_USE_BREW_CURL=ON.")
-    else()
-        message(WARNING "libcurl not found; network builtins will be disabled for this build.")
+if(PSCAL_USE_BUNDLED_CURL)
+    message(STATUS "CURL: building bundled libcurl from third-party/curl-8.17.0")
+    # Build a static-only libcurl without the command line tool, docs, or tests.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+    set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
+    set(BUILD_CURL_EXE OFF CACHE BOOL "Build curl executable" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "Build libcurl tests" FORCE)
+    set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "Build libcurl documentation" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "Build libcurl examples" FORCE)
+    set(CURL_DISABLE_LDAP ON CACHE BOOL "Disable LDAP support in libcurl" FORCE)
+    set(CURL_DISABLE_LDAPS ON CACHE BOOL "Disable LDAPS support in libcurl" FORCE)
+    set(CURL_DISABLE_TELNET ON CACHE BOOL "Disable TELNET support in libcurl" FORCE)
+    set(CURL_DISABLE_TFTP ON CACHE BOOL "Disable TFTP support in libcurl" FORCE)
+    set(CURL_DISABLE_SMTP ON CACHE BOOL "Disable SMTP support in libcurl" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "Disable libpsl dependency for bundled libcurl" FORCE)
+    set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+    if(PSCAL_PLATFORM_IOS)
+        if(NOT DEFINED PSCAL_OPENSSL_INSTALL_DIR)
+            message(FATAL_ERROR "Bundled libcurl on iOS requires PSCAL_OPENSSL_INSTALL_DIR (ensure PSCAL_PLATFORM_IOS OpenSSL logic runs first).")
+        endif()
+        set(_PSCAL_CURL_OPENSSL_ROOT "${PSCAL_OPENSSL_INSTALL_DIR}")
+        set(OPENSSL_ROOT_DIR "${_PSCAL_CURL_OPENSSL_ROOT}" CACHE PATH "OpenSSL root used by bundled libcurl" FORCE)
+        set(OPENSSL_INCLUDE_DIR "${_PSCAL_CURL_OPENSSL_ROOT}/include" CACHE PATH "OpenSSL include dir for bundled libcurl" FORCE)
+        set(OPENSSL_CRYPTO_LIBRARY "${_PSCAL_CURL_OPENSSL_ROOT}/lib/libcrypto.a" CACHE FILEPATH "OpenSSL libcrypto for bundled libcurl" FORCE)
+        set(OPENSSL_SSL_LIBRARY "${_PSCAL_CURL_OPENSSL_ROOT}/lib/libssl.a" CACHE FILEPATH "OpenSSL libssl for bundled libcurl" FORCE)
+        set(OpenSSL_DIR "${_PSCAL_CURL_OPENSSL_ROOT}/lib/cmake/OpenSSL" CACHE PATH "OpenSSL config path for bundled libcurl" FORCE)
+        set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Link bundled libcurl against static OpenSSL" FORCE)
+        set(CURL_USE_SECTRANSPORT OFF CACHE BOOL "Disable SecureTransport when using bundled libcurl" FORCE)
+        set(CURL_USE_SCHANNEL OFF CACHE BOOL "Disable Schannel when using bundled libcurl" FORCE)
+        set(CURL_USE_MBEDTLS OFF CACHE BOOL "Disable mbedTLS when using bundled libcurl" FORCE)
+        set(CURL_USE_WOLFSSL OFF CACHE BOOL "Disable wolfSSL when using bundled libcurl" FORCE)
+        set(CURL_USE_GNUTLS OFF CACHE BOOL "Disable GnuTLS when using bundled libcurl" FORCE)
+        set(CURL_USE_RUSTLS OFF CACHE BOOL "Disable Rustls when using bundled libcurl" FORCE)
     endif()
-else()
-    if(TARGET CURL::libcurl)
-        message(STATUS "CURL: using imported target CURL::libcurl")
+    add_subdirectory(third-party/curl-8.17.0 EXCLUDE_FROM_ALL)
+    if(TARGET libcurl_static)
+        set(_PSCAL_LIBCURL_TARGET libcurl_static)
+    elseif(TARGET libcurl)
+        set(_PSCAL_LIBCURL_TARGET libcurl)
     else()
-        message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
-        message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+        set(_PSCAL_LIBCURL_TARGET "")
+    endif()
+    if(_PSCAL_LIBCURL_TARGET STREQUAL "")
+        message(FATAL_ERROR "Bundled libcurl target not found after configuring third-party/curl-8.17.0.")
+    endif()
+    if(PSCAL_PLATFORM_IOS AND TARGET pscal_openssl)
+        add_dependencies(${_PSCAL_LIBCURL_TARGET} pscal_openssl)
+    endif()
+    if(NOT TARGET CURL::libcurl)
+        add_library(CURL::libcurl ALIAS ${_PSCAL_LIBCURL_TARGET})
+    endif()
+    get_target_property(_PSCAL_CURL_INTERFACE_DIRS ${_PSCAL_LIBCURL_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_PSCAL_CURL_INTERFACE_DIRS)
+        set(CURL_INCLUDE_DIRS ${_PSCAL_CURL_INTERFACE_DIRS})
+    endif()
+    if(NOT CURL_INCLUDE_DIRS)
+        set(CURL_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/curl-8.17.0/include")
+    endif()
+    set(CURL_INCLUDE_DIRS "${CURL_INCLUDE_DIRS}" CACHE STRING "libcurl include directories" FORCE)
+    set(CURL_LIBRARIES CURL::libcurl)
+    set(CURL_FOUND ON CACHE BOOL "Bundled libcurl configured" FORCE)
+else()
+    option(PSCAL_USE_BREW_CURL "Prefer Homebrew-provided curl over the macOS SDK one" OFF)
+    if(APPLE AND PSCAL_USE_BREW_CURL)
+        # Hint FindCURL using Homebrew prefix and pkg-config
+        execute_process(
+            COMMAND brew --prefix curl
+            OUTPUT_VARIABLE _BREW_CURL_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(_BREW_CURL_PREFIX AND EXISTS "${_BREW_CURL_PREFIX}")
+            list(PREPEND CMAKE_PREFIX_PATH "${_BREW_CURL_PREFIX}")
+            # Propagate pkg-config hint for libcurl.pc
+            if(DEFINED ENV{PKG_CONFIG_PATH})
+                set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+            else()
+                set(ENV{PKG_CONFIG_PATH} "${_BREW_CURL_PREFIX}/lib/pkgconfig")
+            endif()
+            message(STATUS "Hinting CURL with Homebrew prefix: ${_BREW_CURL_PREFIX}")
+        else()
+            message(WARNING "PSCAL_USE_BREW_CURL=ON but Homebrew curl not found; falling back to system CURL.")
+        endif()
+    endif()
+
+    set(_PSCAL_REQUIRE_CURL ON)
+    if(PSCAL_PLATFORM_IOS)
+        set(_PSCAL_REQUIRE_CURL OFF)
+    endif()
+
+    find_package(CURL QUIET)
+    if(NOT CURL_FOUND)
+        if(_PSCAL_REQUIRE_CURL)
+            message(FATAL_ERROR "libcurl is required for this configuration. Install libcurl dev headers or set PSCAL_USE_BUNDLED_CURL=ON.")
+        else()
+            message(WARNING "libcurl not found; network builtins will be disabled for this build.")
+        endif()
+    else()
+        if(TARGET CURL::libcurl)
+            message(STATUS "CURL: using imported target CURL::libcurl")
+        else()
+            message(STATUS "CURL Include Dirs: ${CURL_INCLUDE_DIRS}")
+            message(STATUS "CURL Libraries Variable: ${CURL_LIBRARIES}")
+        endif()
     endif()
 endif()
 
@@ -768,6 +845,7 @@ set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/sshbuf-misc.c
         ${PSCAL_OPENSSH_ROOT}/ssherr.c
         ${PSCAL_OPENSSH_ROOT}/sshkey.c
+        ${PSCAL_OPENSSH_ROOT}/sshsig.c
         ${PSCAL_OPENSSH_ROOT}/ssh-pkcs11-client.c
         ${PSCAL_OPENSSH_ROOT}/ssh-sk-client.c
         ${PSCAL_OPENSSH_ROOT}/ttymodes.c
@@ -889,6 +967,7 @@ set(PSCAL_OPENSSH_SOURCES
     ${PSCAL_OPENSSH_CLIENT_SOURCES}
     ${PSCAL_OPENSSH_SCP_SOURCES}
     ${PSCAL_OPENSSH_SFTP_SOURCES}
+    ${PSCAL_OPENSSH_ROOT}/ssh-keygen.c
     ${PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES}
 )
 
@@ -906,6 +985,8 @@ set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/scp.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_scp_main)
 set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/sftp.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_sftp_main)
+set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/ssh-keygen.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_ssh_keygen_main)
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES
@@ -1054,13 +1135,23 @@ function(pscal_apply_common_compilation_settings target_name)
         )
         target_compile_definitions(${target_name} PRIVATE SDL)
     endif()
-    if(PSCAL_HAS_LIBCURL AND NOT TARGET CURL::libcurl AND CURL_INCLUDE_DIRS)
+    if(PSCAL_HAS_LIBCURL AND CURL_INCLUDE_DIRS)
         target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
     endif()
 endfunction()
 
 add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
 pscal_apply_common_compilation_settings(pscal_core_static)
+if(PSCAL_HAS_LIBCURL AND CURL_INCLUDE_DIRS)
+    target_include_directories(pscal_core_static PRIVATE ${CURL_INCLUDE_DIRS})
+endif()
+if(PSCAL_HAS_LIBCURL)
+    if(TARGET CURL::libcurl)
+        target_link_libraries(pscal_core_static PUBLIC CURL::libcurl)
+    elseif(CURL_LIBRARIES)
+        target_link_libraries(pscal_core_static PUBLIC ${CURL_LIBRARIES})
+    endif()
+endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
 target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
@@ -1070,18 +1161,28 @@ if(PSCAL_PLATFORM_IOS)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
         "${PSCAL_OPENSSL_INSTALL_DIR}/include")
+    set(_pscal_core_embed_archives
+        "$<TARGET_FILE:pscal_core_static>"
+        "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a"
+        "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
+    )
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            list(APPEND _pscal_core_embed_archives "$<TARGET_FILE:CURL::libcurl>")
+        elseif(CURL_LIBRARIES)
+            list(APPEND _pscal_core_embed_archives ${CURL_LIBRARIES})
+        endif()
+    endif()
     add_custom_command(TARGET pscal_core_static POST_BUILD
         COMMAND /usr/bin/libtool -static
             -o "$<TARGET_FILE:pscal_core_static>.merged"
-            "$<TARGET_FILE:pscal_core_static>"
-            "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a"
-            "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
+            ${_pscal_core_embed_archives}
         COMMAND ${CMAKE_COMMAND} -E copy
             "$<TARGET_FILE:pscal_core_static>.merged"
             "$<TARGET_FILE:pscal_core_static>"
         COMMAND ${CMAKE_COMMAND} -E remove
             "$<TARGET_FILE:pscal_core_static>.merged"
-        COMMENT "Embedding OpenSSL archives into libpscal_core_static.a for iOS")
+            COMMENT "Embedding OpenSSL archives into libpscal_core_static.a for iOS")
 endif()
 target_include_directories(pscal_core_static BEFORE PRIVATE
     third-party/elvis
@@ -1780,13 +1881,6 @@ add_executable(smallclue
 target_link_libraries(smallclue PRIVATE pscal_core_static)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
     target_link_libraries(smallclue PRIVATE CURL::libcurl)
-endif()
-add_executable(smallclu
-    src/smallclue/main.c
-)
-target_link_libraries(smallclu PRIVATE pscal_core_static)
-if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
-    target_link_libraries(smallclu PRIVATE CURL::libcurl)
 endif()
 
 if(PSCAL_PLATFORM_IOS)

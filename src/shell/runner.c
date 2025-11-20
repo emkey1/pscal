@@ -27,6 +27,21 @@ extern char **environ;
 
 static const char *const kShellCompilerId = "shell";
 
+#if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message);
+static void runtimeDebugLog(const char *message) {
+    if (&pscalRuntimeDebugLog != NULL && message) {
+        pscalRuntimeDebugLog(message);
+    }
+}
+#else
+static void runtimeDebugLog(const char *message) {
+    if (message) {
+        fprintf(stderr, "%s\n", message);
+    }
+}
+#endif
+
 static int gShellSymbolTableDepth = 0;
 static VM *gShellThreadOwnerVm = NULL;
 
@@ -408,10 +423,12 @@ int shellRunSource(const char *source,
     bool chunk_initialized = false;
     VM *vm = NULL;
     bool vm_initialized = false;
+    bool vm_stack_dumped = false;
     VM *previous_thread_owner = NULL;
     bool assigned_thread_owner = false;
     bool exit_flag = false;
     bool should_run_exit_trap = false;
+    bool trap_exit_requested = false;
 
     ShellParser parser;
     program = shellParseString(pre_src ? pre_src : source, &parser);
@@ -501,6 +518,11 @@ int shellRunSource(const char *source,
     }
 
     InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    if (result == INTERPRET_RUNTIME_ERROR) {
+        runtimeDebugLog("[shell] interpretBytecode -> runtime error; dumping VM stack");
+        vmDumpStackInfoDetailed(vm, "shell runtime error");
+        vm_stack_dumped = true;
+    }
     int last_status = shellRuntimeLastStatus();
     exit_flag = shellRuntimeConsumeExitRequested();
     if (result == INTERPRET_RUNTIME_ERROR && exit_flag) {
@@ -509,15 +531,45 @@ int shellRunSource(const char *source,
     should_run_exit_trap = shellRuntimeIsOutermostScript() &&
                            (!shellRuntimeIsInteractive() || exit_flag);
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
-
+    {
+        char log_buf[256];
+        snprintf(log_buf, sizeof(log_buf),
+                 "[shell] interpret result=%d last_status=%d exit_flag=%s exit_code=%d",
+                 (int)result,
+                 last_status,
+                 exit_flag ? "true" : "false",
+                 exit_code);
+        runtimeDebugLog(log_buf);
+    }
+    if (exit_code != EXIT_SUCCESS && vm && !vm_stack_dumped) {
+        char dump_label[64];
+        snprintf(dump_label, sizeof(dump_label), "shell exit code %d", exit_code);
+        vmDumpStackInfoDetailed(vm, dump_label);
+        vm_stack_dumped = true;
+    }
 cleanup:
     if (should_run_exit_trap) {
         shellRuntimeRunExitTrap();
-        bool trap_exit_requested = shellRuntimeConsumeExitRequested();
+        trap_exit_requested = shellRuntimeConsumeExitRequested();
         exit_flag = exit_flag || trap_exit_requested;
         if (trap_exit_requested) {
             exit_code = shellRuntimeLastStatus();
         }
+    }
+    if ((exit_code != EXIT_SUCCESS || exit_flag) ) {
+        char final_log[256];
+        snprintf(final_log, sizeof(final_log),
+                 "[shell] final exit_code=%d exit_flag=%s trap_exit=%s",
+                 exit_code,
+                 exit_flag ? "true" : "false",
+                 trap_exit_requested ? "true" : "false");
+        runtimeDebugLog(final_log);
+    }
+    if (exit_code != EXIT_SUCCESS && vm && !vm_stack_dumped) {
+        char dump_label[64];
+        snprintf(dump_label, sizeof(dump_label), "shell final exit %d", exit_code);
+        vmDumpStackInfoDetailed(vm, dump_label);
+        vm_stack_dumped = true;
     }
     if (source_pushed) {
         shellRuntimeTrackSourcePop();

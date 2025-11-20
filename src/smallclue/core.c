@@ -37,6 +37,18 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+#include <sys/param.h>
+#include <sys/mount.h>
+#define SMALLCLUE_HAVE_STATFS 1
+#else
+#include <sys/statvfs.h>
+#define SMALLCLUE_HAVE_STATVFS 1
+#endif
+#if SMALLCLUE_HAS_IFADDRS
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -173,10 +185,15 @@ static int smallclueElvisCommand(int argc, char **argv);
 static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
+static int smallclueSshKeygenCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
 static int smallclueCurlCommand(int argc, char **argv);
 static int smallclueWgetCommand(int argc, char **argv);
+#if SMALLCLUE_HAS_IFADDRS
+static int smallclueIpAddrCommand(int argc, char **argv);
+#endif
+static int smallclueDfCommand(int argc, char **argv);
 
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
@@ -201,6 +218,9 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"grep", smallclueGrepCommand, "Search for patterns"},
     {"head", smallclueHeadCommand, "Print the first lines of files"},
     {"id", smallclueIdCommand, "Print user identity information"},
+#if SMALLCLUE_HAS_IFADDRS
+    {"ipaddr", smallclueIpAddrCommand, "Show interface IP addresses"},
+#endif
     {"kill", smallclueKillCommand, "Send signals to processes"},
     {"less", smallcluePagerCommand, "Paginate file contents"},
     {"ln", smallclueLnCommand, "Create links"},
@@ -222,6 +242,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"scp", smallclueScpCommand, "Securely copy files over SSH"},
     {"sftp", smallclueSftpCommand, "Interactive SFTP client"},
     {"ssh", smallclueSshCommand, "OpenSSH client"},
+    {"ssh-keygen", smallclueSshKeygenCommand, "Generate SSH key pairs"},
     {"tail", smallclueTailCommand, "Print the last lines of files"},
     {"tee", smallclueTeeCommand, "Copy stdin to files and stdout"},
     {"test", smallclueTestCommand, "Evaluate expressions"},
@@ -234,6 +255,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"wc", smallclueWcCommand, "Count lines/words/bytes"},
     {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
     {"xargs", smallclueXargsCommand, "Build command lines from stdin"},
+    {"df", smallclueDfCommand, "Report filesystem usage"},
 };
 
 static size_t kSmallclueAppletCount = sizeof(kSmallclueApplets) / sizeof(kSmallclueApplets[0]);
@@ -2449,6 +2471,261 @@ static int smallclueScpCommand(int argc, char **argv) {
 }
 static int smallclueSftpCommand(int argc, char **argv) {
     return smallclueRunSftp(argc, argv);
+}
+static int smallclueSshKeygenCommand(int argc, char **argv) {
+    return smallclueRunSshKeygen(argc, argv);
+}
+#if SMALLCLUE_HAS_IFADDRS
+static void smallclueIpAddrUsage(void) {
+    fputs("usage: ipaddr [-4|-6] [-a]\n", stderr);
+}
+
+static bool smallclueShouldSkipInterface(const struct ifaddrs *ifa, int family, bool show_all) {
+    if (show_all || !ifa) {
+        return false;
+    }
+    if (ifa->ifa_flags & IFF_LOOPBACK) {
+        return true;
+    }
+#if defined(AF_INET6)
+    if (family == AF_INET6 && ifa->ifa_addr) {
+        const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)ifa->ifa_addr;
+        if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr) || IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr)) {
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+static int smallclueIpAddrCommand(int argc, char **argv) {
+    bool request_v4 = false;
+    bool request_v6 = false;
+    bool show_all = false;
+    smallclueResetGetopt();
+    int opt;
+    while ((opt = getopt(argc, argv, "46ah")) != -1) {
+        switch (opt) {
+            case '4':
+                request_v4 = true;
+                break;
+            case '6':
+                request_v6 = true;
+                break;
+            case 'a':
+                show_all = true;
+                break;
+            case 'h':
+            default:
+                smallclueIpAddrUsage();
+                return 1;
+        }
+    }
+    if (optind != argc) {
+        smallclueIpAddrUsage();
+        return 1;
+    }
+    bool show_v4 = request_v4 || (!request_v4 && !request_v6);
+    bool show_v6 = request_v6 || (!request_v4 && !request_v6);
+
+    struct ifaddrs *ifaddr = NULL;
+    if (getifaddrs(&ifaddr) != 0) {
+        fprintf(stderr, "ipaddr: getifaddrs failed: %s\n", strerror(errno));
+        return 1;
+    }
+
+    bool printed = false;
+    for (struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr) {
+            continue;
+        }
+        int family = ifa->ifa_addr->sa_family;
+        if (family == AF_INET) {
+            if (!show_v4) continue;
+        }
+#if defined(AF_INET6)
+        else if (family == AF_INET6) {
+            if (!show_v6) continue;
+        }
+#endif
+        else {
+            continue;
+        }
+        if (smallclueShouldSkipInterface(ifa, family, show_all)) {
+            continue;
+        }
+
+        char host[NI_MAXHOST];
+        socklen_t addrlen = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+        int flags = NI_NUMERICHOST;
+        if (getnameinfo(ifa->ifa_addr, addrlen, host, sizeof(host), NULL, 0, flags) != 0) {
+            continue;
+        }
+        printf("%-12s %-4s %s\n",
+            ifa->ifa_name ? ifa->ifa_name : "(unknown)",
+            (family == AF_INET) ? "IPv4" : "IPv6",
+            host);
+        printed = true;
+    }
+    freeifaddrs(ifaddr);
+    if (!printed) {
+        fprintf(stderr, "ipaddr: no matching interfaces\n");
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+typedef struct {
+    unsigned long long total_bytes;
+    unsigned long long free_bytes;
+    unsigned long long avail_bytes;
+#if defined(SMALLCLUE_HAVE_STATFS) && defined(MNAMELEN)
+    char mount_point[MNAMELEN];
+#else
+    char mount_point[PATH_MAX];
+#endif
+} SmallclueDfStats;
+
+static bool smallclueDfQuery(const char *path, SmallclueDfStats *out) {
+    if (!path || !*path || !out) {
+        errno = EINVAL;
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+#if defined(SMALLCLUE_HAVE_STATVFS)
+    struct statvfs st;
+    if (statvfs(path, &st) != 0) {
+        return false;
+    }
+    unsigned long long block_size = st.f_frsize ? st.f_frsize : st.f_bsize;
+#elif defined(SMALLCLUE_HAVE_STATFS)
+    struct statfs st;
+    if (statfs(path, &st) != 0) {
+        return false;
+    }
+    unsigned long long block_size = st.f_bsize ? st.f_bsize : st.f_iosize;
+#else
+#error "Either statvfs or statfs must be available for df command"
+#endif
+    if (block_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+#if defined(SMALLCLUE_HAVE_STATVFS)
+    unsigned long long total_blocks = st.f_blocks;
+    unsigned long long free_blocks = st.f_bfree;
+    unsigned long long avail_blocks = st.f_bavail;
+#else
+    unsigned long long total_blocks = st.f_blocks;
+    unsigned long long free_blocks = st.f_bfree;
+    unsigned long long avail_blocks = st.f_bavail;
+#endif
+    out->total_bytes = total_blocks * block_size;
+    out->free_bytes = free_blocks * block_size;
+    out->avail_bytes = avail_blocks * block_size;
+#if defined(SMALLCLUE_HAVE_STATFS) && defined(MNAMELEN)
+    if (st.f_mntonname[0]) {
+        strncpy(out->mount_point, st.f_mntonname, sizeof(out->mount_point) - 1);
+        out->mount_point[sizeof(out->mount_point) - 1] = '\0';
+    }
+#endif
+    if (out->mount_point[0] == '\0') {
+        const char *label = path;
+        char resolved[PATH_MAX];
+        if (realpath(path, resolved)) {
+            label = resolved;
+        }
+        strncpy(out->mount_point, label, sizeof(out->mount_point) - 1);
+        out->mount_point[sizeof(out->mount_point) - 1] = '\0';
+    }
+    return true;
+}
+
+static void smallclueDfFormatSize(char *buf, size_t bufsize,
+                                  unsigned long long bytes, bool human) {
+    if (!buf || bufsize == 0) {
+        return;
+    }
+    if (!human) {
+        unsigned long long blocks = (bytes + 1023ULL) / 1024ULL;
+        snprintf(buf, bufsize, "%llu", blocks);
+        return;
+    }
+    static const char *suffixes[] = {"B", "K", "M", "G", "T", "P"};
+    size_t idx = 0;
+    long double value = (long double)bytes;
+    while (value >= 1024.0L && idx + 1 < sizeof(suffixes) / sizeof(suffixes[0])) {
+        value /= 1024.0L;
+        idx++;
+    }
+    if (value >= 100.0L) {
+        snprintf(buf, bufsize, "%.0Lf%s", value, suffixes[idx]);
+    } else if (value >= 10.0L) {
+        snprintf(buf, bufsize, "%.1Lf%s", value, suffixes[idx]);
+    } else {
+        snprintf(buf, bufsize, "%.2Lf%s", value, suffixes[idx]);
+    }
+}
+
+static void smallclueDfPrintHeader(bool human) {
+    printf("%-24s %12s %12s %12s %6s %s\n",
+           "Filesystem",
+           human ? "Size" : "1K-blocks",
+           human ? "Used" : "Used",
+           human ? "Avail" : "Avail",
+           "Use%",
+           "Mounted on");
+}
+
+static int smallclueDfCommand(int argc, char **argv) {
+    const char *usage = "usage: df [-h] [path ...]\n";
+    bool human = false;
+    smallclueResetGetopt();
+    int opt;
+    while ((opt = getopt(argc, argv, "h")) != -1) {
+        switch (opt) {
+            case 'h':
+                human = true;
+                break;
+            default:
+                fputs(usage, stderr);
+                return 1;
+        }
+    }
+    int path_start = optind;
+    int path_count = (optind < argc) ? (argc - optind) : 0;
+    smallclueDfPrintHeader(human);
+    int status = 0;
+    for (int i = 0; i < (path_count > 0 ? path_count : 1); ++i) {
+        const char *path = (path_count > 0) ? argv[path_start + i] : ".";
+        SmallclueDfStats stats;
+        if (!smallclueDfQuery(path, &stats)) {
+            fprintf(stderr, "df: %s: %s\n", path ? path : "(null)", strerror(errno));
+            status = 1;
+            continue;
+        }
+        unsigned long long used_bytes = (stats.total_bytes > stats.free_bytes)
+                                            ? stats.total_bytes - stats.free_bytes
+                                            : 0;
+        unsigned long long avail_bytes = stats.avail_bytes;
+        long double denom = (long double)used_bytes + (long double)avail_bytes;
+        long double percent = (denom > 0.0L) ? (long double)used_bytes / denom * 100.0L : 0.0L;
+        char total_buf[32];
+        char used_buf[32];
+        char avail_buf[32];
+        smallclueDfFormatSize(total_buf, sizeof total_buf, stats.total_bytes, human);
+        smallclueDfFormatSize(used_buf, sizeof used_buf, used_bytes, human);
+        smallclueDfFormatSize(avail_buf, sizeof avail_buf, avail_bytes, human);
+        printf("%-24s %12s %12s %12s %5.0Lf%% %s\n",
+               stats.mount_point[0] ? stats.mount_point : (path ? path : ""),
+               total_buf,
+               used_buf,
+               avail_buf,
+               percent,
+               path ? path : stats.mount_point);
+    }
+    return status;
 }
 static int smallcluePingAttempt(const struct sockaddr *addr, socklen_t addrlen, int family, int timeout_ms, double *out_ms) {
     int sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
