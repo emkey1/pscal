@@ -20,18 +20,23 @@ final class TerminalFontSettings: ObservableObject {
 
     static let shared = TerminalFontSettings()
     static let appearanceDidChangeNotification = Notification.Name("TerminalFontSettingsAppearanceDidChange")
+    static let preferencesDidChangeNotification = Notification.Name("TerminalPreferencesDidChange")
 
+    private static let minPointSizeValue: CGFloat = 10.0
+    private static let maxPointSizeValue: CGFloat = 28.0
     private let storageKey = "com.pscal.terminal.fontPointSize"
     private let fontNameKey = "com.pscal.terminal.fontName"
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
-    let minimumPointSize: CGFloat = 10.0
-    let maximumPointSize: CGFloat = 28.0
+    private let elvisWindowKey = "com.pscal.terminal.elvisWindow"
+    let minimumPointSize: CGFloat = TerminalFontSettings.minPointSizeValue
+    let maximumPointSize: CGFloat = TerminalFontSettings.maxPointSizeValue
 
     @Published var pointSize: CGFloat = 14.0
     @Published var backgroundColor: UIColor = .systemBackground
     @Published var foregroundColor: UIColor = .label
     @Published private(set) var selectedFontID: String
+    @Published private(set) var elvisWindowEnabled: Bool
 
     let fontOptions: [FontOption]
 
@@ -50,19 +55,29 @@ final class TerminalFontSettings: ObservableObject {
             initialPointSize = 14.0
         }
 
-        pointSize = clamp(initialPointSize)
-        backgroundColor = loadColor(key: backgroundKey, fallback: .systemBackground)
-        foregroundColor = loadColor(key: foregroundKey, fallback: .label)
+        let clampedSize = TerminalFontSettings.clampSize(initialPointSize)
+        pointSize = clampedSize
+        backgroundColor = TerminalFontSettings.loadColor(key: backgroundKey, fallback: .systemBackground)
+        foregroundColor = TerminalFontSettings.loadColor(key: foregroundKey, fallback: .label)
 
         let storedFontID = UserDefaults.standard.string(forKey: fontNameKey)
         let envFontName = ProcessInfo.processInfo.environment["PSCALI_FONT_NAME"]
         selectedFontID = TerminalFontSettings.resolveInitialFontID(storedID: storedFontID,
                                                                    envName: envFontName,
                                                                    options: fontOptions)
+
+        let storedElvisPref = UserDefaults.standard.object(forKey: elvisWindowKey) as? Bool
+        let envWindowMode = ProcessInfo.processInfo.environment["PSCALI_ELVIS_WINDOW_MODE"]
+        elvisWindowEnabled = TerminalFontSettings.resolveInitialElvisWindowSetting(stored: storedElvisPref,
+                                                                                   envValue: envWindowMode)
     }
 
     func clamp(_ size: CGFloat) -> CGFloat {
-        min(max(size, minimumPointSize), maximumPointSize)
+        TerminalFontSettings.clampSize(size)
+    }
+
+    private static func clampSize(_ size: CGFloat) -> CGFloat {
+        return min(max(size, minPointSizeValue), maxPointSizeValue)
     }
 
     var currentFont: UIFont {
@@ -100,36 +115,36 @@ final class TerminalFontSettings: ObservableObject {
     }
 
     func updateBackgroundColor(_ color: UIColor) {
-        let normalized = normalize(color)
+        let normalized = TerminalFontSettings.normalize(color)
         guard normalized != backgroundColor else { return }
         backgroundColor = normalized
-        store(color: normalized, key: backgroundKey)
+        TerminalFontSettings.store(color: normalized, key: backgroundKey)
         notifyChange()
     }
 
     func updateForegroundColor(_ color: UIColor) {
-        let normalized = normalize(color)
+        let normalized = TerminalFontSettings.normalize(color)
         guard normalized != foregroundColor else { return }
         foregroundColor = normalized
-        store(color: normalized, key: foregroundKey)
+        TerminalFontSettings.store(color: normalized, key: foregroundKey)
         notifyChange()
     }
 
-    private func store(color: UIColor, key: String) {
+    private static func store(color: UIColor, key: String) {
         if let data = try? NSKeyedArchiver.archivedData(withRootObject: color, requiringSecureCoding: false) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
 
-    private func loadColor(key: String, fallback: UIColor) -> UIColor {
+    private static func loadColor(key: String, fallback: UIColor) -> UIColor {
         guard let data = UserDefaults.standard.data(forKey: key),
-              let color = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(data) as? UIColor else {
+              let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: data) else {
             return fallback
         }
         return normalize(color)
     }
 
-    private func normalize(_ color: UIColor) -> UIColor {
+    private static func normalize(_ color: UIColor) -> UIColor {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         if color.getRed(&r, green: &g, blue: &b, alpha: &a) {
             return UIColor(red: r, green: g, blue: b, alpha: a)
@@ -215,6 +230,30 @@ final class TerminalFontSettings: ObservableObject {
             return option.displayName.caseInsensitiveCompare(trimmed) == .orderedSame
         })
     }
+
+    private static func resolveInitialElvisWindowSetting(stored: Bool?, envValue: String?) -> Bool {
+        if let stored = stored {
+            return stored
+        }
+        guard let env = envValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !env.isEmpty else {
+            return true
+        }
+        if ["inline", "main", "primary", "embedded", "0", "false", "no"].contains(env) {
+            return false
+        }
+        if ["window", "external", "secondary", "1", "true", "yes"].contains(env) {
+            return true
+        }
+        return true
+    }
+
+    func updateElvisWindowEnabled(_ enabled: Bool) {
+        guard enabled != elvisWindowEnabled else { return }
+        elvisWindowEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: elvisWindowKey)
+        NotificationCenter.default.post(name: TerminalFontSettings.preferencesDidChangeNotification, object: nil)
+    }
 }
 
 struct TerminalView: View {
@@ -264,7 +303,6 @@ private struct TerminalContentView: View {
     }
 
     var body: some View {
-        let background = runtime.terminalBackgroundColor
         let elvisToken = runtime.elvisRenderToken
         let elvisActive = runtime.isElvisModeActive()
         let elvisVisible = ElvisWindowManager.shared.isVisible
@@ -504,6 +542,7 @@ private enum TerminalFontMetrics {
 final class TerminalRendererContainerView: UIView {
     private let terminalView = TerminalDisplayTextView()
     private var lastElvisSnapshotText: String?
+    private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
     private var appearanceObserver: NSObjectProtocol?
 
@@ -522,6 +561,7 @@ final class TerminalRendererContainerView: UIView {
         terminalView.typingAttributes[.font] = terminalView.font
         terminalView.backgroundColor = TerminalFontSettings.shared.backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
+        terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
         addSubview(terminalView)
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
@@ -551,6 +591,7 @@ final class TerminalRendererContainerView: UIView {
     func configure(backgroundColor: UIColor, foregroundColor: UIColor) {
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = foregroundColor
+        terminalView.cursorColor = foregroundColor
         self.backgroundColor = backgroundColor
     }
 
@@ -595,6 +636,7 @@ final class TerminalRendererContainerView: UIView {
             return
         } else {
             lastElvisSnapshotText = nil
+            lastElvisCursorOffset = nil
             terminalView.attributedText = text
             terminalView.cursorTextOffset = cursor?.textOffset
             terminalView.cursorInfo = cursor
@@ -611,23 +653,35 @@ final class TerminalRendererContainerView: UIView {
         if lastElvisSnapshotText != snapshot.text {
             lastElvisSnapshotText = snapshot.text
             terminalView.text = snapshot.text
+            lastElvisCursorOffset = nil
         }
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
+        terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
 
+        var resolvedCursor: TerminalCursorInfo?
+        var preferredInset: CGFloat = 0
         if let commandCursor = elvisCommandLineCursor(from: snapshot) {
-            terminalView.cursorTextOffset = commandCursor.textOffset
-            terminalView.cursorInfo = commandCursor
-            scrollToCursor(textView: terminalView,
-                           cursorOffset: commandCursor.textOffset,
-                           preferBottomInset: Self.commandLinePadding)
+            resolvedCursor = commandCursor
+            preferredInset = Self.commandLinePadding
         } else if let cursor = snapshot.cursor {
-            terminalView.cursorTextOffset = cursor.textOffset
-            terminalView.cursorInfo = cursor
-            scrollToCursor(textView: terminalView, cursorOffset: cursor.textOffset)
+            resolvedCursor = cursor
+        }
+
+        terminalView.cursorTextOffset = resolvedCursor?.textOffset
+        terminalView.cursorInfo = resolvedCursor
+
+        if let offset = resolvedCursor?.textOffset {
+            if offset != lastElvisCursorOffset {
+                scrollToCursor(textView: terminalView,
+                               cursorOffset: offset,
+                               preferBottomInset: preferredInset)
+                lastElvisCursorOffset = offset
+            }
         } else {
             terminalView.cursorTextOffset = nil
             terminalView.cursorInfo = nil
+            lastElvisCursorOffset = nil
             scrollToBottom(textView: terminalView, text: terminalView.attributedText)
         }
     }
@@ -652,17 +706,30 @@ final class TerminalRendererContainerView: UIView {
                                 preferBottomInset: CGFloat = 0) {
         textView.layoutIfNeeded()
         let length = textView.attributedText.length
-        guard length > 0 else {
-            textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        let safeOffset = max(0, min(cursorOffset, length))
+        let beginning = textView.beginningOfDocument
+        guard let position = textView.position(from: beginning, offset: safeOffset) else {
+            let fallbackRange = NSRange(location: max(0, min(safeOffset, max(length - 1, 0))), length: 0)
+            textView.scrollRangeToVisible(fallbackRange)
             return
         }
-        let clamped = max(0, min(cursorOffset, length - 1))
-        let range = NSRange(location: clamped, length: 1)
-        textView.scrollRangeToVisible(range)
-        if preferBottomInset > 0 {
-            var offset = textView.contentOffset
-            offset.y += preferBottomInset
-            textView.setContentOffset(offset, animated: false)
+        let caret = textView.caretRect(for: position)
+        var newOffset = textView.contentOffset
+        let topVisible = newOffset.y + textView.textContainerInset.top
+        let bottomVisible = newOffset.y + textView.bounds.height - textView.textContainerInset.bottom
+        var needsUpdate = false
+        if caret.minY < topVisible {
+            newOffset.y = caret.minY - textView.textContainerInset.top - preferBottomInset
+            needsUpdate = true
+        } else if caret.maxY > (bottomVisible - preferBottomInset) {
+            newOffset.y = caret.maxY - textView.bounds.height + textView.textContainerInset.bottom + preferBottomInset
+            needsUpdate = true
+        }
+        let minOffsetY = -textView.contentInset.top
+        let maxOffsetY = max(minOffsetY, textView.contentSize.height - textView.bounds.height + textView.contentInset.bottom)
+        newOffset.y = min(max(newOffset.y, minOffsetY), maxOffsetY)
+        if needsUpdate {
+            textView.setContentOffset(newOffset, animated: false)
         }
     }
 
@@ -715,6 +782,11 @@ final class TerminalDisplayTextView: UITextView {
     var cursorTextOffset: Int? {
         didSet { updateCursorLayer() }
     }
+    var cursorColor: UIColor = .systemOrange {
+        didSet {
+            cursorLayer.backgroundColor = cursorColor.cgColor
+        }
+    }
 
     private let cursorLayer: CALayer = {
         let layer = CALayer()
@@ -728,6 +800,7 @@ final class TerminalDisplayTextView: UITextView {
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
         layer.addSublayer(cursorLayer)
+        cursorLayer.backgroundColor = cursorColor.cgColor
         isEditable = false
         isScrollEnabled = true
         textContainerInset = .zero
@@ -836,6 +909,17 @@ struct TerminalSettingsView: View {
                         settings.updateForegroundColor(UIColor(swiftUIColor: newValue))
                     }))
                 }
+                Section(header: Text("elvis/vi")) {
+                    Toggle("elvis/vi",
+                           isOn: Binding(get: {
+                        settings.elvisWindowEnabled
+                    }, set: { newValue in
+                        settings.updateElvisWindowEnabled(newValue)
+                    }))
+                    Text("Show the elvis editor in a floating window.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {
@@ -845,6 +929,26 @@ struct TerminalSettingsView: View {
             }
         }
         .applyDetents()
+    }
+}
+
+struct ElvisFloatingRendererView: View {
+    @ObservedObject private var fontSettings = TerminalFontSettings.shared
+    @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
+
+    var body: some View {
+        let token = runtime.elvisRenderToken
+        _ = token
+        let snapshot = ElvisTerminalBridge.shared.snapshot()
+        return TerminalRendererView(text: NSAttributedString(string: snapshot.text),
+                                    cursor: snapshot.cursor,
+                                    backgroundColor: fontSettings.backgroundColor,
+                                    foregroundColor: fontSettings.foregroundColor,
+                                    isElvisMode: true,
+                                    isElvisWindowVisible: false,
+                                    elvisRenderToken: token,
+                                    fontPointSize: fontSettings.pointSize)
+            .background(Color(fontSettings.backgroundColor))
     }
 }
 

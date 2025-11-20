@@ -22,7 +22,7 @@
 #include <pty.h>
 #endif
 
-#if PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3
+#if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
 extern "C" void SDL_SetMainReady(void);
 static void PSCALRuntimeEnsureSDLReady(void);
 #endif
@@ -353,7 +353,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     pthread_create(&s_output_thread, NULL, PSCALRuntimeOutputPump, NULL);
     NSLog(@"PSCALRuntime: output pump thread started");
 
-#if PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3
+#if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
     PSCALRuntimeEnsureSDLReady();
 #endif
     int result = exsh_main(argc, argv);
@@ -513,11 +513,11 @@ int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }
 #import <Foundation/Foundation.h>
-static void PSCALRuntimeEnsureSDLReady(void) {
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
+static void PSCALRuntimeEnsureSDLReady(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         SDL_SetMainReady();
     });
-#endif
 }
+#endif

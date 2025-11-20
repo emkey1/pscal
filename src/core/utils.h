@@ -4,6 +4,8 @@
 #include "symbol/symbol.h"
 #include "vm/vm.h"
 
+#define OWNED_POINTER_SENTINEL ((AST*)(uintptr_t)(-1))
+
 #define PASCAL_DEFAULT_FLOAT_PRECISION 6
 /* =======================
    DEBUG MACROS & GLOBALS

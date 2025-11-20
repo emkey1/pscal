@@ -209,7 +209,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         guard shouldSchedule else { return }
         DispatchQueue.main.async {
-            self.terminalBackgroundColor = UIColor.systemBackground
+            self.terminalBackgroundColor = TerminalFontSettings.shared.backgroundColor
             self.elvisRenderToken &+= 1
             ElvisWindowManager.shared.refreshWindow()
             self.stateQueue.sync {
@@ -458,8 +458,6 @@ final class ElvisTerminalBridge {
                 state.grid[targetRow][targetCol] = Character(scalar)
                 targetCol += 1
             }
-            state.cursorRow = targetRow
-            state.cursorCol = min(targetCol, max(0, state.columns - 1))
         }
     }
 

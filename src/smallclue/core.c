@@ -1110,30 +1110,101 @@ static int smallclueEchoCommand(int argc, char **argv) {
     return 0;
 }
 
+static bool smallclueLsValidateShortOptions(const char *arg,
+                                            int *show_all,
+                                            int *long_format,
+                                            int *sort_by_time) {
+    if (!arg) {
+        return true;
+    }
+    for (const char *cursor = arg; *cursor; ++cursor) {
+        switch (*cursor) {
+            case 'a':
+                *show_all = 1;
+                break;
+            case 'l':
+                *long_format = 1;
+                break;
+            case 't':
+                *sort_by_time = 1;
+                break;
+            default:
+                fprintf(stderr, "ls: invalid option -- '%c'\n", *cursor);
+                return false;
+        }
+    }
+    return true;
+}
+
+static bool smallclueLsAcceptColorValue(const char *option_name, const char *value) {
+    if (!value) {
+        return true;
+    }
+    if (*value == '\0') {
+        fprintf(stderr, "ls: invalid argument '' for '%s'\n", option_name);
+        return false;
+    }
+    if (strcasecmp(value, "auto") == 0 ||
+        strcasecmp(value, "always") == 0 ||
+        strcasecmp(value, "never") == 0 ||
+        strcasecmp(value, "none") == 0) {
+        return true;
+    }
+    fprintf(stderr, "ls: invalid argument '%s' for '%s'\n", value, option_name);
+    return false;
+}
+
+static bool smallclueLsHandleLongOption(const char *arg) {
+    if (!arg) {
+        return true;
+    }
+    if (strcmp(arg, "--color") == 0) {
+        return smallclueLsAcceptColorValue("--color", NULL);
+    }
+    if (strcmp(arg, "--colour") == 0) {
+        return smallclueLsAcceptColorValue("--colour", NULL);
+    }
+    if (strncmp(arg, "--color=", 8) == 0) {
+        return smallclueLsAcceptColorValue("--color", arg + 8);
+    }
+    if (strncmp(arg, "--colour=", 9) == 0) {
+        return smallclueLsAcceptColorValue("--colour", arg + 9);
+    }
+    fprintf(stderr, "ls: unrecognized option '%s'\n", arg);
+    return false;
+}
+
 static int smallclueLsCommand(int argc, char **argv) {
     int show_all = 0;
     int long_format = 0;
     int sort_by_time = 0;
-    int opt;
     smallclueResetGetopt();
-    while ((opt = getopt(argc, argv, "alt")) != -1) {
-        switch (opt) {
-            case 'a':
-                show_all = 1;
-                break;
-            case 'l':
-                long_format = 1;
-                break;
-            case 't':
-                sort_by_time = 1;
-                break;
-            default:
-                return 1;
+
+    int idx = 1;
+    while (idx < argc) {
+        const char *arg = argv[idx];
+        if (!arg || arg[0] != '-' || arg[1] == '\0') {
+            break;
         }
+        if (strcmp(arg, "--") == 0) {
+            idx++;
+            break;
+        }
+        if (arg[1] == '-') {
+            if (!smallclueLsHandleLongOption(arg)) {
+                return 1;
+            }
+            idx++;
+            continue;
+        }
+        if (!smallclueLsValidateShortOptions(arg + 1, &show_all, &long_format, &sort_by_time)) {
+            return 1;
+        }
+        idx++;
     }
 
     int status = 0;
-    int paths_start = optind;
+    int paths_start = idx;
     if (paths_start >= argc) {
         return list_directory(".", show_all, long_format, sort_by_time);
     }

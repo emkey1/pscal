@@ -12,23 +12,30 @@ private func elvisRuntimeLog(_ message: String) {
 final class ElvisWindowManager {
     static let shared = ElvisWindowManager()
     static let activityType = "com.pscal.elvis.scene"
+
     static var externalWindowEnabled: Bool {
-        guard let cString = getenv("PSCALI_ELVIS_WINDOW_MODE") else {
-            return true
-        }
-        let value = String(cString: cString).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch value {
-        case "inline", "main", "primary", "embedded", "0", "false", "no":
-            return false
-        default:
-            return true
-        }
+        return TerminalFontSettings.shared.elvisWindowEnabled
     }
 
+    private var preferenceObserver: NSObjectProtocol?
     private var activeSession: UISceneSession?
     private weak var controller: TerminalElvisViewController?
     private weak var mainSession: UISceneSession?
     private var pendingSceneActivity: NSUserActivity?
+
+    private init() {
+        preferenceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.preferencesDidChangeNotification,
+                                                                    object: nil,
+                                                                    queue: .main) { [weak self] _ in
+            self?.applyPreferenceChange()
+        }
+    }
+
+    deinit {
+        if let observer = preferenceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
 
     var isVisible: Bool {
         guard ElvisWindowManager.externalWindowEnabled else { return false }
@@ -60,6 +67,12 @@ final class ElvisWindowManager {
                 UIApplication.shared.requestSceneSessionDestruction(session, options: nil, errorHandler: nil)
                 self.activeSession = nil
                 self.controller = nil
+                if let mainSession = self.mainSession {
+                    UIApplication.shared.requestSceneSessionActivation(mainSession,
+                                                                       userActivity: nil,
+                                                                       options: nil,
+                                                                       errorHandler: nil)
+                }
             } else {
                 self.pendingSceneActivity = nil
             }
@@ -68,11 +81,6 @@ final class ElvisWindowManager {
 
     func refreshWindow() {
         guard ElvisWindowManager.externalWindowEnabled else { return }
-        let snapshot = ElvisTerminalBridge.shared.snapshot()
-        DispatchQueue.main.async { [weak self] in
-            guard let controller = self?.controller else { return }
-            controller.render(snapshot: snapshot)
-        }
     }
 
     func sceneDidConnect(session: UISceneSession, controller: TerminalElvisViewController) {
@@ -105,6 +113,17 @@ final class ElvisWindowManager {
     func mainSceneDidDisconnect(session: UISceneSession) {
         if mainSession == session {
             mainSession = nil
+        }
+    }
+
+    private func applyPreferenceChange() {
+        if ElvisWindowManager.externalWindowEnabled {
+            if ElvisTerminalBridge.shared.isActive {
+                showWindow()
+                refreshWindow()
+            }
+        } else {
+            hideWindow()
         }
     }
 }
@@ -195,29 +214,31 @@ private enum ElvisFontMetrics {
 }
 
 final class TerminalElvisViewController: UIViewController {
-    private let renderer = TerminalRendererContainerView()
+    private let hostingController = UIHostingController(rootView: ElvisFloatingRendererView())
     private let inputViewBridge = TerminalKeyInputView()
     private var lastReportedMetrics: TerminalGeometryMetrics?
-    private var currentElvisFont: UIFont = TerminalElvisViewController.buildPreferredElvisFont(for: UITraitCollection.current)
     private var fontObserver: NSObjectProtocol?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = TerminalFontSettings.shared.backgroundColor
 
-        renderer.frame = view.bounds
-        renderer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(renderer)
-        renderer.configure(backgroundColor: TerminalFontSettings.shared.backgroundColor,
-                           foregroundColor: TerminalFontSettings.shared.foregroundColor)
-        applyCurrentElvisFont()
+        addChild(hostingController)
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(hostingController.view)
+        NSLayoutConstraint.activate([
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        hostingController.didMove(toParent: self)
 
         configureInputBridge()
-        render(snapshot: ElvisTerminalBridge.shared.snapshot())
         fontObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                               object: nil,
                                                               queue: .main) { [weak self] _ in
-            self?.recalculateElvisFont()
+            self?.reportGeometryIfNeeded()
         }
     }
 
@@ -245,7 +266,7 @@ final class TerminalElvisViewController: UIViewController {
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
-            recalculateElvisFont()
+            reportGeometryIfNeeded()
         }
     }
 
@@ -279,15 +300,6 @@ final class TerminalElvisViewController: UIViewController {
         }
     }
 
-    func render(snapshot: ElvisSnapshot) {
-        let attributed = NSAttributedString(string: snapshot.text)
-        renderer.update(text: attributed,
-                        cursor: snapshot.cursor,
-                        backgroundColor: UIColor.systemBackground,
-                        isElvisMode: true,
-                        elvisSnapshot: snapshot)
-    }
-
     private func reportGeometryIfNeeded() {
         guard view.window != nil else {
             return
@@ -296,7 +308,7 @@ final class TerminalElvisViewController: UIViewController {
         let safeInsets = view.safeAreaInsets
         let safeBounds = bounds.inset(by: safeInsets)
         guard safeBounds.width > 0, safeBounds.height > 0 else { return }
-        let font = renderer.currentFont()
+        let font = TerminalElvisViewController.buildPreferredElvisFont(for: traitCollection)
         let (metrics, charSize) = ElvisFontMetrics.metrics(for: bounds,
                                                            safeInsets: safeInsets,
                                                            font: font)
@@ -314,16 +326,6 @@ final class TerminalElvisViewController: UIViewController {
                                charSize.width,
                                charSize.height))
         PscalRuntimeBootstrap.shared.updateElvisWindowSize(columns: metrics.columns, rows: metrics.rows)
-    }
-
-    private func recalculateElvisFont() {
-        currentElvisFont = TerminalElvisViewController.buildPreferredElvisFont(for: traitCollection)
-        applyCurrentElvisFont()
-        reportGeometryIfNeeded()
-    }
-
-    private func applyCurrentElvisFont() {
-        renderer.applyElvisFont(currentElvisFont)
     }
 
     private static func buildPreferredElvisFont(for traits: UITraitCollection) -> UIFont {

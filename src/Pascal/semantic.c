@@ -1,6 +1,7 @@
 #include "Pascal/semantic.h"
 
 #include "Pascal/globals.h"
+#include "Pascal/type_registry.h"
 #include "ast/closure_registry.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
@@ -13,6 +14,121 @@
 static AST *gProgramRoot = NULL;
 static ClosureCaptureRegistry gClosureRegistry;
 static bool gRegistryInitialized = false;
+
+static AST *resolveTypeAliasLocal(AST *type_node) {
+    if (!type_node) {
+        return NULL;
+    }
+
+    while (type_node) {
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST *resolved = lookupType(type_node->token->value);
+            if (!resolved || resolved == type_node) {
+                break;
+            }
+            type_node = resolved;
+            continue;
+        }
+
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+
+        break;
+    }
+
+    return type_node;
+}
+
+static bool astIsInterface(AST *node) {
+    AST *resolved = resolveTypeAliasLocal(node);
+    return resolved && resolved->type == AST_INTERFACE;
+}
+
+static bool astIsRecord(AST *node) {
+    AST *resolved = resolveTypeAliasLocal(node);
+    return resolved && resolved->type == AST_RECORD_TYPE;
+}
+
+static AST *findRecordMethod(AST *recordType, const char *name) {
+    if (!recordType || recordType->type != AST_RECORD_TYPE || !name) {
+        return NULL;
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST *child = recordType->children[i];
+        if (!child) {
+            continue;
+        }
+        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+            child->token && child->token->value &&
+            strcasecmp(child->token->value, name) == 0) {
+            return child;
+        }
+    }
+
+    return NULL;
+}
+
+static void markRecordAgainstInterface(AST *recordType, AST *interfaceType);
+
+static void markRecordAgainstInterfaceList(AST *recordType, AST *baseList) {
+    if (!baseList) {
+        return;
+    }
+
+    if (baseList->type == AST_LIST) {
+        for (int i = 0; i < baseList->child_count; i++) {
+            markRecordAgainstInterface(recordType, baseList->children[i]);
+        }
+    } else {
+        markRecordAgainstInterface(recordType, baseList);
+    }
+}
+
+static void markRecordAgainstInterface(AST *recordType, AST *interfaceType) {
+    AST *resolvedInterface = resolveTypeAliasLocal(interfaceType);
+    if (!resolvedInterface || resolvedInterface->type != AST_INTERFACE) {
+        return;
+    }
+
+    if (resolvedInterface->extra) {
+        markRecordAgainstInterfaceList(recordType, resolvedInterface->extra);
+    }
+
+    for (int i = 0; i < resolvedInterface->child_count; i++) {
+        AST *method = resolvedInterface->children[i];
+        if (!method || (method->type != AST_PROCEDURE_DECL && method->type != AST_FUNCTION_DECL)) {
+            continue;
+        }
+        if (!method->token || !method->token->value) {
+            continue;
+        }
+        AST *recordMethod = findRecordMethod(recordType, method->token->value);
+        if (recordMethod) {
+            recordMethod->is_virtual = true;
+        }
+    }
+}
+
+static void markVirtualMethodsForInterfaces(void) {
+    for (TypeEntry *recordEntry = type_table; recordEntry; recordEntry = recordEntry->next) {
+        AST *recordNode = resolveTypeAliasLocal(recordEntry->typeAST);
+        if (!astIsRecord(recordNode)) {
+            continue;
+        }
+
+        for (TypeEntry *ifaceEntry = type_table; ifaceEntry; ifaceEntry = ifaceEntry->next) {
+            AST *ifaceNode = ifaceEntry->typeAST;
+            if (!astIsInterface(ifaceNode)) {
+                continue;
+            }
+            markRecordAgainstInterface(recordNode, ifaceNode);
+        }
+    }
+}
 
 typedef struct {
     AST *declaration;
@@ -348,6 +464,8 @@ void pascalPerformSemanticAnalysis(AST *root) {
 
     ensureRegistry();
     gProgramRoot = root;
+
+    markVirtualMethodsForInterfaces();
 
     analyzeClosureCaptures(root);
     checkClosureEscapes(root);
