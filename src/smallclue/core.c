@@ -171,6 +171,7 @@ static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
+static int smallclueMarkdownCommand(int argc, char **argv);
 
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
@@ -198,6 +199,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"less", smallcluePagerCommand, "Paginate file contents"},
     {"ln", smallclueLnCommand, "Create links"},
     {"ls", smallclueLsCommand, "List directory contents"},
+    {"md", smallclueMarkdownCommand, "Read Markdown documents"},
     {"mkdir", smallclueMkdirCommand, "Create directories"},
     {"more", smallcluePagerCommand, "Paginate file contents"},
     {"mv", smallclueMvCommand, "Move or rename files"},
@@ -867,6 +869,598 @@ static int pager_file(const char *cmd_name, const char *path, FILE *stream) {
     int status = pagerInteractiveSession(cmd_name, &buffer, page_rows);
     pagerBufferFree(&buffer);
     return status;
+}
+
+#define MARKDOWN_WRAP_WIDTH 78
+
+typedef struct {
+    char *name;
+    char *title;
+} MarkdownDocEntry;
+
+static void markdownParagraphAppend(char **buffer, size_t *length, size_t *capacity, const char *text) {
+    if (!text || !*text) {
+        return;
+    }
+    size_t text_len = strlen(text);
+    size_t needed = *length + text_len + 2;
+    if (needed > *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 128 : *capacity * 2;
+        while (new_capacity < needed) {
+            new_capacity *= 2;
+        }
+        char *resized = (char *)realloc(*buffer, new_capacity);
+        if (!resized) {
+            return;
+        }
+        *buffer = resized;
+        *capacity = new_capacity;
+    }
+    if (*length > 0) {
+        (*buffer)[(*length)++] = ' ';
+    }
+    memcpy(*buffer + *length, text, text_len);
+    *length += text_len;
+    (*buffer)[*length] = '\0';
+}
+
+static char *markdownSimplifyInline(const char *text) {
+    if (!text) {
+        return strdup("");
+    }
+    size_t len = strlen(text);
+    size_t cap = len * 2 + 1;
+    char *buffer = (char *)malloc(cap);
+    if (!buffer) {
+        return strdup(text);
+    }
+    size_t dst = 0;
+    for (size_t i = 0; text[i]; ) {
+        char ch = text[i];
+        if (ch == '`') {
+            i++;
+            continue;
+        }
+        if ((ch == '*' || ch == '_')) {
+            size_t advance = 1;
+            if (text[i + 1] == ch) {
+                advance = 2;
+            }
+            i += advance;
+            continue;
+        }
+        if (ch == '[') {
+            size_t close = i + 1;
+            while (text[close] && text[close] != ']') {
+                close++;
+            }
+            if (text[close] == ']' && text[close + 1] == '(') {
+                size_t url_start = close + 2;
+                size_t url_end = url_start;
+                while (text[url_end] && text[url_end] != ')') {
+                    url_end++;
+                }
+                if (text[url_end] == ')') {
+                    for (size_t j = i + 1; j < close; ++j) {
+                        buffer[dst++] = text[j];
+                    }
+                    if (url_end > url_start) {
+                        buffer[dst++] = ' ';
+                        buffer[dst++] = '(';
+                        for (size_t j = url_start; j < url_end; ++j) {
+                            buffer[dst++] = text[j];
+                        }
+                        buffer[dst++] = ')';
+                    }
+                    i = url_end + 1;
+                    continue;
+                }
+            }
+        }
+        buffer[dst++] = ch;
+        i++;
+    }
+    buffer[dst] = '\0';
+    return buffer;
+}
+
+static void markdownWrapAndWrite(FILE *out, const char *text, const char *firstPrefix, const char *subPrefix, int width) {
+    if (!out) {
+        return;
+    }
+    if (!text || !*text) {
+        if (firstPrefix && *firstPrefix) {
+            fputs(firstPrefix, out);
+        }
+        fputc('\n', out);
+        return;
+    }
+    const char *prefix_first = firstPrefix ? firstPrefix : "";
+    const char *prefix_sub = subPrefix ? subPrefix : prefix_first;
+    size_t prefix_first_len = strlen(prefix_first);
+    size_t prefix_sub_len = strlen(prefix_sub);
+    int wrap_width = width > 20 ? width : MARKDOWN_WRAP_WIDTH;
+
+    char *copy = strdup(text);
+    if (!copy) {
+        return;
+    }
+    char *saveptr = NULL;
+    char *token = strtok_r(copy, " \t\r\n", &saveptr);
+    size_t current = prefix_first_len;
+    fputs(prefix_first, out);
+    bool first_word = true;
+    while (token) {
+        size_t tok_len = strlen(token);
+        size_t extra = first_word ? tok_len : tok_len + 1;
+        if (!first_word && (int)(current + extra) > wrap_width) {
+            fputc('\n', out);
+            fputs(prefix_sub, out);
+            current = prefix_sub_len;
+            first_word = true;
+            extra = tok_len;
+        }
+        if (!first_word) {
+            fputc(' ', out);
+            current++;
+        }
+        fputs(token, out);
+        current += tok_len;
+        first_word = false;
+        token = strtok_r(NULL, " \t\r\n", &saveptr);
+    }
+    fputc('\n', out);
+    free(copy);
+}
+
+static bool markdownIsHorizontalRule(const char *text) {
+    if (!text) return false;
+    size_t dash_count = 0;
+    for (const char *p = text; *p; ++p) {
+        if (*p == '-' || *p == '_' || *p == '*') {
+            dash_count++;
+        } else if (!isspace((unsigned char)*p)) {
+            return false;
+        }
+    }
+    return dash_count >= 3;
+}
+
+static int markdownHeadingLevel(const char *text) {
+    if (!text) return 0;
+    int level = 0;
+    const char *p = text;
+    while (*p == '#') {
+        level++;
+        p++;
+    }
+    if (level > 0 && (*p == ' ' || *p == '\t')) {
+        return level;
+    }
+    return 0;
+}
+
+static void markdownWriteHeading(FILE *out, const char *text, int level) {
+    if (!text || !*text) return;
+    char *formatted = markdownSimplifyInline(text);
+    if (!formatted) return;
+    for (char *p = formatted; *p; ++p) {
+        *p = (char)toupper((unsigned char)*p);
+    }
+    fprintf(out, "%s\n", formatted);
+    char underline = (level == 1) ? '=' : '-';
+    size_t len = strlen(formatted);
+    size_t underline_len = len > MARKDOWN_WRAP_WIDTH ? MARKDOWN_WRAP_WIDTH : len;
+    for (size_t i = 0; i < underline_len; ++i) {
+        fputc(underline, out);
+    }
+    fputc('\n', out);
+    fputc('\n', out);
+    free(formatted);
+}
+
+static void markdownBuildPrefix(char *buffer, size_t buffer_size, int spaces, const char *suffix) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+    if (spaces < 0) spaces = 0;
+    if ((size_t)(spaces + 1) > buffer_size) {
+        spaces = (int)buffer_size - 1;
+    }
+    size_t suffix_len = suffix ? strlen(suffix) : 0;
+    if ((size_t)spaces + suffix_len + 1 > buffer_size) {
+        if (suffix_len + 1 > buffer_size) {
+            suffix_len = buffer_size - 1;
+        }
+        spaces = 0;
+    }
+    memset(buffer, ' ', (size_t)spaces);
+    if (suffix_len > 0) {
+        memcpy(buffer + spaces, suffix, suffix_len);
+    }
+    buffer[spaces + suffix_len] = '\0';
+}
+
+static bool markdownExtractListItem(char *line, char **content, char *firstPrefix, size_t firstSize, char *subPrefix, size_t subSize) {
+    if (!line || !content || !firstPrefix || !subPrefix) {
+        return false;
+    }
+    char *p = line;
+    int indent = 0;
+    while (*p == ' ' || *p == '\t') {
+        indent += (*p == '\t') ? 4 : 1;
+        p++;
+    }
+    if ((*p == '-' || *p == '*' || *p == '+') && (p[1] == ' ' || p[1] == '\t')) {
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        *content = p;
+        markdownBuildPrefix(firstPrefix, firstSize, indent, "• ");
+        markdownBuildPrefix(subPrefix, subSize, indent + 2, "  ");
+        return true;
+    }
+    if (isdigit((unsigned char)*p)) {
+        const char *start = p;
+        while (isdigit((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '.' && (p[1] == ' ' || p[1] == '\t')) {
+            int value = atoi(start);
+            p++;
+            while (*p == ' ' || *p == '\t') p++;
+            *content = p;
+            char suffix[16];
+            snprintf(suffix, sizeof(suffix), "%d. ", value);
+            markdownBuildPrefix(firstPrefix, firstSize, indent, suffix);
+            size_t suffix_len = strlen(suffix);
+            markdownBuildPrefix(subPrefix, subSize, indent + (int)suffix_len, "  ");
+            return true;
+        }
+    }
+    return false;
+}
+
+static void markdownFlushParagraph(FILE *out, char **paragraph, size_t *length) {
+    if (!paragraph || !*paragraph || !length || *length == 0) {
+        return;
+    }
+    (*paragraph)[*length] = '\0';
+    char *formatted = markdownSimplifyInline(*paragraph);
+    if (formatted) {
+        markdownWrapAndWrite(out, formatted, "", "", MARKDOWN_WRAP_WIDTH);
+        free(formatted);
+    }
+    fputc('\n', out);
+    *length = 0;
+    **paragraph = '\0';
+}
+
+static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
+    if (!input || !output) {
+        return 1;
+    }
+    char *line = NULL;
+    size_t line_cap = 0;
+    ssize_t line_len;
+    bool in_code_block = false;
+    char *paragraph = NULL;
+    size_t paragraph_len = 0;
+    size_t paragraph_cap = 0;
+
+    if (label && *label) {
+        fprintf(output, "%s\n", label);
+        size_t underline_len = strlen(label);
+        if (underline_len > MARKDOWN_WRAP_WIDTH) {
+            underline_len = MARKDOWN_WRAP_WIDTH;
+        }
+        for (size_t i = 0; i < underline_len; ++i) {
+            fputc('=', output);
+        }
+        fputc('\n', output);
+        fputc('\n', output);
+    }
+
+    while ((line_len = getline(&line, &line_cap, input)) != -1) {
+        while (line_len > 0 && (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
+            line[--line_len] = '\0';
+        }
+        for (char *p = line; *p; ++p) {
+            if (*p == '\t') {
+                *p = ' ';
+            }
+        }
+        char *trimmed = line;
+        while (*trimmed && isspace((unsigned char)*trimmed)) {
+            trimmed++;
+        }
+        char *end = trimmed + strlen(trimmed);
+        while (end > trimmed && isspace((unsigned char)end[-1])) {
+            *--end = '\0';
+        }
+
+        if (strncmp(trimmed, "```", 3) == 0) {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            in_code_block = !in_code_block;
+            fputc('\n', output);
+            continue;
+        }
+
+        if (in_code_block) {
+            fprintf(output, "    %s\n", trimmed);
+            continue;
+        }
+
+        if (*trimmed == '\0') {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            fputc('\n', output);
+            continue;
+        }
+
+        if (markdownIsHorizontalRule(trimmed)) {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            for (int i = 0; i < MARKDOWN_WRAP_WIDTH; ++i) {
+                fputc('-', output);
+            }
+            fputc('\n', output);
+            fputc('\n', output);
+            continue;
+        }
+
+        int heading = markdownHeadingLevel(trimmed);
+        if (heading > 0) {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            const char *heading_text = trimmed + heading;
+            while (*heading_text == ' ' || *heading_text == '\t') heading_text++;
+            markdownWriteHeading(output, heading_text, heading);
+            continue;
+        }
+
+        if (*trimmed == '>') {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            char *quote = trimmed + 1;
+            while (*quote == ' ' || *quote == '\t') quote++;
+            char *formatted = markdownSimplifyInline(quote);
+            if (formatted) {
+                markdownWrapAndWrite(output, formatted, "> ", "> ", MARKDOWN_WRAP_WIDTH);
+                free(formatted);
+            }
+            fputc('\n', output);
+            continue;
+        }
+
+        char *list_text = NULL;
+        char prefix_first[32];
+        char prefix_sub[32];
+        if (markdownExtractListItem(trimmed, &list_text, prefix_first, sizeof(prefix_first), prefix_sub, sizeof(prefix_sub))) {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            char *formatted = markdownSimplifyInline(list_text);
+            if (formatted) {
+                markdownWrapAndWrite(output, formatted, prefix_first, prefix_sub, MARKDOWN_WRAP_WIDTH);
+                free(formatted);
+            }
+            fputc('\n', output);
+            continue;
+        }
+
+        markdownParagraphAppend(&paragraph, &paragraph_len, &paragraph_cap, trimmed);
+    }
+
+    markdownFlushParagraph(output, &paragraph, &paragraph_len);
+    free(paragraph);
+    free(line);
+    return 0;
+}
+
+static int markdownResolvePath(const char *input, char *resolved, size_t resolved_size) {
+    if (!input || !resolved || resolved_size == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (strcmp(input, "-") == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct stat st;
+    if (stat(input, &st) == 0 && S_ISREG(st.st_mode)) {
+        if (realpath(input, resolved)) {
+            return 0;
+        }
+        strncpy(resolved, input, resolved_size - 1);
+        resolved[resolved_size - 1] = '\0';
+        return 0;
+    }
+    if (strchr(input, '/')) {
+        return -1;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !*home) {
+        return -1;
+    }
+    char docs_directory[PATH_MAX];
+    if (smallclueBuildPath(docs_directory, sizeof(docs_directory), home, "Docs") != 0) {
+        return -1;
+    }
+    char candidate[PATH_MAX];
+    if (smallclueBuildPath(candidate, sizeof(candidate), docs_directory, input) == 0 &&
+        stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+        strncpy(resolved, candidate, resolved_size - 1);
+        resolved[resolved_size - 1] = '\0';
+        return 0;
+    }
+    char with_ext[PATH_MAX];
+    snprintf(with_ext, sizeof(with_ext), "%s.md", input);
+    if (smallclueBuildPath(candidate, sizeof(candidate), docs_directory, with_ext) == 0 &&
+        stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+        strncpy(resolved, candidate, resolved_size - 1);
+        resolved[resolved_size - 1] = '\0';
+        return 0;
+    }
+    return -1;
+}
+
+static int smallclueMarkdownDisplayStream(const char *label, FILE *input) {
+    FILE *buffer = tmpfile();
+    bool direct = false;
+    if (!buffer) {
+        buffer = stdout;
+        direct = true;
+    }
+    if (markdownRenderStream(label, input, buffer) != 0) {
+        if (!direct) {
+            fclose(buffer);
+        }
+        return 1;
+    }
+    if (direct) {
+        fflush(buffer);
+        return 0;
+    }
+    fflush(buffer);
+    rewind(buffer);
+    int status = pager_file("md", label ? label : "(stdin)", buffer);
+    fclose(buffer);
+    return status;
+}
+
+static int smallclueMarkdownDisplayPath(const char *path) {
+    if (!path) {
+        return 1;
+    }
+    if (strcmp(path, "-") == 0) {
+        return smallclueMarkdownDisplayStream("(stdin)", stdin);
+    }
+    char resolved[PATH_MAX];
+    if (markdownResolvePath(path, resolved, sizeof(resolved)) != 0) {
+        fprintf(stderr, "md: %s: %s\n", path, strerror(errno));
+        return 1;
+    }
+    FILE *fp = fopen(resolved, "r");
+    if (!fp) {
+        fprintf(stderr, "md: %s: %s\n", resolved, strerror(errno));
+        return 1;
+    }
+    int status = smallclueMarkdownDisplayStream(resolved, fp);
+    fclose(fp);
+    return status;
+}
+
+static char *markdownExtractTitle(const char *path) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return NULL;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t len;
+    char *title = NULL;
+    while ((len = getline(&line, &cap, fp)) != -1) {
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        char *trimmed = line;
+        while (*trimmed && isspace((unsigned char)*trimmed)) trimmed++;
+        if (*trimmed == '\0') {
+            continue;
+        }
+        if (trimmed[0] == '#') {
+            while (*trimmed == '#') trimmed++;
+            if (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            char *formatted = markdownSimplifyInline(trimmed);
+            title = formatted;
+            break;
+        }
+    }
+    free(line);
+    fclose(fp);
+    if (!title) {
+        title = strdup("(untitled)");
+    }
+    return title;
+}
+
+static int markdownDocEntryCompare(const void *a, const void *b) {
+    const MarkdownDocEntry *left = (const MarkdownDocEntry *)a;
+    const MarkdownDocEntry *right = (const MarkdownDocEntry *)b;
+    if (!left->name || !right->name) {
+        return 0;
+    }
+    return strcasecmp(left->name, right->name);
+}
+
+static void markdownDocEntryFree(MarkdownDocEntry *entry) {
+    if (!entry) return;
+    free(entry->name);
+    free(entry->title);
+}
+
+static int smallclueMarkdownListDocuments(void) {
+    const char *home = getenv("HOME");
+    if (!home || !*home) {
+        fprintf(stderr, "md: HOME is not set\n");
+        return 1;
+    }
+    char docs_dir[PATH_MAX];
+    if (smallclueBuildPath(docs_dir, sizeof(docs_dir), home, "Docs") != 0) {
+        fprintf(stderr, "md: unable to resolve Docs directory\n");
+        return 1;
+    }
+    DIR *dir = opendir(docs_dir);
+    if (!dir) {
+        fprintf(stderr, "md: %s: %s\n", docs_dir, strerror(errno));
+        return 1;
+    }
+    MarkdownDocEntry *entries = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    struct dirent *dent;
+    while ((dent = readdir(dir)) != NULL) {
+        if (dent->d_name[0] == '.') {
+            continue;
+        }
+        const char *dot = strrchr(dent->d_name, '.');
+        if (!dot || strcasecmp(dot, ".md") != 0) {
+            continue;
+        }
+        char path[PATH_MAX];
+        if (smallclueBuildPath(path, sizeof(path), docs_dir, dent->d_name) != 0) {
+            continue;
+        }
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        if (count == capacity) {
+            size_t new_cap = capacity == 0 ? 8 : capacity * 2;
+            MarkdownDocEntry *resized = (MarkdownDocEntry *)realloc(entries, new_cap * sizeof(MarkdownDocEntry));
+            if (!resized) {
+                continue;
+            }
+            entries = resized;
+            capacity = new_cap;
+        }
+        entries[count].name = strdup(dent->d_name);
+        if (entries[count].name) {
+            char *ext = strrchr(entries[count].name, '.');
+            if (ext) *ext = '\0';
+        }
+        entries[count].title = markdownExtractTitle(path);
+        count++;
+    }
+    closedir(dir);
+    if (count == 0) {
+        printf("No Markdown documents found in %s\n", docs_dir);
+        free(entries);
+        return 1;
+    }
+    qsort(entries, count, sizeof(MarkdownDocEntry), markdownDocEntryCompare);
+    printf("Markdown documents in %s:\n\n", docs_dir);
+    for (size_t i = 0; i < count; ++i) {
+        const char *title = entries[i].title ? entries[i].title : "";
+        printf("  %-24s %s\n", entries[i].name ? entries[i].name : "(unknown)", title);
+        markdownDocEntryFree(&entries[i]);
+    }
+    free(entries);
+    return 0;
 }
 
 static int cat_file(const char *path) {
@@ -1752,6 +2346,30 @@ static int smallcluePagerCommand(int argc, char **argv) {
         }
         status |= pager_file(cmd_name, path, fp);
         fclose(fp);
+    }
+    return status ? 1 : 0;
+}
+
+static int smallclueMarkdownCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    int list_only = 0;
+    int opt;
+    while ((opt = getopt(argc, argv, "l")) != -1) {
+        switch (opt) {
+            case 'l':
+                list_only = 1;
+                break;
+            default:
+                fprintf(stderr, "usage: md [-l] [file ...]\n");
+                return 1;
+        }
+    }
+    if (list_only || optind >= argc) {
+        return smallclueMarkdownListDocuments();
+    }
+    int status = 0;
+    for (int i = optind; i < argc; ++i) {
+        status |= smallclueMarkdownDisplayPath(argv[i]);
     }
     return status ? 1 : 0;
 }

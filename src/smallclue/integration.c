@@ -141,6 +141,7 @@ DEFINE_SMALLCLUE_WRAPPER("vi", vi)
 #endif
 DEFINE_SMALLCLUE_WRAPPER("less", less)
 DEFINE_SMALLCLUE_WRAPPER("ls", ls)
+DEFINE_SMALLCLUE_WRAPPER("md", md)
 DEFINE_SMALLCLUE_WRAPPER("more", more)
 
 #undef DEFINE_SMALLCLUE_WRAPPER
@@ -150,6 +151,7 @@ static pthread_once_t g_smallclue_builtin_once = PTHREAD_ONCE_INIT;
 static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("cat", vmBuiltinSmallclue_cat, BUILTIN_TYPE_PROCEDURE, "cat");
     registerVmBuiltin("ls", vmBuiltinSmallclue_ls, BUILTIN_TYPE_PROCEDURE, "ls");
+    registerVmBuiltin("md", vmBuiltinSmallclue_md, BUILTIN_TYPE_PROCEDURE, "md");
     registerVmBuiltin("less", vmBuiltinSmallclue_less, BUILTIN_TYPE_PROCEDURE, "less");
     registerVmBuiltin("more", vmBuiltinSmallclue_more, BUILTIN_TYPE_PROCEDURE, "more");
     registerVmBuiltin("clear", vmBuiltinSmallclue_clear, BUILTIN_TYPE_PROCEDURE, "clear");

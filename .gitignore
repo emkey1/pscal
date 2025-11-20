@@ -8,7 +8,7 @@ links
 Misc/old
 .gitignore
 .bin
-
+third-party/SDL/*
 Tests/edge_input.txt
 Tests/readln_test.txt
 Tests/async_test_src.txt
