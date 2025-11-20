@@ -13,6 +13,8 @@ str IndexPath;
 str Body;
 text GFile;
 str ConfiguredAssetRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/misc/simple_web_server/htdocs";
+str ConfiguredDocumentRoot = "@PSCALI_SYSFILES_ROOT@";
+str ConfiguredTmpRoot = "@PSCALI_WORKSPACE_ROOT@";
 
 // Worker pool + simple ring queue for accepted connections
 int MaxThreads = 8;                   // configurable via CLI
@@ -31,17 +33,46 @@ int GDropped = 0;
 int GServed = 0;
 
 // Helpers
+str ensureDirCandidate(str candidate) {
+  if (candidate == "") return "";
+  str normalized = fsNormalizePath(candidate);
+  if (normalized != "") candidate = normalized;
+  if (!fsPathExists(candidate)) {
+    mkdir(candidate);
+  }
+  if (fsPathExists(candidate)) {
+    return candidate;
+  }
+  return "";
+}
+
 str resolveTempDir() {
-  str dir = "/tmp";
-  dir = fsNormalizePath(dir);
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMPDIR");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMP");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TEMP");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("HOME");
-  if (dir == "" || !fsPathExists(dir)) dir = ".";
-  str normalized = fsNormalizePath(dir);
-  if (normalized == "") return dir;
-  return normalized;
+  str candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
+  if (candidate != "") return candidate;
+
+  str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCAL_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCALI_SYSFILES_ROOT"));
+  if (workspace != "") {
+    str combined = fsPathJoin(workspace, "tmp");
+    candidate = ensureDirCandidate(combined);
+    if (candidate != "") return candidate;
+  }
+
+  candidate = ensureDirCandidate(getenv("TMPDIR"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("TMP"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("TEMP"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("HOME"));
+  if (candidate != "") return candidate;
+
+  candidate = ensureDirCandidate("/tmp");
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(".");
+  if (candidate != "") return candidate;
+  return "/tmp";
 }
 
 str ensureTrailingSlash(str path) {
