@@ -31,10 +31,12 @@ final class TerminalFontSettings: ObservableObject {
     private let elvisWindowKey = "com.pscal.terminal.elvisWindow"
     let minimumPointSize: CGFloat = TerminalFontSettings.minPointSizeValue
     let maximumPointSize: CGFloat = TerminalFontSettings.maxPointSizeValue
+    static let defaultBackgroundColor = UIColor.black
+    static let defaultForegroundColor = UIColor(red: 1.0, green: 0.64, blue: 0.0, alpha: 1.0)
 
     @Published var pointSize: CGFloat = 14.0
-    @Published var backgroundColor: UIColor = .systemBackground
-    @Published var foregroundColor: UIColor = .label
+    @Published var backgroundColor: UIColor = TerminalFontSettings.defaultBackgroundColor
+    @Published var foregroundColor: UIColor = TerminalFontSettings.defaultForegroundColor
     @Published private(set) var selectedFontID: String
     @Published private(set) var elvisWindowEnabled: Bool
 
@@ -57,8 +59,8 @@ final class TerminalFontSettings: ObservableObject {
 
         let clampedSize = TerminalFontSettings.clampSize(initialPointSize)
         pointSize = clampedSize
-        backgroundColor = TerminalFontSettings.loadColor(key: backgroundKey, fallback: .systemBackground)
-        foregroundColor = TerminalFontSettings.loadColor(key: foregroundKey, fallback: .label)
+        backgroundColor = TerminalFontSettings.loadColor(key: backgroundKey, fallback: TerminalFontSettings.defaultBackgroundColor)
+        foregroundColor = TerminalFontSettings.loadColor(key: foregroundKey, fallback: TerminalFontSettings.defaultForegroundColor)
 
         let storedFontID = UserDefaults.standard.string(forKey: fontNameKey)
         let envFontName = ProcessInfo.processInfo.environment["PSCALI_FONT_NAME"]

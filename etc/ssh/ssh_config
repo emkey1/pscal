@@ -1,7 +1,7 @@
 #
 # PSCAL default ssh client configuration.
 #
-# This is copied into the app sandbox (sysfiles/etc/ssh) on first launch
+# This is copied into the app sandbox (Documents/etc/ssh) on first launch
 # so user modifications will persist across updates.
 #
 
