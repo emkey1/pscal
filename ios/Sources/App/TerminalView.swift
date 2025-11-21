@@ -3,6 +3,7 @@ import UIKit
 import Combine
 import QuartzCore
 import CoreText
+import Darwin
 
 @_silgen_name("pscalRuntimeDebugLog")
 private func c_terminalDebugLog(_ message: UnsafePointer<CChar>) -> Void
@@ -37,6 +38,8 @@ final class TerminalFontSettings: ObservableObject {
     @Published var pointSize: CGFloat = 14.0
     @Published var backgroundColor: UIColor = TerminalFontSettings.defaultBackgroundColor
     @Published var foregroundColor: UIColor = TerminalFontSettings.defaultForegroundColor
+    @Published var pathTruncationEnabled: Bool = false
+    @Published private(set) var pathTruncationPath: String = ""
     @Published private(set) var selectedFontID: String
     @Published private(set) var elvisWindowEnabled: Bool
 
@@ -72,6 +75,21 @@ final class TerminalFontSettings: ObservableObject {
         let envWindowMode = ProcessInfo.processInfo.environment["PSCALI_ELVIS_WINDOW_MODE"]
         elvisWindowEnabled = TerminalFontSettings.resolveInitialElvisWindowSetting(stored: storedElvisPref,
                                                                                    envValue: envWindowMode)
+
+        let storedTruncationPath = UserDefaults.standard.string(forKey: PathTruncationPreferences.pathDefaultsKey)
+        let normalizedStored = PathTruncationManager.shared.normalize(storedTruncationPath ?? "")
+        if normalizedStored.isEmpty {
+            let defaultPath = PathTruncationManager.shared.normalize(PathTruncationManager.shared.defaultDocumentsPath())
+            pathTruncationPath = defaultPath
+        } else {
+            pathTruncationPath = normalizedStored
+        }
+        if UserDefaults.standard.object(forKey: PathTruncationPreferences.enabledDefaultsKey) != nil {
+            pathTruncationEnabled = UserDefaults.standard.bool(forKey: PathTruncationPreferences.enabledDefaultsKey)
+        } else {
+            pathTruncationEnabled = !pathTruncationPath.isEmpty
+        }
+        applyPathTruncationPreferences()
     }
 
     func clamp(_ size: CGFloat) -> CGFloat {
@@ -97,6 +115,25 @@ final class TerminalFontSettings: ObservableObject {
             return custom
         }
         return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+
+    func font(forPointSize size: CGFloat, weight: UIFont.Weight, italic: Bool = false) -> UIFont {
+        let base = font(forPointSize: size)
+        var traits = base.fontDescriptor.symbolicTraits
+        if weight == .bold {
+            traits.insert(.traitBold)
+        } else {
+            traits.remove(.traitBold)
+        }
+        if italic {
+            traits.insert(.traitItalic)
+        } else {
+            traits.remove(.traitItalic)
+        }
+        if let descriptor = base.fontDescriptor.withSymbolicTraits(traits) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return base
     }
 
     func updatePointSize(_ newSize: CGFloat) {
@@ -131,6 +168,37 @@ final class TerminalFontSettings: ObservableObject {
         foregroundColor = normalized
         TerminalFontSettings.store(color: normalized, key: foregroundKey)
         notifyChange()
+    }
+
+    func updatePathTruncationEnabled(_ enabled: Bool) {
+        guard enabled != pathTruncationEnabled else { return }
+        pathTruncationEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: PathTruncationPreferences.enabledDefaultsKey)
+        if enabled && pathTruncationPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let defaultPath = PathTruncationManager.shared.normalize(PathTruncationManager.shared.defaultDocumentsPath())
+            pathTruncationPath = defaultPath
+            UserDefaults.standard.set(defaultPath, forKey: PathTruncationPreferences.pathDefaultsKey)
+        }
+        applyPathTruncationPreferences()
+    }
+
+    func updatePathTruncationPath(_ newPath: String) {
+        let normalized = PathTruncationManager.shared.normalize(newPath)
+        guard normalized != pathTruncationPath else { return }
+        pathTruncationPath = normalized
+        UserDefaults.standard.set(normalized, forKey: PathTruncationPreferences.pathDefaultsKey)
+        if pathTruncationEnabled {
+            applyPathTruncationPreferences()
+        }
+    }
+
+    func useDocumentsPathForTruncation() {
+        let defaultPath = PathTruncationManager.shared.defaultDocumentsPath()
+        updatePathTruncationPath(defaultPath)
+    }
+
+    private func applyPathTruncationPreferences() {
+        PathTruncationManager.shared.apply(enabled: pathTruncationEnabled, path: pathTruncationPath)
     }
 
     private static func store(color: UIColor, key: String) {
@@ -312,6 +380,7 @@ private struct TerminalContentView: View {
         let elvisToken = runtime.elvisRenderToken
         let elvisActive = runtime.isElvisModeActive()
         let elvisVisible = ElvisWindowManager.shared.isVisible
+        let currentFont = fontSettings.currentFont
         return VStack(spacing: 0) {
             TerminalRendererView(text: runtime.screenText,
                                  cursor: runtime.cursorInfo,
@@ -320,6 +389,7 @@ private struct TerminalContentView: View {
                                  isElvisMode: elvisActive,
                                  isElvisWindowVisible: elvisVisible,
                                  elvisRenderToken: elvisToken,
+                                 font: currentFont,
                                  fontPointSize: fontSettings.pointSize)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
@@ -497,19 +567,20 @@ struct TerminalRendererView: UIViewRepresentable {
     let isElvisMode: Bool
     let isElvisWindowVisible: Bool
     let elvisRenderToken: UInt64
+    let font: UIFont
     let fontPointSize: CGFloat
 
     func makeUIView(context: Context) -> TerminalRendererContainerView {
         let container = TerminalRendererContainerView()
         container.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
-        container.applyFont(pointSize: fontPointSize)
+        container.applyFont(font: font)
         return container
     }
 
     func updateUIView(_ uiView: TerminalRendererContainerView, context: Context) {
         _ = elvisRenderToken
         uiView.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
-        uiView.applyFont(pointSize: fontPointSize)
+        uiView.applyFont(font: font)
         let externalWindowEnabled = ElvisWindowManager.externalWindowEnabled
         let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
         if shouldBlankMain {
@@ -573,7 +644,7 @@ final class TerminalRendererContainerView: UIView {
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
             guard let self else { return }
-            self.applyFont(pointSize: TerminalFontSettings.shared.pointSize)
+            self.applyFont(font: TerminalFontSettings.shared.currentFont)
             self.configure(backgroundColor: TerminalFontSettings.shared.backgroundColor,
                            foregroundColor: TerminalFontSettings.shared.foregroundColor)
         }
@@ -601,14 +672,15 @@ final class TerminalRendererContainerView: UIView {
         self.backgroundColor = backgroundColor
     }
 
-    func applyFont(pointSize: CGFloat) {
-        let clamped = TerminalFontSettings.shared.clamp(pointSize)
-        let font = TerminalFontSettings.shared.font(forPointSize: clamped)
-        if terminalView.font != font {
-            terminalView.font = font
-            terminalView.typingAttributes[.font] = font
-            resolvedFont = font
+    func applyFont(font: UIFont) {
+        if let current = terminalView.font,
+           current.fontName == font.fontName,
+           abs(current.pointSize - font.pointSize) < 0.01 {
+            return
         }
+        terminalView.font = font
+        terminalView.typingAttributes[.font] = font
+        resolvedFont = font
     }
 
     func applyElvisFont(_ font: UIFont) {
@@ -643,14 +715,15 @@ final class TerminalRendererContainerView: UIView {
         } else {
             lastElvisSnapshotText = nil
             lastElvisCursorOffset = nil
-            terminalView.attributedText = text
+            let displayText = remapFontsIfNeeded(in: text)
+            terminalView.attributedText = displayText
             terminalView.cursorTextOffset = cursor?.textOffset
             terminalView.cursorInfo = cursor
             terminalView.backgroundColor = backgroundColor
             if let cursorOffset = cursor?.textOffset {
                 scrollToCursor(textView: terminalView, cursorOffset: cursorOffset)
             } else {
-                scrollToBottom(textView: terminalView, text: text)
+                scrollToBottom(textView: terminalView, text: displayText)
             }
         }
     }
@@ -737,6 +810,24 @@ final class TerminalRendererContainerView: UIView {
         if needsUpdate {
             textView.setContentOffset(newOffset, animated: false)
         }
+    }
+
+    private func remapFontsIfNeeded(in text: NSAttributedString) -> NSAttributedString {
+        guard text.length > 0 else { return text }
+        let mutable = NSMutableAttributedString(attributedString: text)
+        let baseFont = currentFont()
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
+            let existing = (value as? UIFont) ?? baseFont
+            let traits = existing.fontDescriptor.symbolicTraits
+            let weight: UIFont.Weight = traits.contains(.traitBold) ? .bold : .regular
+            let italic = traits.contains(.traitItalic)
+            let replacement = TerminalFontSettings.shared.font(forPointSize: existing.pointSize,
+                                                               weight: weight,
+                                                               italic: italic)
+            mutable.addAttribute(.font, value: replacement, range: range)
+        }
+        return mutable
     }
 
     private func elvisCommandLineCursor(from snapshot: ElvisSnapshot) -> TerminalCursorInfo? {
@@ -926,6 +1017,36 @@ struct TerminalSettingsView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+                Section(header: Text("Filesystem Paths")) {
+                    Toggle("Present sandbox as /",
+                           isOn: Binding(get: {
+                        settings.pathTruncationEnabled
+                    }, set: { newValue in
+                        settings.updatePathTruncationEnabled(newValue)
+                    }))
+                    Text("Requires restarting the PSCAL runtime to take effect.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    TextField("PATH_TRUNCATE",
+                              text: Binding(get: {
+                        settings.pathTruncationPath
+                    }, set: { newValue in
+                        settings.updatePathTruncationPath(newValue)
+                    }))
+                    .textInputAutocapitalization(.none)
+                    .autocorrectionDisabled(true)
+                    .font(.system(.body, design: .monospaced))
+                    .disabled(!settings.pathTruncationEnabled)
+                    Button("Use Documents root") {
+                        settings.useDocumentsPathForTruncation()
+                    }
+                    .disabled(!settings.pathTruncationEnabled)
+                    Text(settings.pathTruncationEnabled ?
+                         "Absolute paths map to \(settings.pathTruncationPath.isEmpty ? "Documents" : settings.pathTruncationPath)." :
+                         "PATH_TRUNCATE is disabled; absolute paths reflect the full sandbox path.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {
@@ -935,6 +1056,73 @@ struct TerminalSettingsView: View {
             }
         }
         .applyDetents()
+    }
+}
+
+struct PathTruncationPreferences {
+    static let enabledDefaultsKey = "com.pscal.terminal.pathTruncateEnabled"
+    static let pathDefaultsKey = "com.pscal.terminal.pathTruncateValue"
+}
+
+final class PathTruncationManager {
+    static let shared = PathTruncationManager()
+
+    private init() {}
+
+    func normalize(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return ""
+        }
+        let absolute = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        let resolved = URL(fileURLWithPath: absolute).resolvingSymlinksInPath().path
+        var normalized = resolved
+        if normalized.isEmpty {
+            return ""
+        }
+        if normalized == "/" {
+            return normalized
+        }
+        while normalized.count > 1 && normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+
+    func defaultDocumentsPath() -> String {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        return normalize(docs?.path ?? "")
+    }
+
+    func apply(enabled: Bool, path: String) {
+        if enabled {
+            let normalized = normalize(path)
+            if !normalized.isEmpty {
+                normalized.withCString { cString in
+                    PSCALRuntimeApplyPathTruncation(cString)
+                }
+                return
+            }
+        }
+        PSCALRuntimeApplyPathTruncation(nil)
+    }
+
+    func applyStoredPreference() {
+        let defaults = UserDefaults.standard
+        let storedPath = defaults.string(forKey: PathTruncationPreferences.pathDefaultsKey)
+        let normalizedPath: String
+        if let storedPath, !storedPath.isEmpty {
+            normalizedPath = normalize(storedPath)
+        } else {
+            normalizedPath = normalize(defaultDocumentsPath())
+        }
+        let enabled: Bool
+        if defaults.object(forKey: PathTruncationPreferences.enabledDefaultsKey) != nil {
+            enabled = defaults.bool(forKey: PathTruncationPreferences.enabledDefaultsKey)
+        } else {
+            enabled = false
+        }
+        apply(enabled: enabled, path: normalizedPath)
     }
 }
 
@@ -953,6 +1141,7 @@ struct ElvisFloatingRendererView: View {
                                     isElvisMode: true,
                                     isElvisWindowVisible: false,
                                     elvisRenderToken: token,
+                                    font: fontSettings.currentFont,
                                     fontPointSize: fontSettings.pointSize)
             .background(Color(fontSettings.backgroundColor))
     }

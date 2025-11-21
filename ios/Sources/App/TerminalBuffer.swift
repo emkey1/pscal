@@ -125,6 +125,7 @@ final class TerminalBuffer {
     private let maxScrollback: Int
     private let dsrResponder: ((Data) -> Void)?
     private var resizeRequestHandler: ((Int, Int) -> Void)?
+    private var resetHandler: (() -> Void)?
 
     private var grid: [[TerminalCell]]
     private var scrollback: [[TerminalCell]] = []
@@ -146,14 +147,14 @@ final class TerminalBuffer {
     private var csiPrivateMode = false
     private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
 
-    private static let fontCache = TerminalFontCache()
-    private static let fontCacheNotificationToken: NSObjectProtocol = {
-        NotificationCenter.default.addObserver(forName: UIContentSizeCategory.didChangeNotification,
-                                               object: nil,
-                                               queue: nil) { _ in
-            TerminalBuffer.fontCache.clear()
-        }
-    }()
+private static let fontCache = TerminalFontCache()
+private static let fontCacheNotificationToken: NSObjectProtocol = {
+    NotificationCenter.default.addObserver(forName: UIContentSizeCategory.didChangeNotification,
+                                           object: nil,
+                                           queue: nil) { _ in
+        TerminalBuffer.fontCache.clear()
+    }
+}()
     private let inputQueue = DispatchQueue(label: "com.pscal.terminal.input", attributes: .concurrent)
     private var bufferedInput: [UInt8] = []
 
@@ -195,6 +196,7 @@ struct TerminalSnapshot {
          resizeHandler: ((Int, Int) -> Void)? = nil) {
         self.dsrResponder = dsrResponder
         self.resizeRequestHandler = resizeHandler
+        self.resetHandler = nil
         _ = TerminalBuffer.fontCacheNotificationToken
         self.columns = max(10, columns)
         self.rows = max(4, rows)
@@ -206,6 +208,10 @@ struct TerminalSnapshot {
 
     func setResizeHandler(_ handler: ((Int, Int) -> Void)?) {
         resizeRequestHandler = handler
+    }
+
+    func setResetHandler(_ handler: (() -> Void)?) {
+        resetHandler = handler
     }
 
     @discardableResult
@@ -588,8 +594,8 @@ struct TerminalSnapshot {
         switch command {
         case 8:
             if csiParameters.count >= 3 {
-                let rows = max(4, csiParameters[1])
-                let columns = max(10, csiParameters[2])
+                let rows = csiParameters[1]
+                let columns = csiParameters[2]
                 resizeRequestHandler?(columns, rows)
             }
         default:
@@ -930,6 +936,7 @@ struct TerminalSnapshot {
         csiPrivateMode = false
         scrollRegionTop = 0
         scrollRegionBottom = rows - 1
+        resetHandler?()
     }
 
     fileprivate static func utf16Offset(in row: [TerminalCell], column: Int) -> Int {
