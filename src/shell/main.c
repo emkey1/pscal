@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -1628,6 +1629,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
 
     size_t replacement_len = 0;
     bool append_space = false;
+    bool append_slash = false;
     if (results.gl_pathc == 1) {
         const char *match = results.gl_pathv[0];
         if (!match) {
@@ -1660,13 +1662,36 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+    /* If PATH_TRUNCATE is active, double-check directory matches so we keep the trailing slash. */
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual && results.gl_pathv[0] && replacement_len > 0) {
+        const char *visible = results.gl_pathv[0];
+        char expanded[PATH_MAX];
+        const char *real_path = visible;
+        if (pathTruncateExpand(visible, expanded, sizeof(expanded))) {
+            real_path = expanded;
+        }
+        struct stat st;
+        if (real_path && stat(real_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (visible[replacement_len - 1] != '/') {
+                append_slash = true;
+            }
+            append_space = false;
+        }
+    }
+#endif
+
+    size_t total_len = word_start + replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
     if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
         globfree(&results);
         return false;
     }
 
     memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
+    if (append_slash) {
+        (*buffer)[word_start + replacement_len] = '/';
+        replacement_len += 1;
+    }
     if (append_space) {
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
