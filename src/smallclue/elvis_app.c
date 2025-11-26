@@ -23,6 +23,26 @@ static void pscalRuntimeDebugLog(const char *message) {
 static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
+static int g_elvis_session_counter = 0;
+
+static char *smallclueGenerateSessionPath(void) {
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || !*tmpdir) {
+        tmpdir = "/tmp";
+    }
+    char templ[PATH_MAX];
+    int written = snprintf(templ, sizeof(templ), "%s/pscal_elvis_%d_%d_XXXXXX",
+                           tmpdir, (int)getpid(), g_elvis_session_counter++);
+    if (written <= 0 || (size_t)written >= sizeof(templ)) {
+        return NULL;
+    }
+    int fd = mkstemp(templ);
+    if (fd >= 0) {
+        close(fd);
+        return strdup(templ);
+    }
+    return NULL;
+}
 
 static char *smallclueOverrideEnv(const char *name, const char *value) {
     const char *current = getenv(name);
@@ -96,6 +116,7 @@ int smallclueRunElvis(int argc, char **argv) {
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallclueOverrideEnv("TERMCAP", termcapPath);
 #endif
+    char *session_path = smallclueGenerateSessionPath();
     int wrapped_argc = argc + 4;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
     if (!wrapped_argv) {
@@ -111,7 +132,7 @@ int smallclueRunElvis(int argc, char **argv) {
     wrapped_argv[1] = "-G";
     wrapped_argv[2] = "pscal";
     wrapped_argv[3] = "-f";
-    wrapped_argv[4] = "ram";
+    wrapped_argv[4] = session_path ? session_path : "ram";
     for (int i = 1; i < argc; ++i) {
         wrapped_argv[i + 4] = argv[i];
     }
@@ -149,6 +170,12 @@ int smallclueRunElvis(int argc, char **argv) {
     pscalRuntimeDebugLog(resultBuf);
 
     free(wrapped_argv);
+    if (session_path) {
+        unlink(session_path);
+        free(session_path);
+    } else {
+        unlink("ram");
+    }
     smallclueRestoreEnv("ELVISPATH", saved_elvis_path);
     smallclueRestoreEnv("TERM", saved_term);
     smallclueRestoreEnv("ELVISTERM", saved_elvis_term);
@@ -159,7 +186,6 @@ int smallclueRunElvis(int argc, char **argv) {
     smallclueRestoreEnv("TERMCAP", saved_termcap);
 #endif
     free(elvis_path);
-    unlink("ram");
     /* Ensure elvis session state is fully torn down before next launch. */
     sesclose();
     return status;
