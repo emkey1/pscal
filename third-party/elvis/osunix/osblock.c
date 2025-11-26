@@ -273,6 +273,10 @@ void blkread(BLK *buf, _BLKNO_ blkno)
 {
 #ifdef FEATURE_RAM
 	if (nblks > 0) {
+		if (blkno < 0 || blkno >= nblks || !blklist || !blklist[blkno]) {
+			msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
+			return;
+		}
 		memcpy(buf, blklist[blkno], o_blksize);
 		return;
 	}
