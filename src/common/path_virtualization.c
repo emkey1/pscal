@@ -1,0 +1,258 @@
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
+
+#if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message);
+#define LOG_EXPANSION(op, original, resolved)                       \
+    do {                                                            \
+        if (&pscalRuntimeDebugLog != NULL) {                        \
+            char logbuf[PATH_MAX * 2];                              \
+            snprintf(logbuf, sizeof(logbuf),                        \
+                     "[pathvirt] %s original=%s resolved=%s",       \
+                     op,                                            \
+                     (original) ? (original) : "(null)",            \
+                     (resolved) ? (resolved) : "(null)");           \
+            pscalRuntimeDebugLog(logbuf);                           \
+        }                                                           \
+    } while (0)
+#else
+#define LOG_EXPANSION(op, original, resolved) ((void)0)
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "common/path_truncate.h"
+
+static bool pathVirtualizationActive(void) {
+    const char *prefix = getenv("PATH_TRUNCATE");
+    return prefix && prefix[0] == '/';
+}
+
+static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t buffer_len) {
+    if (!input) {
+        return NULL;
+    }
+    if (!pathTruncateExpand(input, buffer, buffer_len)) {
+        return input;
+    }
+    return buffer;
+}
+
+static void pathVirtualizedStripInPlace(char *buffer, size_t current_length) {
+    if (!buffer) {
+        return;
+    }
+    char stripped[PATH_MAX];
+    if (!pathTruncateStrip(buffer, stripped, sizeof(stripped))) {
+        return;
+    }
+    size_t len = strlen(stripped);
+    if (len + 1 > current_length) {
+        return;
+    }
+    memcpy(buffer, stripped, len + 1);
+}
+
+int pscalPathVirtualized_chdir(const char *path) {
+    if (!pathVirtualizationActive()) {
+        return chdir(path);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return chdir(target ? target : path);
+}
+
+char *pscalPathVirtualized_getcwd(char *buffer, size_t size) {
+    if (!pathVirtualizationActive()) {
+        return getcwd(buffer, size);
+    }
+    char *result = getcwd(buffer, size);
+    if (!result) {
+        return result;
+    }
+    pathVirtualizedStripInPlace(buffer, strlen(buffer) + 1);
+    return result;
+}
+
+int pscalPathVirtualized_stat(const char *path, struct stat *buf) {
+    if (!pathVirtualizationActive()) {
+        return stat(path, buf);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    LOG_EXPANSION("stat", path, target);
+    return stat(target ? target : path, buf);
+}
+
+int pscalPathVirtualized_lstat(const char *path, struct stat *buf) {
+    if (!pathVirtualizationActive()) {
+        return lstat(path, buf);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    LOG_EXPANSION("lstat", path, target);
+    return lstat(target ? target : path, buf);
+}
+
+int pscalPathVirtualized_access(const char *path, int mode) {
+    if (!pathVirtualizationActive()) {
+        return access(path, mode);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return access(target ? target : path, mode);
+}
+
+int pscalPathVirtualized_mkdir(const char *path, mode_t mode) {
+    if (!pathVirtualizationActive()) {
+        return mkdir(path, mode);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return mkdir(target ? target : path, mode);
+}
+
+int pscalPathVirtualized_rmdir(const char *path) {
+    if (!pathVirtualizationActive()) {
+        return rmdir(path);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return rmdir(target ? target : path);
+}
+
+int pscalPathVirtualized_unlink(const char *path) {
+    if (!pathVirtualizationActive()) {
+        return unlink(path);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return unlink(target ? target : path);
+}
+
+int pscalPathVirtualized_remove(const char *path) {
+    if (!pathVirtualizationActive()) {
+        return remove(path);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    return remove(target ? target : path);
+}
+
+int pscalPathVirtualized_rename(const char *oldpath, const char *newpath) {
+    if (!pathVirtualizationActive()) {
+        return rename(oldpath, newpath);
+    }
+    char expanded_old[PATH_MAX];
+    char expanded_new[PATH_MAX];
+    const char *old_target = pathVirtualizedExpand(oldpath, expanded_old, sizeof(expanded_old));
+    const char *new_target = pathVirtualizedExpand(newpath, expanded_new, sizeof(expanded_new));
+    return rename(old_target ? old_target : oldpath,
+                  new_target ? new_target : newpath);
+}
+
+DIR *pscalPathVirtualized_opendir(const char *name) {
+    if (!pathVirtualizationActive()) {
+        return opendir(name);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(name, expanded, sizeof(expanded));
+    LOG_EXPANSION("opendir", name, target);
+    return opendir(target ? target : name);
+}
+
+int pscalPathVirtualized_symlink(const char *target, const char *linkpath) {
+    if (!pathVirtualizationActive()) {
+        return symlink(target, linkpath);
+    }
+    char expanded_link[PATH_MAX];
+    const char *link_target = pathVirtualizedExpand(linkpath, expanded_link, sizeof(expanded_link));
+    return symlink(target, link_target ? link_target : linkpath);
+}
+
+ssize_t pscalPathVirtualized_readlink(const char *path, char *buf, size_t size) {
+    if (!pathVirtualizationActive()) {
+        return readlink(path, buf, size);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    ssize_t result = readlink(target ? target : path, buf, size);
+    if (result >= 0 && (size_t)result < size) {
+        buf[result] = '\0';
+        pathVirtualizedStripInPlace(buf, strlen(buf) + 1);
+        result = (ssize_t)strlen(buf);
+    }
+    return result;
+}
+
+char *pscalPathVirtualized_realpath(const char *path, char *resolved_path) {
+    if (!pathVirtualizationActive()) {
+        return realpath(path, resolved_path);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedExpand(path, expanded, sizeof(expanded));
+    char *result = realpath(target ? target : path, resolved_path);
+    if (result) {
+        pathVirtualizedStripInPlace(result, strlen(result) + 1);
+    }
+    return result;
+}
+
+static const char *pathVirtualizedPrepare(const char *path, char expanded[PATH_MAX]) {
+    const char *target = pathVirtualizedExpand(path, expanded, PATH_MAX);
+    return target ? target : path;
+}
+
+int pscalPathVirtualized_open(const char *path, int oflag, ...) {
+    if (!pathVirtualizationActive()) {
+        if (oflag & O_CREAT) {
+            va_list ap;
+            va_start(ap, oflag);
+            mode_t mode = (mode_t)va_arg(ap, int);
+            int fd = open(path, oflag, mode);
+            va_end(ap);
+            return fd;
+        }
+        return open(path, oflag);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedPrepare(path, expanded);
+    int fd;
+    if (oflag & O_CREAT) {
+        va_list ap;
+        va_start(ap, oflag);
+        mode_t mode = (mode_t)va_arg(ap, int);
+        fd = open(target, oflag, mode);
+        va_end(ap);
+    } else {
+        fd = open(target, oflag);
+    }
+    return fd;
+}
+
+FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {
+    if (!pathVirtualizationActive()) {
+        return fopen(path, mode);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedPrepare(path, expanded);
+    return fopen(target, mode);
+}
+
+FILE *pscalPathVirtualized_freopen(const char *path, const char *mode, FILE *stream) {
+    if (!pathVirtualizationActive()) {
+        return freopen(path, mode, stream);
+    }
+    char expanded[PATH_MAX];
+    const char *target = pathVirtualizedPrepare(path, expanded);
+    return freopen(target, mode, stream);
+}
+
+#endif /* PSCAL_TARGET_IOS */

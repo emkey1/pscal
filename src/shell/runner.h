@@ -4,6 +4,9 @@
 #include <stdbool.h>
 
 #include "Pascal/globals.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

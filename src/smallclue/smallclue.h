@@ -2,6 +2,9 @@
 #define SMALLCLUE_SMALLCLUE_H
 
 #include <stddef.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 
 #if defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 #define SMALLCLUE_HAS_IFADDRS 1

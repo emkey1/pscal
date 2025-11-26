@@ -1,5 +1,30 @@
 /* Auto-generated include: command assembly helpers and metadata parsing. Included from shell.c. */
 #include "shell/runner.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#include "common/path_truncate.h"
+extern void pscalRuntimeDebugLog(const char *message);
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#define SHELL_GETCWD(buf, len) pscalPathVirtualized_getcwd((buf), (len))
+#define SHELL_CHDIR(path) pscalPathVirtualized_chdir((path))
+#else
+#define SHELL_GETCWD(buf, len) getcwd((buf), (len))
+#define SHELL_CHDIR(path) chdir((path))
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+static const char *shellVisiblePath(const char *path, char *buffer, size_t buffer_len) {
+    if (!path) {
+        return NULL;
+    }
+    if (pathTruncateStrip(path, buffer, buffer_len)) {
+        return buffer;
+    }
+    return path;
+}
+#endif
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);
@@ -3135,13 +3160,36 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
         gShellRuntime.dir_stack_initialised = true;
         return true;
     }
-    char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        shellDirectoryStackReportErrno(vm, builtin);
-        shellUpdateStatus(errno ? errno : 1);
-        return false;
+    const char *home = shellSafeGetenv("PSCALI_REAL_HOME");
+    if (!home || !*home) {
+        home = shellSafeGetenv("HOME");
     }
-    char *copy = strdup(cwd);
+    const char *initial_path = home && *home ? home : ".";
+    char resolved[PATH_MAX];
+    const char *expanded_path = initial_path;
+#if defined(PSCAL_TARGET_IOS)
+    char virtual_expanded[PATH_MAX];
+    if (pathTruncateExpand(initial_path, virtual_expanded, sizeof(virtual_expanded))) {
+        expanded_path = virtual_expanded;
+    }
+#endif
+    const char *source_path = expanded_path;
+    if (realpath(expanded_path, resolved)) {
+        source_path = resolved;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    {
+        char logBuf[PATH_MAX * 2];
+        snprintf(logBuf, sizeof(logBuf),
+                 "[exsh] init dir stack: PSCALI_REAL_HOME=%s HOME=%s expanded=%s resolved=%s",
+                 shellSafeGetenv("PSCALI_REAL_HOME") ? shellSafeGetenv("PSCALI_REAL_HOME") : "(null)",
+                 shellSafeGetenv("HOME") ? shellSafeGetenv("HOME") : "(null)",
+                 expanded_path,
+                 source_path);
+        pscalRuntimeDebugLog(logBuf);
+    }
+#endif
+    char *copy = strdup(source_path);
     if (!copy) {
         shellDirectoryStackReportError(vm, builtin, "out of memory");
         shellUpdateStatus(1);
@@ -3200,17 +3248,29 @@ static bool shellDirectoryStackAssignTopOwned(char *path) {
 }
 
 static bool shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd) {
+    const char *new_value = new_cwd;
+    const char *old_value = old_cwd;
+#if defined(PSCAL_TARGET_IOS)
+    char new_visible[PATH_MAX];
+    char old_visible[PATH_MAX];
     if (new_cwd) {
-        if (!shellSetTrackedVariable("PWD", new_cwd, false)) {
+        new_value = shellVisiblePath(new_cwd, new_visible, sizeof(new_visible));
+    }
+    if (old_cwd) {
+        old_value = shellVisiblePath(old_cwd, old_visible, sizeof(old_visible));
+    }
+#endif
+    if (new_value) {
+        if (!shellSetTrackedVariable("PWD", new_value, false)) {
             return false;
         }
     }
-    if (old_cwd) {
-        if (!shellSetTrackedVariable("OLDPWD", old_cwd, false)) {
-            if (new_cwd) {
+    if (old_value) {
+        if (!shellSetTrackedVariable("OLDPWD", old_value, false)) {
+            if (new_value) {
                 const char *current = shellSafeGetenv("PWD");
-                if (!current || strcmp(current, old_cwd) != 0) {
-                    (void)shellSetTrackedVariable("PWD", old_cwd, false);
+                if (!current || strcmp(current, old_value) != 0) {
+                    (void)shellSetTrackedVariable("PWD", old_value, false);
                 }
             }
             return false;
@@ -3230,28 +3290,33 @@ static bool shellDirectoryStackChdir(VM *vm,
         return false;
     }
     char old_cwd[PATH_MAX];
-    if (!getcwd(old_cwd, sizeof(old_cwd))) {
+    if (!SHELL_GETCWD(old_cwd, sizeof(old_cwd))) {
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
         return false;
     }
-    if (chdir(target) != 0) {
+    if (SHELL_CHDIR(target) != 0) {
+#if defined(PSCAL_TARGET_IOS)
+        char logBuf[PATH_MAX + 64];
+        snprintf(logBuf, sizeof(logBuf), "[exsh] chdir failed target=%s errno=%d", target ? target : "(null)", errno);
+        pscalRuntimeDebugLog(logBuf);
+#endif
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
         return false;
     }
     char new_cwd[PATH_MAX];
-    if (!getcwd(new_cwd, sizeof(new_cwd))) {
+    if (!SHELL_GETCWD(new_cwd, sizeof(new_cwd))) {
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
-        (void)chdir(old_cwd);
+        (void)SHELL_CHDIR(old_cwd);
         return false;
     }
     char *new_copy = strdup(new_cwd);
     if (!new_copy) {
         shellDirectoryStackReportError(vm, builtin, "out of memory");
         shellUpdateStatus(1);
-        (void)chdir(old_cwd);
+        (void)SHELL_CHDIR(old_cwd);
         return false;
     }
     char *old_copy = NULL;
@@ -3261,7 +3326,7 @@ static bool shellDirectoryStackChdir(VM *vm,
             shellDirectoryStackReportError(vm, builtin, "out of memory");
             shellUpdateStatus(1);
             free(new_copy);
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             return false;
         }
     }

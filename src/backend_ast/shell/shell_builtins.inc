@@ -2,10 +2,24 @@
 #include "shell/runner.h"
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#include "common/path_truncate.h"
+static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
+    if (!input) {
+        return NULL;
+    }
+    if (pathTruncateExpand(input, buffer, buffer_len)) {
+        return buffer;
+    }
+    return input;
+}
+#endif
 #include <pthread.h>
 #include <sys/ioctl.h>
 #ifdef PSCAL_TARGET_IOS
@@ -2461,7 +2475,10 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
 
     int remaining = arg_count - arg_index;
     if (remaining <= 0) {
-        path = shellSafeGetenv("HOME");
+        path = shellSafeGetenv("PSCALI_REAL_HOME");
+        if (!path || !*path) {
+            path = shellSafeGetenv("HOME");
+        }
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
@@ -2482,6 +2499,16 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     if (!shellDirectoryStackEnsureInitialised(vm, "cd")) {
         return makeVoid();
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    char resolved_target[PATH_MAX];
+    if (path) {
+        const char *expanded = shellResolvePathForIOS(path, resolved_target, sizeof(resolved_target));
+        if (expanded) {
+            path = expanded;
+        }
+    }
+#endif
 
     char *new_cwd = NULL;
     char *old_cwd = NULL;
@@ -2537,7 +2564,13 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(errno ? errno : 1);
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    char display[PATH_MAX];
+    const char *visible = pathTruncateStrip(cwd, display, sizeof(display)) ? display : cwd;
+    printf("%s\n", visible);
+#else
     printf("%s\n", cwd);
+#endif
     shellUpdateStatus(0);
     return makeVoid();
 }

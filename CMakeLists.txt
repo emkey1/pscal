@@ -755,6 +755,8 @@ set(PSCAL_CORE_SOURCES
     src/core/cache.c
     src/common/runtime_params.c
     src/common/runtime_tty.c
+    src/common/path_truncate.c
+    src/common/path_virtualization.c
     src/common/pscal_terminal_host.c
     src/common/frontend_kind.c
     src/common/runtime_paths.c
