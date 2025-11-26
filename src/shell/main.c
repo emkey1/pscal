@@ -29,6 +29,9 @@
 #include "symbol/symbol.h"
 #include "common/frontend_kind.h"
 #include "common/runtime_tty.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_truncate.h"
+#endif
 
 static struct termios gInteractiveOriginalTermios;
 static volatile sig_atomic_t gInteractiveTermiosValid = 0;
@@ -1530,14 +1533,33 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t pattern_len = word_len + 2;
+    const char *glob_base = word;
+    size_t glob_base_len = word_len;
+    bool glob_used_virtual = false;
+#if defined(PSCAL_TARGET_IOS)
+    if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
+        char word_copy[PATH_MAX];
+        if (word_len < sizeof(word_copy)) {
+            memcpy(word_copy, word, word_len);
+            word_copy[word_len] = '\0';
+            char expanded[PATH_MAX];
+            if (pathTruncateExpand(word_copy, expanded, sizeof(expanded))) {
+                glob_base = expanded;
+                glob_base_len = strlen(expanded);
+                glob_used_virtual = true;
+            }
+        }
+    }
+#endif
+
+    size_t pattern_len = glob_base_len + 2;
     char *pattern = (char *)malloc(pattern_len);
     if (!pattern) {
         return false;
     }
-    memcpy(pattern, word, word_len);
-    pattern[word_len] = '*';
-    pattern[word_len + 1] = '\0';
+    memcpy(pattern, glob_base, glob_base_len);
+    pattern[glob_base_len] = '*';
+    pattern[glob_base_len + 1] = '\0';
 
     glob_t results;
     memset(&results, 0, sizeof(results));
@@ -1548,6 +1570,25 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         globfree(&results);
         return false;
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual) {
+        for (size_t i = 0; i < results.gl_pathc; ++i) {
+            const char *match = results.gl_pathv[i];
+            if (!match) {
+                continue;
+            }
+            char stripped[PATH_MAX];
+            if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
+                char *copy = strdup(stripped);
+                if (copy) {
+                    free(results.gl_pathv[i]);
+                    results.gl_pathv[i] = copy;
+                }
+            }
+        }
+    }
+#endif
 
     size_t command_start = 0;
     size_t command_len = 0;
