@@ -25,6 +25,24 @@ static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
 
+static char *smallclueGenerateSessionPath(void) {
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || !*tmpdir) {
+        tmpdir = "/tmp";
+    }
+    char templ[PATH_MAX];
+    int written = snprintf(templ, sizeof(templ), "%s/pscal_elvis_%d_XXXXXX.ses", tmpdir, (int)getpid());
+    if (written <= 0 || (size_t)written >= sizeof(templ)) {
+        return NULL;
+    }
+    int fd = mkstemp(templ);
+    if (fd >= 0) {
+        close(fd);
+        return strdup(templ);
+    }
+    return NULL;
+}
+
 static char *smallclueOverrideEnv(const char *name, const char *value) {
     const char *current = getenv(name);
     char *saved = current ? strdup(current) : NULL;
@@ -97,8 +115,12 @@ int smallclueRunElvis(int argc, char **argv) {
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallclueOverrideEnv("TERMCAP", termcapPath);
 #endif
-    const char *session_path = NULL; /* no session file */
-    int wrapped_argc = argc + 3; /* argv0, -G, gui */
+    char *session_path_owned = smallclueGenerateSessionPath();
+    const char *session_path = session_path_owned;
+    bool use_custom_session = session_path && session_path[0] != '\0';
+
+    int extra_args = use_custom_session ? 5 : 3; /* argv0, -G, gui, [-f session] */
+    int wrapped_argc = argc + extra_args;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
     if (!wrapped_argv) {
         fprintf(stderr, "elvis: out of memory\n");
@@ -113,6 +135,10 @@ int smallclueRunElvis(int argc, char **argv) {
     wrapped_argv[argi++] = argv[0];
     wrapped_argv[argi++] = "-G";
     wrapped_argv[argi++] = "pscal";
+    if (use_custom_session) {
+        wrapped_argv[argi++] = "-f";
+        wrapped_argv[argi++] = session_path;
+    }
     for (int i = 1; i < argc; ++i) {
         wrapped_argv[argi++] = argv[i];
     }
@@ -162,5 +188,9 @@ int smallclueRunElvis(int argc, char **argv) {
     free(elvis_path);
     /* Ensure elvis session state is fully torn down before next launch. */
     sesclose();
+    if (session_path_owned) {
+        unlink(session_path_owned);
+        free(session_path_owned);
+    }
     return status;
 }
