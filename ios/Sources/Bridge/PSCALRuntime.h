@@ -40,6 +40,11 @@ int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
 
+/// Configures the PATH_TRUNCATE environment variable used by the shell to
+/// present sandboxed paths as a shorter root (e.g. "/").
+/// Passing NULL or an empty string clears the setting.
+void PSCALRuntimeApplyPathTruncation(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

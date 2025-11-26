@@ -466,6 +466,14 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
 int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }
+
+void PSCALRuntimeApplyPathTruncation(const char *path) {
+    if (path && path[0] != '\0') {
+        setenv("PATH_TRUNCATE", path, 1);
+    } else {
+        unsetenv("PATH_TRUNCATE");
+    }
+}
 #import <Foundation/Foundation.h>
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
 static void PSCALRuntimeEnsureSDLReady(void) {
