@@ -220,6 +220,11 @@ static char	dfltname[1024];
 
 /* This function closes the session file, given its handle */
 void blkclose(BLK *buf) {
+#ifdef FEATURE_RAM
+	if (nblks > 0) {
+		blkreset();
+	}
+#endif
 	if (fd < 0)
 		return;
 	blkread(buf, 0);
