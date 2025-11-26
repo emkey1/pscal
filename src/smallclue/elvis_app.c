@@ -96,7 +96,9 @@ int smallclueRunElvis(int argc, char **argv) {
     char *saved_termcap = smallclueOverrideEnv("TERMCAP", termcapPath);
 #endif
     const char *session_path = getenv("PSCALI_ELVIS_SESSION");
-    int wrapped_argc = argc + 4;
+    bool use_custom_session = session_path && session_path[0] != '\0';
+    int extra_args = use_custom_session ? 5 : 3; /* argv0, -G, gui, [-f session] */
+    int wrapped_argc = argc + extra_args;
     char **wrapped_argv = (char **)calloc((size_t)wrapped_argc, sizeof(char *));
     if (!wrapped_argv) {
         fprintf(stderr, "elvis: out of memory\n");
@@ -107,13 +109,16 @@ int smallclueRunElvis(int argc, char **argv) {
         free(elvis_path);
         return 1;
     }
-    wrapped_argv[0] = argv[0];
-    wrapped_argv[1] = "-G";
-    wrapped_argv[2] = "pscal";
-    wrapped_argv[3] = "-f";
-    wrapped_argv[4] = session_path ? session_path : "";
+    int argi = 0;
+    wrapped_argv[argi++] = argv[0];
+    wrapped_argv[argi++] = "-G";
+    wrapped_argv[argi++] = "pscal";
+    if (use_custom_session) {
+        wrapped_argv[argi++] = "-f";
+        wrapped_argv[argi++] = session_path;
+    }
     for (int i = 1; i < argc; ++i) {
-        wrapped_argv[i + 4] = argv[i];
+        wrapped_argv[argi++] = argv[i];
     }
     pscalRuntimeDebugLog("[smallclue] launching elvis_main_entry");
     for (int i = 0; i < wrapped_argc; ++i) {
