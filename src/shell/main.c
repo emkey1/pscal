@@ -1552,6 +1552,9 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 #endif
+    while (glob_base_len > 1 && glob_base[glob_base_len - 1] == '/') {
+        glob_base_len--;
+    }
 
     size_t pattern_len = glob_base_len + 2;
     char *pattern = (char *)malloc(pattern_len);
