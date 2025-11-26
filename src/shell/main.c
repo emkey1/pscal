@@ -1536,6 +1536,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
 
     const char *glob_base = word;
     size_t glob_base_len = word_len;
+    bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
     bool glob_used_virtual = false;
 #if defined(PSCAL_TARGET_IOS)
     if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
@@ -1556,14 +1557,20 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         glob_base_len--;
     }
 
-    size_t pattern_len = glob_base_len + 2;
+    size_t pattern_len = glob_base_len + (had_trailing_slash ? 3 : 2);
     char *pattern = (char *)malloc(pattern_len);
     if (!pattern) {
         return false;
     }
     memcpy(pattern, glob_base, glob_base_len);
-    pattern[glob_base_len] = '*';
-    pattern[glob_base_len + 1] = '\0';
+    size_t write_idx = glob_base_len;
+    if (had_trailing_slash) {
+        if (write_idx == 0 || pattern[write_idx - 1] != '/') {
+            pattern[write_idx++] = '/';
+        }
+    }
+    pattern[write_idx++] = '*';
+    pattern[write_idx] = '\0';
 
     glob_t results;
     memset(&results, 0, sizeof(results));
