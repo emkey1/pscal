@@ -113,16 +113,8 @@ int smallclueRunElvis(int argc, char **argv) {
     snprintf(termcapPath, sizeof(termcapPath), "%s/etc/termcap", sysRoot);
     char *saved_termcap = smallclueOverrideEnv("TERMCAP", termcapPath);
 #endif
-    const char *session_path_env = getenv("PSCALI_ELVIS_SESSION");
-    bool use_custom_session = session_path_env && session_path_env[0] != '\0';
-    char *owned_session_path = NULL;
-    if (!use_custom_session) {
-        owned_session_path = smallclueGenerateSessionPath();
-        if (owned_session_path) {
-            use_custom_session = true;
-        }
-    }
-    const char *session_path = use_custom_session ? (session_path_env ? session_path_env : owned_session_path) : NULL;
+    const char *session_path = getenv("PSCALI_ELVIS_SESSION");
+    bool use_custom_session = session_path && session_path[0] != '\0';
 
     int extra_args = use_custom_session ? 5 : 3; /* argv0, -G, gui, [-f session] */
     int wrapped_argc = argc + extra_args;
@@ -193,9 +185,5 @@ int smallclueRunElvis(int argc, char **argv) {
     free(elvis_path);
     /* Ensure elvis session state is fully torn down before next launch. */
     sesclose();
-    if (owned_session_path) {
-        unlink(owned_session_path);
-        free(owned_session_path);
-    }
     return status;
 }
