@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #ifndef S_ISDIR
 # define S_ISDIR(mode)	((mode & 0170000) == 0040000)
 #endif
@@ -35,6 +36,20 @@ static int fd = -1; /* file descriptor of the session file */
 #ifdef FEATURE_RAM
 static BLK **blklist;
 static int nblks;
+
+static void blkreset(void) {
+	int i;
+	if (blklist) {
+		for (i = 0; i < nblks; i++) {
+			if (blklist[i]) {
+				free(blklist[i]);
+			}
+		}
+		free(blklist);
+	}
+	blklist = NULL;
+	nblks = 0;
+}
 #endif
 
 /* This function creates a new block file, and returns ElvTrue if successful,
@@ -215,6 +230,9 @@ void blkclose(BLK *buf) {
 	if (o_tempsession) {
 		unlink(tochar8(o_session));
 	}
+#ifdef FEATURE_RAM
+	blkreset();
+#endif
 }
 
 /* Write the contents of buf into record # blkno, for the block file

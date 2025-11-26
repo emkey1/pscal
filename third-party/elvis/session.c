@@ -59,6 +59,43 @@ static int	nblocks;	/* size of alloccnt array */
 static BLKTYPE	*alloctype;	/* types of blocks, parallel to alloccnt[] */
 #endif
 
+static void sessionResetState(void)
+{
+	CACHEENTRY *scan = newest;
+	while (scan)
+	{
+		CACHEENTRY *prev = scan->older;
+		if (scan->buf)
+		{
+			safefree(scan->buf);
+		}
+		safefree(scan);
+		scan = prev;
+	}
+	newest = NULL;
+	oldest = NULL;
+	ncached = 0;
+	if (hashed)
+	{
+		safefree(hashed);
+		hashed = NULL;
+	}
+	oldblkhash = 0;
+	if (alloccnt)
+	{
+		safefree(alloccnt);
+		alloccnt = NULL;
+	}
+#ifdef DEBUG_SESSION
+	if (alloctype)
+	{
+		safefree(alloctype);
+		alloctype = NULL;
+	}
+#endif
+	nblocks = 0;
+}
+
 
 /* This function deletes an item from the block cache.  Optionally, it will
  * also free the item.
@@ -291,6 +328,7 @@ void sesclose()
 	tmp = (BLK *)safealloc((int)o_blksize, sizeof(char));
 	blkclose(tmp);
 	safefree(tmp);
+	sessionResetState();
 }
 
 /*----------------------------------------------------------------------------*/

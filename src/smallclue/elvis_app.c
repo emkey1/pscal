@@ -18,6 +18,7 @@ static void pscalRuntimeDebugLog(const char *message) {
     (void)message;
 }
 #endif
+#include "elvis.h"
 
 static jmp_buf g_elvis_exit_env;
 static bool g_elvis_exit_active = false;
@@ -159,5 +160,7 @@ int smallclueRunElvis(int argc, char **argv) {
 #endif
     free(elvis_path);
     unlink("ram");
+    /* Ensure elvis session state is fully torn down before next launch. */
+    sesclose();
     return status;
 }
