@@ -353,8 +353,8 @@ struct TerminalView: View {
                     focusAnchor &+= 1
                 }) {
                     Text("R")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .frame(width: 28, height: 28)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .frame(width: 32, height: 32)
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 .accessibilityLabel("Reset Terminal")
@@ -367,7 +367,8 @@ struct TerminalView: View {
                 }
                 .accessibilityLabel("Adjust Font Size")
             }
-            .padding()
+            .padding(.top, 12)
+            .padding(.trailing, 12)
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
