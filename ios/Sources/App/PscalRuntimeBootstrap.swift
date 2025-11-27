@@ -205,7 +205,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         echoLocallyIfNeeded(text)
         let bytes = [UInt8](data) // copy for async safety
         inputQueue.async {
-            let chunkSize = 1024
+            let chunkSize = 512
             var offset = 0
             while offset < bytes.count {
                 let len = min(chunkSize, bytes.count - offset)
@@ -215,7 +215,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 }
                 offset += len
                 if offset < bytes.count {
-                    usleep(1000) // allow the PTY to drain
+                    usleep(2000) // allow the PTY to drain
                 }
             }
         }

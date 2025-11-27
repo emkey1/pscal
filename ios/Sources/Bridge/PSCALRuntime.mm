@@ -285,6 +285,14 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
 
+    // Make input writes non-blocking; PSCALRuntimeSendInput will back off on EAGAIN.
+    if (input_fd >= 0) {
+        int flags = fcntl(input_fd, F_GETFL, 0);
+        if (flags >= 0) {
+            (void)fcntl(input_fd, F_SETFL, flags | O_NONBLOCK);
+        }
+    }
+
     if (!using_virtual_tty) {
         PSCALRuntimeApplyWindowSize(master_fd, initial_columns, initial_rows);
         pscalRuntimeSetVirtualTTYEnabled(false);
@@ -429,14 +437,23 @@ void PSCALRuntimeSendInput(const char *utf8, size_t length) {
         return;
     }
     size_t written = 0;
+    int backoffMicros = 1000; // 1ms
     while (written < length) {
         ssize_t chunk = write(fd, utf8 + written, length - written);
         if (chunk < 0) {
             if (errno == EINTR) {
                 continue;
             }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep((useconds_t)backoffMicros);
+                if (backoffMicros < 16000) {
+                    backoffMicros *= 2; // modest backoff to avoid hot loop
+                }
+                continue;
+            }
             break;
         }
+        backoffMicros = 1000;
         written += (size_t)chunk;
     }
 }
