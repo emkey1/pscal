@@ -121,8 +121,8 @@ final class TerminalBuffer {
         case osc
     }
 
-    private var columns: Int
-    private var rows: Int
+    private(set) var columns: Int
+    private(set) var rows: Int
     private let maxScrollback: Int
     private let dsrResponder: ((Data) -> Void)?
     private var resizeRequestHandler: ((Int, Int) -> Void)?
