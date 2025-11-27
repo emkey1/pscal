@@ -645,7 +645,7 @@ private enum TerminalFontMetrics {
     }
 }
 
-final class TerminalRendererContainerView: UIView {
+final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let terminalView = TerminalDisplayTextView()
     private let selectionOverlay = TerminalSelectionOverlay()
     private var lastElvisSnapshotText: String?
