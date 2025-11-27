@@ -837,14 +837,17 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             selectionMenu.isHidden = true
             return
         }
-        selectionMenu.sizeToFit()
-        let preferredOrigin = CGPoint(x: anchorRect.maxX - selectionMenu.bounds.width,
-                                      y: max(0, anchorRect.minY - selectionMenu.bounds.height - 8))
-        let maxX = bounds.width - selectionMenu.bounds.width - 8
+        selectionMenu.layoutIfNeeded()
+        let targetSize = selectionMenu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let menuSize = CGSize(width: max(60, targetSize.width), height: max(32, targetSize.height))
+        let preferredOrigin = CGPoint(x: anchorRect.maxX - menuSize.width,
+                                      y: max(0, anchorRect.minY - menuSize.height - 8))
+        let maxX = bounds.width - menuSize.width - 8
         let clampedX = max(8, min(preferredOrigin.x, maxX))
-        let maxY = bounds.height - selectionMenu.bounds.height - 8
+        let maxY = bounds.height - menuSize.height - 8
         let clampedY = max(8, min(preferredOrigin.y, maxY))
-        selectionMenu.frame.origin = CGPoint(x: clampedX, y: clampedY)
+        selectionMenu.frame = CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: menuSize)
+        bringSubviewToFront(selectionMenu)
     }
 
     func update(text: NSAttributedString,
