@@ -231,6 +231,20 @@ final class PscalRuntimeBootstrap: ObservableObject {
         updateGeometry(from: .elvis, columns: columns, rows: rows)
     }
 
+    func currentScreenText(maxLength: Int = 8000) -> String {
+        let text = screenText.string
+        let utf8 = text.utf8
+        if utf8.count <= maxLength {
+            return text
+        }
+        let dropCount = utf8.count - maxLength
+        if let idx = text.utf8.index(text.utf8.startIndex, offsetBy: dropCount, limitedBy: text.utf8.endIndex),
+           let scalarIndex = String.UTF8View.Index(idx, within: text) {
+            return String(text[scalarIndex...])
+        }
+        return text.suffix(maxLength).description
+    }
+
     @objc
     public func consumeOutput(buffer: UnsafePointer<Int8>, length: Int) {
         guard length > 0 else { return }

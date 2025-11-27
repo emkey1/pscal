@@ -345,14 +345,26 @@ struct TerminalView: View {
         )
         .edgesIgnoringSafeArea(.bottom)
         .overlay(alignment: .topTrailing) {
-            Button(action: { showingSettings = true }) {
-                Image(systemName: "textformat.size")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
+            VStack(alignment: .trailing, spacing: 8) {
+                Button(action: {
+                    UIPasteboard.general.string = PscalRuntimeBootstrap.shared.currentScreenText()
+                }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Copy Screen")
+
+                Button(action: { showingSettings = true }) {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Adjust Font Size")
             }
             .padding()
-            .accessibilityLabel("Adjust Font Size")
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
@@ -919,9 +931,6 @@ final class TerminalDisplayTextView: UITextView {
         isScrollEnabled = true
         textContainerInset = .zero
         backgroundColor = .clear
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCopyLongPress(_:)))
-        longPress.minimumPressDuration = 0.4
-        addGestureRecognizer(longPress)
     }
 
     required init?(coder: NSCoder) {
@@ -954,41 +963,7 @@ final class TerminalDisplayTextView: UITextView {
         handler(text)
     }
 
-    override func copy(_ sender: Any?) {
-        copyVisible(sender)
-    }
-
-    @objc private func copyVisible(_ sender: Any?) {
-        let range = visibleCharacterRange()
-        guard range.length > 0 else { return }
-        let text = (attributedText ?? NSAttributedString(string: "")).attributedSubstring(from: range).string
-        UIPasteboard.general.string = text
-    }
-
-    @objc private func copyAll(_ sender: Any?) {
-        let text = (attributedText ?? NSAttributedString(string: "")).string
-        guard !text.isEmpty else { return }
-        UIPasteboard.general.string = text
-    }
-
-    private func visibleCharacterRange() -> NSRange {
-        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
-        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-        return charRange
-    }
-
-    @objc private func handleCopyLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        becomeFirstResponder()
-        let menu = UIMenuController.shared
-        let targetRect = CGRect(origin: gesture.location(in: self), size: CGSize(width: 1, height: 1))
-        menu.menuItems = [
-            UIMenuItem(title: "Copy Visible", action: #selector(copyVisible(_:))),
-            UIMenuItem(title: "Copy All", action: #selector(copyAll(_:)))
-        ]
-        menu.showMenu(from: self, rect: targetRect)
-    }
+    override func copy(_ sender: Any?) { }
 
     private func updateCursorLayer() {
         guard let offset = cursorTextOffset else {
