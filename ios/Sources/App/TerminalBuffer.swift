@@ -118,6 +118,7 @@ final class TerminalBuffer {
         case normal
         case escape
         case csi
+        case osc
     }
 
     private var columns: Int
@@ -140,6 +141,7 @@ final class TerminalBuffer {
     private var suppressNextRemoteLF: Bool = false
     private var utf8ContinuationBytes: Int = 0
     private var utf8Codepoint: UInt32 = 0
+    private(set) var bracketedPasteEnabled: Bool = false
 
     private var parserState: ParserState = .normal
     private var csiParameters: [Int] = []
@@ -388,6 +390,14 @@ struct TerminalSnapshot {
             handleEscape(byte)
         case .csi:
             handleCSIByte(byte)
+        case .osc:
+            // For now, just swallow until BEL or ST; implement if needed.
+            if byte == 0x07 { // BEL terminates OSC
+                parserState = .normal
+            } else if byte == 0x1B {
+                // ESC \
+                parserState = .normal
+            }
         }
     }
 
@@ -443,6 +453,8 @@ struct TerminalSnapshot {
             csiParameters.removeAll()
             currentParameter = ""
             csiPrivateMode = false
+        case 0x5D: // ']'
+            parserState = .osc
         case 0x44: // 'D' index
             newLine(resetColumn: false)
             parserState = .normal
@@ -584,6 +596,8 @@ struct TerminalSnapshot {
             cursorCol = 0
         case 25:
             cursorHidden = !on
+        case 2004:
+            bracketedPasteEnabled = on
         default:
             break
         }
@@ -937,6 +951,7 @@ struct TerminalSnapshot {
         scrollRegionTop = 0
         scrollRegionBottom = rows - 1
         resetHandler?()
+        bracketedPasteEnabled = false
     }
 
     fileprivate static func utf16Offset(in row: [TerminalCell], column: Int) -> Int {

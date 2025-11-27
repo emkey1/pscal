@@ -97,7 +97,7 @@ begin
   writeln('Error: Unable to determine OpenWeather API key.');
   writeln('Set the OPENWEATHER_API_KEY environment variable or create ', keyPath,
           ' with your OpenWeather API key.');
-  halt(1);
+  LoadApiKey := '';
 end;
 // --- END LoadApiKey ---
 
@@ -280,7 +280,11 @@ begin
 
   // --- Read API Key ---
   apiKeyFromFile := LoadApiKey();
-  // { DEBUG: Key debug lines removed }
+  if apiKeyFromFile = '' then
+  begin
+    ExitCode := 1;
+    Exit;
+  end;
 
   // --- Check for command-line argument for Zip Code ---
   if ParamCount >= 1 then
@@ -292,7 +296,8 @@ begin
   begin
     writeln;
     writeln('Usage: weather <zipcode>');
-    halt(1);
+    ExitCode := 1;
+    Exit;
   end;
   // ---------------------------------------
 
@@ -305,9 +310,21 @@ begin
 
   // Perform the API call
   ms := apiSend(url, '');
+  if ms = 0 then
+  begin
+    writeln('Error: Unable to reach weather service (apiSend failed).');
+    ExitCode := 1;
+    Exit;
+  end;
 
   // Convert the memory stream response to a string
   response := apiReceive(ms);
+  if response = '' then
+  begin
+    writeln('Error: Empty response from weather service.');
+    ExitCode := 1;
+    Exit;
+  end;
   // { DEBUG: Raw response debug lines removed }
 
   // Free the memory stream (if applicable)

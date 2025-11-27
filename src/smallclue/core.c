@@ -1892,6 +1892,52 @@ static int compare_ls_entries_by_mtime(const void *lhs, const void *rhs) {
     return strcmp(a->name, b->name);
 }
 
+static void print_ls_columns(const SmallclueLsEntry *entries, size_t count) {
+    if (count == 0) {
+        return;
+    }
+
+    int term_cols = pscalRuntimeDetectWindowCols();
+    if (term_cols <= 0) {
+        term_cols = 80;
+    }
+
+    size_t max_len = 0;
+    for (size_t i = 0; i < count; ++i) {
+        size_t len = strlen(entries[i].name);
+        if (len > max_len) {
+            max_len = len;
+        }
+    }
+
+    size_t col_width = max_len + 2; /* padding between columns */
+    if (col_width == 0) {
+        return;
+    }
+
+    int cols = term_cols / (int)col_width;
+    if (cols < 1) {
+        cols = 1;
+    }
+    int rows = (int)((count + (size_t)cols - 1) / (size_t)cols);
+
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            size_t idx = (size_t)c * (size_t)rows + (size_t)r;
+            if (idx >= count) {
+                continue;
+            }
+            const char *name = entries[idx].name;
+            if (c == cols - 1 || (size_t)((c + 1) * rows + r) >= count) {
+                printf("%s", name);
+            } else {
+                printf("%-*s", (int)col_width, name);
+            }
+        }
+        putchar('\n');
+    }
+}
+
 static int list_directory(const char *path,
                           bool show_all,
                           bool long_format,
@@ -1963,11 +2009,15 @@ static int list_directory(const char *path,
         qsort(entries, count, sizeof(entries[0]), compare_ls_entries_by_mtime);
     }
 
-    for (size_t i = 0; i < count; ++i) {
-        status |= print_path_entry_with_stat(entries[i].full_path,
-                                             entries[i].name,
-                                             long_format,
-                                             &entries[i].stat_buf);
+    if (long_format) {
+        for (size_t i = 0; i < count; ++i) {
+            status |= print_path_entry_with_stat(entries[i].full_path,
+                                                 entries[i].name,
+                                                 true,
+                                                 &entries[i].stat_buf);
+        }
+    } else {
+        print_ls_columns(entries, count);
     }
 
     free_ls_entries(entries, count);

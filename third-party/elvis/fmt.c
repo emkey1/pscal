@@ -43,7 +43,9 @@ void usage(void);
 void putword(int shortlines);
 int fetchc(FILE *in);
 void fmt(FILE *in);
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
 int main(int argc, char **argv);
+#endif
 #endif
 
 int	width = 72;	/* the desired line width */
@@ -337,6 +339,7 @@ void fmt(FILE * in)
 
 
 
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
 int main(int argc, char * * argv)
 {
 	FILE	*in;	/* an input stream */
@@ -493,3 +496,4 @@ int main(int argc, char * * argv)
 	/* exit, possibly indicating an error */
 	return error;
 }
+#endif /* !PSCAL_NO_CLI_ENTRYPOINTS */

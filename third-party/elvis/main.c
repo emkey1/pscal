@@ -373,6 +373,13 @@ static int choosegui(int argc, char * * argv) {
 	/* Initialize "j" just to silence a compiler warning */
 	j = 0;
 
+	/* Some launchers can hand us an argc that counts the terminating NULL.
+	 * Trim any trailing NULL entries so argv[i] is always valid.
+	 */
+	while (argc > 0 && argv[argc - 1] == NULL) {
+		argc--;
+	}
+
 	/* search for "-G gui" in the command line.  Also watch for "-V" */
 	for (i = 1; i < argc; i++) {
 		/* skip non-flag arguments */

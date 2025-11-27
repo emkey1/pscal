@@ -102,6 +102,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         case main
         case elvis
     }
+    private let inputQueue = DispatchQueue(label: "com.pscal.runtime.input", qos: .userInitiated)
     private var geometryBySource: [GeometrySource: TerminalGeometryMetrics]
     private var activeGeometry: TerminalGeometryMetrics
     private var activeGeometrySource: GeometrySource = .main
@@ -144,6 +145,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
                                                                      queue: .main) { [weak self] _ in
             self?.scheduleRender()
         }
+    }
+
+    func sendPasted(_ text: String) {
+        guard !text.isEmpty else { return }
+        let wrapped: String
+        if terminalBuffer.bracketedPasteEnabled {
+            wrapped = "\u{1B}[200~" + text + "\u{1B}[201~"
+        } else {
+            wrapped = text
+        }
+        send(wrapped)
     }
 
     func start() {
@@ -191,9 +203,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
             return
         }
         echoLocallyIfNeeded(text)
-        data.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.bindMemory(to: CChar.self).baseAddress else { return }
-            PSCALRuntimeSendInput(base, rawBuffer.count)
+        let bytes = [UInt8](data) // copy for async safety
+        inputQueue.async {
+            let chunkSize = 1024
+            var offset = 0
+            while offset < bytes.count {
+                let len = min(chunkSize, bytes.count - offset)
+                bytes.withUnsafeBytes { raw in
+                    guard let base = raw.baseAddress?.advanced(by: offset) else { return }
+                    PSCALRuntimeSendInput(base.assumingMemoryBound(to: CChar.self), len)
+                }
+                offset += len
+                if offset < bytes.count {
+                    usleep(1000) // allow the PTY to drain
+                }
+            }
         }
     }
 

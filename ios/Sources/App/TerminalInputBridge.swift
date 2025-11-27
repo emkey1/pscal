@@ -4,6 +4,7 @@ import UIKit
 struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
+    var onPaste: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -24,6 +25,7 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.smartDashesType = .no
         view.keyboardAppearance = .dark
         view.onInput = onInput
+        view.onPaste = onPaste
         context.coordinator.view = view
         view.inputAssistantItem.leadingBarButtonGroups = []
         view.inputAssistantItem.trailingBarButtonGroups = []
@@ -35,6 +37,7 @@ struct TerminalInputBridge: UIViewRepresentable {
 
     func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
         uiView.onInput = onInput
+        uiView.onPaste = onPaste
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
             DispatchQueue.main.async {
@@ -51,6 +54,7 @@ struct TerminalInputBridge: UIViewRepresentable {
 
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
+    var onPaste: ((String) -> Void)?
     private struct RepeatCommand {
         let command: UIKeyCommand
         let output: String
@@ -83,7 +87,11 @@ final class TerminalKeyInputView: UITextView {
     override var canBecomeFirstResponder: Bool { true }
 
     override var keyCommands: [UIKeyCommand]? {
-        repeatKeyCommands.map { $0.command }
+        var commands = repeatKeyCommands.map { $0.command }
+        commands.append(UIKeyCommand(input: "v",
+                                     modifierFlags: [.command],
+                                     action: #selector(handlePasteCommand)))
+        return commands
     }
 
     override func insertText(_ text: String) {
@@ -92,6 +100,21 @@ final class TerminalKeyInputView: UITextView {
 
     override func deleteBackward() {
         onInput?("\u{7F}")
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        onPaste?(text)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        if action == #selector(copy(_:)) {
+            return false
+        }
+        return super.canPerformAction(action, withSender: sender)
     }
 
     override func caretRect(for position: UITextPosition) -> CGRect { .zero }
@@ -179,5 +202,10 @@ final class TerminalKeyInputView: UITextView {
             break
         }
         return false
+    }
+
+    @objc private func handlePasteCommand() {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        onPaste?(text)
     }
 }

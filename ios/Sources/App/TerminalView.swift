@@ -390,7 +390,8 @@ private struct TerminalContentView: View {
                                  isElvisWindowVisible: elvisVisible,
                                  elvisRenderToken: elvisToken,
                                  font: currentFont,
-                                 fontPointSize: fontSettings.pointSize)
+                                 fontPointSize: fontSettings.pointSize,
+                                 onPaste: handlePaste)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
 
@@ -413,7 +414,9 @@ private struct TerminalContentView: View {
         }
         .overlay(alignment: .bottomLeading) {
             if !ElvisWindowManager.shared.isVisible {
-                TerminalInputBridge(focusAnchor: $focusAnchor, onInput: handleInput)
+                TerminalInputBridge(focusAnchor: $focusAnchor,
+                                    onInput: handleInput,
+                                    onPaste: handlePaste)
                     .frame(width: 1, height: 1)
                     .allowsHitTesting(false)
             }
@@ -445,6 +448,10 @@ private struct TerminalContentView: View {
 
     private func handleInput(_ text: String) {
         runtime.send(text)
+    }
+
+    private func handlePaste(_ text: String) {
+        runtime.sendPasted(text)
     }
 
     private func updateTerminalGeometry() {
@@ -569,11 +576,13 @@ struct TerminalRendererView: UIViewRepresentable {
     let elvisRenderToken: UInt64
     let font: UIFont
     let fontPointSize: CGFloat
+    var onPaste: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> TerminalRendererContainerView {
         let container = TerminalRendererContainerView()
         container.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
         container.applyFont(font: font)
+        container.onPaste = onPaste
         return container
     }
 
@@ -581,6 +590,7 @@ struct TerminalRendererView: UIViewRepresentable {
         _ = elvisRenderToken
         uiView.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
         uiView.applyFont(font: font)
+        uiView.onPaste = onPaste
         let externalWindowEnabled = ElvisWindowManager.externalWindowEnabled
         let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
         if shouldBlankMain {
@@ -622,6 +632,11 @@ final class TerminalRendererContainerView: UIView {
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
     private var appearanceObserver: NSObjectProtocol?
+    var onPaste: ((String) -> Void)? {
+        didSet {
+            terminalView.pasteHandler = onPaste
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -879,6 +894,7 @@ final class TerminalDisplayTextView: UITextView {
     var cursorTextOffset: Int? {
         didSet { updateCursorLayer() }
     }
+    var pasteHandler: ((String) -> Void)?
     var cursorColor: UIColor = .systemOrange {
         didSet {
             cursorLayer.backgroundColor = cursorColor.cgColor
@@ -893,6 +909,9 @@ final class TerminalDisplayTextView: UITextView {
     }()
 
     private var blinkAnimationAdded = false
+    @available(iOS 16.0, *)
+    private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
+    private var editMenuLongPress: UILongPressGestureRecognizer?
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -902,6 +921,13 @@ final class TerminalDisplayTextView: UITextView {
         isScrollEnabled = true
         textContainerInset = .zero
         backgroundColor = .clear
+        if #available(iOS 16.0, *) {
+            addInteraction(editMenuInteraction)
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            longPress.minimumPressDuration = 0.5
+            addGestureRecognizer(longPress)
+            editMenuLongPress = longPress
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -915,6 +941,32 @@ final class TerminalDisplayTextView: UITextView {
 
     override var contentOffset: CGPoint {
         didSet { updateCursorLayer() }
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copy(_:)) {
+            return selectedRange.length > 0
+        }
+        if action == #selector(paste(_:)) {
+            return pasteHandler != nil && UIPasteboard.general.hasStrings
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let handler = pasteHandler,
+              let text = UIPasteboard.general.string,
+              !text.isEmpty else { return }
+        handler(text)
+    }
+
+    @available(iOS 16.0, *)
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        becomeFirstResponder()
+        let point = gesture.location(in: self)
+        let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+        editMenuInteraction.presentEditMenu(with: config)
     }
 
     private func updateCursorLayer() {
@@ -948,6 +1000,23 @@ final class TerminalDisplayTextView: UITextView {
         }
 
         cursorLayer.opacity = 1
+    }
+}
+
+@available(iOS 16.0, *)
+extension TerminalDisplayTextView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        var actions: [UIMenuElement] = []
+        if selectedRange.length > 0 {
+            actions.append(UICommand(title: "Copy", action: #selector(copy(_:))))
+        }
+        if pasteHandler != nil, UIPasteboard.general.hasStrings {
+            actions.append(UICommand(title: "Paste", action: #selector(paste(_:))))
+        }
+        guard !actions.isEmpty else { return nil }
+        return UIMenu(children: actions)
     }
 }
 

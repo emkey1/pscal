@@ -292,6 +292,30 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         pscalRuntimeSetVirtualTTYEnabled(true);
     }
 
+    // Ensure session-heavy tools (e.g., embedded Elvis) write into a
+    // writable sandbox directory instead of the app bundle.
+    @autoreleasepool {
+        // Prefer a stable Documents/home working directory so tools like Elvis
+        // can create temp/session files in a writable location.
+        NSString *homeRoot = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/home"];
+        NSError *dirError = nil;
+        [[NSFileManager defaultManager] createDirectoryAtPath:homeRoot
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&dirError];
+        NSString *sessionRoot = homeRoot;
+        if (sessionRoot.length == 0) {
+            sessionRoot = NSTemporaryDirectory();
+        }
+        if (sessionRoot.length > 0) {
+            setenv("HOME", sessionRoot.UTF8String, 1);
+            setenv("SESSIONPATH", sessionRoot.UTF8String, 1);
+            setenv("TMPDIR", sessionRoot.UTF8String, 1);
+            setenv("PWD", sessionRoot.UTF8String, 1);
+            chdir(sessionRoot.UTF8String);
+        }
+    }
+
     // Ensure stdio is line-buffered at most to reduce latency.
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);

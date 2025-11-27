@@ -38,6 +38,8 @@ static char *smallclueGenerateSessionPath(void) {
     int fd = mkstemp(templ);
     if (fd >= 0) {
         close(fd);
+        /* Don't leave the empty file behind; Elvis expects to create it. */
+        unlink(templ);
         return strdup(templ);
     }
     return NULL;

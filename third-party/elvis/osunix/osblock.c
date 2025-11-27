@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #ifndef S_ISDIR
 # define S_ISDIR(mode)	((mode & 0170000) == 0040000)
 #endif
@@ -33,6 +34,23 @@ char id_osblock[] = "$Id: osblock.c,v 2.30 2003/10/17 17:41:23 steve Exp $";
 
 
 static int fd = -1; /* file descriptor of the session file */
+#ifdef FEATURE_RAM
+static BLK **blklist;
+static int nblks;
+
+static void blkreset(void) {
+	if (nblks > 0) {
+		for (int i = 0; i < nblks; i++) {
+			if (blklist[i]) {
+				free(blklist[i]);
+			}
+		}
+		free(blklist);
+		blklist = NULL;
+		nblks = 0;
+	}
+}
+#endif
 /* This function creates a new block file, and returns ElvTrue if successful,
  * or ElvFalse if failed because the file was already busy.
  */
@@ -42,6 +60,19 @@ static char	dfltname[1024];
 	struct stat st;
 	int	i, j;
 	long	oldcount;
+
+#ifdef FEATURE_RAM
+	if (o_session && !CHARcmp(o_session, toCHAR("ram"))) {
+		nblks = 1024;
+		blklist = (BLK **)calloc(nblks, sizeof(BLK *));
+		blklist[0] = (BLK *)malloc(o_blksize);
+		memcpy(blklist[0], buf, o_blksize);
+		buf->super.inuse = getpid();
+		fd = -1;
+		o_tempsession = ElvTrue;
+		return ElvTrue;
+	}
+#endif
 
 	/* If no session file was explicitly requested, try successive
 	 * defaults until we find an existing file (if we're trying to
