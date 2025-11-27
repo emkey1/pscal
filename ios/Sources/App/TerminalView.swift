@@ -347,27 +347,14 @@ struct TerminalView: View {
         )
         .edgesIgnoringSafeArea(.bottom)
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 8) {
-                Button(action: {
-                    UIPasteboard.general.string = PscalRuntimeBootstrap.shared.currentScreenText()
-                    focusAnchor &+= 1
-                }) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .accessibilityLabel("Copy Screen")
-
-                Button(action: { showingSettings = true }) {
-                    Image(systemName: "textformat.size")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .accessibilityLabel("Adjust Font Size")
+            Button(action: { showingSettings = true }) {
+                Image(systemName: "textformat.size")
+                    .font(.system(size: 16, weight: .semibold))
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
             }
             .padding()
+            .accessibilityLabel("Adjust Font Size")
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
@@ -748,6 +735,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func handleSelectionPress(_ recognizer: UILongPressGestureRecognizer) {
         let location = recognizer.location(in: terminalView)
+        let anchor = recognizer.location(in: self)
         switch recognizer.state {
         case .began:
             if let index = characterIndex(at: location) {
@@ -755,6 +743,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                 selectionEndIndex = index
                 selectionOverlay.updateSelection(start: index, end: index)
                 terminalView.isScrollEnabled = false
+                selectionAnchorPoint = anchor
             }
         case .changed:
             guard let start = selectionStartIndex else { break }
@@ -766,40 +755,30 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             }
         case .ended, .cancelled, .failed:
             terminalView.isScrollEnabled = true
-            finalizeSelectionCopy()
+            selectionAnchorPoint = anchor
+            presentCopyMenu()
         default:
             break
         }
     }
 
-    private func finalizeSelectionCopy() {
-        guard let start = selectionStartIndex,
-              let end = selectionEndIndex,
-              let text = terminalView.attributedText else {
+    private func presentCopyMenu() {
+        guard selectionOverlay.hasSelection else {
             selectionOverlay.clearSelection()
             selectionStartIndex = nil
             selectionEndIndex = nil
+            selectionAnchorPoint = nil
             return
         }
-        let lower = max(0, min(start, end))
-        let upper = min(text.length, max(start, end))
-        guard upper > lower else {
-            selectionOverlay.clearSelection()
-            selectionStartIndex = nil
-            selectionEndIndex = nil
-            return
-        }
-        let range = NSRange(location: lower, length: upper - lower)
-        let selectedText = text.attributedSubstring(from: range).string
-        if !selectedText.isEmpty {
-            UIPasteboard.general.string = selectedText
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            self.selectionOverlay.clearSelection()
-        }
-        selectionStartIndex = nil
-        selectionEndIndex = nil
+        becomeFirstResponder()
+        let menu = UIMenuController.shared
+        menu.menuItems = [
+            UIMenuItem(title: "Copy", action: #selector(copySelectionAction)),
+            UIMenuItem(title: "Copy All", action: #selector(copyAllAction))
+        ]
+        let anchor = selectionAnchorPoint ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        let targetRect = CGRect(origin: anchor, size: CGSize(width: 1, height: 1))
+        menu.showMenu(from: self, rect: targetRect)
     }
 
     private func characterIndex(at point: CGPoint) -> Int? {
@@ -817,6 +796,47 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             return text.length
         }
         return charIndex
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copySelectionAction) || action == #selector(copyAllAction) {
+            return selectionOverlay.hasSelection
+        }
+        return false
+    }
+
+    @objc private func copySelectionAction() {
+        guard let text = terminalView.attributedText,
+              let range = selectionOverlay.currentSelectionRange() else {
+            selectionOverlay.clearSelection()
+            selectionStartIndex = nil
+            selectionEndIndex = nil
+            selectionAnchorPoint = nil
+            return
+        }
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+        if clamped.length > 0 {
+            let selectedText = text.attributedSubstring(from: clamped).string
+            UIPasteboard.general.string = selectedText
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        selectionOverlay.clearSelection()
+        selectionStartIndex = nil
+        selectionEndIndex = nil
+        selectionAnchorPoint = nil
+        UIMenuController.shared.hideMenu()
+    }
+
+    @objc private func copyAllAction() {
+        if let text = terminalView.attributedText, text.length > 0 {
+            UIPasteboard.general.string = text.string
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        selectionOverlay.clearSelection()
+        selectionStartIndex = nil
+        selectionEndIndex = nil
+        selectionAnchorPoint = nil
+        UIMenuController.shared.hideMenu()
     }
 
     func update(text: NSAttributedString,
@@ -840,6 +860,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         } else {
             lastElvisSnapshotText = nil
             lastElvisCursorOffset = nil
+            selectionOverlay.clearSelection()
             let displayText = remapFontsIfNeeded(in: text)
             terminalView.attributedText = displayText
             terminalView.cursorTextOffset = cursor?.textOffset
@@ -1115,18 +1136,37 @@ final class TerminalDisplayTextView: UITextView {
 final class TerminalSelectionOverlay: UIView {
     weak var textView: UITextView?
     private var selectionRange: NSRange?
+    var hasSelection: Bool {
+        guard let range = selectionRange else { return false }
+        return range.length > 0
+    }
+
+    func currentSelectionRange() -> NSRange? {
+        return selectionRange
+    }
 
     func updateSelection(start: Int, end: Int) {
         let lower = min(start, end)
         let upper = max(start, end)
-        selectionRange = NSRange(location: lower, length: upper - lower + 1)
-        setNeedsDisplay()
+        let newRange = NSRange(location: lower, length: upper - lower + 1)
+        let oldRect = selectionBoundingRect(for: selectionRange)
+        let newRect = selectionBoundingRect(for: newRange)
+        selectionRange = newRange
+        if let dirty = union(rectA: oldRect, rectB: newRect) {
+            setNeedsDisplay(dirty.insetBy(dx: -2, dy: -2))
+        } else {
+            setNeedsDisplay()
+        }
     }
 
     func clearSelection() {
-        if selectionRange != nil {
+        if let range = selectionRange {
             selectionRange = nil
-            setNeedsDisplay()
+            if let rect = selectionBoundingRect(for: range) {
+                setNeedsDisplay(rect.insetBy(dx: -2, dy: -2))
+            } else {
+                setNeedsDisplay()
+            }
         }
     }
 
@@ -1158,6 +1198,35 @@ final class TerminalSelectionOverlay: UIView {
             drawRect.origin.y += inset.top - textView.contentOffset.y
             drawRect = drawRect.integral.insetBy(dx: -1, dy: -1)
             context?.fill(drawRect)
+        }
+    }
+
+    private func selectionBoundingRect(for range: NSRange?) -> CGRect? {
+        guard let range = range,
+              let textView = textView,
+              let layoutManager = textView.layoutManager as NSLayoutManager?,
+              let textContainer = textView.textContainer as NSTextContainer?,
+              range.length > 0 else {
+            return nil
+        }
+        let inset = textView.textContainerInset
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        rect.origin.x += inset.left - textView.contentOffset.x
+        rect.origin.y += inset.top - textView.contentOffset.y
+        return rect
+    }
+
+    private func union(rectA: CGRect?, rectB: CGRect?) -> CGRect? {
+        switch (rectA, rectB) {
+        case let (.some(a), .some(b)):
+            return a.union(b)
+        case let (.some(a), .none):
+            return a
+        case let (.none, .some(b)):
+            return b
+        default:
+            return nil
         }
     }
 }
