@@ -1416,6 +1416,17 @@ static int shellRunBuiltinInProcess(VM *vm,
     }
 
     bool builtin_ran = shellInvokeBuiltin(vm, cmd);
+#if defined(PSCAL_TARGET_IOS)
+    if (!builtin_ran) {
+        /* Try tool-runner execution for shebang-wrapped scripts even in
+         * pipeline mode. This mirrors the exec path but stays in-process. */
+        int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+        if (shebang_status >= 0) {
+            shellUpdateStatus(shebang_status);
+            builtin_ran = true;
+        }
+    }
+#endif
     if (!builtin_ran) {
         runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
         shellUpdateStatus(127);
