@@ -140,13 +140,14 @@ static const char *shellResolveToolName(const char *interpreter) {
     }
     const char *base = strrchr(interpreter, '/');
     base = base ? base + 1 : interpreter;
-    if (strcmp(base, "pascal") == 0) return "pascal";
-    if (strcmp(base, "clike") == 0) return "clike";
-    if (strcmp(base, "rea") == 0) return "rea";
-    if (strcmp(base, "pscalvm") == 0) return "pscalvm";
-    if (strcmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
-    if (strcmp(base, "dascal") == 0) return "dascal";
-    if (strcmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "pascal") == 0) return "pascal";
+    if (strcasecmp(base, "clike") == 0) return "clike";
+    if (strcasecmp(base, "rea") == 0) return "rea";
+    if (strcasecmp(base, "pscalvm") == 0) return "pscalvm";
+    if (strcasecmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
+    if (strcasecmp(base, "dascal") == 0) return "dascal";
+    if (strcasecmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "exsh") == 0) return "exsh";
     return NULL;
 }
 
