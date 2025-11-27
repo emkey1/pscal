@@ -91,47 +91,48 @@ static bool shellReadShebangLine(const char *path, char **out_line) {
     return true;
 }
 
+extern int pascal_main(int argc, char **argv);
+extern int clike_main(int argc, char **argv);
+extern int rea_main(int argc, char **argv);
+extern int pscalvm_main(int argc, char **argv);
+extern int pscaljson2bc_main(int argc, char **argv);
+#ifdef BUILD_DASCAL
+extern int dascal_main(int argc, char **argv);
+#endif
+#ifdef BUILD_PSCALD
+extern int pscald_main(int argc, char **argv);
+#endif
+
 static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
-    const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
-    if (!runner || !*runner) {
-        fprintf(stderr, "%s: PSCALI_TOOL_RUNNER_PATH is not set; rebuild the iOS helper binary.\n",
-                tool_name ? tool_name : "tool");
+    /* On iOS we cannot reliably spawn; dispatch tool entrypoints directly. */
+    struct {
+        const char *name;
+        int (*entry)(int, char **);
+    } table[] = {
+        {"pascal", pascal_main},
+        {"clike", clike_main},
+        {"rea", rea_main},
+        {"pscalvm", pscalvm_main},
+        {"pscaljson2bc", pscaljson2bc_main},
+#ifdef BUILD_DASCAL
+        {"dascal", dascal_main},
+#endif
+#ifdef BUILD_PSCALD
+        {"pscald", pscald_main},
+#endif
+    };
+    const char *name = tool_name && *tool_name ? tool_name : (argc > 0 && argv && argv[0] ? argv[0] : NULL);
+    if (!name) {
         return 127;
     }
-
-    size_t child_count = (size_t)argc + 1;
-    char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
-    if (!child_argv) {
-        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name ? tool_name : "tool");
-        return 1;
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
+        if (strcasecmp(name, table[i].name) == 0) {
+            return table[i].entry(argc, argv);
+        }
     }
-
-    child_argv[0] = (char *)runner;
-    for (int i = 0; i < argc; ++i) {
-        child_argv[i + 1] = argv[i];
-    }
-
-    pid_t pid = 0;
-    int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
-    free(child_argv);
-    if (spawn_rc != 0) {
-        fprintf(stderr, "%s: failed to launch tool runner: %s\n",
-                tool_name ? tool_name : "tool", strerror(spawn_rc));
-        return 127;
-    }
-
-    int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
-        perror("waitpid");
-        return 127;
-    }
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
-    }
-    if (WIFSIGNALED(status)) {
-        return 128 + WTERMSIG(status);
-    }
-    return 1;
+    fprintf(stderr, "%s: tool runner unavailable for '%s'\n",
+            name, name);
+    return 127;
 }
 
 static const char *shellResolveToolName(const char *interpreter) {
