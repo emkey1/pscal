@@ -2330,6 +2330,14 @@ static char *readInteractiveLine(const char *prompt,
             } else {
                 fputc('\a', stdout);
                 fflush(stdout);
+                /* Ensure the prompt stays intact even when backspace is hit at
+                 * the start of input. */
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             }
             continue;
         }
