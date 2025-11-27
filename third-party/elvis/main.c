@@ -78,8 +78,7 @@ ELVBOOL	stdin_not_kbd;	/* if ElvTrue, then keyboard input should be adjusted */
 #endif
 
 /* Give a usage message, and then exit */
-static void usage(char * hint)
-{
+static void usage(char * hint) {
 	int	i;
 	char	guinames[80];
 
@@ -103,15 +102,13 @@ static void usage(char * hint)
 	msg(MSG_INFO, "       +command    Archaic form of \"-c command\" flag");
 	msg(MSG_INFO, "       -           Archaic form of \"-s\" flag");
 	guinames[0] = '\0';
-	for (i = 0; i < QTY(allguis); i++)
-	{
+	for (i = 0; i < QTY(allguis); i++) {
 		/* space between names */
 		if (i > 0)
 			strcat(guinames, " ");
 
 		/* concatenate the gui names into a list */
-		switch ((*allguis[i]->test)())
-		{
+		switch ((*allguis[i]->test)()) {
 		  case 0:
 			sprintf(guinames + strlen(guinames), "(%s)", allguis[i]->name);
 			break;
@@ -127,8 +124,8 @@ static void usage(char * hint)
 	msg(MSG_INFO, "[s]User interfaces: $1", guinames);
 	msg(MSG_INFO, "For more information about user interfaces, give the command 'elvis -G?'");
 	msg(MSG_INFO, "[s]Report bugs to $1", "kirkenda@cs.pdx.edu");
-	if (hint)
-	{
+    
+	if (hint) {
 		msg(MSG_INFO, hint);
 	}
 	if (chosengui)
@@ -136,17 +133,14 @@ static void usage(char * hint)
 	exit(0);
 }
 
-static void guiusage()
-{
+static void guiusage() {
 	int	i;
 	ELVBOOL	found;
 	char	*msgfmt;
 
 	msg(MSG_INFO, "user interfaces:");
-	for (i = 0, found = ElvFalse; i < QTY(allguis); i++)
-	{
-		switch ((*allguis[i]->test)())
-		{
+	for (i = 0, found = ElvFalse; i < QTY(allguis); i++) {
+		switch ((*allguis[i]->test)()) {
 		  case 0:
 			msgfmt = "[ss]   -G ($1<<12) $2 \\(UNAVAILABLE\\)";
 			break;
@@ -175,8 +169,7 @@ static void guiusage()
  * flags discovered.  Upon return, any arguments handled here should be
  * deleted from argv[]; the return value is the new argc value.
  */
-static int parseflags(int argc, char * * argv)
-{
+static int parseflags(int argc, char * * argv) {
 	int	i, j, del;
 	long	size = 0;
 
@@ -184,22 +177,18 @@ static int parseflags(int argc, char * * argv)
 	o_program = toCHAR(argv[0]);
 
 	/* for each argument... */
-	for (i = 1; i < argc && strcmp(argv[i], "--"); i++)
-	{
+	for (i = 1; i < argc && strcmp(argv[i], "--"); i++) {
 		/* for now, assume we'll be deleting 0 arguments */
 		del = 0;
 
 		/* recognize any normal flags */
-		if (argv[i][0] == '-')
-		{
+		if (argv[i][0] == '-') {
 			/* the "-" flag has already been processed */
 			if (!argv[i][1])
 				del = 1;
 
-			for (j = 1; j != 0 && argv[i][j]; j++)
-			{
-				switch (argv[i][j])
-				{
+			for (j = 1; j != 0 && argv[i][j]; j++) {
+				switch (argv[i][j]) {
 				  case 'a':
 					initialall = ElvTrue;
 					del = 1;
@@ -222,40 +211,32 @@ static int parseflags(int argc, char * * argv)
 				  	break;
 
 				  case 'f':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						o_session = toCHAR(&argv[i][j + 1]);
 						del = 1;
-					}
-					else if (i + 1 < argc)
-					{
+					} else if (i + 1 < argc) {
 						o_session = toCHAR(argv[i + 1]);
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-s requires the name of a session file");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					break;
 
 				  case 'o':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						msglog(&argv[i][j + 1]);
 						del = 1;
-					}
-					else if (i + 1 < argc)
-					{
+					} else if (i + 1 < argc) {
 						msglog(argv[i + 1]);
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-o requires the name of a log file");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					break;
 
@@ -264,40 +245,33 @@ static int parseflags(int argc, char * * argv)
 					break;
 
 				  case 'c':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						initialcommand = &argv[i][j + 1];
 						del = 1;
 					}
-					else if (i + 1 < argc)
-					{
+					else if (i + 1 < argc) {
 						initialcommand = argv[i + 1];
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-c requires an initial command");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					break;
 
 				  case 't':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						initialtag = &argv[i][j + 1];
 						del = 1;
-					}
-					else if (i + 1 < argc)
-					{
+					} else if (i + 1 < argc) {
 						initialtag = argv[i + 1];
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-t requires a tag name");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					break;
 
@@ -307,27 +281,22 @@ static int parseflags(int argc, char * * argv)
 					break;
 
 				  case 'B':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						size = atol(&argv[i][j + 1]);
 						del = 1;
-					}
-					else if (i + 1 < argc)
-					{
+					} else if (i + 1 < argc) {
 						size = atol(argv[i + 1]);
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-B requires a block size for the session file");
 					}
 					if (size != 512 && size != 1024
 						&& size != 2048 && size != 4096
-						&& size != 8192)
-					{
+						&& size != 8192) {
 						usage("bad -B blksize: should be 512, 1024, 2048, 4096, or 8192");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					o_blksize = size;
 					break;
@@ -344,53 +313,43 @@ static int parseflags(int argc, char * * argv)
 					break;
 
 				  case 'w':
-					if (argv[i][j + 1])
-					{
+					if (argv[i][j + 1]) {
 						size = atol(&argv[i][j + 1]);
 						del = 1;
-					}
-					else if (i + 1 < argc)
-					{
+					} else if (i + 1 < argc) {
 						size = atol(argv[i + 1]);
 						del = 2;
 						i++;
-					}
-					else
-					{
+					} else {
 						usage("-w requires a window size");
 					}
+                        
 					j = -1; /* so we stop processing this arg */
 					break;
 
 				  default:
-					if (del)
-					{
+					if (del) {
 						usage(NULL);
 					}
 					j = -1;
 				}
 			}
 		}
-		else if (argv[i][0] == '+')
-		{
-			if (argv[i][1])
-			{
+		else if (argv[i][0] == '+') {
+			if (argv[i][1]) {
 				initialcommand = &argv[i][1];
-			}
-			else
-			{
+			} else {
 				initialcommand = "$";
 			}
 			del = 1;
 		}
 
 		/* delete arguments, if we're supposed to */
-		if (del > 0)
-		{
-			for (j = i + 1 - del; j < argc - del; j++)
-			{
+		if (del > 0) {
+			for (j = i + 1 - del; j < argc - del; j++) {
 				argv[j] = argv[j + del];
 			}
+            
 			i -= del;
 			argc -= del;
 		}
@@ -408,16 +367,14 @@ static int parseflags(int argc, char * * argv)
  * Like parseflags(), this function should delete any arguments from argv that
  * it uses, and return the new argc value.
  */
-static int choosegui(int argc, char * * argv)
-{
+static int choosegui(int argc, char * * argv) {
 	int	i, j, val;
 
 	/* Initialize "j" just to silence a compiler warning */
 	j = 0;
 
 	/* search for "-G gui" in the command line.  Also watch for "-V" */
-	for (i = 1; i < argc; i++)
-	{
+	for (i = 1; i < argc; i++) {
 		/* skip non-flag arguments */
 		if (argv[i][0] != '-')
 			continue;
@@ -427,8 +384,7 @@ static int choosegui(int argc, char * * argv)
 			break;
 
 		/* is it -G?  -V?  - or -s? */
-		if (argv[i][1] == 'G')
-		{
+		if (argv[i][1] == 'G') {
 			/* remember the gui name */
 			if (argv[i][2])
 				o_gui = toCHAR(&argv[i][2]), j = i + 1;
@@ -438,30 +394,25 @@ static int choosegui(int argc, char * * argv)
 				usage("-G requires a user interface name");
 
 			/* delete the "-G" and its argument */
-			while (j < argc)
-			{
+			while (j < argc) {
 				argv[i++] = argv[j++];
 			}
 			argv[i] = NULL;
 			argc = i;
 		}
-		else if (argv[i][1] == 'V')
-		{
+		else if (argv[i][1] == 'V') {
 			for (j = 1; argv[i][j] == 'V'; j++)
 				o_verbose++;
 		}
-		else if (argv[i][1] == '\0' || argv[i][1] == 's')
-		{
+		else if (argv[i][1] == '\0' || argv[i][1] == 's') {
 			/* use the "script" interface */
 			o_gui = toCHAR("script");
 
 			/* don't read any configuration files */
 			optpreset(o_elvispath, NULL, OPT_HIDE);
-		}
-		else if (!strcmp(argv[i], "-version")
+		} else if (!strcmp(argv[i], "-version")
 		 || !strcmp(argv[i], "--version")
-		 || !strcmp(argv[i], "-v"))
-		{
+		 || !strcmp(argv[i], "-v")) {
 			msg(MSG_INFO, "[s]elvis $1", VERSION);
 #ifdef COPY1
 			msg(MSG_INFO, "[s]$1", COPY1);
@@ -498,10 +449,8 @@ static int choosegui(int argc, char * * argv)
 	 * to know if stdin is going to be read as a file, so they can find
 	 * an alternate way to read from the keyboard.
 	 */
-	for (i = 0; i < argc; i++)
-	{
-		if (!strcmp(argv[i], "-"))
-		{
+	for (i = 0; i < argc; i++) {
+		if (!strcmp(argv[i], "-")) {
 			stdin_not_kbd = ElvTrue;
 			break;
 		}
@@ -511,8 +460,7 @@ static int choosegui(int argc, char * * argv)
 	/* if no GUI was explicitly requested, then check for an ELVISGUI
 	 * environment variable.
 	 */
-	if (!o_gui)
-	{
+	if (!o_gui) {
 		const char *envgui = getenv("ELVISGUI");
 		if (envgui && *envgui) {
 			fprintf(stderr, "[elvis main] ELVISGUI=%s\n", envgui);
@@ -523,46 +471,35 @@ static int choosegui(int argc, char * * argv)
 	}
 
 	/* find the specified GUI, or the first available if none specified */
-	if (o_gui)
-	{
+	if (o_gui) {
 		/* find the named GUI */
 		for (i = 0; i < QTY(allguis) && strcmp(allguis[i]->name, tochar8(o_gui)); i++)
 		{
 		}
-		if (i >= QTY(allguis))
-		{
-			if (CHARcmp(o_gui, toCHAR("?")))
-			{
+		if (i >= QTY(allguis)) {
+			if (CHARcmp(o_gui, toCHAR("?"))) {
 				msg(MSG_ERROR, "[s]invalid gui $1", o_gui);
 			}
 			guiusage();
 		}
-	}
-	else
-	{
+	} else {
 		/* Find the first GUI that is definitely available.  While
 		 * searching, also remember the first one that *MIGHT* be
 		 * available, just in case we don't find any that are definitely
 		 * available.
 		 */
-		for (i = 0, j = -1; i < QTY(allguis) && (val = (*allguis[i]->test)()) != 1; i++)
-		{
-			if (val == 2 && j == -1)
-			{
+		for (i = 0, j = -1; i < QTY(allguis) && (val = (*allguis[i]->test)()) != 1; i++) {
+			if (val == 2 && j == -1) {
 				j = i;
 			}
 		}
 
 		/* If we didn't find a definite one, use the maybe one */
-		if (i >= QTY(allguis))
-		{
-			if (j >= 0)
-			{
+		if (i >= QTY(allguis)) {
+			if (j >= 0) {
 				fprintf(stderr, "[elvis main] selecting fallback GUI index %d\n", j);
 				i = j;
-			}
-			else
-			{
+			} else {
 				fprintf(stderr, "[elvis main] no gui available\n");
 				msg(MSG_ERROR, "no gui available");
 				exit(0);
@@ -572,8 +509,7 @@ static int choosegui(int argc, char * * argv)
 
 	/* Call the GUI's init() function */
 	argc = (*allguis[i]->init)(argc, argv);
-	if (argc <= 0)
-	{
+	if (argc <= 0) {
 		exit(0);
 	}
 
@@ -587,8 +523,7 @@ static int choosegui(int argc, char * * argv)
 }
 
 /* execute the initialization buffer (which may create some windows) */
-static void doexrc()
-{
+static void doexrc() {
 #ifdef FEATURE_CALC
 	BUFFER	buf;	/* the buffer itself */
 	MARKBUF	top;	/* top of the buffer */
@@ -597,8 +532,7 @@ static void doexrc()
 
 	/* If a buffer named "Elvis initialization" exists */
 	buf = bufpath(o_elvispath, INIT_FILE, toCHAR(INIT_BUF));
-	if (buf)
-	{
+	if (buf) {
 		/* Temporarily make all display-mode options available */
 		dispinit(ElvTrue);
 
@@ -637,8 +571,7 @@ static void doexrc()
 }
 
 /* make the "elvis args" buffer contain file names from command line */
-static void buildargs(int argc, char * * argv)
-{
+static void buildargs(int argc, char * * argv) {
 	int	i;
 
 	/* skip "--", if given */
@@ -653,8 +586,7 @@ static void buildargs(int argc, char * * argv)
 	/* Copy each argument to the args list.  For some operating systems,
 	 * we'll be expanding wildcards in each argument as we do this.
 	 */
-	for (argnext = i = 0; i < argc; i++)
-	{
+	for (argnext = i = 0; i < argc; i++) {
 		(void)exaddfilearg(&arglist, &argnext, argv[i], OSFILENAMERULES);
 	}
 
@@ -667,8 +599,7 @@ static void buildargs(int argc, char * * argv)
 }
 
 /* start first file */
-static void startfirst()
-{
+static void startfirst() {
 	BUFFER	buf;
 
 	/* Initialization is done.  Any autocmd events generated while loading
@@ -678,21 +609,17 @@ static void startfirst()
 	o_initializing = ElvFalse;
 
 	/* If "Elvis args" is empty */
-	if (!arglist[0])
-	{
+	if (!arglist[0]) {
 		/* Create an anonymous buffer and a window for it */
 		buf = bufalloc(NULL, 0, ElvFalse);
 		assert(buf);
 		(void)(*gui->creategw)(tochar8(o_bufname(buf)), "");
-	}
-	else
-	{
+	} else {
 		/* Load buffers and make windows for either just the first
 		 * argument, or as many of the arguments as possible.
 		 */
 		assert(argnext == 0);
-		do
-		{
+		do {
 			/* Create a buffer & window the first file */
 			buf = bufload((CHAR *)0, arglist[argnext++], ElvTrue);
 			assert(buf);
@@ -704,8 +631,7 @@ static void startfirst()
 /* Perform "-c cmd" or "-t tag".  If supposed to exit after that, then return
  * TRUE; else return FALSE to continue running interactively.
  */
-ELVBOOL mainfirstcmd(WINDOW win)
-{
+ELVBOOL mainfirstcmd(WINDOW win) {
 #ifdef FEATURE_TAGS
 	CHAR	tagcmd[100];
 #endif
@@ -719,8 +645,7 @@ ELVBOOL mainfirstcmd(WINDOW win)
 
 #ifdef FEATURE_TAGS
 	/* If "-t tag" was given */
-	if (initialtag)
-	{
+	if (initialtag) {
 		/* Compose a ":tag" command */
 		CHARcpy(tagcmd, toCHAR("tag "));
 		CHARncat(tagcmd, toCHAR(initialtag), QTY(tagcmd) - 5);
@@ -738,8 +663,7 @@ ELVBOOL mainfirstcmd(WINDOW win)
 	return (ELVBOOL)(windefault && !windefault->state);
 }
 
-static void init(int argc, char * * argv)
-{
+static void init(int argc, char * * argv) {
 	BUFFER	buf;
 	char	*lc;		/* locale name */
 	char	lcfile[100];	/* combination of locale name and file name */
@@ -812,20 +736,16 @@ static void init(int argc, char * * argv)
 	/* Load the verbose messages, plus a few others */
 	if (((lc = getenv("LC_ALL")) != NULL && *lc)
 	 || ((lc = getenv("LC_MESSAGES")) != NULL && *lc)
-	 || ((lc = getenv("LANG")) != NULL && *lc))
-	{
+	 || ((lc = getenv("LANG")) != NULL && *lc)) {
 		/* Try to find "elvis.msg" in a locale-dependent subdirectory.
 		 * If you can't find it there, then look for the standard one.
 		 */
 		strcpy(lcfile, dirpath(lc, MSG_FILE));
 		buf = bufpath(o_elvispath, lcfile, toCHAR(MSG_BUF));
-		if (!buf || o_bufchars(buf) == 0)
-		{
+		if (!buf || o_bufchars(buf) == 0) {
 			(void)bufpath(o_elvispath, MSG_FILE, toCHAR(MSG_BUF));
 		}
-	}
-	else
-	{
+	} else {
 		/* just use the standard versbose messages */
 		(void)bufpath(o_elvispath, MSG_FILE, toCHAR(MSG_BUF));
 	}
@@ -892,8 +812,7 @@ void term() {
 	safefree(arglist);
 
 	/* Free all the buffers so they aren't reported as memory leaks */
-	for (buf = ((BUFFER)0); buf; buf = next)
-	{
+	for (buf = ((BUFFER)0); buf; buf = next) {
 		next = buflist(buf);
 		if (!o_internal(buf))
 			buffree(buf);
@@ -913,8 +832,7 @@ void term() {
 	safeterm();
 }
 
-int main(int argc, char * * argv)
-{
+int main(int argc, char * * argv) {
 	init(argc, argv);
 	exstring(windefault, toCHAR("window 1"), NULL);
 	(*gui->loop)();
