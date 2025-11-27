@@ -647,10 +647,19 @@ private enum TerminalFontMetrics {
 
 final class TerminalRendererContainerView: UIView {
     private let terminalView = TerminalDisplayTextView()
+    private let selectionOverlay = TerminalSelectionOverlay()
     private var lastElvisSnapshotText: String?
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
     private var appearanceObserver: NSObjectProtocol?
+    private var selectionStartIndex: Int?
+    private var selectionEndIndex: Int?
+    private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
+        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleSelectionPress(_:)))
+        recognizer.minimumPressDuration = 0.25
+        recognizer.delegate = self
+        return recognizer
+    }()
     var onPaste: ((String) -> Void)? {
         didSet {
             terminalView.pasteHandler = onPaste
@@ -661,7 +670,7 @@ final class TerminalRendererContainerView: UIView {
         super.init(frame: frame)
         clipsToBounds = true
         terminalView.isEditable = false
-        terminalView.isSelectable = true
+        terminalView.isSelectable = false
         terminalView.isScrollEnabled = true
         terminalView.textContainerInset = .zero
         terminalView.textContainer.lineFragmentPadding = 0
@@ -674,6 +683,13 @@ final class TerminalRendererContainerView: UIView {
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
         addSubview(terminalView)
+
+        selectionOverlay.isUserInteractionEnabled = false
+        selectionOverlay.backgroundColor = .clear
+        selectionOverlay.textView = terminalView
+        addSubview(selectionOverlay)
+        addGestureRecognizer(longPressRecognizer)
+
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
@@ -697,6 +713,7 @@ final class TerminalRendererContainerView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         terminalView.frame = bounds
+        selectionOverlay.frame = bounds
     }
 
     func configure(backgroundColor: UIColor, foregroundColor: UIColor) {
@@ -722,10 +739,84 @@ final class TerminalRendererContainerView: UIView {
         terminalView.font = font
         terminalView.typingAttributes[.font] = font
         resolvedFont = font
+        selectionOverlay.clearSelection()
     }
 
     func currentFont() -> UIFont {
         return terminalView.font ?? resolvedFont
+    }
+
+    @objc private func handleSelectionPress(_ recognizer: UILongPressGestureRecognizer) {
+        let location = recognizer.location(in: terminalView)
+        switch recognizer.state {
+        case .began:
+            if let index = characterIndex(at: location) {
+                selectionStartIndex = index
+                selectionEndIndex = index
+                selectionOverlay.updateSelection(start: index, end: index)
+                terminalView.isScrollEnabled = false
+            }
+        case .changed:
+            guard let start = selectionStartIndex else { break }
+            if let index = characterIndex(at: location) {
+                if selectionEndIndex != index {
+                    selectionEndIndex = index
+                    selectionOverlay.updateSelection(start: start, end: index)
+                }
+            }
+        case .ended, .cancelled, .failed:
+            terminalView.isScrollEnabled = true
+            finalizeSelectionCopy()
+        default:
+            break
+        }
+    }
+
+    private func finalizeSelectionCopy() {
+        guard let start = selectionStartIndex,
+              let end = selectionEndIndex,
+              let text = terminalView.attributedText else {
+            selectionOverlay.clearSelection()
+            selectionStartIndex = nil
+            selectionEndIndex = nil
+            return
+        }
+        let lower = max(0, min(start, end))
+        let upper = min(text.length, max(start, end))
+        guard upper > lower else {
+            selectionOverlay.clearSelection()
+            selectionStartIndex = nil
+            selectionEndIndex = nil
+            return
+        }
+        let range = NSRange(location: lower, length: upper - lower)
+        let selectedText = text.attributedSubstring(from: range).string
+        if !selectedText.isEmpty {
+            UIPasteboard.general.string = selectedText
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            self.selectionOverlay.clearSelection()
+        }
+        selectionStartIndex = nil
+        selectionEndIndex = nil
+    }
+
+    private func characterIndex(at point: CGPoint) -> Int? {
+        guard let text = terminalView.attributedText else { return nil }
+        let layout = terminalView.layoutManager
+        let container = terminalView.textContainer
+        var adjusted = point
+        adjusted.x -= terminalView.textContainerInset.left
+        adjusted.y -= terminalView.textContainerInset.top
+        adjusted.x += terminalView.contentOffset.x
+        adjusted.y += terminalView.contentOffset.y
+        let glyphIndex = layout.glyphIndex(for: adjusted, in: container)
+        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
+        if charIndex >= text.length {
+            return text.length
+        }
+        return charIndex
     }
 
     func update(text: NSAttributedString,
@@ -767,6 +858,7 @@ final class TerminalRendererContainerView: UIView {
             lastElvisSnapshotText = snapshot.text
             terminalView.text = snapshot.text
             lastElvisCursorOffset = nil
+            selectionOverlay.clearSelection()
         }
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
@@ -1016,6 +1108,56 @@ final class TerminalDisplayTextView: UITextView {
             } else {
                 recognizer.isEnabled = false
             }
+        }
+    }
+}
+
+final class TerminalSelectionOverlay: UIView {
+    weak var textView: UITextView?
+    private var selectionRange: NSRange?
+
+    func updateSelection(start: Int, end: Int) {
+        let lower = min(start, end)
+        let upper = max(start, end)
+        selectionRange = NSRange(location: lower, length: upper - lower + 1)
+        setNeedsDisplay()
+    }
+
+    func clearSelection() {
+        if selectionRange != nil {
+            selectionRange = nil
+            setNeedsDisplay()
+        }
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let textView = textView,
+              let layoutManager = textView.layoutManager as NSLayoutManager?,
+              let textContainer = textView.textContainer as NSTextContainer?,
+              let selection = selectionRange,
+              selection.length > 0 else {
+            return
+        }
+
+        let selectionColor = UIColor.systemBlue.withAlphaComponent(0.25)
+        let inset = textView.textContainerInset
+        let context = UIGraphicsGetCurrentContext()
+        context?.setFillColor(selectionColor.cgColor)
+
+        var actualCharRange = NSRange()
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: selection, actualCharacterRange: &actualCharRange)
+
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { (_, usedRect, _, glyphRangeForLine, _) in
+            let intersection = NSIntersectionRange(glyphRangeForLine, glyphRange)
+            if intersection.length == 0 {
+                return
+            }
+            let highlightRect = layoutManager.boundingRect(forGlyphRange: intersection, in: textContainer)
+            var drawRect = highlightRect
+            drawRect.origin.x += inset.left - textView.contentOffset.x
+            drawRect.origin.y += inset.top - textView.contentOffset.y
+            drawRect = drawRect.integral.insetBy(dx: -1, dy: -1)
+            context?.fill(drawRect)
         }
     }
 }
