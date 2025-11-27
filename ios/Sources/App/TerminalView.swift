@@ -909,8 +909,6 @@ final class TerminalDisplayTextView: UITextView {
     }()
 
     private var blinkAnimationAdded = false
-    private var editMenuInteraction: Any?
-    private var editMenuLongPress: UILongPressGestureRecognizer?
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -920,15 +918,6 @@ final class TerminalDisplayTextView: UITextView {
         isScrollEnabled = true
         textContainerInset = .zero
         backgroundColor = .clear
-        if #available(iOS 16.0, *) {
-            let interaction = UIEditMenuInteraction(delegate: self)
-            editMenuInteraction = interaction
-            addInteraction(interaction)
-            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-            longPress.minimumPressDuration = 0.5
-            addGestureRecognizer(longPress)
-            editMenuLongPress = longPress
-        }
     }
 
     required init?(coder: NSCoder) {
@@ -961,13 +950,13 @@ final class TerminalDisplayTextView: UITextView {
         handler(text)
     }
 
-    @available(iOS 16.0, *)
-    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        becomeFirstResponder()
-        let point = gesture.location(in: self)
-        let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
-        (editMenuInteraction as? UIEditMenuInteraction)?.presentEditMenu(with: config)
+    override func copy(_ sender: Any?) {
+        let nsText = self.attributedText ?? NSAttributedString(string: "")
+        let range = selectedRange
+        guard range.length > 0,
+              range.location + range.length <= nsText.length else { return }
+        let substring = nsText.attributedSubstring(from: range).string
+        UIPasteboard.general.string = substring
     }
 
     private func updateCursorLayer() {
@@ -1001,23 +990,6 @@ final class TerminalDisplayTextView: UITextView {
         }
 
         cursorLayer.opacity = 1
-    }
-}
-
-@available(iOS 16.0, *)
-extension TerminalDisplayTextView: UIEditMenuInteractionDelegate {
-    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
-                             menuFor configuration: UIEditMenuConfiguration,
-                             suggestedActions: [UIMenuElement]) -> UIMenu? {
-        var actions: [UIMenuElement] = []
-        if selectedRange.length > 0 {
-            actions.append(UICommand(title: "Copy", action: #selector(copy(_:))))
-        }
-        if pasteHandler != nil, UIPasteboard.general.hasStrings {
-            actions.append(UICommand(title: "Paste", action: #selector(paste(_:))))
-        }
-        guard !actions.isEmpty else { return nil }
-        return UIMenu(children: actions)
     }
 }
 
