@@ -368,7 +368,7 @@ struct TerminalView: View {
                 .accessibilityLabel("Adjust Font Size")
             }
             .padding(.top, 12)
-            .padding(.trailing, 10)
+            .padding(.trailing, 4)
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
