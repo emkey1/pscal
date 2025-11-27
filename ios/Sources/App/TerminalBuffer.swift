@@ -1152,6 +1152,8 @@ struct TerminalSnapshot {
     }
 
     private func applyBackspaceErase() {
+        // Do not erase past column 0 to avoid destroying prompt text.
+        guard cursorCol > 0 else { return }
         process(byte: 0x08, fromEcho: true)
         if cursorRow >= 0 && cursorRow < grid.count &&
             cursorCol >= 0 && cursorCol < columns {
