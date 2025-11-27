@@ -909,8 +909,7 @@ final class TerminalDisplayTextView: UITextView {
     }()
 
     private var blinkAnimationAdded = false
-    @available(iOS 16.0, *)
-    private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
+    private var editMenuInteraction: UIEditMenuInteraction?
     private var editMenuLongPress: UILongPressGestureRecognizer?
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -922,7 +921,9 @@ final class TerminalDisplayTextView: UITextView {
         textContainerInset = .zero
         backgroundColor = .clear
         if #available(iOS 16.0, *) {
-            addInteraction(editMenuInteraction)
+            let interaction = UIEditMenuInteraction(delegate: self)
+            editMenuInteraction = interaction
+            addInteraction(interaction)
             let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
             longPress.minimumPressDuration = 0.5
             addGestureRecognizer(longPress)
@@ -966,7 +967,7 @@ final class TerminalDisplayTextView: UITextView {
         becomeFirstResponder()
         let point = gesture.location(in: self)
         let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
-        editMenuInteraction.presentEditMenu(with: config)
+        editMenuInteraction?.presentEditMenu(with: config)
     }
 
     private func updateCursorLayer() {
