@@ -915,9 +915,13 @@ final class TerminalDisplayTextView: UITextView {
         layer.addSublayer(cursorLayer)
         cursorLayer.backgroundColor = cursorColor.cgColor
         isEditable = false
+        isSelectable = false
         isScrollEnabled = true
         textContainerInset = .zero
         backgroundColor = .clear
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCopyLongPress(_:)))
+        longPress.minimumPressDuration = 0.4
+        addGestureRecognizer(longPress)
     }
 
     required init?(coder: NSCoder) {
@@ -934,11 +938,11 @@ final class TerminalDisplayTextView: UITextView {
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(copy(_:)) {
-            return selectedRange.length > 0
-        }
         if action == #selector(paste(_:)) {
             return pasteHandler != nil && UIPasteboard.general.hasStrings
+        }
+        if action == #selector(copyVisible(_:)) || action == #selector(copyAll(_:)) {
+            return true
         }
         return super.canPerformAction(action, withSender: sender)
     }
@@ -951,12 +955,39 @@ final class TerminalDisplayTextView: UITextView {
     }
 
     override func copy(_ sender: Any?) {
-        let nsText = self.attributedText ?? NSAttributedString(string: "")
-        let range = selectedRange
-        guard range.length > 0,
-              range.location + range.length <= nsText.length else { return }
-        let substring = nsText.attributedSubstring(from: range).string
-        UIPasteboard.general.string = substring
+        copyVisible(sender)
+    }
+
+    @objc private func copyVisible(_ sender: Any?) {
+        let range = visibleCharacterRange()
+        guard range.length > 0 else { return }
+        let text = (attributedText ?? NSAttributedString(string: "")).attributedSubstring(from: range).string
+        UIPasteboard.general.string = text
+    }
+
+    @objc private func copyAll(_ sender: Any?) {
+        let text = (attributedText ?? NSAttributedString(string: "")).string
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+    }
+
+    private func visibleCharacterRange() -> NSRange {
+        let visibleRect = CGRect(origin: contentOffset, size: bounds.size)
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        return charRange
+    }
+
+    @objc private func handleCopyLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        becomeFirstResponder()
+        let menu = UIMenuController.shared
+        let targetRect = CGRect(origin: gesture.location(in: self), size: CGSize(width: 1, height: 1))
+        menu.menuItems = [
+            UIMenuItem(title: "Copy Visible", action: #selector(copyVisible(_:))),
+            UIMenuItem(title: "Copy All", action: #selector(copyAll(_:)))
+        ]
+        menu.showMenu(from: self, rect: targetRect)
     }
 
     private func updateCursorLayer() {
