@@ -635,7 +635,6 @@ private enum TerminalFontMetrics {
 final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let terminalView = TerminalDisplayTextView()
     private let selectionOverlay = TerminalSelectionOverlay()
-    private let selectionMenu = TerminalSelectionMenuView()
     private var lastElvisSnapshotText: String?
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
@@ -678,11 +677,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionOverlay.textView = terminalView
         addSubview(selectionOverlay)
         addGestureRecognizer(longPressRecognizer)
-        selectionMenu.isHidden = true
-        selectionMenu.copyHandler = { [weak self] in self?.copySelectionAction() }
-        selectionMenu.copyAllHandler = { [weak self] in self?.copyAllAction() }
-        addSubview(selectionMenu)
-
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
@@ -773,12 +767,23 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             hideSelectionMenu()
             return
         }
-        positionSelectionMenu()
-        selectionMenu.isHidden = false
+        becomeFirstResponder()
+        var items: [UIMenuItem] = [
+            UIMenuItem(title: "Copy", action: #selector(copySelectionAction)),
+            UIMenuItem(title: "Copy All", action: #selector(copyAllAction))
+        ]
+        if UIPasteboard.general.hasStrings {
+            items.append(UIMenuItem(title: "Paste", action: #selector(pasteSelectionAction)))
+        }
+        let menu = UIMenuController.shared
+        menu.menuItems = items
+        let anchorRect = selectionOverlay.selectionBoundingRect(in: self) ?? CGRect(origin: CGPoint(x: bounds.midX, y: bounds.midY), size: CGSize(width: 1, height: 1))
+        menu.showMenu(from: self, rect: anchorRect)
     }
 
     private func hideSelectionMenu() {
-        selectionMenu.isHidden = true
+        UIMenuController.shared.hideMenu()
+        selectionAnchorPoint = nil
     }
 
     private func characterIndex(at point: CGPoint) -> Int? {
@@ -832,22 +837,15 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         hideSelectionMenu()
     }
 
-    private func positionSelectionMenu() {
-        guard let anchorRect = selectionOverlay.selectionBoundingRect(in: self) else {
-            selectionMenu.isHidden = true
+    @objc private func pasteSelectionAction() {
+        guard let onPaste = onPaste,
+              let text = UIPasteboard.general.string,
+              !text.isEmpty else {
+            hideSelectionMenu()
             return
         }
-        selectionMenu.layoutIfNeeded()
-        let targetSize = selectionMenu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-        let menuSize = CGSize(width: max(60, targetSize.width), height: max(32, targetSize.height))
-        let preferredOrigin = CGPoint(x: anchorRect.maxX - menuSize.width,
-                                      y: max(0, anchorRect.minY - menuSize.height - 8))
-        let maxX = bounds.width - menuSize.width - 8
-        let clampedX = max(8, min(preferredOrigin.x, maxX))
-        let maxY = bounds.height - menuSize.height - 8
-        let clampedY = max(8, min(preferredOrigin.y, maxY))
-        selectionMenu.frame = CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: menuSize)
-        bringSubviewToFront(selectionMenu)
+        onPaste(text)
+        hideSelectionMenu()
     }
 
     func update(text: NSAttributedString,
