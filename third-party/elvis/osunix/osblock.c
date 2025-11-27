@@ -289,8 +289,7 @@ void blkread(BLK *buf, _BLKNO_ blkno)
  * blocks out to the disk, but UNIX doesn't offer a way to do that, so we
  * force them all out.  Major bummer.
  */
-void blksync()
-{
+void blksync(void) {
 #ifdef FEATURE_RAM
 	if (nblks > 0)
 		return;
