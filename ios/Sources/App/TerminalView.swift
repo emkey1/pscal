@@ -932,9 +932,7 @@ final class TerminalDisplayTextView: UITextView {
         textContainerInset = .zero
         backgroundColor = .clear
         isUserInteractionEnabled = true
-        if #available(iOS 15.0, *) {
-            self.isTextDragInteractionEnabled = false
-        } else {
+        if #available(iOS 11.0, *) {
             self.textDragInteraction?.isEnabled = false
         }
         pruneGestures()
