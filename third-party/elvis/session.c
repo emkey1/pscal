@@ -3,6 +3,7 @@
 
 
 #include "elvis.h"
+#include <limits.h>
 #ifdef FEATURE_RCSID
 char id_session[] = "$Id: session.c,v 2.30 2003/10/17 17:41:23 steve Exp $";
 #endif
@@ -313,8 +314,7 @@ void sesopen(ELVBOOL force)
 /* Flush all dirty blocks in the cache, and then close the session
  * file.  Elvis calls this just before exiting.
  */
-void sesclose()
-{
+void sesclose(void) {
 	BLK	 *tmp;
 
 	/* if session file was never opened, then we don't need to close it */
@@ -489,15 +489,13 @@ void sesflush(_BLKNO_ blkno)
 }
 
 /* flush every dirty block in the cache */
-void sessync()
-{
+void sessync(void) {
 	CACHEENTRY *bc;
 
 	safeinspect();
 
 	/* for each block... */
-	for (bc = oldest; bc; bc = bc->newer)
-	{
+	for (bc = oldest; bc; bc = bc->newer) {
 #ifdef DEBUG_SESSION
 		if (bc->locks > 0)
 		{
@@ -576,7 +574,11 @@ BLKNO sesalloc(_BLKNO_ blkwant, BLKTYPE blktype)
 	if (blkno >= nblocks)
 	{
 		/* reallocate the alloccnt array */
-		newsize = blkno + o_blkgrow - (blkno % o_blkgrow);
+		long computed = (long)blkno + (long)o_blkgrow - ((long)blkno % (long)o_blkgrow);
+		if (computed > INT_MAX) {
+			computed = INT_MAX;
+		}
+		newsize = (int)computed;
 		assert(newsize > blkno);
 		newarray = (COUNT *)safekept(newsize, sizeof(COUNT));
 #ifdef DEBUG_SESSION

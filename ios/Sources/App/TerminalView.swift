@@ -950,9 +950,6 @@ final class TerminalDisplayTextView: UITextView {
         if action == #selector(paste(_:)) {
             return pasteHandler != nil && UIPasteboard.general.hasStrings
         }
-        if action == #selector(copyVisible(_:)) || action == #selector(copyAll(_:)) {
-            return true
-        }
         return super.canPerformAction(action, withSender: sender)
     }
 
