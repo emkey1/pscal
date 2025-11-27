@@ -37,7 +37,7 @@ BEGIN
 
   // Get screen dimensions
   Width := ScreenCols;  // Assumes ScreenCols built-in exists
-  Height := ScreenRows; // Assumes ScreenRows built-in exists
+  Height := ScreenRows - 1; // Assumes ScreenRows built-in exists
 
   WriteLn('Calculating Mandelbrot for ', Width, 'x', Height, ' console...');
 

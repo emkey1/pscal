@@ -36,7 +36,7 @@ BEGIN
   // ClrScr; // Optional
 
   Width := ScreenCols;
-  Height := ScreenRows;
+  Height := ScreenRows - 1;
 
   WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with 256 colors...');
 
