@@ -347,14 +347,27 @@ struct TerminalView: View {
         )
         .edgesIgnoringSafeArea(.bottom)
         .overlay(alignment: .topTrailing) {
-            Button(action: { showingSettings = true }) {
-                Image(systemName: "textformat.size")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
+            VStack(alignment: .trailing, spacing: 10) {
+                Button(action: {
+                    PscalRuntimeBootstrap.shared.resetTerminalState()
+                    focusAnchor &+= 1
+                }) {
+                    Text("R")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Reset Terminal")
+
+                Button(action: { showingSettings = true }) {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Adjust Font Size")
             }
             .padding()
-            .accessibilityLabel("Adjust Font Size")
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()

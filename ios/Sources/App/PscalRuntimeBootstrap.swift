@@ -231,6 +231,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
         updateGeometry(from: .elvis, columns: columns, rows: rows)
     }
 
+    func resetTerminalState() {
+        let cols = terminalBuffer.columns
+        let rows = terminalBuffer.rows
+        if cols > 0 && rows > 0 {
+            PSCALRuntimeUpdateWindowSize(Int32(cols), Int32(rows))
+        }
+        terminalBuffer.reset()
+        DispatchQueue.main.async {
+            self.screenText = NSAttributedString(string: "")
+            self.cursorInfo = nil
+        }
+        runtimeDebugLog("[Runtime] terminal reset invoked")
+        send("\u{1B}c") // RIS
+    }
+
     func currentScreenText(maxLength: Int = 8000) -> String {
         let text = screenText.string
         let utf8 = text.utf8
