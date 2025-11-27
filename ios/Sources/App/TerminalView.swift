@@ -863,17 +863,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionMenu.frame = CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: menuSize)
     }
 
-    @objc private func pasteSelectionAction() {
-        guard let onPaste = onPaste,
-              let text = UIPasteboard.general.string,
-              !text.isEmpty else {
-            hideSelectionMenu()
-            return
-        }
-        onPaste(text)
-        hideSelectionMenu()
-    }
-
     func update(text: NSAttributedString,
                 cursor: TerminalCursorInfo?,
                 backgroundColor: UIColor,
