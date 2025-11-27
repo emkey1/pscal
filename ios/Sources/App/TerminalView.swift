@@ -333,13 +333,15 @@ final class TerminalFontSettings: ObservableObject {
 struct TerminalView: View {
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
+    @State private var focusAnchor: Int = 0
 
     var body: some View {
         KeyboardAwareContainer(
             content: GeometryReader { proxy in
                 TerminalContentView(availableSize: proxy.size,
                                     safeAreaInsets: proxy.safeAreaInsets,
-                                    fontSettings: fontSettings)
+                                    fontSettings: fontSettings,
+                                    focusAnchor: $focusAnchor)
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
         )
@@ -348,6 +350,7 @@ struct TerminalView: View {
             VStack(alignment: .trailing, spacing: 8) {
                 Button(action: {
                     UIPasteboard.general.string = PscalRuntimeBootstrap.shared.currentScreenText()
+                    focusAnchor &+= 1
                 }) {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 16, weight: .semibold))
@@ -379,13 +382,17 @@ private struct TerminalContentView: View {
     let safeAreaInsets: EdgeInsets
     @ObservedObject private var fontSettings: TerminalFontSettings
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
-    @State private var focusAnchor: Int = 0
+    @Binding private var focusAnchor: Int
     @State private var lastLoggedMetrics: TerminalGeometryMetrics?
 
-    init(availableSize: CGSize, safeAreaInsets: EdgeInsets, fontSettings: TerminalFontSettings) {
+    init(availableSize: CGSize,
+         safeAreaInsets: EdgeInsets,
+         fontSettings: TerminalFontSettings,
+         focusAnchor: Binding<Int>) {
         self.availableSize = availableSize
         self.safeAreaInsets = safeAreaInsets
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
+        _focusAnchor = focusAnchor
     }
 
     var body: some View {
