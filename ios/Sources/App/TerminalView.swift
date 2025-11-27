@@ -635,6 +635,7 @@ private enum TerminalFontMetrics {
 final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let terminalView = TerminalDisplayTextView()
     private let selectionOverlay = TerminalSelectionOverlay()
+    private let selectionMenu = TerminalSelectionMenuView()
     private var lastElvisSnapshotText: String?
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
@@ -677,6 +678,10 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionOverlay.textView = terminalView
         addSubview(selectionOverlay)
         addGestureRecognizer(longPressRecognizer)
+        selectionMenu.isHidden = true
+        selectionMenu.copyHandler = { [weak self] in self?.copySelectionAction() }
+        selectionMenu.copyAllHandler = { [weak self] in self?.copyAllAction() }
+        addSubview(selectionMenu)
 
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
@@ -757,29 +762,23 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         case .ended, .cancelled, .failed:
             terminalView.isScrollEnabled = true
             selectionAnchorPoint = anchor
-            presentCopyMenu()
+            showSelectionMenu()
         default:
             break
         }
     }
 
-    private func presentCopyMenu() {
+    private func showSelectionMenu() {
         guard selectionOverlay.hasSelection else {
-            selectionOverlay.clearSelection()
-            selectionStartIndex = nil
-            selectionEndIndex = nil
-            selectionAnchorPoint = nil
+            hideSelectionMenu()
             return
         }
-        becomeFirstResponder()
-        let menu = UIMenuController.shared
-        menu.menuItems = [
-            UIMenuItem(title: "Copy", action: #selector(copySelectionAction)),
-            UIMenuItem(title: "Copy All", action: #selector(copyAllAction))
-        ]
-        let anchor = selectionAnchorPoint ?? CGPoint(x: bounds.midX, y: bounds.midY)
-        let targetRect = CGRect(origin: anchor, size: CGSize(width: 1, height: 1))
-        menu.showMenu(from: self, rect: targetRect)
+        positionSelectionMenu()
+        selectionMenu.isHidden = false
+    }
+
+    private func hideSelectionMenu() {
+        selectionMenu.isHidden = true
     }
 
     private func characterIndex(at point: CGPoint) -> Int? {
@@ -797,13 +796,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             return text.length
         }
         return charIndex
-    }
-
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(copySelectionAction) || action == #selector(copyAllAction) {
-            return selectionOverlay.hasSelection
-        }
-        return false
     }
 
     @objc private func copySelectionAction() {
@@ -825,7 +817,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionStartIndex = nil
         selectionEndIndex = nil
         selectionAnchorPoint = nil
-        UIMenuController.shared.hideMenu()
+        hideSelectionMenu()
     }
 
     @objc private func copyAllAction() {
@@ -837,7 +829,22 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionStartIndex = nil
         selectionEndIndex = nil
         selectionAnchorPoint = nil
-        UIMenuController.shared.hideMenu()
+        hideSelectionMenu()
+    }
+
+    private func positionSelectionMenu() {
+        guard let anchorRect = selectionOverlay.selectionBoundingRect(in: self) else {
+            selectionMenu.isHidden = true
+            return
+        }
+        selectionMenu.sizeToFit()
+        let preferredOrigin = CGPoint(x: anchorRect.maxX - selectionMenu.bounds.width,
+                                      y: max(0, anchorRect.minY - selectionMenu.bounds.height - 8))
+        let maxX = bounds.width - selectionMenu.bounds.width - 8
+        let clampedX = max(8, min(preferredOrigin.x, maxX))
+        let maxY = bounds.height - selectionMenu.bounds.height - 8
+        let clampedY = max(8, min(preferredOrigin.y, maxY))
+        selectionMenu.frame.origin = CGPoint(x: clampedX, y: clampedY)
     }
 
     func update(text: NSAttributedString,
@@ -1146,6 +1153,11 @@ final class TerminalSelectionOverlay: UIView {
         return selectionRange
     }
 
+    func selectionBoundingRect(in view: UIView) -> CGRect? {
+        guard let textView else { return nil }
+        return selectionBoundingRect(for: selectionRange).flatMap { convert($0, from: textView) }
+    }
+
     func updateSelection(start: Int, end: Int) {
         let lower = min(start, end)
         let upper = max(start, end)
@@ -1229,6 +1241,65 @@ final class TerminalSelectionOverlay: UIView {
         default:
             return nil
         }
+    }
+}
+
+final class TerminalSelectionMenuView: UIView {
+    var copyHandler: (() -> Void)?
+    var copyAllHandler: (() -> Void)?
+
+    private let stack = UIStackView()
+    private let copyButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Copy", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        return button
+    }()
+    private let copyAllButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("All", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        return button
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.9)
+        layer.cornerRadius = 8
+        layer.masksToBounds = true
+        stack.axis = .horizontal
+        stack.spacing = 4
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4)
+        ])
+        copyButton.addTarget(self, action: #selector(didTapCopy), for: .touchUpInside)
+        copyAllButton.addTarget(self, action: #selector(didTapCopyAll), for: .touchUpInside)
+        stack.addArrangedSubview(copyButton)
+        stack.addArrangedSubview(copyAllButton)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func sizeToFit() {
+        super.sizeToFit()
+        layoutIfNeeded()
+    }
+
+    @objc private func didTapCopy() {
+        copyHandler?()
+    }
+
+    @objc private func didTapCopyAll() {
+        copyAllHandler?()
     }
 }
 
