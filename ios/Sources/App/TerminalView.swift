@@ -931,6 +931,13 @@ final class TerminalDisplayTextView: UITextView {
         isScrollEnabled = true
         textContainerInset = .zero
         backgroundColor = .clear
+        isUserInteractionEnabled = true
+        if #available(iOS 15.0, *) {
+            self.isTextDragInteractionEnabled = false
+        } else {
+            self.textDragInteraction?.isEnabled = false
+        }
+        pruneGestures()
     }
 
     required init?(coder: NSCoder) {
@@ -941,6 +948,8 @@ final class TerminalDisplayTextView: UITextView {
         super.layoutSubviews()
         updateCursorLayer()
     }
+
+    override var canBecomeFirstResponder: Bool { false }
 
     override var contentOffset: CGPoint {
         didSet { updateCursorLayer() }
@@ -993,6 +1002,16 @@ final class TerminalDisplayTextView: UITextView {
         }
 
         cursorLayer.opacity = 1
+    }
+
+    private func pruneGestures() {
+        gestureRecognizers?.forEach { recognizer in
+            if recognizer is UIPanGestureRecognizer {
+                recognizer.isEnabled = true
+            } else {
+                recognizer.isEnabled = false
+            }
+        }
     }
 }
 
