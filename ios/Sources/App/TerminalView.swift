@@ -641,6 +641,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private var appearanceObserver: NSObjectProtocol?
     private var selectionStartIndex: Int?
     private var selectionEndIndex: Int?
+    private var selectionAnchorPoint: CGPoint?
     private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleSelectionPress(_:)))
         recognizer.minimumPressDuration = 0.25
