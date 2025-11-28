@@ -75,6 +75,10 @@ extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak));
 bool shellRuntimeConsumeExitRequested(void);
 #endif
 
+__attribute__((weak)) bool shellRuntimeConsumeExitRequested(void) {
+    return false;
+}
+
 static bool smallclueShouldAbort(int *out_status) {
     if (shellRuntimeConsumeExitRequested) {
         if (shellRuntimeConsumeExitRequested()) {
