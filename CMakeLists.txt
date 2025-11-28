@@ -1459,6 +1459,12 @@ if(PSCAL_BUILD_STATIC_LIBS)
         SOURCES ${SHELL_SOURCES})
     target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
 endif()
+if(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+    pscal_add_static_library(pscal_exsh_static
+        FRONTEND FRONTEND_SHELL
+        SOURCES ${SHELL_SOURCES})
+    target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
+endif()
 
 # Tiny C front-end executable
 set(CLIKE_SOURCES
@@ -1890,6 +1896,9 @@ endif()
 
 # Optional smallclue extras
 option(SMALLCLUE_WITH_EXSH "Enable the exsh front end as the smallclue 'sh' applet" OFF)
+if(SMALLCLUE_WITH_EXSH)
+    target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
+endif()
 
 add_executable(smallclue
     src/smallclue/main.c
@@ -1900,7 +1909,9 @@ if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
 endif()
 if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
     target_link_libraries(smallclue PRIVATE pscal_exsh_static)
-    target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
+    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
+elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
 endif()
 
 if(PSCAL_PLATFORM_IOS)
