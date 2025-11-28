@@ -4800,8 +4800,9 @@ static bool smallclueChopParentDirectory(char *path) {
 
 static bool smallclueConfirmDelete(const char *label, const char *path) {
     if (!isatty(STDIN_FILENO)) {
-        /* Non-interactive: proceed without prompting. */
-        return true;
+        fprintf(stderr, "%s: cannot prompt on non-interactive input for '%s' (use -f to force)\n",
+                label, path);
+        return false;
     }
     fprintf(stderr, "%s: remove '%s'? [y/N] ", label, path);
     fflush(stderr);
@@ -4826,7 +4827,7 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
             return -1;
         }
         if (!force && !smallclueConfirmDelete(label, path)) {
-            return 0;
+            return 1;
         }
         DIR *dir = opendir(path);
         if (!dir) {
