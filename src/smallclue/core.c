@@ -1374,6 +1374,18 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
             continue;
         }
 
+        int pipe_count = 0;
+        for (const char *p = trimmed; *p; ++p) {
+            if (*p == '|') {
+                pipe_count++;
+            }
+        }
+        if (pipe_count >= 2) {
+            markdownFlushParagraph(output, &paragraph, &paragraph_len);
+            fprintf(output, "%s\n", trimmed);
+            continue;
+        }
+
         char *list_text = NULL;
         char prefix_first[32];
         char prefix_sub[32];
