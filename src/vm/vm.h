@@ -239,6 +239,7 @@ void runtimeError(VM* vm, const char* format, ...);
 void runtimeWarning(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
+void vmSetSuppressStateDump(bool suppress);
 void vmSetVerboseErrors(bool enabled);
 void vmOpcodeProfileDump(void);
 bool vmOpcodeProfileIsEnabled(void);

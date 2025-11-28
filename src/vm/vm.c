@@ -2162,12 +2162,20 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
     }
 }
 
+static bool g_suppress_vm_state_dump = false;
+
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
 #if defined(PSCAL_TARGET_IOS)
     (void)vm;
     (void)context_message;
     return;
 #endif
+    const char *force_dump = getenv("PSCAL_VM_DUMP");
+    if (g_suppress_vm_state_dump) {
+        if (!force_dump || *force_dump == '\0' || *force_dump == '0') {
+            return;
+        }
+    }
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
@@ -2205,6 +2213,10 @@ void vmDumpStackInfo(VM* vm) {
     // Print stack contents for more detailed debugging:
     fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
     vmDumpStackInternal(vm, false);
+}
+
+void vmSetSuppressStateDump(bool suppress) {
+    g_suppress_vm_state_dump = suppress;
 }
 
 static bool vmSetContains(const Value* setVal, const Value* itemVal) {

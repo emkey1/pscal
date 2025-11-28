@@ -1903,10 +1903,44 @@ endif()
 add_executable(smallclue
     src/smallclue/main.c
 )
-target_link_libraries(smallclue PRIVATE pscal_core_static)
+set(_SMALLCLUE_LINK_LIBS pscal_core_static)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
-    target_link_libraries(smallclue PRIVATE CURL::libcurl)
+    list(APPEND _SMALLCLUE_LINK_LIBS CURL::libcurl)
 endif()
+if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
+    list(APPEND _SMALLCLUE_LINK_LIBS pscal_exsh_static)
+    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
+elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SQLITE_LIBS})
+endif()
+list(APPEND _SMALLCLUE_LINK_LIBS m Threads::Threads)
+if(SDL)
+    target_link_directories(smallclue PRIVATE
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
+    )
+    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
+    list(APPEND _SMALLCLUE_LINK_LIBS
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
+        ${PSCAL_SDL_PLATFORM_LIBS}
+    )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND _SMALLCLUE_LINK_LIBS ${OPENGL_LIBRARIES})
+    endif()
+endif()
+list(REMOVE_DUPLICATES _SMALLCLUE_LINK_LIBS)
+target_link_libraries(smallclue PRIVATE ${_SMALLCLUE_LINK_LIBS})
 if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
     target_link_libraries(smallclue PRIVATE pscal_exsh_static)
     target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
