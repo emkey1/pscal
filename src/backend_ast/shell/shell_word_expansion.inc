@@ -1760,6 +1760,13 @@ static void shellHandlePendingSignal(int signo) {
         shellUpdateStatus(128 + signo);
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (signo == SIGTSTP && pscalRuntimeVirtualTTYEnabled()) {
+        fprintf(stderr, "job control (Ctrl-Z/bg/fg) is not supported in this environment\n");
+        return;
+    }
+#endif
+
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
         if (gShellCurrentVm) {
             gShellCurrentVm->exit_requested = true;

@@ -1892,6 +1892,16 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         assignments_applied = true;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (cmd->background && pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "job control (&/bg/fg) is not supported on this platform");
+        shellUpdateStatus(1);
+        shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
+        return makeVoid();
+    }
+#endif
+
     int stdin_fd = -1;
     int stdout_fd = -1;
     int stderr_fd = -1;

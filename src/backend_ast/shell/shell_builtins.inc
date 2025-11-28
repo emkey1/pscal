@@ -9600,6 +9600,13 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "fg: job control is not supported on this platform");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
@@ -9662,6 +9669,13 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "bg: job control is not supported on this platform");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {

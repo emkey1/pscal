@@ -9,6 +9,7 @@
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 #include "pscal_paths.h"
+#include "common/runtime_tty.h"
 
 #include <ctype.h>
 #include <errno.h>
