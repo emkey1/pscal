@@ -79,6 +79,27 @@ __attribute__((weak)) bool shellRuntimeConsumeExitRequested(void) {
     return false;
 }
 
+static void smallclueClearPendingSignals(void) {
+    sigset_t watchset;
+    sigemptyset(&watchset);
+    sigaddset(&watchset, SIGINT);
+    sigaddset(&watchset, SIGTSTP);
+    sigset_t oldset;
+    if (sigprocmask(SIG_BLOCK, &watchset, &oldset) != 0) {
+        return;
+    }
+    sigset_t pending;
+    while (sigpending(&pending) == 0 &&
+           (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+        int signo = 0;
+        if (sigwait(&watchset, &signo) != 0) {
+            break;
+        }
+        (void)signo;
+    }
+    sigprocmask(SIG_SETMASK, &oldset, NULL);
+}
+
 static bool smallclueShouldAbort(int *out_status) {
     if (shellRuntimeConsumeExitRequested) {
         if (shellRuntimeConsumeExitRequested()) {
@@ -89,20 +110,25 @@ static bool smallclueShouldAbort(int *out_status) {
         }
     }
 
-    sigset_t pending;
-    if (sigpending(&pending) == 0) {
-        if (sigismember(&pending, SIGINT)) {
-            if (out_status) {
-                *out_status = 130;
+    sigset_t watchset;
+    sigemptyset(&watchset);
+    sigaddset(&watchset, SIGINT);
+    sigaddset(&watchset, SIGTSTP);
+    sigset_t oldset;
+    if (sigprocmask(SIG_BLOCK, &watchset, &oldset) == 0) {
+        sigset_t pending;
+        if (sigpending(&pending) == 0 &&
+            (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+            int signo = 0;
+            if (sigwait(&watchset, &signo) == 0) {
+                if (out_status) {
+                    *out_status = (signo == SIGINT) ? 130 : 148;
+                }
+                sigprocmask(SIG_SETMASK, &oldset, NULL);
+                return true;
             }
-            return true;
         }
-        if (sigismember(&pending, SIGTSTP)) {
-            if (out_status) {
-                *out_status = 148;
-            }
-            return true;
-        }
+        sigprocmask(SIG_SETMASK, &oldset, NULL);
     }
     return false;
 }
@@ -2753,6 +2779,7 @@ static int smallclueWatchRunApplet(const SmallclueApplet *applet, int argc, char
 
 static int smallclueWatchCommand(int argc, char **argv) {
     smallclueResetGetopt();
+    smallclueClearPendingSignals();
     double interval = 2.0;
     int idx = 1;
     while (idx < argc) {
@@ -3920,6 +3947,7 @@ static int smallclueTailFollow(FILE *fp, const char *label, long lines) {
 }
 
 static int smallclueTailCommand(int argc, char **argv) {
+    smallclueClearPendingSignals();
     long lines = 10;
     bool follow = false;
     int index = 1;
