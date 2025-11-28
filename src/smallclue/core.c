@@ -4800,7 +4800,8 @@ static bool smallclueChopParentDirectory(char *path) {
 
 static bool smallclueConfirmDelete(const char *label, const char *path) {
     if (!isatty(STDIN_FILENO)) {
-        return false;
+        /* Non-interactive: proceed without prompting. */
+        return true;
     }
     fprintf(stderr, "%s: remove '%s'? [y/N] ", label, path);
     fflush(stderr);
