@@ -4379,6 +4379,11 @@ static int smallclueGrepCommand(int argc, char **argv) {
                 index++;
                 continue;
             }
+            if (strncmp(arg, "--color", 7) == 0 || strncmp(arg, "--colour", 8) == 0) {
+                /* Accept --color[=auto|never|always] without changing behaviour. */
+                index++;
+                continue;
+            }
             /* Unrecognized long option: treat as start of pattern/paths. */
             break;
         }
