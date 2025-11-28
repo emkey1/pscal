@@ -63,8 +63,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"date", "date", -1},
     {"du", "du", -1},
     {"env", "env", -1},
-    {"elvis", "elvis", -1},
-    {"vi", "elvis", -1},
+    {"nextvi", "nextvi", -1},
+    {"vi", "nextvi", -1},
     {"pwd", "pwd", -1},
     {"basename", "basename", -1},
     {"dirname", "dirname", -1},
@@ -118,7 +118,6 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"uniq", "uniq", -1},
     {"wc", "wc", -1},
     {"wget", "wget", -1},
-    {"elvisdump", "elvisdump", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},

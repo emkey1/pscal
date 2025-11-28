@@ -163,8 +163,7 @@ DEFINE_SMALLCLUE_WRAPPER("ping", ping)
 DEFINE_SMALLCLUE_WRAPPER("env", env)
 #endif
 #if defined(PSCAL_TARGET_IOS)
-DEFINE_SMALLCLUE_WRAPPER("elvis", elvis)
-DEFINE_SMALLCLUE_WRAPPER("vi", vi)
+DEFINE_SMALLCLUE_WRAPPER("nextvi", nextvi)
 #endif
 DEFINE_SMALLCLUE_WRAPPER("less", less)
 DEFINE_SMALLCLUE_WRAPPER("ls", ls)
@@ -238,8 +237,8 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("ln", vmBuiltinSmallclue_ln, BUILTIN_TYPE_PROCEDURE, "ln");
     registerVmBuiltin("ping", vmBuiltinSmallclue_ping, BUILTIN_TYPE_PROCEDURE, "ping");
     registerVmBuiltin("env", vmBuiltinSmallclue_env, BUILTIN_TYPE_PROCEDURE, "env");
-    registerVmBuiltin("elvis", vmBuiltinSmallclue_elvis, BUILTIN_TYPE_PROCEDURE, "elvis");
-    registerVmBuiltin("vi", vmBuiltinSmallclue_vi, BUILTIN_TYPE_PROCEDURE, "vi");
+    registerVmBuiltin("nextvi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "nextvi");
+    registerVmBuiltin("vi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "vi");
 #endif
     registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
     registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");

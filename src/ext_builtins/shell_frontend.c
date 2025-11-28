@@ -121,6 +121,5 @@ void registerShellFrontendBuiltins(void) {
 #endif
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
-    registerShellBuiltin(category, command_group, "elvisdump", vmBuiltinShellElvisDump);
 #endif
 }
