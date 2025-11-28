@@ -4960,12 +4960,16 @@ static int smallclueMkdirParents(const char *path, mode_t mode) {
 
 static int smallclueRmCommand(int argc, char **argv) {
     int recursive = 0;
+    int force = 0;
     int opt;
     smallclueResetGetopt();
-    while ((opt = getopt(argc, argv, "r")) != -1) {
+    while ((opt = getopt(argc, argv, "rf")) != -1) {
         switch (opt) {
             case 'r':
                 recursive = 1;
+                break;
+            case 'f':
+                force = 1;
                 break;
             default:
                 fprintf(stderr, "rm: invalid option -- %c\n", optopt);
@@ -4973,13 +4977,18 @@ static int smallclueRmCommand(int argc, char **argv) {
         }
     }
     if (optind >= argc) {
-        fprintf(stderr, "rm: missing operand\n");
-        return 1;
+        if (!force) {
+            fprintf(stderr, "rm: missing operand\n");
+            return 1;
+        }
+        return 0;
     }
     int status = 0;
     for (int i = optind; i < argc; ++i) {
         if (smallclueRemovePathWithLabel("rm", argv[i], recursive != 0) != 0) {
-            status = 1;
+            if (!force) {
+                status = 1;
+            }
         }
     }
     return status;
