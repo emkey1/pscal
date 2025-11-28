@@ -3341,10 +3341,18 @@ static void shellInitJobControlState(void) {
         return;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    bool virtual_tty = pscalRuntimeVirtualTTYEnabled();
+    if (!virtual_tty && !pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
+        gShellRuntime.tty_fd = -1;
+        return;
+    }
+#else
     if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
         return;
     }
+#endif
 
     struct sigaction ignore_action;
     memset(&ignore_action, 0, sizeof(ignore_action));
@@ -3379,10 +3387,19 @@ static void shellEnsureJobControl(void) {
         return;
     }
 
-    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
-        gShellRuntime.job_control_enabled = false;
-        gShellRuntime.tty_fd = -1;
-        return;
+    bool virtual_tty =
+#if defined(PSCAL_TARGET_IOS)
+        pscalRuntimeVirtualTTYEnabled();
+#else
+        false;
+#endif
+
+    if (!virtual_tty) {
+        if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
+            gShellRuntime.job_control_enabled = false;
+            gShellRuntime.tty_fd = -1;
+            return;
+        }
     }
 
     pid_t pgid = getpgrp();
@@ -3392,6 +3409,11 @@ static void shellEnsureJobControl(void) {
     }
 
     gShellRuntime.shell_pgid = pgid;
+
+    if (virtual_tty) {
+        gShellRuntime.job_control_enabled = true;
+        return;
+    }
 
     while (true) {
         pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
@@ -3420,6 +3442,15 @@ static void shellJobControlSetForeground(pid_t pgid) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
+    if (
+#if defined(PSCAL_TARGET_IOS)
+        pscalRuntimeVirtualTTYEnabled()
+#else
+        false
+#endif
+    ) {
+        return;
+    }
     while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
         if (errno == EINTR) {
             continue;
@@ -3430,6 +3461,15 @@ static void shellJobControlSetForeground(pid_t pgid) {
 
 static void shellJobControlRestoreForeground(void) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
+        return;
+    }
+    if (
+#if defined(PSCAL_TARGET_IOS)
+        pscalRuntimeVirtualTTYEnabled()
+#else
+        false
+#endif
+    ) {
         return;
     }
     pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
