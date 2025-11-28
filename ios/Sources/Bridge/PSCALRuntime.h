@@ -40,6 +40,11 @@ int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
 
+/// Delivers a signal to the active runtime thread (no-op if inactive).
+/// Useful on iOS when virtual TTY mode prevents kernel-generated job-control
+/// signals from being delivered via the terminal.
+void PSCALRuntimeSendSignal(int signo);
+
 /// Configures the PATH_TRUNCATE environment variable used by the shell to
 /// present sandboxed paths as a shorter root (e.g. "/").
 /// Passing NULL or an empty string clears the setting.

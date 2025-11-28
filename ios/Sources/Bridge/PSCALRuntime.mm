@@ -56,6 +56,7 @@ extern "C" {
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
 static PSCALRuntimeExitHandler s_exit_handler = NULL;
 static void *s_handler_context = NULL;
+static pthread_t s_runtime_thread_id;
 
 static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_runtime_active = false;
@@ -290,6 +291,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_using_virtual_tty = using_virtual_tty;
     s_runtime_active = true;
     s_runtime_thread = pthread_self();
+    s_runtime_thread_id = s_runtime_thread;
     const int initial_columns = s_pending_columns;
     const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
@@ -364,6 +366,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_using_virtual_tty = false;
     s_runtime_active = false;
     memset(&s_runtime_thread, 0, sizeof(s_runtime_thread));
+    memset(&s_runtime_thread_id, 0, sizeof(s_runtime_thread_id));
     pthread_mutex_unlock(&s_runtime_mutex);
 
     if (pump_fd >= 0) {
@@ -515,6 +518,17 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
 
 int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
+}
+
+void PSCALRuntimeSendSignal(int signo) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    bool active = s_runtime_active;
+    pthread_t target = s_runtime_thread_id;
+    pthread_mutex_unlock(&s_runtime_mutex);
+    if (!active || target == 0) {
+        return;
+    }
+    pthread_kill(target, signo);
 }
 
 void PSCALRuntimeApplyPathTruncation(const char *path) {

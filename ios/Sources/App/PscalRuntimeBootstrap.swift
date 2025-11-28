@@ -199,6 +199,16 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func send(_ text: String) {
         guard let data = text.data(using: .utf8), !data.isEmpty else { return }
+        if data.count == 1 {
+            switch data.first {
+            case 0x03: // Ctrl-C
+                PSCALRuntimeSendSignal(SIGINT)
+            case 0x1a: // Ctrl-Z
+                PSCALRuntimeSendSignal(SIGTSTP)
+            default:
+                break
+            }
+        }
         if ElvisTerminalBridge.shared.interceptInputIfNeeded(data: data) {
             return
         }
