@@ -67,12 +67,6 @@ final class ElvisWindowManager {
                 UIApplication.shared.requestSceneSessionDestruction(session, options: nil, errorHandler: nil)
                 self.activeSession = nil
                 self.controller = nil
-                if let mainSession = self.mainSession {
-                    UIApplication.shared.requestSceneSessionActivation(mainSession,
-                                                                       userActivity: nil,
-                                                                       options: nil,
-                                                                       errorHandler: nil)
-                }
             } else {
                 self.pendingSceneActivity = nil
             }
@@ -89,6 +83,8 @@ final class ElvisWindowManager {
             self.activeSession = session
             self.controller = controller
             self.pendingSceneActivity = nil
+            // Keep the main session as-is; do not juggle activation to avoid
+            // backgrounding other windows when the Elvis scene appears/disappears.
         }
     }
 
@@ -99,9 +95,6 @@ final class ElvisWindowManager {
                 self.activeSession = nil
                 self.controller = nil
                 self.pendingSceneActivity = nil
-                if let mainSession = self.mainSession {
-                    UIApplication.shared.requestSceneSessionActivation(mainSession, userActivity: nil, options: nil, errorHandler: nil)
-                }
             }
         }
     }
