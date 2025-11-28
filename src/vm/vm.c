@@ -2354,7 +2354,9 @@ void runtimeError(VM* vm, const char* format, ...) {
     bool have_runtime_location = false;
     if (vm) {
         computeRuntimeLocation(vm, &instruction_offset, &error_line);
+#if !defined(PSCAL_TARGET_IOS)
         fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+#endif
         have_runtime_location = true;
     }
 
