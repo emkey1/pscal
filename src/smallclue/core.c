@@ -189,6 +189,10 @@ static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallclueSshKeygenCommand(int argc, char **argv);
+#if defined(SMALLCLUE_WITH_EXSH)
+extern int exsh_main(int argc, char **argv);
+static int smallclueShCommand(int argc, char **argv);
+#endif
 static int smallclueUptimeCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
@@ -243,6 +247,9 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"sleep", smallclueSleepCommand, "Delay for a number of seconds"},
     {"sort", smallclueSortCommand, "Sort lines of text"},
     {"stty", smallclueSttyCommand, "Adjust terminal rows/columns"},
+#if defined(SMALLCLUE_WITH_EXSH)
+    {"sh", smallclueShCommand, "Run the PSCAL shell front end"},
+#endif
     {"scp", smallclueScpCommand, "Securely copy files over SSH"},
     {"sftp", smallclueSftpCommand, "Interactive SFTP client"},
     {"ssh", smallclueSshCommand, "OpenSSH client"},
@@ -2643,6 +2650,12 @@ static int smallclueFalseCommand(int argc, char **argv) {
     (void)argv;
     return 1;
 }
+
+#if defined(SMALLCLUE_WITH_EXSH)
+static int smallclueShCommand(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#endif
 
 static int64_t smallclueUptimeSeconds(void) {
 #if defined(__APPLE__)

@@ -109,6 +109,9 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"touch", "touch", -1},
     {"tr", "tr", -1},
     {"uptime", "uptime", -1},
+#ifdef SMALLCLUE_WITH_EXSH
+    {"sh", "sh", -1},
+#endif
     {"ssh", "ssh", -1},
     {"ssh-keygen", "ssh-keygen", -1},
     {"uniq", "uniq", -1},

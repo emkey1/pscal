@@ -627,7 +627,18 @@ if(PSCAL_USE_BUNDLED_CURL)
     set(CURL_DISABLE_TFTP ON CACHE BOOL "Disable TFTP support in libcurl" FORCE)
     set(CURL_DISABLE_SMTP ON CACHE BOOL "Disable SMTP support in libcurl" FORCE)
     set(CURL_USE_LIBPSL OFF CACHE BOOL "Disable libpsl dependency for bundled libcurl" FORCE)
-    set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+    if(PSCAL_PLATFORM_IOS)
+        # Prefer OpenSSL with Apple SecTrust so we can rely on the system
+        # certificate store instead of shipping our own CA bundle.
+        set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+        set(USE_APPLE_SECTRUST ON CACHE BOOL "Enable Apple SecTrust validation on Apple platforms" FORCE)
+        set(CURL_BROTLI OFF CACHE BOOL "Disable brotli to avoid extra dependencies on iOS" FORCE)
+        set(CURL_ZSTD OFF CACHE BOOL "Disable zstd to avoid extra dependencies on iOS" FORCE)
+        set(USE_NGHTTP2 OFF CACHE BOOL "Disable nghttp2 on iOS builds" FORCE)
+        set(HTTP_ONLY ON CACHE BOOL "Limit libcurl to HTTP/HTTPS on iOS builds" FORCE)
+    else()
+        set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+    endif()
     if(PSCAL_PLATFORM_IOS)
         if(NOT DEFINED PSCAL_OPENSSL_INSTALL_DIR)
             message(FATAL_ERROR "Bundled libcurl on iOS requires PSCAL_OPENSSL_INSTALL_DIR (ensure PSCAL_PLATFORM_IOS OpenSSL logic runs first).")
@@ -1877,12 +1888,19 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
 endif()
 
+# Optional smallclue extras
+option(SMALLCLUE_WITH_EXSH "Enable the exsh front end as the smallclue 'sh' applet" OFF)
+
 add_executable(smallclue
     src/smallclue/main.c
 )
 target_link_libraries(smallclue PRIVATE pscal_core_static)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
     target_link_libraries(smallclue PRIVATE CURL::libcurl)
+endif()
+if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
+    target_link_libraries(smallclue PRIVATE pscal_exsh_static)
+    target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
 endif()
 
 if(PSCAL_PLATFORM_IOS)

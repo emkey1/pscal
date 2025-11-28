@@ -143,6 +143,9 @@ DEFINE_SMALLCLUE_WRAPPER("[", bracket)
 DEFINE_SMALLCLUE_WRAPPER("xargs", xargs)
 DEFINE_SMALLCLUE_WRAPPER("ps", ps)
 DEFINE_SMALLCLUE_WRAPPER("kill", kill)
+#if defined(SMALLCLUE_WITH_EXSH)
+DEFINE_SMALLCLUE_WRAPPER("sh", sh)
+#endif
 DEFINE_SMALLCLUE_WRAPPER("uptime", uptime)
 DEFINE_SMALLCLUE_WRAPPER("file", file)
 DEFINE_SMALLCLUE_WRAPPER("scp", scp)
@@ -217,6 +220,9 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("xargs", vmBuiltinSmallclue_xargs, BUILTIN_TYPE_PROCEDURE, "xargs");
     registerVmBuiltin("ps", vmBuiltinSmallclue_ps, BUILTIN_TYPE_PROCEDURE, "ps");
     registerVmBuiltin("kill", vmBuiltinSmallclue_kill, BUILTIN_TYPE_PROCEDURE, "kill");
+#if defined(SMALLCLUE_WITH_EXSH)
+    registerVmBuiltin("sh", vmBuiltinSmallclue_sh, BUILTIN_TYPE_PROCEDURE, "sh");
+#endif
     registerVmBuiltin("uptime", vmBuiltinSmallclue_uptime, BUILTIN_TYPE_PROCEDURE, "uptime");
     registerVmBuiltin("scp", vmBuiltinSmallclue_scp, BUILTIN_TYPE_PROCEDURE, "scp");
     registerVmBuiltin("sftp", vmBuiltinSmallclue_sftp, BUILTIN_TYPE_PROCEDURE, "sftp");
