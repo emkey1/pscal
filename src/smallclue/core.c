@@ -178,7 +178,7 @@ static const char *smallclueLeafName(const char *path);
 static int smallclueBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static void smallclueTrimTrailingSlashes(char *path);
 static bool smallclueChopParentDirectory(char *path);
-static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive);
+static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force);
 static int smallclueCopyFile(const char *label, const char *src, const char *dst);
 static int smallclueMkdirParents(const char *path, mode_t mode);
 static int smallclueElvisCommand(int argc, char **argv);
@@ -4798,16 +4798,34 @@ static bool smallclueChopParentDirectory(char *path) {
     return path[0] != '\0';
 }
 
-static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive) {
+static bool smallclueConfirmDelete(const char *label, const char *path) {
+    if (!isatty(STDIN_FILENO)) {
+        return false;
+    }
+    fprintf(stderr, "%s: remove '%s'? [y/N] ", label, path);
+    fflush(stderr);
+    int c = getchar();
+    /* consume the rest of the line */
+    int d;
+    while ((d = getchar()) != '\n' && d != EOF) { }
+    return c == 'y' || c == 'Y';
+}
+
+static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force) {
     struct stat st;
     if (lstat(path, &st) != 0) {
-        fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
-        return -1;
+        if (!force) {
+            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+        }
+        return force ? 0 : -1;
     }
     if (S_ISDIR(st.st_mode)) {
         if (!recursive) {
             fprintf(stderr, "%s: %s: is a directory\n", label, path);
             return -1;
+        }
+        if (!force && !smallclueConfirmDelete(label, path)) {
+            return 0;
         }
         DIR *dir = opendir(path);
         if (!dir) {
@@ -4826,7 +4844,7 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
                 status = -1;
                 break;
             }
-            if (smallclueRemovePathWithLabel(label, child_path, true) != 0) {
+            if (smallclueRemovePathWithLabel(label, child_path, true, force) != 0) {
                 status = -1;
             }
         }
@@ -4841,8 +4859,11 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
         return 0;
     }
     if (unlink(path) != 0) {
-        fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
-        return -1;
+        if (!force) {
+            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+            return -1;
+        }
+        return 0;
     }
     return 0;
 }
@@ -4985,7 +5006,7 @@ static int smallclueRmCommand(int argc, char **argv) {
     }
     int status = 0;
     for (int i = optind; i < argc; ++i) {
-        if (smallclueRemovePathWithLabel("rm", argv[i], recursive != 0) != 0) {
+        if (smallclueRemovePathWithLabel("rm", argv[i], recursive != 0, force != 0) != 0) {
             if (!force) {
                 status = 1;
             }
@@ -5325,7 +5346,7 @@ static int smallclueMvCommand(int argc, char **argv) {
                 status = 1;
                 continue;
             }
-            if (smallclueRemovePathWithLabel("mv", src, false) != 0) {
+            if (smallclueRemovePathWithLabel("mv", src, false, true) != 0) {
                 fprintf(stderr, "mv: %s: unable to remove after copy\n", src);
                 status = 1;
             }
