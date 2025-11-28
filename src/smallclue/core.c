@@ -4367,6 +4367,21 @@ static int smallclueGrepCommand(int argc, char **argv) {
             index++;
             break;
         }
+        if (strncmp(arg, "--", 2) == 0) {
+            /* Support common long forms and treat unknown long opts as end of options. */
+            if (strcmp(arg, "--ignore-case") == 0 || strcmp(arg, "--ignore") == 0) {
+                ignore_case = 1;
+                index++;
+                continue;
+            }
+            if (strcmp(arg, "--line-number") == 0 || strcmp(arg, "--number") == 0) {
+                number_lines = 1;
+                index++;
+                continue;
+            }
+            /* Unrecognized long option: treat as start of pattern/paths. */
+            break;
+        }
         for (const char *opt = arg + 1; *opt; ++opt) {
             if (*opt == 'n') {
                 number_lines = 1;
