@@ -67,6 +67,41 @@
 extern int optreset;
 #endif
 
+#if defined(__APPLE__)
+extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak_import));
+#elif defined(__GNUC__)
+extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak));
+#else
+bool shellRuntimeConsumeExitRequested(void);
+#endif
+
+static bool smallclueShouldAbort(int *out_status) {
+    if (shellRuntimeConsumeExitRequested) {
+        if (shellRuntimeConsumeExitRequested()) {
+            if (out_status) {
+                *out_status = 130;
+            }
+            return true;
+        }
+    }
+    sigset_t pending;
+    if (sigpending(&pending) == 0) {
+        if (sigismember(&pending, SIGINT)) {
+            if (out_status) {
+                *out_status = 130;
+            }
+            return true;
+        }
+        if (sigismember(&pending, SIGTSTP)) {
+            if (out_status) {
+                *out_status = 148;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 static void smallclueResetGetopt(void) {
     optind = 1;
 #if SMALLCLUE_GETOPT_NEEDS_OPTRESET
@@ -2768,6 +2803,11 @@ static int smallclueWatchCommand(int argc, char **argv) {
 
     int status = 0;
     while (1) {
+        int abort_status = 0;
+        if (smallclueShouldAbort(&abort_status)) {
+            status = abort_status;
+            break;
+        }
         printf("\033[H\033[J");
         printf("Every %.2fs: %s\n\n", interval, cmdline ? cmdline : argv[idx]);
         fflush(stdout);
@@ -2780,10 +2820,15 @@ static int smallclueWatchCommand(int argc, char **argv) {
             ts.tv_nsec = 0;
         }
         while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+            if (smallclueShouldAbort(&abort_status)) {
+                status = abort_status;
+                goto watch_done;
+            }
             continue;
         }
     }
 
+watch_done:
     free(cmdline);
     return status;
 }
@@ -3844,6 +3889,9 @@ static int smallclueTailFollow(FILE *fp, const char *label, long lines) {
     char *line = NULL;
     size_t cap = 0;
     while (1) {
+        if (smallclueShouldAbort(&status)) {
+            break;
+        }
         ssize_t len = getline(&line, &cap, fp);
         if (len < 0) {
             if (errno == EINTR) {
