@@ -1510,7 +1510,6 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
         if (strncmp(trimmed, "```", 3) == 0) {
             markdownFlushParagraph(output, &paragraph, &paragraph_len);
             in_code_block = !in_code_block;
-            fputc('\n', output);
             continue;
         }
 
@@ -1610,7 +1609,6 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
                 markdownWrapAndWrite(output, formatted, prefix_first, prefix_sub, MARKDOWN_WRAP_WIDTH);
                 free(formatted);
             }
-            fputc('\n', output);
             continue;
         }
 
