@@ -3,6 +3,15 @@
 
 #include <Foundation/Foundation.h>
 #include <UIKit/UIKit.h>
+#if __has_feature(modules)
+@import Security;
+@import CoreServices;
+@import SystemConfiguration;
+#else
+#include <Security/Security.h>
+#include <CoreServices/CoreServices.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#endif
 #include <errno.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>

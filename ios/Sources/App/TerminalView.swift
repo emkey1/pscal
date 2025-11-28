@@ -23,7 +23,7 @@ final class TerminalFontSettings: ObservableObject {
     static let appearanceDidChangeNotification = Notification.Name("TerminalFontSettingsAppearanceDidChange")
     static let preferencesDidChangeNotification = Notification.Name("TerminalPreferencesDidChange")
 
-    private static let minPointSizeValue: CGFloat = 4.0
+    private static let minPointSizeValue: CGFloat = 2.0
     private static let maxPointSizeValue: CGFloat = 28.0
     private let storageKey = "com.pscal.terminal.fontPointSize"
     private let fontNameKey = "com.pscal.terminal.fontName"
