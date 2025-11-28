@@ -164,6 +164,7 @@ static int smallclueIdCommand(int argc, char **argv);
 static int smallclueTrueCommand(int argc, char **argv);
 static int smallclueFalseCommand(int argc, char **argv);
 static int smallclueSleepCommand(int argc, char **argv);
+static int smallclueWatchCommand(int argc, char **argv);
 static int smallclueBasenameCommand(int argc, char **argv);
 static int smallclueDirnameCommand(int argc, char **argv);
 static int smallclueTeeCommand(int argc, char **argv);
@@ -263,6 +264,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"type", smallclueTypeCommand, "Describe command names"},
     {"uniq", smallclueUniqCommand, "Report or omit repeated lines"},
     {"uptime", smallclueUptimeCommand, "Show system uptime"},
+    {"watch", smallclueWatchCommand, "Periodically run a command"},
     {"vi", smallclueElvisCommand, "Alias for Elvis text editor"},
     {"wc", smallclueWcCommand, "Count lines/words/bytes"},
     {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
@@ -2701,6 +2703,91 @@ static int smallclueUptimeCommand(int argc, char **argv) {
     return 0;
 }
 
+static int smallclueWatchRunApplet(const SmallclueApplet *applet, int argc, char **argv) {
+    if (!applet) {
+        fprintf(stderr, "watch: %s: command not found\n", argv[0]);
+        return 127;
+    }
+    return smallclueDispatchApplet(applet, argc, argv);
+}
+
+static int smallclueWatchCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    double interval = 2.0;
+    int idx = 1;
+    while (idx < argc) {
+        const char *arg = argv[idx];
+        if (!arg || arg[0] != '-') {
+            break;
+        }
+        if (strcmp(arg, "--") == 0) {
+            idx++;
+            break;
+        }
+        if (strcmp(arg, "-n") == 0) {
+            if (idx + 1 >= argc) {
+                fprintf(stderr, "watch: option requires an argument -- n\n");
+                return 1;
+            }
+            char *endptr = NULL;
+            interval = strtod(argv[idx + 1], &endptr);
+            if (!endptr || *endptr != '\0' || interval <= 0.0) {
+                fprintf(stderr, "watch: invalid interval '%s'\n", argv[idx + 1]);
+                return 1;
+            }
+            idx += 2;
+            continue;
+        }
+        fprintf(stderr, "watch: unsupported option '%s'\n", arg);
+        return 1;
+    }
+
+    int cmd_argc = argc - idx;
+    if (cmd_argc < 1) {
+        fprintf(stderr, "watch: command required\n");
+        return 1;
+    }
+
+    const SmallclueApplet *applet = smallclueFindApplet(argv[idx]);
+
+    char *cmdline = NULL;
+    size_t cmdlen = 0;
+    for (int i = idx; i < argc; ++i) {
+        size_t part = strlen(argv[i]);
+        char *next = (char *)realloc(cmdline, cmdlen + part + 2);
+        if (!next) {
+            free(cmdline);
+            fprintf(stderr, "watch: out of memory\n");
+            return 1;
+        }
+        cmdline = next;
+        memcpy(cmdline + cmdlen, argv[i], part);
+        cmdlen += part;
+        cmdline[cmdlen++] = (i + 1 < argc) ? ' ' : '\0';
+    }
+
+    int status = 0;
+    while (1) {
+        printf("\033[H\033[J");
+        printf("Every %.2fs: %s\n\n", interval, cmdline ? cmdline : argv[idx]);
+        fflush(stdout);
+        status = smallclueWatchRunApplet(applet, cmd_argc, &argv[idx]);
+        fflush(stdout);
+        struct timespec ts;
+        ts.tv_sec = (time_t)interval;
+        ts.tv_nsec = (long)((interval - (double)ts.tv_sec) * 1e9);
+        if (ts.tv_nsec < 0) {
+            ts.tv_nsec = 0;
+        }
+        while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+            continue;
+        }
+    }
+
+    free(cmdline);
+    return status;
+}
+
 static int smallclueSleepCommand(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: sleep seconds\n");
@@ -3749,8 +3836,39 @@ static int smallclueTailStream(FILE *fp, const char *label, long lines) {
     return status;
 }
 
+static int smallclueTailFollow(FILE *fp, const char *label, long lines) {
+    int status = smallclueTailStream(fp, label, lines);
+    if (status != 0) {
+        return status;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    while (1) {
+        ssize_t len = getline(&line, &cap, fp);
+        if (len < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (feof(fp)) {
+                clearerr(fp);
+                usleep(200000); /* 200ms */
+                continue;
+            }
+            fprintf(stderr, "tail: %s: %s\n", label ? label : "(stdin)", strerror(errno));
+            free(line);
+            return 1;
+        }
+        fwrite(line, 1, (size_t)len, stdout);
+        fflush(stdout);
+    }
+    /* unreachable */
+    free(line);
+    return 0;
+}
+
 static int smallclueTailCommand(int argc, char **argv) {
     long lines = 10;
+    bool follow = false;
     int index = 1;
     while (index < argc) {
         const char *arg = argv[index];
@@ -3760,6 +3878,11 @@ static int smallclueTailCommand(int argc, char **argv) {
         if (strcmp(arg, "--") == 0) {
             index++;
             break;
+        }
+        if (strcmp(arg, "-f") == 0) {
+            follow = true;
+            index += 1;
+            continue;
         }
         if (strcmp(arg, "-n") == 0) {
             if (index + 1 >= argc) {
@@ -3784,9 +3907,14 @@ static int smallclueTailCommand(int argc, char **argv) {
         fprintf(stderr, "tail: unsupported option '%s'\n", arg);
         return 1;
     }
+    if (follow && (argc - index) > 1) {
+        fprintf(stderr, "tail: -f currently supports a single input\n");
+        return 1;
+    }
     int status = 0;
     if (index >= argc) {
-        status = smallclueTailStream(stdin, "(stdin)", lines);
+        status = follow ? smallclueTailFollow(stdin, "(stdin)", lines)
+                        : smallclueTailStream(stdin, "(stdin)", lines);
     } else {
         for (int i = index; i < argc; ++i) {
             const char *path = argv[i];
@@ -3796,8 +3924,14 @@ static int smallclueTailCommand(int argc, char **argv) {
                 status = 1;
                 continue;
             }
-            status |= smallclueTailStream(fp, path, lines);
-            fclose(fp);
+            if (follow) {
+                status |= smallclueTailFollow(fp, path, lines);
+                fclose(fp);
+                break;
+            } else {
+                status |= smallclueTailStream(fp, path, lines);
+                fclose(fp);
+            }
         }
     }
     return status ? 1 : 0;

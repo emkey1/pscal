@@ -170,6 +170,7 @@ DEFINE_SMALLCLUE_WRAPPER("less", less)
 DEFINE_SMALLCLUE_WRAPPER("ls", ls)
 DEFINE_SMALLCLUE_WRAPPER("md", md)
 DEFINE_SMALLCLUE_WRAPPER("wget", wget)
+DEFINE_SMALLCLUE_WRAPPER("watch", watch)
 DEFINE_SMALLCLUE_WRAPPER("more", more)
 
 #undef DEFINE_SMALLCLUE_WRAPPER
@@ -241,6 +242,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("vi", vmBuiltinSmallclue_vi, BUILTIN_TYPE_PROCEDURE, "vi");
 #endif
     registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
+    registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");
 }
 
 void smallclueRegisterBuiltins(void) {
