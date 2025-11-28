@@ -2163,6 +2163,11 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
 }
 
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
+#if defined(PSCAL_TARGET_IOS)
+    (void)vm;
+    (void)context_message;
+    return;
+#endif
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
