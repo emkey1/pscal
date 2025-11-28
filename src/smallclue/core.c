@@ -1258,12 +1258,25 @@ static void markdownFlushParagraph(FILE *out, char **paragraph, size_t *length) 
         return;
     }
     (*paragraph)[*length] = '\0';
-    char *formatted = markdownSimplifyInline(*paragraph);
-    if (formatted) {
-        markdownWrapAndWrite(out, formatted, "", "", MARKDOWN_WRAP_WIDTH);
-        free(formatted);
+    const char *text = *paragraph;
+    /* Naive table detection: look for '|' separators with at least two columns. */
+    int pipe_count = 0;
+    for (const char *p = text; *p; ++p) {
+        if (*p == '|') {
+            pipe_count++;
+        }
     }
-    fputc('\n', out);
+    if (pipe_count >= 2 && strchr(text, '\n') == NULL) {
+        /* Single-line paragraph that looks like a table row; just print it. */
+        fprintf(out, "%s\n\n", text);
+    } else {
+        char *formatted = markdownSimplifyInline(text);
+        if (formatted) {
+            markdownWrapAndWrite(out, formatted, "", "", MARKDOWN_WRAP_WIDTH);
+            free(formatted);
+        }
+        fputc('\n', out);
+    }
     *length = 0;
     **paragraph = '\0';
 }
