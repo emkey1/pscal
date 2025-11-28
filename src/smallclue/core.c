@@ -34,6 +34,9 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/select.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -186,6 +189,7 @@ static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallclueSshKeygenCommand(int argc, char **argv);
+static int smallclueUptimeCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
 static int smallclueCurlCommand(int argc, char **argv);
@@ -251,6 +255,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"true", smallclueTrueCommand, "Do nothing, successfully"},
     {"type", smallclueTypeCommand, "Describe command names"},
     {"uniq", smallclueUniqCommand, "Report or omit repeated lines"},
+    {"uptime", smallclueUptimeCommand, "Show system uptime"},
     {"vi", smallclueElvisCommand, "Alias for Elvis text editor"},
     {"wc", smallclueWcCommand, "Count lines/words/bytes"},
     {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
@@ -2637,6 +2642,50 @@ static int smallclueFalseCommand(int argc, char **argv) {
     (void)argc;
     (void)argv;
     return 1;
+}
+
+static int64_t smallclueUptimeSeconds(void) {
+#if defined(__APPLE__)
+    struct timeval boottv;
+    size_t len = sizeof(boottv);
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    if (sysctl(mib, 2, &boottv, &len, NULL, 0) == 0 && boottv.tv_sec > 0) {
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        time_t secs = now.tv_sec - boottv.tv_sec;
+        if (secs < 0) {
+            secs = 0;
+        }
+        return (int64_t)secs;
+    }
+#endif
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        return (int64_t)ts.tv_sec;
+    }
+    return -1;
+}
+
+static int smallclueUptimeCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int64_t seconds = smallclueUptimeSeconds();
+    if (seconds < 0) {
+        fprintf(stderr, "uptime: unavailable\n");
+        return 1;
+    }
+    int days = (int)(seconds / 86400);
+    seconds %= 86400;
+    int hours = (int)(seconds / 3600);
+    seconds %= 3600;
+    int minutes = (int)(seconds / 60);
+    int secs = (int)(seconds % 60);
+    if (days > 0) {
+        printf("up %d day%s, %02d:%02d:%02d\n", days, days == 1 ? "" : "s", hours, minutes, secs);
+    } else {
+        printf("up %02d:%02d:%02d\n", hours, minutes, secs);
+    }
+    return 0;
 }
 
 static int smallclueSleepCommand(int argc, char **argv) {

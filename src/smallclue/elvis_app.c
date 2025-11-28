@@ -26,6 +26,12 @@ static bool g_elvis_exit_active = false;
 static int g_elvis_exit_status = 0;
 
 static char *smallclueGenerateSessionPath(void) {
+#if defined(PSCAL_TARGET_IOS)
+    /* Keep elvis session state in RAM on iOS to avoid sandboxed file churn
+     * and related short-read failures.
+     */
+    return strdup("ram");
+#endif
     const char *tmpdir = getenv("TMPDIR");
     if (!tmpdir || !*tmpdir) {
         tmpdir = "/tmp";
@@ -64,6 +70,44 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
         unsetenv(name);
     }
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static void smallcluePurgeSessionFiles(void) {
+    const char *dirs[] = { ".", getenv("TMPDIR"), NULL };
+    for (int di = 0; dirs[di]; di++) {
+        const char *dir = dirs[di];
+        if (!dir || !*dir) {
+            continue;
+        }
+        DIR *d = opendir(dir);
+        if (!d) {
+            continue;
+        }
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            if (!ent->d_name) {
+                continue;
+            }
+            size_t len = strlen(ent->d_name);
+            if (len < 4) {
+                continue;
+            }
+            if (strcmp(ent->d_name + len - 4, ".ses") != 0) {
+                continue;
+            }
+            /* Limit deletion to typical Elvis session names to avoid nuking unrelated files. */
+            if (strncmp(ent->d_name, "elvis", 5) != 0 &&
+                strncmp(ent->d_name, "pscal_elvis_", 12) != 0) {
+                continue;
+            }
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+            unlink(path);
+        }
+        closedir(d);
+    }
+}
+#endif
 
 static char *smallclueBuildElvisPath(void) {
     const char *lib_dir = PSCAL_LIB_DIR;
@@ -176,6 +220,10 @@ int smallclueRunElvis(int argc, char **argv) {
     char resultBuf[64];
     snprintf(resultBuf, sizeof(resultBuf), "[smallclue] elvis_main_entry returned %d", status);
     pscalRuntimeDebugLog(resultBuf);
+#if defined(PSCAL_TARGET_IOS)
+    /* Ensure no session artifacts survive between launches. */
+    smallcluePurgeSessionFiles();
+#endif
 
     free(wrapped_argv);
     smallclueRestoreEnv("ELVISPATH", saved_elvis_path);
