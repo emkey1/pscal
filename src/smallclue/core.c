@@ -457,7 +457,7 @@ static void smallclueKillListSignals(void) {
     putchar('\n');
 }
 
-static int smallclueKillCommand(int argc, char **argv) {
+static int smallclueKillCommandOriginal(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: kill [-SIGNAL] pid...\n");
         return 1;
@@ -497,6 +497,19 @@ static int smallclueKillCommand(int argc, char **argv) {
     }
     return status;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueKillCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    fprintf(stderr, "kill: not implemented on iOS/iPadOS\n");
+    return 1;
+}
+#else
+static int smallclueKillCommand(int argc, char **argv) {
+    return smallclueKillCommandOriginal(argc, argv);
+}
+#endif
 
 static int smallclueXargsCommand(int argc, char **argv) {
     smallclueResetGetopt();
