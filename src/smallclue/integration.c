@@ -78,6 +78,14 @@ static Value smallclueInvokeBuiltin(VM *vm, int arg_count, Value *args, const ch
         }
     }
 
+    const char *debug_env = getenv("SMALLCLUE_DEBUG_ARGS");
+    if (debug_env && *debug_env) {
+        fprintf(stderr, "[smallclue] %s argc=%d\n", applet->name, argc);
+        for (int i = 0; i < argc; ++i) {
+            fprintf(stderr, "  argv[%d]=%s\n", i, argv[i] ? argv[i] : "(null)");
+        }
+    }
+
     int status = ok ? smallclueDispatchApplet(applet, argc, argv) : 1;
     if (shellRuntimeSetLastStatus) {
         shellRuntimeSetLastStatus(status);
