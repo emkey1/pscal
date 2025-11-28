@@ -1238,19 +1238,20 @@ static int markdownTableWrapLen(const char *text, int max_width, int offset) {
     return max_width;
 }
 
-static void markdownPrintSeparator(const int *col_widths, int cols) {
-    fputs("  +", stdout);
+static void markdownPrintSeparator(FILE *out, const int *col_widths, int cols) {
+    fputs("  +", out);
     for (int j = 0; j < cols; ++j) {
         for (int k = 0; k < col_widths[j] + 2; ++k) {
-            fputc('-', stdout);
+            fputc('-', out);
         }
-        fputc('+', stdout);
+        fputc('+', out);
     }
-    fputc('\n', stdout);
+    fputc('\n', out);
 }
 
-static void markdownRenderTable(MarkdownTableRow *rows, int row_count) {
+static void markdownRenderTable(FILE *out, MarkdownTableRow *rows, int row_count) {
     if (!rows || row_count <= 0) return;
+    if (!out) return;
 
     int term_width = markdownTermWidth();
     int col_widths[MARKDOWN_MAX_TABLE_COLS] = {0};
@@ -1282,17 +1283,17 @@ static void markdownRenderTable(MarkdownTableRow *rows, int row_count) {
         }
     }
 
-    markdownPrintSeparator(col_widths, max_cols);
+    markdownPrintSeparator(out, col_widths, max_cols);
     for (int i = 0; i < row_count; ++i) {
         if (markdownIsSeparatorRow(&rows[i])) {
-            markdownPrintSeparator(col_widths, max_cols);
+            markdownPrintSeparator(out, col_widths, max_cols);
             continue;
         }
         int offsets[MARKDOWN_MAX_TABLE_COLS] = {0};
         bool done = false;
         while (!done) {
             done = true;
-            fputs("  |", stdout);
+            fputs("  |", out);
             for (int j = 0; j < max_cols; ++j) {
                 const char *text = (j < rows[i].col_count && rows[i].cells[j]) ? rows[i].cells[j] : "";
                 int width = col_widths[j];
@@ -1301,21 +1302,21 @@ static void markdownRenderTable(MarkdownTableRow *rows, int row_count) {
                 if (off < len) {
                     done = false;
                     int take = markdownTableWrapLen(text, width, off);
-                    fprintf(stdout, " %-*.*s", width, take, text + off);
+                    fprintf(out, " %-*.*s", width, take, text + off);
                     offsets[j] += take;
                     if (offsets[j] < len && text[offsets[j]] == ' ') {
                         offsets[j]++;
                     }
                 } else {
-                    fprintf(stdout, " %-*s", width, "");
+                    fprintf(out, " %-*s", width, "");
                 }
-                fputs(" |", stdout);
+                fputs(" |", out);
             }
-            fputc('\n', stdout);
+            fputc('\n', out);
         }
     }
-    markdownPrintSeparator(col_widths, max_cols);
-    fputc('\n', stdout);
+    markdownPrintSeparator(out, col_widths, max_cols);
+    fputc('\n', out);
 
     for (int i = 0; i < row_count; ++i) {
         for (int j = 0; j < rows[i].col_count; ++j) {
@@ -1514,13 +1515,14 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
         }
 
         if (in_code_block) {
-            fprintf(output, "    %s\n", trimmed);
+            /* Preserve leading whitespace/tabs inside fenced code blocks. */
+            fprintf(output, "    %s\n", line);
             continue;
         }
 
         if (*trimmed == '\0') {
             if (in_table) {
-                markdownRenderTable(table_rows, table_row_count);
+                markdownRenderTable(output, table_rows, table_row_count);
                 table_row_count = 0;
                 in_table = false;
             }
@@ -1542,7 +1544,7 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
         int heading = markdownHeadingLevel(trimmed);
         if (heading > 0) {
             if (in_table) {
-                markdownRenderTable(table_rows, table_row_count);
+                markdownRenderTable(output, table_rows, table_row_count);
                 table_row_count = 0;
                 in_table = false;
             }
@@ -1555,7 +1557,7 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
 
         if (*trimmed == '>') {
             if (in_table) {
-                markdownRenderTable(table_rows, table_row_count);
+                markdownRenderTable(output, table_rows, table_row_count);
                 table_row_count = 0;
                 in_table = false;
             }
@@ -1593,7 +1595,7 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
             }
             continue;
         } else if (in_table) {
-            markdownRenderTable(table_rows, table_row_count);
+            markdownRenderTable(output, table_rows, table_row_count);
             table_row_count = 0;
             in_table = false;
         }
@@ -1617,7 +1619,7 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
 
     markdownFlushParagraph(output, &paragraph, &paragraph_len);
     if (in_table) {
-        markdownRenderTable(table_rows, table_row_count);
+        markdownRenderTable(output, table_rows, table_row_count);
     }
     free(paragraph);
     free(line);
