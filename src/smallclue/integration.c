@@ -48,7 +48,16 @@ static Value smallclueInvokeBuiltin(VM *vm, int arg_count, Value *args, const ch
         return makeVoid();
     }
 
-    int argc = arg_count + 1;
+    int arg_start = 0;
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val) {
+        if (strcasecmp(args[0].s_val, applet->name) == 0) {
+            arg_start = 1;
+        }
+    }
+    int argc = (arg_count - arg_start) + 1;
+    if (argc < 1) {
+        argc = 1;
+    }
     char **argv = (char **)calloc((size_t)(argc + 1), sizeof(char *));
     if (!argv) {
         if (shellRuntimeSetLastStatus) {
@@ -62,8 +71,8 @@ static Value smallclueInvokeBuiltin(VM *vm, int arg_count, Value *args, const ch
     if (!argv[0]) {
         ok = false;
     }
-    for (int i = 0; ok && i < arg_count; ++i) {
-        argv[i + 1] = smallclueDuplicateArg(&args[i]);
+    for (int i = arg_start; ok && i < arg_count; ++i) {
+        argv[(i - arg_start) + 1] = smallclueDuplicateArg(&args[i]);
         if (!argv[i + 1]) {
             ok = false;
         }
