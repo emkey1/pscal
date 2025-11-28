@@ -88,6 +88,7 @@ static bool smallclueShouldAbort(int *out_status) {
             return true;
         }
     }
+
     sigset_t pending;
     if (sigpending(&pending) == 0) {
         if (sigismember(&pending, SIGINT)) {
