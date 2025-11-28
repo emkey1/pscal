@@ -80,6 +80,7 @@ static char	dfltname[1024];
 
 #ifdef PSCAL_TARGET_IOS
 	(void)force;
+	/* Reset all session state and force a fresh temporary in-memory session. */
 	iosblkreset();
 	iosnblks = 1024;
 	iosblk = (BLK **)calloc(iosnblks, sizeof(BLK *));
@@ -93,6 +94,9 @@ static char	dfltname[1024];
 	memcpy(iosblk[0], buf, o_blksize);
 	buf->super.inuse = getpid();
 	fd = -1;
+	o_session = NULL;
+	o_sessionpath = NULL;
+	o_recovering = ElvFalse;
 	o_tempsession = ElvTrue;
 	o_newsession = ElvTrue;
 	return ElvTrue;
@@ -262,6 +266,9 @@ void blkclose(BLK *buf) {
 #ifdef PSCAL_TARGET_IOS
 	(void)buf;
 	iosblkreset();
+	o_session = NULL;
+	o_sessionpath = NULL;
+	o_recovering = ElvFalse;
 	return;
 #endif
 #ifdef FEATURE_RAM
