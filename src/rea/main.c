@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <signal.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -515,6 +516,24 @@ int rea_main(int argc, char **argv) {
         if (dump_bytecode_only_flag || no_run_flag) {
             result = INTERPRET_OK;
         } else {
+            static VM *g_sigint_vm = NULL;
+            static void reaHandleSigint(int signo) {
+                (void)signo;
+                if (g_sigint_vm) {
+                    g_sigint_vm->abort_requested = true;
+                    g_sigint_vm->exit_requested = true;
+                }
+            }
+            sigset_t set;
+            sigemptyset(&set);
+            sigaddset(&set, SIGINT);
+            sigprocmask(SIG_UNBLOCK, &set, NULL);
+            struct sigaction sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sa_handler = reaHandleSigint;
+            sigemptyset(&sa.sa_mask);
+            sigaction(SIGINT, &sa, NULL);
+
             VM vm;
             initVM(&vm);
             if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
@@ -523,7 +542,9 @@ int rea_main(int argc, char **argv) {
                                     (src && strstr(src, "trace on")))) {
                 vm.trace_head_instructions = 16;
             }
+            g_sigint_vm = &vm;
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+            g_sigint_vm = NULL;
             freeVM(&vm);
         }
     }

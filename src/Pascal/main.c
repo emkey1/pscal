@@ -49,6 +49,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #ifdef SDL
 #include "core/sdl_headers.h"
 #include PSCALI_SDL_TTF_HEADER
@@ -57,6 +58,29 @@
 // ast.h is already included via globals.h or directly, no need for duplicate
 
 static int s_vm_trace_head = 0;
+static VM *s_sigint_vm = NULL;
+
+static void pascalHandleSigint(int signo) {
+    (void)signo;
+    if (s_sigint_vm) {
+        s_sigint_vm->abort_requested = true;
+        s_sigint_vm->exit_requested = true;
+    }
+}
+
+static void pascalInstallSigint(VM *vm) {
+    s_sigint_vm = vm;
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = pascalHandleSigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+}
 
 typedef struct {
     size_t partial_match_len;
@@ -296,6 +320,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                         } else if (source && strstr(source, "trace on")) {
                             vm->trace_head_instructions = 16;
                         }
+                        pascalInstallSigint(vm);
                         InterpretResult result_vm =
                             interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                         if (result_vm == INTERPRET_OK) {
@@ -306,6 +331,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
                             overall_success_status = false;
                             vmDumpStackInfo(vm);
                         }
+                        s_sigint_vm = NULL;
                         freeVM(vm);
                         free(vm);
                         globalSymbols = NULL;
