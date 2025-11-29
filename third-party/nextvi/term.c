@@ -20,6 +20,7 @@ static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
 }
+static void ios_term_render_buf(const char *s, int n);
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
 		return;
