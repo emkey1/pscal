@@ -2726,6 +2726,15 @@ static void init_pipe_once(void) {
     }
 }
 
+// Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
+void pscalRuntimeRequestSigint(void) {
+    g_vm_sigint_seen = 1;
+    if (g_vm_sigint_pipe[1] >= 0) {
+        char c = 'i';
+        (void)write(g_vm_sigint_pipe[1], &c, 1);
+    }
+}
+
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
     vmPushColorState();
