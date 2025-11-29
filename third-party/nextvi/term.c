@@ -6,6 +6,49 @@ unsigned int ibuf_pos, ibuf_cnt, ibuf_sz = 128, icmd_pos;
 unsigned char *ibuf, icmd[4096];
 unsigned int texec, tn;
 
+/* iOS bridge for floating window rendering */
+#if defined(PSCAL_TARGET_IOS)
+extern void pscalTerminalBegin(int columns, int rows);
+extern void pscalTerminalEnd(void);
+extern void pscalTerminalRender(const char *utf8, int len, int row, int col, long fg, long bg, int attr);
+extern void pscalTerminalClear(void);
+extern void pscalTerminalMoveCursor(int row, int col);
+static int ios_row = 0;
+static int ios_col = 0;
+static void ios_term_reset(void) {
+	ios_row = 0;
+	ios_col = 0;
+}
+static void ios_term_render_char(char ch) {
+	if (xcols <= 0 || xrows <= 0)
+		return;
+	if (ch == '\n') {
+		ios_col = 0;
+		ios_row++;
+		if (ios_row >= xrows)
+			ios_row = xrows - 1;
+		pscalTerminalMoveCursor(ios_row, ios_col);
+		return;
+	}
+	pscalTerminalRender(&ch, 1, ios_row, ios_col, 0, 0, 0);
+	ios_col++;
+	if (ios_col >= xcols) {
+		ios_col = 0;
+		ios_row++;
+		if (ios_row >= xrows)
+			ios_row = xrows - 1;
+		pscalTerminalMoveCursor(ios_row, ios_col);
+	}
+}
+static void ios_term_clear_line_from_cursor(void) {
+	if (xcols <= 0 || xrows <= 0)
+		return;
+	for (int c = ios_col; c < xcols; c++) {
+		pscalTerminalRender(" ", 1, ios_row, c, 0, 0, 0);
+	}
+}
+#endif
+
 void term_init(void)
 {
 	if (xvis & 2)
@@ -27,6 +70,11 @@ void term_init(void)
 	}
 	xcols = xcols ? xcols : 80;
 	xrows = xrows ? xrows : 25;
+#if defined(PSCAL_TARGET_IOS)
+	pscalTerminalBegin(xcols, xrows);
+	pscalTerminalClear();
+	ios_term_reset();
+#endif
 }
 
 void term_done(void)
@@ -37,12 +85,19 @@ void term_done(void)
 	sbuf_free(term_sbuf)
 	term_sbuf = NULL;
 	tcsetattr(0, 0, &termios);
+#if defined(PSCAL_TARGET_IOS)
+	pscalTerminalEnd();
+#endif
 }
 
 void term_clean(void)
 {
 	term_write("\x1b[2J", 4)	/* clear screen */
 	term_write("\x1b[H", 3)		/* cursor topleft */
+#if defined(PSCAL_TARGET_IOS)
+	pscalTerminalClear();
+	ios_term_reset();
+#endif
 }
 
 void term_suspend(void)
@@ -71,11 +126,17 @@ void term_chr(int ch)
 {
 	char s[4] = {ch};
 	term_out(s);
+#if defined(PSCAL_TARGET_IOS)
+	ios_term_render_char((char)ch);
+#endif
 }
 
 void term_kill(void)
 {
 	term_out("\33[K");
+#if defined(PSCAL_TARGET_IOS)
+	ios_term_clear_line_from_cursor();
+#endif
 }
 
 void term_room(int n)
@@ -104,6 +165,15 @@ void term_pos(int r, int c)
 		memcpy(s, "H", 2);
 		term_out(buf+1);
 	}
+#if defined(PSCAL_TARGET_IOS)
+	if (r >= 0)
+		ios_row = r;
+	if (c >= 0)
+		ios_col = c;
+	if (ios_row >= xrows) ios_row = xrows - 1;
+	if (ios_col >= xcols) ios_col = xcols - 1;
+	pscalTerminalMoveCursor(ios_row, ios_col);
+#endif
 }
 
 /* read s before reading from the terminal */
