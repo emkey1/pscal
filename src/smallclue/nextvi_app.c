@@ -38,14 +38,28 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
     }
 }
 
+static int smallclueSetupTty(void) {
+    int fd = open("/dev/tty", O_RDWR);
+    if (fd >= 0) {
+        if (fd != STDIN_FILENO) {
+            dup2(fd, STDIN_FILENO);
+        }
+        if (fd != STDOUT_FILENO) {
+            dup2(fd, STDOUT_FILENO);
+        }
+    }
+    return fd;
+}
+
 int smallclueRunElvis(int argc, char **argv) {
     char *saved_term = smallclueOverrideEnv("TERM", "vt100");
 
+    int dup_fd = smallclueSetupTty();
     struct termios saved_ios;
     int tty_fd = STDIN_FILENO;
     bool have_tty = false;
     if (tcgetattr(tty_fd, &saved_ios) != 0) {
-        tty_fd = open("/dev/tty", O_RDWR);
+        tty_fd = dup_fd >= 0 ? dup_fd : open("/dev/tty", O_RDWR);
         if (tty_fd >= 0 && tcgetattr(tty_fd, &saved_ios) == 0) {
             have_tty = true;
         }
@@ -77,6 +91,9 @@ int smallclueRunElvis(int argc, char **argv) {
         if (tty_fd != STDIN_FILENO) {
             close(tty_fd);
         }
+    }
+    if (dup_fd >= 0 && dup_fd != STDIN_FILENO && dup_fd != tty_fd) {
+        close(dup_fd);
     }
     smallclueRestoreEnv("TERM", saved_term);
     return status;
