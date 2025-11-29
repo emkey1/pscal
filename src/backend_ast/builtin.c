@@ -2495,6 +2495,7 @@ typedef struct {
 #define VM_COLOR_STACK_MAX 16
 static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
 static _Thread_local int vm_color_stack_depth = 0;
+static volatile sig_atomic_t g_vm_sigint_seen = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2657,6 +2658,10 @@ static void vmAtExitCleanup(void) {
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
+    if (signum == SIGINT) {
+        g_vm_sigint_seen = 1;
+        return;
+    }
     if (vm_raw_mode || vm_alt_screen_depth > 0)
         vmAtExitCleanup();
     _exit(128 + signum);
@@ -2664,12 +2669,12 @@ static void vmSignalHandler(int signum) {
 
 static void vmRegisterRestoreHandlers(void) {
     atexit(vmAtExitCleanup);
-#if !defined(PSCAL_TARGET_IOS)
     struct sigaction sa;
     sa.sa_handler = vmSignalHandler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+#if !defined(PSCAL_TARGET_IOS)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGQUIT, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
@@ -2785,6 +2790,15 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     size_t len = 0;
     if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
         while (len < buffer_sz - 1) {
+            if (g_vm_sigint_seen) {
+                g_vm_sigint_seen = 0;
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
             if (vm && (vm->abort_requested || vm->exit_requested)) {
                 buffer[0] = '\0';
                 return false;
@@ -2797,6 +2811,12 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             tv.tv_usec = 100 * 1000; // 100ms
             int ready = select(fd + 1, &rfds, NULL, NULL, &tv);
             if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EBADF) {
+                    return false;
+                }
                 if (errno == EINTR) {
                     continue;
                 }
