@@ -396,11 +396,12 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 	while ((fds[0].fd >= 0 || fds[1].fd >= 0) && poll(fds, 3, 200) >= 0) {
 		if (fds[0].revents & POLLIN) {
 			int ret = read(fds[0].fd, buf, sizeof(buf));
-			if (ret > 0 && oproc == 2)
+			if (ret > 0 && oproc == 2) {
 				term_write(buf, ret);
-			if (ret > 0)
+			}
+			if (ret > 0) {
 				sbuf_mem(sb, buf, ret);
-			else {
+			} else {
 				close(fds[0].fd);
 				fds[0].fd = -1;
 			}
