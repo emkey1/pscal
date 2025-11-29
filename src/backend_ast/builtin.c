@@ -2884,6 +2884,14 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 }
                 break;
             }
+            if (ch == 0x03) { // Ctrl-C
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
             if (ch == '\r') {
                 continue;
             }
