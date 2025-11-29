@@ -162,7 +162,7 @@ void term_done(void)
 	if (xvis & 2)
 		return;
 	term_commit();
-	sbuf_free(term_sbuf)
+	sbuf_free(term_sbuf);
 	term_sbuf = NULL;
 	tcsetattr(0, 0, &termios);
 #if defined(PSCAL_TARGET_IOS)
@@ -196,10 +196,11 @@ void term_commit(void)
 
 static void term_out(char *s)
 {
-	if (term_record)
+	if (term_record) {
 		sbufn_str(term_sbuf, s);
-	else
+	} else {
 		term_write(s, strlen(s));
+	}
 }
 
 void term_chr(int ch)
