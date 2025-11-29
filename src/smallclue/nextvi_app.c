@@ -7,7 +7,19 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
-#include "vi.h"
+
+/* Minimal nextvi globals we need to reset between runs */
+extern int xquit;
+extern int xvis;
+extern unsigned int texec;
+extern unsigned int tn;
+extern unsigned int ibuf_pos;
+extern unsigned int ibuf_cnt;
+extern unsigned int ibuf_sz;
+extern unsigned int icmd_pos;
+extern unsigned char *ibuf;
+extern unsigned char icmd[4096];
+extern int term_record;
 
 extern int nextvi_main_entry(int argc, char **argv);
 
