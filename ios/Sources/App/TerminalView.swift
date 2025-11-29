@@ -29,7 +29,7 @@ final class TerminalFontSettings: ObservableObject {
     private let fontNameKey = "com.pscal.terminal.fontName"
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
-    private let elvisWindowKey = "com.pscal.terminal.elvisWindow"
+    private let elvisWindowKey = "com.pscal.terminal.nextviWindow"
     let minimumPointSize: CGFloat = TerminalFontSettings.minPointSizeValue
     let maximumPointSize: CGFloat = TerminalFontSettings.maxPointSizeValue
     static let defaultBackgroundColor = UIColor.black
@@ -1409,14 +1409,14 @@ struct TerminalSettingsView: View {
                         settings.updateForegroundColor(UIColor(swiftUIColor: newValue))
                     }))
                 }
-                Section(header: Text("elvis/vi")) {
-                    Toggle("elvis/vi",
+                Section(header: Text("nextvi/vi")) {
+                    Toggle("nextvi/vi",
                            isOn: Binding(get: {
                         settings.elvisWindowEnabled
                     }, set: { newValue in
                         settings.updateElvisWindowEnabled(newValue)
                     }))
-                    Text("Show the elvis editor in a floating window.")
+                    Text("Show the nextvi/vi editor in a floating window.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

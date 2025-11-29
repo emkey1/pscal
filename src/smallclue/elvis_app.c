@@ -38,10 +38,6 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
 
 int smallclueRunElvis(int argc, char **argv) {
     char *saved_term = smallclueOverrideEnv("TERM", "vt100");
-#if defined(PSCAL_TARGET_IOS)
-    char *saved_no_ttyraw = smallclueOverrideEnv("PSCALI_NO_TTYRAW", "1");
-    char *saved_force_termcap = smallclueOverrideEnv("PSCALI_FORCE_TERMCAP", "1");
-#endif
 
     pscalRuntimeDebugLog("[smallclue] launching nextvi");
     int status = nextvi_main_entry(argc, argv);
@@ -51,9 +47,5 @@ int smallclueRunElvis(int argc, char **argv) {
     pscalRuntimeDebugLog(resultBuf);
 
     smallclueRestoreEnv("TERM", saved_term);
-#if defined(PSCAL_TARGET_IOS)
-    smallclueRestoreEnv("PSCALI_NO_TTYRAW", saved_no_ttyraw);
-    smallclueRestoreEnv("PSCALI_FORCE_TERMCAP", saved_force_termcap);
-#endif
     return status;
 }
