@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
-#include "third-party/nextvi/vi.h"
+#include "vi.h"
 
 extern int nextvi_main_entry(int argc, char **argv);
 
