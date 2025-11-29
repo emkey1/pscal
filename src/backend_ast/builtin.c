@@ -2663,6 +2663,7 @@ static void vmSignalHandler(int signum) {
 
 static void vmRegisterRestoreHandlers(void) {
     atexit(vmAtExitCleanup);
+#if !defined(PSCAL_TARGET_IOS)
     struct sigaction sa;
     sa.sa_handler = vmSignalHandler;
     sigemptyset(&sa.sa_mask);
@@ -2672,6 +2673,7 @@ static void vmRegisterRestoreHandlers(void) {
     sigaction(SIGQUIT, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGSEGV, &sa, NULL);
+#endif
 }
 
 static void vmSetupTermHandlers(void) {
