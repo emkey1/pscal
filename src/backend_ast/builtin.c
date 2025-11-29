@@ -2499,7 +2499,6 @@ static _Thread_local int vm_color_stack_depth = 0;
 static volatile sig_atomic_t g_vm_sigint_seen = 0;
 static int g_vm_sigint_pipe[2] = {-1, -1};
 static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
-static volatile sig_atomic_t g_vm_sigint_seen = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2706,21 +2705,23 @@ static void vmSetupTermHandlers(void) {
 }
 
 static void vmEnsureSigintPipe(void) {
-    void init_pipe_once(void) {
-        if (pipe(g_vm_sigint_pipe) != 0) {
-            g_vm_sigint_pipe[0] = -1;
-            g_vm_sigint_pipe[1] = -1;
-        } else {
-            for (int i = 0; i < 2; ++i) {
-                fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
-                int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
-                if (flags >= 0) {
-                    fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
-                }
-            }
+    void init_pipe_once(void);
+    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
+}
+
+static void init_pipe_once(void) {
+    if (pipe(g_vm_sigint_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
+        int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
         }
     }
-    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
 }
 
 void vmInitTerminalState(void) {
