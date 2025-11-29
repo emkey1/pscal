@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <termios.h>
 
 extern int nextvi_main_entry(int argc, char **argv);
 
