@@ -369,24 +369,6 @@ int clike_main(int argc, char **argv) {
         CLIKE_RETURN(EXIT_SUCCESS);
     }
 
-    static VM *g_sigint_vm = NULL;
-    static void clikeHandleSigint(int signo) {
-        (void)signo;
-        if (g_sigint_vm) {
-            g_sigint_vm->abort_requested = true;
-            g_sigint_vm->exit_requested = true;
-        }
-    }
-    sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGINT);
-    sigprocmask(SIG_UNBLOCK, &set, NULL);
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = clikeHandleSigint;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, NULL);
-
     clikeInstallSigint();
     VM vm; initVM(&vm);
     // Inline trace toggle via comment: /* trace on */ or // trace on
