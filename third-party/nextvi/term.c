@@ -117,10 +117,14 @@ void term_commit(void)
 
 static void term_out(char *s)
 {
+	size_t len = strlen(s);
 	if (term_record)
 		sbufn_str(term_sbuf, s)
 	else
-		term_write(s, strlen(s))
+		term_write(s, len)
+#if defined(PSCAL_TARGET_IOS)
+	ios_term_render_buf(s, (int)len);
+#endif
 }
 
 void term_chr(int ch)
@@ -227,7 +231,6 @@ void term_back(int c)
 
 int term_read(void)
 {
-	struct pollfd ufds[1];
 #if defined(PSCAL_TARGET_IOS)
 	if (ibuf_pos >= ibuf_cnt) {
 		int n = pscalTerminalRead(ibuf, 1, 1000);
