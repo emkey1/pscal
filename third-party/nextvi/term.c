@@ -20,12 +20,6 @@ static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
 }
-static void ios_term_render_buf(const char *s, int n) {
-	if (!s || n <= 0) return;
-	for (int i = 0; i < n; i++) {
-		ios_term_render_char(s[i]);
-	}
-}
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
 		return;
@@ -182,6 +176,15 @@ void term_pos(int r, int c)
 	pscalTerminalMoveCursor(ios_row, ios_col);
 #endif
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static void ios_term_render_buf(const char *s, int n) {
+	if (!s || n <= 0) return;
+	for (int i = 0; i < n; i++) {
+		ios_term_render_char(s[i]);
+	}
+}
+#endif
 
 #if defined(PSCAL_TARGET_IOS)
 #undef term_write
@@ -394,9 +397,9 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 		if (fds[0].revents & POLLIN) {
 			int ret = read(fds[0].fd, buf, sizeof(buf));
 			if (ret > 0 && oproc == 2)
-				term_write(buf, ret)
+				term_write(buf, ret);
 			if (ret > 0)
-				sbuf_mem(sb, buf, ret)
+				sbuf_mem(sb, buf, ret);
 			else {
 				close(fds[0].fd);
 				fds[0].fd = -1;
