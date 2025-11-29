@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
 
@@ -41,16 +42,25 @@ int smallclueRunElvis(int argc, char **argv) {
     char *saved_term = smallclueOverrideEnv("TERM", "vt100");
 
     struct termios saved_ios;
-    bool have_tty = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
-    if (have_tty && tcgetattr(STDIN_FILENO, &saved_ios) == 0) {
+    int tty_fd = STDIN_FILENO;
+    bool have_tty = false;
+    if (tcgetattr(tty_fd, &saved_ios) != 0) {
+        tty_fd = open("/dev/tty", O_RDWR);
+        if (tty_fd >= 0 && tcgetattr(tty_fd, &saved_ios) == 0) {
+            have_tty = true;
+        }
+    } else {
+        have_tty = true;
+    }
+    if (have_tty) {
         struct termios raw = saved_ios;
         raw.c_lflag &= ~(ICANON | ECHO | IEXTEN | ISIG);
         raw.c_iflag &= ~(ICRNL | IXON);
         raw.c_oflag &= ~(OPOST);
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-        tcflush(STDIN_FILENO, TCIFLUSH);
+        tcsetattr(tty_fd, TCSAFLUSH, &raw);
+        tcflush(tty_fd, TCIFLUSH);
     } else {
         have_tty = false;
     }
@@ -63,7 +73,10 @@ int smallclueRunElvis(int argc, char **argv) {
     pscalRuntimeDebugLog(resultBuf);
 
     if (have_tty) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_ios);
+        tcsetattr(tty_fd, TCSAFLUSH, &saved_ios);
+        if (tty_fd != STDIN_FILENO) {
+            close(tty_fd);
+        }
     }
     smallclueRestoreEnv("TERM", saved_term);
     return status;
