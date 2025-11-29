@@ -1,6 +1,5 @@
 #include "shell/runner.h"
 
-#include "backend_ast/builtin.h"
 #include "compiler/bytecode.h"
 #include "core/cache.h"
 #include "core/preproc.h"
@@ -10,6 +9,7 @@
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "symbol/symbol.h"
+#include "backend_ast/builtin.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 
@@ -17,12 +17,239 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <spawn.h>
+#include <sys/wait.h>
+extern char **environ;
+#endif
 
 static const char *const kShellCompilerId = "shell";
+
+#if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message);
+static void runtimeDebugLog(const char *message) {
+    if (&pscalRuntimeDebugLog != NULL && message) {
+        pscalRuntimeDebugLog(message);
+    }
+}
+#else
+static bool g_shell_debug_enabled = false;
+static bool g_shell_debug_inited = false;
+
+static void runtimeDebugLog(const char *message) {
+    if (!g_shell_debug_inited) {
+        const char *env = getenv("PSCAL_SHELL_DEBUG");
+        g_shell_debug_enabled = (env && *env && strcmp(env, "0") != 0);
+        g_shell_debug_inited = true;
+    }
+    if (message && g_shell_debug_enabled) {
+        fprintf(stderr, "%s\n", message);
+    }
+}
+#endif
 
 static int gShellSymbolTableDepth = 0;
 static VM *gShellThreadOwnerVm = NULL;
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellReadShebangLine(const char *path, char **out_line) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (!path || !out_line) {
+        return false;
+    }
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    char buffer[512];
+    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    close(fd);
+    if (n <= 0) {
+        return false;
+    }
+    buffer[n] = '\0';
+    const unsigned char *bytes = (const unsigned char *)buffer;
+    size_t offset = 0;
+    if (n >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+        offset = 3;
+    }
+    if (buffer[offset] != '#' || buffer[offset + 1] != '!') {
+        return false;
+    }
+    const char *line_start = buffer + offset + 2;
+    while (*line_start == ' ' || *line_start == '\t') {
+        line_start++;
+    }
+    const char *line_end = line_start;
+    while (*line_end && *line_end != '\n' && *line_end != '\r') {
+        line_end++;
+    }
+    size_t line_len = (size_t)(line_end - line_start);
+    char *line = (char *)malloc(line_len + 1);
+    if (!line) {
+        return false;
+    }
+    memcpy(line, line_start, line_len);
+    line[line_len] = '\0';
+    *out_line = line;
+    return true;
+}
+
+extern int pascal_main(int argc, char **argv);
+extern int clike_main(int argc, char **argv);
+extern int rea_main(int argc, char **argv);
+extern int pscalvm_main(int argc, char **argv);
+extern int pscaljson2bc_main(int argc, char **argv);
+#ifdef BUILD_DASCAL
+extern int dascal_main(int argc, char **argv);
+#endif
+#ifdef BUILD_PSCALD
+extern int pscald_main(int argc, char **argv);
+#endif
+
+static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
+    /* On iOS we cannot reliably spawn; dispatch tool entrypoints directly. */
+    struct {
+        const char *name;
+        int (*entry)(int, char **);
+    } table[] = {
+        {"pascal", pascal_main},
+        {"clike", clike_main},
+        {"rea", rea_main},
+        {"pscalvm", pscalvm_main},
+        {"pscaljson2bc", pscaljson2bc_main},
+#ifdef BUILD_DASCAL
+        {"dascal", dascal_main},
+#endif
+#ifdef BUILD_PSCALD
+        {"pscald", pscald_main},
+#endif
+    };
+    const char *name = tool_name && *tool_name ? tool_name : (argc > 0 && argv && argv[0] ? argv[0] : NULL);
+    if (!name) {
+        return 127;
+    }
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
+        if (strcasecmp(name, table[i].name) == 0) {
+            return table[i].entry(argc, argv);
+        }
+    }
+    fprintf(stderr, "%s: tool runner unavailable for '%s'\n",
+            name, name);
+    return 127;
+}
+
+static const char *shellResolveToolName(const char *interpreter) {
+    if (!interpreter || !*interpreter) {
+        return NULL;
+    }
+    const char *base = strrchr(interpreter, '/');
+    base = base ? base + 1 : interpreter;
+    if (strcasecmp(base, "pascal") == 0) return "pascal";
+    if (strcasecmp(base, "clike") == 0) return "clike";
+    if (strcasecmp(base, "rea") == 0) return "rea";
+    if (strcasecmp(base, "pscalvm") == 0) return "pscalvm";
+    if (strcasecmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
+    if (strcasecmp(base, "dascal") == 0) return "dascal";
+    if (strcasecmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "exsh") == 0) return "exsh";
+    return NULL;
+}
+
+int shellMaybeExecShebangTool(const char *path, char *const *argv) {
+    if (!path || !*path) {
+        return -1;
+    }
+    char *line = NULL;
+    if (!shellReadShebangLine(path, &line)) {
+        return -1;
+    }
+
+    char *tokens[8];
+    size_t token_count = 0;
+    char *saveptr = NULL;
+    char *token = strtok_r(line, " \t", &saveptr);
+    while (token && token_count < 8) {
+        tokens[token_count++] = token;
+        token = strtok_r(NULL, " \t", &saveptr);
+    }
+    if (token_count == 0) {
+        free(line);
+        return -1;
+    }
+
+    size_t interpreter_index = 0;
+    const char *interpreter = tokens[interpreter_index];
+    const char *base = strrchr(interpreter, '/');
+    base = base ? base + 1 : interpreter;
+    if (strcmp(base, "env") == 0 && token_count >= 2) {
+        interpreter_index = 1;
+        interpreter = tokens[interpreter_index];
+    }
+    const char *tool_name = shellResolveToolName(interpreter);
+    if (!tool_name) {
+        free(line);
+        return -1;
+    }
+
+    size_t shebang_argc = 0;
+    if (token_count > interpreter_index + 1) {
+        shebang_argc = token_count - (interpreter_index + 1);
+    }
+    size_t script_argc = 0;
+    if (argv) {
+        while (argv[1 + script_argc]) {
+            script_argc++;
+        }
+    }
+
+    size_t total_args = 1 + shebang_argc + 1 + script_argc;
+    char **tool_argv = (char **)calloc(total_args, sizeof(char *));
+    if (!tool_argv) {
+        free(line);
+        return EXIT_FAILURE;
+    }
+
+    bool ok = true;
+    size_t idx = 0;
+    tool_argv[idx++] = strdup(tool_name);
+    for (size_t i = 0; ok && i < shebang_argc; ++i) {
+        tool_argv[idx++] = strdup(tokens[interpreter_index + 1 + i]);
+        if (!tool_argv[idx - 1]) {
+            ok = false;
+        }
+    }
+    tool_argv[idx++] = strdup(path);
+    if (!tool_argv[idx - 1]) {
+        ok = false;
+    }
+    for (size_t i = 0; ok && i < script_argc; ++i) {
+        const char *arg = argv[1 + i];
+        tool_argv[idx++] = strdup(arg ? arg : "");
+        if (!tool_argv[idx - 1]) {
+            ok = false;
+        }
+    }
+
+    int status = EXIT_FAILURE;
+    if (ok) {
+        status = shellSpawnToolRunner(tool_name, (int)total_args, tool_argv);
+    } else {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name);
+    }
+
+    for (size_t i = 0; i < total_args; ++i) {
+        free(tool_argv[i]);
+    }
+    free(tool_argv);
+    free(line);
+    return status;
+}
+#endif
 void shellSymbolTableScopeInit(ShellSymbolTableScope *scope) {
     if (!scope) {
         return;
@@ -204,12 +431,14 @@ int shellRunSource(const char *source,
     bool sem_ctx_initialized = false;
     BytecodeChunk chunk;
     bool chunk_initialized = false;
-    VM vm;
+    VM *vm = NULL;
     bool vm_initialized = false;
+    bool vm_stack_dumped = false;
     VM *previous_thread_owner = NULL;
     bool assigned_thread_owner = false;
     bool exit_flag = false;
     bool should_run_exit_trap = false;
+    bool trap_exit_requested = false;
 
     ShellParser parser;
     program = shellParseString(pre_src ? pre_src : source, &parser);
@@ -281,19 +510,29 @@ int shellRunSource(const char *source,
         goto cleanup;
     }
 
-    initVM(&vm);
+    vm = (VM *)calloc(1, sizeof(VM));
+    if (!vm) {
+        fprintf(stderr, "shell: failed to allocate VM instance.\n");
+        goto cleanup;
+    }
+    initVM(vm);
     vm_initialized = true;
     previous_thread_owner = gShellThreadOwnerVm;
     if (!gShellThreadOwnerVm) {
-        gShellThreadOwnerVm = &vm;
+        gShellThreadOwnerVm = vm;
         assigned_thread_owner = true;
     }
-    vm.threadOwner = gShellThreadOwnerVm ? gShellThreadOwnerVm : &vm;
+    vm->threadOwner = gShellThreadOwnerVm ? gShellThreadOwnerVm : vm;
     if (options->vm_trace_head > 0) {
-        vm.trace_head_instructions = options->vm_trace_head;
+        vm->trace_head_instructions = options->vm_trace_head;
     }
 
-    InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    if (result == INTERPRET_RUNTIME_ERROR) {
+        runtimeDebugLog("[shell] interpretBytecode -> runtime error; dumping VM stack");
+        vmDumpStackInfoDetailed(vm, "shell runtime error");
+        vm_stack_dumped = true;
+    }
     int last_status = shellRuntimeLastStatus();
     exit_flag = shellRuntimeConsumeExitRequested();
     if (result == INTERPRET_RUNTIME_ERROR && exit_flag) {
@@ -302,15 +541,45 @@ int shellRunSource(const char *source,
     should_run_exit_trap = shellRuntimeIsOutermostScript() &&
                            (!shellRuntimeIsInteractive() || exit_flag);
     exit_code = (result == INTERPRET_OK) ? last_status : EXIT_FAILURE;
-
+    {
+        char log_buf[256];
+        snprintf(log_buf, sizeof(log_buf),
+                 "[shell] interpret result=%d last_status=%d exit_flag=%s exit_code=%d",
+                 (int)result,
+                 last_status,
+                 exit_flag ? "true" : "false",
+                 exit_code);
+        runtimeDebugLog(log_buf);
+    }
+    if (exit_code != EXIT_SUCCESS && vm && !vm_stack_dumped) {
+        char dump_label[64];
+        snprintf(dump_label, sizeof(dump_label), "shell exit code %d", exit_code);
+        vmDumpStackInfoDetailed(vm, dump_label);
+        vm_stack_dumped = true;
+    }
 cleanup:
     if (should_run_exit_trap) {
         shellRuntimeRunExitTrap();
-        bool trap_exit_requested = shellRuntimeConsumeExitRequested();
+        trap_exit_requested = shellRuntimeConsumeExitRequested();
         exit_flag = exit_flag || trap_exit_requested;
         if (trap_exit_requested) {
             exit_code = shellRuntimeLastStatus();
         }
+    }
+    if ((exit_code != EXIT_SUCCESS || exit_flag) ) {
+        char final_log[256];
+        snprintf(final_log, sizeof(final_log),
+                 "[shell] final exit_code=%d exit_flag=%s trap_exit=%s",
+                 exit_code,
+                 exit_flag ? "true" : "false",
+                 trap_exit_requested ? "true" : "false");
+        runtimeDebugLog(final_log);
+    }
+    if (exit_code != EXIT_SUCCESS && vm && !vm_stack_dumped) {
+        char dump_label[64];
+        snprintf(dump_label, sizeof(dump_label), "shell final exit %d", exit_code);
+        vmDumpStackInfoDetailed(vm, dump_label);
+        vm_stack_dumped = true;
     }
     if (source_pushed) {
         shellRuntimeTrackSourcePop();
@@ -327,8 +596,11 @@ cleanup:
     if (assigned_thread_owner) {
         gShellThreadOwnerVm = previous_thread_owner;
     }
-    if (vm_initialized) {
-        freeVM(&vm);
+    if (vm_initialized && vm) {
+        freeVM(vm);
+    }
+    if (vm) {
+        free(vm);
     }
     if (chunk_initialized) {
         freeBytecodeChunk(&chunk);

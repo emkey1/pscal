@@ -3,6 +3,8 @@
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"
@@ -10,6 +12,7 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <poll.h>
 #include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
@@ -27,9 +30,12 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <sys/resource.h>
+#include <sys/select.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -47,7 +53,7 @@ void shellRuntimeSetLastStatusSticky(int status);
 
 /* SDL-backed builtins are registered dynamically when available. */
 #ifdef SDL
-#include "backend_ast/sdl.h"
+#include "backend_ast/pscal_sdl_runtime.h"
 #define SDL_READKEY_BUFFER_CAPACITY 8
 static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
 static int gSdlReadKeyBufferStart = 0;
@@ -2491,6 +2497,9 @@ typedef struct {
 #define VM_COLOR_STACK_MAX 16
 static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
 static _Thread_local int vm_color_stack_depth = 0;
+static volatile sig_atomic_t g_vm_sigint_seen = 0;
+static int g_vm_sigint_pipe[2] = {-1, -1};
+static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2547,7 +2556,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     size_t i = 0;
     char ch;
 
-    if (!isatty(STDIN_FILENO))
+    if (!pscalRuntimeStdinIsInteractive())
         return -1;
 
     if (vmTcgetattr(STDIN_FILENO, &oldt) < 0)
@@ -2640,7 +2649,7 @@ static void vmRestoreColorState(void) {
 // atexit handler: restore terminal settings and ensure cursor visibility
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
         if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
             perror("vmAtExitCleanup: write show_cursor");
@@ -2653,6 +2662,14 @@ static void vmAtExitCleanup(void) {
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
+    if (signum == SIGINT) {
+        g_vm_sigint_seen = 1;
+        if (g_vm_sigint_pipe[1] >= 0) {
+            char c = 'i';
+            (void)write(g_vm_sigint_pipe[1], &c, 1);
+        }
+        return;
+    }
     if (vm_raw_mode || vm_alt_screen_depth > 0)
         vmAtExitCleanup();
     _exit(128 + signum);
@@ -2665,10 +2682,12 @@ static void vmRegisterRestoreHandlers(void) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+#if !defined(PSCAL_TARGET_IOS)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGQUIT, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGSEGV, &sa, NULL);
+#endif
 }
 
 static void vmSetupTermHandlers(void) {
@@ -2686,6 +2705,36 @@ static void vmSetupTermHandlers(void) {
     pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
 }
 
+static void init_pipe_once(void);
+
+static void vmEnsureSigintPipe(void) {
+    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
+}
+
+static void init_pipe_once(void) {
+    if (pipe(g_vm_sigint_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
+        int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
+        }
+    }
+}
+
+// Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
+void pscalRuntimeRequestSigint(void) {
+    g_vm_sigint_seen = 1;
+    if (g_vm_sigint_pipe[1] >= 0) {
+        char c = 'i';
+        (void)write(g_vm_sigint_pipe[1], &c, 1);
+    }
+}
+
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
     vmPushColorState();
@@ -2697,7 +2746,7 @@ void vmInitTerminalState(void) {
 // occurs before any terminal cleanup is performed.
 void vmPauseBeforeExit(void) {
     // Only pause when running interactively.
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+    if (!pscalRuntimeStdinIsInteractive() || !pscalRuntimeStdoutIsInteractive())
         return;
 
     sleep(10);
@@ -2767,6 +2816,112 @@ static void vmPrepareCanonicalInput(void) {
     fflush(stdout);
 }
 
+static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
+    if (!stream || !buffer || buffer_sz == 0) {
+        return false;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+
+    size_t len = 0;
+    vmEnsureSigintPipe();
+    if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
+        while (len < buffer_sz - 1) {
+            if (g_vm_sigint_seen) {
+                g_vm_sigint_seen = 0;
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                buffer[0] = '\0';
+                return false;
+            }
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            if (g_vm_sigint_pipe[0] >= 0) {
+                FD_SET(g_vm_sigint_pipe[0], &rfds);
+            }
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100 * 1000; // 100ms
+            int maxfd = fd;
+            if (g_vm_sigint_pipe[0] >= 0 && g_vm_sigint_pipe[0] > maxfd) {
+                maxfd = g_vm_sigint_pipe[0];
+            }
+            int ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EBADF) {
+                    return false;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ready == 0) {
+                continue;
+            }
+            if (g_vm_sigint_pipe[0] >= 0 && FD_ISSET(g_vm_sigint_pipe[0], &rfds)) {
+                char drain[8];
+                while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+                }
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            char ch;
+            ssize_t n = read(fd, &ch, 1);
+            if (n == 0) {
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ch == 0x03) { // Ctrl-C
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (ch == '\r') {
+                continue;
+            }
+            if (ch == '\n') {
+                break;
+            }
+            buffer[len++] = ch;
+        }
+        buffer[len] = '\0';
+        if (len > 0 || feof(stream)) {
+            return true;
+        }
+    }
+
+    if (fgets(buffer, buffer_sz, stream) == NULL) {
+        return false;
+    }
+    buffer[strcspn(buffer, "\r\n")] = '\0';
+    return true;
+}
+
 // Attempts to get the current cursor position using ANSI DSR query.
 // Returns 0 on success, -1 on failure.
 // Stores results in *row and *col.
@@ -2777,36 +2932,41 @@ static int getCursorPosition(int *row, int *col) {
     char ch;
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
+    bool virtualTTY = pscalRuntimeVirtualTTYEnabled() && !pscalRuntimeStdinHasRealTTY();
+    bool termiosApplied = false;
 
     // Default row/col in case of non-critical failure
     *row = 1;
     *col = 1;
 
     // --- Check if Input is a Terminal ---
-    if (!isatty(STDIN_FILENO)) {
+    if (!pscalRuntimeStdinIsInteractive()) {
         fprintf(stderr, "Warning: Cannot get cursor position (stdin is not a TTY).\n");
         return 0; // Treat as non-critical failure, return default 1,1
     }
 
-    // --- Save Current Terminal Settings ---
-    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
-        perror("getCursorPosition: tcgetattr failed");
-        return -1; // Critical failure
-    }
+    if (!virtualTTY) {
+        // --- Save Current Terminal Settings ---
+        if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
+            perror("getCursorPosition: tcgetattr failed");
+            return -1; // Critical failure
+        }
 
-    // --- Prepare and Set Raw Mode ---
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
-    newt.c_cc[VMIN] = 0;              // Non-blocking read
-    newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
+        // --- Prepare and Set Raw Mode ---
+        newt = oldt;
+        newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
+        newt.c_cc[VMIN] = 0;              // Non-blocking read
+        newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
 
-    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
-        int setup_errno = errno;
-        perror("getCursorPosition: tcsetattr (set raw) failed");
-        // Attempt to restore original settings even if setting new ones failed
-        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
-        errno = setup_errno; // Restore errno for accurate reporting
-        return -1; // Critical failure
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
+            int setup_errno = errno;
+            perror("getCursorPosition: tcsetattr (set raw) failed");
+            // Attempt to restore original settings even if setting new ones failed
+            vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
+            errno = setup_errno; // Restore errno for accurate reporting
+            return -1; // Critical failure
+        }
+        termiosApplied = true;
     }
 
     // --- Write DSR Query ---
@@ -2823,22 +2983,44 @@ static int getCursorPosition(int *row, int *col) {
     memset(buf, 0, sizeof(buf));
     i = 0;
     while (i < (int)sizeof(buf) - 1) {
-        errno = 0; // Clear errno before read
-        ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-        read_errno = errno; // Store errno immediately after read
+        if (virtualTTY) {
+            struct pollfd pfd;
+            pfd.fd = STDIN_FILENO;
+            pfd.events = POLLIN;
+            int poll_rc = poll(&pfd, 1, 200);
+            if (poll_rc <= 0) {
+                if (poll_rc == 0) {
+                    fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
+                } else {
+                    perror("getCursorPosition: poll failed");
+                }
+                break;
+            }
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            if (bytes_read <= 0) {
+                if (bytes_read < 0) {
+                    perror("getCursorPosition: read failed");
+                }
+                break;
+            }
+        } else {
+            errno = 0; // Clear errno before read
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            read_errno = errno; // Store errno immediately after read
 
-        if (bytes_read < 0) { // Read error
-             // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
-             if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
-                 fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-             } else {
-                 perror("getCursorPosition: read failed");
-             }
-             break; // Exit loop on any read error or timeout
-        }
-        if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
-             fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
-             break;
+            if (bytes_read < 0) { // Read error
+                 // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
+                 if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
+                     fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
+                 } else {
+                     perror("getCursorPosition: read failed");
+                 }
+                 break; // Exit loop on any read error or timeout
+            }
+            if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
+                 fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
+                 break;
+            }
         }
 
         // Store character and check for terminator 'R'
@@ -2850,9 +3032,11 @@ static int getCursorPosition(int *row, int *col) {
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Restore Original Terminal Settings ---
-    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
-        perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
-        // Continue processing, but be aware terminal might be left in raw mode
+    if (termiosApplied) {
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
+            // Continue processing, but be aware terminal might be left in raw mode
+        }
     }
 
     // --- Parse Response ---
@@ -3128,7 +3312,7 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         bool color_was_applied = applyCurrentTextAttributes(stdout);
         fputs("\x1B[2J\x1B[H", stdout);
         if (color_was_applied) {
@@ -3280,7 +3464,7 @@ Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "PushScreen expects no arguments.");
         return makeVoid();
     }
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         vmPushColorState();
         if (vm_alt_screen_depth == 0) {
             const char enter_alt[] = "\x1B[?1049h";
@@ -3304,7 +3488,7 @@ Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
     if (vm_alt_screen_depth > 0) {
         vm_alt_screen_depth--;
         vmPopColorState();
-        if (isatty(STDOUT_FILENO)) {
+        if (pscalRuntimeStdoutIsInteractive()) {
             if (vm_alt_screen_depth == 0) {
                 const char exit_alt[] = "\x1B[?1049l";
                 if (write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1) != (ssize_t)(sizeof(exit_alt) - 1)) {
@@ -4930,7 +5114,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
     // 2) Read full line
     char line_buffer[1024];
-    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
+    if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
         last_io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
@@ -5061,6 +5245,50 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
+static bool vmTraceStdoutEnabled(void) {
+    static int trace_mode = -1;
+    if (trace_mode < 0) {
+        const char *env = getenv("REA_TRACE_STDOUT");
+        if (!env || !*env) {
+            env = getenv("PSCAL_TRACE_STDOUT");
+        }
+        trace_mode = (env && *env && env[0] != '0') ? 1 : 0;
+    }
+    return trace_mode == 1;
+}
+
+static void vmTraceDescribeValue(const Value *val) {
+    if (!val) {
+        fprintf(stderr, "  [TRACE stdout] <null value>\n");
+        return;
+    }
+    switch (val->type) {
+        case TYPE_STRING:
+            fprintf(stderr, "  [TRACE stdout] string: \"%.*s\"\n",
+                    80, val->s_val ? val->s_val : "");
+            break;
+        case TYPE_CHAR:
+            fprintf(stderr, "  [TRACE stdout] char: %d\n", val->c_val);
+            break;
+        case TYPE_BOOLEAN:
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            fprintf(stderr, "  [TRACE stdout] int: %lld\n", (long long)AS_INTEGER(*val));
+            break;
+        case TYPE_REAL:
+        case TYPE_FLOAT:
+            fprintf(stderr, "  [TRACE stdout] real: %Lf\n", (long double)AS_REAL(*val));
+            break;
+        default:
+            fprintf(stderr, "  [TRACE stdout] value type %d\n", val->type);
+            break;
+    }
+}
+
 Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
     if (arg_count < 1) {
         runtimeError(vm, "Write expects at least a newline flag.");
@@ -5130,6 +5358,10 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    bool trace_stdout = vmTraceStdoutEnabled() && (output_stream == stdout);
+    if (trace_stdout) {
+        fprintf(stderr, "[TRACE stdout] write call: newline=%d args=%d\n", newline ? 1 : 0, print_arg_count);
+    }
     bool color_was_applied = false;
     if (output_stream == stdout) {
         color_was_applied = applyCurrentTextAttributes(output_stream);
@@ -5144,6 +5376,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (!writeBinaryElement(output_stream, &val, binary_element_type, binary_element_size, &write_error)) {
                 last_io_error = write_error != 0 ? write_error : 1;
                 break;
+            }
+            if (trace_stdout) {
+                vmTraceDescribeValue(&val);
             }
             prev = val;
             has_prev = true;
@@ -5185,6 +5420,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (add_space) {
                 fputc(' ', output_stream);
             }
+        }
+        if (trace_stdout) {
+            vmTraceDescribeValue(&val);
         }
         if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
             fputs(val.i_val ? "1" : "0", output_stream);
@@ -5356,9 +5594,14 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
-    int res = system(cmd);
+    int result = -1;
+#ifdef PSCAL_TARGET_IOS
+    runtimeError(vm, "dosExec is unavailable on iOS builds.");
+#else
+    result = system(cmd);
+#endif
     free(cmd);
-    return makeInt(res);
+    return makeInt(result);
 }
 
 Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
@@ -6378,27 +6621,23 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
         runtimeError(vm, "%s received an unknown builtin identifier.", opName);
         return makeInt(-1);
     }
-    if (!threadBuiltinIsAllowlisted(builtin_id)) {
-        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
-        if (shellRuntimeSetLastStatusSticky) {
-            shellRuntimeSetLastStatusSticky(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
+        if (!threadBuiltinIsAllowlisted(builtin_id)) {
+            runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+            if (shellRuntimeSetLastStatusSticky) {
+                shellRuntimeSetLastStatusSticky(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
+            } else if (shellRuntimeSetLastStatus) {
+                shellRuntimeSetLastStatus(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
             }
-#endif
-        } else if (shellRuntimeSetLastStatus) {
-            shellRuntimeSetLastStatus(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
-            }
-#endif
+            return makeInt(-1);
         }
-        return makeInt(-1);
-    }
 
     int options_index = -1;
     ThreadRequestOptions options;

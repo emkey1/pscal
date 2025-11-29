@@ -1,0 +1,21 @@
+/*
+ PSCAL iOS: Linker configuration for Option A (shared front-end archive)
+
+ This configuration assumes a pre-link script creates three archives in
+ $(BUILT_PRODUCTS_DIR)/pscal_libs:
+   - libpscal_frontend_shared.a (common objects extracted once)
+   - libpscal_pascal_static.a   (stripped of common objects)
+   - libpscal_rea_static.a      (stripped of common objects)
+
+ The app target should:
+   1) Run ios/Tools/dedupe_pscal_libs.sh before linking
+   2) Add $(BUILT_PRODUCTS_DIR)/pscal_libs to LIBRARY_SEARCH_PATHS
+   3) Link with -lpscal_pascal_static -lpscal_rea_static -lpscal_frontend_shared (in this order)
+*/
+
+// Inherit defaults and add the shared library after inherited flags so it appears later in the link line.
+OTHER_LDFLAGS = $(inherited) -lpscal_frontend_shared
+DEAD_CODE_STRIPPING = YES
+
+// Ensure the linker finds the rewritten archives first.
+LIBRARY_SEARCH_PATHS = $(BUILT_PRODUCTS_DIR)/pscal_libs $(inherited)

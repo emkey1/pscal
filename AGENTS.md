@@ -3,7 +3,7 @@
 ## Repository Context
 - Runtime and front ends live under `src/`; unit tests under `Tests/`; executables build to `build/bin/` via CMake.
 - Pascal/REA compiler logic is concentrated in `src/compiler/compiler.c`; many globals track compile state, so save/restore helpers are common.
-- Beware Dropbox sync conflicts: `git add` may require escalated permissions; `.git/index.lock` errors usually just mean rerun with elevation.
+- When `git add` fails with permission errors or `.git/index.lock`, rerun with elevation; the workspace sometimes lives on file systems that gate writes.
 
 ## Build & Test
 - Configure with `cmake -S . -B build [-DSDL=ON] [-DBUILD_DASCAL=ON]`, then `cmake --build build`.
@@ -27,4 +27,4 @@
 - Tests are slow; when editing the compiler, run at least the relevant front-end suite prior to broader sweeps.
 - Document any env vars you touch (`SDL_VIDEODRIVER`, `RUN_SDL`, etc.) in commits/PRs; future agents look here for quick bootstrapping.
 - Binaries tend to have both a --dump-ast-json and --dump-bytecode options which can provide substantial clues as to what is going on in the AST building and compilation portions of the code when debugging.
-
+- Commit early and often—small, frequent commits keep iPadOS and desktop work in sync and avoid multi-thousand-file diffs that are hard to review or push.

@@ -2,6 +2,7 @@
 #include "clike/errors.h"
 #include "clike/opt.h"
 #include "ast/ast.h"
+#include "Pascal/type_registry.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -274,6 +275,7 @@ void clikeRegisterStruct(const char *name, AST *ast) {
     for (int i = 0; i < clike_struct_count; ++i) {
         if (strcmp(clike_structs[i].name, name) == 0) {
             clike_structs[i].ast = ast;
+            insertType(name, ast);
             return;
         }
     }
@@ -288,6 +290,7 @@ void clikeRegisterStruct(const char *name, AST *ast) {
     clike_structs[clike_struct_count].name = strdup(name);
     clike_structs[clike_struct_count].ast = ast;
     clike_struct_count++;
+    insertType(name, ast);
 }
 
 void clikeFreeStructs(void) {
@@ -450,6 +453,18 @@ ASTNodeClike* parseProgramClike(ParserClike *p) {
         }
     }
     return prog;
+}
+
+void clikeResetParserState(void) {
+    if (clike_imports) {
+        for (int i = 0; i < clike_import_count; ++i) {
+            free(clike_imports[i]);
+        }
+        free(clike_imports);
+        clike_imports = NULL;
+    }
+    clike_import_count = 0;
+    clike_import_capacity = 0;
 }
 
 static int isTypeToken(ClikeTokenType t) {

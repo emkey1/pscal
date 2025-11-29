@@ -18,6 +18,8 @@
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "Pascal/globals.h"
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
@@ -397,33 +399,34 @@ static bool vmResolveStringIndex(VM* vm,
                                  size_t* out_offset,
                                  bool allow_length_query,
                                  bool* out_length_query) {
-#ifndef FRONTEND_SHELL
-    if (allow_length_query && raw_index == 0) {
+    if (!frontendIsShell()) {
+        if (allow_length_query && raw_index == 0) {
+            if (out_length_query) {
+                *out_length_query = true;
+            }
+            if (out_offset) {
+                *out_offset = 0;
+            }
+            return true;
+        }
+
+        if (raw_index < 1 || (size_t)raw_index > len) {
+            runtimeError(vm,
+                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                         raw_index,
+                         len);
+            return false;
+        }
+
         if (out_length_query) {
-            *out_length_query = true;
+            *out_length_query = false;
         }
         if (out_offset) {
-            *out_offset = 0;
+            *out_offset = (size_t)(raw_index - 1);
         }
         return true;
     }
 
-    if (raw_index < 1 || (size_t)raw_index > len) {
-        runtimeError(vm,
-                     "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                     raw_index,
-                     len);
-        return false;
-    }
-
-    if (out_length_query) {
-        *out_length_query = false;
-    }
-    if (out_offset) {
-        *out_offset = (size_t)(raw_index - 1);
-    }
-    return true;
-#else
     (void)allow_length_query;
     if (raw_index < 0 || (size_t)raw_index >= len) {
         runtimeError(vm,
@@ -440,7 +443,6 @@ static bool vmResolveStringIndex(VM* vm,
         *out_offset = (size_t)raw_index;
     }
     return true;
-#endif
 }
 
 static Value makeOwnedString(char* data, size_t len) {
@@ -456,11 +458,10 @@ static Value makeOwnedString(char* data, size_t len) {
 }
 
 static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
-#ifndef FRONTEND_SHELL
+    if (frontendIsShell()) {
+        return (unsigned long long)offset;
+    }
     return (unsigned long long)(offset + 1);
-#else
-    return (unsigned long long)offset;
-#endif
 }
 
 static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
@@ -2161,7 +2162,20 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
     }
 }
 
+static bool g_suppress_vm_state_dump = false;
+
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
+#if defined(PSCAL_TARGET_IOS)
+    (void)vm;
+    (void)context_message;
+    return;
+#endif
+    const char *force_dump = getenv("PSCAL_VM_DUMP");
+    if (g_suppress_vm_state_dump) {
+        if (!force_dump || *force_dump == '\0' || *force_dump == '0') {
+            return;
+        }
+    }
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
@@ -2199,6 +2213,10 @@ void vmDumpStackInfo(VM* vm) {
     // Print stack contents for more detailed debugging:
     fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
     vmDumpStackInternal(vm, false);
+}
+
+void vmSetSuppressStateDump(bool suppress) {
+    g_suppress_vm_state_dump = suppress;
 }
 
 static bool vmSetContains(const Value* setVal, const Value* itemVal) {
@@ -2300,12 +2318,12 @@ static void emitRuntimeLocation(VM* vm, const char* label) {
 }
 
 void runtimeWarning(VM* vm, const char* format, ...) {
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 
@@ -2327,12 +2345,12 @@ void runtimeError(VM* vm, const char* format, ...) {
         vm->abort_requested = true;
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 
@@ -2348,7 +2366,9 @@ void runtimeError(VM* vm, const char* format, ...) {
     bool have_runtime_location = false;
     if (vm) {
         computeRuntimeLocation(vm, &instruction_offset, &error_line);
+#if !defined(PSCAL_TARGET_IOS)
         fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+#endif
         have_runtime_location = true;
     }
 
@@ -2438,6 +2458,14 @@ static void push(VM* vm, Value value) { // Using your original name 'push'
     }
     *vm->stackTop = value;
     vm->stackTop++;
+}
+
+static Value copyInterfaceReceiverAlias(Value* receiverCell) {
+    Value alias = copyValueForStack(receiverCell);
+    if (alias.type == TYPE_POINTER && alias.base_type_node == OWNED_POINTER_SENTINEL) {
+        alias.base_type_node = NULL;
+    }
+    return alias;
 }
 
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
@@ -3055,6 +3083,61 @@ static Value vmHostBoxInterface(VM* vm) {
         }
     }
 
+    if (!tableSlotPtr && receiverVal.type == TYPE_POINTER && receiverVal.ptr_val) {
+        bool invalid_type = false;
+        Value* existingRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!invalid_type && existingRecord && existingRecord->type == TYPE_RECORD) {
+            FieldValue* hiddenField = existingRecord->record_val;
+            if (hiddenField) {
+                tableSlotPtr = &hiddenField->value;
+                tableValuePtr = tableSlotPtr;
+                if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+                    tableValuePtr = (Value*)tableValuePtr->ptr_val;
+                }
+            }
+        }
+    }
+
+    if (receiverVal.type != TYPE_POINTER) {
+        Value* clone = (Value*)malloc(sizeof(Value));
+        if (!clone) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Out of memory boxing interface receiver.");
+            return makeNil();
+        }
+        *clone = makeCopyOfValue(&receiverVal);
+        receiverVal = makePointer(clone, NULL);
+        receiverVal.base_type_node = OWNED_POINTER_SENTINEL;
+
+        bool invalid_type = false;
+        Value* clonedRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!clonedRecord || invalid_type || clonedRecord->type != TYPE_RECORD) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Unable to resolve cloned receiver for interface boxing.");
+            return makeNil();
+        }
+        FieldValue* hiddenField = clonedRecord->record_val;
+        if (!hiddenField) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Cloned receiver lacks vtable storage.");
+            return makeNil();
+        }
+        tableSlotPtr = &hiddenField->value;
+        tableValuePtr = tableSlotPtr;
+        if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+            tableValuePtr = (Value*)tableValuePtr->ptr_val;
+        }
+    }
+
     const char* class_name_str = (classNameVal.type == TYPE_STRING && classNameVal.s_val)
                                      ? classNameVal.s_val
                                      : NULL;
@@ -3109,6 +3192,10 @@ static Value vmHostBoxInterface(VM* vm) {
     }
 
     *receiverCell = makeCopyOfValue(&receiverVal);
+    if (receiverCell->type == TYPE_POINTER && receiverCell->base_type_node == NULL &&
+        receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverCell->base_type_node = OWNED_POINTER_SENTINEL;
+    }
     *tableCell = makePointer(tableValuePtr, NULL);
     const char* class_identity_source = class_name_str ? class_name_str : "";
     size_t class_identity_len = strlen(class_identity_source);
@@ -3141,6 +3228,9 @@ static Value vmHostBoxInterface(VM* vm) {
     releaseClosureEnv(payload);
     freeValue(&classNameVal);
     freeValue(&typeNameVal);
+    if (receiverVal.type == TYPE_POINTER && receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverVal.base_type_node = NULL;
+    }
     freeValue(&receiverVal);
     freeValue(&tablePtrVal);
     return iface;
@@ -3258,13 +3348,13 @@ static Value vmHostInterfaceLookup(VM* vm) {
         return makeNil();
     }
 
-    Value receiverCopy = copyValueForStack(receiverCell);
+    Value receiverCopy = copyInterfaceReceiverAlias(receiverCell);
 
     if (vm->vmGlobalSymbols) {
         pthread_mutex_lock(&globals_mutex);
         Symbol* myselfSym = hashTableLookup(vm->vmGlobalSymbols, "myself");
         if (myselfSym) {
-            updateSymbol("myself", copyValueForStack(receiverCell));
+            updateSymbol("myself", copyInterfaceReceiverAlias(receiverCell));
         }
         pthread_mutex_unlock(&globals_mutex);
     }
@@ -3349,7 +3439,7 @@ static Value vmHostInterfaceAssert(VM* vm) {
         return makeNil();
     }
 
-    Value result = copyValueForStack(receiverCell);
+    Value result = copyInterfaceReceiverAlias(receiverCell);
 
     freeValue(&targetTypeVal);
     freeValue(&ifaceVal);
@@ -3591,7 +3681,6 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
-#ifdef FRONTEND_SHELL
 static Value vmHostShellLastStatusHost(VM* vm) {
     return vmHostShellLastStatus(vm);
 }
@@ -3619,42 +3708,6 @@ static Value vmHostShellPollJobsHost(VM* vm) {
 static Value vmHostShellLoopIsReadyHost(VM* vm) {
     return vmHostShellLoopIsReady(vm);
 }
-#else
-static Value vmHostShellLastStatusHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckConditionHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopExecuteBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopAdvanceHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellPollJobsHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopIsReadyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-#endif
 
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
@@ -5626,13 +5679,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
                             freeValue(&operand);
                             break;
                         }
-#endif
 
                         push(vm, makePointer(&base_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
                         freeValue(&operand);
@@ -5864,15 +5915,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makeInt((long long)len));
                             freeValue(&operand);
                             break;
                         }
-#else
-                        (void)wants_length;
-#endif
 
                         char ch = base_val->s_val ? base_val->s_val[char_offset] : '\0';
                         push(vm, makeChar(ch));
@@ -6115,17 +6162,14 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-#ifndef FRONTEND_SHELL
                 } else if (pointer_to_lvalue.base_type_node == STRING_LENGTH_SENTINEL) {
-                    runtimeError(vm, "VM Error: Cannot assign to string length.");
-                    freeValue(&value_to_set);
-                    freeValue(&pointer_to_lvalue);
-                    return INTERPRET_RUNTIME_ERROR;
-                } else
-#else
-                } else
-#endif
-                {
+                    if (!frontendIsShell()) {
+                        runtimeError(vm, "VM Error: Cannot assign to string length.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else {
                     // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
@@ -6298,16 +6342,12 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     push(vm, makeChar(*char_target_addr));
-#ifndef FRONTEND_SHELL
-                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL) {
+                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL && !frontendIsShell()) {
                     // Special case: request for string length via element 0.
                     Value* str_val = (Value*)pointer_val.ptr_val;
                     size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
                     push(vm, makeInt((long long)len));
                 } else {
-#else
-                } else {
-#endif
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
@@ -6341,21 +6381,18 @@ comparison_error_label:
                          return INTERPRET_RUNTIME_ERROR;
                      }
                      result_char = str[char_offset];
-                 } else if (base_val.type == TYPE_CHAR) {
-#ifdef FRONTEND_SHELL
-                     if (pscal_index != 0) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 0, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#else
-                     if (pscal_index != 1) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#endif
-                     result_char = base_val.c_val;
+                } else if (base_val.type == TYPE_CHAR) {
+                    long long expected_index = frontendIsShell() ? 0 : 1;
+                    if (pscal_index != expected_index) {
+                        runtimeError(vm,
+                                     "Runtime Error: Index for a CHAR type must be %lld, got %lld.",
+                                     expected_index,
+                                     pscal_index);
+                        freeValue(&index_val);
+                        freeValue(&base_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    result_char = base_val.c_val;
                  } else {
                      runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
                      freeValue(&index_val); freeValue(&base_val);

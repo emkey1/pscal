@@ -65,8 +65,19 @@ var
   { *** END ADDED *** }
 
 function DefaultWordListPath: string;
+var
+  root: string;
 begin
-  DefaultWordListPath := CONFIGURED_WORDS_PATH;
+  root := GetEnv('PSCAL_INSTALL_ROOT_RESOLVED');
+  if root = '' then
+    root := GetEnv('PSCALI_INSTALL_ROOT');
+  if root = '' then
+    root := GetEnv('PSCAL_INSTALL_ROOT');
+  if root = '' then
+    root := '.';
+  if (Length(root) > 0) and (root[Length(root)] = '/') then
+    Delete(root, Length(root), 1);
+  DefaultWordListPath := root + '/etc/words';
 end;
 
 {---------------------------------------------------------------------

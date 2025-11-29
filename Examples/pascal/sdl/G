@@ -1,0 +1,729 @@
+program ScreenFillingMazeSDL;
+
+uses
+  CRT; { For KeyPressed/ReadKey }
+
+const
+  MaxMazeWidth = 400;
+  MaxMazeHeight = 160;
+  MaxCellsWidth = 198;
+  MaxCellsHeight = 78;
+  MazeBufferSize = MaxMazeWidth * MaxMazeHeight;
+  VisitBufferSize = MaxCellsWidth * MaxCellsHeight;
+  
+  { Internal data model constants }
+  CornerTL = '╔';
+  CornerTR = '╗';
+  CornerBL = '╚';
+  CornerBR = '╝';
+  LineH = '═';
+  LineV = '║';
+  LineCross = '╬';
+  TeeDown = '╦';
+  TeeUp = '╩';
+  TeeLeft = '╠';
+  TeeRight = '╣';
+
+  { Graphics Constants }
+  CellSize = 8; { 8x8 pixels per maze cell }
+
+  { OpenGL constants from your docs }
+  GL_QUADS = 7;
+  GL_COLOR_BUFFER_BIT = 16384;
+  GL_DEPTH_BUFFER_BIT = 256;
+  GL_PROJECTION = 5889;
+  GL_MODELVIEW = 5888;
+  GL_DEPTH_TEST = 2929; { Standard OpenGL enum }
+
+type
+  TCellChar = string[4];
+  TMazeGrid = array[0..MazeBufferSize - 1] of TCellChar;
+  TVisitGrid = array[0..VisitBufferSize - 1] of boolean;
+  TDirArray = array[0..3] of integer;
+  TCellArray = array[0..VisitBufferSize - 1] of integer;
+  TMaskGrid = array[0..MazeBufferSize - 1] of boolean;
+
+var
+  Maze: TMazeGrid;
+  Visited: TVisitGrid;
+  MazeWidth, MazeHeight: integer;
+  CellsWidth, CellsHeight: integer;
+  EntryCol, ExitCol: integer;
+  SolutionMask: TMaskGrid;
+  PixelWidth, PixelHeight: integer; { For SDL window size }
+
+{ --- NEW: StrToInt Function --- }
+function StrToInt(s: string): integer;
+var
+  val, i: integer;
+  ch: char;
+begin
+  val := 0;
+  for i := 1 to Length(s) do
+  begin
+    ch := s[i];
+    if (ch >= '0') and (ch <= '9') then
+    begin
+      { Convert char to digit and add to value }
+      val := (val * 10) + (Ord(ch) - Ord('0'));
+    end
+    else
+    begin
+      { Invalid character, return 0 }
+      StrToInt := 0;
+      Exit;
+    end;
+  end;
+  StrToInt := val;
+end;
+
+{ --- All Helper Functions --- }
+
+function MazeIndex(row, col: integer): integer;
+begin
+  Result := row * MazeWidth + col;
+end;
+
+function VisitIndex(row, col: integer): integer;
+begin
+  Result := row * CellsWidth + col;
+end;
+
+procedure PutCell(row, col: integer; ch: TCellChar);
+begin
+  if (row >= 0) and (row < MazeHeight) and (col >= 0) and (col < MazeWidth) then
+    Maze[MazeIndex(row, col)] := ch;
+end;
+
+function CellAt(row, col: integer): TCellChar;
+begin
+  if (row < 0) or (row >= MazeHeight) or (col < 0) or (col >= MazeWidth) then
+    Result := ' '
+  else
+    Result := Maze[MazeIndex(row, col)];
+end;
+
+function IsWallCell(row, col: integer): boolean;
+begin
+  Result := CellAt(row, col) <> ' ';
+end;
+
+function HasWallAt(row, col: integer): boolean;
+begin
+  if (row < 0) or (row >= MazeHeight) or (col < 0) or (col >= MazeWidth) then
+  begin
+    Result := False;
+    Exit;
+  end;
+  Result := IsWallCell(row, col);
+end;
+
+procedure MarkVisited(row, col: integer);
+begin
+  if (row >= 0) and (row < CellsHeight) and (col >= 0) and (col < CellsWidth) then
+    Visited[VisitIndex(row, col)] := True;
+end;
+
+function IsVisited(row, col: integer): boolean;
+begin
+  if (row < 0) or (row >= CellsHeight) or (col < 0) or (col >= CellsWidth) then
+    Result := True
+  else
+    Result := Visited[VisitIndex(row, col)];
+end;
+
+procedure ResetVisited;
+var
+  i: integer;
+begin
+  for i := 0 to VisitBufferSize - 1 do
+    Visited[i] := False;
+end;
+
+procedure ClearSolutionMask;
+var
+  i: integer;
+begin
+  for i := 0 to MazeBufferSize - 1 do
+    SolutionMask[i] := False;
+end;
+
+{ --- MODIFIED: ClampDimensions --- }
+procedure ClampDimensions;
+var
+  w_str, h_str: string;
+  w_val, h_val: integer;
+begin
+  { Check for command-line arguments }
+  if ParamCount = 2 then
+  begin
+    w_str := ParamStr(1);
+    h_str := ParamStr(2);
+    w_val := StrToInt(w_str);
+    h_val := StrToInt(h_str);
+
+    { Safety check for invalid input }
+    if (w_val > 0) and (h_val > 0) then
+    begin
+      CellsWidth := w_val;
+      CellsHeight := h_val;
+    end
+    else
+    begin
+      { Fallback to default on invalid input }
+      CellsWidth := 80;
+      CellsHeight := 60;
+    end;
+  end
+  else
+  begin
+    { Default values if no params are given }
+    CellsWidth := 80;
+    CellsHeight := 60;
+  end;
+  
+  { Calculate maze grid dimensions based on cell count }
+  MazeWidth := (CellsWidth * 2) + 1;
+  MazeHeight := (CellsHeight * 2) + 1;
+
+  { Keep the original safety checks against max buffer size }
+  if MazeWidth > MaxMazeWidth then MazeWidth := MaxMazeWidth;
+  if MazeHeight > MaxMazeHeight then MazeHeight := MaxMazeHeight;
+  if CellsWidth > MaxCellsWidth then CellsWidth := MaxCellsWidth;
+  if CellsHeight > MaxCellsHeight then CellsHeight := MaxCellsHeight;
+
+  { Ensure minimum size }
+  if MazeWidth < 3 then MazeWidth := 3;
+  if MazeHeight < 3 then MazeHeight := 3;
+  if CellsWidth < 1 then CellsWidth := 1;
+  if CellsHeight < 1 then CellsHeight := 1;
+end;
+
+procedure InitializeMaze;
+var
+  i: integer;
+  r, c: integer;
+begin
+  for i := 0 to MazeBufferSize - 1 do
+    Maze[i] := ' ';
+
+  for r := 0 to MazeHeight - 1 do
+    for c := 0 to MazeWidth - 1 do
+    begin
+      if r = 0 then
+      begin
+        if c = 0 then
+          PutCell(r, c, CornerTL)
+        else if c = MazeWidth - 1 then
+          PutCell(r, c, CornerTR)
+        else
+          PutCell(r, c, LineH);
+      end
+      else if r = MazeHeight - 1 then
+      begin
+        if c = 0 then
+          PutCell(r, c, CornerBL)
+        else if c = MazeWidth - 1 then
+          PutCell(r, c, CornerBR)
+        else
+          PutCell(r, c, LineH);
+      end
+      else if c = 0 then
+        PutCell(r, c, LineV)
+      else if c = MazeWidth - 1 then
+        PutCell(r, c, LineV)
+      else if (r mod 2 = 0) and (c mod 2 = 0) then
+        PutCell(r, c, LineCross)
+      else if (r mod 2 = 0) then
+        PutCell(r, c, LineH)
+      else if (c mod 2 = 0) then
+        PutCell(r, c, LineV)
+      else
+        PutCell(r, c, ' ');
+    end;
+end;
+
+function WallGlyph(connectUp, connectDown, connectLeft, connectRight: boolean): TCellChar;
+var
+  links: integer;
+begin
+  links := 0;
+  if connectUp then Inc(links);
+  if connectDown then Inc(links);
+  if connectLeft then Inc(links);
+  if connectRight then Inc(links);
+
+  if links >= 4 then
+  begin
+    Result := LineCross;
+    Exit;
+  end;
+
+  if links = 3 then
+  begin
+    if not connectUp then
+    begin
+      Result := TeeDown;
+      Exit;
+    end;
+    if not connectDown then
+    begin
+      Result := TeeUp;
+      Exit;
+    end;
+    if not connectLeft then
+    begin
+      Result := TeeLeft;
+      Exit;
+    end;
+    Result := TeeRight;
+    Exit;
+  end;
+
+  if links = 2 then
+  begin
+    if connectUp and connectDown then
+    begin
+      Result := LineV;
+      Exit;
+    end;
+    if connectLeft and connectRight then
+    begin
+      Result := LineH;
+      Exit;
+    end;
+    if connectUp and connectRight then
+    begin
+      Result := CornerBL;
+      Exit;
+    end;
+    if connectUp and connectLeft then
+    begin
+      Result := CornerBR;
+      Exit;
+    end;
+    if connectDown and connectRight then
+    begin
+      Result := CornerTL;
+      Exit;
+    end;
+    if connectDown and connectLeft then
+    begin
+      Result := CornerTR;
+      Exit;
+    end;
+  end;
+
+  if links = 1 then
+  begin
+    if connectUp or connectDown then
+    begin
+      Result := LineV;
+      Exit;
+    end
+    else
+    begin
+      Result := LineH;
+      Exit;
+    end;
+  end;
+
+  if links = 0 then
+    Result := LineH
+  else
+    Result := LineCross;
+end;
+
+procedure PolishWalls;
+var
+  r, c: integer;
+  up, down, leftConn, rightConn: boolean;
+begin
+  for r := 0 to MazeHeight - 1 do
+    for c := 0 to MazeWidth - 1 do
+      if IsWallCell(r, c) then
+      begin
+        up := HasWallAt(r - 1, c);
+        down := HasWallAt(r + 1, c);
+        leftConn := HasWallAt(r, c - 1);
+        rightConn := HasWallAt(r, c + 1);
+        PutCell(r, c, WallGlyph(up, down, leftConn, rightConn));
+      end;
+end;
+
+function IsPassage(row, col: integer): boolean;
+begin
+  if (row < 0) or (row >= MazeHeight) or (col < 0) or (col >= MazeWidth) then
+  begin
+    Result := False;
+    Exit;
+  end;
+  Result := CellAt(row, col) = ' ';
+end;
+
+function SolveMaze: boolean;
+type
+  TIntArray = array[0..MazeBufferSize - 1] of integer;
+  TBoolArray = array[0..MazeBufferSize - 1] of boolean;
+const
+  dRow: array[0..3] of integer = (-1, 1, 0, 0);
+  dCol: array[0..3] of integer = (0, 0, -1, 1);
+  QueueCapacity = MazeBufferSize;
+var
+  queueRow, queueCol: TIntArray;
+  parent: TIntArray;
+  visited: TBoolArray;
+  head, tail: integer;
+  startRow, startCol, goalRow, goalCol: integer;
+  curRow, curCol, nextRow, nextCol: integer;
+  curIdx, nextIdx: integer;
+  found: boolean;
+  i: integer;
+begin
+  ClearSolutionMask;
+  for i := 0 to MazeBufferSize - 1 do
+  begin
+    parent[i] := -1;
+    visited[i] := False;
+  end;
+
+  startCol := EntryCol;
+  startRow := 1;
+  if not IsPassage(startRow, startCol) then
+    startRow := 0;
+  if not IsPassage(startRow, startCol) then
+  begin
+    SolveMaze := False;
+    Exit;
+  end;
+
+  goalCol := ExitCol;
+  goalRow := MazeHeight - 2;
+  if not IsPassage(goalRow, goalCol) then
+    goalRow := MazeHeight - 1;
+  if not IsPassage(goalRow, goalCol) then
+  begin
+    SolveMaze := False;
+    Exit;
+  end;
+
+  head := 0;
+  tail := 0;
+  queueRow[tail] := startRow;
+  queueCol[tail] := startCol;
+  tail := (tail + 1) mod QueueCapacity;
+  curIdx := MazeIndex(startRow, startCol);
+  visited[curIdx] := True;
+
+  found := False;
+  while head <> tail do
+  begin
+    curRow := queueRow[head];
+    curCol := queueCol[head];
+    head := (head + 1) mod QueueCapacity;
+    if (curRow = goalRow) and (curCol = goalCol) then
+    begin
+      found := True;
+      Break;
+    end;
+    curIdx := MazeIndex(curRow, curCol);
+
+    for i := 0 to 3 do
+    begin
+      nextRow := curRow + dRow[i];
+      nextCol := curCol + dCol[i];
+      if IsPassage(nextRow, nextCol) then
+      begin
+        nextIdx := MazeIndex(nextRow, nextCol);
+        if not visited[nextIdx] then
+        begin
+          visited[nextIdx] := True;
+          parent[nextIdx] := MazeIndex(curRow, curCol);
+          queueRow[tail] := nextRow;
+          queueCol[tail] := nextCol;
+          tail := (tail + 1) mod QueueCapacity;
+          if tail = head then
+          begin
+            found := False;
+            Break;
+          end;
+        end;
+      end;
+    end;
+    if not found and (tail = head) then
+    begin
+      { queue exhausted without reaching goal }
+      Break;
+    end;
+  end;
+
+  if not found then
+  begin
+    SolveMaze := False;
+    Exit;
+  end;
+
+  { --- BUG FIX: Was 'goal_col' --- }
+  nextIdx := MazeIndex(goalRow, goalCol);
+  while nextIdx <> -1 do
+  begin
+    SolutionMask[nextIdx] := True;
+    nextIdx := parent[nextIdx];
+  end;
+  SolutionMask[MazeIndex(0, EntryCol)] := True;
+  SolutionMask[MazeIndex(MazeHeight - 1, ExitCol)] := True;
+  SolveMaze := True;
+end;
+
+procedure Shuffle(var arr: TDirArray);
+var
+  i, j, tmp: integer;
+begin
+  for i := High(arr) downto 1 do
+  begin
+    j := Random(i + 1);
+    tmp := arr[i];
+    arr[i] := arr[j];
+    arr[j] := tmp;
+  end;
+end;
+
+procedure GenerateMaze(startRow, startCol: integer);
+var
+  stackRow, stackCol: TCellArray;
+  top, row, col, i, nextRow, nextCol: integer;
+  dirs: TDirArray;
+  carved: boolean;
+  cellRow, cellCol: integer;
+begin
+  top := 0;
+  stackRow[top] := startRow;
+  stackCol[top] := startCol;
+  Inc(top);
+  MarkVisited(startRow, startCol);
+  cellRow := 1 + startRow * 2;
+  cellCol := 1 + startCol * 2;
+  PutCell(cellRow, cellCol, ' ');
+
+  while top > 0 do
+  begin
+    row := stackRow[top - 1];
+    col := stackCol[top - 1];
+    cellRow := 1 + row * 2;
+    cellCol := 1 + col * 2;
+
+    dirs[0] := 0; dirs[1] := 1; dirs[2] := 2; dirs[3] := 3;
+    Shuffle(dirs);
+    carved := False;
+
+    for i := 0 to 3 do
+    begin
+      nextRow := row;
+      nextCol := col;
+      case dirs[i] of
+        0: Dec(nextRow);
+        1: Inc(nextRow);
+        2: Dec(nextCol);
+        3: Inc(nextCol);
+      end;
+
+      if (nextRow >= 0) and (nextRow < CellsHeight) and
+         (nextCol >= 0) and (nextCol < CellsWidth) and
+         (not IsVisited(nextRow, nextCol)) then
+      begin
+        case dirs[i] of
+          0: PutCell(cellRow - 1, cellCol, ' ');
+          1: PutCell(cellRow + 1, cellCol, ' ');
+          2: PutCell(cellRow, cellCol - 1, ' ');
+          3: PutCell(cellRow, cellCol + 1, ' ');
+        end;
+        stackRow[top] := nextRow;
+        stackCol[top] := nextCol;
+        Inc(top);
+        MarkVisited(nextRow, nextCol);
+        cellRow := 1 + nextRow * 2;
+        cellCol := 1 + nextCol * 2;
+        PutCell(cellRow, cellCol, ' ');
+        carved := True;
+        Break;
+      end;
+    end;
+
+    if not carved then
+      Dec(top);
+  end;
+end;
+
+procedure CarveEntranceAt(rowTop: integer; col: integer);
+begin
+  if col < 1 then col := 1;
+  if col > MazeWidth - 2 then col := MazeWidth - 2;
+
+  PutCell(rowTop, col, ' ');
+  if rowTop = 0 then
+    PutCell(rowTop + 1, col, ' ')
+  else
+    PutCell(rowTop - 1, col, ' ');
+end;
+
+procedure CreateEntranceAndExit;
+begin
+  EntryCol := 1 + (Random(CellsWidth) * 2);
+  if EntryCol > MazeWidth - 2 then EntryCol := MazeWidth - 2;
+  ExitCol := 1 + (Random(CellsWidth) * 2);
+  if ExitCol > MazeWidth - 2 then ExitCol := MazeWidth - 2;
+
+  CarveEntranceAt(0, EntryCol);
+  CarveEntranceAt(MazeHeight - 1, ExitCol);
+end;
+
+procedure RestoreEntranceAndExit;
+begin
+  if (EntryCol >= 1) and (EntryCol <= MazeWidth - 2) then
+    CarveEntranceAt(0, EntryCol);
+  if (ExitCol >= 1) and (ExitCol <= MazeWidth - 2) then
+    CarveEntranceAt(MazeHeight - 1, ExitCol);
+end;
+
+procedure GLFillRect(x, y, w, h: integer);
+begin
+  GLBegin(GL_QUADS);
+    GLVertex3f(x, y, 0);
+    GLVertex3f(x + w, y, 0);
+    GLVertex3f(x + w, y + h, 0);
+    GLVertex3f(x, y + h, 0);
+  GLEnd;
+end;
+
+procedure DrawMaze(showSolution: boolean);
+var
+  r, c: integer;
+  px, py: integer;
+  idx: integer;
+begin
+  { 1. Clear the screen to WHITE }
+  GLClearColor(1.0, 1.0, 1.0, 1.0); { White }
+  GLClear(GL_COLOR_BUFFER_BIT);
+
+  { 2. Iterate over the maze grid and draw rectangles }
+  for r := 0 to MazeHeight - 1 do
+  begin
+    py := r * CellSize;
+    for c := 0 to MazeWidth - 1 do
+    begin
+      px := c * CellSize;
+      idx := MazeIndex(r, c);
+
+      if showSolution and SolutionMask[idx] then
+      begin
+        { Draw solution path in green }
+        GLColor3f(0.0, 0.784, 0.0);
+        GLFillRect(px, py, CellSize, CellSize);
+      end
+      else if IsWallCell(r, c) then
+      begin
+        { Draw walls in BLACK }
+        GLColor3f(0.0, 0.0, 0.0); { Black }
+        GLFillRect(px, py, CellSize, CellSize);
+      end;
+      { else: It's a passage (' '), which is the white background }
+    end;
+  end;
+
+  { 3. Flip the 3D buffer to the screen }
+  GLSwapWindow;
+end;
+
+procedure FlushPendingKeys;
+begin
+  while KeyPressed do
+    ReadKey;
+end;
+
+function ReadCommandKey: char;
+var
+  key: char;
+begin
+  repeat
+    key := ReadKey;
+  until (key <> #10) and (key <> #13);
+  ReadCommandKey := key;
+end;
+
+procedure Set2DProjection(w, h: integer);
+begin
+  GLMatrixMode(GL_PROJECTION);
+  GLLoadIdentity;
+  
+  GLScalef(2.0 / w, -2.0 / h, 1.0);
+  GLTranslatef(-w / 2.0, -h / 2.0, 0);
+
+  GLMatrixMode(GL_MODELVIEW);
+  GLLoadIdentity;
+  
+  GLDisable(GL_DEPTH_TEST);
+end;
+
+
+{ --- MAIN PROGRAM --- }
+var
+  startRow, startCol: integer;
+  key: char;
+  solved: boolean;
+begin
+  Randomize;
+  
+  { This will now check for command-line args }
+  ClampDimensions;
+  
+  { Calculate pixel size }
+  PixelWidth := MazeWidth * CellSize;
+  PixelHeight := MazeHeight * CellSize;
+
+  { 1. Use InitGraph3D with the 5-arg signature }
+  InitGraph3D(PixelWidth, PixelHeight, 'SDL Maze Generator', 32, 0);
+  
+  { 2. Set up the 2D projection }
+  Set2DProjection(PixelWidth, PixelHeight);
+  
+  { 3. Generate Maze }
+  InitializeMaze;
+  ResetVisited;
+  startRow := Random(CellsHeight);
+  startCol := Random(CellsWidth);
+  GenerateMaze(startRow, startCol);
+  
+  CreateEntranceAndExit;
+  PolishWalls;
+  RestoreEntranceAndExit;
+  
+  ClearSolutionMask;
+  
+  { 4. Draw the first frame }
+  DrawMaze(False);
+  
+  { 5. Input loop }
+  key := ReadCommandKey;
+  if (UpCase(key) = 'S') then
+  begin
+    solved := SolveMaze;
+    if solved then
+    begin
+      DrawMaze(True);
+      FlushPendingKeys;
+      ReadKey;
+    end
+    else
+    begin
+      { Flash the screen red if solve fails }
+      GLClearColor(1.0, 0.0, 0.0, 1.0); { Red }
+      GLClear(GL_COLOR_BUFFER_BIT);
+      GLSwapWindow;
+      FlushPendingKeys;
+      ReadKey;
+    end;
+  end;
+  
+  { 6. Clean up 3D }
+  CloseGraph3D;
+end.

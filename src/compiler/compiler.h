@@ -13,9 +13,6 @@ typedef struct {
 
 #define MAX_COMPILER_CONSTANTS 128 // Adjust as needed
 
-extern CompilerConstant compilerConstants[MAX_COMPILER_CONSTANTS];
-extern int compilerConstantCount;
-
 void resetCompilerConstants(void);
 void addCompilerConstant(const char* name_original_case, const Value* value, int line);
 Value* findCompilerConstant(const char* name_original_case);
@@ -30,5 +27,8 @@ void compilerEnableDynamicLocals(int enable);
 void compileUnitImplementation(AST* unit_ast, BytecodeChunk* outputChunk);
 
 void finalizeBytecode(BytecodeChunk* chunk);
+
+// Reset compiler singletons/global state between invocations.
+void compilerResetState(void);
 
 #endif // PSCAL_COMPILER_H

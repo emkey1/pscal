@@ -1,0 +1,502 @@
+#!/usr/bin/env clike
+/*
+ * SDL Mandelbrot renderer using the MandelbrotRow builtin with threading.
+ * Left click to zoom in, right click to zoom out, Q to quit.
+ */
+
+const int Width = 1200;
+const int Height = 900;
+const int BaseIterations = 200;
+const int IterationStep = 50;
+const int MaxIterationCap = 1000;
+const int BytesPerPixel = 4;
+const int ScreenUpdateInterval = 1; /* update every row for responsiveness */
+const double ZoomFactor = 2.0;
+const int ThreadCount = 4;
+const int ButtonLeft = 1;
+const int ButtonRight = 4;
+/* SDL keycodes for arrow keys */
+const int KEY_LEFT = 1073741904;
+const int KEY_RIGHT = 1073741903;
+const int KEY_UP = 1073741906;
+const int KEY_DOWN = 1073741905;
+
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+byte pixelData[Width * Height * BytesPerPixel];
+int rowDone[Height];
+int threadStart[ThreadCount];
+int threadEnd[ThreadCount];
+
+double minRe = -2.0;
+double maxRe = 1.0;
+double minIm = -1.2;
+double maxIm;
+double reFactor;
+double imFactor;
+double pendingMinRe;
+double pendingMaxRe;
+double pendingMinIm;
+double pendingMaxIm;
+int hasPendingBounds = 0;
+
+int textureID;
+int rowMutex;
+int quitMutex;
+int abortMutex;
+int quit = 0;
+int needRender = 1;
+int prevButtons = 0;
+int abortRender = 0;
+int computing = 0;
+int nextPresentRow = 0;
+int tid[ThreadCount];
+int textReady = 0;
+int currentIterations = BaseIterations;
+double initialSpanRe = 0.0;
+
+
+#ifdef SDL_ENABLED
+void updateIterationLimit(double span) {
+    double baseSpan = initialSpanRe;
+    double localSpan = span;
+    int zoomSteps = 0;
+    if (baseSpan <= 0.0) {
+        baseSpan = localSpan;
+    }
+    if (localSpan <= 0.0) {
+        localSpan = baseSpan;
+    }
+    if (baseSpan > 0.0 && localSpan > 0.0) {
+        double ratio = baseSpan / localSpan;
+        if (ratio > 1.0) {
+            while (ratio >= 2.0 && (BaseIterations + (zoomSteps + 1) * IterationStep) <= MaxIterationCap) {
+                zoomSteps++;
+                ratio /= 2.0;
+            }
+        }
+    }
+    if (zoomSteps < 0) {
+        zoomSteps = 0;
+    }
+    currentIterations = BaseIterations + zoomSteps * IterationStep;
+    if (currentIterations > MaxIterationCap) {
+        currentIterations = MaxIterationCap;
+    }
+}
+
+int getQuit() {
+    int q;
+    lock(quitMutex);
+    q = quit;
+    unlock(quitMutex);
+    return q;
+}
+
+void setQuit(int v) {
+    lock(quitMutex);
+    quit = v;
+    unlock(quitMutex);
+}
+
+int getAbortRender() {
+    int a;
+    lock(abortMutex);
+    a = abortRender;
+    unlock(abortMutex);
+    return a;
+}
+
+void setAbortRender(int v) {
+    lock(abortMutex);
+    abortRender = v;
+    unlock(abortMutex);
+}
+
+void applyViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    minRe = newMinRe;
+    maxRe = newMaxRe;
+    minIm = newMinIm;
+    maxIm = newMaxIm;
+    updateIterationLimit(maxRe - minRe);
+}
+
+void commitPendingViewBounds() {
+    if (hasPendingBounds) {
+        applyViewBounds(pendingMinRe, pendingMaxRe, pendingMinIm, pendingMaxIm);
+        updateIterationLimit(maxRe - minRe);
+        hasPendingBounds = 0;
+    }
+}
+
+void getEffectiveViewBounds(double *outMinRe, double *outMaxRe, double *outMinIm, double *outMaxIm) {
+    if (hasPendingBounds) {
+        *outMinRe = pendingMinRe;
+        *outMaxRe = pendingMaxRe;
+        *outMinIm = pendingMinIm;
+        *outMaxIm = pendingMaxIm;
+    } else {
+        *outMinRe = minRe;
+        *outMaxRe = maxRe;
+        *outMinIm = minIm;
+        *outMaxIm = maxIm;
+    }
+}
+
+int requestViewBounds(double newMinRe, double newMaxRe, double newMinIm, double newMaxIm) {
+    double currentMinRe;
+    double currentMaxRe;
+    double currentMinIm;
+    double currentMaxIm;
+
+    getEffectiveViewBounds(&currentMinRe, &currentMaxRe, &currentMinIm, &currentMaxIm);
+    if (newMinRe == currentMinRe &&
+        newMaxRe == currentMaxRe &&
+        newMinIm == currentMinIm &&
+        newMaxIm == currentMaxIm) {
+        return 0;
+    }
+
+    if (computing) {
+        pendingMinRe = newMinRe;
+        pendingMaxRe = newMaxRe;
+        pendingMinIm = newMinIm;
+        pendingMaxIm = newMaxIm;
+        hasPendingBounds = 1;
+        setAbortRender(1);
+    } else {
+        applyViewBounds(newMinRe, newMaxRe, newMinIm, newMaxIm);
+        hasPendingBounds = 0;
+    }
+    needRender = 1;
+    return 1;
+}
+
+int tryInitFont(str path, int fontSize) {
+    /*
+     * getenv() in the VM returns an empty string when the variable is not
+     * present.  Comparing the string directly against NULL triggers a runtime
+     * type error because strings cannot be compared with NIL in CLike.  Treat
+     * an empty string as "not available" instead.
+     */
+    if (strlen(path) == 0) return 0;
+    if (!fileexists(path)) return 0;
+    inittextsystem(path, fontSize);
+    return 1;
+}
+
+/*
+ * Helpers to coordinate the worker threads and process user input events while
+ * keeping the UI responsive.
+ */
+void resetThreadIds() {
+    int i;
+    for (i = 0; i < ThreadCount; i++) {
+        tid[i] = -1;
+    }
+}
+
+int zoomAt(int px, int py, double factor) {
+    double baseMinRe;
+    double baseMaxRe;
+    double baseMinIm;
+    double baseMaxIm;
+    double reStep;
+    double imStep;
+    double centerRe;
+    double centerIm;
+    double widthRe;
+    double heightIm;
+
+    getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+    reStep = (baseMaxRe - baseMinRe) / (Width - 1);
+    imStep = (baseMaxIm - baseMinIm) / (Height - 1);
+    centerRe = baseMinRe + (px + 0.5) * reStep;
+    centerIm = baseMaxIm - (py + 0.5) * imStep;
+    widthRe = (baseMaxRe - baseMinRe) * factor;
+    heightIm = (baseMaxIm - baseMinIm) * factor;
+
+    return requestViewBounds(centerRe - widthRe / 2.0,
+                             centerRe + widthRe / 2.0,
+                             centerIm - heightIm / 2.0,
+                             centerIm + heightIm / 2.0);
+}
+
+void joinThreads() {
+    int i;
+    for (i = 0; i < ThreadCount; i++) {
+        if (tid[i] >= 0) {
+            join tid[i];
+            tid[i] = -1;
+        }
+    }
+}
+
+void startRender() {
+    int i, rowsPerThread, extra, startY, endY;
+
+    setAbortRender(0);
+    maxIm = minIm + (maxRe - minRe) * Height / Width;
+    reFactor = (maxRe - minRe) / (Width - 1);
+    imFactor = (maxIm - minIm) / (Height - 1);
+
+    for (i = 0; i < Height; i++) {
+        rowDone[i] = 0;
+    }
+
+    rowsPerThread = Height / ThreadCount;
+    extra = Height % ThreadCount;
+    startY = 0;
+    for (i = 0; i < ThreadCount; i++) {
+        endY = startY + rowsPerThread - 1;
+        if (extra > 0) {
+            endY++;
+            extra--;
+        }
+        threadStart[i] = startY;
+        threadEnd[i] = endY;
+        startY = endY + 1;
+    }
+
+    if (threadStart[0] <= threadEnd[0]) tid[0] = spawn computeRowsThread0(); else tid[0] = -1;
+    if (threadStart[1] <= threadEnd[1]) tid[1] = spawn computeRowsThread1(); else tid[1] = -1;
+    if (threadStart[2] <= threadEnd[2]) tid[2] = spawn computeRowsThread2(); else tid[2] = -1;
+    if (threadStart[3] <= threadEnd[3]) tid[3] = spawn computeRowsThread3(); else tid[3] = -1;
+
+    computing = 1;
+    nextPresentRow = 0;
+}
+
+void updateScreenDuringRender() {
+    updatetexture(textureID, pixelData);
+    cleardevice();
+    rendercopy(textureID);
+    if (textReady) {
+        outtextxy(8, 8, "Rendering...");
+    }
+    updatescreen();
+}
+
+void pollRenderProgress() {
+    int readyRows;
+    int shouldUpdate = 0;
+
+    if (!computing) {
+        return;
+    }
+
+    readyRows = nextPresentRow;
+    while (readyRows < Height) {
+        int done;
+        lock(rowMutex);
+        done = rowDone[readyRows];
+        unlock(rowMutex);
+        if (!done) {
+            break;
+        }
+        readyRows++;
+        if (((readyRows % ScreenUpdateInterval) == 0) || readyRows == Height) {
+            shouldUpdate = 1;
+        }
+    }
+
+    if (shouldUpdate) {
+        nextPresentRow = readyRows;
+        updateScreenDuringRender();
+    } else {
+        nextPresentRow = readyRows;
+    }
+
+    if (getAbortRender() || nextPresentRow == Height) {
+        int aborted = getAbortRender();
+        joinThreads();
+        setAbortRender(0);
+        computing = 0;
+        commitPendingViewBounds();
+        nextPresentRow = 0;
+        if (!aborted) {
+            updatetexture(textureID, pixelData);
+            cleardevice();
+            rendercopy(textureID);
+            updatescreen();
+        }
+    }
+}
+
+int handleInput() {
+    int changed = 0;
+    int key;
+    int x = 0;
+    int y = 0;
+    int buttons = 0;
+    int insideWindow = 0;
+    int winW;
+    int winH;
+    int freshLeft;
+    int freshRight;
+
+    graphloop(0);
+
+    key = pollkeyany();
+    while (key != 0) {
+        if (key == 'q' || key == 'Q') {
+            setQuit(1);
+            return changed;
+        } else {
+            double baseMinRe;
+            double baseMaxRe;
+            double baseMinIm;
+            double baseMaxIm;
+            double widthRe;
+            double heightIm;
+            double dx;
+            double dy;
+
+            getEffectiveViewBounds(&baseMinRe, &baseMaxRe, &baseMinIm, &baseMaxIm);
+            widthRe = (baseMaxRe - baseMinRe);
+            heightIm = (baseMaxIm - baseMinIm);
+            dx = widthRe * 0.5;
+            dy = heightIm * 0.5;
+            if (key == KEY_LEFT) {
+                changed |= requestViewBounds(baseMinRe - dx, baseMaxRe - dx, baseMinIm, baseMaxIm);
+            } else if (key == KEY_RIGHT) {
+                changed |= requestViewBounds(baseMinRe + dx, baseMaxRe + dx, baseMinIm, baseMaxIm);
+            } else if (key == KEY_UP) {
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm + dy, baseMaxIm + dy);
+            } else if (key == KEY_DOWN) {
+                changed |= requestViewBounds(baseMinRe, baseMaxRe, baseMinIm - dy, baseMaxIm - dy);
+            }
+        }
+        key = pollkeyany();
+    }
+
+    getmousestate(&x, &y, &buttons, &insideWindow);
+    if (!insideWindow) {
+        buttons = 0;
+    }
+
+    winW = getmaxx() + 1;
+    winH = getmaxy() + 1;
+
+    if (insideWindow && winW > 0 && winH > 0) {
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x >= winW) x = winW - 1;
+        if (y >= winH) y = winH - 1;
+        if (winW != Width) {
+            x = (x * Width) / winW;
+            if (x >= Width) x = Width - 1;
+        }
+        if (winH != Height) {
+            y = (y * Height) / winH;
+            if (y >= Height) y = Height - 1;
+        }
+    }
+
+    freshLeft = ((buttons & ButtonLeft) != 0) && ((prevButtons & ButtonLeft) == 0);
+    freshRight = ((buttons & ButtonRight) != 0) && ((prevButtons & ButtonRight) == 0);
+
+    if (freshLeft) {
+        changed |= zoomAt(x, y, 1.0 / ZoomFactor);
+    } else if (freshRight) {
+        changed |= zoomAt(x, y, ZoomFactor);
+    }
+
+    prevButtons = buttons;
+
+    return changed;
+}
+
+void computeRows(int startY, int endY) {
+    int row[Width], x, y, n, R, G, B, idx;
+    double c_im;
+    for (y = startY; y <= endY && !getQuit(); y++) {
+        if (getAbortRender()) break;
+        c_im = maxIm - y * imFactor;
+        mandelbrotrow(minRe, reFactor, c_im, currentIterations, Width - 1, &row);
+        idx = y * Width * BytesPerPixel;
+        for (x = 0; x < Width; x++) {
+            n = row[x];
+            if (n == currentIterations) { R = G = B = 0; }
+            else {
+                R = (n * 5) % 256;
+                G = (n * 7 + 85) % 256;
+                B = (n * 11 + 170) % 256;
+            }
+            pixelData[idx + 0] = R;
+            pixelData[idx + 1] = G;
+            pixelData[idx + 2] = B;
+            pixelData[idx + 3] = 255;
+            idx += BytesPerPixel;
+        }
+        lock(rowMutex);
+        rowDone[y] = 1;
+        unlock(rowMutex);
+    }
+}
+
+void computeRowsThread0() { computeRows(threadStart[0], threadEnd[0]); }
+void computeRowsThread1() { computeRows(threadStart[1], threadEnd[1]); }
+void computeRowsThread2() { computeRows(threadStart[2], threadEnd[2]); }
+void computeRowsThread3() { computeRows(threadStart[3], threadEnd[3]); }
+#endif
+
+int main() {
+#ifdef SDL_ENABLED
+    const int fontSize = 18;
+    str envFontPath;
+
+    printf("Calculating Mandelbrot set. The window will update as rows are drawn...\n");
+    initgraph(Width, Height, "Mandelbrot in CLike (threaded)");
+    envFontPath = getenv("PSCAL_FONT_PATH");
+    if (!textReady) textReady = tryInitFont(envFontPath, fontSize);
+    if (!textReady) textReady = tryInitFont(ConfiguredFontPath, fontSize);
+    if (!textReady) {
+        printf("Warning: Unable to locate Roboto font. Text rendering disabled.\n");
+    }
+    textureID = createtexture(Width, Height);
+    if (textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    cleardevice(); updatescreen();
+
+    rowMutex = mutex();
+    quitMutex = mutex();
+    abortMutex = mutex();
+
+    resetThreadIds();
+
+    initialSpanRe = maxRe - minRe;
+    if (initialSpanRe <= 0.0) {
+        initialSpanRe = 1.0;
+    }
+    updateIterationLimit(maxRe - minRe);
+
+    while (!getQuit()) {
+        pollRenderProgress();
+        if (!computing && needRender) {
+            startRender();
+            needRender = 0;
+            updateScreenDuringRender();
+        }
+        handleInput();
+        delay(1);
+    }
+
+    if (computing) {
+        setAbortRender(1);
+        while (computing) {
+            pollRenderProgress();
+            delay(1);
+        }
+    }
+
+    destroytexture(textureID);
+    if (textReady) {
+        quittextsystem();
+    }
+    closegraph();
+    return 0;
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
+}

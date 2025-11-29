@@ -4,7 +4,7 @@
 #include "vm/vm.h"
 
 #ifdef SDL
-#include "backend_ast/sdl.h"
+#include "backend_ast/pscal_sdl_runtime.h"
 #include "backend_ast/audio.h"
 #include "backend_ast/gl.h"
 #endif
@@ -103,7 +103,7 @@ static const GraphicsBuiltin graphics_builtins[] = {
     {"opengl", "GLBlendFunc", "glblendfunc", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlblendfunc},
     {"opengl", "GLCullFace", "glcullface", BUILTIN_TYPE_PROCEDURE, vmBuiltinGlcullface},
     {"opengl", "GLIsHardwareAccelerated", "glishardwareaccelerated", BUILTIN_TYPE_FUNCTION, vmBuiltinGlishardwareaccelerated},
-    {"window", "GetScreenSize", "getscreensize", BUILTIN_TYPE_PROCEDURE, vmBuiltinGetscreensize}, // Append new builtins to preserve existing IDs.
+    {"window", "GetScreenSize", "getscreensize", BUILTIN_TYPE_FUNCTION, vmBuiltinGetscreensize}, // Append new builtins to preserve existing IDs.
     {"input", "PollKeyAny", "pollkeyany", BUILTIN_TYPE_FUNCTION, vmBuiltinPollkeyany}, // Append new builtins to preserve existing IDs.
     {"opengl", "GLLineWidth", "gllinewidth", BUILTIN_TYPE_PROCEDURE, vmBuiltinGllinewidth}, // Append new builtins to preserve existing IDs.
     {"opengl", "GLSaveFramebufferPng", "glsaveframebufferpng", BUILTIN_TYPE_FUNCTION, vmBuiltinGlsaveframebufferpng}, // Append new builtins to preserve existing IDs.

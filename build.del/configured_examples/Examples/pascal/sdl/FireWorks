@@ -1,0 +1,142 @@
+#!/usr/bin/env pascal
+program FireworksDemo;
+
+uses SysUtils;
+
+const
+  MAX_PARTICLES = 400;
+  GRAV = 0.15;
+  PI = 3.14159;
+  ConfiguredFontPath = '/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  LegacyFontPath = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  RepoFontFallbacks: array[0..2] of string = (
+    'fonts/Roboto/static/Roboto-Regular.ttf',
+    '../fonts/Roboto/static/Roboto-Regular.ttf',
+    '../../fonts/Roboto/static/Roboto-Regular.ttf'
+  );
+
+type
+  Particle = record
+    x, y   : Real;
+    vx, vy : Real;
+    life   : Integer;
+    r, g, b: Integer;
+  end;
+
+function ResolveFontPath: string;
+var
+  baseDir, candidate: string;
+  i: Integer;
+begin
+  if Pos('PSCAL_INSTALL_ROOT', ConfiguredFontPath) = 0 then
+  begin
+    if FileExists(ConfiguredFontPath) then
+    begin
+      ResolveFontPath := ConfiguredFontPath;
+      exit;
+    end;
+  end;
+
+  if FileExists(LegacyFontPath) then
+  begin
+    ResolveFontPath := LegacyFontPath;
+    exit;
+  end;
+
+  baseDir := ExtractFilePath(ExpandFileName(ParamStr(0)));
+  if baseDir = '' then
+    baseDir := IncludeTrailingPathDelimiter(GetCurrentDir)
+  else
+    baseDir := IncludeTrailingPathDelimiter(ExcludeTrailingPathDelimiter(baseDir));
+
+  for i := Low(RepoFontFallbacks) to High(RepoFontFallbacks) do
+  begin
+    candidate := ExpandFileName(baseDir + RepoFontFallbacks[i]);
+    if FileExists(candidate) then
+    begin
+      ResolveFontPath := candidate;
+      exit;
+    end;
+  end;
+
+  ResolveFontPath := ConfiguredFontPath;
+end;
+
+var
+  Particles: array[0..MAX_PARTICLES-1] of Particle;
+  i, mx, my, buttons: Integer;
+  fontsize: Integer;
+  boom: Integer;
+  FontFileName : String;
+  keyCode: Integer;
+
+procedure SpawnFirework(px, py: Integer);
+var j: Integer; angle, speed: Real;
+begin
+  for j := 0 to MAX_PARTICLES-1 do
+  begin
+    angle := (Random(360)) * PI / 180.0;
+    speed := Random(300) / 100.0;
+    Particles[j].x := px;
+    Particles[j].y := py;
+    Particles[j].vx := cos(angle) * speed;
+    Particles[j].vy := sin(angle) * speed;
+    Particles[j].life := 100 + Random(80);
+    Particles[j].r := Random(255);
+    Particles[j].g := Random(255);
+    Particles[j].b := Random(255);
+  end;
+  if (boom <> -1) and not IsSoundPlaying() then
+    PlaySound(boom);   { play once when spawning }
+end;
+
+begin
+  InitGraph(800, 600, 'Fireworks!');
+  InitSoundSystem();
+  boom := LoadSound('explosion.wav');
+  FontFileName := ResolveFontPath; // Prefer installed prefix; fall back to repo/system locations
+  FontSize := 24;
+  InitTextSystem(FontFileName, FontSize);
+
+  SpawnFirework(400, 300);  { initial burst }
+
+  while True do
+  begin
+    ClearDevice();
+
+    GetMouseState(mx, my, buttons);
+    if (buttons and 1) <> 0 then
+      SpawnFirework(mx, my);
+
+    for i := 0 to MAX_PARTICLES-1 do
+      if Particles[i].life > 0 then
+      begin
+        Particles[i].x := Particles[i].x + Particles[i].vx;
+        Particles[i].y := Particles[i].y + Particles[i].vy;
+        Particles[i].vy := Particles[i].vy + GRAV;
+        Particles[i].life := Particles[i].life - 1;
+        SetAlphaBlend(true);
+        SetRGBColor(Particles[i].r, Particles[i].g, Particles[i].b);
+        FillCircle(Round(Particles[i].x), Round(Particles[i].y), 2);
+      end;
+
+    OutTextXY(10, 10, 'Click to launch fireworks – Q or q quits');
+    UpdateScreen();
+    GraphLoop(16);  { ~60 fps }
+
+    keyCode := PollKeyAny();
+    if (keyCode <> 0) and (keyCode >= 0) and (keyCode <= $FF) then
+    begin
+      if UpCase(Chr(keyCode)) = 'Q' then
+        break;
+    end;
+
+    if QuitRequested() then
+      break;
+  end;
+
+  if boom <> -1 then FreeSound(boom);
+  QuitSoundSystem();
+  QuitTextSystem();
+  CloseGraph();
+end.

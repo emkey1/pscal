@@ -1,4 +1,27 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
+
+#if defined(PSCAL_TARGET_IOS)
+static int gShellPagerVirtualTTYFd = -1;
+
+static void shellPagerPushVirtualTTYOverride(int fd) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+    }
+    gShellPagerVirtualTTYFd = fd;
+}
+
+static void shellPagerPopVirtualTTYOverride(void) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+        gShellPagerVirtualTTYFd = -1;
+    }
+}
+
+static int shellPagerGetVirtualTTYOverride(void) {
+    return gShellPagerVirtualTTYFd;
+}
+#endif
+
 static void shellHashRecordExecution(const char *name);
 static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *out_cmd) {
     if (!out_cmd) {
@@ -38,6 +61,299 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
         }
     }
     shellRewriteDoubleBracketTest(out_cmd);
+    return true;
+}
+
+static bool shellAliasBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char ch) {
+    if (!buffer || !length || !capacity) {
+        return false;
+    }
+    if (*length + 1 >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 32 : (*capacity * 2);
+        while (new_capacity < (*length + 2)) {
+            new_capacity *= 2;
+        }
+        char *resized = (char *)realloc(*buffer, new_capacity);
+        if (!resized) {
+            return false;
+        }
+        *buffer = resized;
+        *capacity = new_capacity;
+    }
+    (*buffer)[(*length)++] = ch;
+    return true;
+}
+
+static bool shellAliasFlushWord(char ***out_words,
+                                size_t *out_count,
+                                size_t *out_capacity,
+                                char **buffer,
+                                size_t *length) {
+    if (!out_words || !out_count || !out_capacity || !buffer || !length) {
+        return false;
+    }
+    if (*length == 0) {
+        return true;
+    }
+    char *word = (char *)malloc(*length + 1);
+    if (!word) {
+        return false;
+    }
+    memcpy(word, *buffer, *length);
+    word[*length] = '\0';
+    if (*out_count >= *out_capacity) {
+        size_t new_capacity = (*out_capacity == 0) ? 4 : (*out_capacity * 2);
+        char **resized = (char **)realloc(*out_words, new_capacity * sizeof(char *));
+        if (!resized) {
+            free(word);
+            return false;
+        }
+        *out_words = resized;
+        *out_capacity = new_capacity;
+    }
+    (*out_words)[(*out_count)++] = word;
+    *length = 0;
+    return true;
+}
+
+static void shellAliasFreeWordList(char **words, size_t count) {
+    if (!words) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(words[i]);
+    }
+    free(words);
+}
+
+static bool shellAliasTokenizeValue(const char *value, char ***out_words, size_t *out_count) {
+    if (out_words) {
+        *out_words = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!value || *value == '\0') {
+        return true;
+    }
+
+    char **words = NULL;
+    size_t word_count = 0;
+    size_t word_capacity = 0;
+    char *buffer = NULL;
+    size_t buffer_len = 0;
+    size_t buffer_capacity = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool escaping = false;
+
+    for (const char *cursor = value; *cursor; ++cursor) {
+        char c = *cursor;
+        if (escaping) {
+            if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            escaping = false;
+            continue;
+        }
+        if (in_single) {
+            if (c == '\'') {
+                in_single = false;
+            } else {
+                if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                    shellAliasFreeWordList(words, word_count);
+                    free(buffer);
+                    return false;
+                }
+            }
+            continue;
+        }
+        if (in_double) {
+            if (c == '"') {
+                in_double = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaping = true;
+                continue;
+            }
+            if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            continue;
+        }
+        if (c == '\\') {
+            escaping = true;
+            continue;
+        }
+        if (c == '\'') {
+            in_single = true;
+            continue;
+        }
+        if (c == '"') {
+            in_double = true;
+            continue;
+        }
+        if (isspace((unsigned char)c)) {
+            if (!shellAliasFlushWord(&words, &word_count, &word_capacity, &buffer, &buffer_len)) {
+                shellAliasFreeWordList(words, word_count);
+                free(buffer);
+                return false;
+            }
+            continue;
+        }
+        if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, c)) {
+            shellAliasFreeWordList(words, word_count);
+            free(buffer);
+            return false;
+        }
+    }
+    if (escaping) {
+        if (!shellAliasBufferAppendChar(&buffer, &buffer_len, &buffer_capacity, '\\')) {
+            shellAliasFreeWordList(words, word_count);
+            free(buffer);
+            return false;
+        }
+    }
+    if (!shellAliasFlushWord(&words, &word_count, &word_capacity, &buffer, &buffer_len)) {
+        shellAliasFreeWordList(words, word_count);
+        free(buffer);
+        return false;
+    }
+
+    free(buffer);
+    if (out_words) {
+        *out_words = words;
+    } else {
+        shellAliasFreeWordList(words, word_count);
+    }
+    if (out_count) {
+        *out_count = word_count;
+    }
+    return true;
+}
+
+static bool shellAliasApplyTokens(ShellCommand *cmd, char **alias_words, size_t alias_count) {
+    if (!cmd || !cmd->argv) {
+        shellAliasFreeWordList(alias_words, alias_count);
+        return false;
+    }
+
+    size_t remaining = (cmd->argc > 0) ? (cmd->argc - 1) : 0;
+    size_t new_argc = alias_count + remaining;
+    char **new_argv = (char **)calloc(new_argc + 1, sizeof(char *));
+    if (!new_argv) {
+        shellAliasFreeWordList(alias_words, alias_count);
+        return false;
+    }
+
+    size_t dest = 0;
+    for (size_t i = 0; i < alias_count; ++i) {
+        new_argv[dest++] = alias_words[i];
+        alias_words[i] = NULL;
+    }
+    for (size_t i = 1; i < cmd->argc; ++i) {
+        new_argv[dest++] = cmd->argv[i];
+        cmd->argv[i] = NULL;
+    }
+
+    if (cmd->argc > 0 && cmd->argv[0]) {
+        free(cmd->argv[0]);
+    }
+    free(cmd->argv);
+    if (new_argc == 0) {
+        free(new_argv);
+        cmd->argv = NULL;
+        cmd->argc = 0;
+        shellAliasFreeWordList(alias_words, alias_count);
+        return true;
+    }
+    cmd->argv = new_argv;
+    cmd->argc = new_argc;
+    cmd->argv[cmd->argc] = NULL;
+
+    free(alias_words);
+    return true;
+}
+
+static bool shellExpandAliasOnce(ShellCommand *cmd, const char *value) {
+    if (!cmd || !value) {
+        return true;
+    }
+    char **alias_words = NULL;
+    size_t alias_count = 0;
+    if (!shellAliasTokenizeValue(value, &alias_words, &alias_count)) {
+        return false;
+    }
+    if (alias_count == 0 && cmd->argc <= 1) {
+        if (cmd->argc == 1 && cmd->argv) {
+            free(cmd->argv[0]);
+            free(cmd->argv);
+            cmd->argv = NULL;
+            cmd->argc = 0;
+        }
+        shellAliasFreeWordList(alias_words, alias_count);
+        return true;
+    }
+    bool ok = shellAliasApplyTokens(cmd, alias_words, alias_count);
+    return ok;
+}
+
+static bool shellExpandAliasesIfNeeded(VM *vm, ShellCommand *cmd) {
+    if (!cmd || cmd->argc == 0 || cmd->ignore_functions) {
+        return true;
+    }
+    if (!shellShoptOptionEnabled("expand_aliases")) {
+        return true;
+    }
+    int depth = 0;
+    enum { kMaxAliasDepth = 16 };
+    const char *expanded_names[kMaxAliasDepth];
+    size_t expanded_count = 0;
+    while (cmd->argc > 0 && depth < kMaxAliasDepth) {
+        const char *name = cmd->argv[0];
+        if (!name) {
+            break;
+        }
+        bool already_expanded = false;
+        for (size_t i = 0; i < expanded_count; ++i) {
+            if (strcmp(expanded_names[i], name) == 0) {
+                already_expanded = true;
+                break;
+            }
+        }
+        if (already_expanded) {
+            break;
+        }
+        ShellAlias *alias = shellFindAlias(name);
+        if (!alias || !alias->value) {
+            break;
+        }
+        if (!shellExpandAliasOnce(cmd, alias->value)) {
+            if (vm) {
+                runtimeError(vm, "shell exec: failed to expand alias '%s'", name);
+            }
+            return false;
+        }
+        if (expanded_count < kMaxAliasDepth) {
+            expanded_names[expanded_count++] = alias->name ? alias->name : name;
+        }
+        if (!cmd->argv || cmd->argc == 0 || !cmd->argv[0]) {
+            break;
+        }
+        depth++;
+    }
+    if (depth >= kMaxAliasDepth) {
+        if (vm) {
+            const char *label = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<alias>";
+            runtimeError(vm, "shell exec: alias expansion depth exceeded for '%s'", label);
+        }
+        return false;
+    }
     return true;
 }
 
@@ -277,6 +593,12 @@ static int shellSpawnProcess(VM *vm,
                 _exit(status);
             }
 
+#if defined(PSCAL_TARGET_IOS)
+            int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+            if (shebang_status >= 0) {
+                _exit(shebang_status);
+            }
+#endif
             execvp(cmd->argv[0], cmd->argv);
             int err = errno;
             fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
@@ -395,6 +717,14 @@ static void shellResetPipeline(void) {
     if (!ctx->active) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->spool_buffer) {
+        free(ctx->spool_buffer);
+        ctx->spool_buffer = NULL;
+        ctx->spool_size = 0;
+    }
+    ctx->in_process = false;
+#endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
@@ -434,6 +764,13 @@ static void shellAbortPipeline(void) {
         return;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->spool_buffer) {
+        free(ctx->spool_buffer);
+        ctx->spool_buffer = NULL;
+        ctx->spool_size = 0;
+    }
+#endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
@@ -479,6 +816,11 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     ctx->last_status = 0;
     ctx->background = false;
     ctx->pgid = -1;
+#if defined(PSCAL_TARGET_IOS)
+    ctx->in_process = true;
+    ctx->spool_buffer = NULL;
+    ctx->spool_size = 0;
+#endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
         shellResetPipeline();
@@ -491,7 +833,11 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
             return false;
         }
     }
-    if (stages > 1) {
+    if (stages > 1
+#if defined(PSCAL_TARGET_IOS)
+        && !ctx->in_process
+#endif
+    ) {
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
@@ -517,6 +863,19 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 
     int final_status = ctx->last_status;
     pid_t job_pgid = (ctx->pgid > 0) ? ctx->pgid : ((ctx->launched > 0) ? ctx->pids[0] : -1);
+
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->in_process) {
+        if (ctx->negated) {
+            final_status = (final_status == 0) ? 1 : 0;
+        }
+        ctx->last_status = final_status;
+        shellResetPipeline();
+        shellUpdateStatus(final_status);
+        shellRuntimeProcessPendingSignals();
+        return final_status;
+    }
+#endif
 
     if (!ctx->background) {
         shellEnsureJobControl();
@@ -710,6 +1069,16 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     return true;
 }
 
+static void shellResetStandardStream(int fd) {
+    if (fd == STDIN_FILENO) {
+        clearerr(stdin);
+    } else if (fd == STDOUT_FILENO) {
+        clearerr(stdout);
+    } else if (fd == STDERR_FILENO) {
+        clearerr(stderr);
+    }
+}
+
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count) {
     if (!backups) {
         return;
@@ -718,8 +1087,10 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t c
         ShellExecRedirBackup *backup = &backups[i];
         if (backup->saved_valid && backup->saved_fd >= 0) {
             dup2(backup->saved_fd, backup->target_fd);
+            shellResetStandardStream(backup->target_fd);
         } else if (backup->was_closed) {
             close(backup->target_fd);
+            shellResetStandardStream(backup->target_fd);
         }
     }
 }
@@ -793,6 +1164,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(fd);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(fd);
                 if (target_fd == STDOUT_FILENO) {
                     stdout_redirected = true;
@@ -810,6 +1182,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(err ? err : 1);
                         goto redir_error;
                     }
+                    shellResetStandardStream(target_fd);
                 } else {
                     if (redir->dup_target_fd < 0) {
                         runtimeError(vm, "exec: invalid file descriptor %d", redir->dup_target_fd);
@@ -823,6 +1196,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(err ? err : 1);
                         goto redir_error;
                     }
+                    shellResetStandardStream(target_fd);
                 }
                 break;
             }
@@ -864,6 +1238,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(pipefd[0]);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(pipefd[0]);
                 break;
             }
@@ -921,6 +1296,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     close(pipefd[0]);
                     goto redir_error;
                 }
+                shellResetStandardStream(target_fd);
                 close(pipefd[0]);
                 break;
             }
@@ -952,6 +1328,424 @@ redir_error:
     }
     return false;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static bool shellPipelineWriteBufferToPipe(const char *data, size_t len, int fd) {
+    size_t written = 0;
+    while (written < len) {
+        ssize_t res = write(fd, data + written, len - written);
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        written += (size_t)res;
+    }
+    return true;
+}
+
+static bool shellPipelineReadPipeToBuffer(int fd, char **out_data, size_t *out_size) {
+    const size_t kChunk = 4096;
+    size_t capacity = 0;
+    size_t size = 0;
+    char *buffer = NULL;
+    for (;;) {
+        if (size + kChunk > capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : kChunk;
+            char *new_buf = realloc(buffer, new_capacity);
+            if (!new_buf) {
+                free(buffer);
+                return false;
+            }
+            buffer = new_buf;
+            capacity = new_capacity;
+        }
+        ssize_t res = read(fd, buffer + size, capacity - size);
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            free(buffer);
+            return false;
+        }
+        if (res == 0) {
+            break;
+        }
+        size += (size_t)res;
+    }
+
+    if (!buffer) {
+        buffer = (char *)calloc(1, 1);
+        if (!buffer) {
+            return false;
+        }
+    }
+    *out_data = buffer;
+    *out_size = size;
+    return true;
+}
+
+typedef struct {
+    int fd;
+    char *buffer;
+    size_t size;
+    size_t capacity;
+    int err;
+} ShellPipelineCapture;
+
+static bool shellPipelineCaptureGrow(ShellPipelineCapture *cap, size_t add) {
+    size_t need = cap->size + add;
+    if (need <= cap->capacity) {
+        return true;
+    }
+    size_t new_cap = cap->capacity ? cap->capacity * 2 : 4096;
+    while (new_cap < need) {
+        new_cap *= 2;
+    }
+    char *new_buf = realloc(cap->buffer, new_cap);
+    if (!new_buf) {
+        return false;
+    }
+    cap->buffer = new_buf;
+    cap->capacity = new_cap;
+    return true;
+}
+
+static void *shellPipelineCaptureThread(void *arg) {
+    ShellPipelineCapture *cap = (ShellPipelineCapture *)arg;
+    const size_t chunk = 4096;
+    char *tmp = malloc(chunk);
+    if (!tmp) {
+        cap->err = ENOMEM;
+        close(cap->fd);
+        return NULL;
+    }
+    for (;;) {
+        ssize_t res = read(cap->fd, tmp, chunk);
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            cap->err = errno ? errno : EIO;
+            break;
+        }
+        if (res == 0) {
+            break;
+        }
+        if (!shellPipelineCaptureGrow(cap, (size_t)res)) {
+            cap->err = ENOMEM;
+            break;
+        }
+        memcpy(cap->buffer + cap->size, tmp, (size_t)res);
+        cap->size += (size_t)res;
+    }
+    free(tmp);
+    close(cap->fd);
+    cap->fd = -1;
+    return NULL;
+}
+
+typedef struct {
+    const char *data;
+    size_t len;
+    int fd;
+    int err;
+} ShellPipelineFeed;
+
+static void *shellPipelineFeedThread(void *arg) {
+    ShellPipelineFeed *feed = (ShellPipelineFeed *)arg;
+    const size_t chunk = 4096;
+    size_t offset = 0;
+    while (offset < feed->len) {
+        size_t to_write = feed->len - offset;
+        if (to_write > chunk) {
+            to_write = chunk;
+        }
+        ssize_t res = write(feed->fd, feed->data + offset, to_write);
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            feed->err = errno ? errno : EIO;
+            break;
+        }
+        offset += (size_t)res;
+    }
+    close(feed->fd);
+    feed->fd = -1;
+    return NULL;
+}
+
+static int shellRunBuiltinInProcess(VM *vm,
+                                    ShellCommand *cmd,
+                                    int stdin_fd,
+                                    int stdout_fd,
+                                    int stderr_fd,
+                                    bool apply_exec_redirs) {
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    size_t backup_capacity = 0;
+    int status = 127;
+    bool applied_redirs = false;
+
+    if (stdin_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stdin_fd, STDIN_FILENO) < 0) {
+            goto cleanup;
+        }
+        shellResetStandardStream(STDIN_FILENO);
+    }
+    if (stdout_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
+            goto cleanup;
+        }
+        shellResetStandardStream(STDOUT_FILENO);
+    }
+    if (stderr_fd >= 0) {
+        if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            goto cleanup;
+        }
+        if (dup2(stderr_fd, STDERR_FILENO) < 0) {
+            goto cleanup;
+        }
+        shellResetStandardStream(STDERR_FILENO);
+    }
+
+    if (apply_exec_redirs) {
+        if (!shellApplyExecRedirections(vm, cmd, &backups, &backup_count)) {
+            goto cleanup;
+        }
+        applied_redirs = true;
+    }
+
+    bool builtin_ran = shellInvokeBuiltin(vm, cmd);
+#if defined(PSCAL_TARGET_IOS)
+    if (!builtin_ran) {
+        /* Try tool-runner execution for shebang-wrapped scripts even in
+         * pipeline mode. This mirrors the exec path but stays in-process. */
+        int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+        if (shebang_status >= 0) {
+            shellUpdateStatus(shebang_status);
+            builtin_ran = true;
+        }
+    }
+#endif
+    if (!builtin_ran) {
+        runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
+        shellUpdateStatus(127);
+    }
+    shellFlushStandardStreams();
+    status = gShellRuntime.last_status;
+
+cleanup:
+    if (applied_redirs) {
+        shellRestoreExecRedirections(backups, backup_count);
+    } else if (backups) {
+        shellRestoreExecRedirections(backups, backup_count);
+    }
+    shellFreeExecRedirBackups(backups, backup_count);
+    return status;
+}
+
+static bool shellPipelineExecuteStageInProcess(VM *vm,
+                                               ShellPipelineContext *ctx,
+                                               ShellCommand *cmd,
+                                               size_t stage_pos,
+                                               bool pipeline_head,
+                                               bool pipeline_tail) {
+    if (cmd->background) {
+        runtimeError(vm, "pipelines cannot run in background on this platform");
+        shellUpdateStatus(1);
+        return false;
+    }
+
+    int stdin_fd = -1;
+    int stdout_fd = -1;
+    int stderr_fd = -1;
+    int input_pipe[2] = { -1, -1 };
+    int output_pipe[2] = { -1, -1 };
+    bool ok = false;
+    pthread_t feed_thread;
+    bool feed_thread_started = false;
+    ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .err = 0 };
+    pthread_t capture_thread;
+    bool capture_thread_started = false;
+    ShellPipelineCapture capture = { .fd = -1, .buffer = NULL, .size = 0, .capacity = 0, .err = 0 };
+#if defined(PSCAL_TARGET_IOS)
+    bool pushed_virtual_tty = false;
+#endif
+
+    if (!pipeline_head) {
+        if (!ctx->spool_buffer) {
+            runtimeError(vm, "pipeline: missing intermediate buffer");
+            shellUpdateStatus(1);
+            return false;
+        }
+        bool pager_tail = pipeline_tail &&
+                          cmd->argc > 0 &&
+                          (strcmp(cmd->argv[0], "less") == 0 || strcmp(cmd->argv[0], "more") == 0);
+        if (pager_tail) {
+            const char *tmp_root = getenv("TMPDIR");
+            if (!tmp_root || !*tmp_root) {
+                tmp_root = "/tmp";
+            }
+            char tmpl[PATH_MAX];
+            snprintf(tmpl, sizeof(tmpl), "%s/pscal-pipe-pager-XXXXXX", tmp_root);
+            int fd = mkstemp(tmpl);
+            if (fd < 0) {
+                runtimeError(vm, "pipeline: failed to stage pager input: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                return false;
+            }
+            bool staged = shellPipelineWriteBufferToPipe(ctx->spool_buffer, ctx->spool_size, fd);
+            close(fd);
+            if (!staged) {
+                unlink(tmpl);
+                runtimeError(vm, "pipeline: failed to write pager buffer: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                return false;
+            }
+            stdin_fd = open(tmpl, O_RDONLY);
+            unlink(tmpl);
+            if (stdin_fd < 0) {
+                runtimeError(vm, "pipeline: failed to reopen pager buffer: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                return false;
+            }
+        } else {
+            if (pipe(input_pipe) != 0) {
+                runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                return false;
+            }
+            feed.data = ctx->spool_buffer;
+            feed.len = ctx->spool_size;
+            feed.fd = input_pipe[1];
+            input_pipe[1] = -1;
+            if (pthread_create(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
+                feed_thread_started = true;
+            } else {
+                runtimeError(vm, "pipeline: failed to start feeder");
+                shellUpdateStatus(1);
+                goto cleanup;
+            }
+            stdin_fd = input_pipe[0];
+            input_pipe[0] = -1;
+        }
+    }
+
+    bool need_spool = !pipeline_tail;
+    if (need_spool) {
+        if (pipe(output_pipe) != 0) {
+            runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));
+            shellUpdateStatus(errno ? errno : 1);
+            goto cleanup;
+        }
+        stdout_fd = output_pipe[1];
+    }
+
+    if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos] && stdout_fd >= 0) {
+        stderr_fd = stdout_fd;
+    }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (stdin_fd >= 0 && !pushed_virtual_tty) {
+        int dup_fd = dup(STDIN_FILENO);
+        if (dup_fd >= 0) {
+            shellPagerPushVirtualTTYOverride(dup_fd);
+            pushed_virtual_tty = true;
+        }
+    }
+#endif
+
+    bool apply_exec_redirs = !(ctx->stage_count > 1);
+    if (need_spool && output_pipe[0] >= 0) {
+        capture.fd = output_pipe[0];
+        output_pipe[0] = -1;
+        if (pthread_create(&capture_thread, NULL, shellPipelineCaptureThread, &capture) == 0) {
+            capture_thread_started = true;
+        } else {
+            runtimeError(vm, "pipeline: failed to start capture thread");
+            shellUpdateStatus(1);
+            goto cleanup;
+        }
+    }
+
+    int status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
+    ctx->last_status = status;
+    ctx->pids[stage_pos] = 0;
+    ctx->launched = stage_pos + 1;
+    ok = true;
+
+cleanup:
+    if (stdin_fd >= 0) close(stdin_fd);
+    if (input_pipe[0] >= 0) close(input_pipe[0]);
+    if (input_pipe[1] >= 0) close(input_pipe[1]);
+    if (stdout_fd >= 0) {
+        close(stdout_fd);
+        if (output_pipe[1] == stdout_fd) {
+            output_pipe[1] = -1;
+        }
+        stdout_fd = -1;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (pushed_virtual_tty) {
+        shellPagerPopVirtualTTYOverride();
+        pushed_virtual_tty = false;
+    }
+#endif
+    if (capture_thread_started) {
+        pthread_join(capture_thread, NULL);
+        capture_thread_started = false;
+        if (capture.err != 0) {
+            ok = false;
+            runtimeError(vm, "pipeline: failed to capture output: %s", strerror(capture.err));
+            shellUpdateStatus(capture.err);
+        } else if (ok && need_spool) {
+            free(ctx->spool_buffer);
+            ctx->spool_buffer = capture.buffer;
+            ctx->spool_size = capture.size;
+            capture.buffer = NULL;
+            capture.size = 0;
+        }
+    }
+    free(capture.buffer);
+
+    if (feed_thread_started) {
+        pthread_join(feed_thread, NULL);
+        feed_thread_started = false;
+        if (feed.err != 0) {
+            ok = false;
+            runtimeError(vm, "pipeline: failed to feed input: %s", strerror(feed.err));
+            shellUpdateStatus(feed.err);
+        }
+    }
+
+    if (need_spool && output_pipe[1] >= 0) {
+        close(output_pipe[1]);
+        output_pipe[1] = -1;
+    }
+
+    if (!feed_thread_started && feed.fd >= 0) {
+        close(feed.fd);
+        feed.fd = -1;
+    }
+
+    if (ok && pipeline_tail) {
+        ctx->background = cmd->background;
+        shellFinishPipeline(cmd);
+        shellRuntimeProcessPendingSignals();
+    }
+
+    return ok;
+}
+#endif /* PSCAL_TARGET_IOS */
 
 static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
     if (!shellCommandIsExecBuiltin(cmd)) {
@@ -1009,16 +1803,28 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         shellScalarCacheInvalidate();
         return makeVoid();
     }
+    if (!shellExpandAliasesIfNeeded(vm, cmd)) {
+        shellUpdateStatus(1);
+        shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
+        return makeVoid();
+    }
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     bool pipeline_head = cmd->is_pipeline_head;
     bool pipeline_tail = cmd->is_pipeline_tail;
-    if (ctx->active && cmd->pipeline_index >= 0) {
-        size_t stage_count = ctx->stage_count;
-        int index = cmd->pipeline_index;
-        if (index >= 0 && (size_t)index < stage_count) {
-            pipeline_head = (index == 0);
-            pipeline_tail = ((size_t)index + 1 == stage_count);
+    size_t stage_pos = 0;
+    if (ctx->active) {
+        size_t stage_count = ctx->stage_count ? ctx->stage_count : 1;
+        if (cmd->pipeline_index >= 0) {
+            stage_pos = (size_t)cmd->pipeline_index;
+        } else {
+            stage_pos = ctx->launched;
         }
+        if (stage_pos >= stage_count) {
+            stage_pos = stage_count - 1;
+        }
+        pipeline_head = (stage_pos == 0);
+        pipeline_tail = ((stage_pos + 1) >= stage_count);
     }
     ShellAssignmentBackup *assignment_backups = NULL;
     size_t assignment_backup_count = 0;
@@ -1086,6 +1892,16 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         assignments_applied = true;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (cmd->background && pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "job control (&/bg/fg) is not supported on this platform");
+        shellUpdateStatus(1);
+        shellFreeCommand(cmd);
+        shellScalarCacheInvalidate();
+        return makeVoid();
+    }
+#endif
+
     int stdin_fd = -1;
     int stdout_fd = -1;
     int stderr_fd = -1;
@@ -1127,7 +1943,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        size_t idx = (size_t)cmd->pipeline_index;
+        size_t idx = stage_pos;
         if (idx >= ctx->stage_count) {
             if (assignments_applied) {
                 shellRestoreAssignments(assignment_backups, assignment_backup_count);
@@ -1140,7 +1956,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        if (ctx->stage_count > 1) {
+        bool pipeline_uses_pipes = true;
+#if defined(PSCAL_TARGET_IOS)
+        pipeline_uses_pipes = !ctx->in_process;
+#endif
+        if (pipeline_uses_pipes && ctx->stage_count > 1) {
             if (!pipeline_head) {
                 stdin_fd = ctx->pipes[idx - 1][0];
             }
@@ -1148,9 +1968,32 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 stdout_fd = ctx->pipes[idx][1];
             }
         }
-        if (ctx->merge_stderr && idx < ctx->stage_count && ctx->merge_stderr[idx]) {
+        if (pipeline_uses_pipes &&
+            ctx->merge_stderr && idx < ctx->stage_count && ctx->merge_stderr[idx]) {
             stderr_fd = stdout_fd;
         }
+#if defined(PSCAL_TARGET_IOS)
+        if (ctx->in_process) {
+            bool stage_ok = shellPipelineExecuteStageInProcess(vm,
+                                                               ctx,
+                                                               cmd,
+                                                               stage_pos,
+                                                               pipeline_head,
+                                                               pipeline_tail);
+            if (assignments_applied) {
+                shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                assignments_applied = false;
+                assignment_backups = NULL;
+                assignment_backup_count = 0;
+            }
+            if (!stage_ok) {
+                shellAbortPipeline();
+            }
+            shellFreeCommand(cmd);
+            shellScalarCacheInvalidate();
+            return makeVoid();
+        }
+#endif
     } else {
         if (shellCommandIsExecBuiltin(cmd)) {
             shellExecuteExecBuiltin(vm, cmd);

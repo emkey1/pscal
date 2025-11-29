@@ -1,4 +1,6 @@
 #include <stddef.h>
+#include "vm/vm.h"
+#include "core/utils.h"
 
 /*
  * Provide no-op implementations of shell runtime status helpers when the shell
@@ -29,5 +31,39 @@ PSCAL_WEAK void shellRuntimeSetLastStatusSticky(int status) {
     shellRuntimeSetLastStatus(status);
 }
 
-#endif /* !defined(FRONTEND_SHELL) */
+PSCAL_WEAK Value vmHostShellLastStatus(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
 
+PSCAL_WEAK Value vmHostShellLoopCheckCondition(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+PSCAL_WEAK Value vmHostShellLoopCheckBody(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+PSCAL_WEAK Value vmHostShellLoopExecuteBody(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+PSCAL_WEAK Value vmHostShellLoopAdvance(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+PSCAL_WEAK Value vmHostShellPollJobs(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+PSCAL_WEAK Value vmHostShellLoopIsReady(VM* vm) {
+    (void)vm;
+    return makeNil();
+}
+
+#endif /* !defined(FRONTEND_SHELL) */

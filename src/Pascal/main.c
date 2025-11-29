@@ -34,6 +34,7 @@
 #include "core/list.h"
 #include "core/preproc.h"
 #include "core/build_info.h"
+#include "common/frontend_kind.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -48,6 +49,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #ifdef SDL
 #include "core/sdl_headers.h"
 #include PSCALI_SDL_TTF_HEADER
@@ -55,11 +57,30 @@
 #include "vm/vm.h"
 // ast.h is already included via globals.h or directly, no need for duplicate
 
-/* Global variables */
-int gParamCount = 0;
-char **gParamValues = NULL;
-
 static int s_vm_trace_head = 0;
+static VM *s_sigint_vm = NULL;
+
+static void pascalHandleSigint(int signo) {
+    (void)signo;
+    if (s_sigint_vm) {
+        s_sigint_vm->abort_requested = true;
+        s_sigint_vm->exit_requested = true;
+    }
+}
+
+static void pascalInstallSigint(VM *vm) {
+    s_sigint_vm = vm;
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = pascalHandleSigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+}
 
 typedef struct {
     size_t partial_match_len;
@@ -287,23 +308,34 @@ int runProgram(const char *source, const char *programName, const char *frontend
                 if (dump_bytecode_only_flag) {
                     overall_success_status = true;
                 } else {
-                VM vm;
-                initVM(&vm);
-                vmSetVerboseErrors(true);
-                // Inline trace toggle via source comment: {trace on} / {trace off}
-                if (s_vm_trace_head > 0) vm.trace_head_instructions = s_vm_trace_head;
-                else if (source && strstr(source, "trace on")) vm.trace_head_instructions = 16;
-                InterpretResult result_vm = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
-                freeVM(&vm);
-                globalSymbols = NULL;
-                if (result_vm == INTERPRET_OK) {
-                    overall_success_status = true;
-                } else {
-                    fprintf(stderr, "--- VM execution Failed (%s) ---\n",
-                            result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
-                    overall_success_status = false;
-                    vmDumpStackInfo(&vm);
-                }
+                    VM *vm = (VM *)calloc(1, sizeof(VM));
+                    if (!vm) {
+                        fprintf(stderr, "Out of memory while creating VM.\n");
+                        overall_success_status = false;
+                    } else {
+                        initVM(vm);
+                        vmSetVerboseErrors(true);
+                        if (s_vm_trace_head > 0) {
+                            vm->trace_head_instructions = s_vm_trace_head;
+                        } else if (source && strstr(source, "trace on")) {
+                            vm->trace_head_instructions = 16;
+                        }
+                        pascalInstallSigint(vm);
+                        InterpretResult result_vm =
+                            interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+                        if (result_vm == INTERPRET_OK) {
+                            overall_success_status = true;
+                        } else {
+                            fprintf(stderr, "--- VM execution Failed (%s) ---\n",
+                                    result_vm == INTERPRET_RUNTIME_ERROR ? "Runtime Error" : "Compile Error (VM stage)");
+                            overall_success_status = false;
+                            vmDumpStackInfo(vm);
+                        }
+                        s_sigint_vm = NULL;
+                        freeVM(vm);
+                        free(vm);
+                        globalSymbols = NULL;
+                    }
                 }
             } else {
                 fprintf(stderr, "Compilation failed with errors.\n");
@@ -347,6 +379,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
         freeAST(GlobalAST);
         GlobalAST = NULL;
     }
+    compilerResetState();
 #ifdef SDL
     sdlCleanupAtExit();
 #endif
@@ -390,7 +423,19 @@ static void flushCapturedStderrAtExit(void) {
     }
 }
 
-int main(int argc, char *argv[]) {
+#ifndef PSCAL_PASCAL_ENTRY_SYMBOL
+#define PSCAL_PASCAL_ENTRY_SYMBOL pascal_main
+#endif
+
+#define PAS_RETURN(value)                \
+    do {                                 \
+        int __rc = vmExitWithCleanup(value); \
+        frontendPopKind(previousKind);   \
+        return __rc;                     \
+    } while (0)
+
+int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
     const char* initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') vmInitTerminalState();
     int dump_ast_json_flag = 0;
@@ -407,7 +452,7 @@ int main(int argc, char *argv[]) {
         printf("Pascal Version: %s (latest tag: %s)\n",
                pscal_program_version_string(), pscal_git_tag_string());
         printf("%s\n", PASCAL_USAGE);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        PAS_RETURN(EXIT_SUCCESS);
     }
 
     // Parse options first
@@ -415,11 +460,11 @@ int main(int argc, char *argv[]) {
     for (; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s\n", PASCAL_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            PAS_RETURN(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "-v") == 0) {
             printf("Pascal Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            PAS_RETURN(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             dump_ast_json_flag = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -438,7 +483,7 @@ int main(int argc, char *argv[]) {
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             fprintf(stderr, "%s\n", PASCAL_USAGE);
-            return vmExitWithCleanup(EXIT_FAILURE);
+            PAS_RETURN(EXIT_FAILURE);
         } else {
             // First non-option argument is the source file
             sourceFile = argv[i];
@@ -451,7 +496,7 @@ int main(int argc, char *argv[]) {
     if (dump_ext_builtins_flag) {
         registerExtendedBuiltins();
         extBuiltinDumpInventory(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        PAS_RETURN(EXIT_SUCCESS);
     }
 
     // If --dump-ast-json was specified but no source file yet, check next arg
@@ -463,7 +508,7 @@ int main(int argc, char *argv[]) {
             i++; // Consume this argument
         } else {
             fprintf(stderr, "Error: --dump-ast-json requires a <source_file> argument.\n");
-            return vmExitWithCleanup(EXIT_FAILURE);
+            PAS_RETURN(EXIT_FAILURE);
         }
     }
 
@@ -471,7 +516,7 @@ int main(int argc, char *argv[]) {
     if (!sourceFile) {
         fprintf(stderr, "Error: No source file specified.\n");
         fprintf(stderr, "%s\n", PASCAL_USAGE);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PAS_RETURN(EXIT_FAILURE);
     }
 
     char* canonical_source_path = canonicalizePath(sourceFile);
@@ -492,7 +537,7 @@ int main(int argc, char *argv[]) {
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         if (canonical_source_path) free(canonical_source_path);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PAS_RETURN(EXIT_FAILURE);
     }
     fseek(file, 0, SEEK_END);
     long fsize = ftell(file);
@@ -505,7 +550,7 @@ int main(int argc, char *argv[]) {
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         if (canonical_source_path) free(canonical_source_path);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PAS_RETURN(EXIT_FAILURE);
     }
     size_t bytes_read = fread(source_buffer, 1, fsize, file);
     if (bytes_read != (size_t)fsize) {
@@ -516,7 +561,7 @@ int main(int argc, char *argv[]) {
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (procedure_table) freeHashTable(procedure_table);
         if (canonical_source_path) free(canonical_source_path);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PAS_RETURN(EXIT_FAILURE);
     }
     source_buffer[fsize] = '\0';
     fclose(file);
@@ -603,5 +648,11 @@ int main(int argc, char *argv[]) {
     if (canonical_source_path) {
         free(canonical_source_path);
     }
-    return vmExitWithCleanup(result);
+    PAS_RETURN(result);
 }
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char *argv[]) {
+    return PSCAL_PASCAL_ENTRY_SYMBOL(argc, argv);
+}
+#endif

@@ -12,6 +12,7 @@
 #include "symbol/symbol.h"
 #include "types.h"
 #include "backend_ast/builtin.h"
+#include "common/runtime_tty.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
@@ -1026,7 +1027,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                      #ifdef DEBUG
                      fprintf(stderr, "[DEBUG makeValueForType] String length specified by identifier '%s'. Looking up constant...\n", const_name);
                      #endif
-                     Symbol *constSym = lookupSymbol(const_name);
+                     Symbol *constSym = lookupSymbolOptional(const_name);
 
                     if (constSym && constSym->is_const && constSym->value && constSym->value->type == TYPE_INT32) {
                           parsed_len = constSym->value->i_val;
@@ -1524,8 +1525,15 @@ void freeValue(Value *v) {
                     (void*)v, (void*)v->base_type_node);
             fflush(stderr);
 #endif
+            if (v->ptr_val && v->base_type_node == OWNED_POINTER_SENTINEL) {
+                Value* owned = (Value*)v->ptr_val;
+                freeValue(owned);
+                free(owned);
+            }
             v->ptr_val = NULL;
-            // v->base_type_node = NULL; // Generally, base_type_node should persist as it defines the pointer's *type*
+            if (v->base_type_node == OWNED_POINTER_SENTINEL) {
+                v->base_type_node = NULL;
+            }
             break;
 
         case TYPE_STRING:
@@ -2316,28 +2324,37 @@ int getTerminalSize(int *rows, int *cols) {
     *rows = 24; // Default height
     *cols = 80; // Default width
 
-    // Check if stdout is a terminal
-    if (!isatty(STDOUT_FILENO)) {
-       // fprintf(stderr, "Warning: Cannot get terminal size (stdout is not a TTY).\n");
-        return 0; // Return default size for non-TTY
+    if (!pscalRuntimeStdoutIsInteractive()) {
+        return 0;
     }
 
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
-        // perror("getTerminalSize: ioctl(TIOCGWINSZ) failed"); // Suppress error message?
-        return -1; // Indicate an error occurred
+    if (pscalRuntimeStdoutHasRealTTY()) {
+        struct winsize ws;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
+            return -1; // Indicate an error occurred
+        }
+        if (ws.ws_row > 0 && ws.ws_col > 0) {
+            *rows = ws.ws_row;
+            *cols = ws.ws_col;
+        }
+        return 0;
     }
 
-    // Check for valid size values
-    if (ws.ws_row > 0 && ws.ws_col > 0) {
-        *rows = ws.ws_row;
-        *cols = ws.ws_col;
-    } else {
-        // ioctl succeeded but returned 0 size, use defaults
-       // fprintf(stderr, "Warning: ioctl(TIOCGWINSZ) returned zero size, using defaults.\n");
+    const char *env_lines = getenv("LINES");
+    const char *env_cols = getenv("COLUMNS");
+    if (env_lines) {
+        long value = strtol(env_lines, NULL, 10);
+        if (value > 0 && value < INT_MAX) {
+            *rows = (int)value;
+        }
     }
-
-    return 0; // Success
+    if (env_cols) {
+        long value = strtol(env_cols, NULL, 10);
+        if (value > 0 && value < INT_MAX) {
+            *cols = (int)value;
+        }
+    }
+    return 0;
 }
 
 void freeUnitSymbolTable(Symbol *symbol_table) {

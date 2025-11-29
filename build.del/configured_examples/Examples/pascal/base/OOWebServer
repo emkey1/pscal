@@ -1,0 +1,922 @@
+#!/usr/bin/env pascal
+program OOWebServer;
+
+// This version is refactored to use interfaces,
+// records, and closures to make the request
+// handling more modular and "Pascal-like".
+
+// --- Part 1: Interface and Generic Record ---
+
+var
+    Port: integer = 5555;
+    RootDir: string;
+    IndexPath: string;
+    Body: string; // Default index.html body
+    ConfiguredAssetRoot: string = '/usr/local/pscal/lib/misc/simple_web_server/htdocs';
+    //ConfiguredAssetRoot: string = '/usr/local/pscal/misc/htdocs';
+
+    GAccepted: integer = 0;
+    GServed: integer = 0;
+
+function loadFileToString(const path: string; var data: string): integer; forward;
+function saveStringToFile(const path, data: string): integer; forward;
+
+// Helper functions (pad2, timestamp, etc.) are identical
+procedure pad2(n: integer; var result: string);
+var s: string;
+begin
+    s := inttostr(n);
+    if (length(s) < 2) then s := '0' + s;
+    result := s;
+end;
+
+procedure timestamp(var result: string);
+var
+    yr, mo, dy, dow, hh, mi, ss, hs: integer;
+    ts, s_mo, s_dy, s_hh, s_mi, s_ss: string;
+begin
+    getdate(yr, mo, dy, dow);
+    gettime(hh, mi, ss, hs);
+    pad2(mo, s_mo); pad2(dy, s_dy); pad2(hh, s_hh); 
+    pad2(mi, s_mi); pad2(ss, s_ss);
+    ts := inttostr(yr)+'-'+s_mo+'-'+s_dy+' '+s_hh+':'+s_mi+':'+s_ss;
+    result := ts;
+end;
+
+function endswith(const s, suffix: string): integer;
+var ls, lf: integer; tail: string;
+begin
+    ls := length(s); lf := length(suffix);
+    if (lf > ls) then begin endswith := 0; exit; end;
+    tail := copy(s, ls - lf + 1, lf);
+    if (tail = suffix) then endswith := 1 else endswith := 0;
+end;
+
+procedure contentType(const path: string; var result: string);
+begin
+    if (endswith(path, '.html') = 1) or (endswith(path, '.htm') = 1) then result := 'text/html'
+    else if (endswith(path, '.css') = 1) then result := 'text/css'
+    else if (endswith(path, '.js') = 1) then result := 'application/javascript'
+    else if (endswith(path, '.json') = 1) then result := 'application/json'
+    else if (endswith(path, '.txt') = 1) then result := 'text/plain'
+    else if (endswith(path, '.png') = 1) then result := 'image/png'
+    else if (endswith(path, '.jpg') = 1) or (endswith(path, '.jpeg') = 1) then result := 'image/jpeg'
+    else result := 'application/octet-stream';
+end;
+
+procedure decodePercent(s: string; var result: string);
+var out: string; i, v1, v2, val: integer; h1, h2: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        if (copy(s, i, 1) = '%') and (i + 2 <= length(s)) then
+        begin
+            h1 := copy(s, i + 1, 1); h2 := copy(s, i + 2, 1);
+            v1 := -1; v2 := -1;
+            if (h1 >= '0') and (h1 <= '9') then v1 := ord(h1) - ord('0')
+            else if (h1 >= 'a') and (h1 <= 'f') then v1 := 10 + (ord(h1) - ord('a'))
+            else if (h1 >= 'A') and (h1 <= 'F') then v1 := 10 + (ord(h1) - ord('A'));
+            if (h2 >= '0') and (h2 <= '9') then v2 := ord(h2) - ord('0')
+            else if (h2 >= 'a') and (h2 <= 'f') then v2 := 10 + (ord(h2) - ord('a'))
+            else if (h2 >= 'A') and (h2 <= 'F') then v2 := 10 + (ord(h2) - ord('A'));
+            if (v1 >= 0) and (v2 >= 0) then
+            begin
+                val := v1 * 16 + v2;
+                out := out + tochar(val);
+                i := i + 3;
+                continue;
+            end;
+        end;
+        out := out + copy(s, i, 1);
+        i := i + 1;
+    end;
+    result := out;
+end;
+
+procedure normalizePath(s: string; var result: string);
+var out: string; i, j, segLen, k, last: integer; seg: string;
+begin
+    out := ''; i := 1;
+    while (i <= length(s)) do
+    begin
+        while (i <= length(s)) and (copy(s, i, 1) = '/') do i := i + 1;
+        if (i > length(s)) then break;
+        j := i;
+        while (j <= length(s)) and (copy(s, j, 1) <> '/') do j := j + 1;
+        segLen := j - i;
+        seg := copy(s, i, segLen);
+        if (seg = '') or (seg = '.') then
+        begin
+            // skip
+        end
+        else if (seg = '..') then
+        begin
+            if (length(out) > 0) then
+            begin
+                k := 1; last := 0;
+                while (k <= length(out)) do
+                begin
+                    if (copy(out, k, 1) = '/') then last := k;
+                    k := k + 1;
+                end;
+                if (last > 0) then out := copy(out, 1, last - 1) else out := '';
+            end;
+        end
+        else
+        begin
+            if (length(out) > 0) then out := out + '/' + seg else out := seg;
+        end;
+        i := j + 1;
+    end;
+    result := out;
+end;
+
+function tryParseInt(const s: string; var value: integer): boolean;
+var
+    i, sign, digit: integer;
+    ch: char;
+    resultValue: integer;
+begin
+    if length(s) = 0 then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    i := 1;
+    sign := 1;
+    if s[i] = '-' then
+    begin
+        sign := -1;
+        i := i + 1;
+    end
+    else if s[i] = '+' then
+    begin
+        i := i + 1;
+    end;
+    if i > length(s) then
+    begin
+        tryParseInt := false;
+        exit;
+    end;
+    resultValue := 0;
+    while i <= length(s) do
+    begin
+        ch := s[i];
+        if (ch < '0') or (ch > '9') then
+        begin
+            tryParseInt := false;
+            exit;
+        end;
+        digit := ord(ch) - ord('0');
+        resultValue := resultValue * 10 + digit;
+        i := i + 1;
+    end;
+    value := sign * resultValue;
+    tryParseInt := true;
+end;
+
+function parsePort(const s: string; var portValue: integer): boolean;
+var
+    value, i: integer;
+begin
+    if s = '' then begin parsePort := false; exit; end;
+    if not tryParseInt(s, value) then
+    begin
+        parsePort := false;
+        exit;
+    end;
+    for i := 1 to length(s) do
+    begin
+        if (s[i] < '0') or (s[i] > '9') then
+        begin
+            parsePort := false;
+            exit;
+        end;
+    end;
+    if (value <= 0) or (value > 65535) then
+    begin
+        parsePort := false;
+        exit;
+    end;
+    portValue := value;
+    parsePort := true;
+end;
+
+// --- Part 3: Refactored Connection Handler ---
+
+procedure serveConn(c: integer);
+var
+    req: mstream;
+    reqText, firstLine, method, path, ch: string;
+    listing, name, content, rel, fullPath: string;
+    flen, i, mstart, pstart, qidx, len: integer;
+    respBody, ctype, logDetail, status, hdr, ts: string;
+    code: integer;
+    ok: integer;
+
+// --- serveConn main logic begins ---
+begin
+    // 1. Ensure the socket is blocking so we can read a full request.
+    socketsetblocking(c, true);
+    if (socketpoll(c, 5000, 1) <= 0) then
+    begin
+        status := '408 Request Timeout';
+        respBody := '<html><body>Request Timeout</body></html>';
+        ctype := 'text/html';
+        code := 408;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
+
+    req := socketreceive(c, 2048);
+    if (req = nil) then
+    begin
+        status := '500 Internal Server Error';
+        respBody := '<html><body>Server Error</body></html>';
+        ctype := 'text/html';
+        code := 500;
+        len := length(respBody);
+        hdr := 'HTTP/1.1 ' + status + #13#10
+             + 'Content-Type: ' + ctype + #13#10
+             + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+        socketsend(c, hdr);
+        socketsend(c, respBody);
+        socketclose(c);
+        exit;
+    end;
+    reqText := mstreambuffer(req);
+    mstreamfree(req);
+    // Extract first request line manually (up to CR or LF).
+    firstLine := '';
+    i := 1;
+    while (i <= length(reqText)) do
+    begin
+        ch := copy(reqText, i, 1);
+        if (ch = #13) or (ch = #10) then break;
+        firstLine := firstLine + ch;
+        i := i + 1;
+    end;
+    
+    flen := length(firstLine);
+    i := 1;
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    mstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (mstart <= flen) then method := copy(firstLine, mstart, i - mstart) else method := '';
+    
+    while (i <= flen) and (copy(firstLine, i, 1) = ' ') do i := i + 1;
+    pstart := i;
+    while (i <= flen) and (copy(firstLine, i, 1) <> ' ') do i := i + 1;
+    if (pstart <= flen) and (i > pstart) then path := copy(firstLine, pstart, i - pstart) else path := '/';
+    
+    qidx := 0;
+    i := 1;
+    while (i <= length(path)) do
+    begin
+        if (copy(path, i, 1) = '?') then
+        begin
+            qidx := i;
+            break;
+        end;
+        i := i + 1;
+    end;
+    if (qidx > 0) then path := copy(path, 1, qidx - 1);
+    decodePercent(path, path);
+
+    // 2. Build the response body based on the requested path
+    code := 200;
+    ctype := 'text/html';
+    logDetail := '';
+    respBody := '';
+
+    if (path = '/') then
+    begin
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                printf('Warning: loadFileToString failed for %s (ok=%d)' + #10, IndexPath, ok);
+                respBody := Body;
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            listing := '<html><body><h1>Index of /</h1><ul>';
+            name := findfirst(RootDir);
+            while (name <> '') do
+            begin
+                listing := listing + '<li><a href="/' + name + '">' + name + '</a></li>';
+                name := findnext();
+            end;
+            listing := listing + '</ul></body></html>';
+            respBody := listing;
+            logDetail := '(listing)';
+        end;
+    end
+    else if (path = '/index.html') then
+    begin
+        if (fileexists(IndexPath) = 1) then
+        begin
+            ok := loadFileToString(IndexPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                logDetail := 'index.html';
+            end
+            else
+            begin
+                printf('Warning: loadFileToString failed for %s (ok=%d)' + #10, IndexPath, ok);
+                respBody := Body;
+                logDetail := 'index.html (fallback)';
+            end;
+        end
+        else
+        begin
+            respBody := Body;
+            logDetail := 'index.html (default)';
+        end;
+    end
+    else
+    begin
+        if (length(path) > 0) and (copy(path, 1, 1) = '/') then
+            rel := copy(path, 2, length(path) - 1)
+        else
+            rel := path;
+        normalizePath(rel, rel);
+        fullPath := RootDir + '/' + rel;
+        if (fileexists(fullPath) = 1) then
+        begin
+            ok := loadFileToString(fullPath, content);
+            if (ok = 1) then
+            begin
+                respBody := content;
+                contentType(rel, ctype);
+                logDetail := rel;
+            end
+            else
+            begin
+                respBody := '<html><body>Internal Server Error</body></html>';
+                code := 500;
+                logDetail := rel;
+            end;
+        end
+        else
+        begin
+            respBody := '<html><body>Not Found</body></html>';
+            code := 404;
+            logDetail := rel;
+        end;
+    end;
+
+    // 4. Send Response (unchanged)
+    len := length(respBody);
+    if (code = 200) then status := '200 OK'
+    else if (code = 404) then status := '404 Not Found'
+    else status := '500 Internal Server Error';
+    
+    hdr := 'HTTP/1.1 ' + status + #13#10
+         + 'Content-Type: ' + ctype + #13#10
+         + 'Content-Length: ' + inttostr(len) + #13#10#13#10;
+         
+    socketsend(c, hdr);
+    socketsend(c, respBody);
+    
+    // 5. Log (unchanged)
+    timestamp(ts);
+    printf('%s [%s] %s -> %d %s' + #10,
+           ts, method, path, code, logDetail);
+    socketclose(c);
+end;
+
+// File/Path helpers (fs* and initFiles) are unchanged.
+// ... (I've omitted them for brevity, but they are identical
+//      to the previous version: isDirectory, copyFile,
+//      copyDirectory, resolveTempDir, ensureTrailingSlash,
+//      fs* functions, initFiles) ...
+
+// Need to include these for initFiles
+function isDirectory(const path: string): integer;
+var attr: integer;
+begin
+    attr := getfattr(path);
+    if ((attr and 16) <> 0) then isDirectory := 1 else isDirectory := 0;
+end;
+
+function copyFile(const src, dst: string): integer;
+var data: string;
+begin
+    if (loadFileToString(src, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
+    if (saveStringToFile(dst, data) = 0) then
+    begin
+        copyFile := 0;
+        exit;
+    end;
+    copyFile := 1;
+end;
+
+function copyDirectory(const src, dst: string): integer;
+var
+    cpCmd, comspec, winCmd: string;
+    rc: integer;
+    entries, name, entry, srcPath, dstPath: string;
+    idx, j, segLen, success: integer;
+begin
+    if (isDirectory(src) = 0) then begin copyDirectory := 0; exit; end;
+    mkdir(dst);
+
+    cpCmd := 'cp -R ''' + src + '/.'' ''' + dst + '''';
+    rc := dosExec('/bin/sh', '-c "' + cpCmd + '"');
+    if (rc = 0) then begin copyDirectory := 1; exit; end;
+
+    comspec := getenv('COMSPEC');
+    if (comspec <> '') then
+    begin
+        winCmd := '/C xcopy "' + src + '\*" "' + dst + '" /E /I /Y /Q';
+        rc := dosExec(comspec, winCmd);
+        if (rc = 0) then begin copyDirectory := 1; exit; end;
+    end;
+
+    entries := '';
+    name := findfirst(src);
+    while (name <> '') do
+    begin
+        entries := entries + name + #10;
+        name := findnext;
+    end;
+    idx := 1;
+    success := 1;
+    while (idx <= length(entries)) do
+    begin
+        j := idx;
+        while (j <= length(entries)) and (copy(entries, j, 1) <> #10) do j := j + 1;
+        segLen := j - idx;
+        if (segLen > 0) then
+        begin
+            entry := copy(entries, idx, segLen);
+            if (entry = '.') or (entry = '..') then
+            begin
+                idx := j + 1;
+                continue;
+            end;
+            srcPath := src + '/' + entry;
+            dstPath := dst + '/' + entry;
+            if (isDirectory(srcPath) = 1) then
+            begin
+                if (copyDirectory(srcPath, dstPath) = 0) then success := 0;
+            end
+            else
+            begin
+                if (copyFile(srcPath, dstPath) = 0) then success := 0;
+            end;
+        end;
+        idx := j + 1;
+    end;
+    copyDirectory := success;
+end;
+
+function trimTrailingSlashes(const path: string): string;
+var cleaned: string; len: integer;
+begin
+    cleaned := path;
+    len := length(cleaned);
+    while (len > 1) and ((copy(cleaned, len, 1) = '/') or (copy(cleaned, len, 1) = '\\')) do
+    begin
+        cleaned := copy(cleaned, 1, len - 1);
+        len := len - 1;
+    end;
+    if (len = 0) then trimTrailingSlashes := '' else trimTrailingSlashes := cleaned;
+end;
+
+function stripLeadingCurrent(const path: string): string;
+var cleaned: string;
+begin
+    cleaned := path;
+    while (length(cleaned) >= 2) and (copy(cleaned, 1, 1) = '.') and
+          ((copy(cleaned, 2, 1) = '/') or (copy(cleaned, 2, 1) = '\\')) do
+    begin
+        if (length(cleaned) = 2) then
+        begin
+            stripLeadingCurrent := '';
+            exit;
+        end;
+        cleaned := copy(cleaned, 3, length(cleaned) - 2);
+    end;
+    stripLeadingCurrent := cleaned;
+end;
+
+function canonicalizePath(const path: string): string;
+var cleaned, pwd, base: string;
+begin
+    if (length(path) = 0) then begin canonicalizePath := ''; exit; end;
+    if (copy(path, 1, 1) = '/') or (copy(path, 1, 1) = '\\') then
+    begin
+        canonicalizePath := trimTrailingSlashes(path);
+        exit;
+    end;
+    cleaned := stripLeadingCurrent(path);
+    pwd := getenv('PWD');
+    if (pwd = '') then
+    begin
+        canonicalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    base := trimTrailingSlashes(pwd);
+    if (cleaned = '') then
+    begin
+        canonicalizePath := base;
+        exit;
+    end;
+    if (length(base) = 0) then
+    begin
+        canonicalizePath := trimTrailingSlashes(cleaned);
+        exit;
+    end;
+    if (length(base) = 1) and ((copy(base, 1, 1) = '/') or (copy(base, 1, 1) = '\\')) then
+    begin
+        canonicalizePath := trimTrailingSlashes(base + cleaned);
+        exit;
+    end;
+    canonicalizePath := trimTrailingSlashes(base + '/' + cleaned);
+end;
+
+function pathDirname(const path: string): string;
+var cleaned: string; len, i: integer;
+begin
+    cleaned := trimTrailingSlashes(path);
+    len := length(cleaned);
+    if (len = 0) then begin pathDirname := ''; exit; end;
+    if (len = 1) and ((copy(cleaned, 1, 1) = '/') or (copy(cleaned, 1, 1) = '\\')) then
+    begin
+        pathDirname := cleaned;
+        exit;
+    end;
+    i := len;
+    while (i > 0) and (copy(cleaned, i, 1) <> '/') and (copy(cleaned, i, 1) <> '\\') do
+        i := i - 1;
+    if (i <= 0) then begin pathDirname := ''; exit; end;
+    if (i = 1) then
+    begin
+        pathDirname := copy(cleaned, 1, 1);
+        exit;
+    end;
+    pathDirname := trimTrailingSlashes(copy(cleaned, 1, i - 1));
+end;
+
+function pathJoin(const base, rel: string): string;
+var normalizedBase: string;
+begin
+    if (length(rel) = 0) then begin pathJoin := trimTrailingSlashes(base); exit; end;
+    if (length(base) = 0) then begin pathJoin := rel; exit; end;
+    normalizedBase := trimTrailingSlashes(base);
+    if (copy(rel, 1, 1) = '/') or (copy(rel, 1, 1) = '\\') then
+    begin
+        if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+            pathJoin := rel
+        else
+            pathJoin := normalizedBase + rel;
+        exit;
+    end;
+    if (length(normalizedBase) = 1) and ((copy(normalizedBase, 1, 1) = '/') or (copy(normalizedBase, 1, 1) = '\\')) then
+        pathJoin := normalizedBase + rel
+    else
+        pathJoin := normalizedBase + '/' + rel;
+end;
+
+function defaultInstallRoot(): string;
+var envRoot: string;
+begin
+    envRoot := canonicalizePath(getenv('PSCAL_INSTALL_ROOT_RESOLVED'));
+    if (envRoot <> '') and (isDirectory(envRoot) = 1) then begin defaultInstallRoot := envRoot; exit; end;
+    envRoot := canonicalizePath(getenv('PSCAL_INSTALL_ROOT'));
+    if (envRoot <> '') and (isDirectory(envRoot) = 1) then begin defaultInstallRoot := envRoot; exit; end;
+    defaultInstallRoot := '';
+end;
+
+function substituteInstallRoot(const pattern: string): string;
+const PLACEHOLDER = '/usr/local/pscal';
+var idx, placeholderLen: integer;
+    envRoot, prefix, suffix, candidate: string;
+begin
+    candidate := pattern;
+    placeholderLen := length(PLACEHOLDER);
+    idx := pos(PLACEHOLDER, candidate);
+    if (idx > 0) then
+    begin
+        envRoot := getenv('PSCAL_INSTALL_ROOT_RESOLVED');
+        if (envRoot = '') then envRoot := getenv('PSCAL_INSTALL_ROOT');
+        if (envRoot <> '') then
+        begin
+            prefix := '';
+            if (idx > 1) then prefix := copy(candidate, 1, idx - 1);
+            suffix := '';
+            if (idx + placeholderLen <= length(candidate)) then
+            begin
+                suffix := copy(candidate, idx + placeholderLen, length(candidate) - (idx + placeholderLen) + 1);
+            end;
+            substituteInstallRoot := canonicalizePath(prefix + envRoot + suffix);
+            exit;
+        end
+        else
+        begin
+            substituteInstallRoot := '';
+            exit;
+        end;
+    end;
+    if (candidate <> '') then
+        substituteInstallRoot := canonicalizePath(candidate)
+    else
+        substituteInstallRoot := '';
+end;
+
+function normalizeDirCandidate(const rawPath: string): string;
+var candidate, canonical: string;
+begin
+    candidate := rawPath;
+    if (candidate = '') then begin normalizeDirCandidate := ''; exit; end;
+    canonical := canonicalizePath(candidate);
+    if (canonical <> '') then candidate := canonical;
+    if (isDirectory(candidate) = 1) then
+        normalizeDirCandidate := candidate
+    else
+        normalizeDirCandidate := '';
+end;
+
+procedure resolveAssetRoot(var result: string);
+var candidate, base, fallback: string;
+begin
+    candidate := normalizeDirCandidate(substituteInstallRoot(ConfiguredAssetRoot));
+    if (candidate <> '') then begin result := candidate; exit; end;
+
+    candidate := normalizeDirCandidate(getenv('PSCAL_ASSET_ROOT'));
+    if (candidate <> '') then begin result := candidate; exit; end;
+
+    base := defaultInstallRoot();
+    if (base <> '') then
+    begin
+        fallback := normalizeDirCandidate(pathJoin(base, 'misc/htdocs'));
+        if (fallback <> '') then begin result := fallback; exit; end;
+        fallback := normalizeDirCandidate(pathJoin(base, 'lib/misc/simple_web_server/htdocs'));
+        if (fallback <> '') then begin result := fallback; exit; end;
+    end;
+
+    fallback := normalizeDirCandidate('lib/misc/simple_web_server/htdocs');
+    if (fallback <> '') then begin result := fallback; exit; end;
+    fallback := normalizeDirCandidate('misc/htdocs');
+    if (fallback <> '') then begin result := fallback; exit; end;
+
+    if (isDirectory('/usr/local/pscal/misc/htdocs') = 1) then begin result := '/usr/local/pscal/misc/htdocs'; exit; end;
+    if (isDirectory('/usr/local/pscal/lib/misc/simple_web_server/htdocs') = 1) then begin result := '/usr/local/pscal/lib/misc/simple_web_server/htdocs'; exit; end;
+    if (isDirectory('/usr/local/share/pscal/misc/htdocs') = 1) then begin result := '/usr/local/share/pscal/misc/htdocs'; exit; end;
+    result := '';
+end;
+
+procedure resolveTempDir(var result: string);
+var dir: string;
+begin
+    dir := normalizeDirCandidate('/tmp');
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TMPDIR'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TMP'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('TEMP'));
+    if (dir = '') then dir := normalizeDirCandidate(getenv('HOME'));
+    if (dir = '') then dir := normalizeDirCandidate('.');
+    if (dir = '') then dir := '/tmp';
+    result := dir;
+end;
+
+procedure ensureTrailingSlash(path: string; var result: string);
+var len: integer; last: string;
+begin
+    len := length(path);
+    if (len = 0) then begin result := '/tmp/'; exit; end;
+    last := copy(path, len, 1);
+    if (last = '/') or (last = '\') then result := path else result := path + '/';
+end;
+
+function loadFileToString(const path: string; var data: string): integer;
+var
+    f: file of char;
+    status: integer;
+    ch: char;
+begin
+    assign(f, path);
+    {$I-} reset(f); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        data := '';
+        loadFileToString := 0;
+        exit;
+    end;
+
+    data := '';
+    while not eof(f) do
+    begin
+        {$I-} read(f, ch); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            data := '';
+            loadFileToString := 0;
+            exit;
+        end;
+        data := data + ch;
+    end;
+
+    close(f);
+    loadFileToString := 1;
+end;
+function saveStringToFile(const path, data: string): integer;
+var
+    f: file of byte;
+    total, status, idx: integer;
+    value: byte;
+begin
+    assign(f, path);
+    {$I-} rewrite(f); {$I+}
+    status := IOResult;
+    if (status <> 0) then
+    begin
+        saveStringToFile := 0;
+        exit;
+    end;
+
+    total := length(data);
+    for idx := 1 to total do
+    begin
+        value := ord(data[idx]);
+        {$I-} write(f, value); {$I+}
+        status := IOResult;
+        if (status <> 0) then
+        begin
+            close(f);
+            saveStringToFile := 0;
+            exit;
+        end;
+    end;
+
+    close(f);
+    saveStringToFile := 1;
+end;
+
+procedure initFiles;
+var pid, copied: integer; pidStr, base, source, tempDir: string;
+begin
+    pid := getpid;
+    pidStr := inttostr(pid);
+    resolveTempDir(tempDir);
+    ensureTrailingSlash(tempDir, base);
+    RootDir := base + 'htdocs.' + pidStr;
+    mkdir(RootDir);
+    IndexPath := RootDir + '/index.html';
+    Body := '<html><body>Hello from the OO pscal web server</body></html>';
+    
+    resolveAssetRoot(source);
+    copied := 0;
+    if (source <> '') and (isDirectory(source) = 1) then
+    begin
+        copied := copyDirectory(source, RootDir);
+    end;
+    if (source <> '') then
+        printf('Asset root: %s' + #10, source)
+    else
+        printf('Asset root: (fallback inline page)' + #10);
+
+    if (copied = 0) and (source <> '') then
+        printf('Warning: failed to fully copy assets from %s' + #10, source);
+
+    if (fileexists(IndexPath) = 0) then
+    begin
+        saveStringToFile(IndexPath, Body);
+        printf('Using inline default index page.' + #10);
+    end
+    else
+    begin
+        printf('Copied sample site into %s' + #10, RootDir);
+    end;
+end;
+
+// --- Main Program ---
+var
+    a1, a2: string;
+    parsed: integer;
+    parsedOk: boolean;
+    srv, bindrc, c: integer;
+    pollResult: integer;
+    lastHeartbeatHour, lastHeartbeatMinute: integer;
+    heartbeat_ts: string;
+    hbHour, hbMinute, hbSecond, hbHundredths: integer;
+    
+begin
+    initFiles;
+    lastHeartbeatHour := -1;
+    lastHeartbeatMinute := -1;
+    // Param parsing (unchanged)
+    if (paramcount >= 1) then
+    begin
+        a1 := paramstr(1);
+        if parsePort(a1, parsed) then
+        begin
+            Port := parsed;
+            if (paramcount >= 2) then
+            begin
+                a2 := canonicalizePath(paramstr(2));
+                if (a2 <> '') then
+                begin
+                    RootDir := a2;
+                    IndexPath := RootDir + '/index.html';
+                end;
+            end;
+        end
+        else
+        begin
+            a1 := canonicalizePath(a1);
+            if (a1 <> '') then
+            begin
+                RootDir := a1;
+                IndexPath := RootDir + '/index.html';
+            end;
+            if (paramcount >= 2) then
+            begin
+                a2 := paramstr(2);
+                if parsePort(a2, parsed) then Port := parsed;
+            end;
+        end;
+
+        if (RootDir <> '') then
+        begin
+            mkdir(RootDir);
+            if (fileexists(IndexPath) = 0) then
+            begin
+                saveStringToFile(IndexPath, Body);
+            end;
+        end;
+    end;
+    
+    printf('Serving %s on http://127.0.0.1:%d' + #10, IndexPath, Port);
+    printf('Root: %s' + #10, RootDir);
+    
+    // Socket setup (unchanged)
+    srv := socketcreate(0);
+    if (srv < 0) then begin printf('socketcreate failed' + #10); halt(1); end;
+    
+    bindrc := socketbindaddr(srv, '127.0.0.1', Port);
+    if (bindrc <> 0) then begin printf('socketbind failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    if (socketlisten(srv, 16) <> 0) then begin printf('socketlisten failed: %d' + #10, socketlasterror); halt(1); end;
+    
+    printf('Waiting for connections... (Ctrl+C to quit)' + #10);
+
+    while true do
+    begin
+        gettime(hbHour, hbMinute, hbSecond, hbHundredths);
+        if (hbHour <> lastHeartbeatHour) or (hbMinute <> lastHeartbeatMinute) then
+        begin
+            timestamp(heartbeat_ts);
+            printf('%s [heartbeat] accepted=%d served=%d' + #10,
+                   heartbeat_ts, GAccepted, GServed);
+            lastHeartbeatHour := hbHour;
+            lastHeartbeatMinute := hbMinute;
+        end;
+
+        pollResult := socketpoll(srv, 1000, 1);
+        if (pollResult > 0) then
+        begin
+            c := socketaccept(srv);
+            if (c >= 0) then
+            begin
+                GAccepted := GAccepted + 1;
+                serveConn(c);
+                GServed := GServed + 1;
+            end
+            else
+            begin
+                delay(5);
+            end;
+        end
+        else if (pollResult < 0) then
+        begin
+            delay(10);
+        end;
+    end;
+    
+    socketclose(srv);
+end.

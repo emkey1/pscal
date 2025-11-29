@@ -21,6 +21,7 @@ void freeParserClike(ParserClike *parser);
 ASTNodeClike* parseProgramClike(ParserClike *parser);
 ASTNodeClike* clikeSpawnStatement(ParserClike *p);
 ASTNodeClike* clikeJoinStatement(ParserClike *p);
+void clikeResetParserState(void);
 
 extern char **clike_imports;
 extern int clike_import_count;

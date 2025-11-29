@@ -1936,3 +1936,14 @@ void clikeCompile(ASTNodeClike *program, BytecodeChunk *chunk) {
     clike_imports = NULL;
     clike_import_count = 0;
 }
+
+void clikeResetCodegenState(void) {
+    for (int i = 0; i < globalVarCount; ++i) {
+        free(globalVars[i].name);
+        globalVars[i].name = NULL;
+        globalVars[i].name_idx = 0;
+        globalVars[i].type = TYPE_UNKNOWN;
+        globalVars[i].elemType = TYPE_UNKNOWN;
+    }
+    globalVarCount = 0;
+}

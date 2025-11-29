@@ -1,0 +1,25 @@
+Test: const_function_scope_independent
+Category: const_scope
+Expectation: runtime_ok
+Description: Constants declared inside functions should not collide with outer constants.
+Reason: stdout mismatch
+Exit code: 0
+--- stdout ---
+<empty>
+--- stderr ---
+<empty>
+--- source ---
+#include <stdio.h>
+
+        const int LIMIT = 4;
+        int compute() {
+            const int LIMIT = 2;
+            return LIMIT;
+        }
+        int main() {
+            printf("inner=%d
+", compute());
+            printf("outer=%d
+", LIMIT);
+            return 0;
+        }

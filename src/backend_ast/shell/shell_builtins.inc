@@ -2,9 +2,59 @@
 #include "shell/runner.h"
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#include "common/path_truncate.h"
+static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
+    if (!input) {
+        return NULL;
+    }
+    if (pathTruncateExpand(input, buffer, buffer_len)) {
+        return buffer;
+    }
+    return input;
+}
+#endif
+#include <pthread.h>
+#include <sys/ioctl.h>
+#ifdef PSCAL_TARGET_IOS
+#include <dirent.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include "common/pascal_state.h"
+#include "clike/state.h"
+#include "rea/state.h"
+extern char **environ;
+extern void pscalShowGwinMessage(const char *message);
+extern void pscalElvisDump(void);
+
+static void shellInvalidateFrontendState(FrontendKind kind) {
+    switch (kind) {
+        case FRONTEND_KIND_PASCAL:
+            pascalInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_CLIKE:
+            clikeInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_REA:
+            reaInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_SHELL:
+            pascalInvalidateGlobalState();
+            break;
+        default:
+            pascalInvalidateGlobalState();
+            break;
+    }
+}
+#endif
 
 static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
@@ -2187,7 +2237,7 @@ static bool shellEvaluateFileUnary(const char *op,
             *out_result = false;
             return true;
         }
-        *out_result = (fd >= 0 && isatty((int)fd));
+        *out_result = (fd >= 0 && pscalRuntimeFdIsInteractive((int)fd));
         return true;
     }
 
@@ -2425,7 +2475,10 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
 
     int remaining = arg_count - arg_index;
     if (remaining <= 0) {
-        path = shellSafeGetenv("HOME");
+        path = shellSafeGetenv("PSCALI_REAL_HOME");
+        if (!path || !*path) {
+            path = shellSafeGetenv("HOME");
+        }
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
@@ -2446,6 +2499,16 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     if (!shellDirectoryStackEnsureInitialised(vm, "cd")) {
         return makeVoid();
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    char resolved_target[PATH_MAX];
+    if (path) {
+        const char *expanded = shellResolvePathForIOS(path, resolved_target, sizeof(resolved_target));
+        if (expanded) {
+            path = expanded;
+        }
+    }
+#endif
 
     char *new_cwd = NULL;
     char *old_cwd = NULL;
@@ -2501,10 +2564,1255 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(errno ? errno : 1);
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    char display[PATH_MAX];
+    const char *visible = pathTruncateStrip(cwd, display, sizeof(display)) ? display : cwd;
+    printf("%s\n", visible);
+#else
     printf("%s\n", cwd);
+#endif
     shellUpdateStatus(0);
     return makeVoid();
 }
+
+static void shellCatEmitEscaped(int ch) {
+    if (ch == '\n') {
+        fputc('\n', stdout);
+        return;
+    }
+    if (ch == '\t') {
+        fputs("^I", stdout);
+        return;
+    }
+    if (ch == '\r') {
+        fputs("^M", stdout);
+        return;
+    }
+    if (ch < 32) {
+        fputc('^', stdout);
+        fputc(ch + 64, stdout);
+        return;
+    }
+    if (ch == 127) {
+        fputs("^?", stdout);
+        return;
+    }
+    if (ch & 0x80) {
+        fputs("M-", stdout);
+        shellCatEmitEscaped(ch & 0x7F);
+        return;
+    }
+    fputc(ch, stdout);
+}
+
+static int shellCatStream(FILE *stream, bool show_nonprinting) {
+    char buffer[4096];
+    while (true) {
+        size_t read_bytes = fread(buffer, 1, sizeof(buffer), stream);
+        if (read_bytes > 0) {
+            if (show_nonprinting) {
+                for (size_t i = 0; i < read_bytes; ++i) {
+                    shellCatEmitEscaped((unsigned char)buffer[i]);
+                }
+            } else {
+                if (fwrite(buffer, 1, read_bytes, stdout) != read_bytes) {
+                    return errno ? errno : 1;
+                }
+            }
+        }
+        if (read_bytes < sizeof(buffer)) {
+            if (feof(stream)) {
+                break;
+            }
+            if (ferror(stream)) {
+                return errno ? errno : 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int shellCatPath(const char *path, bool show_nonprinting) {
+    if (!path || strcmp(path, "-") == 0) {
+        return shellCatStream(stdin, show_nonprinting);
+    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "cat: %s: %s\n", path ? path : "", strerror(errno));
+        return errno ? errno : 1;
+    }
+    int rc = shellCatStream(fp, show_nonprinting);
+    fclose(fp);
+    if (rc != 0) {
+        fprintf(stderr, "cat: %s: %s\n", path, strerror(errno ? errno : EIO));
+    }
+    return rc;
+}
+
+Value vmBuiltinShellCat(VM *vm, int arg_count, Value *args) {
+    bool show_nonprinting = false;
+    int index = 0;
+    (void)vm;
+
+    while (index < arg_count) {
+        const Value *arg = &args[index];
+        if (arg->type != TYPE_STRING || !arg->s_val || arg->s_val[0] != '-') {
+            break;
+        }
+        const char *opt = arg->s_val + 1;
+        if (*opt == '\0') {
+            break;
+        }
+        for (; *opt; ++opt) {
+            if (*opt == 'v') {
+                show_nonprinting = true;
+            } else if (*opt == '-') {
+                opt++;
+                break;
+            } else {
+                runtimeError(vm, "cat: unknown option -- '%c'", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+        if (opt[-1] == '-') {
+            break;
+        }
+    }
+    int status = 0;
+    if (index >= arg_count) {
+        status = shellCatPath("-", show_nonprinting);
+    } else {
+        for (int i = index; i < arg_count; ++i) {
+            const Value *arg = &args[i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "cat: expected string arguments");
+                status = 1;
+                break;
+            }
+            int rc = shellCatPath(arg->s_val, show_nonprinting);
+            if (rc != 0 && status == 0) status = rc;
+        }
+    }
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
+typedef struct {
+    char *data;
+    size_t length;
+    size_t *offsets;
+    size_t line_count;
+} ShellPagerBuffer;
+
+static void shellPagerEmitChar(int ch, bool show_nonprinting);
+
+static void shellPagerBufferFree(ShellPagerBuffer *buffer) {
+    if (!buffer) {
+        return;
+    }
+    free(buffer->data);
+    free(buffer->offsets);
+    buffer->data = NULL;
+    buffer->offsets = NULL;
+    buffer->length = 0;
+    buffer->line_count = 0;
+}
+
+static bool shellPagerBufferAppend(char **data,
+                                   size_t *length,
+                                   size_t *capacity,
+                                   const char *chunk,
+                                   size_t chunk_len) {
+    if (!data || !length || !capacity || !chunk) {
+        return false;
+    }
+    if (*length + chunk_len + 1 > *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 8192 : (*capacity * 2);
+        while (new_capacity < *length + chunk_len + 1) {
+            new_capacity *= 2;
+        }
+        char *resized = (char *)realloc(*data, new_capacity);
+        if (!resized) {
+            return false;
+        }
+        *data = resized;
+        *capacity = new_capacity;
+    }
+    memcpy(*data + *length, chunk, chunk_len);
+    *length += chunk_len;
+    (*data)[*length] = '\0';
+    return true;
+}
+
+static bool shellPagerBufferLoad(FILE *stream, ShellPagerBuffer *buffer) {
+    if (!stream || !buffer) {
+        return false;
+    }
+    memset(buffer, 0, sizeof(*buffer));
+    char temp[8192];
+    size_t length = 0;
+    size_t capacity = 0;
+    char *data = NULL;
+    while (true) {
+        size_t read_bytes = fread(temp, 1, sizeof(temp), stream);
+        if (read_bytes > 0) {
+            if (!shellPagerBufferAppend(&data, &length, &capacity, temp, read_bytes)) {
+                free(data);
+                return false;
+            }
+        }
+        if (read_bytes < sizeof(temp)) {
+            if (ferror(stream)) {
+                free(data);
+                return false;
+            }
+            break;
+        }
+    }
+    size_t reserve = (length / 32) + 2;
+    size_t *offsets = (size_t *)malloc(sizeof(size_t) * reserve);
+    if (!offsets) {
+        free(data);
+        return false;
+    }
+    size_t offset_count = 0;
+    offsets[offset_count++] = 0;
+    for (size_t i = 0; i < length; ++i) {
+        if (data[i] == '\n') {
+            if (offset_count == reserve) {
+                reserve *= 2;
+                size_t *resized = (size_t *)realloc(offsets, sizeof(size_t) * reserve);
+                if (!resized) {
+                    free(offsets);
+                    free(data);
+                    return false;
+                }
+                offsets = resized;
+            }
+            offsets[offset_count++] = i + 1;
+        }
+    }
+    if (offsets[offset_count - 1] != length) {
+        if (offset_count == reserve) {
+            reserve += 1;
+            size_t *resized = (size_t *)realloc(offsets, sizeof(size_t) * reserve);
+            if (!resized) {
+                free(offsets);
+                free(data);
+                return false;
+            }
+            offsets = resized;
+        }
+        offsets[offset_count++] = length;
+    }
+    buffer->data = data;
+    buffer->length = length;
+    buffer->offsets = offsets;
+    buffer->line_count = offset_count > 0 ? offset_count - 1 : 0;
+    return true;
+}
+
+static void shellPagerEmitRange(const ShellPagerBuffer *buffer,
+                                size_t start_line,
+                                size_t end_line,
+                                bool show_nonprinting) {
+    if (!buffer || !buffer->data || !buffer->offsets) {
+        return;
+    }
+    if (start_line >= buffer->line_count || start_line >= end_line) {
+        return;
+    }
+    if (end_line > buffer->line_count) {
+        end_line = buffer->line_count;
+    }
+    for (size_t line = start_line; line < end_line; ++line) {
+        size_t begin = buffer->offsets[line];
+        size_t finish = buffer->offsets[line + 1];
+        if (finish > buffer->length) {
+            finish = buffer->length;
+        }
+        for (size_t i = begin; i < finish; ++i) {
+            shellPagerEmitChar((unsigned char)buffer->data[i], show_nonprinting);
+        }
+        if (finish == begin || buffer->data[finish - 1] != '\n') {
+            fputc('\n', stdout);
+        }
+    }
+}
+
+static bool shellPagerLineContains(const char *line,
+                                   size_t line_length,
+                                   const char *pattern,
+                                   size_t pattern_length) {
+    if (!line || !pattern || pattern_length == 0 || line_length < pattern_length) {
+        return false;
+    }
+    for (size_t i = 0; i + pattern_length <= line_length; ++i) {
+        if (memcmp(line + i, pattern, pattern_length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t shellPagerSearchForward(const ShellPagerBuffer *buffer,
+                                      size_t start_line,
+                                      const char *pattern,
+                                      size_t pattern_length) {
+    if (!buffer || !pattern || pattern_length == 0) {
+        return SIZE_MAX;
+    }
+    if (start_line >= buffer->line_count) {
+        start_line = buffer->line_count ? buffer->line_count - 1 : 0;
+    }
+    for (size_t line = start_line; line < buffer->line_count; ++line) {
+        size_t begin = buffer->offsets[line];
+        size_t finish = buffer->offsets[line + 1];
+        if (finish > buffer->length) {
+            finish = buffer->length;
+        }
+        if (shellPagerLineContains(buffer->data + begin,
+                                   finish - begin,
+                                   pattern,
+                                   pattern_length)) {
+            return line;
+        }
+    }
+    return SIZE_MAX;
+}
+
+#define SHELL_PAGER_ACTION_NEXT_PAGE    0
+#define SHELL_PAGER_ACTION_NEXT_LINE    1
+#define SHELL_PAGER_ACTION_PREV_PAGE    2
+#define SHELL_PAGER_ACTION_SEARCH       3
+#define SHELL_PAGER_ACTION_QUIT        (-1)
+#define SHELL_PAGER_ACTION_ABORT       (-2)
+
+static bool shellPagerInterruptPending(void) {
+    return gShellExitRequested || gShellRuntime.break_requested;
+}
+
+static int shellPagerDetectRows(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0) {
+        return (int)ws.ws_row;
+    }
+    const char *env_lines = shellSafeGetenv("LINES");
+    if (env_lines && *env_lines) {
+        int value = atoi(env_lines);
+        if (value > 0) {
+            return value;
+        }
+    }
+    return 24;
+}
+
+static int shellPagerPageLines(void) {
+    int rows = shellPagerDetectRows();
+    if (rows <= 0) {
+        rows = 24;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    int reserved = 3;
+#else
+    int reserved = 1;
+#endif
+    if (rows <= reserved) {
+        return rows;
+    }
+    return rows - reserved;
+}
+
+static bool shellPagerShouldPaginate(void) {
+    if (!pscalRuntimeStdoutIsInteractive()) {
+        return false;
+    }
+    return true;
+}
+
+static FILE *shellPagerAcquireTTY(bool *needs_close) {
+    if (needs_close) {
+        *needs_close = false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    int override_fd = shellPagerGetVirtualTTYOverride();
+    if (override_fd >= 0) {
+        int dup_fd = dup(override_fd);
+        if (dup_fd >= 0) {
+            FILE *fp = fdopen(dup_fd, "r");
+            if (fp) {
+                if (needs_close) {
+                    *needs_close = true;
+                }
+                return fp;
+            }
+            close(dup_fd);
+        }
+    }
+    return stdin;
+#else
+    FILE *tty = fopen("/dev/tty", "r");
+    if (!tty) {
+        return stdin;
+    }
+    if (needs_close) {
+        *needs_close = true;
+    }
+    return tty;
+#endif
+}
+
+static void shellPagerEmitChar(int ch, bool show_nonprinting) {
+    if (show_nonprinting) {
+        shellCatEmitEscaped(ch);
+    } else {
+        fputc(ch, stdout);
+    }
+}
+
+static size_t shellPagerReadPattern(FILE *tty, char *buffer, size_t capacity) {
+    if (!buffer || capacity == 0) {
+        return 0;
+    }
+    buffer[0] = '\0';
+    FILE *input = tty ? tty : stdin;
+    fputs("/", stdout);
+    fflush(stdout);
+    size_t length = 0;
+    while (true) {
+        int ch = input ? fgetc(input) : EOF;
+        if (ch == EOF || ch == '\n' || ch == '\r') {
+            break;
+        }
+        if (ch == '\b' || ch == 0x7F) {
+            if (length > 0) {
+                length--;
+                buffer[length] = '\0';
+                fputs("\b \b", stdout);
+                fflush(stdout);
+            }
+            continue;
+        }
+        if (length + 1 >= capacity) {
+            continue;
+        }
+        buffer[length++] = (char)ch;
+        buffer[length] = '\0';
+        fputc(ch, stdout);
+        fflush(stdout);
+    }
+    buffer[length] = '\0';
+    fputs("\n", stdout);
+    fflush(stdout);
+    return length;
+}
+
+static int shellPagerPrompt(FILE *tty, char *search_buffer, size_t buffer_len, size_t *out_search_len) {
+    if (out_search_len) {
+        *out_search_len = 0;
+    }
+    FILE *input = tty ? tty : stdin;
+    while (true) {
+        if (shellPagerInterruptPending()) {
+            return SHELL_PAGER_ACTION_ABORT;
+        }
+        fputs("--More--", stdout);
+        fflush(stdout);
+        shellRuntimeProcessPendingSignals();
+        int ch = input ? fgetc(input) : EOF;
+        if (ch == '\r') {
+            int next = input ? fgetc(input) : EOF;
+            if (next != '\n' && next != EOF && input) {
+                ungetc(next, input);
+            }
+            ch = '\n';
+        }
+        fputs("\r        \r", stdout);
+        if (ch == EOF) {
+            return SHELL_PAGER_ACTION_QUIT;
+        }
+        if (ch == '\003') {
+            return SHELL_PAGER_ACTION_ABORT;
+        }
+        if (ch == 'q' || ch == 'Q') {
+            return SHELL_PAGER_ACTION_QUIT;
+        }
+        if (ch == ' ' || ch == '\f') {
+            return SHELL_PAGER_ACTION_NEXT_PAGE;
+        }
+        if (ch == '\n') {
+            return SHELL_PAGER_ACTION_NEXT_LINE;
+        }
+        if (ch == 'b' || ch == 'B') {
+            return SHELL_PAGER_ACTION_PREV_PAGE;
+        }
+        if (ch == '/') {
+            if (search_buffer && buffer_len > 0) {
+                size_t pattern_len = shellPagerReadPattern(tty, search_buffer, buffer_len);
+                if (pattern_len > 0) {
+                    if (out_search_len) {
+                        *out_search_len = pattern_len;
+                    }
+                    return SHELL_PAGER_ACTION_SEARCH;
+                }
+            }
+        }
+    }
+}
+
+static int shellPagerDisplayStream(FILE *stream,
+                                   bool show_nonprinting,
+                                   bool interactive,
+                                   int page_lines,
+                                   FILE *tty,
+                                   const char *command_name) {
+    if (!interactive) {
+        return shellCatStream(stream, show_nonprinting);
+    }
+    if (page_lines <= 0) {
+        page_lines = 23;
+    }
+    ShellPagerBuffer buffer;
+    if (!shellPagerBufferLoad(stream, &buffer)) {
+        fprintf(stderr, "%s: failed to cache input for paging\n", command_name);
+        return errno ? errno : 1;
+    }
+    int result = 0;
+    size_t top_line = 0;
+    char search_pattern[256];
+    size_t search_length = 0;
+    while (top_line < buffer.line_count) {
+        size_t end_line = top_line + (size_t)page_lines;
+        if (end_line > buffer.line_count) {
+            end_line = buffer.line_count;
+        }
+        shellPagerEmitRange(&buffer, top_line, end_line, show_nonprinting);
+        if (end_line >= buffer.line_count) {
+            break;
+        }
+        int action = shellPagerPrompt(tty, search_pattern, sizeof(search_pattern), &search_length);
+        if (action == SHELL_PAGER_ACTION_ABORT) {
+            shellPagerBufferFree(&buffer);
+            shellUpdateStatus(130);
+            return EINTR;
+        }
+        if (action == SHELL_PAGER_ACTION_QUIT) {
+            top_line = buffer.line_count;
+            break;
+        }
+        switch (action) {
+            case SHELL_PAGER_ACTION_NEXT_LINE:
+                if (top_line + 1 < buffer.line_count) {
+                    top_line += 1;
+                }
+                break;
+            case SHELL_PAGER_ACTION_PREV_PAGE:
+                if ((size_t)page_lines <= top_line) {
+                    top_line -= (size_t)page_lines;
+                } else {
+                    top_line = 0;
+                }
+                break;
+            case SHELL_PAGER_ACTION_SEARCH:
+                if (search_length > 0) {
+                    size_t found = shellPagerSearchForward(&buffer,
+                                                           end_line,
+                                                           search_pattern,
+                                                           search_length);
+                    if (found == SIZE_MAX) {
+                        fprintf(stdout, "\nPattern not found\n");
+                    } else {
+                        top_line = found;
+                        break;
+                    }
+                }
+                top_line = end_line;
+                break;
+            case SHELL_PAGER_ACTION_NEXT_PAGE:
+            default:
+                top_line = end_line;
+                break;
+        }
+    }
+    if (interactive) {
+        fputs("\r        \r", stdout);
+    }
+    shellPagerBufferFree(&buffer);
+    return result;
+}
+
+static int shellPagerDisplayPath(const char *path,
+                                 bool show_nonprinting,
+                                 bool interactive,
+                                 int page_lines,
+                                 FILE *tty,
+                                 const char *command_name) {
+    if (!interactive) {
+        return shellCatPath(path, show_nonprinting);
+    }
+    FILE *stream = NULL;
+    if (!path || strcmp(path, "-") == 0) {
+        stream = stdin;
+    } else {
+        stream = fopen(path, "rb");
+        if (!stream) {
+            fprintf(stderr, "%s: %s: %s\n", command_name, path ? path : "", strerror(errno));
+            return errno ? errno : 1;
+        }
+    }
+    int rc = shellPagerDisplayStream(stream, show_nonprinting, interactive, page_lines, tty, command_name);
+    if (stream && stream != stdin) {
+        fclose(stream);
+    }
+    return rc;
+}
+
+static Value shellPagerBuiltin(VM *vm, const char *command_name, int arg_count, Value *args) {
+    bool show_nonprinting = false;
+    int index = 0;
+    while (index < arg_count) {
+        const Value *arg = &args[index];
+        if (arg->type != TYPE_STRING || !arg->s_val || arg->s_val[0] != '-') {
+            break;
+        }
+        const char *opt = arg->s_val + 1;
+        if (*opt == '\0') {
+            break;
+        }
+        for (; *opt; ++opt) {
+            if (*opt == 'v') {
+                show_nonprinting = true;
+            } else if (*opt == '-') {
+                opt++;
+                break;
+            } else {
+                runtimeError(vm, "%s: unknown option -- '%c'", command_name, *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+        if (opt[-1] == '-') {
+            break;
+        }
+    }
+
+    bool interactive = shellPagerShouldPaginate();
+    int page_lines = shellPagerPageLines();
+    bool needs_close = false;
+    FILE *tty = interactive ? shellPagerAcquireTTY(&needs_close) : NULL;
+    if (interactive && !tty) {
+        tty = stdin;
+    }
+
+    int status = 0;
+    if (index >= arg_count) {
+        status = shellPagerDisplayPath("-", show_nonprinting, interactive, page_lines, tty, command_name);
+        if (status == EINTR) {
+            status = 130;
+        }
+    } else {
+        for (int i = index; i < arg_count; ++i) {
+            const Value *arg = &args[i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "%s: expected string arguments", command_name);
+                status = 1;
+                break;
+            }
+            int rc = shellPagerDisplayPath(arg->s_val, show_nonprinting, interactive, page_lines, tty, command_name);
+            if (rc == EINTR) {
+                status = 130;
+                break;
+            }
+            if (rc != 0) {
+                if (status == 0) {
+                    status = rc;
+                }
+                break;
+            }
+        }
+    }
+
+    if (tty && needs_close && tty != stdin) {
+        fclose(tty);
+    }
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellLess(VM *vm, int arg_count, Value *args) {
+    return shellPagerBuiltin(vm, "less", arg_count, args);
+}
+
+Value vmBuiltinShellMore(VM *vm, int arg_count, Value *args) {
+    return shellPagerBuiltin(vm, "more", arg_count, args);
+}
+
+Value vmBuiltinShellChmod(VM *vm, int arg_count, Value *args) {
+#ifdef PSCAL_TARGET_IOS
+    if (arg_count < 2) {
+        runtimeError(vm, "chmod: usage: chmod MODE file [file ...]");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "chmod: invalid mode");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    char *endptr = NULL;
+    errno = 0;
+    long parsed = strtol(args[0].s_val, &endptr, 8);
+    if (errno != 0 || !endptr || *endptr != '\0' || parsed < 0 || parsed > 07777) {
+        runtimeError(vm, "chmod: %s: invalid mode", args[0].s_val);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    mode_t mode = (mode_t)parsed;
+    int final_status = 0;
+    for (int i = 1; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val || args[i].s_val[0] == '\0') {
+            runtimeError(vm, "chmod: expected file paths");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (chmod(args[i].s_val, mode) != 0) {
+            fprintf(stderr, "chmod: %s: %s\n", args[i].s_val, strerror(errno));
+            if (final_status == 0) {
+                final_status = errno ? errno : 1;
+            }
+        }
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+#else
+    runtimeError(vm, "chmod: not supported on this platform");
+    shellUpdateStatus(1);
+    return makeVoid();
+#endif
+}
+
+Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "clear: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *sequence = "\x1B[2J\x1B[H";
+    if (fputs(sequence, stdout) == EOF) {
+        runtimeError(vm, "clear: failed to write escape sequence");
+        shellUpdateStatus(errno ? errno : 1);
+        return makeVoid();
+    }
+    fflush(stdout);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+#ifdef PSCAL_TARGET_IOS
+static void shellApplyWindowSize(int rows, int cols) {
+    if (rows <= 0 || cols <= 0) {
+        return;
+    }
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", rows);
+    setenv("LINES", buffer, 1);
+    snprintf(buffer, sizeof(buffer), "%d", cols);
+    setenv("COLUMNS", buffer, 1);
+    printf("\x1b[8;%d;%dt", rows, cols);
+    fflush(stdout);
+}
+
+Value vmBuiltinShellResize(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "resize: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    int rows = pscalRuntimeDetectWindowRows();
+    int cols = pscalRuntimeDetectWindowCols();
+    if (rows <= 0 || cols <= 0) {
+        runtimeError(vm, "resize: unable to detect terminal size");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellApplyWindowSize(rows, cols);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
+    char *piped_message = NULL;
+    if (!pscalRuntimeStdinIsInteractive()) {
+        size_t cap = 1024;
+        size_t len = 0;
+        piped_message = (char *)malloc(cap);
+        if (piped_message) {
+            int ch = 0;
+            while ((ch = fgetc(stdin)) != EOF) {
+                if (len + 1 >= cap) {
+                    size_t new_cap = cap * 2;
+                    char *resized = (char *)realloc(piped_message, new_cap);
+                    if (!resized) {
+                        free(piped_message);
+                        piped_message = NULL;
+                        break;
+                    }
+                    piped_message = resized;
+                    cap = new_cap;
+                }
+                piped_message[len++] = (char)ch;
+            }
+            if (piped_message) {
+                while (len > 0 && (piped_message[len - 1] == '\n' || piped_message[len - 1] == '\r')) {
+                    len--;
+                }
+                piped_message[len] = '\0';
+                if (len == 0) {
+                    free(piped_message);
+                    piped_message = NULL;
+                }
+            }
+        }
+    }
+
+    const char *message = piped_message ? piped_message : "gwin for the win";
+    if (arg_count > 0) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val) {
+            runtimeError(vm, "gwin: expected an optional message string");
+            shellUpdateStatus(1);
+            free(piped_message);
+            return makeVoid();
+        }
+        message = args[0].s_val;
+    }
+    pscalShowGwinMessage(message);
+    shellUpdateStatus(0);
+    if (piped_message) {
+        free(piped_message);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinShellElvisDump(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "elvisdump: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    pscalElvisDump();
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+#endif
+
+#ifdef PSCAL_TARGET_IOS
+
+typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
+
+#define SHELL_TOOL_THREAD_STACK_SZ (8 * 1024 * 1024)
+
+typedef struct {
+    ShellToolEntryFn entry;
+    int argc;
+    char **argv;
+    int status;
+} ShellToolThreadContext;
+
+static void *shellToolThreadMain(void *arg) {
+    ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
+    if (!ctx || !ctx->entry) {
+        return NULL;
+    }
+    ctx->status = ctx->entry(ctx->argc, ctx->argv);
+    return NULL;
+}
+
+static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
+    if (!entry) {
+        return 127;
+    }
+    ShellToolThreadContext context;
+    context.entry = entry;
+    context.argc = argc;
+    context.argv = argv;
+    context.status = 127;
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
+    pthread_t thread;
+    int create_rc = pthread_create(&thread, &attr, shellToolThreadMain, &context);
+    pthread_attr_destroy(&attr);
+    if (create_rc != 0) {
+        return entry(argc, argv);
+    }
+    (void)pthread_join(thread, NULL);
+    return context.status;
+}
+
+static const int kShellToolRunnerUnavailable = -32768;
+
+static int shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
+    const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
+    if (!runner || !*runner) {
+        (void)tool_name;
+        return kShellToolRunnerUnavailable;
+    }
+
+    size_t child_count = (size_t)argc + 1; // runner path + tool argv vector
+    char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
+    if (!child_argv) {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name);
+        return 1;
+    }
+
+    child_argv[0] = (char *)runner;
+    for (int i = 0; i < argc; ++i) {
+        child_argv[i + 1] = argv[i];
+    }
+
+    pid_t pid = 0;
+    int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
+    free(child_argv);
+    if (spawn_rc == EPERM || spawn_rc == ENOSYS) {
+        return kShellToolRunnerUnavailable;
+    }
+    if (spawn_rc != 0) {
+        fprintf(stderr, "%s: failed to launch tool runner: %s\n", tool_name, strerror(spawn_rc));
+        return 127;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 127;
+    }
+
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
+
+static Value shellRunToolBuiltin(VM *vm,
+                                 const char *tool_name,
+                                 ShellToolEntryFn entry,
+                                 FrontendKind target_kind,
+                                 int arg_count,
+                                 Value *args) {
+    FrontendKind previous_kind = frontendPushKind(target_kind);
+    if (!entry) {
+        runtimeError(vm, "%s: tool entrypoint unavailable", tool_name);
+        shellUpdateStatus(127);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    PascalGlobalState pascal_state;
+    pascalPushGlobalState(&pascal_state);
+
+    const int saved_param_count = gParamCount;
+    char **saved_param_values = gParamValues;
+    bool saved_param_owned = gParamValuesOwned;
+
+    const int argc = arg_count + 1;
+    // Add one extra slot so argv[argc] stays NULL like a real C argv vector.
+    char **argv = (char **)calloc((size_t)(argc + 1), sizeof(char *));
+    if (!argv) {
+        runtimeError(vm, "%s: out of memory", tool_name);
+        shellUpdateStatus(1);
+        pascalPopGlobalState(&pascal_state);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    argv[0] = strdup(tool_name);
+    if (!argv[0]) {
+        ok = false;
+    }
+
+    for (int i = 0; ok && i < arg_count; ++i) {
+        const Value *arg = &args[i];
+        if (arg->type != TYPE_STRING) {
+            runtimeError(vm, "%s: expected string arguments", tool_name);
+            ok = false;
+            break;
+        }
+        const char *src = arg->s_val ? arg->s_val : "";
+        argv[i + 1] = strdup(src);
+        if (!argv[i + 1]) {
+            runtimeError(vm, "%s: out of memory", tool_name);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        int status = shellSpawnToolProcess(tool_name, argc, argv);
+        if (status == kShellToolRunnerUnavailable) {
+            if (entry) {
+#if defined(PSCAL_TARGET_IOS)
+                status = shellRunToolInThread(entry, argc, argv);
+                shellInvalidateFrontendState(target_kind);
+#else
+                status = entry(argc, argv);
+                pascalInvalidateGlobalState();
+#endif
+            } else {
+                fprintf(stderr, "%s: tool runner unavailable and no builtin entry.\n", tool_name);
+                status = 127;
+            }
+        }
+        fflush(NULL);
+        shellUpdateStatus(status);
+    } else {
+        shellUpdateStatus(1);
+    }
+
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+
+    gParamCount = saved_param_count;
+    gParamValues = saved_param_values;
+    gParamValuesOwned = saved_param_owned;
+    pascalPopGlobalState(&pascal_state);
+
+    Value result = makeVoid();
+    frontendPopKind(previous_kind);
+    return result;
+}
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellStringVector;
+
+static void shellStringVectorFree(ShellStringVector *vec) {
+    if (!vec) {
+        return;
+    }
+    for (size_t i = 0; i < vec->count; ++i) {
+        free(vec->items[i]);
+    }
+    free(vec->items);
+    vec->items = NULL;
+    vec->count = 0;
+    vec->capacity = 0;
+}
+
+static bool shellStringVectorPush(ShellStringVector *vec, const char *value) {
+    if (!vec || !value) {
+        return false;
+    }
+    if (vec->count == vec->capacity) {
+        size_t new_cap = vec->capacity ? vec->capacity * 2 : 32;
+        char **resized = (char **)realloc(vec->items, new_cap * sizeof(char *));
+        if (!resized) {
+            return false;
+        }
+        vec->items = resized;
+        vec->capacity = new_cap;
+    }
+    vec->items[vec->count] = strdup(value);
+    if (!vec->items[vec->count]) {
+        return false;
+    }
+    vec->count++;
+    return true;
+}
+
+static int shellLsCompare(const void *a, const void *b) {
+    const char *const *lhs = (const char *const *)a;
+    const char *const *rhs = (const char *const *)b;
+    return strcasecmp(*lhs, *rhs);
+}
+
+static int shellBuiltinListDirectory(const char *path, bool show_all) {
+    DIR *dir = opendir(path);
+    if (!dir) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    ShellStringVector entries = {0};
+    errno = 0;
+    struct dirent *dent;
+    while ((dent = readdir(dir)) != NULL) {
+        if (!show_all && dent->d_name[0] == '.') {
+            continue;
+        }
+        if (!shellStringVectorPush(&entries, dent->d_name)) {
+            errno = ENOMEM;
+            break;
+        }
+    }
+    int err = errno;
+    closedir(dir);
+
+    if (err && err != 0) {
+        shellStringVectorFree(&entries);
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(err));
+        return err;
+    }
+
+    qsort(entries.items, entries.count, sizeof(char *), shellLsCompare);
+    for (size_t i = 0; i < entries.count; ++i) {
+        printf("%s\n", entries.items[i]);
+    }
+    shellStringVectorFree(&entries);
+    return 0;
+}
+
+static int shellBuiltinListPath(const char *path, bool show_all, bool print_header, bool needs_spacing) {
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        printf("%s\n", path);
+        return 0;
+    }
+
+    if (print_header) {
+        if (needs_spacing) {
+            printf("\n");
+        }
+        printf("%s:\n", path);
+    }
+    return shellBuiltinListDirectory(path, show_all);
+}
+
+Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
+    bool show_all = false;
+    int index = 0;
+    while (index < arg_count) {
+        if (args[index].type != TYPE_STRING || !args[index].s_val) {
+            break;
+        }
+        const char *word = args[index].s_val;
+        if (word[0] != '-') {
+            break;
+        }
+        if (strcmp(word, "--") == 0) {
+            index++;
+            break;
+        }
+        for (const char *opt = word + 1; *opt; ++opt) {
+            if (*opt == 'a') {
+                show_all = true;
+            } else {
+                runtimeError(vm, "ls: unsupported option -%c", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+    }
+
+    int path_count = arg_count - index;
+    const char *default_path = ".";
+    const char **paths = NULL;
+    if (path_count <= 0) {
+        path_count = 1;
+        paths = &default_path;
+    } else {
+        paths = (const char **)malloc(sizeof(const char *) * (size_t)path_count);
+        if (!paths) {
+            runtimeError(vm, "ls: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        for (int i = 0; i < path_count; ++i) {
+            const Value *arg = &args[index + i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "ls: expected string path arguments");
+                free(paths);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            paths[i] = arg->s_val;
+        }
+    }
+
+    int final_status = 0;
+    for (int i = 0; i < path_count; ++i) {
+        int rc = shellBuiltinListPath(paths[i], show_all, path_count > 1, i > 0);
+        if (rc != 0 && final_status == 0) {
+            final_status = rc;
+        }
+    }
+    if (paths != &default_path) {
+        free(paths);
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+extern int pascal_main(int argc, char *argv[]);
+extern int clike_main(int argc, char *argv[]);
+extern int rea_main(int argc, char *argv[]);
+extern int pscalvm_main(int argc, char *argv[]);
+extern int pscaljson2bc_main(int argc, char **argv);
+extern int exsh_main(int argc, char *argv[]);
+#ifdef BUILD_DASCAL
+extern int dascal_main(int argc, char *argv[]);
+#endif
+#ifdef BUILD_PSCALD
+extern int pscald_main(int argc, char *argv[]);
+#endif
+
+Value vmBuiltinShellPascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pascal", pascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+#ifdef BUILD_DASCAL
+Value vmBuiltinShellDascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "dascal", dascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+Value vmBuiltinShellClike(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "clike", clike_main, FRONTEND_KIND_CLIKE, arg_count, args);
+}
+
+Value vmBuiltinShellRea(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "rea", rea_main, FRONTEND_KIND_REA, arg_count, args);
+}
+
+Value vmBuiltinShellPscalVm(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscalvm", pscalvm_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellPscalJson2bc(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscaljson2bc", pscaljson2bc_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellExshTool(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "exsh", exsh_main, FRONTEND_KIND_SHELL, arg_count, args);
+}
+
+#ifdef BUILD_PSCALD
+Value vmBuiltinShellPscald(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscald", pscald_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+#endif /* PSCAL_TARGET_IOS */
 
 Value vmBuiltinShellDirs(VM *vm, int arg_count, Value *args) {
     (void)args;
@@ -7502,6 +8810,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "chmod",
+        "Change file permissions.",
+        "chmod MODE file [file ...]",
+        "Applies the octal MODE to each file path. Only numeric modes are supported "
+        "on iOS builds.",
+        NULL,
+        0
+    },
+    {
         "read",
         "Read a line from standard input.",
         "read [-p prompt] [name ...]",
@@ -8283,6 +9600,13 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "fg: job control is not supported on this platform");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
@@ -8345,6 +9669,13 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalRuntimeVirtualTTYEnabled()) {
+        runtimeError(vm, "bg: job control is not supported on this platform");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {
@@ -8476,7 +9807,15 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     }
 
     bool status_flag = true;
+    bool consumed = false;
     if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+    } else if (thread_vm && thread_vm != vm &&
+               vmThreadTakeResult(vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+        thread_vm = vm;
+    }
+    if (consumed) {
         shellUpdateStatus(status_flag ? 0 : 1);
     } else {
         shellUpdateStatus(0);

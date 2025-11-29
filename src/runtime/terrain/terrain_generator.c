@@ -1,3 +1,9 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/terrain/terrain_generator.h"
 #include <math.h>
 
@@ -435,6 +441,10 @@ void terrainGeneratorDraw(const TerrainGenerator *generator) {
 
         terrainShaderUnbind();
     } else {
+#if defined(PSCAL_TARGET_IOS)
+        /* Fixed-function fallback path is unavailable on OpenGLES/iOS.
+         * Terrain rendering requires shader support on this platform. */
+#else
         glEnableClientState(GL_VERTEX_ARRAY);
         glVertexPointer(3, GL_FLOAT, sizeof(TerrainVertex), (const void *)offsetof(TerrainVertex, position));
 
@@ -454,11 +464,10 @@ void terrainGeneratorDraw(const TerrainGenerator *generator) {
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisableClientState(GL_NORMAL_ARRAY);
         glDisableClientState(GL_VERTEX_ARRAY);
+#endif
     }
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 #endif
-
-

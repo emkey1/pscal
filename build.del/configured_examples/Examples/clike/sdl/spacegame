@@ -1,0 +1,658 @@
+#!/usr/bin/env clike
+/*
+ * Simple Space style shooter using SDL graphics and sound.
+ */
+
+str ConfiguredShotSoundPath = "/usr/local/pscal/lib/sounds/paddle_hit.wav";
+str ConfiguredExplodeSoundPath = "/usr/local/pscal/lib/sounds/wall_hit.wav";
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+int tryLoadSound(str path) {
+    /*
+     * Older runtimes can yield NIL from loadsound() when the file is absent.
+     * Guard against that by ensuring the candidate path actually exists
+     * before attempting to load it.
+     */
+    if (length(path) == 0) {
+        return -1;
+    }
+    if (!fileexists(path)) {
+        return -1;
+    }
+    return loadsound(path);
+}
+
+int tryInitFont(str path, int fontSize) {
+    /*
+     * getenv() may yield NIL when the requested variable is absent (older
+     * runtime builds behaved this way).  length() safely treats NIL as a
+     * zero-length string, so gate all work on that instead of calling strlen
+     * directly which would raise a type mismatch when handed NIL.
+     */
+    if (length(path) == 0) {
+        return 0;
+    }
+    if (!fileexists(path)) {
+        return 0;
+    }
+    inittextsystem(path, fontSize);
+    return 1;
+}
+
+#ifdef SDL_ENABLED
+void drawPlayerShip(int x, int y, int w, int h, int invincibleTicks) {
+    int fuselageWidth;
+    int fuselageLeft;
+    int fuselageRight;
+    int wingTop;
+    int thrusterHalfWidth;
+    int thrusterHeight;
+    int thrusterTop;
+    int innerHalfWidth;
+    int innerBottom;
+    int canopyRadius;
+
+    fuselageWidth = w / 3;
+    if (fuselageWidth < 8) {
+        fuselageWidth = 8;
+    }
+    if (fuselageWidth > w) {
+        fuselageWidth = w;
+    }
+    fuselageLeft = x + (w - fuselageWidth) / 2;
+    fuselageRight = fuselageLeft + fuselageWidth - 1;
+    wingTop = y + h / 2;
+    if (wingTop > y + h - 1) {
+        wingTop = y + h - 1;
+    }
+
+    setrgbcolor(10, 90, 10);
+    fillrect(x, wingTop, x + w - 1, y + h - 1);
+
+    setrgbcolor(30, invincibleTicks > 0 ? 255 : 200, 60);
+    fillrect(fuselageLeft, y, fuselageRight, y + h - 1);
+
+    setrgbcolor(120, 220, 120);
+    fillrect(fuselageLeft + fuselageWidth / 4,
+             y + h / 6,
+             fuselageRight - fuselageWidth / 4,
+             wingTop);
+
+    canopyRadius = h / 4;
+    if (canopyRadius < 2) {
+        canopyRadius = 2;
+    }
+    setrgbcolor(180, 220, 255);
+    fillcircle(x + w / 2, y + h / 3, canopyRadius);
+
+    thrusterHalfWidth = w / 6;
+    if (thrusterHalfWidth < 2) {
+        thrusterHalfWidth = 2;
+    }
+    thrusterHeight = h / 3;
+    if (thrusterHeight < 4) {
+        thrusterHeight = 4;
+    }
+    thrusterTop = y + h - thrusterHeight;
+    if (thrusterTop < y) {
+        thrusterTop = y;
+    }
+    setrgbcolor(255, 180, 0);
+    fillrect(x + w / 2 - thrusterHalfWidth,
+             thrusterTop,
+             x + w / 2 + thrusterHalfWidth,
+             y + h - 1);
+
+    innerHalfWidth = thrusterHalfWidth / 2;
+    if (innerHalfWidth < 1) {
+        innerHalfWidth = 1;
+    }
+    innerBottom = thrusterTop + thrusterHeight / 2;
+    if (innerBottom > y + h - 1) {
+        innerBottom = y + h - 1;
+    }
+    setrgbcolor(255, 240, 150);
+    fillrect(x + w / 2 - innerHalfWidth,
+             thrusterTop,
+             x + w / 2 + innerHalfWidth,
+             innerBottom);
+}
+
+void drawAlienShip(int x, int y, int w, int h, int isDiving) {
+    int bodyTop;
+    int domeBaseTop;
+    int domeBaseBottom;
+    int domeRadius;
+    int eyeRadius;
+    int eyeOffset;
+    int lightY;
+    int lights;
+    int lightSpacing;
+    int i;
+
+    bodyTop = y + h / 3;
+    if (bodyTop > y + h - 1) {
+        bodyTop = y + h - 1;
+    }
+    domeBaseTop = bodyTop - h / 4;
+    if (domeBaseTop < y) {
+        domeBaseTop = y;
+    }
+    domeBaseBottom = bodyTop + h / 6;
+    if (domeBaseBottom > y + h - 1) {
+        domeBaseBottom = y + h - 1;
+    }
+
+    setrgbcolor(80, 0, 120);
+    fillrect(x, bodyTop, x + w - 1, y + h - 1);
+
+    setrgbcolor(140, 0, 190);
+    fillrect(x + w / 8, domeBaseTop, x + w - w / 8 - 1, domeBaseBottom);
+
+    domeRadius = h / 3;
+    if (domeRadius < 3) {
+        domeRadius = 3;
+    }
+    setrgbcolor(200, 80, 220);
+    fillcircle(x + w / 2, y + h / 3, domeRadius);
+
+    eyeRadius = h / 10;
+    if (eyeRadius < 1) {
+        eyeRadius = 1;
+    }
+    eyeOffset = w / 4;
+    if (eyeOffset < 4) {
+        eyeOffset = 4;
+    }
+    setrgbcolor(255, 255, 255);
+    fillcircle(x + w / 2 - eyeOffset, y + h / 3, eyeRadius + 1);
+    fillcircle(x + w / 2 + eyeOffset, y + h / 3, eyeRadius + 1);
+
+    setrgbcolor(0, 0, 0);
+    fillcircle(x + w / 2 - eyeOffset, y + h / 3, eyeRadius / 2 + 1);
+    fillcircle(x + w / 2 + eyeOffset, y + h / 3, eyeRadius / 2 + 1);
+
+    lightY = y + h - h / 6;
+    if (lightY > y + h - 1) {
+        lightY = y + h - 1;
+    }
+    lights = 4;
+    lightSpacing = w / (lights + 1);
+    if (lightSpacing < 4) {
+        lightSpacing = 4;
+    }
+    i = 1;
+    while (i <= lights) {
+        int lightX;
+        lightX = x + i * lightSpacing;
+        if (lightX < x) {
+            lightX = x;
+        }
+        if (lightX > x + w - 1) {
+            lightX = x + w - 1;
+        }
+        if (isDiving) {
+            setrgbcolor(255, 100 + i * 20, 0);
+        } else {
+            setrgbcolor(0, 220, 180);
+        }
+        fillcircle(lightX, lightY, eyeRadius);
+        i = i + 1;
+    }
+}
+#endif
+
+int main() {
+#ifdef SDL_ENABLED
+    int ScreenWidth;
+    int ScreenHeight;
+    int PlayerX;
+    int PlayerY;
+    int PlayerW;
+    int PlayerH;
+    int PlayerSpeed;
+    int PlayerLives;
+    int PlayerInvincibleTicks;
+    int PlayerShotCooldown;
+
+    int BulletX;
+    int BulletY;
+    int BulletW;
+    int BulletH;
+    int BulletSpeed;
+    int BulletActive;
+
+    const int AlienRows = 3;
+    const int AlienCols = 6;
+    const int AlienCount = AlienRows * AlienCols;
+    int AlienW;
+    int AlienH;
+    int AlienPaddingX;
+    int AlienPaddingY;
+    int AlienDir;
+    int AlienSpeed;
+    int AlienBaseSpeed;
+    int AliensAlive;
+    int AlienDiveChance;
+    int AlienFireChance;
+
+    int i;
+    int j;
+    int minAlienX;
+    int maxAlienX;
+    int mouseX;
+    int mouseY;
+    int mouseButtons;
+    int mouseInside;
+    int ShotSound;
+    int ExplodeSound;
+    int ManualQuit;
+    int Score;
+    int TextReady;
+
+    /* Arrays are 1-based to match the underlying Pascal VM. */
+    int AlienX[AlienCount + 1];
+    int AlienY[AlienCount + 1];
+    int AlienAlive[AlienCount + 1];
+    int AlienHomeX[AlienCount + 1];
+    int AlienHomeY[AlienCount + 1];
+    int AlienDiving[AlienCount + 1];
+
+    const int MaxAlienBullets = 6;
+    int AlienBulletX[MaxAlienBullets];
+    int AlienBulletY[MaxAlienBullets];
+    int AlienBulletActive[MaxAlienBullets];
+    int AlienBulletSpeed;
+
+    randomize();
+    ScreenWidth = 800;
+    ScreenHeight = 600;
+    initgraph(ScreenWidth, ScreenHeight, "CLike Space Game");
+
+    initsoundsystem();
+    ShotSound = tryLoadSound(ConfiguredShotSoundPath);
+    if (ShotSound == -1) { ShotSound = tryLoadSound("lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) { ShotSound = tryLoadSound("../../../lib/sounds/paddle_hit.wav"); }
+    if (ShotSound == -1) {
+        printf("Warning: Unable to load paddle_hit.wav. Shot sound disabled.\n");
+    }
+    ExplodeSound = tryLoadSound(ConfiguredExplodeSoundPath);
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) { ExplodeSound = tryLoadSound("../../../lib/sounds/wall_hit.wav"); }
+    if (ExplodeSound == -1) {
+        printf("Warning: Unable to load wall_hit.wav. Explosion sound disabled.\n");
+    }
+
+    PlayerW = 40;
+    PlayerH = 20;
+    PlayerX = ScreenWidth / 2 - PlayerW / 2;
+    PlayerY = ScreenHeight - PlayerH - 10;
+    PlayerSpeed = 5;
+    PlayerLives = 3;
+    PlayerInvincibleTicks = 0;
+    PlayerShotCooldown = 0;
+
+    BulletW = 4;
+    BulletH = 12;
+    BulletSpeed = 10;
+    BulletActive = 0;
+
+    AlienW = 30;
+    AlienH = 20;
+    AlienPaddingX = 10;
+    AlienPaddingY = 10;
+    AlienBaseSpeed = 2;
+    AlienSpeed = AlienBaseSpeed;
+    AlienDir = 1;
+    ManualQuit = 0;
+    Score = 0;
+
+    AlienFireChance = 90;
+    AlienDiveChance = 320;
+
+    TextReady = 0;
+    {
+        const int FontSize = 18;
+        str envFontPath;
+        envFontPath = getenv("PSCAL_FONT_PATH");
+        if (!TextReady) { TextReady = tryInitFont(envFontPath, FontSize); }
+        if (!TextReady) { TextReady = tryInitFont(ConfiguredFontPath, FontSize); }
+        if (!TextReady) { TextReady = tryInitFont("fonts/Roboto/static/Roboto-Regular.ttf", FontSize); }
+        if (!TextReady) { TextReady = tryInitFont("../../fonts/Roboto/static/Roboto-Regular.ttf", FontSize); }
+        if (!TextReady) {
+            printf("Warning: Unable to locate Roboto font. Score and lives display disabled.\n");
+        }
+    }
+
+    AlienBulletSpeed = 6;
+    i = 0;
+    while (i < MaxAlienBullets) {
+        AlienBulletActive[i] = 0;
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= AlienRows) {
+        j = 1;
+        while (j <= AlienCols) {
+            int idx;
+            idx = (i - 1) * AlienCols + j;
+            AlienHomeX[idx] = 80 + (j - 1) * (AlienW + AlienPaddingX);
+            AlienHomeY[idx] = 60 + (i - 1) * (AlienH + AlienPaddingY);
+            AlienX[idx] = AlienHomeX[idx];
+            AlienY[idx] = AlienHomeY[idx];
+            AlienAlive[idx] = 1;
+            AlienDiving[idx] = 0;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    AliensAlive = AlienCount;
+
+    while (!quitrequested() && !ManualQuit && AliensAlive > 0 && PlayerLives > 0) {
+        graphloop(16);
+
+        int key;
+        key = pollkeyany();
+        while (key != 0) {
+            if (key == 'q' || key == 'Q') {
+                ManualQuit = 1;
+                break;
+            } else if (key == 1073741904) {
+                PlayerX = PlayerX - PlayerSpeed;
+            } else if (key == 1073741903) {
+                PlayerX = PlayerX + PlayerSpeed;
+            } else if (key == 32) {
+                if (!BulletActive && PlayerShotCooldown == 0) {
+                    BulletActive = 1;
+                    BulletX = PlayerX + PlayerW / 2 - BulletW / 2;
+                    BulletY = PlayerY - BulletH;
+                    PlayerShotCooldown = 12;
+                    if (ShotSound != -1) {
+                        playsound(ShotSound);
+                    }
+                }
+            }
+            key = pollkeyany();
+        }
+        if (ManualQuit) {
+            break;
+        }
+
+        getmousestate(&mouseX, &mouseY, &mouseButtons, &mouseInside);
+        if (mouseInside) {
+            PlayerX = mouseX - PlayerW / 2;
+            if ((mouseButtons & 1) && !BulletActive && PlayerShotCooldown == 0) {
+                BulletActive = 1;
+                BulletX = PlayerX + PlayerW / 2 - BulletW / 2;
+                BulletY = PlayerY - BulletH;
+                PlayerShotCooldown = 12;
+                if (ShotSound != -1) {
+                    playsound(ShotSound);
+                }
+            }
+        }
+
+        if (PlayerShotCooldown > 0) {
+            PlayerShotCooldown = PlayerShotCooldown - 1;
+        }
+
+        if (PlayerX < 0) { PlayerX = 0; }
+        if (PlayerX > ScreenWidth - PlayerW) { PlayerX = ScreenWidth - PlayerW; }
+
+        if (BulletActive) {
+            BulletY = BulletY - BulletSpeed;
+            if (BulletY + BulletH < 0) {
+                BulletActive = 0;
+            }
+        }
+
+        minAlienX = ScreenWidth;
+        maxAlienX = 0;
+        i = 1;
+        while (i <= AlienCount) {
+            if (AlienAlive[i]) {
+                if (AlienHomeX[i] < minAlienX) { minAlienX = AlienHomeX[i]; }
+                if (AlienHomeX[i] + AlienW > maxAlienX) { maxAlienX = AlienHomeX[i] + AlienW; }
+            }
+            i = i + 1;
+        }
+        if (AlienDir == 1 && maxAlienX >= ScreenWidth - 10) {
+            AlienDir = -1;
+            i = 1;
+            while (i <= AlienCount) {
+                if (AlienAlive[i]) {
+                    AlienHomeY[i] = AlienHomeY[i] + AlienH;
+                    if (!AlienDiving[i]) {
+                        AlienY[i] = AlienHomeY[i];
+                    }
+                }
+                i = i + 1;
+            }
+        } else if (AlienDir == -1 && minAlienX <= 10) {
+            AlienDir = 1;
+            i = 1;
+            while (i <= AlienCount) {
+                if (AlienAlive[i]) {
+                    AlienHomeY[i] = AlienHomeY[i] + AlienH;
+                    if (!AlienDiving[i]) {
+                        AlienY[i] = AlienHomeY[i];
+                    }
+                }
+                i = i + 1;
+            }
+        }
+
+        {
+            int delta;
+            delta = AlienSpeed * AlienDir;
+            i = 1;
+            while (i <= AlienCount) {
+                if (AlienAlive[i]) {
+                    AlienHomeX[i] = AlienHomeX[i] + delta;
+                    if (!AlienDiving[i]) {
+                        AlienX[i] = AlienX[i] + delta;
+                    } else {
+                        int targetX;
+                        targetX = PlayerX + PlayerW / 2 - AlienW / 2;
+                        if (AlienX[i] < targetX) {
+                            AlienX[i] = AlienX[i] + 3;
+                        } else if (AlienX[i] > targetX) {
+                            AlienX[i] = AlienX[i] - 3;
+                        }
+                        AlienY[i] = AlienY[i] + 4;
+                        if (AlienY[i] > ScreenHeight + AlienH) {
+                            AlienDiving[i] = 0;
+                            AlienX[i] = AlienHomeX[i];
+                            AlienY[i] = AlienHomeY[i];
+                        }
+                    }
+                }
+                i = i + 1;
+            }
+        }
+
+        if (BulletActive) {
+            i = 1;
+            while (i <= AlienCount) {
+                if (AlienAlive[i]) {
+                    if (BulletX < AlienX[i] + AlienW &&
+                        BulletX + BulletW > AlienX[i] &&
+                        BulletY < AlienY[i] + AlienH &&
+                        BulletY + BulletH > AlienY[i]) {
+                        AlienAlive[i] = 0;
+                        AlienDiving[i] = 0;
+                        BulletActive = 0;
+                        AliensAlive = AliensAlive - 1;
+                        Score = Score + 50;
+                        printf("Score: %d\n", Score);
+                        if (ExplodeSound != -1) {
+                            playsound(ExplodeSound);
+                        }
+                        break;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+
+        if (AliensAlive > 0) {
+            AlienSpeed = AlienBaseSpeed + (AlienCount - AliensAlive) / 4;
+            if (AlienSpeed > 6) {
+                AlienSpeed = 6;
+            }
+            if (AlienFireChance > 30 && (AlienCount - AliensAlive) > 6) {
+                AlienFireChance = 60;
+            }
+        }
+
+        if (PlayerInvincibleTicks > 0) {
+            PlayerInvincibleTicks = PlayerInvincibleTicks - 1;
+        }
+
+        if (random(AlienDiveChance) == 0) {
+            int choice;
+            choice = random(AlienCount) + 1;
+            if (AlienAlive[choice] && !AlienDiving[choice]) {
+                AlienDiving[choice] = 1;
+                AlienX[choice] = AlienHomeX[choice];
+                AlienY[choice] = AlienHomeY[choice];
+            }
+        }
+
+        if (random(AlienFireChance) == 0) {
+            int shooter;
+            shooter = random(AlienCount) + 1;
+            if (AlienAlive[shooter]) {
+                int slot;
+                slot = 0;
+                while (slot < MaxAlienBullets) {
+                    if (!AlienBulletActive[slot]) {
+                        AlienBulletActive[slot] = 1;
+                        AlienBulletX[slot] = AlienX[shooter] + AlienW / 2;
+                        AlienBulletY[slot] = AlienY[shooter] + AlienH;
+                        break;
+                    }
+                    slot = slot + 1;
+                }
+            }
+        }
+
+        i = 0;
+        while (i < MaxAlienBullets) {
+            if (AlienBulletActive[i]) {
+                AlienBulletY[i] = AlienBulletY[i] + AlienBulletSpeed;
+                if (AlienBulletY[i] > ScreenHeight) {
+                    AlienBulletActive[i] = 0;
+                } else {
+                    if (PlayerInvincibleTicks == 0 &&
+                        AlienBulletX[i] >= PlayerX &&
+                        AlienBulletX[i] <= PlayerX + PlayerW &&
+                        AlienBulletY[i] >= PlayerY &&
+                        AlienBulletY[i] <= PlayerY + PlayerH) {
+                        AlienBulletActive[i] = 0;
+                        PlayerLives = PlayerLives - 1;
+                        PlayerInvincibleTicks = 120;
+                        BulletActive = 0;
+                        printf("Hit! Lives remaining: %d\n", PlayerLives);
+                        PlayerX = ScreenWidth / 2 - PlayerW / 2;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+
+        if (PlayerInvincibleTicks == 0) {
+            i = 1;
+            while (i <= AlienCount) {
+                if (AlienAlive[i]) {
+                    if (AlienX[i] < PlayerX + PlayerW &&
+                        AlienX[i] + AlienW > PlayerX &&
+                        AlienY[i] < PlayerY + PlayerH &&
+                        AlienY[i] + AlienH > PlayerY) {
+                        PlayerLives = PlayerLives - 1;
+                        PlayerInvincibleTicks = 120;
+                        BulletActive = 0;
+                        printf("Collision! Lives remaining: %d\n", PlayerLives);
+                        if (AlienDiving[i]) {
+                            AlienDiving[i] = 0;
+                            AlienX[i] = AlienHomeX[i];
+                            AlienY[i] = AlienHomeY[i];
+                        }
+                        PlayerX = ScreenWidth / 2 - PlayerW / 2;
+                        break;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+
+        i = 1;
+        while (i <= AlienCount) {
+            if (AlienAlive[i]) {
+                if (!AlienDiving[i] && AlienY[i] + AlienH >= PlayerY) {
+                    PlayerLives = PlayerLives - 1;
+                    PlayerInvincibleTicks = 120;
+                    printf("Aliens breached the defenses! Lives remaining: %d\n", PlayerLives);
+                    break;
+                }
+            }
+            i = i + 1;
+        }
+
+        cleardevice();
+        if (PlayerInvincibleTicks % 20 < 10 || PlayerInvincibleTicks == 0) {
+            drawPlayerShip(PlayerX, PlayerY, PlayerW, PlayerH, PlayerInvincibleTicks);
+        }
+        if (BulletActive) {
+            setrgbcolor(255, 255, 0);
+            fillrect(BulletX, BulletY, BulletX + BulletW - 1, BulletY + BulletH - 1);
+        }
+        i = 1;
+        while (i <= AlienCount) {
+            if (AlienAlive[i]) {
+                drawAlienShip(AlienX[i], AlienY[i], AlienW, AlienH, AlienDiving[i]);
+            }
+            i = i + 1;
+        }
+        setrgbcolor(255, 255, 255);
+        i = 0;
+        while (i < MaxAlienBullets) {
+            if (AlienBulletActive[i]) {
+                drawline(AlienBulletX[i], AlienBulletY[i], AlienBulletX[i], AlienBulletY[i] + 6);
+            }
+            i = i + 1;
+        }
+
+        if (TextReady) {
+            str ScoreText;
+            str LivesText;
+            ScoreText = "Score: " + inttostr(Score);
+            LivesText = "Lives: " + inttostr(PlayerLives);
+            outtextxy(10, 10, ScoreText);
+            outtextxy(ScreenWidth - 140, 10, LivesText);
+        }
+
+        updatescreen();
+    }
+
+    quitsoundsystem();
+    if (TextReady) {
+        quittextsystem();
+    }
+    closegraph();
+    if (AliensAlive == 0) {
+        printf("You saved the galaxy! Final score: %d\n", Score);
+    } else if (PlayerLives <= 0) {
+        printf("Game over. Final score: %d\n", Score);
+    }
+    return 0;
+#else
+    printf("SDL support not enabled.\n");
+    return 1;
+#endif
+}

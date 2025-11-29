@@ -197,11 +197,16 @@ Symbol *lookupLocalSymbol(const char *name) {
  * @param name The symbol name string to look up.
  * @return A pointer to the found Symbol structure.
  */
-Symbol *lookupSymbol(const char *name) {
+Symbol *lookupSymbolOptional(const char *name) {
     Symbol *sym = lookupLocalSymbol(name);
     if (!sym) {
         sym = lookupGlobalSymbol(name);
     }
+    return sym;
+}
+
+Symbol *lookupSymbol(const char *name) {
+    Symbol *sym = lookupSymbolOptional(name);
     if (!sym) {
         fprintf(stderr, "Runtime error: Symbol '%s' not found.\n", name);
 #ifdef DEBUG
@@ -394,8 +399,21 @@ void insertConstGlobalSymbol(const char *name, Value val) {
         fprintf(stderr, "Internal error: constGlobalSymbols hash table is NULL during insertConstGlobalSymbol.\n");
         EXIT_FAILURE_HANDLER();
     }
-    if (hashTableLookup(constGlobalSymbols, name)) {
-        return; // Already inserted
+    Symbol *existing = hashTableLookup(constGlobalSymbols, name);
+    if (existing) {
+        existing->type = val.type;
+        existing->is_const = true;
+        if (existing->value) {
+            freeValue(existing->value);
+        } else {
+            existing->value = malloc(sizeof(Value));
+            if (!existing->value) {
+                fprintf(stderr, "Memory allocation error (malloc Value) in insertConstGlobalSymbol\n");
+                EXIT_FAILURE_HANDLER();
+            }
+        }
+        *(existing->value) = makeCopyOfValue(&val);
+        return;
     }
 
     Symbol *new_symbol = malloc(sizeof(Symbol));

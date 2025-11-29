@@ -1,0 +1,44 @@
+Elvis for Debian
+----------------
+
+This package contains Elvis 2.2_1.
+
+
+This version of Elvis is inofficial. It is based on the last package
+released by Steve Kirkendall in 2004 found on:
+
+  ftp://ftp.cs.pdx.edu/pub/elvis/unreleased/almost-2.2_1.tar.gz
+
+It contains bugfixes to that version plus numerous patches contribued
+by third parties, first of all the Debian maintainers. The code from
+which this build was created can be found on this inofficial git
+repository at github:
+
+  https://github.com/mbert/elvis
+
+
+Elvis' manual is located in /usr/share/elvis/manual (elvis.html) and you
+can read it as well with your browser as with Elvis itself (start Elvis,
+type :h and hit Return).
+
+
+If you want to bypass Elvis' global configuration then put your own
+setup files into ~/.elvis - see chapter 10 in the manual for further
+information.  The elvis.ali file includes an alias for this purpose, see
+:h customize.
+If you just want to change some default settings then creating .elvisrc
+in your home directory should suffice (:mkexrc can do this for you).
+
+
+If you use Elvis (the termcap interface) within a dark xterm, you'll
+probably get "wrong" colors (e.g. normal text will appear black, so
+you can't read it).
+You can solve this problem either by setting the background
+option to "dark" in your configuration file or by setting the
+environment variable ELVISBG to "dark".
+Further information: http://georg.f-451.net/elvis/index.html#color
+
+
+This package brings along some icons:
+    /usr/share/pixmaps/elvis_32x32.xpm (used by the menu system)
+    /usr/share/elvis/icons/*

@@ -163,7 +163,7 @@ stringop1.sh: string length                            63,783    589,314   10.8%
 
 Sat Oct 18 08:01:44 CEST 2025
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
@@ -197,7 +197,7 @@ stringop1.sh: string length                            64,332    595,905   10.8%
 
 Sat Oct 18 11:25:02 CEST 2025
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
@@ -229,7 +229,7 @@ subshell.sh: external command                           error        562    n/a
 stringop1.sh: string length                            63,737    588,745   10.8%
 ------------------------------------------------------------------------
 * count: number of executions per second
-/Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh   231.58s user 15.74s system 123% cpu 3:19.63 total
+/Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh   231.58s user 15.74s system 123% cpu 3:19.63 total
 
 Sat Oct 18 19:32:16 CEST 2025
 
@@ -271,7 +271,7 @@ o Populate a dedicated hash table for core and dynamically registered VM builtin
 o Expose hashed lookup helpers so registration, handler resolution, and ID queries avoid linear scans and update VM call sites accordingly
 o Extend the CLike ExtBuiltinQuery fixture to ensure dynamically registered builtins execute successfully
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
@@ -308,7 +308,7 @@ o Maintain a hash table keyed by canonical builtin names alongside the existing 
 o Update builtin helpers to query the new hash and keep isBuiltin/getBuiltinType in sync
 o Extend the Pascal scope manifest with a case-sensitive builtin regression test
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh      
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh      
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
@@ -345,7 +345,7 @@ o Annotate bytecode chunks with precomputed lowercase builtin constant indices a
 o Update builtin dispatch in the VM, CLike, and shell frontends to consume the cached lowercase names instead of normalising at runtime
 o Extend Pascal fixtures with mixed-case builtin coverage to exercise the new metadata
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------
@@ -380,7 +380,7 @@ stringop1.sh: string length                           139,050    596,037   23.3%
 Sun Oct 19 20:05:16 CEST 2025
 o More optimizations via the codex command line
 
-mke@MacBook-Pro-M1 shellbench % time /Users/mke/Dropbox/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
+mke@MacBook-Pro-M1 shellbench % time /Users/mke/Projects/git/shellbench/shellbench -s 'exsh,bash' sample/assign.sh sample/cmp.sh sample/count.sh sample/eval.sh sample/func.sh sample/null.sh sample/subshell.sh sample/stringop1.sh
 ------------------------------------------------------------------------
 name                                                     exsh       bash
 ------------------------------------------------------------------------

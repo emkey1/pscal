@@ -1,5 +1,7 @@
 #include "shell/builtins.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"
+#include "common/builtin_shared.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,11 +43,82 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"getopts", "getopts", 48},
     {"mapfile", "mapfile", 49},
     {"readarray", "mapfile", 49},
+    {"cat", "cat", -1},
+    {"less", "less", -1},
+    {"more", "less", -1},
+    {"clear", "clear", -1},
+    {"cls", "clear", -1},
     {"jobs", "jobs", 17},
     {"fg", "fg", 18},
     {"bg", "bg", 19},
     {"wait", "wait", 20},
     {"WaitForThread", "waitforthread", 1056},
+#ifdef PSCAL_TARGET_IOS
+    {"cal", "cal", -1},
+    {"chmod", "chmod", -1},
+    {"clike", "clike", -1},
+    {"cp", "cp", -1},
+    {"curl", "curl", -1},
+    {"cut", "cut", -1},
+    {"date", "date", -1},
+    {"du", "du", -1},
+    {"env", "env", -1},
+    {"nextvi", "nextvi", -1},
+    {"vi", "nextvi", -1},
+    {"pwd", "pwd", -1},
+    {"basename", "basename", -1},
+    {"dirname", "dirname", -1},
+    {"df", "df", -1},
+    {"sleep", "sleep", -1},
+    {"tee", "tee", -1},
+    {"xargs", "xargs", -1},
+    {"ps", "ps", -1},
+    {"kill", "kill", -1},
+    {"file", "file", -1},
+    {"find", "find", -1},
+    {"grep", "grep", -1},
+    {"gwin", "gwin", -1},
+    {"head", "head", -1},
+    {"id", "id", -1},
+    {"ipaddr", "ipaddr", -1},
+    {"ls", "ls", -1},
+    {"md", "md", -1},
+    {"ln", "ln", -1},
+    {"mkdir", "mkdir", -1},
+    {"rmdir", "rmdir", -1},
+    {"mv", "mv", -1},
+    {"pascal", "pascal", -1},
+    {"pscaljson2bc", "pscaljson2bc", -1},
+#ifdef BUILD_PSCALD
+    {"pscald", "pscald", -1},
+#endif
+#ifdef BUILD_DASCAL
+    {"dascal", "dascal", -1},
+#endif
+    {"pscalvm", "pscalvm", -1},
+    {"rea", "rea", -1},
+    {"resize", "resize", -1},
+    {"rm", "rm", -1},
+    {"ping", "ping", -1},
+    {"scp", "scp", -1},
+    {"sftp", "sftp", -1},
+    {"sed", "sed", -1},
+    {"sort", "sort", -1},
+    {"stty", "stty", -1},
+    {"tail", "tail", -1},
+    {"touch", "touch", -1},
+    {"tr", "tr", -1},
+    {"uptime", "uptime", -1},
+    {"watch", "watch", -1},
+#ifdef SMALLCLUE_WITH_EXSH
+    {"sh", "sh", -1},
+#endif
+    {"ssh", "ssh", -1},
+    {"ssh-keygen", "ssh-keygen", -1},
+    {"uniq", "uniq", -1},
+    {"wc", "wc", -1},
+    {"wget", "wget", -1},
+#endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},
     {"ThreadGetStatus", "threadgetstatus", -1},
@@ -112,7 +185,7 @@ static char *shellLowercase(const char *name) {
 }
 
 void shellRegisterBuiltins(HashTable *table) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!table) {
         return;
     }
@@ -141,7 +214,7 @@ void shellRegisterBuiltins(HashTable *table) {
 }
 
 int shellGetBuiltinId(const char *name) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!name) {
         return -1;
     }
@@ -178,7 +251,7 @@ bool shellIsBuiltinName(const char *name) {
 }
 
 void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context) {
-    registerExtendedBuiltins();
+    sharedRegisterExtendedBuiltins();
     if (!visitor) {
         return;
     }
@@ -199,3 +272,6 @@ void shellDumpBuiltins(FILE *out) {
         fprintf(out, "  %s\n", kShellBuiltins[i].name);
     }
 }
+#include "shell/builtins.h"
+#include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"

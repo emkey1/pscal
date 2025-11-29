@@ -1,8 +1,24 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/shaders/terrain/terrain_shader.h"
 
 #include <math.h>
 #include <string.h>
 #include <ctype.h>
+
+#if defined(PSCAL_TARGET_IOS)
+static void terrainSetIdentity(float m[16]) {
+    if (!m) return;
+    for (int i = 0; i < 16; ++i) {
+        m[i] = 0.0f;
+    }
+    m[0] = m[5] = m[10] = m[15] = 1.0f;
+}
+#endif
 
 static float clampf(float value, float minValue, float maxValue) {
     if (value < minValue) return minValue;
@@ -477,8 +493,13 @@ const TerrainShaderHandles *terrainShaderBind(const TerrainGenerator *generator)
 
     float modelView[16];
     float projection[16];
+#if defined(PSCAL_TARGET_IOS)
+    terrainSetIdentity(modelView);
+    terrainSetIdentity(projection);
+#else
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
     glGetFloatv(GL_PROJECTION_MATRIX, projection);
+#endif
 
     float mvp[16];
     multiplyMat4(projection, modelView, mvp);

@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <signal.h>
 #include "vm/vm.h"
 #include "core/cache.h"
 #include "core/utils.h"
@@ -42,21 +43,42 @@
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"
 #include "backend_ast/builtin.h"
+#include "common/frontend_kind.h"
 #include "rea/builtins/thread.h"
 #include "rea/parser.h"
+#include "rea/state.h"
 #include "rea/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
-
-int gParamCount = 0;
-char **gParamValues = NULL;
 
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
+}
+
+static VM *g_sigint_vm = NULL;
+
+static void reaHandleSigint(int signo) {
+    (void)signo;
+    if (g_sigint_vm) {
+        g_sigint_vm->abort_requested = true;
+        g_sigint_vm->exit_requested = true;
+    }
+}
+
+static void reaInstallSigint(void) {
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = reaHandleSigint;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
 }
 
 static const char *REA_USAGE =
@@ -258,7 +280,18 @@ static void collectUsesClauses(AST* node, List* out) {
     }
 }
 
-int main(int argc, char **argv) {
+int rea_main(int argc, char **argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_REA);
+#define REA_RETURN(value)                           \
+    do {                                            \
+        int __rea_rc = (value);                     \
+        if (reaSymbolStateActive) {                 \
+            reaResetSymbolState();                  \
+            reaSymbolStateActive = false;           \
+        }                                           \
+        frontendPopKind(previousKind);              \
+        return __rea_rc;                            \
+    } while (0)
     const char *initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') {
         vmInitTerminalState();
@@ -274,14 +307,15 @@ int main(int argc, char **argv) {
     int verbose_flag = 0;
     int strict_mode = 0;
     int argi = 1;
+    bool reaSymbolStateActive = false;
     while (argc > argi && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             printf("%s", REA_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "-v") == 0) {
             printf("Rea Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
@@ -303,7 +337,7 @@ int main(int argc, char **argv) {
             vm_trace_head = atoi(argv[argi] + 16);
         } else {
             fprintf(stderr, "Unknown option: %s\n%s", argv[argi], REA_USAGE);
-            return vmExitWithCleanup(EXIT_FAILURE);
+            REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
         }
         argi++;
     }
@@ -311,19 +345,19 @@ int main(int argc, char **argv) {
     if (dump_ext_builtins) {
         registerExtendedBuiltins();
         extBuiltinDumpInventory(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     if (argc <= argi) {
         fprintf(stderr, "%s", REA_USAGE);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
 
     const char *path = argv[argi++];
     FILE *f = fopen(path, "rb");
     if (!f) {
         perror("open");
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
@@ -331,14 +365,14 @@ int main(int argc, char **argv) {
     char *src = (char *)malloc(len + 1);
     if (!src) {
         fclose(f);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     size_t bytes_read = fread(src, 1, len, f);
     fclose(f);
     if (bytes_read != (size_t)len) {
         free(src);
         fprintf(stderr, "Error reading source file '%s'\n", path);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     src[len] = '\0';
 
@@ -354,6 +388,7 @@ int main(int argc, char **argv) {
     // future bytecode-level CALL injection.
 
     initSymbolSystem();
+    reaSymbolStateActive = true;
     gSuppressWriteSpacing = 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
@@ -378,7 +413,7 @@ int main(int argc, char **argv) {
     if (!program) {
         if (preprocessed_source) free(preprocessed_source);
         free(src);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     reaSemanticSetSourcePath(path);
     reaPerformSemanticAnalysis(program);
@@ -386,7 +421,7 @@ int main(int argc, char **argv) {
         freeAST(program);
         if (preprocessed_source) free(preprocessed_source);
         free(src);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     if (dump_ast_json) {
         annotateTypes(program, NULL, program);
@@ -394,7 +429,7 @@ int main(int argc, char **argv) {
         freeAST(program);
         if (preprocessed_source) free(preprocessed_source);
         free(src);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     List *dep_files = createList();
@@ -503,6 +538,7 @@ int main(int argc, char **argv) {
         if (dump_bytecode_only_flag || no_run_flag) {
             result = INTERPRET_OK;
         } else {
+            reaInstallSigint();
             VM vm;
             initVM(&vm);
             if (vm_trace_head > 0) vm.trace_head_instructions = vm_trace_head;
@@ -511,7 +547,9 @@ int main(int argc, char **argv) {
                                     (src && strstr(src, "trace on")))) {
                 vm.trace_head_instructions = 16;
             }
+            g_sigint_vm = &vm;
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+            g_sigint_vm = NULL;
             freeVM(&vm);
         }
     }
@@ -519,13 +557,14 @@ int main(int argc, char **argv) {
     freeBytecodeChunk(&chunk);
     freeAST(program);
     freeProcedureTable();
-    freeTypeTableASTNodes();
-    freeTypeTable();
-
-    if (globalSymbols) freeHashTable(globalSymbols);
-    if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-
     if (preprocessed_source) free(preprocessed_source);
     free(src);
-    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
+    REA_RETURN(vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE));
 }
+#undef REA_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char **argv) {
+    return rea_main(argc, argv);
+}
+#endif

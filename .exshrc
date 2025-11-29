@@ -1,0 +1,5 @@
+# Default exsh configuration
+# Custom prompt with colorised cwd and indicator glyph
+export PS1="\e[38;5;39mexsh\e[0m \e[1;35m\W\e[0m ⚡ "
+
+# Add additional aliases or environment tweaks below

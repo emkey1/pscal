@@ -1,0 +1,23 @@
+Test: const_random_shadow_pass
+Category: const_scope
+Expectation: runtime_ok
+Description: Random identifiers demonstrate const shadowing with unique local names.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+Runtime Error: Operands must be numbers for arithmetic operation '-' (or strings/chars for '+'). Got UNKNOWN_VAR_TYPE and INTEGER
+[Error Location] Offset: 18, Line: 5
+--- source ---
+#include <stdio.h>
+
+        const int uhc03cmpg = 8;
+        int main() {
+            int la5r7hjgp = uhc03cmpg - 3;
+            printf("shadow-const=%d
+", uhc03cmpg);
+            printf("shadow-local=%d
+", la5r7hjgp);
+            return 0;
+        }

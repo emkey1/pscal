@@ -1,0 +1,61 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ios-simulator",
+      "displayName": "iOS (Simulator)",
+      "description": "Build PSCAL static libs targeting the iOS simulator",
+      "inherits": [
+        "base"
+      ],
+      "toolchainFile": "cmake/toolchains/ios.cmake",
+      "cacheVariables": {
+        "PSCALI_IOS_PLATFORM": "SIMULATOR",
+        "SDL": "OFF",
+        "PSCAL_BUILD_STATIC_LIBS": "ON",
+        "PSCAL_USE_BREW_CURL": "ON",
+        "BUILD_DASCAL": "ON"
+      }
+    },
+    {
+      "name": "ios-device",
+      "displayName": "iOS (Device)",
+      "description": "Build PSCAL static libs targeting iOS devices",
+      "inherits": [
+        "base"
+      ],
+      "toolchainFile": "cmake/toolchains/ios.cmake",
+      "cacheVariables": {
+        "PSCALI_IOS_PLATFORM": "DEVICE",
+        "SDL": "OFF",
+        "PSCAL_BUILD_STATIC_LIBS": "ON",
+        "PSCAL_USE_BREW_CURL": "ON",
+        "BUILD_DASCAL": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ios-simulator",
+      "configurePreset": "ios-simulator"
+    },
+    {
+      "name": "ios-device",
+      "configurePreset": "ios-device"
+    }
+  ]
+}

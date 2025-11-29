@@ -12,23 +12,28 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
 #include "shell/opt.h"
 #include "shell/builtins.h"
+#include "vm/vm.h"
 #include "shell/runner.h"
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "core/cache.h"
 #include "compiler/bytecode.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"
 #include "Pascal/globals.h"
 #include "vm/vm.h"
 #include "symbol/symbol.h"
-
-int gParamCount = 0;
-char **gParamValues = NULL;
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_truncate.h"
+#endif
 
 static struct termios gInteractiveOriginalTermios;
 static volatile sig_atomic_t gInteractiveTermiosValid = 0;
@@ -729,7 +734,7 @@ static char *shellFormatPrompt(const char *input) {
 static char *shellResolveInteractivePrompt(void) {
     const char *env_prompt = getenv("PS1");
     if (!env_prompt || !*env_prompt) {
-        env_prompt = "exsh$ ";
+        env_prompt = "\\e[38;5;39mexsh\\e[0m \\e[1;35m\\W\\e[0m ⚡ ";
     }
     char *formatted = shellFormatPrompt(env_prompt);
     if (formatted) {
@@ -1530,14 +1535,43 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t pattern_len = word_len + 2;
+    const char *glob_base = word;
+    size_t glob_base_len = word_len;
+    bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
+    bool glob_used_virtual = false;
+#if defined(PSCAL_TARGET_IOS)
+    if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
+        char word_copy[PATH_MAX];
+        if (word_len < sizeof(word_copy)) {
+            memcpy(word_copy, word, word_len);
+            word_copy[word_len] = '\0';
+            char expanded[PATH_MAX];
+            if (pathTruncateExpand(word_copy, expanded, sizeof(expanded))) {
+                glob_base = expanded;
+                glob_base_len = strlen(expanded);
+                glob_used_virtual = true;
+            }
+        }
+    }
+#endif
+    while (glob_base_len > 1 && glob_base[glob_base_len - 1] == '/') {
+        glob_base_len--;
+    }
+
+    size_t pattern_len = glob_base_len + (had_trailing_slash ? 3 : 2);
     char *pattern = (char *)malloc(pattern_len);
     if (!pattern) {
         return false;
     }
-    memcpy(pattern, word, word_len);
-    pattern[word_len] = '*';
-    pattern[word_len + 1] = '\0';
+    memcpy(pattern, glob_base, glob_base_len);
+    size_t write_idx = glob_base_len;
+    if (had_trailing_slash) {
+        if (write_idx == 0 || pattern[write_idx - 1] != '/') {
+            pattern[write_idx++] = '/';
+        }
+    }
+    pattern[write_idx++] = '*';
+    pattern[write_idx] = '\0';
 
     glob_t results;
     memset(&results, 0, sizeof(results));
@@ -1548,6 +1582,25 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         globfree(&results);
         return false;
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual) {
+        for (size_t i = 0; i < results.gl_pathc; ++i) {
+            const char *match = results.gl_pathv[i];
+            if (!match) {
+                continue;
+            }
+            char stripped[PATH_MAX];
+            if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
+                char *copy = strdup(stripped);
+                if (copy) {
+                    free(results.gl_pathv[i]);
+                    results.gl_pathv[i] = copy;
+                }
+            }
+        }
+    }
+#endif
 
     size_t command_start = 0;
     size_t command_len = 0;
@@ -1587,6 +1640,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
 
     size_t replacement_len = 0;
     bool append_space = false;
+    bool append_slash = false;
     if (results.gl_pathc == 1) {
         const char *match = results.gl_pathv[0];
         if (!match) {
@@ -1619,13 +1673,36 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+    /* If PATH_TRUNCATE is active, double-check directory matches so we keep the trailing slash. */
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual && results.gl_pathv[0] && replacement_len > 0) {
+        const char *visible = results.gl_pathv[0];
+        char expanded[PATH_MAX];
+        const char *real_path = visible;
+        if (pathTruncateExpand(visible, expanded, sizeof(expanded))) {
+            real_path = expanded;
+        }
+        struct stat st;
+        if (real_path && stat(real_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (visible[replacement_len - 1] != '/') {
+                append_slash = true;
+            }
+            append_space = false;
+        }
+    }
+#endif
+
+    size_t total_len = word_start + replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
     if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
         globfree(&results);
         return false;
     }
 
     memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
+    if (append_slash) {
+        (*buffer)[word_start + replacement_len] = '/';
+        replacement_len += 1;
+    }
     if (append_space) {
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
@@ -1727,6 +1804,7 @@ static char *readInteractiveLine(const char *prompt,
                                  bool *out_eof,
                                  bool *out_editor_failed) {
     bool installed_sigint_handler = false;
+    const bool has_real_tty = pscalRuntimeStdinHasRealTTY();
     if (out_eof) {
         *out_eof = false;
     }
@@ -1738,54 +1816,63 @@ static char *readInteractiveLine(const char *prompt,
     }
 
     struct termios original_termios;
-    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-
-    struct termios raw_termios = original_termios;
-    raw_termios.c_lflag &= ~(ICANON | ECHO);
-    raw_termios.c_cc[VMIN] = 1;
-    raw_termios.c_cc[VTIME] = 0;
-    gInteractiveOriginalTermios = original_termios;
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveTermiosValid = 1;
-
+    struct termios raw_termios;
     struct sigaction sigint_action;
-    memset(&sigint_action, 0, sizeof(sigint_action));
-    sigemptyset(&sigint_action.sa_mask);
-    sigint_action.sa_handler = interactiveSigintHandler;
-    if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveHasOldSigint = 1;
-    installed_sigint_handler = true;
-
     struct sigaction sigtstp_action;
-    memset(&sigtstp_action, 0, sizeof(sigtstp_action));
-    sigemptyset(&sigtstp_action.sa_mask);
-    sigtstp_action.sa_handler = SIG_IGN;
-    if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
-        interactiveRestoreSigintHandler();
-        installed_sigint_handler = false;
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
+    if (has_real_tty) {
+        if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
         }
-        return NULL;
+
+        raw_termios = original_termios;
+        raw_termios.c_lflag &= ~(ICANON | ECHO);
+        raw_termios.c_cc[VMIN] = 1;
+        raw_termios.c_cc[VTIME] = 0;
+        gInteractiveOriginalTermios = original_termios;
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveTermiosValid = 1;
+
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        sigemptyset(&sigint_action.sa_mask);
+        sigint_action.sa_handler = interactiveSigintHandler;
+        if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigint = 1;
+        installed_sigint_handler = true;
+
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        sigemptyset(&sigtstp_action.sa_mask);
+        sigtstp_action.sa_handler = SIG_IGN;
+        if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
+            interactiveRestoreSigintHandler();
+            installed_sigint_handler = false;
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigtstp = 1;
+    } else {
+        memset(&original_termios, 0, sizeof(original_termios));
+        memset(&raw_termios, 0, sizeof(raw_termios));
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        gInteractiveTermiosValid = 0;
     }
-    gInteractiveHasOldSigtstp = 1;
 
     size_t capacity = 128;
     char *buffer = (char *)malloc(capacity);
@@ -1886,6 +1973,9 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == 26) { /* Ctrl-Z */
+            if (!has_real_tty) {
+                continue;
+            }
             alt_dot_active = false;
             alt_dot_offset = 0;
             interactiveRestoreSigintHandler();
@@ -2241,6 +2331,14 @@ static char *readInteractiveLine(const char *prompt,
             } else {
                 fputc('\a', stdout);
                 fflush(stdout);
+                /* Ensure the prompt stays intact even when backspace is hit at
+                 * the start of input. */
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             }
             continue;
         }
@@ -2619,7 +2717,11 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     exec_opts.exit_on_signal = false;
 
     int last_status = shellRuntimeLastStatus();
-    bool tty = isatty(STDIN_FILENO);
+    bool tty = pscalRuntimeStdinIsInteractive();
+    const char *force_no_tty = getenv("PSCAL_FORCE_NO_TTY");
+    if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
+        tty = false;
+    }
 
     while (true) {
         char *prompt_storage = shellResolveInteractivePrompt();
@@ -2641,14 +2743,14 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         size_t line_capacity = 0;
         ssize_t read = 0;
         if (!line) {
-            if (isatty(STDIN_FILENO)) {
+            if (pscalRuntimeStdinIsInteractive()) {
                 fputs(prompt, stdout);
                 fflush(stdout);
             }
             read = getline(&line, &line_capacity, stdin);
             if (read < 0) {
                 free(line);
-                if (isatty(STDIN_FILENO)) {
+                if (pscalRuntimeStdinIsInteractive()) {
                     fputc('\n', stdout);
                 }
                 free(prompt_storage);
@@ -2683,7 +2785,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             free(line);
             continue;
         }
-        if (used_history && isatty(STDIN_FILENO)) {
+        if (used_history && pscalRuntimeStdinIsInteractive()) {
             printf("%s\n", expanded_line);
             fflush(stdout);
         }
@@ -2712,11 +2814,27 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     return last_status;
 }
 
-int main(int argc, char **argv) {
+int exsh_main(int argc, char **argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_SHELL);
+#define EXSH_RETURN(value)              \
+    do {                                \
+        int __exsh_rc = (value);        \
+        frontendPopKind(previousKind);  \
+        return __exsh_rc;               \
+    } while (0)
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     options.quiet = true;
     options.suppress_warnings = true;
+
+    registerShellFrontendBuiltins();
+    vmSetSuppressStateDump(true);
+
+#if defined(PSCAL_TARGET_IOS)
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#endif
+
     shellRuntimeSetArg0(options.frontend_path);
     shellRuntimeSetInteractive(false);
 
@@ -2730,11 +2848,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", SHELL_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "-v") == 0) {
             printf("Shell Frontend Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             options.dump_ast_json = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -2764,7 +2882,7 @@ int main(int argc, char **argv) {
                 }
                 const char *program_name = (slash && slash[1]) ? slash + 1 : program;
                 fprintf(stderr, "%s: -c: option requires an argument\n", program_name);
-                return vmExitWithCleanup(2);
+                EXSH_RETURN(vmExitWithCleanup(2));
             }
             command_string = argv[i + 1];
             if (i + 2 < argc) {
@@ -2776,7 +2894,7 @@ int main(int argc, char **argv) {
             break;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         } else {
             path = argv[i];
             arg_start_index = i + 1;
@@ -2786,7 +2904,7 @@ int main(int argc, char **argv) {
 
     if (dump_ext_builtins_flag) {
         shellDumpBuiltins(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     setenv("EXSH_LAST_STATUS", "0", 1);
@@ -2796,7 +2914,7 @@ int main(int argc, char **argv) {
         shellRuntimeSetInteractive(false);
         char *src = shellLoadFile(path);
         if (!src) {
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         }
         if (arg_start_index < argc) {
             gParamCount = argc - arg_start_index;
@@ -2810,7 +2928,7 @@ int main(int argc, char **argv) {
         (void)exit_requested;
         free(src);
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     if (command_string) {
@@ -2835,27 +2953,27 @@ int main(int argc, char **argv) {
         int status = shellRunSource(command_string, "<command>", &command_options, &exit_requested);
         (void)exit_requested;
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     gParamCount = 0;
     gParamValues = NULL;
 
-    if (isatty(STDIN_FILENO)) {
+    if (pscalRuntimeStdinIsInteractive()) {
         shellRuntimeSetInteractive(true);
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {
-            return vmExitWithCleanup(rc_status);
+            EXSH_RETURN(vmExitWithCleanup(rc_status));
         }
         shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     shellRuntimeSetInteractive(false);
     char *stdin_src = readStream(stdin);
     if (!stdin_src) {
-        return EXIT_FAILURE;
+        EXSH_RETURN(EXIT_FAILURE);
     }
 
     ShellRunOptions stdin_opts = options;
@@ -2865,5 +2983,17 @@ int main(int argc, char **argv) {
     int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
     (void)exit_requested;
     free(stdin_src);
-    return vmExitWithCleanup(status);
+    EXSH_RETURN(vmExitWithCleanup(status));
 }
+#undef EXSH_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#elif defined(PSCAL_TARGET_IOS) && defined(SDL)
+#include "SDL_main.h"
+int SDL_main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#endif

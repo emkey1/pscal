@@ -196,6 +196,29 @@ Value vmBuiltinShellWhich(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellGetopts(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
+#ifdef PSCAL_TARGET_IOS
+Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellLess(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellMore(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPascal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellChmod(struct VM_s* vm, int arg_count, Value* args);
+#ifdef BUILD_DASCAL
+Value vmBuiltinShellDascal(struct VM_s* vm, int arg_count, Value* args);
+#endif
+Value vmBuiltinShellClike(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellRea(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalVm(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalJson2bc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExshTool(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellGwin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellResize(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellElvisDump(struct VM_s* vm, int arg_count, Value* args);
+#ifdef BUILD_PSCALD
+Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
+#endif
+#endif
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellLoopAdvance(struct VM_s* vm);
 Value vmHostShellLoopCheckCondition(struct VM_s* vm);
@@ -242,6 +265,8 @@ bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);
 bool shellRuntimeExitOnSignal(void);
 size_t shellRuntimeHistoryCount(void);
+void shellRuntimeSetLastStatus(int status);
+void shellRuntimeSetLastStatusSticky(int status);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,
                                         char **out_line,

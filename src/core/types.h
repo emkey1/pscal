@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include "list.h"
 #include <stdbool.h>
+#include "common/frontend_symbol_aliases.h"
 
 // Default record size used for untyped files when RESET/REWRITE omit an
 // explicit size. Turbo Pascal historically defaults to 128 bytes; mirror that

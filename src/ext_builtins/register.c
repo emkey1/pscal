@@ -16,7 +16,7 @@ void registerHasExtBuiltin(void);
 
 void registerExtBuiltinQueryBuiltins(void);
 
-#ifdef FRONTEND_SHELL
+#if defined(PSCAL_TARGET_IOS)
 void registerShellFrontendBuiltins(void);
 #endif
 
@@ -51,7 +51,7 @@ static void registerExtendedBuiltinsOnce(void) {
 #ifdef ENABLE_EXT_BUILTIN_OPENAI
   registerOpenAIBuiltins();
 #endif
-#ifdef FRONTEND_SHELL
+#if defined(PSCAL_TARGET_IOS)
   registerShellFrontendBuiltins();
 #endif
 }

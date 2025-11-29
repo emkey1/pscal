@@ -1,0 +1,273 @@
+#!/usr/bin/env rea
+// SDL Inner Solar System Simulation in Rea using OOP and threads.
+// Each planet runs in its own thread and the frame rate is throttled.
+
+// Only simulate the inner planets plus Jupiter
+const int NumPlanets = 5;
+const int NumAsteroids = 200;
+
+bool quit = false;
+int posMutex = mutex();
+float earthMonths = 0.0;
+
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+str resolveFontPath() {
+  str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+  if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+    return ConfiguredFontPath;
+  }
+  if (fileexists(legacyFontPath)) {
+    return legacyFontPath;
+  }
+  if (fileexists(repoFontPath1)) {
+    return repoFontPath1;
+  }
+  return repoFontPath2;
+}
+
+
+class Planet {
+  int orbit;
+  int size;
+
+  float speed; // radians per update
+
+  int r;
+  int g;
+  int b;
+  float angle;
+  float posX;
+  float posY;
+  int centerX;
+  int centerY;
+  int tid;
+  int isEarth;
+
+    Planet init(int o, int s, float spdDeg, int red, int green, int blue, int cx, int cy) {
+      myself.orbit = o;
+      myself.size = s;
+      // Store angular speed in radians for precise updates even below 1 degree
+      myself.speed = spdDeg * 0.017453292519943295; // degrees -> radians
+      myself.r = red;
+      myself.g = green;
+      myself.b = blue;
+      myself.centerX = cx;
+      myself.centerY = cy;
+      myself.isEarth = 0;
+      // Initialize angle in radians as well
+      myself.angle = random(360) * 0.017453292519943295;
+      myself.posX = cx + cos(myself.angle) * o;
+      myself.posY = cy + sin(myself.angle) * o;
+      return myself;
+    }
+
+    void updateWorker() {
+      while (!quit) {
+        myself.angle = myself.angle + myself.speed;
+        if (myself.angle >= 6.283185307179586) myself.angle = myself.angle - 6.283185307179586; // 2*pi
+        float px = myself.centerX + cos(myself.angle) * myself.orbit;
+        float py = myself.centerY + sin(myself.angle) * myself.orbit;
+        lock(posMutex);
+        myself.posX = px;
+        myself.posY = py;
+        if (myself.isEarth) {
+          earthMonths = earthMonths + (myself.speed / 6.283185307179586) * 12;
+        }
+        unlock(posMutex);
+        delay(16);
+      }
+    }
+
+    void start() {
+      myself.tid = spawn myself.updateWorker();
+    }
+
+    // Wait for the worker thread to finish. "join" is a reserved keyword in
+    // Rea, so give the method a more explicit name to avoid confusion with the
+    // built-in thread operation.
+    void joinThread() {
+      join myself.tid;
+    }
+
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
+      fillcircle(trunc(myself.posX), trunc(myself.posY), myself.size);
+    }
+  }
+
+class SolarSystemApp {
+  const int WindowWidth = 1280;
+  const int WindowHeight = 1024;
+  const int TargetFPS = 60;
+  const int OrbitSpacing = 2; // extra padding between successive orbits
+  const float SunRadiusAU = 0.00465;
+  const float MercuryRadiusAU = 0.0000163;
+  const float VenusRadiusAU = 0.0000405;
+  const float EarthRadiusAU = 0.0000426;
+  const float MarsRadiusAU = 0.0000226;
+  const float JupiterRadiusAU = 0.000477;
+  const int SunMinRadius = 20;
+
+    int FrameDelay;
+    int centerX;
+    int centerY;
+    float AUScale; // pixels per astronomical unit, computed to fit Jupiter
+    int sunRadius;
+    int AUOffset;
+    Planet planets[NumPlanets + 1];
+    float asteroidAngle[NumAsteroids + 1];
+    float asteroidSpeed[NumAsteroids + 1];
+    int asteroidRadius[NumAsteroids + 1];
+
+  void SolarSystemApp() {
+    // no special initialization needed beyond defaults
+  }
+
+  void initPlanets() {
+    int orbit;
+    int size;
+    int extra = 0;
+    myself.sunRadius = trunc(myself.AUScale * SunRadiusAU);
+    if (myself.sunRadius < SunMinRadius) myself.sunRadius = SunMinRadius;
+    myself.AUOffset = myself.sunRadius;
+    // Mercury - 0.39 AU
+    orbit = trunc(myself.AUOffset + myself.AUScale * 0.39 + extra);
+    size = trunc(myself.sunRadius * MercuryRadiusAU / SunRadiusAU);
+    if (size < 1) size = 1;
+    myself.planets[1] = new Planet(); myself.planets[1].init(orbit, size, 4.7, 169, 169, 169, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
+    // Venus - 0.72 AU
+    orbit = trunc(myself.AUOffset + myself.AUScale * 0.72 + extra);
+    size = trunc(myself.sunRadius * VenusRadiusAU / SunRadiusAU);
+    if (size < 1) size = 1;
+    myself.planets[2] = new Planet(); myself.planets[2].init(orbit, size, 3.5, 218, 165,  32, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
+    // Earth - 1.00 AU
+    orbit = trunc(myself.AUOffset + myself.AUScale * 1.00 + extra);
+    size = trunc(myself.sunRadius * EarthRadiusAU / SunRadiusAU);
+    if (size < 1) size = 1;
+    myself.planets[3] = new Planet(); myself.planets[3].init(orbit, size, 3.0,   0, 102, 255, myself.centerX, myself.centerY);
+    myself.planets[3].isEarth = 1;
+    extra = extra + OrbitSpacing;
+    // Mars - 1.52 AU
+    orbit = trunc(myself.AUOffset + myself.AUScale * 1.52 + extra);
+    size = trunc(myself.sunRadius * MarsRadiusAU / SunRadiusAU);
+    if (size < 1) size = 1;
+    myself.planets[4] = new Planet(); myself.planets[4].init(orbit, size, 2.4, 188,  39,  50, myself.centerX, myself.centerY);
+    extra = extra + OrbitSpacing;
+    // Jupiter - 5.20 AU
+    orbit = trunc(myself.AUOffset + myself.AUScale * 5.20 + extra);
+    size = trunc(myself.sunRadius * JupiterRadiusAU / SunRadiusAU);
+    if (size < 1) size = 1;
+    myself.planets[5] = new Planet(); myself.planets[5].init(orbit, size, 1.3, 205, 133,  63, myself.centerX, myself.centerY);
+  }
+
+  void initAsteroids() {
+    int i = 1;
+    while (i <= NumAsteroids) {
+      // Asteroid belt spans approximately 2.2 to 3.2 astronomical units
+      // from the Sun, so pick a radius within that AU range scaled to
+      // screen coordinates.
+      int inner = trunc(myself.AUOffset + myself.AUScale * 2.2);
+      int outer = trunc(myself.AUOffset + myself.AUScale * 3.2);
+      myself.asteroidRadius[i] = inner + random(outer - inner);
+      myself.asteroidAngle[i] = random(360) * 0.017453292519943295;
+      myself.asteroidSpeed[i] = (0.1 + random(5) * 0.05) * 0.017453292519943295;
+      i = i + 1;
+    }
+  }
+
+  void startThreads() {
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].start();
+      i = i + 1;
+    }
+  }
+
+  void draw() {
+    lock(posMutex);
+    cleardevice();
+    setrgbcolor(255, 255, 0); // Sun
+    fillcircle(myself.centerX, myself.centerY, myself.sunRadius);
+    setrgbcolor(169, 169, 169);
+    int a = 1;
+    while (a <= NumAsteroids) {
+      myself.asteroidAngle[a] = myself.asteroidAngle[a] + myself.asteroidSpeed[a];
+      if (myself.asteroidAngle[a] >= 6.283185307179586) {
+        myself.asteroidAngle[a] = myself.asteroidAngle[a] - 6.283185307179586;
+      }
+      int ax = trunc(myself.centerX + cos(myself.asteroidAngle[a]) * myself.asteroidRadius[a]);
+      int ay = trunc(myself.centerY + sin(myself.asteroidAngle[a]) * myself.asteroidRadius[a]);
+      fillcircle(ax, ay, 1);
+      a = a + 1;
+    }
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].draw();
+      i = i + 1;
+    }
+    str monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
+    outtextxy(getmaxx() - 220, 16, monthStr);
+    unlock(posMutex);
+    updatescreen();
+  }
+
+  void joinThreads() {
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].joinThread();
+      i = i + 1;
+    }
+  }
+
+  void run() {
+    initgraph(WindowWidth, WindowHeight, "Rea SDL Inner Solar System");
+    myself.centerX = getmaxx() / 2;
+    myself.centerY = getmaxy() / 2;
+    // Scale astronomical units so Jupiter stays fully on screen with a small margin
+    int maxExtra = OrbitSpacing * (NumPlanets - 1);
+    int minJupiterSize = trunc(SunMinRadius * JupiterRadiusAU / SunRadiusAU);
+    if (minJupiterSize < 1) minJupiterSize = 1;
+    myself.AUScale = (myself.centerY - SunMinRadius - maxExtra - minJupiterSize - 10) / 5.20;
+    inittextsystem(resolveFontPath(), 16);
+    randomize();
+    myself.FrameDelay = trunc(1000 / TargetFPS);
+    myself.initPlanets();
+    myself.initAsteroids();
+    // Start planet worker threads using the current object instance
+    myself.startThreads();
+    writeln("Inner solar system simulation running. Press Q to quit.");
+    while (!quit) {
+      if (quitrequested()) {
+        quit = true;
+        break;
+      }
+      int keyCode = pollkeyany();
+      while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
+          quit = true;
+          break;
+        }
+        keyCode = pollkeyany();
+      }
+      if (quit) break;
+      // Draw all planets based on their updated positions
+      myself.draw();
+      // Use the object's frame delay to pace the main loop and yield time to
+      // planet worker threads, ensuring smooth motion.
+      graphloop(myself.FrameDelay);
+    }
+    // Wait for all planet worker threads to finish before shutting down
+    myself.joinThreads();
+    closegraph();
+    writeln("Simulation finished.");
+  }
+}
+
+SolarSystemApp app = new SolarSystemApp();
+app.run();

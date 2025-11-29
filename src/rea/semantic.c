@@ -81,9 +81,39 @@ static ReaModuleInfo **gLoadedModules = NULL;
 static int gLoadedModuleCount = 0;
 static int gLoadedModuleCapacity = 0;
 
+static void freeModuleInfo(ReaModuleInfo *info) {
+    if (!info) return;
+    free(info->path);
+    free(info->directory);
+    free(info->name);
+    if (info->exports) {
+        for (int i = 0; i < info->export_count; i++) {
+            free(info->exports[i].name);
+        }
+        free(info->exports);
+    }
+    if (info->ast) {
+        freeAST(info->ast);
+    }
+    free(info);
+}
+
+static void clearModuleCache(void) {
+    if (gLoadedModules) {
+        for (int i = 0; i < gLoadedModuleCount; i++) {
+            freeModuleInfo(gLoadedModules[i]);
+        }
+        free(gLoadedModules);
+    }
+    gLoadedModules = NULL;
+    gLoadedModuleCount = 0;
+    gLoadedModuleCapacity = 0;
+}
+
 static ReaModuleBindingList *gActiveBindings = NULL;
 static char **gModuleDirStack = NULL;
 static int gModuleDirDepth = 0;
+static int gModuleDirCapacity = 0;
 static char *reaDupString(const char *s);
 static char *duplicateDirName(const char *path);
 static char *tryResolveFromRepository(const char *relative, bool *out_exists);
@@ -94,6 +124,19 @@ static char **gEnvImportPaths = NULL;
 static int gEnvImportPathCount = 0;
 static int gEnvImportPathCapacity = 0;
 static bool gEnvImportPathsLoaded = false;
+
+static void clearEnvImportPaths(void) {
+    if (gEnvImportPaths) {
+        for (int i = 0; i < gEnvImportPathCount; i++) {
+            free(gEnvImportPaths[i]);
+        }
+        free(gEnvImportPaths);
+    }
+    gEnvImportPaths = NULL;
+    gEnvImportPathCount = 0;
+    gEnvImportPathCapacity = 0;
+    gEnvImportPathsLoaded = false;
+}
 
 #define REA_IMPORT_PATH_ENV "REA_IMPORT_PATH"
 #define REA_DEFAULT_IMPORT_DIR "/usr/local/lib/rea"
@@ -198,20 +241,20 @@ static void freeDirStack(void) {
     free(gModuleDirStack);
     gModuleDirStack = NULL;
     gModuleDirDepth = 0;
+    gModuleDirCapacity = 0;
 }
 
 static bool ensureDirStackCapacity(int needed) {
-    static int capacity = 0;
-    if (capacity >= needed) return true;
-    int newCap = capacity ? capacity * 2 : 8;
+    if (gModuleDirCapacity >= needed) return true;
+    int newCap = gModuleDirCapacity ? gModuleDirCapacity * 2 : 8;
     while (newCap < needed) newCap *= 2;
     char **resized = (char **)realloc(gModuleDirStack, (size_t)newCap * sizeof(char *));
     if (!resized) return false;
-    for (int i = capacity; i < newCap; i++) {
+    for (int i = gModuleDirCapacity; i < newCap; i++) {
         resized[i] = NULL;
     }
     gModuleDirStack = resized;
-    capacity = newCap;
+    gModuleDirCapacity = newCap;
     return true;
 }
 
@@ -3730,4 +3773,14 @@ char *reaResolveImportPath(const char *path) {
         return NULL;
     }
     return resolved;
+}
+
+void reaSemanticResetState(void) {
+    clearModuleCache();
+    clearEnvImportPaths();
+    clearGenericTypeState();
+    freeDirStack();
+    freeClassTable();
+    gActiveBindings = NULL;
+    gProgramRoot = NULL;
 }
