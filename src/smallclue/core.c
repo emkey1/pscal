@@ -6,7 +6,7 @@
 #include "smallclue/smallclue.h"
 
 #include "common/runtime_tty.h"
-#include "smallclue/elvis_app.h"
+#include "smallclue/nextvi_app.h"
 #include "smallclue/openssh_app.h"
 #if defined(PSCAL_HAS_LIBCURL)
 #include <curl/curl.h>

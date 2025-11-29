@@ -1,4 +1,4 @@
-#include "smallclue/elvis_app.h"
+#include "smallclue/nextvi_app.h"
 
 #include <stdbool.h>
 #include <stdio.h>

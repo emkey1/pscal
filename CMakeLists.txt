@@ -772,7 +772,7 @@ set(PSCAL_CORE_SOURCES
     src/common/pascal_state.c
     src/smallclue/core.c
     src/smallclue/integration.c
-    src/smallclue/elvis_app.c
+    src/smallclue/nextvi_app.c
     src/smallclue/openssh_app.c
     src/vm/vm.c
     lib/noise/noise.c
