@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
+#include "third-party/nextvi/vi.h"
 
 extern int nextvi_main_entry(int argc, char **argv);
 
@@ -36,6 +37,17 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
     } else {
         unsetenv(name);
     }
+}
+
+static void smallclueResetNextviGlobals(void) {
+    xquit = 0;
+    xvis = 0;
+    texec = 0;
+    tn = 0;
+    ibuf_pos = 0;
+    ibuf_cnt = 0;
+    icmd_pos = 0;
+    term_record = 0;
 }
 
 #if defined(PSCAL_TARGET_IOS)
@@ -93,6 +105,8 @@ static int smallclueSetupTty(void) {
 
 int smallclueRunElvis(int argc, char **argv) {
     char *saved_term = smallclueOverrideEnv("TERM", "vt100");
+
+    smallclueResetNextviGlobals();
 
     int dup_fd = smallclueSetupTty();
     struct termios saved_ios;
