@@ -35,6 +35,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <signal.h>
+#include <fcntl.h>
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -2704,8 +2705,9 @@ static void vmSetupTermHandlers(void) {
     pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
 }
 
+static void init_pipe_once(void);
+
 static void vmEnsureSigintPipe(void) {
-    void init_pipe_once(void);
     pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
 }
 
