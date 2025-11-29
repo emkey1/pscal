@@ -13,11 +13,18 @@ extern void pscalTerminalEnd(void);
 extern void pscalTerminalRender(const char *utf8, int len, int row, int col, long fg, long bg, int attr);
 extern void pscalTerminalClear(void);
 extern void pscalTerminalMoveCursor(int row, int col);
+extern int pscalTerminalRead(unsigned char *buffer, int maxlen, int timeout_ms);
 static int ios_row = 0;
 static int ios_col = 0;
 static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
+}
+static void ios_term_render_buf(const char *s, int n) {
+	if (!s || n <= 0) return;
+	for (int i = 0; i < n; i++) {
+		ios_term_render_char(s[i]);
+	}
 }
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
@@ -176,6 +183,11 @@ void term_pos(int r, int c)
 #endif
 }
 
+#if defined(PSCAL_TARGET_IOS)
+#undef term_write
+#define term_write(s, n) ios_term_render_buf(s, n)
+#endif
+
 /* read s before reading from the terminal */
 void term_push(char *s, unsigned int n)
 {
@@ -213,6 +225,22 @@ void term_back(int c)
 int term_read(void)
 {
 	struct pollfd ufds[1];
+#if defined(PSCAL_TARGET_IOS)
+	if (ibuf_pos >= ibuf_cnt) {
+		int n = pscalTerminalRead(ibuf, 1, 1000);
+		if (n <= 0) {
+			if (texec) {
+				xquit = texec == '&' ? -1 : 1;
+			}
+			return 0;
+		}
+		ibuf_cnt = (unsigned int)n;
+		ibuf_pos = 0;
+	}
+	if (icmd_pos < sizeof(icmd))
+		icmd[icmd_pos++] = ibuf[ibuf_pos];
+	return ibuf[ibuf_pos++];
+#else
 	if (ibuf_pos >= ibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
@@ -234,6 +262,7 @@ int term_read(void)
 	if (icmd_pos < sizeof(icmd))
 		icmd[icmd_pos++] = ibuf[ibuf_pos];
 	return ibuf[ibuf_pos++];
+#endif
 }
 
 /* return a static string that changes text attributes to att */
