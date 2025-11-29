@@ -20,7 +20,6 @@ static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
 }
-static void ios_term_render_buf(const char *s, int n);
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
 		return;
@@ -49,6 +48,85 @@ static void ios_term_clear_line_from_cursor(void) {
 		pscalTerminalRender(" ", 1, ios_row, c, 0, 0, 0);
 	}
 }
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+static void ios_term_write(const char *s, int n) {
+	if (!s || n <= 0)
+		return;
+	write(1, s, n);
+	int i = 0;
+	while (i < n) {
+		unsigned char ch = (unsigned char)s[i];
+		if (ch == 0x1B && i + 1 < n && s[i + 1] == '[') {
+			i += 2;
+			int num1 = 0, num2 = 0;
+			int parsing_second = 0;
+			while (i < n) {
+				char c = s[i];
+				if (c >= '0' && c <= '9') {
+					int *target = parsing_second ? &num2 : &num1;
+					*target = (*target * 10) + (c - '0');
+					i++;
+					continue;
+				}
+				if (c == ';') {
+					parsing_second = 1;
+					i++;
+					continue;
+				}
+				if (c == 'H' || c == 'f') {
+					int r = (num1 > 0 ? num1 - 1 : 0);
+					int ccol = (num2 > 0 ? num2 - 1 : 0);
+					ios_row = r;
+					ios_col = ccol;
+					pscalTerminalMoveCursor(ios_row, ios_col);
+				}
+				else if (c == 'J') {
+					pscalTerminalClear();
+					ios_term_reset();
+				}
+				else if (c == 'K') {
+					ios_term_clear_line_from_cursor();
+				}
+				else if (c == 'A') {
+					int step = num1 > 0 ? num1 : 1;
+					ios_row -= step;
+					if (ios_row < 0) ios_row = 0;
+					pscalTerminalMoveCursor(ios_row, ios_col);
+				}
+				else if (c == 'B') {
+					int step = num1 > 0 ? num1 : 1;
+					ios_row += step;
+					if (ios_row >= xrows) ios_row = xrows - 1;
+					pscalTerminalMoveCursor(ios_row, ios_col);
+				}
+				else if (c == 'C') {
+					int step = num1 > 0 ? num1 : 1;
+					ios_col += step;
+					if (ios_col >= xcols) ios_col = xcols - 1;
+					pscalTerminalMoveCursor(ios_row, ios_col);
+				}
+				else if (c == 'D') {
+					int step = num1 > 0 ? num1 : 1;
+					ios_col -= step;
+					if (ios_col < 0) ios_col = 0;
+					pscalTerminalMoveCursor(ios_row, ios_col);
+				}
+				i++;
+				break;
+			}
+			continue;
+		}
+		ios_term_render_char((char)ch);
+		i++;
+	}
+}
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#undef term_write
+#define term_write(s, n) ios_term_write(s, n)
 #endif
 
 void term_init(void)
@@ -118,14 +196,10 @@ void term_commit(void)
 
 static void term_out(char *s)
 {
-	size_t len = strlen(s);
 	if (term_record)
 		sbufn_str(term_sbuf, s)
 	else
-		term_write(s, len)
-#if defined(PSCAL_TARGET_IOS)
-	ios_term_render_buf(s, (int)len);
-#endif
+		term_write(s, strlen(s))
 }
 
 void term_chr(int ch)
@@ -192,8 +266,7 @@ static void ios_term_render_buf(const char *s, int n) {
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
-#undef term_write
-#define term_write(s, n) ios_term_render_buf(s, n)
+/* term_write is left intact; we mirror only explicit character writes. */
 #endif
 
 /* read s before reading from the terminal */
