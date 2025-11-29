@@ -172,8 +172,8 @@ void term_done(void)
 
 void term_clean(void)
 {
-	term_write("\x1b[2J", 4)	/* clear screen */
-	term_write("\x1b[H", 3)		/* cursor topleft */
+	term_write("\x1b[2J", 4);	/* clear screen */
+	term_write("\x1b[H", 3);		/* cursor topleft */
 #if defined(PSCAL_TARGET_IOS)
 	pscalTerminalClear();
 	ios_term_reset();
@@ -189,17 +189,17 @@ void term_suspend(void)
 
 void term_commit(void)
 {
-	term_write(term_sbuf->s, term_sbuf->s_n)
-	sbuf_cut(term_sbuf, 0)
+	term_write(term_sbuf->s, term_sbuf->s_n);
+	sbuf_cut(term_sbuf, 0);
 	term_record = 0;
 }
 
 static void term_out(char *s)
 {
 	if (term_record)
-		sbufn_str(term_sbuf, s)
+		sbufn_str(term_sbuf, s);
 	else
-		term_write(s, strlen(s))
+		term_write(s, strlen(s));
 }
 
 void term_chr(int ch)
