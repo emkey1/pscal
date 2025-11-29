@@ -30,6 +30,7 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <sys/resource.h>
+#include <sys/select.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
@@ -2772,6 +2773,70 @@ static void vmPrepareCanonicalInput(void) {
     fflush(stdout);
 }
 
+static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
+    if (!stream || !buffer || buffer_sz == 0) {
+        return false;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+
+    size_t len = 0;
+    if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
+        while (len < buffer_sz - 1) {
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                buffer[0] = '\0';
+                return false;
+            }
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100 * 1000; // 100ms
+            int ready = select(fd + 1, &rfds, NULL, NULL, &tv);
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ready == 0) {
+                continue;
+            }
+            char ch;
+            ssize_t n = read(fd, &ch, 1);
+            if (n == 0) {
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ch == '\r') {
+                continue;
+            }
+            if (ch == '\n') {
+                break;
+            }
+            buffer[len++] = ch;
+        }
+        buffer[len] = '\0';
+        if (len > 0 || feof(stream)) {
+            return true;
+        }
+    }
+
+    if (fgets(buffer, buffer_sz, stream) == NULL) {
+        return false;
+    }
+    buffer[strcspn(buffer, "\r\n")] = '\0';
+    return true;
+}
+
 // Attempts to get the current cursor position using ANSI DSR query.
 // Returns 0 on success, -1 on failure.
 // Stores results in *row and *col.
@@ -4964,7 +5029,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
     // 2) Read full line
     char line_buffer[1024];
-    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
+    if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
         last_io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
