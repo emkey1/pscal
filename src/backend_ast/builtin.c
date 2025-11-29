@@ -34,6 +34,7 @@
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
+#include <signal.h>
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -2496,6 +2497,9 @@ typedef struct {
 static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
 static _Thread_local int vm_color_stack_depth = 0;
 static volatile sig_atomic_t g_vm_sigint_seen = 0;
+static int g_vm_sigint_pipe[2] = {-1, -1};
+static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
+static volatile sig_atomic_t g_vm_sigint_seen = 0;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2660,6 +2664,10 @@ static void vmAtExitCleanup(void) {
 static void vmSignalHandler(int signum) {
     if (signum == SIGINT) {
         g_vm_sigint_seen = 1;
+        if (g_vm_sigint_pipe[1] >= 0) {
+            char c = 'i';
+            (void)write(g_vm_sigint_pipe[1], &c, 1);
+        }
         return;
     }
     if (vm_raw_mode || vm_alt_screen_depth > 0)
@@ -2695,6 +2703,24 @@ static void vmSetupTermHandlers(void) {
     pthread_mutex_unlock(&vm_term_mutex);
 
     pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
+}
+
+static void vmEnsureSigintPipe(void) {
+    void init_pipe_once(void) {
+        if (pipe(g_vm_sigint_pipe) != 0) {
+            g_vm_sigint_pipe[0] = -1;
+            g_vm_sigint_pipe[1] = -1;
+        } else {
+            for (int i = 0; i < 2; ++i) {
+                fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
+                int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
+                if (flags >= 0) {
+                    fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
+                }
+            }
+        }
+    }
+    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
 }
 
 void vmInitTerminalState(void) {
@@ -2788,6 +2814,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     }
 
     size_t len = 0;
+    vmEnsureSigintPipe();
     if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
         while (len < buffer_sz - 1) {
             if (g_vm_sigint_seen) {
@@ -2806,10 +2833,17 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             fd_set rfds;
             FD_ZERO(&rfds);
             FD_SET(fd, &rfds);
+            if (g_vm_sigint_pipe[0] >= 0) {
+                FD_SET(g_vm_sigint_pipe[0], &rfds);
+            }
             struct timeval tv;
             tv.tv_sec = 0;
             tv.tv_usec = 100 * 1000; // 100ms
-            int ready = select(fd + 1, &rfds, NULL, NULL, &tv);
+            int maxfd = fd;
+            if (g_vm_sigint_pipe[0] >= 0 && g_vm_sigint_pipe[0] > maxfd) {
+                maxfd = g_vm_sigint_pipe[0];
+            }
+            int ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
             if (ready < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -2824,6 +2858,17 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             }
             if (ready == 0) {
                 continue;
+            }
+            if (g_vm_sigint_pipe[0] >= 0 && FD_ISSET(g_vm_sigint_pipe[0], &rfds)) {
+                char drain[8];
+                while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+                }
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
             }
             char ch;
             ssize_t n = read(fd, &ch, 1);
