@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -18,6 +19,26 @@ static void pathTruncateResetCaches(void) {
     g_pathTruncatePrimaryLen = 0;
     g_pathTruncateAlias[0] = '\0';
     g_pathTruncateAliasLen = 0;
+}
+
+static void pathTruncateEnsureDir(const char *path) {
+    if (!path || *path == '\0') {
+        return;
+    }
+    char buf[PATH_MAX];
+    size_t len = strlen(path);
+    if (len + 1 > sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, path, len + 1);
+    for (char *p = buf + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(buf, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(buf, 0777);
 }
 
 static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t out_size) {
@@ -257,6 +278,16 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
 void pathTruncateApplyEnvironment(const char *prefix) {
     if (prefix && prefix[0] == '/') {
         setenv("PATH_TRUNCATE", prefix, 1);
+        /* Seed common root directories so path virtualization has writable parents. */
+        char tmpbuf[PATH_MAX];
+        int written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/tmp", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
+        written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/var/tmp", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
     } else {
         unsetenv("PATH_TRUNCATE");
     }
