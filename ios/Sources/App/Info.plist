@@ -36,9 +36,9 @@
 				</dict>
 				<dict>
 					<key>UISceneConfigurationName</key>
-					<string>Elvis Scene</string>
+					<string>Editor Scene</string>
 					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).ElvisSceneDelegate</string>
+					<string>$(PRODUCT_MODULE_NAME).EditorSceneDelegate</string>
 				</dict>
 				<dict>
 					<key>UISceneConfigurationName</key>

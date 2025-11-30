@@ -3,8 +3,53 @@ import Foundation
 import Darwin
 import UIKit
 
+func traceLog(_ msg: String) {
+    // print("[BRIDGE-TRACE] \(msg)") // <--- COMMENT THIS OUT
+    pscalRuntimeDebugLogBridge("[BRIDGE-TRACE] \(msg)") // Use your existing safe logger
+}
+
 private let runtimeLogMirrorsToConsole: Bool = {
     guard let value = ProcessInfo.processInfo.environment["PSCALI_RUNTIME_STDERR"] else {
+        return false
+    }
+    return value != "0"
+}()
+
+private func terminalLogURL() -> URL? {
+    guard let raw = getenv("PSCALI_TERMINAL_LOG") else { return nil }
+    let path = String(cString: raw)
+    if path.isEmpty { return nil }
+    let url: URL
+    if path.hasPrefix("/") {
+        url = URL(fileURLWithPath: path)
+    } else {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let logDir = base.appendingPathComponent("var", isDirectory: true).appendingPathComponent("log", isDirectory: true)
+        url = logDir.appendingPathComponent(path)
+    }
+    let dir = url.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return url
+}
+
+private func terminalLog(_ message: String) {
+    guard let url = terminalLogURL() else { return }
+    let line = message + "\n"
+    guard let data = line.data(using: .utf8) else { return }
+    if FileManager.default.fileExists(atPath: url.path) {
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        }
+    } else {
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+private let elvisDebugLoggingEnabled: Bool = {
+    guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_ELVIS"] else {
         return false
     }
     return value != "0"
@@ -171,6 +216,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
         }
 
+        EditorTerminalBridge.shared.deactivate()
+
         terminalBuffer.reset()
         DispatchQueue.main.async {
             self.screenText = NSAttributedString(string: "Launching exsh...")
@@ -198,7 +245,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func send(_ text: String) {
-        guard let data = text.data(using: .utf8), !data.isEmpty else { return }
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        guard let data = normalized.data(using: .utf8), !data.isEmpty else { return }
         if data.count == 1 {
             switch data.first {
             case 0x03: // Ctrl-C
@@ -209,7 +257,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 break
             }
         }
-        if ElvisTerminalBridge.shared.interceptInputIfNeeded(data: data) {
+        if EditorTerminalBridge.shared.interceptInputIfNeeded(data: data) {
             return
         }
         echoLocallyIfNeeded(text)
@@ -288,6 +336,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.async {
             self.exitStatus = status
+            EditorTerminalBridge.shared.deactivate()
+            EditorWindowManager.shared.hideWindow()
+            self.setElvisModeActive(false)
             let restartDelay: TimeInterval = 0.1
             runtimeDebugLog("[Runtime] restarting exsh in \(restartDelay)s after status \(status)")
             DispatchQueue.main.asyncAfter(deadline: .now() + restartDelay) {
@@ -326,19 +377,35 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func setElvisModeActive(_ active: Bool) {
-        stateQueue.sync {
-            elvisModeActive = active
+            stateQueue.sync {
+                elvisModeActive = active
+            }
+
+            if active {
+                // 1. CRITICAL FIX: Force the C-Runtime to match the Main UI size.
+                // Do not rely on 'geometryBySource[.elvis]' because it contains
+                // the stale/wrong size (e.g., 94 or 64 rows).
+                let validMetrics = geometryBySource[.main] ?? activeGeometry
+                
+                runtimeDebugLog("[Geometry] Forcing C-Runtime to sync with Main UI: \(validMetrics.columns)x\(validMetrics.rows)")
+                
+                // Tell the C-side: "No, you are actually THIS big."
+                PSCALRuntimeUpdateWindowSize(Int32(validMetrics.columns), Int32(validMetrics.rows))
+                
+                // 2. Update the internal tracker to match
+                activeGeometry = validMetrics
+                activeGeometrySource = .main // Force source to main to prevent reverting to stale elvis metrics
+                
+                refreshElvisDisplay()
+            } else {
+                // Exiting editor mode
+                refreshActiveGeometry(forceRuntimeUpdate: true)
+                scheduleRender()
+            }
         }
-        refreshActiveGeometry(forceRuntimeUpdate: true)
-        if active {
-            refreshElvisDisplay()
-        } else {
-            scheduleRender()
-        }
-    }
 
     func refreshElvisDisplay() {
-        guard ElvisTerminalBridge.shared.isActive else { return }
+        guard EditorTerminalBridge.shared.isActive else { return }
         let shouldSchedule: Bool = stateQueue.sync {
             if elvisRefreshPending {
                 return false
@@ -350,7 +417,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         DispatchQueue.main.async {
             self.terminalBackgroundColor = TerminalFontSettings.shared.backgroundColor
             self.elvisRenderToken &+= 1
-            ElvisWindowManager.shared.refreshWindow()
+            EditorWindowManager.shared.refreshWindow()
             self.stateQueue.sync {
                 self.elvisRefreshPending = false
             }
@@ -404,7 +471,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func determineDesiredGeometrySource() -> GeometrySource {
-        if isElvisModeActive() && ElvisWindowManager.shared.isVisible {
+        if isElvisModeActive() && EditorWindowManager.shared.isVisible {
             return .elvis
         }
         return .main
@@ -412,15 +479,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     private func applyActiveGeometry(resizeTerminalBuffer: Bool, forceRuntimeUpdate: Bool) {
         let metrics = activeGeometry
+        let runtimeColumns = metrics.columns
+        let runtimeRows = metrics.rows
         if resizeTerminalBuffer {
-            let resized = terminalBuffer.resize(columns: metrics.columns, rows: metrics.rows)
+            let resized = terminalBuffer.resize(columns: runtimeColumns, rows: runtimeRows)
             if resized {
                 scheduleRender()
             }
         }
         if forceRuntimeUpdate || resizeTerminalBuffer {
-            runtimeDebugLog("[Geometry] applying runtime window size columns=\(metrics.columns) rows=\(metrics.rows) resizeBuffer=\(resizeTerminalBuffer) force=\(forceRuntimeUpdate)")
-            PSCALRuntimeUpdateWindowSize(Int32(metrics.columns), Int32(metrics.rows))
+            runtimeDebugLog("[Geometry] applying runtime window size columns=\(runtimeColumns) rows=\(runtimeRows) resizeBuffer=\(resizeTerminalBuffer) force=\(forceRuntimeUpdate)")
+            PSCALRuntimeUpdateWindowSize(Int32(runtimeColumns), Int32(runtimeRows))
         }
     }
 
@@ -478,25 +547,106 @@ struct TerminalCursorInfo: Equatable {
 
 struct ElvisSnapshot {
     let text: String
+    let attributedText: NSAttributedString
     let cursor: TerminalCursorInfo?
 }
 
-final class ElvisTerminalBridge {
-    static let shared = ElvisTerminalBridge()
+struct CellAttributes: Equatable {
+    let fg: Int?
+    let bg: Int?
+    let bold: Bool
+    let underline: Bool
+    let inverse: Bool
+
+    static let defaultAttributes = CellAttributes(fg: nil, bg: nil, bold: false, underline: false, inverse: false)
+}
+
+private struct TerminalPalette {
+    static let shared = TerminalPalette()
+
+    private static func buildPalette() -> [UIColor] {
+        var palette: [UIColor] = []
+        // 0-15 standard/bright
+        let base: [UIColor] = [
+            UIColor(red: 0/255.0, green: 0/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 205/255.0, green: 0/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 0/255.0, green: 205/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 205/255.0, green: 205/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 0/255.0, green: 0/255.0, blue: 238/255.0, alpha: 1),
+            UIColor(red: 205/255.0, green: 0/255.0, blue: 205/255.0, alpha: 1),
+            UIColor(red: 0/255.0, green: 205/255.0, blue: 205/255.0, alpha: 1),
+            UIColor(red: 229/255.0, green: 229/255.0, blue: 229/255.0, alpha: 1),
+            UIColor(red: 127/255.0, green: 127/255.0, blue: 127/255.0, alpha: 1),
+            UIColor(red: 255/255.0, green: 0/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 0/255.0, green: 255/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 255/255.0, green: 255/255.0, blue: 0/255.0, alpha: 1),
+            UIColor(red: 92/255.0, green: 92/255.0, blue: 255/255.0, alpha: 1),
+            UIColor(red: 255/255.0, green: 0/255.0, blue: 255/255.0, alpha: 1),
+            UIColor(red: 0/255.0, green: 255/255.0, blue: 255/255.0, alpha: 1),
+            UIColor(red: 255/255.0, green: 255/255.0, blue: 255/255.0, alpha: 1)
+        ]
+        palette.append(contentsOf: base)
+        // 16-231 color cube
+        let steps: [CGFloat] = [0, 95, 135, 175, 215, 255]
+        for r in 0..<6 {
+            for g in 0..<6 {
+                for b in 0..<6 {
+                    let color = UIColor(red: steps[r]/255.0,
+                                        green: steps[g]/255.0,
+                                        blue: steps[b]/255.0,
+                                        alpha: 1)
+                    palette.append(color)
+                }
+            }
+        }
+        // 232-255 grayscale
+        for i in 0..<24 {
+            let val = CGFloat(8 + i * 10)
+            let c = val/255.0
+            palette.append(UIColor(red: c, green: c, blue: c, alpha: 1))
+        }
+        return palette
+    }
+
+    private let colors: [UIColor] = TerminalPalette.buildPalette()
+
+    func resolve(attr: CellAttributes, defaultFG: UIColor, defaultBG: UIColor) -> (fg: UIColor, bg: UIColor) {
+        let fgColor = color(for: attr.fg, default: defaultFG)
+        let bgColor = color(for: attr.bg, default: defaultBG)
+        if attr.inverse {
+            return (bgColor, fgColor)
+        }
+        return (fgColor, bgColor)
+    }
+
+    private func color(for index: Int?, default: UIColor) -> UIColor {
+        guard let idx = index else { return `default` }
+        if idx >= 0 && idx < colors.count {
+            return colors[idx]
+        }
+        return `default`
+    }
+}
+
+final class EditorTerminalBridge {
+    static let shared = EditorTerminalBridge()
 
     private struct ScreenState {
         var rows: Int = 0
         var columns: Int = 0
         var grid: [[Character]] = []
+        var attrs: [[CellAttributes]] = []
         var cursorRow: Int = 0
         var cursorCol: Int = 0
         var active: Bool = false
+        var cursorVisible: Bool = true
     }
 
-    private let stateQueue = DispatchQueue(label: "com.pscal.elvis.bridge.state", attributes: .concurrent)
+    private let stateQueue = DispatchQueue(label: "com.pscal.editor.bridge.state", attributes: .concurrent)
     private var state = ScreenState()
     private let inputCondition = NSCondition()
     private var pendingInput: [UInt8] = []
+    private var altScreenState: ScreenState?
 
     var isActive: Bool {
         stateQueue.sync { state.active }
@@ -508,9 +658,13 @@ final class ElvisTerminalBridge {
             state.columns = max(1, columns)
             state.rows = max(1, rows)
             let blankRow = Array(repeating: Character(" "), count: state.columns)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
             state.grid = Array(repeating: blankRow, count: state.rows)
+            state.attrs = Array(repeating: blankAttr, count: state.rows)
             state.cursorRow = 0
             state.cursorCol = 0
+            state.cursorVisible = true
+            altScreenState = nil
         }
         inputCondition.lock()
         pendingInput.removeAll()
@@ -521,10 +675,13 @@ final class ElvisTerminalBridge {
         stateQueue.sync(flags: .barrier) {
             state.active = false
             state.grid.removeAll()
+            state.attrs.removeAll()
             state.rows = 0
             state.columns = 0
             state.cursorRow = 0
             state.cursorCol = 0
+            state.cursorVisible = true
+            altScreenState = nil
         }
         inputCondition.lock()
         pendingInput.removeAll()
@@ -538,15 +695,19 @@ final class ElvisTerminalBridge {
             let newRows = max(1, rows)
             let newCols = max(1, columns)
             let blankRow = Array(repeating: Character(" "), count: newCols)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: newCols)
             var newGrid = Array(repeating: blankRow, count: newRows)
+            var newAttrs = Array(repeating: blankAttr, count: newRows)
             let copyRows = min(newRows, state.rows)
             let copyCols = min(newCols, state.columns)
             for r in 0..<copyRows {
                 for c in 0..<copyCols {
                     newGrid[r][c] = state.grid[r][c]
+                    newAttrs[r][c] = state.attrs[r][c]
                 }
             }
             state.grid = newGrid
+            state.attrs = newAttrs
             state.rows = newRows
             state.columns = newCols
             state.cursorRow = min(state.cursorRow, newRows - 1)
@@ -558,9 +719,189 @@ final class ElvisTerminalBridge {
         stateQueue.sync(flags: .barrier) {
             guard state.active else { return }
             let blankRow = Array(repeating: Character(" "), count: state.columns)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
             state.grid = Array(repeating: blankRow, count: state.rows)
+            state.attrs = Array(repeating: blankAttr, count: state.rows)
             state.cursorRow = 0
             state.cursorCol = 0
+        }
+    }
+
+    private func clearLineSegment(row: Int, start: Int, end: Int) {
+        guard state.active,
+              row >= 0, row < state.rows,
+              start < end else { return }
+        let begin = max(0, min(start, state.columns))
+        let stop = max(begin, min(end, state.columns))
+        let space = Character(" ")
+        for col in begin..<stop {
+            state.grid[row][col] = space
+            state.attrs[row][col] = CellAttributes.defaultAttributes
+        }
+    }
+
+    func clearToEndOfScreen(row: Int, col: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active else { return }
+            let r = max(0, min(row, state.rows - 1))
+            let c = max(0, min(col, state.columns))
+            clearLineSegment(row: r, start: c, end: state.columns)
+            if r + 1 < state.rows {
+                let blankRow = Array(repeating: Character(" "), count: state.columns)
+                let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+                for rr in (r + 1)..<state.rows {
+                    state.grid[rr] = blankRow
+                    state.attrs[rr] = blankAttr
+                }
+            }
+        }
+    }
+
+    func clearToStartOfScreen(row: Int, col: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active else { return }
+            let r = max(0, min(row, state.rows - 1))
+            let c = max(0, min(col, state.columns))
+            if r > 0 {
+                let blankRow = Array(repeating: Character(" "), count: state.columns)
+                let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+                for rr in 0..<r {
+                    state.grid[rr] = blankRow
+                    state.attrs[rr] = blankAttr
+                }
+            }
+            clearLineSegment(row: r, start: 0, end: c + 1)
+        }
+    }
+
+    func clearLineFromCursor(row: Int, col: Int) {
+        stateQueue.sync(flags: .barrier) {
+            clearLineSegment(row: row, start: col, end: state.columns)
+        }
+    }
+
+    func clearLineToCursor(row: Int, col: Int) {
+        stateQueue.sync(flags: .barrier) {
+            clearLineSegment(row: row, start: 0, end: col + 1)
+        }
+    }
+
+    func clearLine(row: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active, row >= 0, row < state.rows else { return }
+            let blankRow = Array(repeating: Character(" "), count: state.columns)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+            state.grid[row] = blankRow
+            state.attrs[row] = blankAttr
+        }
+    }
+
+    func insertLines(at row: Int, count: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active, state.rows > 0, state.columns > 0 else { return }
+            let targetRow = max(0, min(row, state.rows - 1))
+            let linesToInsert = min(max(1, count), state.rows - targetRow)
+            let savedCursorRow = state.cursorRow
+            let savedCursorCol = state.cursorCol
+            let blankRow = Array(repeating: Character(" "), count: state.columns)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+            for _ in 0..<linesToInsert {
+                state.grid.insert(blankRow, at: targetRow)
+                state.grid.removeLast()
+                state.attrs.insert(blankAttr, at: targetRow)
+                state.attrs.removeLast()
+            }
+            state.cursorRow = savedCursorRow
+            state.cursorCol = savedCursorCol
+        }
+    }
+
+    func deleteLines(at row: Int, count: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active, state.rows > 0, state.columns > 0 else { return }
+            let targetRow = max(0, min(row, state.rows - 1))
+            let linesToDelete = min(max(1, count), state.rows - targetRow)
+            let savedCursorRow = state.cursorRow
+            let savedCursorCol = state.cursorCol
+            let blankRow = Array(repeating: Character(" "), count: state.columns)
+            for _ in 0..<linesToDelete {
+                state.grid.remove(at: targetRow)
+                state.grid.append(blankRow)
+                state.attrs.remove(at: targetRow)
+                state.attrs.append(Array(repeating: CellAttributes.defaultAttributes, count: state.columns))
+            }
+            state.cursorRow = savedCursorRow
+            state.cursorCol = savedCursorCol
+        }
+    }
+
+    func insertChars(at row: Int, col: Int, count: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active, state.rows > 0, state.columns > 0 else { return }
+            let r = max(0, min(row, state.rows - 1))
+            let c = max(0, min(col, state.columns - 1))
+            let amt = min(max(1, count), state.columns - c)
+            var line = state.grid[r]
+            var attrLine = state.attrs[r]
+            for idx in stride(from: state.columns - 1, through: c + amt, by: -1) {
+                line[idx] = line[idx - amt]
+                attrLine[idx] = attrLine[idx - amt]
+            }
+            for idx in c..<(c + amt) {
+                line[idx] = Character(" ")
+                attrLine[idx] = CellAttributes.defaultAttributes
+            }
+            state.grid[r] = line
+            state.attrs[r] = attrLine
+        }
+    }
+
+    func deleteChars(at row: Int, col: Int, count: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active, state.rows > 0, state.columns > 0 else { return }
+            let r = max(0, min(row, state.rows - 1))
+            let c = max(0, min(col, state.columns - 1))
+            let amt = min(max(1, count), state.columns - c)
+            var line = state.grid[r]
+            var attrLine = state.attrs[r]
+            for idx in c..<(state.columns - amt) {
+                line[idx] = line[idx + amt]
+                attrLine[idx] = attrLine[idx + amt]
+            }
+            for idx in (state.columns - amt)..<state.columns {
+                line[idx] = Character(" ")
+                attrLine[idx] = CellAttributes.defaultAttributes
+            }
+            state.grid[r] = line
+            state.attrs[r] = attrLine
+        }
+    }
+
+    func setCursorVisible(_ visible: Bool) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active else { return }
+            state.cursorVisible = visible
+        }
+    }
+
+    func enterAltScreen() {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active else { return }
+            altScreenState = state
+            let blankRow = Array(repeating: Character(" "), count: state.columns)
+            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+            state.grid = Array(repeating: blankRow, count: state.rows)
+            state.attrs = Array(repeating: blankAttr, count: state.rows)
+            state.cursorRow = 0
+            state.cursorCol = 0
+        }
+    }
+
+    func exitAltScreen() {
+        stateQueue.sync(flags: .barrier) {
+            guard let saved = altScreenState else { return }
+            state = saved
+            altScreenState = nil
         }
     }
 
@@ -574,27 +915,39 @@ final class ElvisTerminalBridge {
 
     private func normalizeRow(_ row: Int) -> Int {
         guard state.rows > 0 else { return 0 }
-        var normalized = row
-        while normalized < 0 {
-            normalized += state.rows
-        }
-        return normalized % max(1, state.rows)
+        if row < 0 { return 0 }
+        if row >= state.rows { return state.rows - 1 }
+        return row
     }
 
-    func draw(row: Int, column: Int, text: UnsafePointer<CChar>?, length: Int) {
+    func draw(row: Int, column: Int, text: UnsafePointer<CChar>?, length: Int, fg: Int32, bg: Int32, attr: Int32) {
         guard let text, length > 0 else { return }
-        let buffer = UnsafeBufferPointer(start: text, count: length)
+        let data = Data(bytes: text, count: length)
+        let string = String(decoding: data, as: UTF8.self)
         stateQueue.sync(flags: .barrier) {
             guard state.active, state.rows > 0, state.columns > 0 else { return }
             let targetRow = max(0, min(normalizeRow(row), state.rows - 1))
             var targetCol = max(0, min(column, state.columns - 1))
-            for byte in buffer {
+            let attributes = CellAttributes(fg: fg >= 0 ? Int(fg) : nil,
+                                            bg: bg >= 0 ? Int(bg) : nil,
+                                            bold: (attr & 1) != 0,
+                                            underline: (attr & 2) != 0,
+                                            inverse: (attr & 4) != 0)
+            for ch in string {
+                if ch == "\n" {
+                    state.cursorRow = min(state.rows - 1, targetRow + 1)
+                    state.cursorCol = 0
+                    break;
+                }
+                if let scalar = ch.unicodeScalars.first,
+                   scalar.properties.generalCategory == .control {
+                    continue
+                }
                 if targetCol >= state.columns {
                     break
                 }
-                let scalarValue = UInt32(UInt8(bitPattern: byte))
-                let scalar = UnicodeScalar(scalarValue) ?? " "
-                state.grid[targetRow][targetCol] = Character(scalar)
+                state.grid[targetRow][targetCol] = ch
+                state.attrs[targetRow][targetCol] = attributes
                 targetCol += 1
             }
         }
@@ -620,9 +973,46 @@ final class ElvisTerminalBridge {
         } else {
             lines = currentState.grid.map { String($0) }
         }
-        let joined = lines.joined(separator: "\n")
+        let palette = TerminalPalette.shared
+        let fgDefault = TerminalFontSettings.shared.foregroundColor
+        let bgDefault = TerminalFontSettings.shared.backgroundColor
+        let baseFont = TerminalFontSettings.shared.currentFont
+        let boldFont: UIFont = {
+            if let desc = baseFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                return UIFont(descriptor: desc, size: baseFont.pointSize)
+            }
+            return baseFont
+        }()
+
+        var plainBuilder = String()
+        plainBuilder.reserveCapacity(currentState.rows * currentState.columns + max(currentState.rows - 1, 0))
+        let attributed = NSMutableAttributedString()
+        let newlineAttrs: [NSAttributedString.Key: Any] = [.font: baseFont,
+                                                           .foregroundColor: fgDefault,
+                                                           .backgroundColor: bgDefault]
+
+        for r in 0..<currentState.rows {
+            for c in 0..<currentState.columns {
+                let ch = currentState.grid[r][c]
+                let attr = currentState.attrs[r][c]
+                plainBuilder.append(ch)
+                let resolved = palette.resolve(attr: attr, defaultFG: fgDefault, defaultBG: bgDefault)
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: attr.bold ? boldFont : baseFont,
+                    .foregroundColor: resolved.fg,
+                    .backgroundColor: resolved.bg,
+                    .underlineStyle: attr.underline ? NSUnderlineStyle.single.rawValue : 0
+                ]
+                attributed.append(NSAttributedString(string: String(ch), attributes: attrs))
+            }
+            if r < currentState.rows - 1 {
+                plainBuilder.append("\n")
+                attributed.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
+            }
+        }
+        let joined = plainBuilder
         let cursor: TerminalCursorInfo?
-        if currentState.active && !lines.isEmpty {
+        if currentState.active && currentState.cursorVisible && !lines.isEmpty {
             let row = max(0, min(currentState.cursorRow, lines.count - 1))
             let column = max(0, min(currentState.cursorCol, currentState.columns))
             var offset = 0
@@ -650,6 +1040,7 @@ final class ElvisTerminalBridge {
             cursor = nil
         }
         return ElvisSnapshot(text: joined,
+                              attributedText: attributed,
                               cursor: cursor)
     }
 
@@ -700,74 +1091,164 @@ final class ElvisTerminalBridge {
 
 @_cdecl("pscalTerminalBegin")
 func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
-    let logLine = "pscalTerminalBegin cols=\(columns) rows=\(rows)"
-    runtimeDebugLog(logLine)
-    ElvisTerminalBridge.shared.activate(columns: Int(columns), rows: Int(rows))
+    if elvisDebugLoggingEnabled {
+        runtimeDebugLog("pscalTerminalBegin cols=\(columns) rows=\(rows)")
+    }
+    EditorTerminalBridge.shared.activate(columns: Int(columns), rows: Int(rows))
     PscalRuntimeBootstrap.shared.setElvisModeActive(true)
-    ElvisWindowManager.shared.showWindow()
+    EditorWindowManager.shared.showWindow()
 }
 
 @_cdecl("pscalTerminalEnd")
 func pscalTerminalEnd() {
-    runtimeDebugLog("pscalTerminalEnd")
-    ElvisTerminalBridge.shared.deactivate()
+    if elvisDebugLoggingEnabled {
+        runtimeDebugLog("pscalTerminalEnd")
+    }
+    EditorTerminalBridge.shared.deactivate()
     PscalRuntimeBootstrap.shared.setElvisModeActive(false)
-    ElvisWindowManager.shared.hideWindow()
+    EditorWindowManager.shared.hideWindow()
 }
 
 @_cdecl("pscalTerminalResize")
 func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
-    let logLine = "pscalTerminalResize cols=\(columns) rows=\(rows)"
-    runtimeDebugLog(logLine)
-    ElvisTerminalBridge.shared.resize(columns: Int(columns), rows: Int(rows))
+    if elvisDebugLoggingEnabled {
+        runtimeDebugLog("pscalTerminalResize cols=\(columns) rows=\(rows)")
+    }
+    EditorTerminalBridge.shared.resize(columns: Int(columns), rows: Int(rows))
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalRender")
 func pscalTerminalRender(_ utf8: UnsafePointer<CChar>?, _ len: Int32, _ row: Int32, _ col: Int32, _ fg: Int64, _ bg: Int64, _ attr: Int32) {
-    let logLine = "pscalTerminalRender len=\(len) row=\(row) col=\(col)"
-    runtimeDebugLog(logLine)
-    _ = fg
-    _ = bg
-    _ = attr
-    ElvisTerminalBridge.shared.draw(row: Int(row), column: Int(col), text: utf8, length: Int(len))
+    if let logUrl = terminalLogURL() {
+        let previewLen = min(Int(len), 8)
+        let bytes = (0..<previewLen).compactMap { idx in utf8?[idx] }.map { String(format: "%02X", $0) }.joined(separator: " ")
+        terminalLog("RENDER row=\(row) col=\(col) len=\(len) fg=\(fg) bg=\(bg) attr=\(attr) bytes=\(bytes)")
+    }
+    EditorTerminalBridge.shared.draw(row: Int(row),
+                                     column: Int(col),
+                                     text: utf8,
+                                     length: Int(len),
+                                     fg: Int32(truncatingIfNeeded: fg),
+                                     bg: Int32(truncatingIfNeeded: bg),
+                                     attr: attr)
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClear")
 func pscalTerminalClear() {
-    runtimeDebugLog("pscalTerminalClear")
-    ElvisTerminalBridge.shared.clear()
+    if elvisDebugLoggingEnabled {
+        runtimeDebugLog("pscalTerminalClear")
+    }
+    if terminalLogURL() != nil { terminalLog("CLEAR") }
+    EditorTerminalBridge.shared.clear()
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalMoveCursor")
 func pscalTerminalMoveCursor(_ row: Int32, _ column: Int32) {
-    ElvisTerminalBridge.shared.moveCursor(row: Int(row), column: Int(column))
+    if terminalLogURL() != nil {
+        terminalLog("CURSOR row=\(row) col=\(column)")
+    }
+    EditorTerminalBridge.shared.moveCursor(row: Int(row), column: Int(column))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+@_cdecl("pscalTerminalClearEol")
+func pscalTerminalClearEol(_ row: Int32, _ column: Int32) {
+    EditorTerminalBridge.shared.clearToEndOfLine(row: Int(row), column: Int(column))
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
 }
 
-@_cdecl("pscalTerminalClearEol")
-func pscalTerminalClearEol(_ row: Int32, _ column: Int32) {
-    ElvisTerminalBridge.shared.clearToEndOfLine(row: Int(row), column: Int(column))
+@_cdecl("pscalTerminalClearBol")
+func pscalTerminalClearBol(_ row: Int32, _ column: Int32) {
+    EditorTerminalBridge.shared.clearLineToCursor(row: Int(row), col: Int(column))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalClearLine")
+func pscalTerminalClearLine(_ row: Int32) {
+    if terminalLogURL() != nil { terminalLog("CLEAR_LINE row=\(row)") }
+    EditorTerminalBridge.shared.clearLine(row: Int(row))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalClearScreenFromCursor")
+func pscalTerminalClearScreenFromCursor(_ row: Int32, _ column: Int32) {
+    if terminalLogURL() != nil { terminalLog("CLEAR_SCR_FROM row=\(row) col=\(column)") }
+    EditorTerminalBridge.shared.clearToEndOfScreen(row: Int(row), col: Int(column))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalClearScreenToCursor")
+func pscalTerminalClearScreenToCursor(_ row: Int32, _ column: Int32) {
+    if terminalLogURL() != nil { terminalLog("CLEAR_SCR_TO row=\(row) col=\(column)") }
+    EditorTerminalBridge.shared.clearToStartOfScreen(row: Int(row), col: Int(column))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalInsertLines")
+func pscalTerminalInsertLines(_ row: Int32, _ count: Int32) {
+    if terminalLogURL() != nil { terminalLog("IL row=\(row) count=\(count)") }
+    EditorTerminalBridge.shared.insertLines(at: Int(row), count: Int(max(1, count)))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalDeleteLines")
+func pscalTerminalDeleteLines(_ row: Int32, _ count: Int32) {
+    if terminalLogURL() != nil { terminalLog("DL row=\(row) count=\(count)") }
+    EditorTerminalBridge.shared.deleteLines(at: Int(row), count: Int(max(1, count)))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalInsertChars")
+func pscalTerminalInsertChars(_ row: Int32, _ col: Int32, _ count: Int32) {
+    if terminalLogURL() != nil { terminalLog("ICH row=\(row) col=\(col) count=\(count)") }
+    EditorTerminalBridge.shared.insertChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalDeleteChars")
+func pscalTerminalDeleteChars(_ row: Int32, _ col: Int32, _ count: Int32) {
+    if terminalLogURL() != nil { terminalLog("DCH row=\(row) col=\(col) count=\(count)") }
+    EditorTerminalBridge.shared.deleteChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalEnterAltScreen")
+func pscalTerminalEnterAltScreen() {
+    if terminalLogURL() != nil { terminalLog("ALT_ENTER") }
+    EditorTerminalBridge.shared.enterAltScreen()
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalExitAltScreen")
+func pscalTerminalExitAltScreen() {
+    if terminalLogURL() != nil { terminalLog("ALT_EXIT") }
+    EditorTerminalBridge.shared.exitAltScreen()
+    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+}
+
+@_cdecl("pscalTerminalSetCursorVisible")
+func pscalTerminalSetCursorVisible(_ visible: Int32) {
+    EditorTerminalBridge.shared.setCursorVisible(visible != 0)
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalRead")
 func pscalTerminalRead(_ buffer: UnsafeMutablePointer<UInt8>?, _ maxlen: Int32, _ timeout: Int32) -> Int32 {
     guard let buffer else { return 0 }
-    let bytesRead = ElvisTerminalBridge.shared.read(into: buffer, maxLength: Int(maxlen), timeoutMs: Int(timeout))
+    let bytesRead = EditorTerminalBridge.shared.read(into: buffer, maxLength: Int(maxlen), timeoutMs: Int(timeout))
     return Int32(bytesRead)
 }
 
 @_cdecl("pscalElvisDump")
 func pscalElvisDump() {
-    let snapshot = ElvisTerminalBridge.shared.snapshot()
+    let snapshot = EditorTerminalBridge.shared.snapshot()
     snapshot.text.withCString { cstr in
         fputs(cstr, stdout)
         fputc(0x0A, stdout)
     }
-    let debugState = ElvisTerminalBridge.shared.debugState()
+    let debugState = EditorTerminalBridge.shared.debugState()
     if let cursor = snapshot.cursor {
         let cursorLine = "[elvisdump] cursor row=\(cursor.row) col=\(cursor.column)\n"
         cursorLine.withCString { fputs($0, stderr) }

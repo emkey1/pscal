@@ -399,7 +399,7 @@ private struct TerminalContentView: View {
     var body: some View {
         let elvisToken = runtime.elvisRenderToken
         let elvisActive = runtime.isElvisModeActive()
-        let elvisVisible = ElvisWindowManager.shared.isVisible
+        let elvisVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
         return VStack(spacing: 0) {
             TerminalRendererView(text: runtime.screenText,
@@ -411,6 +411,7 @@ private struct TerminalContentView: View {
                                  elvisRenderToken: elvisToken,
                                  font: currentFont,
                                  fontPointSize: fontSettings.pointSize,
+                                 elvisSnapshot: nil,
                                  onPaste: handlePaste)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
@@ -433,7 +434,7 @@ private struct TerminalContentView: View {
             focusAnchor &+= 1
         }
         .overlay(alignment: .bottomLeading) {
-            if !ElvisWindowManager.shared.isVisible {
+            if !EditorWindowManager.shared.isVisible {
                 TerminalInputBridge(focusAnchor: $focusAnchor,
                                     onInput: handleInput,
                                     onPaste: handlePaste)
@@ -596,6 +597,7 @@ struct TerminalRendererView: UIViewRepresentable {
     let elvisRenderToken: UInt64
     let font: UIFont
     let fontPointSize: CGFloat
+    let elvisSnapshot: ElvisSnapshot?
     var onPaste: ((String) -> Void)? = nil
 
     func makeUIView(context: Context) -> TerminalRendererContainerView {
@@ -611,7 +613,7 @@ struct TerminalRendererView: UIViewRepresentable {
         uiView.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
         uiView.applyFont(font: font)
         uiView.onPaste = onPaste
-        let externalWindowEnabled = ElvisWindowManager.externalWindowEnabled
+        let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
         let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
         if shouldBlankMain {
             uiView.update(text: NSAttributedString(string: ""),
@@ -622,7 +624,12 @@ struct TerminalRendererView: UIViewRepresentable {
             return
         }
         let shouldUseSnapshot = isElvisMode && (!externalWindowEnabled || !isElvisWindowVisible)
-        let snapshot = shouldUseSnapshot ? ElvisTerminalBridge.shared.snapshot() : nil
+        let snapshot: ElvisSnapshot?
+        if shouldUseSnapshot {
+            snapshot = elvisSnapshot ?? EditorTerminalBridge.shared.snapshot()
+        } else {
+            snapshot = nil
+        }
         uiView.update(text: text,
                       cursor: cursor,
                       backgroundColor: backgroundColor,
@@ -913,15 +920,13 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func applyElvisSnapshot(_ snapshot: ElvisSnapshot, backgroundColor: UIColor) {
-        if lastElvisSnapshotText != snapshot.text {
-            lastElvisSnapshotText = snapshot.text
-            terminalView.text = snapshot.text
-            lastElvisCursorOffset = nil
-            selectionOverlay.clearSelection()
-        }
+        lastElvisSnapshotText = snapshot.text
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
+        terminalView.attributedText = snapshot.attributedText
+        lastElvisCursorOffset = nil
+        selectionOverlay.clearSelection()
 
         var resolvedCursor: TerminalCursorInfo?
         var preferredInset: CGFloat = 0
@@ -1529,15 +1534,15 @@ final class PathTruncationManager {
     }
 }
 
-struct ElvisFloatingRendererView: View {
+struct EditorFloatingRendererView: View {
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
 
     var body: some View {
         let token = runtime.elvisRenderToken
         _ = token
-        let snapshot = ElvisTerminalBridge.shared.snapshot()
-        return TerminalRendererView(text: NSAttributedString(string: snapshot.text),
+        let snapshot = EditorTerminalBridge.shared.snapshot()
+        return TerminalRendererView(text: snapshot.attributedText,
                                     cursor: snapshot.cursor,
                                     backgroundColor: fontSettings.backgroundColor,
                                     foregroundColor: fontSettings.foregroundColor,
@@ -1545,7 +1550,8 @@ struct ElvisFloatingRendererView: View {
                                     isElvisWindowVisible: false,
                                     elvisRenderToken: token,
                                     font: fontSettings.currentFont,
-                                    fontPointSize: fontSettings.pointSize)
+                                    fontPointSize: fontSettings.pointSize,
+                                    elvisSnapshot: snapshot)
             .background(Color(fontSettings.backgroundColor))
     }
 }

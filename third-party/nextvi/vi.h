@@ -326,6 +326,7 @@ char *term_att(int att);
 void term_push(char *s, unsigned int n);
 void term_back(int c);
 #define term_dec() ibuf_pos--; icmd_pos--;
+void nextvi_reset_state(void);
 #define term_exec(s, n, type) \
 { \
 	preserve(int, ibuf_cnt,) \

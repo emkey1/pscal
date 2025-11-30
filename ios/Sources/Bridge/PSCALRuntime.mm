@@ -538,6 +538,38 @@ void PSCALRuntimeApplyPathTruncation(const char *path) {
         unsetenv("PATH_TRUNCATE");
     }
 }
+
+extern "C" int pscalPlatformClipboardSet(const char *utf8, size_t len) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!utf8) return -1;
+    NSString *str = [[NSString alloc] initWithBytes:utf8 length:len encoding:NSUTF8StringEncoding];
+    if (!str) return -1;
+    UIPasteboard.generalPasteboard.string = str;
+    return 0;
+#else
+    (void)utf8; (void)len;
+    return -1;
+#endif
+}
+
+extern "C" char *pscalPlatformClipboardGet(size_t *out_len) {
+#if defined(PSCAL_TARGET_IOS)
+    NSString *str = UIPasteboard.generalPasteboard.string;
+    if (!str) return NULL;
+    NSData *data = [str dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return NULL;
+    size_t len = (size_t)data.length;
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, data.bytes, len);
+    buf[len] = '\0';
+    if (out_len) *out_len = len;
+    return buf;
+#else
+    (void)out_len;
+    return NULL;
+#endif
+}
 #import <Foundation/Foundation.h>
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
 static void PSCALRuntimeEnsureSDLReady(void) {

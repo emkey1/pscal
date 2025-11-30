@@ -8721,6 +8721,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         NULL,
         0
     },
+#if defined(PSCAL_TARGET_IOS)
+    {
+        "smallclue-help",
+        "List available smallclue applets.",
+        "smallclue-help",
+        "Prints the iOS smallclue applet catalog with brief descriptions.",
+        NULL,
+        0
+    },
+#endif
     {
         "caller",
         "Report information about active call frames.",

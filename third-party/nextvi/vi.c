@@ -48,6 +48,131 @@ static int vi_tsm;			/* type of the status message */
 static int vi_joinmode = 1;		/* 1: insert extra space for pad 0: raw line join */
 static int vi_nlword;			/* new line mode for eEwWbB */
 
+void nextvi_reset_state(void)
+{
+	if (term_sbuf) {
+		sbuf_free(term_sbuf);
+		term_sbuf = NULL;
+	}
+	if (ibuf) {
+		free(ibuf);
+		ibuf = NULL;
+	}
+	ibuf_sz = 128;
+	ibuf_pos = 0;
+	ibuf_cnt = 0;
+	icmd_pos = 0;
+	texec = 0;
+	tn = 0;
+	term_record = 0;
+	xrows = 0;
+	xcols = 0;
+	memset(icmd, 0, sizeof(icmd));
+#if defined(PSCAL_TARGET_IOS)
+	ios_row = 0;
+	ios_col = 0;
+#endif
+
+	vi_hidch = 0;
+	vi_insmov = 0;
+	vi_lncol = 0;
+	memset(vi_msg, 0, sizeof(vi_msg));
+	vi_lnnum = 0;
+	vi_mod = 0;
+	vi_word = vi_word_m;
+	_vi_word = vi_word_m;
+	vi_wsel = 1;
+	vi_rshift = 0;
+	vi_arg = 0;
+	memset(vi_charlast, 0, sizeof(vi_charlast));
+	vi_charcmd = 0;
+	vi_ybuf = 0;
+	vi_col = 0;
+	vi_scrollud = 0;
+	vi_scrolley = 0;
+	vi_cndir = 1;
+	vi_status = 0;
+	vi_tsm = 0;
+	vi_joinmode = 1;
+	vi_nlword = 0;
+
+	xleft = 0;
+	xquit = 0;
+	xvis = 0;
+	xai = 1;
+	xic = 1;
+	xhl = 1;
+	xhll = 0;
+	xhlw = 0;
+	xhlp = 0;
+	xhlr = 0;
+	xled = 1;
+	xtd = +1;
+	xshape = 1;
+	xorder = 1;
+	xtbs = 8;
+	xish = 0;
+	xgrp = 0;
+	xpac = 0;
+	xmpt = 0;
+	xpr = 0;
+	xsep = ':';
+	xlim = -1;
+	xseq = 1;
+	xrow = 0;
+	xoff = 0;
+	xtop = 0;
+	xkmap = 0;
+	xkmap_alt = 1;
+	xkwddir = 0;
+	xkwdcnt = 0;
+	xgdep = 0;
+	xrerr = NULL;
+	if (xkwdrs) {
+		rset_free(xkwdrs);
+		xkwdrs = NULL;
+	}
+	if (xacreg) {
+		sbuf_free(xacreg);
+		xacreg = NULL;
+	}
+	for (int i = 0; i < 256; i++) {
+		if (xregs[i]) {
+			sbuf_free(xregs[i]);
+			xregs[i] = NULL;
+		}
+	}
+	if (bufs) {
+		int max = xbufsmax > 0 ? xbufsmax : xbufcur;
+		for (int i = 0; i < max; i++) {
+			free(bufs[i].path);
+			if (bufs[i].lb)
+				lbuf_free(bufs[i].lb);
+		}
+		free(bufs);
+	}
+	bufs = NULL;
+	ex_buf = NULL;
+	ex_pbuf = NULL;
+	ex_tpbuf = NULL;
+	xbufcur = 0;
+	xbufsmax = 0;
+	xbufsalloc = 10;
+	for (int i = 0; i < 2; i++) {
+		if (tempbufs[i].lb)
+			lbuf_free(tempbufs[i].lb);
+		free(tempbufs[i].path);
+		tempbufs[i].path = NULL;
+		tempbufs[i].lb = NULL;
+		tempbufs[i].row = 0;
+		tempbufs[i].off = 0;
+		tempbufs[i].top = 0;
+		tempbufs[i].td = +1;
+		tempbufs[i].mtime = -1;
+		tempbufs[i].ft = NULL;
+	}
+}
+
 void *emalloc(size_t size)
 {
 	void *p;
@@ -1699,15 +1824,19 @@ void vi(int init)
 				vc_status(0);
 				vi_mod |= 1;
 				break;
-			default:
-				continue;
+				default:
+					continue;
+				}
+				if (strchr("!<>AIJKOPRacdiopry", c)) {
+					size_t rlen;
+					rep:
+					rlen = icmd_pos;
+					if (rlen > sizeof(rep_cmd))
+						rlen = sizeof(rep_cmd);
+					memcpy(rep_cmd, icmd, rlen);
+					rep_len = (int)rlen;
+				}
 			}
-			if (strchr("!<>AIJKOPRacdiopry", c)) {
-				rep:
-				memcpy(rep_cmd, icmd, icmd_pos);
-				rep_len = icmd_pos;
-			}
-		}
 		if (xrow < 0 || xrow >= lbuf_len(xb))
 			xrow = lbuf_len(xb) ? lbuf_len(xb) - 1 : 0;
 		if (xtop > xrow)
@@ -1820,6 +1949,7 @@ static int setup_signals(void)
 int main(int argc, char *argv[])
 {
 	int i, j;
+	nextvi_reset_state();
 	if (!setup_signals())
 		return EXIT_FAILURE;
 	dir_init();

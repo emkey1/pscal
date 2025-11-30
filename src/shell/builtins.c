@@ -87,6 +87,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"mkdir", "mkdir", -1},
     {"rmdir", "rmdir", -1},
     {"mv", "mv", -1},
+    {"pbcopy", "pbcopy", -1},
+    {"pbpaste", "pbpaste", -1},
     {"pascal", "pascal", -1},
     {"pscaljson2bc", "pscaljson2bc", -1},
 #ifdef BUILD_PSCALD
@@ -118,6 +120,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"uniq", "uniq", -1},
     {"wc", "wc", -1},
     {"wget", "wget", -1},
+    {"smallclue-help", "smallclue-help", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},

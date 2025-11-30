@@ -5,6 +5,9 @@ int xrows, xcols;
 unsigned int ibuf_pos, ibuf_cnt, ibuf_sz = 128, icmd_pos;
 unsigned char *ibuf, icmd[4096];
 unsigned int texec, tn;
+#if !defined(PSCAL_TARGET_IOS)
+static struct pollfd ufds[1];
+#endif
 
 /* iOS bridge for floating window rendering */
 #if defined(PSCAL_TARGET_IOS)
@@ -13,16 +16,46 @@ extern void pscalTerminalEnd(void);
 extern void pscalTerminalRender(const char *utf8, int len, int row, int col, long fg, long bg, int attr);
 extern void pscalTerminalClear(void);
 extern void pscalTerminalMoveCursor(int row, int col);
+extern void pscalTerminalClearEol(int row, int col);
+extern void pscalTerminalClearBol(int row, int col);
+extern void pscalTerminalClearLine(int row);
+extern void pscalTerminalClearScreenFromCursor(int row, int col);
+extern void pscalTerminalClearScreenToCursor(int row, int col);
+extern void pscalTerminalInsertChars(int row, int col, int count);
+extern void pscalTerminalDeleteChars(int row, int col, int count);
+extern void pscalTerminalEnterAltScreen(void);
+extern void pscalTerminalExitAltScreen(void);
+extern void pscalTerminalSetCursorVisible(int visible);
+extern void pscalTerminalInsertLines(int row, int count);
+extern void pscalTerminalDeleteLines(int row, int count);
 extern int pscalTerminalRead(unsigned char *buffer, int maxlen, int timeout_ms);
 static int ios_row = 0;
 static int ios_col = 0;
+static int ios_wrap = 1;
+static int ios_fg = -1;
+static int ios_bg = -1;
+static int ios_attr = 0; /* bit0=bold, bit1=underline, bit2=inverse */
+enum {
+	IOS_ATTR_BOLD = 1 << 0,
+	IOS_ATTR_UNDER = 1 << 1,
+	IOS_ATTR_INV = 1 << 2
+};
+static void ios_term_render_buf(const char *s, int n);
 static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
+	ios_fg = -1;
+	ios_bg = -1;
+	ios_attr = 0;
 }
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
 		return;
+	if (ch == '\r') {
+		ios_col = 0;
+		pscalTerminalMoveCursor(ios_row, ios_col);
+		return;
+	}
 	if (ch == '\n') {
 		ios_col = 0;
 		ios_row++;
@@ -31,14 +64,28 @@ static void ios_term_render_char(char ch) {
 		pscalTerminalMoveCursor(ios_row, ios_col);
 		return;
 	}
-	pscalTerminalRender(&ch, 1, ios_row, ios_col, 0, 0, 0);
+	if (ch == '\b') {
+		if (ios_col > 0)
+			ios_col--;
+		pscalTerminalMoveCursor(ios_row, ios_col);
+		return;
+	}
+	if (ch == '\t') {
+		int spaces = 8 - (ios_col % 8);
+		for (int i = 0; i < spaces; i++)
+			ios_term_render_char(' ');
+		return;
+	}
+	pscalTerminalRender(&ch, 1, ios_row, ios_col, ios_fg, ios_bg, ios_attr);
 	ios_col++;
-	if (ios_col >= xcols) {
+	if (ios_wrap && ios_col >= xcols) {
 		ios_col = 0;
 		ios_row++;
 		if (ios_row >= xrows)
 			ios_row = xrows - 1;
 		pscalTerminalMoveCursor(ios_row, ios_col);
+	} else if (!ios_wrap && ios_col >= xcols) {
+		ios_col = xcols - 1;
 	}
 }
 static void ios_term_clear_line_from_cursor(void) {
@@ -60,66 +107,192 @@ static void ios_term_write(const char *s, int n) {
 		unsigned char ch = (unsigned char)s[i];
 		if (ch == 0x1B && i + 1 < n && s[i + 1] == '[') {
 			i += 2;
-			int num1 = 0, num2 = 0;
-			int parsing_second = 0;
+			int nums[8] = {0};
+			int numcnt = 0;
+			int private_mode = 0;
+			if (i < n && s[i] == '?') {
+				private_mode = 1;
+				i++;
+			}
 			while (i < n) {
 				char c = s[i];
 				if (c >= '0' && c <= '9') {
-					int *target = parsing_second ? &num2 : &num1;
-					*target = (*target * 10) + (c - '0');
+					if (numcnt < 8)
+						nums[numcnt] = nums[numcnt] * 10 + (c - '0');
 					i++;
 					continue;
 				}
 				if (c == ';') {
-					parsing_second = 1;
+					if (numcnt < 7)
+						numcnt++;
 					i++;
 					continue;
 				}
-				if (c == 'H' || c == 'f') {
-					int r = (num1 > 0 ? num1 - 1 : 0);
-					int ccol = (num2 > 0 ? num2 - 1 : 0);
-					ios_row = r;
-					ios_col = ccol;
-					pscalTerminalMoveCursor(ios_row, ios_col);
-				}
-				else if (c == 'J') {
-					pscalTerminalClear();
-					ios_term_reset();
-				}
-				else if (c == 'K') {
-					ios_term_clear_line_from_cursor();
-				}
-				else if (c == 'A') {
-					int step = num1 > 0 ? num1 : 1;
-					ios_row -= step;
-					if (ios_row < 0) ios_row = 0;
-					pscalTerminalMoveCursor(ios_row, ios_col);
-				}
-				else if (c == 'B') {
-					int step = num1 > 0 ? num1 : 1;
-					ios_row += step;
-					if (ios_row >= xrows) ios_row = xrows - 1;
-					pscalTerminalMoveCursor(ios_row, ios_col);
-				}
-				else if (c == 'C') {
-					int step = num1 > 0 ? num1 : 1;
-					ios_col += step;
-					if (ios_col >= xcols) ios_col = xcols - 1;
-					pscalTerminalMoveCursor(ios_row, ios_col);
-				}
-				else if (c == 'D') {
-					int step = num1 > 0 ? num1 : 1;
-					ios_col -= step;
-					if (ios_col < 0) ios_col = 0;
-					pscalTerminalMoveCursor(ios_row, ios_col);
+				int p1 = nums[0];
+				int p2 = numcnt >= 1 ? nums[1] : 0;
+				if (!private_mode) {
+					if (c == 'H' || c == 'f') {
+						int r = p1 > 0 ? p1 - 1 : 0;
+						int ccol = p2 > 0 ? p2 - 1 : 0;
+						ios_row = r;
+						ios_col = ccol;
+						if (ios_row >= xrows) ios_row = xrows - 1;
+						if (ios_col >= xcols) ios_col = xcols - 1;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'J') {
+						int mode = p1;
+						if (mode == 0) {
+							pscalTerminalClearScreenFromCursor(ios_row, ios_col);
+						} else if (mode == 1) {
+							pscalTerminalClearScreenToCursor(ios_row, ios_col);
+						} else {
+							pscalTerminalClear();
+							ios_term_reset();
+						}
+					} else if (c == 'K') {
+						int mode = p1;
+						if (mode == 0) {
+							ios_term_clear_line_from_cursor();
+						} else if (mode == 1) {
+							pscalTerminalClearBol(ios_row, ios_col);
+						} else {
+							pscalTerminalClearLine(ios_row);
+						}
+					} else if (c == 'A') {
+						int step = p1 > 0 ? p1 : 1;
+						ios_row -= step;
+						if (ios_row < 0) ios_row = 0;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'B') {
+						int step = p1 > 0 ? p1 : 1;
+						ios_row += step;
+						if (ios_row >= xrows) ios_row = xrows - 1;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'C') {
+						int step = p1 > 0 ? p1 : 1;
+						ios_col += step;
+						if (ios_col >= xcols) ios_col = xcols - 1;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'D') {
+						int step = p1 > 0 ? p1 : 1;
+						ios_col -= step;
+						if (ios_col < 0) ios_col = 0;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'L') {
+						int count = p1 > 0 ? p1 : 1;
+						pscalTerminalInsertLines(ios_row, count);
+					} else if (c == 'M') {
+						int count = p1 > 0 ? p1 : 1;
+						pscalTerminalDeleteLines(ios_row, count);
+					} else if (c == '@') {
+						int count = p1 > 0 ? p1 : 1;
+						pscalTerminalInsertChars(ios_row, ios_col, count);
+					} else if (c == 'P') {
+						int count = p1 > 0 ? p1 : 1;
+						pscalTerminalDeleteChars(ios_row, ios_col, count);
+					} else if (c == 'm') {
+						if (numcnt == 0 && p1 == 0) {
+							ios_fg = -1;
+							ios_bg = -1;
+							ios_attr = 0;
+						} else {
+							for (int idx = 0; idx <= numcnt; idx++) {
+								int code = nums[idx];
+								if (code == 0) {
+									ios_fg = -1;
+									ios_bg = -1;
+									ios_attr = 0;
+								} else if (code == 1) {
+									ios_attr |= IOS_ATTR_BOLD;
+								} else if (code == 4) {
+									ios_attr |= IOS_ATTR_UNDER;
+								} else if (code == 7) {
+									ios_attr |= IOS_ATTR_INV;
+								} else if (code == 22) {
+									ios_attr &= ~IOS_ATTR_BOLD;
+								} else if (code == 24) {
+									ios_attr &= ~IOS_ATTR_UNDER;
+								} else if (code == 27) {
+									ios_attr &= ~IOS_ATTR_INV;
+								} else if (code == 39) {
+									ios_fg = -1;
+								} else if (code == 49) {
+									ios_bg = -1;
+								} else if (code >= 30 && code <= 37) {
+									ios_fg = code - 30;
+								} else if (code >= 40 && code <= 47) {
+									ios_bg = code - 40;
+								} else if (code >= 90 && code <= 97) {
+									ios_fg = (code - 90) + 8;
+								} else if (code >= 100 && code <= 107) {
+									ios_bg = (code - 100) + 8;
+								} else if (code == 38 || code == 48) {
+									if (idx + 2 <= numcnt && nums[idx + 1] == 5) {
+										int val = nums[idx + 2];
+										if (val >= 0 && val <= 255) {
+											if (code == 38)
+												ios_fg = val;
+											else
+												ios_bg = val;
+										}
+										idx += 2;
+									} else if (idx + 3 <= numcnt && nums[idx + 1] == 2) {
+										int r = nums[idx + 2];
+										int g = nums[idx + 3];
+										int b = (idx + 4 <= numcnt) ? nums[idx + 4] : 0;
+										int rr = r < 0 ? 0 : (r > 255 ? 255 : r);
+										int gg = g < 0 ? 0 : (g > 255 ? 255 : g);
+										int bb = b < 0 ? 0 : (b > 255 ? 255 : b);
+										int rc = (rr * 5 + 127) / 255;
+										int gc = (gg * 5 + 127) / 255;
+										int bc = (bb * 5 + 127) / 255;
+										int idx256 = 16 + 36 * rc + 6 * gc + bc;
+										if (code == 38)
+											ios_fg = idx256;
+										else
+											ios_bg = idx256;
+										idx += 4;
+									}
+								}
+							}
+						}
+					} else if (c == 'n') {
+						if (p1 == 6) {
+							char resp[32];
+							int len = snprintf(resp, sizeof(resp), "\x1b[%d;%dR", ios_row + 1, ios_col + 1);
+							if (len > 0)
+								write(1, resp, (size_t)len);
+						}
+					}
+				} else {
+					if (c == 'h' || c == 'l') {
+						int on = c == 'h';
+						for (int idx = 0; idx <= numcnt; idx++) {
+							int mode = nums[idx];
+							if (mode == 7) {
+								ios_wrap = on;
+							} else if (mode == 25) {
+								pscalTerminalSetCursorVisible(on);
+							} else if (mode == 47 || mode == 1049) {
+								if (on)
+									pscalTerminalEnterAltScreen();
+								else
+									pscalTerminalExitAltScreen();
+								ios_term_reset();
+								pscalTerminalMoveCursor(ios_row, ios_col);
+							}
+						}
+					}
 				}
 				i++;
 				break;
 			}
 			continue;
 		}
-		ios_term_render_char((char)ch);
-		i++;
+		int start = i;
+		while (i < n && !(s[i] == 0x1B && i + 1 < n && s[i + 1] == '['))
+			i++;
+		ios_term_render_buf(s + start, i - start);
 	}
 }
 #endif
@@ -133,7 +306,6 @@ void term_init(void)
 {
 	if (xvis & 2)
 		return;
-	struct winsize win;
 	struct termios newtermios;
 	sbuf_make(term_sbuf, 2048)
 	tcgetattr(0, &termios);
@@ -144,10 +316,13 @@ void term_init(void)
 		xrows = atoi(getenv("LINES"));
 	if (getenv("COLUMNS"))
 		xcols = atoi(getenv("COLUMNS"));
+#if !defined(PSCAL_TARGET_IOS)
+	struct winsize win;
 	if (!ioctl(0, TIOCGWINSZ, &win)) {
 		xcols = win.ws_col;
 		xrows = win.ws_row;
 	}
+#endif
 	xcols = xcols ? xcols : 80;
 	xrows = xrows ? xrows : 25;
 #if defined(PSCAL_TARGET_IOS)
@@ -259,9 +434,44 @@ void term_pos(int r, int c)
 
 #if defined(PSCAL_TARGET_IOS)
 static void ios_term_render_buf(const char *s, int n) {
-	if (!s || n <= 0) return;
-	for (int i = 0; i < n; i++) {
-		ios_term_render_char(s[i]);
+	if (!s || n <= 0 || xcols <= 0 || xrows <= 0)
+		return;
+	int i = 0;
+	while (i < n) {
+		char ch = s[i];
+		if (ch == '\r' || ch == '\n' || ch == '\b' || ch == '\t') {
+			ios_term_render_char(ch);
+			i++;
+			continue;
+		}
+		if (ios_wrap && ios_col >= xcols) {
+			ios_col = 0;
+			ios_row++;
+			if (ios_row >= xrows)
+				ios_row = xrows - 1;
+			pscalTerminalMoveCursor(ios_row, ios_col);
+		} else if (!ios_wrap && ios_col >= xcols) {
+			ios_col = xcols - 1;
+		}
+		int start = i;
+		int avail = xcols - ios_col;
+		int len = 0;
+		while (i < n && len < avail) {
+			ch = s[i];
+			if (ch == '\r' || ch == '\n' || ch == '\b' || ch == '\t')
+				break;
+			len++;
+			i++;
+		}
+		if (len > 0) {
+			pscalTerminalRender(s + start, len, ios_row, ios_col, ios_fg, ios_bg, ios_attr);
+			ios_col += len;
+			if (!ios_wrap && ios_col >= xcols)
+				ios_col = xcols - 1;
+			pscalTerminalMoveCursor(ios_row, ios_col);
+		} else {
+			i++;
+		}
 	}
 }
 #endif

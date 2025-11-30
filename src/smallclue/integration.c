@@ -126,6 +126,8 @@ DEFINE_SMALLCLUE_WRAPPER("cut", cut)
 DEFINE_SMALLCLUE_WRAPPER("curl", curl)
 DEFINE_SMALLCLUE_WRAPPER("tr", tr)
 DEFINE_SMALLCLUE_WRAPPER("id", id)
+DEFINE_SMALLCLUE_WRAPPER("pbcopy", pbcopy)
+DEFINE_SMALLCLUE_WRAPPER("pbpaste", pbpaste)
 #if SMALLCLUE_HAS_IFADDRS
 DEFINE_SMALLCLUE_WRAPPER("ipaddr", ipaddr)
 #endif
@@ -171,6 +173,9 @@ DEFINE_SMALLCLUE_WRAPPER("md", md)
 DEFINE_SMALLCLUE_WRAPPER("wget", wget)
 DEFINE_SMALLCLUE_WRAPPER("watch", watch)
 DEFINE_SMALLCLUE_WRAPPER("more", more)
+#if defined(PSCAL_TARGET_IOS)
+DEFINE_SMALLCLUE_WRAPPER("smallclue-help", smallclue_help)
+#endif
 
 #undef DEFINE_SMALLCLUE_WRAPPER
 
@@ -202,6 +207,8 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("curl", vmBuiltinSmallclue_curl, BUILTIN_TYPE_PROCEDURE, "curl");
     registerVmBuiltin("tr", vmBuiltinSmallclue_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclue_id, BUILTIN_TYPE_PROCEDURE, "id");
+    registerVmBuiltin("pbcopy", vmBuiltinSmallclue_pbcopy, BUILTIN_TYPE_PROCEDURE, "pbcopy");
+    registerVmBuiltin("pbpaste", vmBuiltinSmallclue_pbpaste, BUILTIN_TYPE_PROCEDURE, "pbpaste");
 #if SMALLCLUE_HAS_IFADDRS
     registerVmBuiltin("ipaddr", vmBuiltinSmallclue_ipaddr, BUILTIN_TYPE_PROCEDURE, "ipaddr");
 #endif
@@ -242,6 +249,9 @@ static void smallclueRegisterBuiltinsOnce(void) {
 #endif
     registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
     registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");
+#if defined(PSCAL_TARGET_IOS)
+    registerVmBuiltin("smallclue-help", vmBuiltinSmallclue_smallclue_help, BUILTIN_TYPE_PROCEDURE, "smallclue-help");
+#endif
 }
 
 void smallclueRegisterBuiltins(void) {

@@ -8,6 +8,7 @@
 #include "common/runtime_tty.h"
 #include "smallclue/nextvi_app.h"
 #include "smallclue/openssh_app.h"
+#include "common/runtime_clipboard.h"
 #if defined(PSCAL_HAS_LIBCURL)
 #include <curl/curl.h>
 #endif
@@ -256,6 +257,8 @@ static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallclueSshKeygenCommand(int argc, char **argv);
+static int smallcluePbcopyCommand(int argc, char **argv);
+static int smallcluePbpasteCommand(int argc, char **argv);
 #if defined(SMALLCLUE_WITH_EXSH)
 extern int exsh_main(int argc, char **argv);
 static int smallclueShCommand(int argc, char **argv);
@@ -269,6 +272,9 @@ static int smallclueWgetCommand(int argc, char **argv);
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
 static int smallclueDfCommand(int argc, char **argv);
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueHelpCommand(int argc, char **argv);
+#endif
 
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
@@ -304,6 +310,8 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"mkdir", smallclueMkdirCommand, "Create directories"},
     {"more", smallcluePagerCommand, "Paginate file contents"},
     {"mv", smallclueMvCommand, "Move or rename files"},
+    {"pbcopy", smallcluePbcopyCommand, "Copy stdin to the system clipboard"},
+    {"pbpaste", smallcluePbpasteCommand, "Paste the system clipboard to stdout"},
     {"ping", smallcluePingCommand, "TCP ping utility"},
     {"ps", smallcluePsCommand, "Show simple process information"},
     {"pwd", smallcluePwdCommand, "Print working directory"},
@@ -336,6 +344,9 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
     {"xargs", smallclueXargsCommand, "Build command lines from stdin"},
     {"df", smallclueDfCommand, "Report filesystem usage"},
+#if defined(PSCAL_TARGET_IOS)
+    {"smallclue-help", smallclueHelpCommand, "List available smallclue applets"},
+#endif
 };
 
 static size_t kSmallclueAppletCount = sizeof(kSmallclueApplets) / sizeof(kSmallclueApplets[0]);
@@ -2357,15 +2368,25 @@ static int list_directory(const char *path,
     return status ? 1 : 0;
 }
 
+static void smallcluePrintAppletList(FILE *out, const char *heading) {
+    if (!out) {
+        return;
+    }
+    if (heading && *heading) {
+        fprintf(out, "%s\n", heading);
+    }
+    for (size_t i = 0; i < kSmallclueAppletCount; ++i) {
+        const SmallclueApplet *applet = &kSmallclueApplets[i];
+        fprintf(out, "  %-14s %s\n", applet->name, applet->description ? applet->description : "");
+    }
+}
+
 
 static void print_usage(void) {
     fprintf(stderr, "This is smallclue. Usage:\n");
     fprintf(stderr, "  smallclue <applet> [arguments...]\n\n");
     fprintf(stderr, "Available applets:\n");
-    for (size_t i = 0; i < kSmallclueAppletCount; ++i) {
-        const SmallclueApplet *applet = &kSmallclueApplets[i];
-        fprintf(stderr, "  %-8s %s\n", applet->name, applet->description ? applet->description : "");
-    }
+    smallcluePrintAppletList(stderr, NULL);
     fprintf(stderr, "\nYou can symlink applets to 'smallclue' or invoke them directly.\n");
 }
 
@@ -2405,6 +2426,9 @@ static bool smallclueLsValidateShortOptions(const char *arg,
                 break;
             case 't':
                 *sort_by_time = 1;
+                break;
+            case 'h':
+                /* ignore -h for compatibility */
                 break;
             default:
                 fprintf(stderr, "ls: invalid option -- '%c'\n", *cursor);
@@ -2718,6 +2742,15 @@ static int smallclueFalseCommand(int argc, char **argv) {
     (void)argv;
     return 1;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueHelpCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    smallcluePrintAppletList(stdout, "Available smallclue applets:");
+    return 0;
+}
+#endif
 
 #if defined(SMALLCLUE_WITH_EXSH)
 static int smallclueShCommand(int argc, char **argv) {
@@ -4888,6 +4921,7 @@ static int smallclueGrepCommand(int argc, char **argv) {
     int index = 1;
     int number_lines = 0;
     int ignore_case = 0;
+    int invert_match = 0;
     while (index < argc) {
         const char *arg = argv[index];
         if (!arg || arg[0] != '-') {
@@ -4901,6 +4935,11 @@ static int smallclueGrepCommand(int argc, char **argv) {
             /* Support common long forms and treat unknown long opts as end of options. */
             if (strcmp(arg, "--ignore-case") == 0 || strcmp(arg, "--ignore") == 0) {
                 ignore_case = 1;
+                index++;
+                continue;
+            }
+            if (strcmp(arg, "--invert-match") == 0 || strcmp(arg, "--invert") == 0) {
+                invert_match = 1;
                 index++;
                 continue;
             }
@@ -4922,6 +4961,8 @@ static int smallclueGrepCommand(int argc, char **argv) {
                 number_lines = 1;
             } else if (*opt == 'i') {
                 ignore_case = 1;
+            } else if (*opt == 'v') {
+                invert_match = 1;
             } else {
                 fprintf(stderr, "grep: unsupported option -%c\n", *opt);
                 return 1;
@@ -4943,7 +4984,8 @@ static int smallclueGrepCommand(int argc, char **argv) {
         long line_no = 0;
         while ((len = getline(&line, &cap, stdin)) != -1) {
             line_no++;
-            if (smallclueStrCaseStr(line, pattern, ignore_case) != NULL) {
+            int found = smallclueStrCaseStr(line, pattern, ignore_case) != NULL;
+            if (invert_match ? !found : found) {
                 if (number_lines) {
                     printf("%ld:", line_no);
                 }
@@ -4963,7 +5005,8 @@ static int smallclueGrepCommand(int argc, char **argv) {
             long line_no = 0;
             while ((len = getline(&line, &cap, fp)) != -1) {
                 line_no++;
-                if (smallclueStrCaseStr(line, pattern, ignore_case) != NULL) {
+                int found = smallclueStrCaseStr(line, pattern, ignore_case) != NULL;
+                if (invert_match ? !found : found) {
                     if (paths > 1) {
                         printf("%s:", path);
                     }
@@ -6035,4 +6078,63 @@ static int smallclueBracketCommand(int argc, char **argv) {
         return 1;
     }
     return smallclueTestWithArgs(argc - 2, argv + 1);
+}
+
+static int smallcluePbcopyCommand(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        fprintf(stderr, "pbcopy: takes no arguments\n");
+        return 1;
+    }
+    smallclueResetGetopt();
+    char buf[4096];
+    size_t total = 0;
+    size_t cap = 4096;
+    char *data = (char *)malloc(cap);
+    if (!data) {
+        fprintf(stderr, "pbcopy: out of memory\n");
+        return 1;
+    }
+    ssize_t n;
+    while ((n = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
+        if (total + (size_t)n > cap) {
+            size_t newcap = cap * 2;
+            while (newcap < total + (size_t)n) newcap *= 2;
+            char *tmp = (char *)realloc(data, newcap);
+            if (!tmp) {
+                free(data);
+                fprintf(stderr, "pbcopy: out of memory\n");
+                return 1;
+            }
+            data = tmp;
+            cap = newcap;
+        }
+        memcpy(data + total, buf, (size_t)n);
+        total += (size_t)n;
+    }
+    int rc = runtimeClipboardSet(data, total);
+    free(data);
+    if (rc != 0) {
+        fprintf(stderr, "pbcopy: clipboard unavailable\n");
+        return 1;
+    }
+    return 0;
+}
+
+static int smallcluePbpasteCommand(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        fprintf(stderr, "pbpaste: takes no arguments\n");
+        return 1;
+    }
+    smallclueResetGetopt();
+    size_t len = 0;
+    char *text = runtimeClipboardGet(&len);
+    if (!text) {
+        fprintf(stderr, "pbpaste: clipboard unavailable\n");
+        return 1;
+    }
+    ssize_t written = write(STDOUT_FILENO, text, len);
+    free(text);
+    return written < 0 ? 1 : 0;
 }

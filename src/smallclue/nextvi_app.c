@@ -8,20 +8,8 @@
 #include <unistd.h>
 #include <termios.h>
 
-/* Minimal nextvi globals we need to reset between runs */
-extern int xquit;
-extern int xvis;
-extern unsigned int texec;
-extern unsigned int tn;
-extern unsigned int ibuf_pos;
-extern unsigned int ibuf_cnt;
-extern unsigned int ibuf_sz;
-extern unsigned int icmd_pos;
-extern unsigned char *ibuf;
-extern unsigned char icmd[4096];
-extern int term_record;
-
 extern int nextvi_main_entry(int argc, char **argv);
+void nextvi_reset_state(void);
 
 #if defined(PSCAL_TARGET_IOS)
 void pscalRuntimeDebugLog(const char *message);
@@ -52,14 +40,7 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
 }
 
 static void smallclueResetNextviGlobals(void) {
-    xquit = 0;
-    xvis = 0;
-    texec = 0;
-    tn = 0;
-    ibuf_pos = 0;
-    ibuf_cnt = 0;
-    icmd_pos = 0;
-    term_record = 0;
+    nextvi_reset_state();
 }
 
 #if defined(PSCAL_TARGET_IOS)

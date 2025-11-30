@@ -37,6 +37,44 @@ PSCAL_WEAK void pscalTerminalClearEol(int row, int col) {
     (void)row;
     (void)col;
 }
+PSCAL_WEAK void pscalTerminalClearBol(int row, int col) {
+    (void)row;
+    (void)col;
+}
+PSCAL_WEAK void pscalTerminalClearLine(int row) {
+    (void)row;
+}
+PSCAL_WEAK void pscalTerminalClearScreenFromCursor(int row, int col) {
+    (void)row;
+    (void)col;
+}
+PSCAL_WEAK void pscalTerminalClearScreenToCursor(int row, int col) {
+    (void)row;
+    (void)col;
+}
+PSCAL_WEAK void pscalTerminalInsertChars(int row, int col, int count) {
+    (void)row;
+    (void)col;
+    (void)count;
+}
+PSCAL_WEAK void pscalTerminalDeleteChars(int row, int col, int count) {
+    (void)row;
+    (void)col;
+    (void)count;
+}
+PSCAL_WEAK void pscalTerminalEnterAltScreen(void) {}
+PSCAL_WEAK void pscalTerminalExitAltScreen(void) {}
+PSCAL_WEAK void pscalTerminalSetCursorVisible(int visible) {
+    (void)visible;
+}
+PSCAL_WEAK void pscalTerminalInsertLines(int row, int count) {
+    (void)row;
+    (void)count;
+}
+PSCAL_WEAK void pscalTerminalDeleteLines(int row, int count) {
+    (void)row;
+    (void)count;
+}
 PSCAL_WEAK void pscalTerminalMoveCursor(int row, int col) {
     (void)row;
     (void)col;
@@ -156,10 +194,67 @@ void pscalTerminalClearEol(int row, int col) {
     printf("\033[K");
     fflush(stdout);
 }
+void pscalTerminalClearBol(int row, int col) {
+    (void)col;
+    if (row < 0) row = 0;
+    pscalTerminalMove(row, 0);
+    printf("\033[1K");
+    fflush(stdout);
+}
+void pscalTerminalClearLine(int row) {
+    if (row < 0) row = 0;
+    pscalTerminalMove(row, 0);
+    printf("\033[2K");
+    fflush(stdout);
+}
+void pscalTerminalClearScreenFromCursor(int row, int col) {
+    pscalTerminalMove(row, col);
+    printf("\033[0J");
+    fflush(stdout);
+}
+void pscalTerminalClearScreenToCursor(int row, int col) {
+    pscalTerminalMove(row, col);
+    printf("\033[1J");
+    fflush(stdout);
+}
+void pscalTerminalInsertChars(int row, int col, int count) {
+    pscalTerminalMove(row, col);
+    printf("\033[%d@", count);
+    fflush(stdout);
+}
+void pscalTerminalDeleteChars(int row, int col, int count) {
+    pscalTerminalMove(row, col);
+    printf("\033[%dP", count);
+    fflush(stdout);
+}
+void pscalTerminalEnterAltScreen(void) {
+    printf("\033[?1049h");
+    fflush(stdout);
+}
+void pscalTerminalExitAltScreen(void) {
+    printf("\033[?1049l");
+    fflush(stdout);
+}
+void pscalTerminalSetCursorVisible(int visible) {
+    printf("\033[?25%cm", visible ? 'h' : 'l');
+    fflush(stdout);
+}
 
 void pscalTerminalMoveCursor(int row, int col) {
     pscalTerminalMove(row, col);
     fflush(stdout);
+}
+
+void pscalTerminalInsertLines(int row, int count) {
+    (void)row;
+    (void)count;
+    /* insert-line handling is not required for host terminal */
+}
+
+void pscalTerminalDeleteLines(int row, int count) {
+    (void)row;
+    (void)count;
+    /* delete-line handling is not required for host terminal */
 }
 
 int pscalTerminalRead(uint8_t *buffer, int maxlen, int timeout_ms) {
