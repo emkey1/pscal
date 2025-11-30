@@ -28,6 +28,7 @@ extern void pscalRuntimeDebugLog(const char *message);
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "common/path_truncate.h"
 
 static bool pathVirtualizationActive(void) {
@@ -210,6 +211,35 @@ static const char *pathVirtualizedPrepare(const char *path, char expanded[PATH_M
     return target ? target : path;
 }
 
+static void pathVirtualizedEnsureParent(const char *path) {
+    if (!path || *path != '/') {
+        return;
+    }
+    char buf[PATH_MAX];
+    size_t len = strlen(path);
+    if (len >= sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, path, len + 1);
+    for (char *p = buf + len; p >= buf; --p) {
+        if (*p == '/') {
+            *p = '\0';
+            break;
+        }
+    }
+    if (buf[0] == '\0') {
+        return;
+    }
+    for (char *p = buf + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(buf, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(buf, 0777);
+}
+
 int pscalPathVirtualized_open(const char *path, int oflag, ...) {
     if (!pathVirtualizationActive()) {
         if (oflag & O_CREAT) {
@@ -230,6 +260,7 @@ int pscalPathVirtualized_open(const char *path, int oflag, ...) {
         va_list ap;
         va_start(ap, oflag);
         mode_t mode = (mode_t)va_arg(ap, int);
+        pathVirtualizedEnsureParent(target);
         fd = open(target, oflag, mode);
         va_end(ap);
     } else {
