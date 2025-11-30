@@ -138,6 +138,19 @@ static bool pathTruncateFetchPrefix(const char **out_prefix, size_t *out_length)
         return false;
     }
     pathTruncateStorePrefix(source, length);
+    if (g_pathTruncatePrimaryLen == 1 && g_pathTruncatePrimary[0] == '/') {
+        /* A PATH_TRUNCATE of "/" is not useful; fall back to the sandbox home. */
+        const char *home = getenv("HOME");
+        if (home && home[0] == '/') {
+            size_t home_len = strlen(home);
+            while (home_len > 1 && home[home_len - 1] == '/') {
+                home_len--;
+            }
+            if (home_len > 0) {
+                pathTruncateStorePrefix(home, home_len);
+            }
+        }
+    }
     *out_prefix = g_pathTruncatePrimary;
     *out_length = g_pathTruncatePrimaryLen;
     return true;
