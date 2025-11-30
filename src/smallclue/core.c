@@ -4119,19 +4119,26 @@ static int smallclueTouchCommand(int argc, char **argv) {
             status = 1;
             continue;
         }
-        int fd = open(path, O_WRONLY | O_CREAT, 0666);
-        if (fd < 0) {
-            fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+        const char *target = path;
 #if defined(PSCAL_TARGET_IOS)
-            smallclueLogPathExpansion("touch-open-failed", path);
+        char expanded[PATH_MAX];
+        if (pathTruncateExpand(path, expanded, sizeof(expanded))) {
+            target = expanded;
+        }
+#endif
+        int fd = openat(AT_FDCWD, target, O_WRONLY | O_CREAT, 0666);
+        if (fd < 0) {
+            fprintf(stderr, "touch: %s: %s\n", target, strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+            smallclueLogPathExpansion("touch-open-failed", target);
 #endif
             status = 1;
             continue;
         }
         if (futimes(fd, times) != 0) {
-            fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+            fprintf(stderr, "touch: %s: %s\n", target, strerror(errno));
 #if defined(PSCAL_TARGET_IOS)
-            smallclueLogPathExpansion("touch-futimes-failed", path);
+            smallclueLogPathExpansion("touch-futimes-failed", target);
 #endif
             status = 1;
         }
