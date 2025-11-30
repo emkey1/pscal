@@ -98,6 +98,49 @@ static bool pathTruncateIsTempPath(const char *path) {
            strncmp(path, "/private/var/tmp", 16) == 0;
 }
 
+static bool pathTruncateRemapTempPath(const char *source_path, char *out, size_t out_size) {
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || tmpdir[0] != '/') {
+        return false;
+    }
+
+    char normalized_tmp[PATH_MAX];
+    const char *target_tmp = tmpdir;
+    if (pathTruncateNormalizeAbsolute(tmpdir, normalized_tmp, sizeof(normalized_tmp))) {
+        target_tmp = normalized_tmp;
+    }
+
+    const char *suffix = source_path;
+    if (strncmp(source_path, "/private/var/tmp", 16) == 0) {
+        suffix = source_path + 16;
+    } else if (strncmp(source_path, "/var/tmp", 8) == 0) {
+        suffix = source_path + 8;
+    } else if (strncmp(source_path, "/tmp", 4) == 0) {
+        suffix = source_path + 4;
+    }
+    while (*suffix == '/') {
+        suffix++;
+    }
+
+    size_t base_len = strlen(target_tmp);
+    size_t total_len = base_len;
+    if (*suffix) {
+        total_len += 1 + strlen(suffix);
+    }
+    if (total_len + 1 > out_size) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+
+    memcpy(out, target_tmp, base_len);
+    out[base_len] = '\0';
+    if (*suffix) {
+        out[base_len] = '/';
+        strcpy(out + base_len + 1, suffix);
+    }
+    return true;
+}
+
 static void pathTruncateStorePrefix(const char *source, size_t length) {
     if (length >= sizeof(g_pathTruncatePrimary)) {
         length = sizeof(g_pathTruncatePrimary) - 1;
@@ -300,6 +343,9 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
         source_path = normalized;
     }
     if (pathTruncateIsTempPath(source_path)) {
+        if (pathTruncateRemapTempPath(source_path, out, out_size)) {
+            return true;
+        }
         return pathTruncateCopyString(source_path, out, out_size);
     }
 
