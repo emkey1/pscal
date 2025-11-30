@@ -4104,11 +4104,11 @@ static int smallclueTouchCommand(int argc, char **argv) {
             status = 1;
             continue;
         }
-        close(fd);
-        if (utimes(path, times) != 0) {
+        if (futimes(fd, times) != 0) {
             fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
             status = 1;
         }
+        close(fd);
     }
     return status ? 1 : 0;
 }
