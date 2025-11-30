@@ -89,6 +89,15 @@ static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t o
     return true;
 }
 
+static bool pathTruncateIsTempPath(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    return strncmp(path, "/tmp", 4) == 0 ||
+           strncmp(path, "/var/tmp", 8) == 0 ||
+           strncmp(path, "/private/var/tmp", 16) == 0;
+}
+
 static void pathTruncateStorePrefix(const char *source, size_t length) {
     if (length >= sizeof(g_pathTruncatePrimary)) {
         length = sizeof(g_pathTruncatePrimary) - 1;
@@ -289,6 +298,9 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (input_path[0] == '/' &&
         pathTruncateNormalizeAbsolute(input_path, normalized, sizeof(normalized))) {
         source_path = normalized;
+    }
+    if (pathTruncateIsTempPath(source_path)) {
+        return pathTruncateCopyString(source_path, out, out_size);
     }
 
     size_t source_len = strlen(source_path);
