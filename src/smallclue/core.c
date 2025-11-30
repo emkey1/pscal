@@ -5449,24 +5449,31 @@ static bool smallclueConfirmDelete(const char *label, const char *path) {
 }
 
 static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force) {
+    const char *target = path;
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    if (path && pathTruncateExpand(path, expanded, sizeof(expanded))) {
+        target = expanded;
+    }
+#endif
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat(target, &st) != 0) {
         if (!force) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
         }
         return force ? 0 : -1;
     }
     if (S_ISDIR(st.st_mode)) {
         if (!recursive) {
-            fprintf(stderr, "%s: %s: is a directory\n", label, path);
+            fprintf(stderr, "%s: %s: is a directory\n", label, target);
             return -1;
         }
-        if (!force && !smallclueConfirmDelete(label, path)) {
+        if (!force && !smallclueConfirmDelete(label, target)) {
             return 1;
         }
-        DIR *dir = opendir(path);
+        DIR *dir = opendir(target);
         if (!dir) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
             return -1;
         }
         struct dirent *entry;
@@ -5477,7 +5484,7 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
             }
             char child_path[PATH_MAX];
             if (smallclueBuildPath(child_path, sizeof(child_path), path, entry->d_name) != 0) {
-                fprintf(stderr, "%s: %s/%s: %s\n", label, path, entry->d_name, strerror(errno));
+                fprintf(stderr, "%s: %s/%s: %s\n", label, target, entry->d_name, strerror(errno));
                 status = -1;
                 break;
             }
@@ -5489,15 +5496,15 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
         if (status != 0) {
             return -1;
         }
-        if (rmdir(path) != 0) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+        if (rmdir(target) != 0) {
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
             return -1;
         }
         return 0;
     }
-    if (unlink(path) != 0) {
+    if (unlink(target) != 0) {
         if (!force) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
             return -1;
         }
         return 0;
