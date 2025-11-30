@@ -193,14 +193,6 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
-        case .keyboardUpArrow:
-            onInput?("\u{1B}[A"); return true
-        case .keyboardDownArrow:
-            onInput?("\u{1B}[B"); return true
-        case .keyboardLeftArrow:
-            onInput?("\u{1B}[D"); return true
-        case .keyboardRightArrow:
-            onInput?("\u{1B}[C"); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
