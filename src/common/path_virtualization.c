@@ -224,7 +224,6 @@ int pscalPathVirtualized_open(const char *path, int oflag, ...) {
     }
     char expanded[PATH_MAX];
     const char *target = pathVirtualizedPrepare(path, expanded);
-    LOG_EXPANSION("open", path, target);
     int fd;
     if (oflag & O_CREAT) {
         va_list ap;
