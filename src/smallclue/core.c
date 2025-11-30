@@ -3246,7 +3246,10 @@ static void smallclueDfFormatSize(char *buf, size_t bufsize,
         value /= 1024.0L;
         idx++;
     }
-    if (value >= 100.0L) {
+    if (idx == 0) {
+        /* Bytes should not show fractional values. */
+        snprintf(buf, bufsize, "%.0Lf%s", value, suffixes[idx]);
+    } else if (value >= 100.0L) {
         snprintf(buf, bufsize, "%.0Lf%s", value, suffixes[idx]);
     } else if (value >= 10.0L) {
         snprintf(buf, bufsize, "%.1Lf%s", value, suffixes[idx]);
