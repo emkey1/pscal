@@ -37,6 +37,8 @@
 #include <sys/select.h>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#include "common/path_truncate.h"
+void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
 #endif
 #include <termios.h>
 #include <time.h>
@@ -4007,6 +4009,25 @@ static int smallclueTailFollow(FILE *fp, const char *label, long lines) {
     return 0;
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static void smallclueLogPathExpansion(const char *label, const char *path) {
+    if (!pscalRuntimeDebugLog) {
+        return;
+    }
+    char expanded[PATH_MAX];
+    const char *resolved = path;
+    if (path && pathTruncateExpand(path, expanded, sizeof(expanded))) {
+        resolved = expanded;
+    }
+    char logbuf[PATH_MAX * 2];
+    snprintf(logbuf, sizeof(logbuf), "[smallclue][%s] path=%s resolved=%s",
+             label ? label : "touch",
+             path ? path : "(null)",
+             resolved ? resolved : "(null)");
+    pscalRuntimeDebugLog(logbuf);
+}
+#endif
+
 static int smallclueTailCommand(int argc, char **argv) {
     smallclueClearPendingSignals();
     long lines = 10;
@@ -4101,11 +4122,17 @@ static int smallclueTouchCommand(int argc, char **argv) {
         int fd = open(path, O_WRONLY | O_CREAT, 0666);
         if (fd < 0) {
             fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+            smallclueLogPathExpansion("touch-open-failed", path);
+#endif
             status = 1;
             continue;
         }
         if (futimes(fd, times) != 0) {
             fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+            smallclueLogPathExpansion("touch-futimes-failed", path);
+#endif
             status = 1;
         }
         close(fd);
