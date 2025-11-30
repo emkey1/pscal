@@ -6,6 +6,7 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -96,6 +97,21 @@ static bool pathTruncateIsTempPath(const char *path) {
     return strncmp(path, "/tmp", 4) == 0 ||
            strncmp(path, "/var/tmp", 8) == 0 ||
            strncmp(path, "/private/var/tmp", 16) == 0;
+}
+
+static const char *pathTruncateTempSuffix(const char *source_path) {
+    const char *suffix = source_path;
+    if (strncmp(source_path, "/private/var/tmp", 16) == 0) {
+        suffix = source_path + 16;
+    } else if (strncmp(source_path, "/var/tmp", 8) == 0) {
+        suffix = source_path + 8;
+    } else if (strncmp(source_path, "/tmp", 4) == 0) {
+        suffix = source_path + 4;
+    }
+    while (*suffix == '/') {
+        suffix++;
+    }
+    return suffix;
 }
 
 static void pathTruncateStorePrefix(const char *source, size_t length) {
@@ -300,10 +316,30 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
         source_path = normalized;
     }
     if (pathTruncateIsTempPath(source_path)) {
-        char realbuf[PATH_MAX];
-        const char *resolved = realpath(source_path, realbuf);
-        const char *out_path = resolved ? resolved : source_path;
-        return pathTruncateCopyString(out_path, out, out_size);
+        const char *suffix = pathTruncateTempSuffix(source_path);
+        size_t needed = prefix_len + 4; /* "/tmp" */
+        if (*suffix) {
+            needed += 1 + strlen(suffix);
+        }
+        if (needed + 1 > out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        int written = snprintf(out, out_size, "%.*s/tmp", (int)prefix_len, prefix);
+        if (written < 0 || (size_t)written >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        if (*suffix) {
+            snprintf(out + written, out_size - (size_t)written, "/%s", suffix);
+        }
+        /* Ensure the tmp directory exists for callers that create files. */
+        char tmpdir[PATH_MAX];
+        int dir_written = snprintf(tmpdir, sizeof(tmpdir), "%.*s/tmp", (int)prefix_len, prefix);
+        if (dir_written > 0 && (size_t)dir_written < sizeof(tmpdir)) {
+            (void)mkdir(tmpdir, 0777);
+        }
+        return true;
     }
 
     size_t source_len = strlen(source_path);

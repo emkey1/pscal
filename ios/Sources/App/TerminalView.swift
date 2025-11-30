@@ -1509,6 +1509,11 @@ final class PathTruncationManager {
                 normalized.withCString { cString in
                     PSCALRuntimeApplyPathTruncation(cString)
                 }
+                let tmpURL = URL(fileURLWithPath: normalized, isDirectory: true)
+                    .appendingPathComponent("tmp", isDirectory: true)
+                try? FileManager.default.createDirectory(at: tmpURL,
+                                                         withIntermediateDirectories: true,
+                                                         attributes: nil)
                 return
             }
         }
