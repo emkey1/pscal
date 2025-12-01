@@ -310,6 +310,10 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (!input_path) {
         return pathTruncateCopyString("", out, out_size);
     }
+    if (strncmp(input_path, "/dev/", 5) == 0 || strcmp(input_path, "/dev") == 0) {
+        /* Device nodes should not be remapped. */
+        return pathTruncateCopyString(input_path, out, out_size);
+    }
     const char *prefix = NULL;
     size_t prefix_len = 0;
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len) || input_path[0] != '/') {

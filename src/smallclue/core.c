@@ -901,7 +901,7 @@ static int pager_control_fd(void) {
 static int pager_read_key(void) {
     int fd = pager_control_fd();
     if (fd < 0) {
-        return EOF;
+        return 'q';
     }
     struct termios orig;
     bool have_termios = (tcgetattr(fd, &orig) == 0);
