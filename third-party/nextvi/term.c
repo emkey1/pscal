@@ -119,7 +119,7 @@ static void ios_term_render_char(char ch) {
 		return;
 	if (ch == '\r') {
 		ios_col = 0;
-		pscalTerminalMoveCursor(ios_row, ios_col);
+		ios_sync_cursor();
 		return;
 	}
 	if (ch == '\n') {
@@ -129,13 +129,13 @@ static void ios_term_render_char(char ch) {
 			ios_row = ios_margin_bottom;
 			ios_scroll_region_up();
 		}
-		pscalTerminalMoveCursor(ios_row, ios_col);
+		ios_sync_cursor();
 		return;
 	}
 	if (ch == '\b') {
 		if (ios_col > 0)
 			ios_col--;
-		pscalTerminalMoveCursor(ios_row, ios_col);
+		ios_sync_cursor();
 		return;
 	}
 	if (ch == '\t') {
@@ -148,7 +148,7 @@ static void ios_term_render_char(char ch) {
 			next = xcols - 1;
 		}
 		ios_col = next;
-		pscalTerminalMoveCursor(ios_row, ios_col);
+		ios_sync_cursor();
 		return;
 	}
 	if (ch == 0x08) { /* backspace already handled; keep fallback */ }
@@ -159,7 +159,7 @@ static void ios_term_render_char(char ch) {
 		ios_row++;
 		if (ios_row >= xrows)
 			ios_row = xrows - 1;
-		pscalTerminalMoveCursor(ios_row, ios_col);
+		ios_sync_cursor();
 	} else if (!ios_wrap && ios_col >= xcols) {
 		ios_col = xcols - 1;
 	}

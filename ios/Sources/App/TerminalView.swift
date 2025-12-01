@@ -978,6 +978,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         if storageLength > 0 {
             // Make sure pending text storage edits are flushed before asking for caret geometry.
             textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storageLength))
+            textView.layoutManager.ensureLayout(for: textView.textContainer)
+            let glyphCount = textView.layoutManager.numberOfGlyphs
+            if glyphCount > 0 {
+                textView.layoutManager.ensureGlyphs(forGlyphRange: NSRange(location: 0, length: glyphCount))
+            }
         }
         let length = textView.attributedText.length
         let safeOffset = max(0, min(cursorOffset, length))
