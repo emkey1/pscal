@@ -890,12 +890,15 @@ static int pager_control_fd(void) {
 #ifdef _WIN32
     pager_control_fd_value = -1;
 #else
-    int fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
+    int fd = -1;
+    if (pscalRuntimeStdinIsInteractive()) {
+        fd = dup(STDIN_FILENO);
+    }
     if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
         fd = dup(STDOUT_FILENO);
     }
-    if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
-        fd = dup(STDIN_FILENO);
+    if (fd < 0) {
+        fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
     }
     pager_control_fd_value = fd;
 #endif
@@ -922,35 +925,43 @@ static int pager_read_key(void) {
         tcsetattr(fd, TCSAFLUSH, &raw);
     }
     int result = 'q';
-    struct pollfd pfd = { .fd = fd, .events = POLLIN };
-    int poll_rc = poll(&pfd, 1, 500);
-    if (poll_rc == 1 && (pfd.revents & POLLIN)) {
+    for (;;) {
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int poll_rc = poll(&pfd, 1, -1);
+        if (poll_rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if ((pfd.revents & POLLIN) == 0) {
+            continue;
+        }
         unsigned char ch = 0;
         ssize_t n = read(fd, &ch, 1);
-        if (n > 0) {
-            if (ch == '\x1b') {
-                unsigned char seq[3] = {0};
-                if (read(fd, &seq[0], 1) == 1 && seq[0] == '[') {
-                    if (read(fd, &seq[1], 1) == 1) {
-                        if (seq[1] >= '0' && seq[1] <= '9') {
-                            if (read(fd, &seq[2], 1) == 1 && seq[2] == '~') {
-                                if (seq[1] == '5') {
-                                    result = PAGER_KEY_PAGE_UP;
-                                } else if (seq[1] == '6') {
-                                    result = PAGER_KEY_PAGE_DOWN;
-                                } else {
-                                    result = '\x1b';
-                                }
+        if (n <= 0) {
+            break;
+        }
+        if (ch == '\x1b') {
+            unsigned char seq[3] = {0};
+            if (read(fd, &seq[0], 1) == 1 && seq[0] == '[') {
+                if (read(fd, &seq[1], 1) == 1) {
+                    if (seq[1] >= '0' && seq[1] <= '9') {
+                        if (read(fd, &seq[2], 1) == 1 && seq[2] == '~') {
+                            if (seq[1] == '5') {
+                                result = PAGER_KEY_PAGE_UP;
+                            } else if (seq[1] == '6') {
+                                result = PAGER_KEY_PAGE_DOWN;
                             } else {
                                 result = '\x1b';
                             }
-                        } else if (seq[1] == 'A') {
-                            result = PAGER_KEY_ARROW_UP;
-                        } else if (seq[1] == 'B') {
-                            result = PAGER_KEY_ARROW_DOWN;
                         } else {
                             result = '\x1b';
                         }
+                    } else if (seq[1] == 'A') {
+                        result = PAGER_KEY_ARROW_UP;
+                    } else if (seq[1] == 'B') {
+                        result = PAGER_KEY_ARROW_DOWN;
                     } else {
                         result = '\x1b';
                     }
@@ -958,9 +969,12 @@ static int pager_read_key(void) {
                     result = '\x1b';
                 }
             } else {
-                result = ch;
+                result = '\x1b';
             }
+        } else {
+            result = ch;
         }
+        break;
     }
     if (have_termios) {
         tcsetattr(fd, TCSAFLUSH, &orig);
