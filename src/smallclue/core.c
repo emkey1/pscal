@@ -992,7 +992,9 @@ static int pager_terminal_rows(void) {
 }
 
 static int pager_file(const char *cmd_name, const char *path, FILE *stream) {
-    if (!pscalRuntimeStdoutIsInteractive()) {
+    int ctrl_fd = pager_control_fd();
+    bool have_ctrl = (ctrl_fd >= 0) && pscalRuntimeFdIsInteractive(ctrl_fd);
+    if (!have_ctrl) {
         return print_file(path, stream);
     }
 
