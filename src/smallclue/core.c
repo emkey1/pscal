@@ -891,11 +891,11 @@ static int pager_control_fd(void) {
     pager_control_fd_value = -1;
 #else
     int fd = -1;
-    if (pscalRuntimeStdinIsInteractive()) {
-        fd = dup(STDIN_FILENO);
-    }
-    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fd = dup(STDOUT_FILENO);
+    }
+    if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
+        fd = dup(STDIN_FILENO);
     }
     if (fd < 0) {
         fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
