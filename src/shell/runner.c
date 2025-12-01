@@ -35,8 +35,16 @@ static void runtimeDebugLog(const char *message) {
     }
 }
 #else
+static bool g_shell_debug_enabled = false;
+static bool g_shell_debug_inited = false;
+
 static void runtimeDebugLog(const char *message) {
-    if (message) {
+    if (!g_shell_debug_inited) {
+        const char *env = getenv("PSCAL_SHELL_DEBUG");
+        g_shell_debug_enabled = (env && *env && strcmp(env, "0") != 0);
+        g_shell_debug_inited = true;
+    }
+    if (message && g_shell_debug_enabled) {
         fprintf(stderr, "%s\n", message);
     }
 }

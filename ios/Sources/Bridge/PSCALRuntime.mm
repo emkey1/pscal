@@ -3,6 +3,15 @@
 
 #include <Foundation/Foundation.h>
 #include <UIKit/UIKit.h>
+#if __has_feature(modules)
+@import Security;
+@import CoreServices;
+@import SystemConfiguration;
+#else
+#include <Security/Security.h>
+#include <CoreServices/CoreServices.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#endif
 #include <errno.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>
@@ -47,6 +56,7 @@ extern "C" {
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
 static PSCALRuntimeExitHandler s_exit_handler = NULL;
 static void *s_handler_context = NULL;
+static pthread_t s_runtime_thread_id;
 
 static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_runtime_active = false;
@@ -281,6 +291,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_using_virtual_tty = using_virtual_tty;
     s_runtime_active = true;
     s_runtime_thread = pthread_self();
+    s_runtime_thread_id = s_runtime_thread;
     const int initial_columns = s_pending_columns;
     const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
@@ -355,6 +366,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_using_virtual_tty = false;
     s_runtime_active = false;
     memset(&s_runtime_thread, 0, sizeof(s_runtime_thread));
+    memset(&s_runtime_thread_id, 0, sizeof(s_runtime_thread_id));
     pthread_mutex_unlock(&s_runtime_mutex);
 
     if (pump_fd >= 0) {
@@ -508,12 +520,55 @@ int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }
 
+void PSCALRuntimeSendSignal(int signo) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    bool active = s_runtime_active;
+    pthread_t target = s_runtime_thread_id;
+    pthread_mutex_unlock(&s_runtime_mutex);
+    if (!active || target == 0) {
+        return;
+    }
+    pthread_kill(target, signo);
+}
+
 void PSCALRuntimeApplyPathTruncation(const char *path) {
     if (path && path[0] != '\0') {
         setenv("PATH_TRUNCATE", path, 1);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
+}
+
+extern "C" int pscalPlatformClipboardSet(const char *utf8, size_t len) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!utf8) return -1;
+    NSString *str = [[NSString alloc] initWithBytes:utf8 length:len encoding:NSUTF8StringEncoding];
+    if (!str) return -1;
+    UIPasteboard.generalPasteboard.string = str;
+    return 0;
+#else
+    (void)utf8; (void)len;
+    return -1;
+#endif
+}
+
+extern "C" char *pscalPlatformClipboardGet(size_t *out_len) {
+#if defined(PSCAL_TARGET_IOS)
+    NSString *str = UIPasteboard.generalPasteboard.string;
+    if (!str) return NULL;
+    NSData *data = [str dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return NULL;
+    size_t len = (size_t)data.length;
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, data.bytes, len);
+    buf[len] = '\0';
+    if (out_len) *out_len = len;
+    return buf;
+#else
+    (void)out_len;
+    return NULL;
+#endif
 }
 #import <Foundation/Foundation.h>
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)

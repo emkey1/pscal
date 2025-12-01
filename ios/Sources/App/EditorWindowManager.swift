@@ -5,13 +5,13 @@ import Darwin
 @_silgen_name("pscalRuntimeDebugLog")
 private func c_pscalRuntimeDebugLog(_ message: UnsafePointer<CChar>) -> Void
 
-private func elvisRuntimeLog(_ message: String) {
+private func editorRuntimeLog(_ message: String) {
     message.withCString { c_pscalRuntimeDebugLog($0) }
 }
 
-final class ElvisWindowManager {
-    static let shared = ElvisWindowManager()
-    static let activityType = "com.pscal.elvis.scene"
+final class EditorWindowManager {
+    static let shared = EditorWindowManager()
+    static let activityType = "com.pscal.editor.scene"
 
     static var externalWindowEnabled: Bool {
         return TerminalFontSettings.shared.elvisWindowEnabled
@@ -19,7 +19,7 @@ final class ElvisWindowManager {
 
     private var preferenceObserver: NSObjectProtocol?
     private var activeSession: UISceneSession?
-    private weak var controller: TerminalElvisViewController?
+    private weak var controller: TerminalEditorViewController?
     private weak var mainSession: UISceneSession?
     private var pendingSceneActivity: NSUserActivity?
 
@@ -38,15 +38,15 @@ final class ElvisWindowManager {
     }
 
     var isVisible: Bool {
-        guard ElvisWindowManager.externalWindowEnabled else { return false }
+        guard EditorWindowManager.externalWindowEnabled else { return false }
         return controller != nil || pendingSceneActivity != nil
     }
 
     func showWindow() {
-        guard ElvisWindowManager.externalWindowEnabled else { return }
+        guard EditorWindowManager.externalWindowEnabled else { return }
         DispatchQueue.main.async {
             guard self.activeSession == nil, self.pendingSceneActivity == nil else { return }
-            let activity = NSUserActivity(activityType: ElvisWindowManager.activityType)
+            let activity = NSUserActivity(activityType: EditorWindowManager.activityType)
             self.pendingSceneActivity = activity
             UIApplication.shared.requestSceneSessionActivation(nil,
                                                                userActivity: activity,
@@ -61,47 +61,43 @@ final class ElvisWindowManager {
     }
 
     func hideWindow() {
-        guard ElvisWindowManager.externalWindowEnabled else { return }
+        guard EditorWindowManager.externalWindowEnabled else { return }
         DispatchQueue.main.async {
             if let session = self.activeSession {
                 UIApplication.shared.requestSceneSessionDestruction(session, options: nil, errorHandler: nil)
                 self.activeSession = nil
                 self.controller = nil
-                if let mainSession = self.mainSession {
-                    UIApplication.shared.requestSceneSessionActivation(mainSession,
-                                                                       userActivity: nil,
-                                                                       options: nil,
-                                                                       errorHandler: nil)
-                }
+                self.activateMainSceneIfAvailable()
             } else {
                 self.pendingSceneActivity = nil
+                self.activateMainSceneIfAvailable()
             }
         }
     }
 
     func refreshWindow() {
-        guard ElvisWindowManager.externalWindowEnabled else { return }
+        guard EditorWindowManager.externalWindowEnabled else { return }
     }
 
-    func sceneDidConnect(session: UISceneSession, controller: TerminalElvisViewController) {
-        guard ElvisWindowManager.externalWindowEnabled else { return }
+    func sceneDidConnect(session: UISceneSession, controller: TerminalEditorViewController) {
+        guard EditorWindowManager.externalWindowEnabled else { return }
         DispatchQueue.main.async {
             self.activeSession = session
             self.controller = controller
             self.pendingSceneActivity = nil
+            // Keep the main session as-is; do not juggle activation to avoid
+            // backgrounding other windows when the Elvis scene appears/disappears.
         }
     }
 
     func sceneDidDisconnect(session: UISceneSession) {
-        guard ElvisWindowManager.externalWindowEnabled else { return }
+        guard EditorWindowManager.externalWindowEnabled else { return }
         DispatchQueue.main.async {
             if self.activeSession == session {
                 self.activeSession = nil
                 self.controller = nil
                 self.pendingSceneActivity = nil
-                if let mainSession = self.mainSession {
-                    UIApplication.shared.requestSceneSessionActivation(mainSession, userActivity: nil, options: nil, errorHandler: nil)
-                }
+                self.activateMainSceneIfAvailable()
             }
         }
     }
@@ -116,9 +112,17 @@ final class ElvisWindowManager {
         }
     }
 
+    private func activateMainSceneIfAvailable() {
+        guard let session = mainSession else { return }
+        UIApplication.shared.requestSceneSessionActivation(session,
+                                                           userActivity: nil,
+                                                           options: nil,
+                                                           errorHandler: nil)
+    }
+
     private func applyPreferenceChange() {
-        if ElvisWindowManager.externalWindowEnabled {
-            if ElvisTerminalBridge.shared.isActive {
+        if EditorWindowManager.externalWindowEnabled {
+            if EditorTerminalBridge.shared.isActive {
                 showWindow()
                 refreshWindow()
             }
@@ -135,12 +139,12 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
         let config = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
         let hasGwinActivity = options.userActivities.contains { $0.activityType == GwinWindowManager.activityType } ||
             connectingSceneSession.stateRestorationActivity?.activityType == GwinWindowManager.activityType
-        let hasElvisActivity = options.userActivities.contains { $0.activityType == ElvisWindowManager.activityType } ||
-            connectingSceneSession.stateRestorationActivity?.activityType == ElvisWindowManager.activityType
+        let hasEditorActivity = options.userActivities.contains { $0.activityType == EditorWindowManager.activityType } ||
+            connectingSceneSession.stateRestorationActivity?.activityType == EditorWindowManager.activityType
         if hasGwinActivity {
             config.delegateClass = GwinSceneDelegate.self
-        } else if hasElvisActivity {
-            config.delegateClass = ElvisSceneDelegate.self
+        } else if hasEditorActivity {
+            config.delegateClass = EditorSceneDelegate.self
         } else {
             config.delegateClass = MainSceneDelegate.self
         }
@@ -160,38 +164,38 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UIHostingController(rootView: TerminalView())
         self.window = window
         window.makeKeyAndVisible()
-        ElvisWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
+        EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
-        ElvisWindowManager.shared.mainSceneDidDisconnect(session: scene.session)
+        EditorWindowManager.shared.mainSceneDidDisconnect(session: scene.session)
         window = nil
     }
 }
 
-@objc(ElvisSceneDelegate)
-class ElvisSceneDelegate: UIResponder, UIWindowSceneDelegate {
+@objc(EditorSceneDelegate)
+class EditorSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
     func scene(_ scene: UIScene,
                willConnectTo session: UISceneSession,
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        let controller = TerminalElvisViewController()
+        let controller = TerminalEditorViewController()
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = controller
         self.window = window
         window.makeKeyAndVisible()
-        ElvisWindowManager.shared.sceneDidConnect(session: windowScene.session, controller: controller)
+        EditorWindowManager.shared.sceneDidConnect(session: windowScene.session, controller: controller)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
-        ElvisWindowManager.shared.sceneDidDisconnect(session: scene.session)
+        EditorWindowManager.shared.sceneDidDisconnect(session: scene.session)
         window = nil
     }
 }
 
-private enum ElvisFontMetrics {
+private enum EditorFontMetrics {
     static func characterSize(for font: UIFont) -> CGSize {
         let width = max(1, ("W" as NSString).size(withAttributes: [.font: font]).width)
         let height = max(1, font.lineHeight)
@@ -213,8 +217,8 @@ private enum ElvisFontMetrics {
     }
 }
 
-final class TerminalElvisViewController: UIViewController {
-    private let hostingController = UIHostingController(rootView: ElvisFloatingRendererView())
+final class TerminalEditorViewController: UIViewController {
+    private let hostingController = UIHostingController(rootView: EditorFloatingRendererView())
     private let inputViewBridge = TerminalKeyInputView()
     private var lastReportedMetrics: TerminalGeometryMetrics?
     private var fontObserver: NSObjectProtocol?
@@ -308,15 +312,15 @@ final class TerminalElvisViewController: UIViewController {
         let safeInsets = view.safeAreaInsets
         let safeBounds = bounds.inset(by: safeInsets)
         guard safeBounds.width > 0, safeBounds.height > 0 else { return }
-        let font = TerminalElvisViewController.buildPreferredElvisFont(for: traitCollection)
-        let (metrics, charSize) = ElvisFontMetrics.metrics(for: bounds,
+        let font = TerminalEditorViewController.buildPreferredEditorFont(for: traitCollection)
+        let (metrics, charSize) = EditorFontMetrics.metrics(for: bounds,
                                                            safeInsets: safeInsets,
                                                            font: font)
         if metrics == lastReportedMetrics {
             return
         }
         lastReportedMetrics = metrics
-        elvisRuntimeLog(String(format: "[ElvisScene] reporting size %.1fx%.1f -> rows=%d cols=%d font=%@ %.2fpt char(%.2f x %.2f)",
+        editorRuntimeLog(String(format: "[EditorScene] reporting size %.1fx%.1f -> rows=%d cols=%d font=%@ %.2fpt char(%.2f x %.2f)",
                                safeBounds.width,
                                safeBounds.height,
                                metrics.rows,
@@ -328,7 +332,7 @@ final class TerminalElvisViewController: UIViewController {
         PscalRuntimeBootstrap.shared.updateElvisWindowSize(columns: metrics.columns, rows: metrics.rows)
     }
 
-    private static func buildPreferredElvisFont(for traits: UITraitCollection) -> UIFont {
+    private static func buildPreferredEditorFont(for traits: UITraitCollection) -> UIFont {
         let pointSize = resolvedFontPointSize(for: traits)
         return TerminalFontSettings.shared.font(forPointSize: pointSize)
     }

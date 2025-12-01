@@ -6,6 +6,8 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -17,6 +19,26 @@ static void pathTruncateResetCaches(void) {
     g_pathTruncatePrimaryLen = 0;
     g_pathTruncateAlias[0] = '\0';
     g_pathTruncateAliasLen = 0;
+}
+
+static void pathTruncateEnsureDir(const char *path) {
+    if (!path || *path == '\0') {
+        return;
+    }
+    char buf[PATH_MAX];
+    size_t len = strlen(path);
+    if (len + 1 > sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, path, len + 1);
+    for (char *p = buf + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(buf, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(buf, 0777);
 }
 
 static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t out_size) {
@@ -138,6 +160,19 @@ static bool pathTruncateFetchPrefix(const char **out_prefix, size_t *out_length)
         return false;
     }
     pathTruncateStorePrefix(source, length);
+    if (g_pathTruncatePrimaryLen == 1 && g_pathTruncatePrimary[0] == '/') {
+        /* A PATH_TRUNCATE of "/" is not useful; fall back to the sandbox home. */
+        const char *home = getenv("HOME");
+        if (home && home[0] == '/') {
+            size_t home_len = strlen(home);
+            while (home_len > 1 && home[home_len - 1] == '/') {
+                home_len--;
+            }
+            if (home_len > 0) {
+                pathTruncateStorePrefix(home, home_len);
+            }
+        }
+    }
     *out_prefix = g_pathTruncatePrimary;
     *out_length = g_pathTruncatePrimaryLen;
     return true;
@@ -243,6 +278,16 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
 void pathTruncateApplyEnvironment(const char *prefix) {
     if (prefix && prefix[0] == '/') {
         setenv("PATH_TRUNCATE", prefix, 1);
+        /* Seed common root directories so path virtualization has writable parents. */
+        char tmpbuf[PATH_MAX];
+        int written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/tmp", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
+        written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/var/tmp", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
     } else {
         unsetenv("PATH_TRUNCATE");
     }
@@ -264,6 +309,10 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     }
     if (!input_path) {
         return pathTruncateCopyString("", out, out_size);
+    }
+    if (strncmp(input_path, "/dev/", 5) == 0 || strcmp(input_path, "/dev") == 0) {
+        /* Device nodes should not be remapped. */
+        return pathTruncateCopyString(input_path, out, out_size);
     }
     const char *prefix = NULL;
     size_t prefix_len = 0;

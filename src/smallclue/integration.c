@@ -48,7 +48,16 @@ static Value smallclueInvokeBuiltin(VM *vm, int arg_count, Value *args, const ch
         return makeVoid();
     }
 
-    int argc = arg_count + 1;
+    int arg_start = 0;
+    if (arg_count > 0 && args[0].type == TYPE_STRING && args[0].s_val) {
+        if (strcasecmp(args[0].s_val, applet->name) == 0) {
+            arg_start = 1;
+        }
+    }
+    int argc = (arg_count - arg_start) + 1;
+    if (argc < 1) {
+        argc = 1;
+    }
     char **argv = (char **)calloc((size_t)(argc + 1), sizeof(char *));
     if (!argv) {
         if (shellRuntimeSetLastStatus) {
@@ -62,10 +71,18 @@ static Value smallclueInvokeBuiltin(VM *vm, int arg_count, Value *args, const ch
     if (!argv[0]) {
         ok = false;
     }
-    for (int i = 0; ok && i < arg_count; ++i) {
-        argv[i + 1] = smallclueDuplicateArg(&args[i]);
+    for (int i = arg_start; ok && i < arg_count; ++i) {
+        argv[(i - arg_start) + 1] = smallclueDuplicateArg(&args[i]);
         if (!argv[i + 1]) {
             ok = false;
+        }
+    }
+
+    const char *debug_env = getenv("SMALLCLUE_DEBUG_ARGS");
+    if (debug_env && *debug_env) {
+        fprintf(stderr, "[smallclue] %s argc=%d\n", applet->name, argc);
+        for (int i = 0; i < argc; ++i) {
+            fprintf(stderr, "  argv[%d]=%s\n", i, argv[i] ? argv[i] : "(null)");
         }
     }
 
@@ -109,6 +126,8 @@ DEFINE_SMALLCLUE_WRAPPER("cut", cut)
 DEFINE_SMALLCLUE_WRAPPER("curl", curl)
 DEFINE_SMALLCLUE_WRAPPER("tr", tr)
 DEFINE_SMALLCLUE_WRAPPER("id", id)
+DEFINE_SMALLCLUE_WRAPPER("pbcopy", pbcopy)
+DEFINE_SMALLCLUE_WRAPPER("pbpaste", pbpaste)
 #if SMALLCLUE_HAS_IFADDRS
 DEFINE_SMALLCLUE_WRAPPER("ipaddr", ipaddr)
 #endif
@@ -126,6 +145,10 @@ DEFINE_SMALLCLUE_WRAPPER("[", bracket)
 DEFINE_SMALLCLUE_WRAPPER("xargs", xargs)
 DEFINE_SMALLCLUE_WRAPPER("ps", ps)
 DEFINE_SMALLCLUE_WRAPPER("kill", kill)
+#if defined(SMALLCLUE_WITH_EXSH)
+DEFINE_SMALLCLUE_WRAPPER("sh", sh)
+#endif
+DEFINE_SMALLCLUE_WRAPPER("uptime", uptime)
 DEFINE_SMALLCLUE_WRAPPER("file", file)
 DEFINE_SMALLCLUE_WRAPPER("scp", scp)
 DEFINE_SMALLCLUE_WRAPPER("sftp", sftp)
@@ -140,16 +163,20 @@ DEFINE_SMALLCLUE_WRAPPER("rmdir", rmdir)
 DEFINE_SMALLCLUE_WRAPPER("ln", ln)
 DEFINE_SMALLCLUE_WRAPPER("ping", ping)
 DEFINE_SMALLCLUE_WRAPPER("env", env)
+DEFINE_SMALLCLUE_WRAPPER("dmesg", dmesg)
 #endif
 #if defined(PSCAL_TARGET_IOS)
-DEFINE_SMALLCLUE_WRAPPER("elvis", elvis)
-DEFINE_SMALLCLUE_WRAPPER("vi", vi)
+DEFINE_SMALLCLUE_WRAPPER("nextvi", nextvi)
 #endif
 DEFINE_SMALLCLUE_WRAPPER("less", less)
 DEFINE_SMALLCLUE_WRAPPER("ls", ls)
 DEFINE_SMALLCLUE_WRAPPER("md", md)
 DEFINE_SMALLCLUE_WRAPPER("wget", wget)
+DEFINE_SMALLCLUE_WRAPPER("watch", watch)
 DEFINE_SMALLCLUE_WRAPPER("more", more)
+#if defined(PSCAL_TARGET_IOS)
+DEFINE_SMALLCLUE_WRAPPER("smallclue-help", smallclue_help)
+#endif
 
 #undef DEFINE_SMALLCLUE_WRAPPER
 
@@ -181,6 +208,8 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("curl", vmBuiltinSmallclue_curl, BUILTIN_TYPE_PROCEDURE, "curl");
     registerVmBuiltin("tr", vmBuiltinSmallclue_tr, BUILTIN_TYPE_PROCEDURE, "tr");
     registerVmBuiltin("id", vmBuiltinSmallclue_id, BUILTIN_TYPE_PROCEDURE, "id");
+    registerVmBuiltin("pbcopy", vmBuiltinSmallclue_pbcopy, BUILTIN_TYPE_PROCEDURE, "pbcopy");
+    registerVmBuiltin("pbpaste", vmBuiltinSmallclue_pbpaste, BUILTIN_TYPE_PROCEDURE, "pbpaste");
 #if SMALLCLUE_HAS_IFADDRS
     registerVmBuiltin("ipaddr", vmBuiltinSmallclue_ipaddr, BUILTIN_TYPE_PROCEDURE, "ipaddr");
 #endif
@@ -199,6 +228,10 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("xargs", vmBuiltinSmallclue_xargs, BUILTIN_TYPE_PROCEDURE, "xargs");
     registerVmBuiltin("ps", vmBuiltinSmallclue_ps, BUILTIN_TYPE_PROCEDURE, "ps");
     registerVmBuiltin("kill", vmBuiltinSmallclue_kill, BUILTIN_TYPE_PROCEDURE, "kill");
+#if defined(SMALLCLUE_WITH_EXSH)
+    registerVmBuiltin("sh", vmBuiltinSmallclue_sh, BUILTIN_TYPE_PROCEDURE, "sh");
+#endif
+    registerVmBuiltin("uptime", vmBuiltinSmallclue_uptime, BUILTIN_TYPE_PROCEDURE, "uptime");
     registerVmBuiltin("scp", vmBuiltinSmallclue_scp, BUILTIN_TYPE_PROCEDURE, "scp");
     registerVmBuiltin("sftp", vmBuiltinSmallclue_sftp, BUILTIN_TYPE_PROCEDURE, "sftp");
     registerVmBuiltin("ssh", vmBuiltinSmallclue_ssh, BUILTIN_TYPE_PROCEDURE, "ssh");
@@ -212,10 +245,15 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("ln", vmBuiltinSmallclue_ln, BUILTIN_TYPE_PROCEDURE, "ln");
     registerVmBuiltin("ping", vmBuiltinSmallclue_ping, BUILTIN_TYPE_PROCEDURE, "ping");
     registerVmBuiltin("env", vmBuiltinSmallclue_env, BUILTIN_TYPE_PROCEDURE, "env");
-    registerVmBuiltin("elvis", vmBuiltinSmallclue_elvis, BUILTIN_TYPE_PROCEDURE, "elvis");
-    registerVmBuiltin("vi", vmBuiltinSmallclue_vi, BUILTIN_TYPE_PROCEDURE, "vi");
+    registerVmBuiltin("nextvi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "nextvi");
+    registerVmBuiltin("vi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "vi");
+    registerVmBuiltin("dmesg", vmBuiltinSmallclue_dmesg, BUILTIN_TYPE_PROCEDURE, "dmesg");
 #endif
     registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
+    registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");
+#if defined(PSCAL_TARGET_IOS)
+    registerVmBuiltin("smallclue-help", vmBuiltinSmallclue_smallclue_help, BUILTIN_TYPE_PROCEDURE, "smallclue-help");
+#endif
 }
 
 void smallclueRegisterBuiltins(void) {

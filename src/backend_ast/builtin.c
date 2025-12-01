@@ -30,9 +30,12 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <sys/resource.h>
+#include <sys/select.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -2494,6 +2497,9 @@ typedef struct {
 #define VM_COLOR_STACK_MAX 16
 static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
 static _Thread_local int vm_color_stack_depth = 0;
+static volatile sig_atomic_t g_vm_sigint_seen = 0;
+static int g_vm_sigint_pipe[2] = {-1, -1};
+static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2656,6 +2662,14 @@ static void vmAtExitCleanup(void) {
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
+    if (signum == SIGINT) {
+        g_vm_sigint_seen = 1;
+        if (g_vm_sigint_pipe[1] >= 0) {
+            char c = 'i';
+            (void)write(g_vm_sigint_pipe[1], &c, 1);
+        }
+        return;
+    }
     if (vm_raw_mode || vm_alt_screen_depth > 0)
         vmAtExitCleanup();
     _exit(128 + signum);
@@ -2668,10 +2682,12 @@ static void vmRegisterRestoreHandlers(void) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+#if !defined(PSCAL_TARGET_IOS)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGQUIT, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGSEGV, &sa, NULL);
+#endif
 }
 
 static void vmSetupTermHandlers(void) {
@@ -2687,6 +2703,50 @@ static void vmSetupTermHandlers(void) {
     pthread_mutex_unlock(&vm_term_mutex);
 
     pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
+}
+
+static void init_pipe_once(void);
+
+static void vmEnsureSigintPipe(void) {
+    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
+}
+
+static void init_pipe_once(void) {
+    if (pipe(g_vm_sigint_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
+        int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
+        }
+    }
+}
+
+// Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
+void pscalRuntimeRequestSigint(void) {
+    g_vm_sigint_seen = 1;
+    if (g_vm_sigint_pipe[1] >= 0) {
+        char c = 'i';
+        (void)write(g_vm_sigint_pipe[1], &c, 1);
+    }
+}
+
+bool pscalRuntimeConsumeSigint(void) {
+    if (!g_vm_sigint_seen && g_vm_sigint_pipe[0] < 0) {
+        return false;
+    }
+    bool seen = g_vm_sigint_seen != 0;
+    g_vm_sigint_seen = 0;
+    if (g_vm_sigint_pipe[0] >= 0) {
+        char drain[8];
+        while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+        }
+    }
+    return seen;
 }
 
 void vmInitTerminalState(void) {
@@ -2768,6 +2828,112 @@ static void vmPrepareCanonicalInput(void) {
         perror("vmPrepareCanonicalInput: write show_cursor");
     }
     fflush(stdout);
+}
+
+static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
+    if (!stream || !buffer || buffer_sz == 0) {
+        return false;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+
+    size_t len = 0;
+    vmEnsureSigintPipe();
+    if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
+        while (len < buffer_sz - 1) {
+            if (g_vm_sigint_seen) {
+                g_vm_sigint_seen = 0;
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                buffer[0] = '\0';
+                return false;
+            }
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            if (g_vm_sigint_pipe[0] >= 0) {
+                FD_SET(g_vm_sigint_pipe[0], &rfds);
+            }
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100 * 1000; // 100ms
+            int maxfd = fd;
+            if (g_vm_sigint_pipe[0] >= 0 && g_vm_sigint_pipe[0] > maxfd) {
+                maxfd = g_vm_sigint_pipe[0];
+            }
+            int ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EBADF) {
+                    return false;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ready == 0) {
+                continue;
+            }
+            if (g_vm_sigint_pipe[0] >= 0 && FD_ISSET(g_vm_sigint_pipe[0], &rfds)) {
+                char drain[8];
+                while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+                }
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            char ch;
+            ssize_t n = read(fd, &ch, 1);
+            if (n == 0) {
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (ch == 0x03) { // Ctrl-C
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (ch == '\r') {
+                continue;
+            }
+            if (ch == '\n') {
+                break;
+            }
+            buffer[len++] = ch;
+        }
+        buffer[len] = '\0';
+        if (len > 0 || feof(stream)) {
+            return true;
+        }
+    }
+
+    if (fgets(buffer, buffer_sz, stream) == NULL) {
+        return false;
+    }
+    buffer[strcspn(buffer, "\r\n")] = '\0';
+    return true;
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.
@@ -4962,7 +5128,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
     // 2) Read full line
     char line_buffer[1024];
-    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
+    if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
         last_io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***

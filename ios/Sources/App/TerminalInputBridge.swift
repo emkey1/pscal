@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+@_silgen_name("pscalRuntimeRequestSigint")
+func pscalRuntimeRequestSigint()
+
 struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
@@ -178,6 +181,10 @@ final class TerminalKeyInputView: UITextView {
         if key.modifierFlags.contains(.control),
            let scalar = key.charactersIgnoringModifiers.lowercased().unicodeScalars.first {
             let value = scalar.value
+            if scalar == "c" {
+                pscalRuntimeRequestSigint()
+                return true
+            }
             if value >= 0x40, value <= 0x7F,
                let ctrlScalar = UnicodeScalar(value & 0x1F) {
                 onInput?(String(ctrlScalar))
@@ -186,14 +193,6 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
-        case .keyboardUpArrow:
-            onInput?("\u{1B}[A"); return true
-        case .keyboardDownArrow:
-            onInput?("\u{1B}[B"); return true
-        case .keyboardLeftArrow:
-            onInput?("\u{1B}[D"); return true
-        case .keyboardRightArrow:
-            onInput?("\u{1B}[C"); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:

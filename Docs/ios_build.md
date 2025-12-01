@@ -67,10 +67,9 @@ should include the relevant header (or forward declare the function) and call it
 with the same argv vector the CLI expects.
 `pscal_dascal_static` and `pscal_pscald_static` obey the same feature toggles as
 their executable counterparts, so add `-DBUILD_DASCAL=ON` / `-DBUILD_PSCALD=ON`
-when configuring if you need those archives.
-Until we ship an iOS-ready libcurl, the presets force `PSCAL_USE_BREW_CURL=ON`
-so headers resolve via Homebrew; CLI executables stay disabled to avoid linking
-against the macOS-only libcurl dylib.
+when configuring if you need those archives. The iOS presets now build the
+bundled libcurl against the in-tree OpenSSL while enabling Apple SecTrust, so
+HTTPS validation uses the platform trust store without shipping a CA bundle.
 
 Example simulator build:
 

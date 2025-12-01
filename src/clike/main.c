@@ -29,6 +29,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <signal.h>
 #include "compiler/bytecode.h"
 #include "clike/parser.h"
 #include "clike/codegen.h"
@@ -57,6 +58,28 @@ static void initSymbolSystemClike(void) {
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
     current_procedure_table = procedure_table;
+}
+
+static VM *g_sigint_vm = NULL;
+
+static void clikeHandleSigint(int signo) {
+    (void)signo;
+    if (g_sigint_vm) {
+        g_sigint_vm->abort_requested = true;
+        g_sigint_vm->exit_requested = true;
+    }
+}
+
+static void clikeInstallSigint(void) {
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = clikeHandleSigint;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
 }
 
 static const char *CLIKE_USAGE =
@@ -346,6 +369,7 @@ int clike_main(int argc, char **argv) {
         CLIKE_RETURN(EXIT_SUCCESS);
     }
 
+    clikeInstallSigint();
     VM vm; initVM(&vm);
     // Inline trace toggle via comment: /* trace on */ or // trace on
     if (vm_trace_head > 0) {
@@ -353,7 +377,9 @@ int clike_main(int argc, char **argv) {
     } else if ((pre_src && strstr(pre_src, "trace on")) || (src && strstr(src, "trace on"))) {
         vm.trace_head_instructions = 16;
     }
+    g_sigint_vm = &vm;
     InterpretResult result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    g_sigint_vm = NULL;
     freeVM(&vm);
     freeBytecodeChunk(&chunk);
     freeASTClike(prog);

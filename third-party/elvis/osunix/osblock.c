@@ -34,6 +34,23 @@ char id_osblock[] = "$Id: osblock.c,v 2.30 2003/10/17 17:41:23 steve Exp $";
 
 
 static int fd = -1; /* file descriptor of the session file */
+#ifdef PSCAL_TARGET_IOS
+/* iOS sandboxed storage causes session files to behave poorly; keep session
+ * state entirely in memory so elvis never touches the filesystem.
+ */
+static BLK **iosblk;
+static int iosnblks;
+static void iosblkreset(void) {
+	if (iosnblks > 0 && iosblk) {
+		for (int i = 0; i < iosnblks; i++) {
+			free(iosblk[i]);
+		}
+		free(iosblk);
+	}
+	iosblk = NULL;
+	iosnblks = 0;
+}
+#endif
 #ifdef FEATURE_RAM
 static BLK **blklist;
 static int nblks;
@@ -60,6 +77,30 @@ static char	dfltname[1024];
 	struct stat st;
 	int	i, j;
 	long	oldcount;
+
+#ifdef PSCAL_TARGET_IOS
+	(void)force;
+	/* Reset all session state and force a fresh temporary in-memory session. */
+	iosblkreset();
+	iosnblks = 1024;
+	iosblk = (BLK **)calloc(iosnblks, sizeof(BLK *));
+	if (!iosblk) {
+		msg(MSG_FATAL, "no memory for session");
+	}
+	iosblk[0] = (BLK *)malloc(o_blksize);
+	if (!iosblk[0]) {
+		msg(MSG_FATAL, "no memory for session");
+	}
+	memcpy(iosblk[0], buf, o_blksize);
+	buf->super.inuse = getpid();
+	fd = -1;
+	o_session = NULL;
+	o_sessionpath = NULL;
+	o_recovering = ElvFalse;
+	o_tempsession = ElvTrue;
+	o_newsession = ElvTrue;
+	return ElvTrue;
+#endif
 
 #ifdef FEATURE_RAM
 	if (o_session && !CHARcmp(o_session, toCHAR("ram"))) {
@@ -222,6 +263,14 @@ static char	dfltname[1024];
 
 /* This function closes the session file, given its handle */
 void blkclose(BLK *buf) {
+#ifdef PSCAL_TARGET_IOS
+	(void)buf;
+	iosblkreset();
+	o_session = NULL;
+	o_sessionpath = NULL;
+	o_recovering = ElvFalse;
+	return;
+#endif
 #ifdef FEATURE_RAM
 	if (nblks > 0) {
 		blkreset();
@@ -249,6 +298,31 @@ void blkclose(BLK *buf) {
  */
 void blkwrite(BLK *buf, _BLKNO_ blkno)
 {
+#ifdef PSCAL_TARGET_IOS
+	if (iosnblks > 0) {
+		if (blkno >= iosnblks) {
+			int newcount = iosnblks;
+			while (blkno >= newcount) {
+				newcount += 1024;
+			}
+			BLK **tmp = (BLK **)realloc(iosblk, newcount * sizeof(BLK *));
+			if (!tmp) {
+				msg(MSG_FATAL, "blkwrite failed");
+			}
+			memset(&tmp[iosnblks], 0, (newcount - iosnblks) * sizeof(BLK *));
+			iosblk = tmp;
+			iosnblks = newcount;
+		}
+		if (!iosblk[blkno]) {
+			iosblk[blkno] = (BLK *)malloc(o_blksize);
+			if (!iosblk[blkno]) {
+				msg(MSG_FATAL, "blkwrite failed");
+			}
+		}
+		memcpy(iosblk[blkno], buf, o_blksize);
+		return;
+	}
+#endif
 #ifdef FEATURE_RAM
 	/* store it in RAM */
 	if (nblks > 0) {
@@ -276,13 +350,51 @@ void blkwrite(BLK *buf, _BLKNO_ blkno)
  * identified by blkhandle.  The request block will always exist;
  * it will never be beyond the end of the file.
  */
-void blkread(BLK *buf, _BLKNO_ blkno)
-{
+void blkread(BLK *buf, _BLKNO_ blkno) {
+#ifdef PSCAL_TARGET_IOS
+	if (iosnblks > 0) {
+		if (blkno >= iosnblks) {
+			int newcount = iosnblks;
+			while (blkno >= newcount) {
+				newcount += 1024;
+			}
+			BLK **tmp = (BLK **)realloc(iosblk, newcount * sizeof(BLK *));
+			if (!tmp) {
+				msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
+			}
+			memset(&tmp[iosnblks], 0, (newcount - iosnblks) * sizeof(BLK *));
+			iosblk = tmp;
+			iosnblks = newcount;
+		}
+		if (!iosblk[blkno]) {
+			iosblk[blkno] = (BLK *)calloc(1, o_blksize);
+			if (!iosblk[blkno]) {
+				msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
+			}
+		}
+		memcpy(buf, iosblk[blkno], o_blksize);
+		return;
+	}
+#endif
 	/* read the block */
 	lseek(fd, (off_t)blkno * o_blksize, 0);
-	if (read(fd, (char *)buf, (size_t)o_blksize) != o_blksize) {
+	ssize_t nread = read(fd, (char *)buf, (size_t)o_blksize);
+	if (nread == (ssize_t)o_blksize) {
+		return;
+	}
+	if (nread < 0) {
 		msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
 	}
+	/* Short reads can occur on iOS if a session file is truncated by the
+	 * sandbox; pad with zeros instead of aborting so the editor remains usable.
+	 */
+#ifdef PSCAL_TARGET_IOS
+	if (nread >= 0 && nread < (ssize_t)o_blksize) {
+		memset(((char *)buf) + nread, 0, (size_t)(o_blksize - nread));
+		return;
+	}
+#endif
+	msg(MSG_FATAL, "[d]blkread($1) failed", (int)blkno);
 }
 
 /* Force changes out to disk.  Ideally we would only force the session file's
@@ -290,6 +402,9 @@ void blkread(BLK *buf, _BLKNO_ blkno)
  * force them all out.  Major bummer.
  */
 void blksync(void) {
+#ifdef PSCAL_TARGET_IOS
+	return;
+#endif
 #ifdef FEATURE_RAM
 	if (nblks > 0)
 		return;

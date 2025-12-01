@@ -58,7 +58,7 @@
 #define FEATURE_TAGS
 #define FEATURE_TEXTOBJ
 #define FEATURE_V
-#undef FEATURE_RAM
+#define FEATURE_RAM
 #undef FEATURE_XFT
 #define FEATURE_PERSIST
 

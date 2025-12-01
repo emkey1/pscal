@@ -62,22 +62,23 @@ bool pscalRuntimeVirtualTTYEnabled(void) {
 }
 
 static bool pscalRuntimeFdUsesVirtualTTY(int fd) {
-    if (!sVirtualTTYEnabled) {
-        return false;
-    }
-    int idx = stdFdToIndex(fd);
-    if (idx < 0) {
-        return false;
-    }
-    VirtualTTYDescriptor *slot = &sVirtualTTY[idx];
-    if (!slot->valid) {
+    if (!sVirtualTTYEnabled || fd < 0) {
         return false;
     }
     struct stat st;
     if (fstat(fd, &st) != 0) {
         return false;
     }
-    return st.st_dev == slot->dev && st.st_ino == slot->ino;
+    for (int i = 0; i < 3; ++i) {
+        VirtualTTYDescriptor *slot = &sVirtualTTY[i];
+        if (!slot->valid) {
+            continue;
+        }
+        if (st.st_dev == slot->dev && st.st_ino == slot->ino) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool pscalRuntimeFdIsInteractive(int fd) {

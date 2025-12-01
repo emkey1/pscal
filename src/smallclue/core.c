@@ -6,8 +6,9 @@
 #include "smallclue/smallclue.h"
 
 #include "common/runtime_tty.h"
-#include "smallclue/elvis_app.h"
+#include "smallclue/nextvi_app.h"
 #include "smallclue/openssh_app.h"
+#include "common/runtime_clipboard.h"
 #if defined(PSCAL_HAS_LIBCURL)
 #include <curl/curl.h>
 #endif
@@ -15,6 +16,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <fnmatch.h>
 #include <grp.h>
 #include <limits.h>
@@ -28,12 +30,19 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <inttypes.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/select.h>
+#include <glob.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include "common/path_truncate.h"
+void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+#endif
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -63,6 +72,97 @@
 #if SMALLCLUE_GETOPT_NEEDS_OPTRESET
 extern int optreset;
 #endif
+
+#if defined(__APPLE__)
+extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak_import));
+#elif defined(__GNUC__)
+extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak));
+#else
+bool shellRuntimeConsumeExitRequested(void);
+#endif
+
+extern bool pscalRuntimeConsumeSigint(void);
+#if defined(PSCAL_TARGET_IOS)
+#if defined(__APPLE__)
+extern char *pscalRuntimeCopySessionLog(void) __attribute__((weak_import));
+extern void pscalRuntimeResetSessionLog(void) __attribute__((weak_import));
+#elif defined(__GNUC__)
+extern char *pscalRuntimeCopySessionLog(void) __attribute__((weak));
+extern void pscalRuntimeResetSessionLog(void) __attribute__((weak));
+#else
+char *pscalRuntimeCopySessionLog(void);
+void pscalRuntimeResetSessionLog(void);
+#endif
+
+// Provide weak fallbacks so smallclue can link when the Swift bridge is absent.
+__attribute__((weak)) char *pscalRuntimeCopySessionLog(void) { return NULL; }
+__attribute__((weak)) void pscalRuntimeResetSessionLog(void) { }
+#endif
+
+__attribute__((weak)) bool shellRuntimeConsumeExitRequested(void) {
+    return false;
+}
+
+static void smallclueClearPendingSignals(void) {
+    sigset_t watchset;
+    sigemptyset(&watchset);
+    sigaddset(&watchset, SIGINT);
+    sigaddset(&watchset, SIGTSTP);
+    sigset_t oldset;
+    if (sigprocmask(SIG_BLOCK, &watchset, &oldset) != 0) {
+        return;
+    }
+    sigset_t pending;
+    while (sigpending(&pending) == 0 &&
+           (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+        int signo = 0;
+        if (sigwait(&watchset, &signo) != 0) {
+            break;
+        }
+        (void)signo;
+    }
+    sigprocmask(SIG_SETMASK, &oldset, NULL);
+}
+
+static bool smallclueShouldAbort(int *out_status) {
+    if (pscalRuntimeConsumeSigint()) {
+        if (out_status) {
+            *out_status = 130;
+        }
+        return true;
+    }
+
+    if (shellRuntimeConsumeExitRequested) {
+        if (shellRuntimeConsumeExitRequested()) {
+            if (out_status) {
+                *out_status = 130;
+            }
+            return true;
+        }
+    }
+
+    sigset_t watchset;
+    sigemptyset(&watchset);
+    sigaddset(&watchset, SIGINT);
+    sigaddset(&watchset, SIGTSTP);
+    sigset_t oldset;
+    if (sigprocmask(SIG_BLOCK, &watchset, &oldset) == 0) {
+        sigset_t pending;
+        if (sigpending(&pending) == 0 &&
+            (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+            int signo = 0;
+            if (sigwait(&watchset, &signo) == 0) {
+                if (out_status) {
+                    *out_status = (signo == SIGINT) ? 130 : 148;
+                }
+                sigprocmask(SIG_SETMASK, &oldset, NULL);
+                return true;
+            }
+        }
+        sigprocmask(SIG_SETMASK, &oldset, NULL);
+    }
+    return false;
+}
 
 static void smallclueResetGetopt(void) {
     optind = 1;
@@ -158,9 +258,11 @@ static int smallclueSedCommand(int argc, char **argv);
 static int smallclueCutCommand(int argc, char **argv);
 static int smallclueTrCommand(int argc, char **argv);
 static int smallclueIdCommand(int argc, char **argv);
+static void smallclueDfFormatSize(char *buf, size_t bufsize, unsigned long long bytes, bool human);
 static int smallclueTrueCommand(int argc, char **argv);
 static int smallclueFalseCommand(int argc, char **argv);
 static int smallclueSleepCommand(int argc, char **argv);
+static int smallclueWatchCommand(int argc, char **argv);
 static int smallclueBasenameCommand(int argc, char **argv);
 static int smallclueDirnameCommand(int argc, char **argv);
 static int smallclueTeeCommand(int argc, char **argv);
@@ -178,7 +280,7 @@ static const char *smallclueLeafName(const char *path);
 static int smallclueBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static void smallclueTrimTrailingSlashes(char *path);
 static bool smallclueChopParentDirectory(char *path);
-static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive);
+static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force);
 static int smallclueCopyFile(const char *label, const char *src, const char *dst);
 static int smallclueMkdirParents(const char *path, mode_t mode);
 static int smallclueElvisCommand(int argc, char **argv);
@@ -186,6 +288,13 @@ static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
 static int smallclueSftpCommand(int argc, char **argv);
 static int smallclueSshKeygenCommand(int argc, char **argv);
+static int smallcluePbcopyCommand(int argc, char **argv);
+static int smallcluePbpasteCommand(int argc, char **argv);
+#if defined(SMALLCLUE_WITH_EXSH)
+extern int exsh_main(int argc, char **argv);
+static int smallclueShCommand(int argc, char **argv);
+#endif
+static int smallclueUptimeCommand(int argc, char **argv);
 static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
 static int smallclueCurlCommand(int argc, char **argv);
@@ -194,6 +303,10 @@ static int smallclueWgetCommand(int argc, char **argv);
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
 static int smallclueDfCommand(int argc, char **argv);
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueDmesgCommand(int argc, char **argv);
+static int smallclueHelpCommand(int argc, char **argv);
+#endif
 
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
@@ -210,7 +323,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"dirname", smallclueDirnameCommand, "Strip last path component"},
     {"du", smallclueDuCommand, "Summarize disk usage"},
     {"echo", smallclueEchoCommand, "Print arguments"},
-    {"elvis", smallclueElvisCommand, "Elvis text editor"},
+    {"nextvi", smallclueElvisCommand, "Nextvi text editor"},
     {"env", smallclueEnvCommand, "Display or update environment"},
     {"false", smallclueFalseCommand, "Do nothing, unsuccessfully"},
     {"file", smallclueFileCommand, "Identify file types"},
@@ -229,6 +342,8 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"mkdir", smallclueMkdirCommand, "Create directories"},
     {"more", smallcluePagerCommand, "Paginate file contents"},
     {"mv", smallclueMvCommand, "Move or rename files"},
+    {"pbcopy", smallcluePbcopyCommand, "Copy stdin to the system clipboard"},
+    {"pbpaste", smallcluePbpasteCommand, "Paste the system clipboard to stdout"},
     {"ping", smallcluePingCommand, "TCP ping utility"},
     {"ps", smallcluePsCommand, "Show simple process information"},
     {"pwd", smallcluePwdCommand, "Print working directory"},
@@ -239,6 +354,9 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"sleep", smallclueSleepCommand, "Delay for a number of seconds"},
     {"sort", smallclueSortCommand, "Sort lines of text"},
     {"stty", smallclueSttyCommand, "Adjust terminal rows/columns"},
+#if defined(SMALLCLUE_WITH_EXSH)
+    {"sh", smallclueShCommand, "Run the PSCAL shell front end"},
+#endif
     {"scp", smallclueScpCommand, "Securely copy files over SSH"},
     {"sftp", smallclueSftpCommand, "Interactive SFTP client"},
     {"ssh", smallclueSshCommand, "OpenSSH client"},
@@ -251,11 +369,17 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"true", smallclueTrueCommand, "Do nothing, successfully"},
     {"type", smallclueTypeCommand, "Describe command names"},
     {"uniq", smallclueUniqCommand, "Report or omit repeated lines"},
-    {"vi", smallclueElvisCommand, "Alias for Elvis text editor"},
+    {"uptime", smallclueUptimeCommand, "Show system uptime"},
+    {"watch", smallclueWatchCommand, "Periodically run a command"},
+    {"vi", smallclueElvisCommand, "Alias for Nextvi text editor"},
     {"wc", smallclueWcCommand, "Count lines/words/bytes"},
     {"wget", smallclueWgetCommand, "Download files via HTTP(S)"},
     {"xargs", smallclueXargsCommand, "Build command lines from stdin"},
     {"df", smallclueDfCommand, "Report filesystem usage"},
+#if defined(PSCAL_TARGET_IOS)
+    {"smallclue-help", smallclueHelpCommand, "List available smallclue applets"},
+    {"dmesg", smallclueDmesgCommand, "Show PSCAL runtime log for this session"},
+#endif
 };
 
 static size_t kSmallclueAppletCount = sizeof(kSmallclueApplets) / sizeof(kSmallclueApplets[0]);
@@ -457,7 +581,7 @@ static void smallclueKillListSignals(void) {
     putchar('\n');
 }
 
-static int smallclueKillCommand(int argc, char **argv) {
+static int smallclueKillCommandOriginal(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: kill [-SIGNAL] pid...\n");
         return 1;
@@ -497,6 +621,19 @@ static int smallclueKillCommand(int argc, char **argv) {
     }
     return status;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueKillCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    fprintf(stderr, "kill: not implemented on iOS/iPadOS\n");
+    return 1;
+}
+#else
+static int smallclueKillCommand(int argc, char **argv) {
+    return smallclueKillCommandOriginal(argc, argv);
+}
+#endif
 
 static int smallclueXargsCommand(int argc, char **argv) {
     smallclueResetGetopt();
@@ -774,6 +911,20 @@ static const char *pager_command_name(const char *name) {
 
 static int pager_control_fd_value = -2;
 
+// Duplicate an FD for pager control input only if it can be read from.
+static int pagerDupForRead(int fd) {
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        return -1;
+    }
+    int flags = fcntl(dup_fd, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_ACCMODE) != O_WRONLY) {
+        return dup_fd;
+    }
+    close(dup_fd);
+    return -1;
+}
+
 static int pager_control_fd(void) {
     if (pager_control_fd_value != -2) {
         return pager_control_fd_value;
@@ -783,7 +934,10 @@ static int pager_control_fd(void) {
 #else
     int fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
     if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
-        fd = dup(STDIN_FILENO);
+        fd = pagerDupForRead(STDIN_FILENO);
+    }
+    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+        fd = pagerDupForRead(STDOUT_FILENO);
     }
     pager_control_fd_value = fd;
 #endif
@@ -793,7 +947,10 @@ static int pager_control_fd(void) {
 static int pager_read_key(void) {
     int fd = pager_control_fd();
     if (fd < 0) {
-        return EOF;
+        return 'q';
+    }
+    if (!pscalRuntimeFdIsInteractive(fd)) {
+        return 'q';
     }
     struct termios orig;
     bool have_termios = (tcgetattr(fd, &orig) == 0);
@@ -806,34 +963,44 @@ static int pager_read_key(void) {
         raw.c_cc[VTIME] = 0;
         tcsetattr(fd, TCSAFLUSH, &raw);
     }
-    int result = EOF;
-    unsigned char ch = 0;
-    ssize_t n = read(fd, &ch, 1);
-    if (n > 0) {
+    int result = 'q';
+    for (;;) {
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int poll_rc = poll(&pfd, 1, -1);
+        if (poll_rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if ((pfd.revents & POLLIN) == 0) {
+            continue;
+        }
+        unsigned char ch = 0;
+        ssize_t n = read(fd, &ch, 1);
+        if (n <= 0) {
+            break;
+        }
         if (ch == '\x1b') {
             unsigned char seq[3] = {0};
-            if (read(fd, &seq[0], 1) == 1) {
-                if (seq[0] == '[') {
-                    if (read(fd, &seq[1], 1) == 1) {
-                        if (seq[1] >= '0' && seq[1] <= '9') {
-                            if (read(fd, &seq[2], 1) == 1 && seq[2] == '~') {
-                                if (seq[1] == '5') {
-                                    result = PAGER_KEY_PAGE_UP;
-                                } else if (seq[1] == '6') {
-                                    result = PAGER_KEY_PAGE_DOWN;
-                                } else {
-                                    result = '\x1b';
-                                }
+            if (read(fd, &seq[0], 1) == 1 && seq[0] == '[') {
+                if (read(fd, &seq[1], 1) == 1) {
+                    if (seq[1] >= '0' && seq[1] <= '9') {
+                        if (read(fd, &seq[2], 1) == 1 && seq[2] == '~') {
+                            if (seq[1] == '5') {
+                                result = PAGER_KEY_PAGE_UP;
+                            } else if (seq[1] == '6') {
+                                result = PAGER_KEY_PAGE_DOWN;
                             } else {
                                 result = '\x1b';
                             }
-                        } else if (seq[1] == 'A') {
-                            result = PAGER_KEY_ARROW_UP;
-                        } else if (seq[1] == 'B') {
-                            result = PAGER_KEY_ARROW_DOWN;
                         } else {
                             result = '\x1b';
                         }
+                    } else if (seq[1] == 'A') {
+                        result = PAGER_KEY_ARROW_UP;
+                    } else if (seq[1] == 'B') {
+                        result = PAGER_KEY_ARROW_DOWN;
                     } else {
                         result = '\x1b';
                     }
@@ -843,12 +1010,10 @@ static int pager_read_key(void) {
             } else {
                 result = '\x1b';
             }
-            if (result == EOF) {
-                result = '\x1b';
-            }
         } else {
             result = ch;
         }
+        break;
     }
     if (have_termios) {
         tcsetattr(fd, TCSAFLUSH, &orig);
@@ -880,13 +1045,24 @@ static int pager_terminal_rows(void) {
 }
 
 static int pager_file(const char *cmd_name, const char *path, FILE *stream) {
-    if (!pscalRuntimeStdoutIsInteractive()) {
-        return print_file(path, stream);
-    }
-
     PagerBuffer buffer = {0};
     if (pagerCollectLines(cmd_name, path, stream, &buffer) != 0) {
         return 1;
+    }
+
+    int ctrl_fd = pager_control_fd();
+    bool have_ctrl = (ctrl_fd >= 0) && pscalRuntimeFdIsInteractive(ctrl_fd);
+    if (!have_ctrl) {
+        /* No interactive input available; dump what we collected. */
+        for (size_t i = 0; i < buffer.count; ++i) {
+            fputs(buffer.lines[i], stdout);
+            size_t len = strlen(buffer.lines[i]);
+            if (len == 0 || buffer.lines[i][len - 1] != '\n') {
+                fputc('\n', stdout);
+            }
+        }
+        pagerBufferFree(&buffer);
+        return 0;
     }
 
     int rows = pager_terminal_rows();
@@ -901,6 +1077,14 @@ static int pager_file(const char *cmd_name, const char *path, FILE *stream) {
 }
 
 #define MARKDOWN_WRAP_WIDTH 78
+#define MARKDOWN_MAX_TABLE_ROWS 500
+#define MARKDOWN_MAX_TABLE_COLS 50
+#define MARKDOWN_MIN_COL_WIDTH 10
+
+typedef struct {
+    char *cells[MARKDOWN_MAX_TABLE_COLS];
+    int col_count;
+} MarkdownTableRow;
 
 typedef struct {
     char *name;
@@ -1133,6 +1317,178 @@ static void markdownWrapAndWrite(FILE *out, const char *text, const char *firstP
     free(copy);
 }
 
+static int markdownTermWidth(void) {
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+        return w.ws_col;
+    }
+    const char *cols = getenv("COLUMNS");
+    if (cols && *cols) {
+        int parsed = atoi(cols);
+        if (parsed > 0) {
+            return parsed;
+        }
+    }
+    return MARKDOWN_WRAP_WIDTH;
+}
+
+static char *markdownTrimInline(char *str) {
+    if (!str) return str;
+    while (*str && isspace((unsigned char)*str)) {
+        str++;
+    }
+    char *end = str + strlen(str);
+    while (end > str && isspace((unsigned char)*(end - 1))) {
+        *(--end) = '\0';
+    }
+    return str;
+}
+
+static void markdownParseTableRow(char *line, MarkdownTableRow *row) {
+    if (!row) return;
+    row->col_count = 0;
+    if (!line) return;
+    char *cursor = line;
+    if (*cursor == '|') {
+        cursor++;
+    }
+    char *start = cursor;
+    while (*cursor) {
+        if (*cursor == '|') {
+            *cursor = '\0';
+            if (row->col_count < MARKDOWN_MAX_TABLE_COLS) {
+                row->cells[row->col_count++] = strdup(markdownTrimInline(start));
+            }
+            start = cursor + 1;
+        }
+        cursor++;
+    }
+    if (*start) {
+        if (row->col_count < MARKDOWN_MAX_TABLE_COLS) {
+            row->cells[row->col_count++] = strdup(markdownTrimInline(start));
+        }
+    }
+}
+
+static int markdownIsSeparatorRow(const MarkdownTableRow *row) {
+    if (!row || row->col_count == 0) return 0;
+    const char *cell = row->cells[0];
+    if (!cell) return 0;
+    int has_dash = 0;
+    for (const char *p = cell; *p; ++p) {
+        if (*p == '-') {
+            has_dash = 1;
+        } else if (*p == ':' || isspace((unsigned char)*p)) {
+            continue;
+        } else {
+            return 0;
+        }
+    }
+    return has_dash;
+}
+
+static int markdownTableWrapLen(const char *text, int max_width, int offset) {
+    int len = (int)strlen(text);
+    int remaining = len - offset;
+    if (remaining <= max_width) return remaining;
+    for (int k = max_width; k > 0; --k) {
+        char prev = text[offset + k - 1];
+        if (prev == ' ') return k;
+        if (prev == '/' || prev == '-' || prev == '_' || prev == ',' || prev == '.') {
+            return k;
+        }
+    }
+    return max_width;
+}
+
+static void markdownPrintSeparator(FILE *out, const int *col_widths, int cols) {
+    fputs("  +", out);
+    for (int j = 0; j < cols; ++j) {
+        for (int k = 0; k < col_widths[j] + 2; ++k) {
+            fputc('-', out);
+        }
+        fputc('+', out);
+    }
+    fputc('\n', out);
+}
+
+static void markdownRenderTable(FILE *out, MarkdownTableRow *rows, int row_count) {
+    if (!rows || row_count <= 0) return;
+    if (!out) return;
+
+    int term_width = markdownTermWidth();
+    int col_widths[MARKDOWN_MAX_TABLE_COLS] = {0};
+    int max_cols = 0;
+
+    for (int i = 0; i < row_count; ++i) {
+        if (rows[i].col_count > max_cols) {
+            max_cols = rows[i].col_count;
+        }
+        if (!markdownIsSeparatorRow(&rows[i])) {
+            for (int j = 0; j < rows[i].col_count; ++j) {
+                int len = (int)strlen(rows[i].cells[j]);
+                if (len > col_widths[j]) {
+                    col_widths[j] = len;
+                }
+            }
+        }
+    }
+
+    int total_padding = (max_cols * 3) + 1;
+    int available = term_width - total_padding;
+    int current_total = 0;
+    for (int j = 0; j < max_cols; ++j) current_total += col_widths[j];
+    if (available > 0 && current_total > available && max_cols > 0) {
+        int avg = available / max_cols;
+        if (avg < MARKDOWN_MIN_COL_WIDTH) avg = MARKDOWN_MIN_COL_WIDTH;
+        for (int j = 0; j < max_cols; ++j) {
+            if (col_widths[j] > avg) col_widths[j] = avg;
+        }
+    }
+
+    markdownPrintSeparator(out, col_widths, max_cols);
+    for (int i = 0; i < row_count; ++i) {
+        if (markdownIsSeparatorRow(&rows[i])) {
+            markdownPrintSeparator(out, col_widths, max_cols);
+            continue;
+        }
+        int offsets[MARKDOWN_MAX_TABLE_COLS] = {0};
+        bool done = false;
+        while (!done) {
+            done = true;
+            fputs("  |", out);
+            for (int j = 0; j < max_cols; ++j) {
+                const char *text = (j < rows[i].col_count && rows[i].cells[j]) ? rows[i].cells[j] : "";
+                int width = col_widths[j];
+                int len = (int)strlen(text);
+                int off = offsets[j];
+                if (off < len) {
+                    done = false;
+                    int take = markdownTableWrapLen(text, width, off);
+                    fprintf(out, " %-*.*s", width, take, text + off);
+                    offsets[j] += take;
+                    if (offsets[j] < len && text[offsets[j]] == ' ') {
+                        offsets[j]++;
+                    }
+                } else {
+                    fprintf(out, " %-*s", width, "");
+                }
+                fputs(" |", out);
+            }
+            fputc('\n', out);
+        }
+    }
+    markdownPrintSeparator(out, col_widths, max_cols);
+    fputc('\n', out);
+
+    for (int i = 0; i < row_count; ++i) {
+        for (int j = 0; j < rows[i].col_count; ++j) {
+            free(rows[i].cells[j]);
+            rows[i].cells[j] = NULL;
+        }
+    }
+}
+
 static bool markdownIsHorizontalRule(const char *text) {
     if (!text) return false;
     size_t dash_count = 0;
@@ -1245,12 +1601,25 @@ static void markdownFlushParagraph(FILE *out, char **paragraph, size_t *length) 
         return;
     }
     (*paragraph)[*length] = '\0';
-    char *formatted = markdownSimplifyInline(*paragraph);
-    if (formatted) {
-        markdownWrapAndWrite(out, formatted, "", "", MARKDOWN_WRAP_WIDTH);
-        free(formatted);
+    const char *text = *paragraph;
+    /* Naive table detection: look for '|' separators with at least two columns. */
+    int pipe_count = 0;
+    for (const char *p = text; *p; ++p) {
+        if (*p == '|') {
+            pipe_count++;
+        }
     }
-    fputc('\n', out);
+    if (pipe_count >= 2 && strchr(text, '\n') == NULL) {
+        /* Single-line paragraph that looks like a table row; just print it. */
+        fprintf(out, "%s\n\n", text);
+    } else {
+        char *formatted = markdownSimplifyInline(text);
+        if (formatted) {
+            markdownWrapAndWrite(out, formatted, "", "", MARKDOWN_WRAP_WIDTH);
+            free(formatted);
+        }
+        fputc('\n', out);
+    }
     *length = 0;
     **paragraph = '\0';
 }
@@ -1263,9 +1632,12 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
     size_t line_cap = 0;
     ssize_t line_len;
     bool in_code_block = false;
+    bool in_table = false;
     char *paragraph = NULL;
     size_t paragraph_len = 0;
     size_t paragraph_cap = 0;
+    MarkdownTableRow table_rows[MARKDOWN_MAX_TABLE_ROWS];
+    int table_row_count = 0;
 
     if (label && *label) {
         fprintf(output, "%s\n", label);
@@ -1301,16 +1673,21 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
         if (strncmp(trimmed, "```", 3) == 0) {
             markdownFlushParagraph(output, &paragraph, &paragraph_len);
             in_code_block = !in_code_block;
-            fputc('\n', output);
             continue;
         }
 
         if (in_code_block) {
-            fprintf(output, "    %s\n", trimmed);
+            /* Preserve leading whitespace/tabs inside fenced code blocks. */
+            fprintf(output, "    %s\n", line);
             continue;
         }
 
         if (*trimmed == '\0') {
+            if (in_table) {
+                markdownRenderTable(output, table_rows, table_row_count);
+                table_row_count = 0;
+                in_table = false;
+            }
             markdownFlushParagraph(output, &paragraph, &paragraph_len);
             fputc('\n', output);
             continue;
@@ -1328,6 +1705,11 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
 
         int heading = markdownHeadingLevel(trimmed);
         if (heading > 0) {
+            if (in_table) {
+                markdownRenderTable(output, table_rows, table_row_count);
+                table_row_count = 0;
+                in_table = false;
+            }
             markdownFlushParagraph(output, &paragraph, &paragraph_len);
             const char *heading_text = trimmed + heading;
             while (*heading_text == ' ' || *heading_text == '\t') heading_text++;
@@ -1336,6 +1718,11 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
         }
 
         if (*trimmed == '>') {
+            if (in_table) {
+                markdownRenderTable(output, table_rows, table_row_count);
+                table_row_count = 0;
+                in_table = false;
+            }
             markdownFlushParagraph(output, &paragraph, &paragraph_len);
             char *quote = trimmed + 1;
             while (*quote == ' ' || *quote == '\t') quote++;
@@ -1348,6 +1735,33 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
             continue;
         }
 
+        int pipe_count = 0;
+        for (const char *p = trimmed; *p; ++p) {
+            if (*p == '|') {
+                pipe_count++;
+            }
+        }
+        if (pipe_count >= 2) {
+            if (!in_table) {
+                markdownFlushParagraph(output, &paragraph, &paragraph_len);
+                in_table = true;
+                table_row_count = 0;
+            }
+            if (table_row_count < MARKDOWN_MAX_TABLE_ROWS) {
+                char *dup = strdup(trimmed);
+                if (dup) {
+                    markdownParseTableRow(dup, &table_rows[table_row_count]);
+                    free(dup);
+                    table_row_count++;
+                }
+            }
+            continue;
+        } else if (in_table) {
+            markdownRenderTable(output, table_rows, table_row_count);
+            table_row_count = 0;
+            in_table = false;
+        }
+
         char *list_text = NULL;
         char prefix_first[32];
         char prefix_sub[32];
@@ -1358,7 +1772,6 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
                 markdownWrapAndWrite(output, formatted, prefix_first, prefix_sub, MARKDOWN_WRAP_WIDTH);
                 free(formatted);
             }
-            fputc('\n', output);
             continue;
         }
 
@@ -1366,6 +1779,9 @@ static int markdownRenderStream(const char *label, FILE *input, FILE *output) {
     }
 
     markdownFlushParagraph(output, &paragraph, &paragraph_len);
+    if (in_table) {
+        markdownRenderTable(output, table_rows, table_row_count);
+    }
     free(paragraph);
     free(line);
     return 0;
@@ -1792,7 +2208,7 @@ static void print_permissions(mode_t mode) {
     putchar(mode & S_IXOTH ? 'x' : '-');
 }
 
-static void print_long_listing(const char *filename, const struct stat *s) {
+static void print_long_listing(const char *filename, const struct stat *s, bool human) {
     print_permissions(s->st_mode);
     printf(" %2llu", (unsigned long long)s->st_nlink);
 
@@ -1802,7 +2218,13 @@ static void print_long_listing(const char *filename, const struct stat *s) {
     struct group *gr = getgrgid(s->st_gid);
     printf(" %-8s", gr ? gr->gr_name : "?");
 
-    printf(" %8lld", (long long)s->st_size);
+    if (human) {
+        char sizebuf[32];
+        smallclueDfFormatSize(sizebuf, sizeof(sizebuf), (unsigned long long)s->st_size, true);
+        printf(" %8s", sizebuf);
+    } else {
+        printf(" %8lld", (long long)s->st_size);
+    }
     char time_buf[64];
     strftime(time_buf, sizeof(time_buf), "%b %d %H:%M", localtime(&s->st_mtime));
     printf(" %s %s", time_buf, filename);
@@ -1821,6 +2243,7 @@ static void print_long_listing(const char *filename, const struct stat *s) {
 static int print_path_entry_with_stat(const char *path,
                                       const char *label,
                                       bool long_format,
+                                      bool human,
                                       const struct stat *stat_buf) {
     struct stat local_stat;
     const struct stat *st = stat_buf;
@@ -1833,7 +2256,7 @@ static int print_path_entry_with_stat(const char *path,
     }
 
     if (long_format) {
-        print_long_listing(label ? label : path, st);
+        print_long_listing(label ? label : path, st, human);
     } else {
         printf("%s\n", label ? label : path);
     }
@@ -1859,8 +2282,8 @@ static char *join_path(const char *base, const char *name) {
     return joined;
 }
 
-static int print_path_entry(const char *path, const char *label, bool long_format) {
-    return print_path_entry_with_stat(path, label, long_format, NULL);
+static int print_path_entry(const char *path, const char *label, bool long_format, bool human) {
+    return print_path_entry_with_stat(path, label, long_format, human, NULL);
 }
 
 typedef struct {
@@ -1941,7 +2364,8 @@ static void print_ls_columns(const SmallclueLsEntry *entries, size_t count) {
 static int list_directory(const char *path,
                           bool show_all,
                           bool long_format,
-                          bool sort_by_time) {
+                          bool sort_by_time,
+                          bool human) {
     DIR *d = opendir(path);
     if (!d) {
         fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
@@ -2014,6 +2438,7 @@ static int list_directory(const char *path,
             status |= print_path_entry_with_stat(entries[i].full_path,
                                                  entries[i].name,
                                                  true,
+                                                 human,
                                                  &entries[i].stat_buf);
         }
     } else {
@@ -2024,15 +2449,25 @@ static int list_directory(const char *path,
     return status ? 1 : 0;
 }
 
+static void smallcluePrintAppletList(FILE *out, const char *heading) {
+    if (!out) {
+        return;
+    }
+    if (heading && *heading) {
+        fprintf(out, "%s\n", heading);
+    }
+    for (size_t i = 0; i < kSmallclueAppletCount; ++i) {
+        const SmallclueApplet *applet = &kSmallclueApplets[i];
+        fprintf(out, "  %-14s %s\n", applet->name, applet->description ? applet->description : "");
+    }
+}
+
 
 static void print_usage(void) {
     fprintf(stderr, "This is smallclue. Usage:\n");
     fprintf(stderr, "  smallclue <applet> [arguments...]\n\n");
     fprintf(stderr, "Available applets:\n");
-    for (size_t i = 0; i < kSmallclueAppletCount; ++i) {
-        const SmallclueApplet *applet = &kSmallclueApplets[i];
-        fprintf(stderr, "  %-8s %s\n", applet->name, applet->description ? applet->description : "");
-    }
+    smallcluePrintAppletList(stderr, NULL);
     fprintf(stderr, "\nYou can symlink applets to 'smallclue' or invoke them directly.\n");
 }
 
@@ -2058,7 +2493,9 @@ static int smallclueEchoCommand(int argc, char **argv) {
 static bool smallclueLsValidateShortOptions(const char *arg,
                                             int *show_all,
                                             int *long_format,
-                                            int *sort_by_time) {
+                                            int *sort_by_time,
+                                            int *list_dirs_only,
+                                            int *human_sizes) {
     if (!arg) {
         return true;
     }
@@ -2072,6 +2509,12 @@ static bool smallclueLsValidateShortOptions(const char *arg,
                 break;
             case 't':
                 *sort_by_time = 1;
+                break;
+            case 'h':
+                *human_sizes = 1;
+                break;
+            case 'd':
+                *list_dirs_only = 1;
                 break;
             default:
                 fprintf(stderr, "ls: invalid option -- '%c'\n", *cursor);
@@ -2123,6 +2566,8 @@ static int smallclueLsCommand(int argc, char **argv) {
     int show_all = 0;
     int long_format = 0;
     int sort_by_time = 0;
+    int list_dirs_only = 0;
+    int human_sizes = 0;
     smallclueResetGetopt();
 
     int idx = 1;
@@ -2142,7 +2587,12 @@ static int smallclueLsCommand(int argc, char **argv) {
             idx++;
             continue;
         }
-        if (!smallclueLsValidateShortOptions(arg + 1, &show_all, &long_format, &sort_by_time)) {
+        if (!smallclueLsValidateShortOptions(arg + 1,
+                                             &show_all,
+                                             &long_format,
+                                             &sort_by_time,
+                                             &list_dirs_only,
+                                             &human_sizes)) {
             return 1;
         }
         idx++;
@@ -2151,7 +2601,10 @@ static int smallclueLsCommand(int argc, char **argv) {
     int status = 0;
     int paths_start = idx;
     if (paths_start >= argc) {
-        return list_directory(".", show_all, long_format, sort_by_time);
+        if (list_dirs_only) {
+            return print_path_entry(".", ".", long_format, human_sizes) ? 1 : 0;
+        }
+        return list_directory(".", show_all, long_format, sort_by_time, human_sizes);
     }
 
     int remaining = argc - paths_start;
@@ -2164,16 +2617,16 @@ static int smallclueLsCommand(int argc, char **argv) {
             continue;
         }
         bool is_dir = S_ISDIR(stat_buf.st_mode);
-        if (is_dir) {
+        if (is_dir && !list_dirs_only) {
             if (remaining > 1) {
                 if (i > paths_start) {
                     putchar('\n');
                 }
                 printf("%s:\n", path);
             }
-            status |= list_directory(path, show_all, long_format, sort_by_time);
+            status |= list_directory(path, show_all, long_format, sort_by_time, human_sizes);
         } else {
-            status |= print_path_entry(path, path, long_format);
+            status |= print_path_entry_with_stat(path, path, long_format, human_sizes, &stat_buf);
         }
     }
     return status ? 1 : 0;
@@ -2384,6 +2837,161 @@ static int smallclueFalseCommand(int argc, char **argv) {
     (void)argc;
     (void)argv;
     return 1;
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueHelpCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    smallcluePrintAppletList(stdout, "Available smallclue applets:");
+    return 0;
+}
+#endif
+
+#if defined(SMALLCLUE_WITH_EXSH)
+static int smallclueShCommand(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#endif
+
+static int64_t smallclueUptimeSeconds(void) {
+#if defined(__APPLE__)
+    struct timeval boottv;
+    size_t len = sizeof(boottv);
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    if (sysctl(mib, 2, &boottv, &len, NULL, 0) == 0 && boottv.tv_sec > 0) {
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        time_t secs = now.tv_sec - boottv.tv_sec;
+        if (secs < 0) {
+            secs = 0;
+        }
+        return (int64_t)secs;
+    }
+#endif
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        return (int64_t)ts.tv_sec;
+    }
+    return -1;
+}
+
+static int smallclueUptimeCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int64_t seconds = smallclueUptimeSeconds();
+    if (seconds < 0) {
+        fprintf(stderr, "uptime: unavailable\n");
+        return 1;
+    }
+    int days = (int)(seconds / 86400);
+    seconds %= 86400;
+    int hours = (int)(seconds / 3600);
+    seconds %= 3600;
+    int minutes = (int)(seconds / 60);
+    int secs = (int)(seconds % 60);
+    if (days > 0) {
+        printf("up %d day%s, %02d:%02d:%02d\n", days, days == 1 ? "" : "s", hours, minutes, secs);
+    } else {
+        printf("up %02d:%02d:%02d\n", hours, minutes, secs);
+    }
+    return 0;
+}
+
+static int smallclueWatchRunApplet(const SmallclueApplet *applet, int argc, char **argv) {
+    if (!applet) {
+        fprintf(stderr, "watch: %s: command not found\n", argv[0]);
+        return 127;
+    }
+    return smallclueDispatchApplet(applet, argc, argv);
+}
+
+static int smallclueWatchCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    smallclueClearPendingSignals();
+    double interval = 2.0;
+    int idx = 1;
+    while (idx < argc) {
+        const char *arg = argv[idx];
+        if (!arg || arg[0] != '-') {
+            break;
+        }
+        if (strcmp(arg, "--") == 0) {
+            idx++;
+            break;
+        }
+        if (strcmp(arg, "-n") == 0) {
+            if (idx + 1 >= argc) {
+                fprintf(stderr, "watch: option requires an argument -- n\n");
+                return 1;
+            }
+            char *endptr = NULL;
+            interval = strtod(argv[idx + 1], &endptr);
+            if (!endptr || *endptr != '\0' || interval <= 0.0) {
+                fprintf(stderr, "watch: invalid interval '%s'\n", argv[idx + 1]);
+                return 1;
+            }
+            idx += 2;
+            continue;
+        }
+        fprintf(stderr, "watch: unsupported option '%s'\n", arg);
+        return 1;
+    }
+
+    int cmd_argc = argc - idx;
+    if (cmd_argc < 1) {
+        fprintf(stderr, "watch: command required\n");
+        return 1;
+    }
+
+    const SmallclueApplet *applet = smallclueFindApplet(argv[idx]);
+
+    char *cmdline = NULL;
+    size_t cmdlen = 0;
+    for (int i = idx; i < argc; ++i) {
+        size_t part = strlen(argv[i]);
+        char *next = (char *)realloc(cmdline, cmdlen + part + 2);
+        if (!next) {
+            free(cmdline);
+            fprintf(stderr, "watch: out of memory\n");
+            return 1;
+        }
+        cmdline = next;
+        memcpy(cmdline + cmdlen, argv[i], part);
+        cmdlen += part;
+        cmdline[cmdlen++] = (i + 1 < argc) ? ' ' : '\0';
+    }
+
+    int status = 0;
+    while (1) {
+        int abort_status = 0;
+        if (smallclueShouldAbort(&abort_status)) {
+            status = abort_status;
+            break;
+        }
+        printf("\033[H\033[J");
+        printf("Every %.2fs: %s\n\n", interval, cmdline ? cmdline : argv[idx]);
+        fflush(stdout);
+        status = smallclueWatchRunApplet(applet, cmd_argc, &argv[idx]);
+        fflush(stdout);
+        struct timespec ts;
+        ts.tv_sec = (time_t)interval;
+        ts.tv_nsec = (long)((interval - (double)ts.tv_sec) * 1e9);
+        if (ts.tv_nsec < 0) {
+            ts.tv_nsec = 0;
+        }
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+        if (smallclueShouldAbort(&abort_status)) {
+            status = abort_status;
+            goto watch_done;
+        }
+        continue;
+    }
+}
+
+watch_done:
+    free(cmdline);
+    return status;
 }
 
 static int smallclueSleepCommand(int argc, char **argv) {
@@ -2709,7 +3317,10 @@ static void smallclueDfFormatSize(char *buf, size_t bufsize,
         value /= 1024.0L;
         idx++;
     }
-    if (value >= 100.0L) {
+    if (idx == 0) {
+        /* Bytes should not show fractional values. */
+        snprintf(buf, bufsize, "%.0Lf%s", value, suffixes[idx]);
+    } else if (value >= 100.0L) {
         snprintf(buf, bufsize, "%.0Lf%s", value, suffixes[idx]);
     } else if (value >= 10.0L) {
         snprintf(buf, bufsize, "%.1Lf%s", value, suffixes[idx]);
@@ -2916,6 +3527,27 @@ static int smallcluePingCommand(int argc, char **argv) {
     freeaddrinfo(res);
     return (successes > 0) ? 0 : 1;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueDmesgCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (pscalRuntimeCopySessionLog) {
+        char *snapshot = pscalRuntimeCopySessionLog();
+        if (snapshot) {
+            fputs(snapshot, stdout);
+            size_t len = strlen(snapshot);
+            if (len > 0 && snapshot[len - 1] != '\n') {
+                fputc('\n', stdout);
+            }
+            free(snapshot);
+            return 0;
+        }
+    }
+    fprintf(stderr, "dmesg: session log unavailable\n");
+    return 1;
+}
+#endif
 
 static int smallclueCatCommand(int argc, char **argv) {
     int status = 0;
@@ -3434,8 +4066,62 @@ static int smallclueTailStream(FILE *fp, const char *label, long lines) {
     return status;
 }
 
+static int smallclueTailFollow(FILE *fp, const char *label, long lines) {
+    int status = smallclueTailStream(fp, label, lines);
+    if (status != 0) {
+        return status;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    while (1) {
+        if (smallclueShouldAbort(&status)) {
+            break;
+        }
+        ssize_t len = getline(&line, &cap, fp);
+        if (len < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (feof(fp)) {
+                clearerr(fp);
+                usleep(200000); /* 200ms */
+                continue;
+            }
+            fprintf(stderr, "tail: %s: %s\n", label ? label : "(stdin)", strerror(errno));
+            free(line);
+            return 1;
+        }
+        fwrite(line, 1, (size_t)len, stdout);
+        fflush(stdout);
+    }
+    /* unreachable */
+    free(line);
+    return 0;
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static void smallclueLogPathExpansion(const char *label, const char *path) {
+    if (!pscalRuntimeDebugLog) {
+        return;
+    }
+    char expanded[PATH_MAX];
+    const char *resolved = path;
+    if (path && pathTruncateExpand(path, expanded, sizeof(expanded))) {
+        resolved = expanded;
+    }
+    char logbuf[PATH_MAX * 2];
+    snprintf(logbuf, sizeof(logbuf), "[smallclue][%s] path=%s resolved=%s",
+             label ? label : "touch",
+             path ? path : "(null)",
+             resolved ? resolved : "(null)");
+    pscalRuntimeDebugLog(logbuf);
+}
+#endif
+
 static int smallclueTailCommand(int argc, char **argv) {
+    smallclueClearPendingSignals();
     long lines = 10;
+    bool follow = false;
     int index = 1;
     while (index < argc) {
         const char *arg = argv[index];
@@ -3445,6 +4131,11 @@ static int smallclueTailCommand(int argc, char **argv) {
         if (strcmp(arg, "--") == 0) {
             index++;
             break;
+        }
+        if (strcmp(arg, "-f") == 0) {
+            follow = true;
+            index += 1;
+            continue;
         }
         if (strcmp(arg, "-n") == 0) {
             if (index + 1 >= argc) {
@@ -3469,9 +4160,14 @@ static int smallclueTailCommand(int argc, char **argv) {
         fprintf(stderr, "tail: unsupported option '%s'\n", arg);
         return 1;
     }
+    if (follow && (argc - index) > 1) {
+        fprintf(stderr, "tail: -f currently supports a single input\n");
+        return 1;
+    }
     int status = 0;
     if (index >= argc) {
-        status = smallclueTailStream(stdin, "(stdin)", lines);
+        status = follow ? smallclueTailFollow(stdin, "(stdin)", lines)
+                        : smallclueTailStream(stdin, "(stdin)", lines);
     } else {
         for (int i = index; i < argc; ++i) {
             const char *path = argv[i];
@@ -3481,8 +4177,14 @@ static int smallclueTailCommand(int argc, char **argv) {
                 status = 1;
                 continue;
             }
-            status |= smallclueTailStream(fp, path, lines);
-            fclose(fp);
+            if (follow) {
+                status |= smallclueTailFollow(fp, path, lines);
+                fclose(fp);
+                break;
+            } else {
+                status |= smallclueTailStream(fp, path, lines);
+                fclose(fp);
+            }
         }
     }
     return status ? 1 : 0;
@@ -3507,17 +4209,30 @@ static int smallclueTouchCommand(int argc, char **argv) {
             status = 1;
             continue;
         }
-        int fd = open(path, O_WRONLY | O_CREAT, 0666);
+        const char *target = path;
+#if defined(PSCAL_TARGET_IOS)
+        char expanded[PATH_MAX];
+        if (pathTruncateExpand(path, expanded, sizeof(expanded))) {
+            target = expanded;
+        }
+#endif
+        int fd = openat(AT_FDCWD, target, O_WRONLY | O_CREAT, 0666);
         if (fd < 0) {
-            fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+            fprintf(stderr, "touch: %s: %s\n", target, strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+            smallclueLogPathExpansion("touch-open-failed", target);
+#endif
             status = 1;
             continue;
         }
-        close(fd);
-        if (utimes(path, times) != 0) {
-            fprintf(stderr, "touch: %s: %s\n", path, strerror(errno));
+        if (futimes(fd, times) != 0) {
+            fprintf(stderr, "touch: %s: %s\n", target, strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+            smallclueLogPathExpansion("touch-futimes-failed", target);
+#endif
             status = 1;
         }
+        close(fd);
     }
     return status ? 1 : 0;
 }
@@ -4358,6 +5073,7 @@ static int smallclueGrepCommand(int argc, char **argv) {
     int index = 1;
     int number_lines = 0;
     int ignore_case = 0;
+    int invert_match = 0;
     while (index < argc) {
         const char *arg = argv[index];
         if (!arg || arg[0] != '-') {
@@ -4367,11 +5083,38 @@ static int smallclueGrepCommand(int argc, char **argv) {
             index++;
             break;
         }
+        if (strncmp(arg, "--", 2) == 0) {
+            /* Support common long forms and treat unknown long opts as end of options. */
+            if (strcmp(arg, "--ignore-case") == 0 || strcmp(arg, "--ignore") == 0) {
+                ignore_case = 1;
+                index++;
+                continue;
+            }
+            if (strcmp(arg, "--invert-match") == 0 || strcmp(arg, "--invert") == 0) {
+                invert_match = 1;
+                index++;
+                continue;
+            }
+            if (strcmp(arg, "--line-number") == 0 || strcmp(arg, "--number") == 0) {
+                number_lines = 1;
+                index++;
+                continue;
+            }
+            if (strncmp(arg, "--color", 7) == 0 || strncmp(arg, "--colour", 8) == 0) {
+                /* Accept --color[=auto|never|always] without changing behaviour. */
+                index++;
+                continue;
+            }
+            /* Unrecognized long option: treat as start of pattern/paths. */
+            break;
+        }
         for (const char *opt = arg + 1; *opt; ++opt) {
             if (*opt == 'n') {
                 number_lines = 1;
             } else if (*opt == 'i') {
                 ignore_case = 1;
+            } else if (*opt == 'v') {
+                invert_match = 1;
             } else {
                 fprintf(stderr, "grep: unsupported option -%c\n", *opt);
                 return 1;
@@ -4393,7 +5136,8 @@ static int smallclueGrepCommand(int argc, char **argv) {
         long line_no = 0;
         while ((len = getline(&line, &cap, stdin)) != -1) {
             line_no++;
-            if (smallclueStrCaseStr(line, pattern, ignore_case) != NULL) {
+            int found = smallclueStrCaseStr(line, pattern, ignore_case) != NULL;
+            if (invert_match ? !found : found) {
                 if (number_lines) {
                     printf("%ld:", line_no);
                 }
@@ -4413,7 +5157,8 @@ static int smallclueGrepCommand(int argc, char **argv) {
             long line_no = 0;
             while ((len = getline(&line, &cap, fp)) != -1) {
                 line_no++;
-                if (smallclueStrCaseStr(line, pattern, ignore_case) != NULL) {
+                int found = smallclueStrCaseStr(line, pattern, ignore_case) != NULL;
+                if (invert_match ? !found : found) {
                     if (paths > 1) {
                         printf("%s:", path);
                     }
@@ -4432,9 +5177,9 @@ static int smallclueGrepCommand(int argc, char **argv) {
 }
 
 typedef struct {
-    long lines;
-    long words;
-    long bytes;
+    uint64_t lines;
+    uint64_t words;
+    uint64_t bytes;
 } SmallclueWcCounts;
 
 static int smallclueWcProcessFile(const char *path, SmallclueWcCounts *counts) {
@@ -4475,13 +5220,13 @@ static int smallclueWcProcessFile(const char *path, SmallclueWcCounts *counts) {
 
 static void smallclueWcPrint(const SmallclueWcCounts *counts, int show_lines, int show_words, int show_bytes, const char *label) {
     if (show_lines) {
-        printf("%7ld", counts->lines);
+        printf("%12" PRIu64, counts->lines);
     }
     if (show_words) {
-        printf("%7ld", counts->words);
+        printf("%12" PRIu64, counts->words);
     }
     if (show_bytes) {
-        printf("%7ld", counts->bytes);
+        printf("%12" PRIu64, counts->bytes);
     }
     if (label) {
         printf(" %s", label);
@@ -4778,20 +5523,47 @@ static bool smallclueChopParentDirectory(char *path) {
     return path[0] != '\0';
 }
 
-static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive) {
+static bool smallclueConfirmDelete(const char *label, const char *path) {
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "%s: cannot prompt on non-interactive input for '%s' (use -f to force)\n",
+                label, path);
+        return false;
+    }
+    fprintf(stderr, "%s: remove '%s'? [y/N] ", label, path);
+    fflush(stderr);
+    int c = getchar();
+    /* consume the rest of the line */
+    int d;
+    while ((d = getchar()) != '\n' && d != EOF) { }
+    return c == 'y' || c == 'Y';
+}
+
+static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force) {
+    const char *target = path;
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    if (path && pathTruncateExpand(path, expanded, sizeof(expanded))) {
+        target = expanded;
+    }
+#endif
     struct stat st;
-    if (lstat(path, &st) != 0) {
-        fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
-        return -1;
+    if (lstat(target, &st) != 0) {
+        if (!force) {
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
+        }
+        return force ? 0 : -1;
     }
     if (S_ISDIR(st.st_mode)) {
         if (!recursive) {
-            fprintf(stderr, "%s: %s: is a directory\n", label, path);
+            fprintf(stderr, "%s: %s: is a directory\n", label, target);
             return -1;
         }
-        DIR *dir = opendir(path);
+        if (!force && !smallclueConfirmDelete(label, target)) {
+            return 1;
+        }
+        DIR *dir = opendir(target);
         if (!dir) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
             return -1;
         }
         struct dirent *entry;
@@ -4802,11 +5574,11 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
             }
             char child_path[PATH_MAX];
             if (smallclueBuildPath(child_path, sizeof(child_path), path, entry->d_name) != 0) {
-                fprintf(stderr, "%s: %s/%s: %s\n", label, path, entry->d_name, strerror(errno));
+                fprintf(stderr, "%s: %s/%s: %s\n", label, target, entry->d_name, strerror(errno));
                 status = -1;
                 break;
             }
-            if (smallclueRemovePathWithLabel(label, child_path, true) != 0) {
+            if (smallclueRemovePathWithLabel(label, child_path, true, force) != 0) {
                 status = -1;
             }
         }
@@ -4814,15 +5586,18 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
         if (status != 0) {
             return -1;
         }
-        if (rmdir(path) != 0) {
-            fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
+        if (rmdir(target) != 0) {
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
             return -1;
         }
         return 0;
     }
-    if (unlink(path) != 0) {
-        fprintf(stderr, "%s: %s: %s\n", label, path, strerror(errno));
-        return -1;
+    if (unlink(target) != 0) {
+        if (!force) {
+            fprintf(stderr, "%s: %s: %s\n", label, target, strerror(errno));
+            return -1;
+        }
+        return 0;
     }
     return 0;
 }
@@ -4940,12 +5715,16 @@ static int smallclueMkdirParents(const char *path, mode_t mode) {
 
 static int smallclueRmCommand(int argc, char **argv) {
     int recursive = 0;
+    int force = 0;
     int opt;
     smallclueResetGetopt();
-    while ((opt = getopt(argc, argv, "r")) != -1) {
+    while ((opt = getopt(argc, argv, "rf")) != -1) {
         switch (opt) {
             case 'r':
                 recursive = 1;
+                break;
+            case 'f':
+                force = 1;
                 break;
             default:
                 fprintf(stderr, "rm: invalid option -- %c\n", optopt);
@@ -4953,13 +5732,47 @@ static int smallclueRmCommand(int argc, char **argv) {
         }
     }
     if (optind >= argc) {
-        fprintf(stderr, "rm: missing operand\n");
-        return 1;
+        if (!force) {
+            fprintf(stderr, "rm: missing operand\n");
+            return 1;
+        }
+        return 0;
     }
     int status = 0;
     for (int i = optind; i < argc; ++i) {
-        if (smallclueRemovePathWithLabel("rm", argv[i], recursive != 0) != 0) {
-            status = 1;
+        const char *input = argv[i];
+        const char *expanded = input;
+#if defined(PSCAL_TARGET_IOS)
+        char pathbuf[PATH_MAX];
+        if (pathTruncateExpand(input, pathbuf, sizeof(pathbuf))) {
+            expanded = pathbuf;
+        }
+#endif
+        if (strpbrk(expanded, "*?[")) {
+            glob_t matches;
+            memset(&matches, 0, sizeof(matches));
+            int gret = glob(expanded, GLOB_NOCHECK, NULL, &matches);
+            if (gret != 0) {
+                globfree(&matches);
+                if (!force) {
+                    status = 1;
+                }
+                continue;
+            }
+            for (size_t m = 0; m < matches.gl_pathc; ++m) {
+                if (smallclueRemovePathWithLabel("rm", matches.gl_pathv[m], recursive != 0, force != 0) != 0) {
+                    if (!force) {
+                        status = 1;
+                    }
+                }
+            }
+            globfree(&matches);
+        } else {
+            if (smallclueRemovePathWithLabel("rm", expanded, recursive != 0, force != 0) != 0) {
+                if (!force) {
+                    status = 1;
+                }
+            }
         }
     }
     return status;
@@ -5296,7 +6109,7 @@ static int smallclueMvCommand(int argc, char **argv) {
                 status = 1;
                 continue;
             }
-            if (smallclueRemovePathWithLabel("mv", src, false) != 0) {
+            if (smallclueRemovePathWithLabel("mv", src, false, true) != 0) {
                 fprintf(stderr, "mv: %s: unable to remove after copy\n", src);
                 status = 1;
             }
@@ -5453,4 +6266,63 @@ static int smallclueBracketCommand(int argc, char **argv) {
         return 1;
     }
     return smallclueTestWithArgs(argc - 2, argv + 1);
+}
+
+static int smallcluePbcopyCommand(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        fprintf(stderr, "pbcopy: takes no arguments\n");
+        return 1;
+    }
+    smallclueResetGetopt();
+    char buf[4096];
+    size_t total = 0;
+    size_t cap = 4096;
+    char *data = (char *)malloc(cap);
+    if (!data) {
+        fprintf(stderr, "pbcopy: out of memory\n");
+        return 1;
+    }
+    ssize_t n;
+    while ((n = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
+        if (total + (size_t)n > cap) {
+            size_t newcap = cap * 2;
+            while (newcap < total + (size_t)n) newcap *= 2;
+            char *tmp = (char *)realloc(data, newcap);
+            if (!tmp) {
+                free(data);
+                fprintf(stderr, "pbcopy: out of memory\n");
+                return 1;
+            }
+            data = tmp;
+            cap = newcap;
+        }
+        memcpy(data + total, buf, (size_t)n);
+        total += (size_t)n;
+    }
+    int rc = runtimeClipboardSet(data, total);
+    free(data);
+    if (rc != 0) {
+        fprintf(stderr, "pbcopy: clipboard unavailable\n");
+        return 1;
+    }
+    return 0;
+}
+
+static int smallcluePbpasteCommand(int argc, char **argv) {
+    (void)argv;
+    if (argc > 1) {
+        fprintf(stderr, "pbpaste: takes no arguments\n");
+        return 1;
+    }
+    smallclueResetGetopt();
+    size_t len = 0;
+    char *text = runtimeClipboardGet(&len);
+    if (!text) {
+        fprintf(stderr, "pbpaste: clipboard unavailable\n");
+        return 1;
+    }
+    ssize_t written = write(STDOUT_FILENO, text, len);
+    free(text);
+    return written < 0 ? 1 : 0;
 }

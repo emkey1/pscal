@@ -26,7 +26,6 @@
 				<string>145F4FD32BE0727A00603B3F</string>
 				<string>5DFF9B112EC3E8CC004DFE5A</string>
 				<string>5D8F07B52ECB57F000431C40</string>
-				<string>5FELVISROOT</string>
 			</array>
 			<key>isa</key>
 			<string>PBXGroup</string>
@@ -111,8 +110,6 @@
 				<string>14B7F7E12BE5F46B00E6D40B</string>
 				<string>145F4FCB2BE071F400603B3F</string>
 				<string>14E9F2212BE2B9A300A1E3C0</string>
-				<string>5FELVISOSBLOCKBF</string>
-				<string>5FELVISSESSIONBF</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -473,13 +470,10 @@
 				<key>HEADER_SEARCH_PATHS</key>
 				<array>
 					<string>$(PROJECT_DIR)/../src</string>
-					<string>$(PROJECT_DIR)/../third-party/elvis</string>
-					<string>$(PROJECT_DIR)/../third-party/elvis/osunix</string>
+					<string>$(PROJECT_DIR)/../third-party/nextvi</string>
 					<string>$(PROJECT_DIR)/Sources/Bridge</string>
 					<string>$(PROJECT_DIR)/../build/ios-simulator/generated</string>
 					<string>$(PROJECT_DIR)/../build/ios-device/generated</string>
-					<string>$(PROJECT_DIR)/../build/ios-simulator/generated/elvis</string>
-					<string>$(PROJECT_DIR)/../build/ios-device/generated/elvis</string>
 				</array>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
 				<string>15.0</string>
@@ -660,13 +654,10 @@
 				<key>HEADER_SEARCH_PATHS</key>
 				<array>
 					<string>$(PROJECT_DIR)/../src</string>
-					<string>$(PROJECT_DIR)/../third-party/elvis</string>
-					<string>$(PROJECT_DIR)/../third-party/elvis/osunix</string>
+					<string>$(PROJECT_DIR)/../third-party/nextvi</string>
 					<string>$(PROJECT_DIR)/Sources/Bridge</string>
 					<string>$(PROJECT_DIR)/../build/ios-simulator/generated</string>
 					<string>$(PROJECT_DIR)/../build/ios-device/generated</string>
-					<string>$(PROJECT_DIR)/../build/ios-simulator/generated/elvis</string>
-					<string>$(PROJECT_DIR)/../build/ios-device/generated/elvis</string>
 				</array>
 				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
 				<string>15.0</string>
@@ -886,7 +877,7 @@
 			<key>lastKnownFileType</key>
 			<string>sourcecode.swift</string>
 			<key>path</key>
-			<string>ElvisWindowManager.swift</string>
+			<string>EditorWindowManager.swift</string>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
@@ -1282,72 +1273,6 @@ copy_dir "${toolchain_root}/etc" "etc" .bundle_etc.stamp
 copy_dir "${toolchain_root}/Docs" "Docs" .bundle_docs.stamp
 copy_dir "${toolchain_root}/Tests/libs" "TestsLibs" .bundle_testslibs.stamp
 </string>
-		</dict>
-		<key>5FELVISMAIN</key>
-		<dict>
-			<key>isa</key>
-			<string>PBXFileReference</string>
-			<key>lastKnownFileType</key>
-			<string>sourcecode.c.c</string>
-			<key>name</key>
-			<string>main.c</string>
-			<key>path</key>
-			<string>../third-party/elvis/main.c</string>
-			<key>sourceTree</key>
-			<string>&lt;group&gt;</string>
-		</dict>
-		<key>5FELVISOSBLOCK</key>
-		<dict>
-			<key>isa</key>
-			<string>PBXFileReference</string>
-			<key>lastKnownFileType</key>
-			<string>sourcecode.c.c</string>
-			<key>name</key>
-			<string>osblock.c</string>
-			<key>path</key>
-			<string>../third-party/elvis/osunix/osblock.c</string>
-			<key>sourceTree</key>
-			<string>&lt;group&gt;</string>
-		</dict>
-		<key>5FELVISOSBLOCKBF</key>
-		<dict>
-			<key>fileRef</key>
-			<string>5FELVISOSBLOCK</string>
-			<key>isa</key>
-			<string>PBXBuildFile</string>
-		</dict>
-		<key>5FELVISROOT</key>
-		<dict>
-			<key>isa</key>
-			<string>PBXFileReference</string>
-			<key>lastKnownFileType</key>
-			<string>folder</string>
-			<key>name</key>
-			<string>elvis</string>
-			<key>path</key>
-			<string>../third-party/elvis</string>
-			<key>sourceTree</key>
-			<string>&lt;group&gt;</string>
-		</dict>
-		<key>5FELVISSESSION</key>
-		<dict>
-			<key>isa</key>
-			<string>PBXFileReference</string>
-			<key>lastKnownFileType</key>
-			<string>sourcecode.c.c</string>
-			<key>name</key>
-			<string>session.c</string>
-			<key>path</key>
-			<string>../third-party/elvis/session.c</string>
-			<key>sourceTree</key>
-			<string>&lt;group&gt;</string>
-		</dict>
-		<key>5FELVISSESSIONBF</key>
-		<dict>
-			<key>fileRef</key>
-			<string>5FELVISSESSION</string>
-			<key>isa</key>
-			<string>PBXBuildFile</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

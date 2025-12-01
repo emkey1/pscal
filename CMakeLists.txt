@@ -191,8 +191,6 @@ if(PSCAL_PLATFORM_IOS)
 endif()
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/elvis")
-configure_file(third-party/elvis/config_pscal_ios.h "${CMAKE_BINARY_DIR}/generated/elvis/config.h" COPYONLY)
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
 configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
@@ -627,7 +625,18 @@ if(PSCAL_USE_BUNDLED_CURL)
     set(CURL_DISABLE_TFTP ON CACHE BOOL "Disable TFTP support in libcurl" FORCE)
     set(CURL_DISABLE_SMTP ON CACHE BOOL "Disable SMTP support in libcurl" FORCE)
     set(CURL_USE_LIBPSL OFF CACHE BOOL "Disable libpsl dependency for bundled libcurl" FORCE)
-    set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+    if(PSCAL_PLATFORM_IOS)
+        # Prefer OpenSSL with Apple SecTrust so we can rely on the system
+        # certificate store instead of shipping our own CA bundle.
+        set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+        set(USE_APPLE_SECTRUST ON CACHE BOOL "Enable Apple SecTrust validation on Apple platforms" FORCE)
+        set(CURL_BROTLI OFF CACHE BOOL "Disable brotli to avoid extra dependencies on iOS" FORCE)
+        set(CURL_ZSTD OFF CACHE BOOL "Disable zstd to avoid extra dependencies on iOS" FORCE)
+        set(USE_NGHTTP2 OFF CACHE BOOL "Disable nghttp2 on iOS builds" FORCE)
+        set(HTTP_ONLY ON CACHE BOOL "Limit libcurl to HTTP/HTTPS on iOS builds" FORCE)
+    else()
+        set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
+    endif()
     if(PSCAL_PLATFORM_IOS)
         if(NOT DEFINED PSCAL_OPENSSL_INSTALL_DIR)
             message(FATAL_ERROR "Bundled libcurl on iOS requires PSCAL_OPENSSL_INSTALL_DIR (ensure PSCAL_PLATFORM_IOS OpenSSL logic runs first).")
@@ -755,6 +764,7 @@ set(PSCAL_CORE_SOURCES
     src/core/cache.c
     src/common/runtime_params.c
     src/common/runtime_tty.c
+    src/common/runtime_clipboard.c
     src/common/path_truncate.c
     src/common/path_virtualization.c
     src/common/pscal_terminal_host.c
@@ -763,7 +773,7 @@ set(PSCAL_CORE_SOURCES
     src/common/pascal_state.c
     src/smallclue/core.c
     src/smallclue/integration.c
-    src/smallclue/elvis_app.c
+    src/smallclue/nextvi_app.c
     src/smallclue/openssh_app.c
     src/vm/vm.c
     lib/noise/noise.c
@@ -1008,81 +1018,9 @@ if(SDL)
     endif()
 endif()
 
-set(ELVIS_CORE_SOURCES
-        third-party/elvis/autocmd.c
-        third-party/elvis/buffer.c
-        third-party/elvis/calc.c
-        third-party/elvis/color.c
-        third-party/elvis/cut.c
-        third-party/elvis/descr.c
-        third-party/elvis/digraph.c
-        third-party/elvis/display.c
-        third-party/elvis/dmhex.c
-        third-party/elvis/dmmarkup.c
-        third-party/elvis/dmnormal.c
-        third-party/elvis/dmsyntax.c
-        third-party/elvis/draw.c
-        third-party/elvis/event.c
-        third-party/elvis/ex.c
-        third-party/elvis/exaction.c
-        third-party/elvis/exconfig.c
-        third-party/elvis/exedit.c
-        third-party/elvis/exmake.c
-        third-party/elvis/exsubst.c
-        third-party/elvis/fold.c
-        third-party/elvis/ftp.c
-        third-party/elvis/gui.c
-        third-party/elvis/guicurs.c
-        third-party/elvis/guitcap.c
-        third-party/elvis/guiopen.c
-        third-party/elvis/guipscal.c
-        third-party/elvis/http.c
-        third-party/elvis/input.c
-        third-party/elvis/io.c
-        third-party/elvis/lowbuf.c
-        third-party/elvis/lp.c
-        third-party/elvis/lpescape.c
-        third-party/elvis/lpovrtyp.c
-        third-party/elvis/lpps.c
-        third-party/elvis/main.c
-        third-party/elvis/map.c
-        third-party/elvis/mark.c
-        third-party/elvis/message.c
-        third-party/elvis/misc.c
-        third-party/elvis/more.c
-        third-party/elvis/move.c
-        third-party/elvis/need.c
-        third-party/elvis/operator.c
-        third-party/elvis/optglob.c
-        third-party/elvis/options.c
-        third-party/elvis/regexp.c
-        third-party/elvis/region.c
-        third-party/elvis/regsub.c
-        third-party/elvis/safe.c
-        third-party/elvis/scan.c
-        third-party/elvis/search.c
-        third-party/elvis/session.c
-        third-party/elvis/spell.c
-        third-party/elvis/state.c
-        third-party/elvis/tag.c
-        third-party/elvis/tagsrch.c
-        third-party/elvis/tagelvis.c
-        third-party/elvis/tinytcap.c
-        third-party/elvis/url.c
-        third-party/elvis/vi.c
-        third-party/elvis/vicmd.c
-        third-party/elvis/window.c
-        third-party/elvis/fmt.c
-        third-party/elvis/osunix/osblock.c
-        third-party/elvis/osunix/osdir.c
-        third-party/elvis/osunix/osprg.c
-        third-party/elvis/osunix/ostext.c
-        third-party/elvis/osunix/osnet.c
-        third-party/elvis/osunix/tcaphelp.c
-)
-list(APPEND PSCAL_CORE_SOURCES ${ELVIS_CORE_SOURCES})
-set_property(SOURCE ${ELVIS_CORE_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS "exit=elvis_exit")
-set_property(SOURCE third-party/elvis/main.c APPEND PROPERTY COMPILE_DEFINITIONS "main=elvis_main_entry")
+set(NEXTVI_CORE_SOURCES third-party/nextvi/vi.c)
+list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
+set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
 
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
@@ -1187,9 +1125,7 @@ if(PSCAL_PLATFORM_IOS)
             COMMENT "Embedding OpenSSL archives into libpscal_core_static.a for iOS")
 endif()
 target_include_directories(pscal_core_static BEFORE PRIVATE
-    third-party/elvis
-    third-party/elvis/osunix
-    "${CMAKE_BINARY_DIR}/generated/elvis"
+    third-party/nextvi
 )
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
@@ -1443,6 +1379,12 @@ if(NOT PSCAL_PLATFORM_IOS)
 endif()
 
 if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_exsh_static
+        FRONTEND FRONTEND_SHELL
+        SOURCES ${SHELL_SOURCES})
+    target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
+endif()
+if(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
     pscal_add_static_library(pscal_exsh_static
         FRONTEND FRONTEND_SHELL
         SOURCES ${SHELL_SOURCES})
@@ -1877,12 +1819,58 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
 endif()
 
+# Optional smallclue extras
+option(SMALLCLUE_WITH_EXSH "Enable the exsh front end as the smallclue 'sh' applet" OFF)
+if(SMALLCLUE_WITH_EXSH)
+    target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
+endif()
+
 add_executable(smallclue
     src/smallclue/main.c
 )
-target_link_libraries(smallclue PRIVATE pscal_core_static)
+set(_SMALLCLUE_LINK_LIBS pscal_core_static)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
-    target_link_libraries(smallclue PRIVATE CURL::libcurl)
+    list(APPEND _SMALLCLUE_LINK_LIBS CURL::libcurl)
+endif()
+if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
+    list(APPEND _SMALLCLUE_LINK_LIBS pscal_exsh_static)
+    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
+elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
+endif()
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SQLITE_LIBS})
+endif()
+list(APPEND _SMALLCLUE_LINK_LIBS m Threads::Threads)
+if(SDL)
+    target_link_directories(smallclue PRIVATE
+        ${PC_SDL_IMAGE_LIBRARY_DIRS}
+        ${PC_SDL_MIXER_LIBRARY_DIRS}
+        ${PC_SDL_TTF_LIBRARY_DIRS}
+    )
+    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
+    list(APPEND _SMALLCLUE_LINK_LIBS
+        ${PC_SDL_IMAGE_LIBRARIES}
+        ${PC_SDL_MIXER_LIBRARIES}
+        ${PC_SDL_TTF_LIBRARIES}
+        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+        ${PC_SDL_MIXER_LDFLAGS_OTHER}
+        ${PC_SDL_TTF_LDFLAGS_OTHER}
+        ${PSCAL_SDL_PLATFORM_LIBS}
+    )
+    if(PSCAL_OPENGL_TARGET)
+        list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_OPENGL_TARGET})
+    elseif(OPENGL_LIBRARIES)
+        list(APPEND _SMALLCLUE_LINK_LIBS ${OPENGL_LIBRARIES})
+    endif()
+endif()
+list(REMOVE_DUPLICATES _SMALLCLUE_LINK_LIBS)
+target_link_libraries(smallclue PRIVATE ${_SMALLCLUE_LINK_LIBS})
+if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
+    target_link_libraries(smallclue PRIVATE pscal_exsh_static)
+    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
+elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
 endif()
 
 if(PSCAL_PLATFORM_IOS)
@@ -1941,6 +1929,4 @@ if(NOT PSCAL_PLATFORM_IOS)
 endif()
 
 if(PSCAL_PLATFORM_IOS)
-    install(DIRECTORY third-party/elvis/data/ DESTINATION "${_pscal_runtime_dest}/lib/elvis/data")
-    install(DIRECTORY third-party/elvis/doc/ DESTINATION "${_pscal_runtime_dest}/lib/elvis/doc")
 endif()

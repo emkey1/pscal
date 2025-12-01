@@ -18,6 +18,7 @@
 #include "shell/codegen.h"
 #include "shell/opt.h"
 #include "shell/builtins.h"
+#include "vm/vm.h"
 #include "shell/runner.h"
 #include "core/preproc.h"
 #include "core/build_info.h"
@@ -2827,6 +2828,7 @@ int exsh_main(int argc, char **argv) {
     options.suppress_warnings = true;
 
     registerShellFrontendBuiltins();
+    vmSetSuppressStateDump(true);
 
 #if defined(PSCAL_TARGET_IOS)
     setvbuf(stdout, NULL, _IONBF, 0);
