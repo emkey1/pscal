@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <fnmatch.h>
 #include <grp.h>
 #include <limits.h>
@@ -890,6 +891,9 @@ static int pager_control_fd(void) {
     pager_control_fd_value = -1;
 #else
     int fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
+    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+        fd = dup(STDOUT_FILENO);
+    }
     if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
         fd = dup(STDIN_FILENO);
     }
@@ -903,6 +907,9 @@ static int pager_read_key(void) {
     if (fd < 0) {
         return 'q';
     }
+    if (!pscalRuntimeFdIsInteractive(fd)) {
+        return 'q';
+    }
     struct termios orig;
     bool have_termios = (tcgetattr(fd, &orig) == 0);
     struct termios raw;
@@ -914,14 +921,16 @@ static int pager_read_key(void) {
         raw.c_cc[VTIME] = 0;
         tcsetattr(fd, TCSAFLUSH, &raw);
     }
-    int result = EOF;
-    unsigned char ch = 0;
-    ssize_t n = read(fd, &ch, 1);
-    if (n > 0) {
-        if (ch == '\x1b') {
-            unsigned char seq[3] = {0};
-            if (read(fd, &seq[0], 1) == 1) {
-                if (seq[0] == '[') {
+    int result = 'q';
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    int poll_rc = poll(&pfd, 1, 500);
+    if (poll_rc == 1 && (pfd.revents & POLLIN)) {
+        unsigned char ch = 0;
+        ssize_t n = read(fd, &ch, 1);
+        if (n > 0) {
+            if (ch == '\x1b') {
+                unsigned char seq[3] = {0};
+                if (read(fd, &seq[0], 1) == 1 && seq[0] == '[') {
                     if (read(fd, &seq[1], 1) == 1) {
                         if (seq[1] >= '0' && seq[1] <= '9') {
                             if (read(fd, &seq[2], 1) == 1 && seq[2] == '~') {
@@ -949,13 +958,8 @@ static int pager_read_key(void) {
                     result = '\x1b';
                 }
             } else {
-                result = '\x1b';
+                result = ch;
             }
-            if (result == EOF) {
-                result = '\x1b';
-            }
-        } else {
-            result = ch;
         }
     }
     if (have_termios) {
