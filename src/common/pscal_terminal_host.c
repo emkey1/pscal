@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -68,12 +69,16 @@ PSCAL_WEAK void pscalTerminalSetCursorVisible(int visible) {
     (void)visible;
 }
 PSCAL_WEAK void pscalTerminalInsertLines(int row, int count) {
-    (void)row;
-    (void)count;
+    if (row < 0) row = 0;
+    if (count < 1) count = 1;
+    printf("\033[%d;%dH\033[%dL", row + 1, 1, count);
+    fflush(stdout);
 }
 PSCAL_WEAK void pscalTerminalDeleteLines(int row, int count) {
-    (void)row;
-    (void)count;
+    if (row < 0) row = 0;
+    if (count < 1) count = 1;
+    printf("\033[%d;%dH\033[%dM", row + 1, 1, count);
+    fflush(stdout);
 }
 PSCAL_WEAK void pscalTerminalMoveCursor(int row, int col) {
     (void)row;
@@ -98,11 +103,66 @@ static bool g_termios_saved = false;
 static bool g_raw_mode = false;
 static int g_rows = 24;
 static int g_cols = 80;
+static int g_margin_top = 0;
+static int g_margin_bottom = 23;
+static int g_origin_mode = 0;
+static int g_wrap_mode = 1;
+static int g_saved_row = 0;
+static int g_saved_col = 0;
+static int g_tab_width = 8;
+static unsigned char g_tabs[256];
+
+typedef struct {
+    long fg;
+    long bg;
+    int attr; /* bit0=bold, bit1=underline, bit2=inverse, bit3=blink, bit4=faint, bit5=italic, bit6=strike */
+} HostAttrState;
+
+static HostAttrState g_attr_state = { .fg = -1, .bg = -1, .attr = 0 };
+
+static void pscalTerminalQuerySize(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        if (ws.ws_col > 0) g_cols = ws.ws_col;
+        if (ws.ws_row > 0) g_rows = ws.ws_row;
+    }
+    if (g_rows < 1) g_rows = 24;
+    if (g_cols < 1) g_cols = 80;
+    g_margin_top = 0;
+    g_margin_bottom = g_rows - 1;
+}
+
+static void pscalTerminalResetTabs(void) {
+    int limit = g_cols < (int)sizeof(g_tabs) ? g_cols : (int)sizeof(g_tabs);
+    for (int i = 0; i < limit; ++i) {
+        g_tabs[i] = (i % g_tab_width) == 0 ? 1 : 0;
+    }
+}
 
 static void pscalTerminalMove(int row, int col) {
     if (row < 0) row = 0;
     if (col < 0) col = 0;
     printf("\033[%d;%dH", row + 1, col + 1);
+}
+
+static void pscalTerminalApplyAttrs(long fg, long bg, int attr) {
+    /* Cache to avoid redundant SGR output. */
+    if (fg == g_attr_state.fg && bg == g_attr_state.bg && attr == g_attr_state.attr) {
+        return;
+    }
+    g_attr_state.fg = fg;
+    g_attr_state.bg = bg;
+    g_attr_state.attr = attr;
+    printf("\033[0m");
+    if (attr & 1) printf("\033[1m");          /* bold */
+    if (attr & 2) printf("\033[4m");          /* underline */
+    if (attr & 4) printf("\033[7m");          /* inverse */
+    if (attr & 8) printf("\033[5m");          /* blink */
+    if (attr & 16) printf("\033[2m");         /* faint */
+    if (attr & 32) printf("\033[3m");         /* italic */
+    if (attr & 64) printf("\033[9m");         /* strike */
+    if (fg >= 0) printf("\033[38;5;%ldm", fg);
+    if (bg >= 0) printf("\033[48;5;%ldm", bg);
 }
 
 static void pscalTerminalEnterRaw(void) {
@@ -131,6 +191,21 @@ static void pscalTerminalLeaveRaw(void) {
 static bool g_debug_log_checked = false;
 static bool g_debug_log_enabled = false;
 
+static int pscalTerminalRowBase(void) {
+    return g_origin_mode ? g_margin_top : 0;
+}
+
+static void pscalTerminalClampCursor(int *row, int *col) {
+    int base = pscalTerminalRowBase();
+    int top = g_origin_mode ? g_margin_top : 0;
+    int bottom = g_origin_mode ? g_margin_bottom : g_rows - 1;
+    if (*row < top) *row = top;
+    if (*row > bottom) *row = bottom;
+    if (*col < 0) *col = 0;
+    if (*col >= g_cols) *col = g_cols - 1;
+    (void)base;
+}
+
 static void pscalTerminalInitDebugFlag(void) {
     if (g_debug_log_checked)
         return;
@@ -155,8 +230,19 @@ void pscalRuntimeDebugLog(const char *message) {
 void pscalTerminalBegin(int columns, int rows) {
     if (columns > 0) g_cols = columns;
     if (rows > 0) g_rows = rows;
+    pscalTerminalQuerySize();
     pscalTerminalEnterRaw();
     printf("\033[?1049h\033[2J\033[H");
+    g_margin_top = 0;
+    g_margin_bottom = g_rows - 1;
+    g_origin_mode = 0;
+    g_wrap_mode = 1;
+    g_saved_row = 0;
+    g_saved_col = 0;
+    g_attr_state.fg = -1;
+    g_attr_state.bg = -1;
+    g_attr_state.attr = 0;
+    pscalTerminalResetTabs();
     fflush(stdout);
 }
 
@@ -169,17 +255,20 @@ void pscalTerminalEnd(void) {
 void pscalTerminalResize(int columns, int rows) {
     if (columns > 0) g_cols = columns;
     if (rows > 0) g_rows = rows;
+    pscalTerminalQuerySize();
+    g_margin_top = 0;
+    g_margin_bottom = g_rows - 1;
+    pscalTerminalResetTabs();
 }
 
 void pscalTerminalRender(const char *utf8, int len, int row, int col,
     long fg, long bg, int attr) {
-    (void)fg;
-    (void)bg;
-    (void)attr;
     if (!utf8 || len <= 0) {
         return;
     }
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
+    pscalTerminalApplyAttrs(fg, bg, attr);
     fwrite(utf8, 1, (size_t)len, stdout);
     fflush(stdout);
 }
@@ -190,6 +279,7 @@ void pscalTerminalClear(void) {
 }
 
 void pscalTerminalClearEol(int row, int col) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     printf("\033[K");
     fflush(stdout);
@@ -208,21 +298,25 @@ void pscalTerminalClearLine(int row) {
     fflush(stdout);
 }
 void pscalTerminalClearScreenFromCursor(int row, int col) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     printf("\033[0J");
     fflush(stdout);
 }
 void pscalTerminalClearScreenToCursor(int row, int col) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     printf("\033[1J");
     fflush(stdout);
 }
 void pscalTerminalInsertChars(int row, int col, int count) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     printf("\033[%d@", count);
     fflush(stdout);
 }
 void pscalTerminalDeleteChars(int row, int col, int count) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     printf("\033[%dP", count);
     fflush(stdout);
@@ -236,25 +330,32 @@ void pscalTerminalExitAltScreen(void) {
     fflush(stdout);
 }
 void pscalTerminalSetCursorVisible(int visible) {
-    printf("\033[?25%cm", visible ? 'h' : 'l');
+    printf("\033[?25%c", visible ? 'h' : 'l');
     fflush(stdout);
 }
 
 void pscalTerminalMoveCursor(int row, int col) {
+    pscalTerminalClampCursor(&row, &col);
     pscalTerminalMove(row, col);
     fflush(stdout);
 }
 
 void pscalTerminalInsertLines(int row, int count) {
-    (void)row;
-    (void)count;
-    /* insert-line handling is not required for host terminal */
+    if (count <= 0) count = 1;
+    if (row < g_margin_top) row = g_margin_top;
+    if (row > g_margin_bottom) row = g_margin_bottom;
+    pscalTerminalMove(row, 0);
+    printf("\033[%dL", count);
+    fflush(stdout);
 }
 
 void pscalTerminalDeleteLines(int row, int count) {
-    (void)row;
-    (void)count;
-    /* delete-line handling is not required for host terminal */
+    if (count <= 0) count = 1;
+    if (row < g_margin_top) row = g_margin_top;
+    if (row > g_margin_bottom) row = g_margin_bottom;
+    pscalTerminalMove(row, 0);
+    printf("\033[%dM", count);
+    fflush(stdout);
 }
 
 int pscalTerminalRead(uint8_t *buffer, int maxlen, int timeout_ms) {

@@ -34,19 +34,76 @@ static int ios_col = 0;
 static int ios_wrap = 1;
 static int ios_fg = -1;
 static int ios_bg = -1;
-static int ios_attr = 0; /* bit0=bold, bit1=underline, bit2=inverse */
+static int ios_attr = 0; /* bit0=bold, bit1=underline, bit2=inverse, bit3=blink, bit4=faint, bit5=italic, bit6=strike */
+static int ios_margin_top = 0;
+static int ios_margin_bottom = 0;
+static int ios_origin_mode = 0;
+static int ios_wrap_mode = 1;
+static int ios_saved_row = 0;
+static int ios_saved_col = 0;
+static int ios_tab_width = 8;
+static unsigned char ios_tabs[256];
+static int ios_bracketed_paste = 0;
+static int ios_mouse_tracking = 0;
+static FILE *ios_dump_fp = NULL;
+
+static void ios_enforce_row_bounds(void) {
+	if (ios_row < ios_margin_top) {
+		ios_row = ios_margin_top;
+	} else if (ios_row > ios_margin_bottom) {
+		ios_row = ios_margin_bottom;
+	}
+}
 enum {
 	IOS_ATTR_BOLD = 1 << 0,
 	IOS_ATTR_UNDER = 1 << 1,
 	IOS_ATTR_INV = 1 << 2
 };
 static void ios_term_render_buf(const char *s, int n);
+static void ios_tabs_reset(void) {
+    int limit = xcols > 0 && xcols < (int)sizeof(ios_tabs) ? xcols : (int)sizeof(ios_tabs);
+    for (int i = 0; i < limit; i++) {
+        ios_tabs[i] = (i % ios_tab_width) == 0 ? 1 : 0;
+    }
+}
+
 static void ios_term_reset(void) {
 	ios_row = 0;
 	ios_col = 0;
 	ios_fg = -1;
 	ios_bg = -1;
 	ios_attr = 0;
+	ios_margin_top = 0;
+	ios_margin_bottom = xrows > 0 ? xrows - 1 : 0;
+	ios_origin_mode = 0;
+	ios_wrap_mode = 1;
+	ios_saved_row = 0;
+	ios_saved_col = 0;
+	ios_tabs_reset();
+	ios_bracketed_paste = 0;
+	ios_mouse_tracking = 0;
+	if (ios_dump_fp) {
+		fclose(ios_dump_fp);
+		ios_dump_fp = NULL;
+	}
+}
+
+static void ios_scroll_region_up(void) {
+	if (ios_margin_top < 0 || ios_margin_top >= xrows) {
+		return;
+	}
+	pscalTerminalMoveCursor(ios_margin_top, 0);
+	pscalTerminalDeleteLines(ios_margin_top, 1);
+	pscalTerminalMoveCursor(ios_margin_bottom, 0);
+}
+
+static void ios_scroll_region_down(void) {
+	if (ios_margin_top < 0 || ios_margin_top >= xrows) {
+		return;
+	}
+	pscalTerminalMoveCursor(ios_margin_top, 0);
+	pscalTerminalInsertLines(ios_margin_top, 1);
+	pscalTerminalMoveCursor(ios_margin_top, 0);
 }
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
@@ -59,8 +116,10 @@ static void ios_term_render_char(char ch) {
 	if (ch == '\n') {
 		ios_col = 0;
 		ios_row++;
-		if (ios_row >= xrows)
-			ios_row = xrows - 1;
+		if (ios_row > ios_margin_bottom) {
+			ios_row = ios_margin_bottom;
+			ios_scroll_region_up();
+		}
 		pscalTerminalMoveCursor(ios_row, ios_col);
 		return;
 	}
@@ -71,11 +130,19 @@ static void ios_term_render_char(char ch) {
 		return;
 	}
 	if (ch == '\t') {
-		int spaces = 8 - (ios_col % 8);
-		for (int i = 0; i < spaces; i++)
-			ios_term_render_char(' ');
+		int next = ios_col + 1;
+		int limit = xcols < (int)sizeof(ios_tabs) ? xcols : (int)sizeof(ios_tabs);
+		while (next < limit && !ios_tabs[next]) {
+			next++;
+		}
+		if (next >= xcols) {
+			next = xcols - 1;
+		}
+		ios_col = next;
+		pscalTerminalMoveCursor(ios_row, ios_col);
 		return;
 	}
+	if (ch == 0x08) { /* backspace already handled; keep fallback */ }
 	pscalTerminalRender(&ch, 1, ios_row, ios_col, ios_fg, ios_bg, ios_attr);
 	ios_col++;
 	if (ios_wrap && ios_col >= xcols) {
@@ -101,10 +168,66 @@ static void ios_term_clear_line_from_cursor(void) {
 static void ios_term_write(const char *s, int n) {
 	if (!s || n <= 0)
 		return;
+	if (!ios_dump_fp) {
+		const char *dump_path = getenv("PSCALI_TERM_ESC_LOG");
+		if (dump_path && *dump_path) {
+			ios_dump_fp = fopen(dump_path, "ab");
+		}
+	}
+	if (ios_dump_fp) {
+		fprintf(ios_dump_fp, "CHUNK %d bytes: ", n);
+		for (int idx = 0; idx < n; idx++) {
+			fprintf(ios_dump_fp, "%02X ", (unsigned char)s[idx]);
+		}
+		fputc('\n', ios_dump_fp);
+		fflush(ios_dump_fp);
+	}
 	write(1, s, n);
 	int i = 0;
 	while (i < n) {
 		unsigned char ch = (unsigned char)s[i];
+		/* Handle single ESC-prefixed sequences (no '[') */
+		if (ch == 0x1B && i + 1 < n && s[i + 1] == ']') {
+			/* OSC: ignore payload until BEL or ST */
+			i += 2;
+			while (i < n) {
+				if (s[i] == '\a') { i++; break; }
+				if (s[i] == 0x1B && i + 1 < n && s[i + 1] == '\\') { i += 2; break; }
+				i++;
+			}
+			continue;
+		}
+		if (ch == 0x1B && i + 1 < n && s[i + 1] != '[') {
+			unsigned char esc = (unsigned char)s[i + 1];
+			if (esc == '7') { /* DECSC */
+				ios_saved_row = ios_row;
+				ios_saved_col = ios_col;
+			} else if (esc == '8') { /* DECRC */
+				ios_row = ios_saved_row;
+				ios_col = ios_saved_col;
+				ios_enforce_row_bounds();
+				if (ios_col >= xcols) ios_col = xcols - 1;
+				pscalTerminalMoveCursor(ios_row, ios_col);
+			} else if (esc == 'D') { /* IND */
+				ios_term_render_char('\n');
+			} else if (esc == 'E') { /* NEL */
+				ios_term_render_char('\r');
+				ios_term_render_char('\n');
+			} else if (esc == 'M') { /* RI */
+				if (ios_row > ios_margin_top) {
+					ios_row--;
+				} else {
+					ios_scroll_region_down();
+				}
+				pscalTerminalMoveCursor(ios_row, ios_col);
+			} else if (esc == 'H') { /* HTS */
+				if (ios_col >= 0 && ios_col < (int)sizeof(ios_tabs)) {
+					ios_tabs[ios_col] = 1;
+				}
+			}
+			i += 2;
+			continue;
+		}
 		if (ch == 0x1B && i + 1 < n && s[i + 1] == '[') {
 			i += 2;
 			int nums[8] = {0};
@@ -134,6 +257,9 @@ static void ios_term_write(const char *s, int n) {
 					if (c == 'H' || c == 'f') {
 						int r = p1 > 0 ? p1 - 1 : 0;
 						int ccol = p2 > 0 ? p2 - 1 : 0;
+						if (ios_origin_mode) {
+							r += ios_margin_top;
+						}
 						ios_row = r;
 						ios_col = ccol;
 						if (ios_row >= xrows) ios_row = xrows - 1;
@@ -161,12 +287,12 @@ static void ios_term_write(const char *s, int n) {
 					} else if (c == 'A') {
 						int step = p1 > 0 ? p1 : 1;
 						ios_row -= step;
-						if (ios_row < 0) ios_row = 0;
+						ios_enforce_row_bounds();
 						pscalTerminalMoveCursor(ios_row, ios_col);
 					} else if (c == 'B') {
 						int step = p1 > 0 ? p1 : 1;
 						ios_row += step;
-						if (ios_row >= xrows) ios_row = xrows - 1;
+						ios_enforce_row_bounds();
 						pscalTerminalMoveCursor(ios_row, ios_col);
 					} else if (c == 'C') {
 						int step = p1 > 0 ? p1 : 1;
@@ -180,110 +306,183 @@ static void ios_term_write(const char *s, int n) {
 						pscalTerminalMoveCursor(ios_row, ios_col);
 					} else if (c == 'L') {
 						int count = p1 > 0 ? p1 : 1;
+						ios_enforce_row_bounds();
 						pscalTerminalInsertLines(ios_row, count);
 					} else if (c == 'M') {
 						int count = p1 > 0 ? p1 : 1;
+						ios_enforce_row_bounds();
 						pscalTerminalDeleteLines(ios_row, count);
-					} else if (c == '@') {
+					} else if (c == 'S') {
 						int count = p1 > 0 ? p1 : 1;
-						pscalTerminalInsertChars(ios_row, ios_col, count);
+						for (int step = 0; step < count; step++) {
+							ios_scroll_region_up();
+						}
+						ios_enforce_row_bounds();
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 'T') {
+						int count = p1 > 0 ? p1 : 1;
+						for (int step = 0; step < count; step++) {
+							ios_scroll_region_down();
+						}
+						ios_enforce_row_bounds();
+						pscalTerminalMoveCursor(ios_row, ios_col);
+					} else if (c == 's') { /* save cursor */
+						ios_saved_row = ios_row;
+						ios_saved_col = ios_col;
+					} else if (c == 'u') { /* restore cursor */
+						ios_row = ios_saved_row;
+						ios_col = ios_saved_col;
+						ios_enforce_row_bounds();
+						if (ios_col >= xcols) ios_col = xcols - 1;
+						pscalTerminalMoveCursor(ios_row, ios_col);
+                    } else if (c == 'r') {
+                        int top = p1 > 0 ? p1 - 1 : 0;
+                        int bot = (p2 > 0 ? p2 - 1 : (xrows - 1));
+                        if (top < 0) top = 0;
+                        if (bot < top) bot = top;
+                        if (bot >= xrows) bot = xrows - 1;
+                        ios_margin_top = top;
+                        ios_margin_bottom = bot;
+                        ios_row = ios_margin_top;
+                        if (ios_col >= xcols) ios_col = xcols - 1;
+                        pscalTerminalMoveCursor(ios_row, ios_col);
+                    } else if (c == 'g') { /* TBC */ 
+                        int mode = p1;
+                        int limit = xcols < (int)sizeof(ios_tabs) ? xcols : (int)sizeof(ios_tabs);
+                        if (mode == 0) {
+                            if (ios_col >= 0 && ios_col < limit) ios_tabs[ios_col] = 0;
+                        } else if (mode == 3) {
+                            for (int t = 0; t < limit; ++t) ios_tabs[t] = 0;
+                        }
+                    } else if (c == '@') {
+                        int count = p1 > 0 ? p1 : 1;
+                        pscalTerminalInsertChars(ios_row, ios_col, count);
 					} else if (c == 'P') {
 						int count = p1 > 0 ? p1 : 1;
 						pscalTerminalDeleteChars(ios_row, ios_col, count);
-					} else if (c == 'm') {
-						if (numcnt == 0 && p1 == 0) {
-							ios_fg = -1;
-							ios_bg = -1;
-							ios_attr = 0;
-						} else {
-							for (int idx = 0; idx <= numcnt; idx++) {
-								int code = nums[idx];
-								if (code == 0) {
-									ios_fg = -1;
-									ios_bg = -1;
-									ios_attr = 0;
-								} else if (code == 1) {
-									ios_attr |= IOS_ATTR_BOLD;
-								} else if (code == 4) {
-									ios_attr |= IOS_ATTR_UNDER;
-								} else if (code == 7) {
-									ios_attr |= IOS_ATTR_INV;
-								} else if (code == 22) {
-									ios_attr &= ~IOS_ATTR_BOLD;
-								} else if (code == 24) {
-									ios_attr &= ~IOS_ATTR_UNDER;
-								} else if (code == 27) {
-									ios_attr &= ~IOS_ATTR_INV;
-								} else if (code == 39) {
-									ios_fg = -1;
-								} else if (code == 49) {
-									ios_bg = -1;
-								} else if (code >= 30 && code <= 37) {
-									ios_fg = code - 30;
-								} else if (code >= 40 && code <= 47) {
-									ios_bg = code - 40;
-								} else if (code >= 90 && code <= 97) {
-									ios_fg = (code - 90) + 8;
-								} else if (code >= 100 && code <= 107) {
-									ios_bg = (code - 100) + 8;
-								} else if (code == 38 || code == 48) {
-									if (idx + 2 <= numcnt && nums[idx + 1] == 5) {
-										int val = nums[idx + 2];
-										if (val >= 0 && val <= 255) {
-											if (code == 38)
-												ios_fg = val;
-											else
-												ios_bg = val;
-										}
-										idx += 2;
-									} else if (idx + 3 <= numcnt && nums[idx + 1] == 2) {
-										int r = nums[idx + 2];
-										int g = nums[idx + 3];
-										int b = (idx + 4 <= numcnt) ? nums[idx + 4] : 0;
-										int rr = r < 0 ? 0 : (r > 255 ? 255 : r);
-										int gg = g < 0 ? 0 : (g > 255 ? 255 : g);
-										int bb = b < 0 ? 0 : (b > 255 ? 255 : b);
-										int rc = (rr * 5 + 127) / 255;
-										int gc = (gg * 5 + 127) / 255;
-										int bc = (bb * 5 + 127) / 255;
-										int idx256 = 16 + 36 * rc + 6 * gc + bc;
-										if (code == 38)
-											ios_fg = idx256;
-										else
-											ios_bg = idx256;
-										idx += 4;
-									}
-								}
-							}
-						}
-					} else if (c == 'n') {
-						if (p1 == 6) {
-							char resp[32];
-							int len = snprintf(resp, sizeof(resp), "\x1b[%d;%dR", ios_row + 1, ios_col + 1);
-							if (len > 0)
-								write(1, resp, (size_t)len);
-						}
-					}
-				} else {
-					if (c == 'h' || c == 'l') {
-						int on = c == 'h';
-						for (int idx = 0; idx <= numcnt; idx++) {
-							int mode = nums[idx];
-							if (mode == 7) {
-								ios_wrap = on;
-							} else if (mode == 25) {
-								pscalTerminalSetCursorVisible(on);
-							} else if (mode == 47 || mode == 1049) {
-								if (on)
-									pscalTerminalEnterAltScreen();
-								else
-									pscalTerminalExitAltScreen();
-								ios_term_reset();
-								pscalTerminalMoveCursor(ios_row, ios_col);
-							}
-						}
-					}
-				}
+                    } else if (c == 'm') {
+                        if (numcnt == 0 && p1 == 0) {
+                            ios_fg = -1;
+                            ios_bg = -1;
+                            ios_attr = 0;
+                        } else {
+                            for (int idx = 0; idx <= numcnt; idx++) {
+                                int code = nums[idx];
+                                if (code == 0) {
+                                    ios_fg = -1;
+                                    ios_bg = -1;
+                                    ios_attr = 0;
+                                } else if (code == 1) {
+                                    ios_attr |= IOS_ATTR_BOLD;
+                                } else if (code == 2) {
+                                    ios_attr |= (1 << 4); /* faint */ 
+                                } else if (code == 3) {
+                                    ios_attr |= (1 << 5); /* italic */
+                                } else if (code == 4) {
+                                    ios_attr |= IOS_ATTR_UNDER;
+                                } else if (code == 5) {
+                                    ios_attr |= (1 << 3); /* blink */ 
+                                } else if (code == 7) {
+                                    ios_attr |= IOS_ATTR_INV;
+                                } else if (code == 8) {
+                                    /* hidden - ignore */ 
+                                } else if (code == 9) {
+                                    ios_attr |= (1 << 6); /* strike */ 
+                                } else if (code == 21 || code == 22) {
+                                    ios_attr &= ~IOS_ATTR_BOLD;
+                                    ios_attr &= ~(1 << 4);
+                                } else if (code == 23) {
+                                    ios_attr &= ~(1 << 5);
+                                } else if (code == 24) {
+                                    ios_attr &= ~IOS_ATTR_UNDER;
+                                } else if (code == 25) {
+                                    ios_attr &= ~(1 << 3);
+                                } else if (code == 27) {
+                                    ios_attr &= ~IOS_ATTR_INV;
+                                } else if (code == 29) {
+                                    ios_attr &= ~(1 << 6);
+                                } else if (code == 39) {
+                                    ios_fg = -1;
+                                } else if (code == 49) {
+                                    ios_bg = -1;
+                                } else if (code >= 30 && code <= 37) {
+                                    ios_fg = code - 30;
+                                } else if (code >= 40 && code <= 47) {
+                                    ios_bg = code - 40;
+                                } else if (code >= 90 && code <= 97) {
+                                    ios_fg = (code - 90) + 8;
+                                } else if (code >= 100 && code <= 107) {
+                                    ios_bg = (code - 100) + 8;
+                                } else if (code == 38 || code == 48) {
+                                    if (idx + 2 <= numcnt && nums[idx + 1] == 5) {
+                                        int val = nums[idx + 2];
+                                        if (val >= 0 && val <= 255) {
+                                            if (code == 38)
+                                                ios_fg = val;
+                                            else
+                                                ios_bg = val;
+                                        }
+                                        idx += 2;
+                                    } else if (idx + 3 <= numcnt && nums[idx + 1] == 2) {
+                                        int r = nums[idx + 2];
+                                        int g = nums[idx + 3];
+                                        int b = (idx + 4 <= numcnt) ? nums[idx + 4] : 0;
+                                        int rr = r < 0 ? 0 : (r > 255 ? 255 : r);
+                                        int gg = g < 0 ? 0 : (g > 255 ? 255 : g);
+                                        int bb = b < 0 ? 0 : (b > 255 ? 255 : b);
+                                        int rc = (rr * 5 + 127) / 255;
+                                        int gc = (gg * 5 + 127) / 255;
+                                        int bc = (bb * 5 + 127) / 255;
+                                        int idx256 = 16 + 36 * rc + 6 * gc + bc;
+                                        if (code == 38)
+                                            ios_fg = idx256;
+                                        else
+                                            ios_bg = idx256;
+                                        idx += 4;
+                                    }
+                                }
+                            }
+                        }
+                    } else if (c == 'n') {
+                        if (p1 == 6) {
+                            char resp[32];
+                            int len = snprintf(resp, sizeof(resp), "\x1b[%d;%dR", ios_row + 1, ios_col + 1);
+                            if (len > 0)
+                                write(1, resp, (size_t)len);
+                        } else if (p1 == 5) {
+                            const char ok[] = "\x1b[0n";
+                            write(1, ok, sizeof(ok) - 1);
+                        }
+                    }
+                } else {
+                    if (c == 'h' || c == 'l') {
+                        int on = c == 'h';
+                        for (int idx = 0; idx <= numcnt; idx++) {
+                            int mode = nums[idx];
+                            if (mode == 7) {
+                                ios_wrap = on;
+                                ios_wrap_mode = on;
+                            } else if (mode == 6) {
+                                ios_origin_mode = on;
+                                ios_enforce_row_bounds();
+                                pscalTerminalMoveCursor(ios_row, ios_col);
+                            } else if (mode == 25) {
+                                pscalTerminalSetCursorVisible(on);
+                            } else if (mode == 47 || mode == 1049) {
+                                if (on)
+                                    pscalTerminalEnterAltScreen();
+                                else
+                                    pscalTerminalExitAltScreen();
+                                ios_term_reset();
+                                pscalTerminalMoveCursor(ios_row, ios_col);
+                            } else if (mode == 2004) {
+                                /* bracketed paste toggle: ignore but consume */ 
+                            } else if (mode == 1000 || mode == 1002 || mode == 1006) {
+                                /* mouse tracking toggles: ignore */ 
+                            }
+                        }
+                    }
+                }
 				i++;
 				break;
 			}
@@ -382,17 +581,11 @@ void term_chr(int ch)
 {
 	char s[4] = {ch};
 	term_out(s);
-#if defined(PSCAL_TARGET_IOS)
-	ios_term_render_char((char)ch);
-#endif
 }
 
 void term_kill(void)
 {
 	term_out("\33[K");
-#if defined(PSCAL_TARGET_IOS)
-	ios_term_clear_line_from_cursor();
-#endif
 }
 
 void term_room(int n)
@@ -421,15 +614,6 @@ void term_pos(int r, int c)
 		memcpy(s, "H", 2);
 		term_out(buf+1);
 	}
-#if defined(PSCAL_TARGET_IOS)
-	if (r >= 0)
-		ios_row = r;
-	if (c >= 0)
-		ios_col = c;
-	if (ios_row >= xrows) ios_row = xrows - 1;
-	if (ios_col >= xcols) ios_col = xcols - 1;
-	pscalTerminalMoveCursor(ios_row, ios_col);
-#endif
 }
 
 #if defined(PSCAL_TARGET_IOS)
@@ -729,8 +913,8 @@ sbuf *cmd_pipe(char *cmd, sbuf *ibuf, int oproc, int *status)
 		term_init();
 		signal(SIGINT, SIG_DFL);
 	}
-	if (oproc)
-		sbufn_ret(sb, sb)
-	sbuf_free(sb)
-	return NULL;
+if (oproc)
+    sbufn_ret(sb, sb)
+sbuf_free(sb)
+return NULL;
 }
