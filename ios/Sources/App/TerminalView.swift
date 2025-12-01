@@ -974,6 +974,12 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                                 cursorOffset: Int,
                                 preferBottomInset: CGFloat = 0) {
         textView.layoutIfNeeded()
+        let storageLength = textView.attributedText.length
+        if storageLength > 0 {
+            // Make sure pending text storage edits are flushed before asking for caret geometry.
+            textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storageLength),
+                                                actualCharacterRange: nil)
+        }
         let length = textView.attributedText.length
         let safeOffset = max(0, min(cursorOffset, length))
         let beginning = textView.beginningOfDocument
