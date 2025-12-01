@@ -451,6 +451,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 activeGeometry = validMetrics
                 activeGeometrySource = .main // Force source to main to prevent reverting to stale elvis metrics
 
+
                 refreshElvisDisplay()
             } else {
                 // Exiting editor mode
