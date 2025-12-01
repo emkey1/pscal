@@ -11,6 +11,15 @@ static struct pollfd ufds[1];
 static unsigned char pending_special[8];
 static int pending_special_len = 0;
 static int pending_special_pos = 0;
+static int decode_arrow(unsigned char lead, unsigned char a, unsigned char b) {
+	if (lead == '[') {
+		if (b == 'A') return 'k'; /* up */
+		if (b == 'B') return 'j'; /* down */
+		if (b == 'C') return 'l'; /* right */
+		if (b == 'D') return 'h'; /* left */
+	}
+	return -1;
+}
 
 /* iOS bridge for floating window rendering */
 #if defined(PSCAL_TARGET_IOS)
@@ -741,26 +750,19 @@ int term_read(void)
 	if (ch == 0x1B) {
 		unsigned char seq[2];
 		int got = 0;
-		/* Try to complete a CSI arrow quickly without blocking long. */
 		while (got < 2) {
 			int r = pscalTerminalRead(seq + got, 1, 5);
 			if (r <= 0)
 				break;
 			got += r;
 		}
-		if (got >= 2 && seq[0] == '[' && (seq[1] == 'A' || seq[1] == 'B' || seq[1] == 'C' || seq[1] == 'D')) {
-			unsigned char dir = (seq[1] == 'A') ? 'k' :
-				(seq[1] == 'B') ? 'j' :
-				(seq[1] == 'C') ? 'l' : 'h';
-			pending_special[0] = 0x1B;
-			pending_special[1] = dir;
-			pending_special_len = 2;
-			pending_special_pos = 1;
-			if (icmd_pos < sizeof(icmd))
-				icmd[icmd_pos++] = pending_special[0];
-			return pending_special[0];
-		}
-		if (got > 0) {
+		if (got >= 2) {
+			int translated = decode_arrow(seq[0], seq[0], seq[1]);
+			if (translated >= 0) {
+				if (icmd_pos < sizeof(icmd))
+					icmd[icmd_pos++] = (unsigned char)translated;
+				return translated;
+			}
 			memcpy(pending_special, seq, (size_t)got);
 			pending_special_len = got;
 			pending_special_pos = 0;
@@ -816,19 +818,13 @@ int term_read(void)
 			}
 			break;
 		}
-		if (got >= 2 && seq[0] == '[' && (seq[1] == 'A' || seq[1] == 'B' || seq[1] == 'C' || seq[1] == 'D')) {
-			unsigned char dir = (seq[1] == 'A') ? 'k' :
-				(seq[1] == 'B') ? 'j' :
-				(seq[1] == 'C') ? 'l' : 'h';
-			pending_special[0] = 0x1B;
-			pending_special[1] = dir;
-			pending_special_len = 2;
-			pending_special_pos = 1;
-			if (icmd_pos < sizeof(icmd))
-				icmd[icmd_pos++] = pending_special[0];
-			return pending_special[0];
-		}
-		if (got > 0) {
+		if (got >= 2) {
+			int translated = decode_arrow(seq[0], seq[0], seq[1]);
+			if (translated >= 0) {
+				if (icmd_pos < sizeof(icmd))
+					icmd[icmd_pos++] = (unsigned char)translated;
+				return translated;
+			}
 			memcpy(pending_special, seq, (size_t)got);
 			pending_special_len = got;
 			pending_special_pos = 0;
