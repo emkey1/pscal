@@ -103,7 +103,9 @@ static void ios_scroll_region_up(void) {
 	}
 	pscalTerminalMoveCursor(ios_margin_top, 0);
 	pscalTerminalDeleteLines(ios_margin_top, 1);
-	pscalTerminalMoveCursor(ios_margin_bottom, 0);
+	ios_row = ios_margin_bottom;
+	ios_col = 0;
+	ios_sync_cursor();
 }
 
 static void ios_scroll_region_down(void) {
@@ -112,7 +114,8 @@ static void ios_scroll_region_down(void) {
 	}
 	pscalTerminalMoveCursor(ios_margin_top, 0);
 	pscalTerminalInsertLines(ios_margin_top, 1);
-	pscalTerminalMoveCursor(ios_margin_top, 0);
+	ios_col = 0;
+	ios_sync_cursor();
 }
 static void ios_term_render_char(char ch) {
 	if (xcols <= 0 || xrows <= 0)
