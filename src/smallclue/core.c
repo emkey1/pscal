@@ -30,6 +30,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <inttypes.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -80,6 +81,24 @@ extern bool shellRuntimeConsumeExitRequested(void) __attribute__((weak));
 bool shellRuntimeConsumeExitRequested(void);
 #endif
 
+extern bool pscalRuntimeConsumeSigint(void);
+#if defined(PSCAL_TARGET_IOS)
+#if defined(__APPLE__)
+extern char *pscalRuntimeCopySessionLog(void) __attribute__((weak_import));
+extern void pscalRuntimeResetSessionLog(void) __attribute__((weak_import));
+#elif defined(__GNUC__)
+extern char *pscalRuntimeCopySessionLog(void) __attribute__((weak));
+extern void pscalRuntimeResetSessionLog(void) __attribute__((weak));
+#else
+char *pscalRuntimeCopySessionLog(void);
+void pscalRuntimeResetSessionLog(void);
+#endif
+
+// Provide weak fallbacks so smallclue can link when the Swift bridge is absent.
+__attribute__((weak)) char *pscalRuntimeCopySessionLog(void) { return NULL; }
+__attribute__((weak)) void pscalRuntimeResetSessionLog(void) { }
+#endif
+
 __attribute__((weak)) bool shellRuntimeConsumeExitRequested(void) {
     return false;
 }
@@ -106,6 +125,13 @@ static void smallclueClearPendingSignals(void) {
 }
 
 static bool smallclueShouldAbort(int *out_status) {
+    if (pscalRuntimeConsumeSigint()) {
+        if (out_status) {
+            *out_status = 130;
+        }
+        return true;
+    }
+
     if (shellRuntimeConsumeExitRequested) {
         if (shellRuntimeConsumeExitRequested()) {
             if (out_status) {
@@ -278,6 +304,7 @@ static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
 static int smallclueDfCommand(int argc, char **argv);
 #if defined(PSCAL_TARGET_IOS)
+static int smallclueDmesgCommand(int argc, char **argv);
 static int smallclueHelpCommand(int argc, char **argv);
 #endif
 
@@ -351,6 +378,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"df", smallclueDfCommand, "Report filesystem usage"},
 #if defined(PSCAL_TARGET_IOS)
     {"smallclue-help", smallclueHelpCommand, "List available smallclue applets"},
+    {"dmesg", smallclueDmesgCommand, "Show PSCAL runtime log for this session"},
 #endif
 };
 
@@ -883,6 +911,20 @@ static const char *pager_command_name(const char *name) {
 
 static int pager_control_fd_value = -2;
 
+// Duplicate an FD for pager control input only if it can be read from.
+static int pagerDupForRead(int fd) {
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        return -1;
+    }
+    int flags = fcntl(dup_fd, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_ACCMODE) != O_WRONLY) {
+        return dup_fd;
+    }
+    close(dup_fd);
+    return -1;
+}
+
 static int pager_control_fd(void) {
     if (pager_control_fd_value != -2) {
         return pager_control_fd_value;
@@ -890,15 +932,12 @@ static int pager_control_fd(void) {
 #ifdef _WIN32
     pager_control_fd_value = -1;
 #else
-    int fd = -1;
-    if (pscalRuntimeStdoutIsInteractive()) {
-        fd = dup(STDOUT_FILENO);
-    }
+    int fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
     if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
-        fd = dup(STDIN_FILENO);
+        fd = pagerDupForRead(STDIN_FILENO);
     }
-    if (fd < 0) {
-        fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
+    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+        fd = pagerDupForRead(STDOUT_FILENO);
     }
     pager_control_fd_value = fd;
 #endif
@@ -2941,14 +2980,14 @@ static int smallclueWatchCommand(int argc, char **argv) {
         if (ts.tv_nsec < 0) {
             ts.tv_nsec = 0;
         }
-        while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
-            if (smallclueShouldAbort(&abort_status)) {
-                status = abort_status;
-                goto watch_done;
-            }
-            continue;
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+        if (smallclueShouldAbort(&abort_status)) {
+            status = abort_status;
+            goto watch_done;
         }
+        continue;
     }
+}
 
 watch_done:
     free(cmdline);
@@ -3488,6 +3527,27 @@ static int smallcluePingCommand(int argc, char **argv) {
     freeaddrinfo(res);
     return (successes > 0) ? 0 : 1;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static int smallclueDmesgCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (pscalRuntimeCopySessionLog) {
+        char *snapshot = pscalRuntimeCopySessionLog();
+        if (snapshot) {
+            fputs(snapshot, stdout);
+            size_t len = strlen(snapshot);
+            if (len > 0 && snapshot[len - 1] != '\n') {
+                fputc('\n', stdout);
+            }
+            free(snapshot);
+            return 0;
+        }
+    }
+    fprintf(stderr, "dmesg: session log unavailable\n");
+    return 1;
+}
+#endif
 
 static int smallclueCatCommand(int argc, char **argv) {
     int status = 0;
@@ -5117,9 +5177,9 @@ static int smallclueGrepCommand(int argc, char **argv) {
 }
 
 typedef struct {
-    long lines;
-    long words;
-    long bytes;
+    uint64_t lines;
+    uint64_t words;
+    uint64_t bytes;
 } SmallclueWcCounts;
 
 static int smallclueWcProcessFile(const char *path, SmallclueWcCounts *counts) {
@@ -5160,13 +5220,13 @@ static int smallclueWcProcessFile(const char *path, SmallclueWcCounts *counts) {
 
 static void smallclueWcPrint(const SmallclueWcCounts *counts, int show_lines, int show_words, int show_bytes, const char *label) {
     if (show_lines) {
-        printf("%7ld", counts->lines);
+        printf("%12" PRIu64, counts->lines);
     }
     if (show_words) {
-        printf("%7ld", counts->words);
+        printf("%12" PRIu64, counts->words);
     }
     if (show_bytes) {
-        printf("%7ld", counts->bytes);
+        printf("%12" PRIu64, counts->bytes);
     }
     if (label) {
         printf(" %s", label);

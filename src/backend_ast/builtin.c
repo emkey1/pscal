@@ -2735,6 +2735,20 @@ void pscalRuntimeRequestSigint(void) {
     }
 }
 
+bool pscalRuntimeConsumeSigint(void) {
+    if (!g_vm_sigint_seen && g_vm_sigint_pipe[0] < 0) {
+        return false;
+    }
+    bool seen = g_vm_sigint_seen != 0;
+    g_vm_sigint_seen = 0;
+    if (g_vm_sigint_pipe[0] >= 0) {
+        char drain[8];
+        while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+        }
+    }
+    return seen;
+}
+
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
     vmPushColorState();

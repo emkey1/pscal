@@ -40,6 +40,13 @@ int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
 
+/// Returns a newly allocated C string containing the runtime log for the
+/// current session; caller must free() the result. Returns NULL on failure.
+char *pscalRuntimeCopySessionLog(void);
+
+/// Clears the in-memory runtime log for the current session.
+void pscalRuntimeResetSessionLog(void);
+
 /// Delivers a signal to the active runtime thread (no-op if inactive).
 /// Useful on iOS when virtual TTY mode prevents kernel-generated job-control
 /// signals from being delivered via the terminal.

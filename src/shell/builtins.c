@@ -121,6 +121,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"wc", "wc", -1},
     {"wget", "wget", -1},
     {"smallclue-help", "smallclue-help", -1},
+    {"dmesg", "dmesg", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},

@@ -18,6 +18,10 @@ function StringReplace(const S, OldPattern, NewPattern: string;
 
 // --- File System ---
 // FileExists is provided as a VM builtin.
+function ExpandFileName(const FileName: string): string;
+function ExtractFilePath(const FileName: string): string;
+function IncludeTrailingPathDelimiter(const S: string): string;
+function ExcludeTrailingPathDelimiter(const S: string): string;
 
 // --- Conversions ---
 // function StrToIntDef(S: string; Default: Longint): Longint; // Needs TryStrToInt built-in
@@ -221,9 +225,62 @@ begin
 end;
 
 
-// --- File System ---
-// FileExists is provided as a VM builtin; no wrapper needed here.
-
 // --- Other sections would go here ---
+
+function IncludeTrailingPathDelimiter(const S: string): string;
+begin
+  if Length(S) = 0 then
+    IncludeTrailingPathDelimiter := '/'
+  else if (S[Length(S)] = '/') or (S[Length(S)] = '\') then
+    IncludeTrailingPathDelimiter := S
+  else
+    IncludeTrailingPathDelimiter := S + '/';
+end;
+
+function ExcludeTrailingPathDelimiter(const S: string): string;
+var
+  L: Integer;
+begin
+  L := Length(S);
+  while (L > 1) and ((S[L] = '/') or (S[L] = '\')) do
+    Dec(L);
+  ExcludeTrailingPathDelimiter := Copy(S, 1, L);
+end;
+
+function ExtractFilePath(const FileName: string): string;
+var
+  L: Integer;
+begin
+  L := Length(FileName);
+  while (L > 0) and (FileName[L] <> '/') and (FileName[L] <> '\') do
+    Dec(L);
+  if L = 0 then
+    ExtractFilePath := ''
+  else
+    ExtractFilePath := Copy(FileName, 1, L);
+end;
+
+function ExpandFileName(const FileName: string): string;
+var
+  base: string;
+begin
+  if Length(FileName) = 0 then
+  begin
+    ExpandFileName := GetCurrentDir;
+    exit;
+  end;
+  if (FileName[1] = '/') or (FileName[1] = '\') then
+  begin
+    ExpandFileName := FileName;
+    exit;
+  end;
+  if (Length(FileName) >= 2) and (FileName[2] = ':') then
+  begin
+    ExpandFileName := FileName;
+    exit;
+  end;
+  base := IncludeTrailingPathDelimiter(GetCurrentDir);
+  ExpandFileName := base + FileName;
+end;
 
 end.

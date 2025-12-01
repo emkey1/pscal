@@ -73,6 +73,7 @@ private final class RuntimeLogger {
     private static let formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = .current
         return formatter
     }()
 
@@ -89,11 +90,54 @@ private final class RuntimeLogger {
         self.fileURL = RuntimeLogger.logsDirectoryURL().appendingPathComponent(filename, isDirectory: false)
     }
 
+    private var sessionLines: [String] = []
+    private var sessionBytes: Int = 0
+    private let sessionByteLimit: Int = 512 * 1024
+
+    private func recordSessionLine(_ line: String) {
+        let delta = line.utf8.count + 1; // account for newline
+        sessionLines.append(line)
+        sessionBytes += delta
+        if sessionByteLimit > 0 {
+            while sessionBytes > sessionByteLimit && !sessionLines.isEmpty {
+                let removed = sessionLines.removeFirst()
+                sessionBytes -= (removed.utf8.count + 1)
+            }
+        }
+    }
+
+    func resetSession() {
+        queue.sync {
+            sessionLines.removeAll()
+            sessionBytes = 0
+        }
+    }
+
+    private func sessionSnapshot() -> String {
+        var snapshot = ""
+        queue.sync {
+            snapshot = sessionLines.joined(separator: "\n")
+            if !snapshot.isEmpty {
+                snapshot.append("\n")
+            }
+        }
+        return snapshot
+    }
+
+    func copySessionSnapshotCString() -> UnsafeMutablePointer<CChar>? {
+        let snapshot = sessionSnapshot()
+        return snapshot.withCString { ptr in
+            strdup(ptr)
+        }
+    }
+
     func append(_ message: String) {
         let timestamp = RuntimeLogger.formatter.string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        guard let data = line.data(using: .utf8) else { return }
+        let line = "[\(timestamp)] \(message)"
+        let record = line + "\n"
+        guard let data = record.data(using: .utf8) else { return }
         queue.async {
+            self.recordSessionLine(line)
             let directory = self.fileURL.deletingLastPathComponent()
             let fileManager = FileManager.default
             if !fileManager.fileExists(atPath: directory.path) {
@@ -125,6 +169,16 @@ private func appendRuntimeDebugLog(_ message: String) {
     if runtimeLogMirrorsToConsole {
         NSLog("%@", message)
     }
+}
+
+@_cdecl("pscalRuntimeCopySessionLog")
+func pscalRuntimeCopySessionLogBridge() -> UnsafeMutablePointer<CChar>? {
+    return RuntimeLogger.runtime.copySessionSnapshotCString()
+}
+
+@_cdecl("pscalRuntimeResetSessionLog")
+func pscalRuntimeResetSessionLogBridge() {
+    RuntimeLogger.runtime.resetSession()
 }
 
 final class PscalRuntimeBootstrap: ObservableObject {
@@ -211,6 +265,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         guard shouldStart else { return }
 
+        RuntimeLogger.runtime.resetSession()
         RuntimeAssetInstaller.shared.prepareWorkspace()
         if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
@@ -426,6 +481,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
 
     private func shouldEchoLocally() -> Bool {
+        // Local echo is only needed in virtual TTY fallback mode; avoid it when
+        // full-screen editors (Elvis/Nextvi) are active to prevent double-rendered
+        // newlines and ghost lines during insert mode.
+        if isElvisModeActive() {
+            return false
+        }
         return PSCALRuntimeIsVirtualTTY() != 0
     }
 
@@ -926,7 +987,7 @@ final class EditorTerminalBridge {
         let string = String(decoding: data, as: UTF8.self)
         stateQueue.sync(flags: .barrier) {
             guard state.active, state.rows > 0, state.columns > 0 else { return }
-            let targetRow = max(0, min(normalizeRow(row), state.rows - 1))
+            var targetRow = max(0, min(normalizeRow(row), state.rows - 1))
             var targetCol = max(0, min(column, state.columns - 1))
             let attributes = CellAttributes(fg: fg >= 0 ? Int(fg) : nil,
                                             bg: bg >= 0 ? Int(bg) : nil,
@@ -935,21 +996,27 @@ final class EditorTerminalBridge {
                                             inverse: (attr & 4) != 0)
             for ch in string {
                 if ch == "\n" {
-                    state.cursorRow = min(state.rows - 1, targetRow + 1)
-                    state.cursorCol = 0
-                    break;
+                    targetRow = min(state.rows - 1, targetRow + 1);
+                    targetCol = 0;
+                    continue
+                }
+                if ch == "\r" {
+                    targetCol = 0
+                    continue
                 }
                 if let scalar = ch.unicodeScalars.first,
                    scalar.properties.generalCategory == .control {
                     continue
                 }
                 if targetCol >= state.columns {
-                    break
+                    targetCol = state.columns - 1
                 }
                 state.grid[targetRow][targetCol] = ch
                 state.attrs[targetRow][targetCol] = attributes
                 targetCol += 1
             }
+            state.cursorRow = targetRow
+            state.cursorCol = min(targetCol, state.columns - 1)
         }
     }
 
