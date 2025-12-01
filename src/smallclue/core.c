@@ -1006,15 +1006,24 @@ static int pager_terminal_rows(void) {
 }
 
 static int pager_file(const char *cmd_name, const char *path, FILE *stream) {
-    int ctrl_fd = pager_control_fd();
-    bool have_ctrl = (ctrl_fd >= 0) && pscalRuntimeFdIsInteractive(ctrl_fd);
-    if (!have_ctrl) {
-        return print_file(path, stream);
-    }
-
     PagerBuffer buffer = {0};
     if (pagerCollectLines(cmd_name, path, stream, &buffer) != 0) {
         return 1;
+    }
+
+    int ctrl_fd = pager_control_fd();
+    bool have_ctrl = (ctrl_fd >= 0) && pscalRuntimeFdIsInteractive(ctrl_fd);
+    if (!have_ctrl) {
+        /* No interactive input available; dump what we collected. */
+        for (size_t i = 0; i < buffer.count; ++i) {
+            fputs(buffer.lines[i], stdout);
+            size_t len = strlen(buffer.lines[i]);
+            if (len == 0 || buffer.lines[i][len - 1] != '\n') {
+                fputc('\n', stdout);
+            }
+        }
+        pagerBufferFree(&buffer);
+        return 0;
     }
 
     int rows = pager_terminal_rows();
