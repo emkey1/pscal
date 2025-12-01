@@ -8,9 +8,6 @@ unsigned int texec, tn;
 #if !defined(PSCAL_TARGET_IOS)
 static struct pollfd ufds[1];
 #endif
-static unsigned char pending_special[8];
-static int pending_special_len = 0;
-static int pending_special_pos = 0;
 
 /* iOS bridge for floating window rendering */
 #if defined(PSCAL_TARGET_IOS)
@@ -719,13 +716,6 @@ void term_back(int c)
 int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
-	/* Serve any translated sequence bytes first. */
-	if (pending_special_pos < pending_special_len) {
-		int ch = pending_special[pending_special_pos++];
-		if (icmd_pos < sizeof(icmd))
-			icmd[icmd_pos++] = (unsigned char)ch;
-		return ch;
-	}
 	if (ibuf_pos >= ibuf_cnt) {
 		int n = pscalTerminalRead(ibuf, 1, 1000);
 		if (n <= 0) {
@@ -737,41 +727,10 @@ int term_read(void)
 		ibuf_cnt = (unsigned int)n;
 		ibuf_pos = 0;
 	}
-	unsigned char ch = ibuf[ibuf_pos++];
-	if (ch == 0x1B) {
-		unsigned char seq[2];
-		int got = 0;
-		while (got < 2) {
-			int r = pscalTerminalRead(seq + got, 1, 5);
-			if (r <= 0)
-				break;
-			got += r;
-		}
-		if (got >= 2 && seq[0] == '[' &&
-		    (seq[1] == 'A' || seq[1] == 'B' || seq[1] == 'C' || seq[1] == 'D')) {
-			/* Drop arrows entirely for now. */
-			return term_read();
-		}
-		if (got > 0) {
-			memcpy(pending_special, seq, (size_t)got);
-			pending_special_len = got;
-			pending_special_pos = 0;
-		}
-		if (icmd_pos < sizeof(icmd))
-			icmd[icmd_pos++] = ch;
-		return ch;
-	}
 	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = ch;
-	return ch;
+		icmd[icmd_pos++] = ibuf[ibuf_pos];
+	return ibuf[ibuf_pos++];
 #else
-	/* host path */
-	if (pending_special_pos < pending_special_len) {
-		int ch = pending_special[pending_special_pos++];
-		if (icmd_pos < sizeof(icmd))
-			icmd[icmd_pos++] = (unsigned char)ch;
-		return ch;
-	}
 	if (ibuf_pos >= ibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
@@ -790,41 +749,9 @@ int term_read(void)
 		ibuf_cnt = 1;
 		ibuf_pos = 0;
 	}
-	unsigned char ch = ibuf[ibuf_pos++];
-	if (ch == 0x1B) {
-		unsigned char seq[2];
-		int got = 0;
-		struct timeval tv = {0, 5000};
-		fd_set rfds;
-		int fd = STDIN_FILENO;
-		while (got < 2) {
-			FD_ZERO(&rfds);
-			FD_SET(fd, &rfds);
-			if (select(fd + 1, &rfds, NULL, NULL, &tv) > 0 &&
-					FD_ISSET(fd, &rfds) &&
-					read(fd, seq + got, 1) == 1) {
-				got++;
-				continue;
-			}
-			break;
-		}
-		if (got >= 2 && seq[0] == '[' &&
-		    (seq[1] == 'A' || seq[1] == 'B' || seq[1] == 'C' || seq[1] == 'D')) {
-			/* Drop arrows entirely for now. */
-			return term_read();
-		}
-		if (got > 0) {
-			memcpy(pending_special, seq, (size_t)got);
-			pending_special_len = got;
-			pending_special_pos = 0;
-		}
-		if (icmd_pos < sizeof(icmd))
-			icmd[icmd_pos++] = ch;
-		return ch;
-	}
 	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = ch;
-	return ch;
+		icmd[icmd_pos++] = ibuf[ibuf_pos];
+	return ibuf[ibuf_pos++];
 #endif
 }
 
