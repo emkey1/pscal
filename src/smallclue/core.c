@@ -35,6 +35,7 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/select.h>
+#include <glob.h>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include "common/path_truncate.h"
@@ -5650,9 +5651,38 @@ static int smallclueRmCommand(int argc, char **argv) {
     }
     int status = 0;
     for (int i = optind; i < argc; ++i) {
-        if (smallclueRemovePathWithLabel("rm", argv[i], recursive != 0, force != 0) != 0) {
-            if (!force) {
-                status = 1;
+        const char *input = argv[i];
+        const char *expanded = input;
+#if defined(PSCAL_TARGET_IOS)
+        char pathbuf[PATH_MAX];
+        if (pathTruncateExpand(input, pathbuf, sizeof(pathbuf))) {
+            expanded = pathbuf;
+        }
+#endif
+        if (strpbrk(expanded, "*?[")) {
+            glob_t matches;
+            memset(&matches, 0, sizeof(matches));
+            int gret = glob(expanded, GLOB_NOCHECK, NULL, &matches);
+            if (gret != 0) {
+                globfree(&matches);
+                if (!force) {
+                    status = 1;
+                }
+                continue;
+            }
+            for (size_t m = 0; m < matches.gl_pathc; ++m) {
+                if (smallclueRemovePathWithLabel("rm", matches.gl_pathv[m], recursive != 0, force != 0) != 0) {
+                    if (!force) {
+                        status = 1;
+                    }
+                }
+            }
+            globfree(&matches);
+        } else {
+            if (smallclueRemovePathWithLabel("rm", expanded, recursive != 0, force != 0) != 0) {
+                if (!force) {
+                    status = 1;
+                }
             }
         }
     }
