@@ -410,6 +410,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.async {
             self.exitStatus = status
+            EditorWindowManager.shared.resignInputFocus()
             EditorTerminalBridge.shared.deactivate()
             EditorWindowManager.shared.hideWindow()
             self.setElvisModeActive(false)

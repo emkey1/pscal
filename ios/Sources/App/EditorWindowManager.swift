@@ -304,6 +304,12 @@ final class TerminalEditorViewController: UIViewController {
         }
     }
 
+    func resignInputFocus() {
+        DispatchQueue.main.async {
+            self.inputViewBridge.resignFirstResponder()
+        }
+    }
+
     private func reportGeometryIfNeeded() {
         guard view.window != nil else {
             return
