@@ -961,6 +961,10 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
         if let offset = resolvedCursor?.textOffset {
             if offset != lastElvisCursorOffset {
+                if bounds.width < 1 || bounds.height < 1 {
+                    pendingUpdate = (snapshot.attributedText, resolvedCursor, backgroundColor, true, snapshot)
+                    return
+                }
                 scrollToCursor(textView: terminalView,
                                cursorOffset: offset,
                                preferBottomInset: preferredInset)
@@ -998,41 +1002,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             // Make sure pending text storage edits are flushed before asking for caret geometry.
             textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storageLength))
             textView.layoutManager.ensureLayout(for: textView.textContainer)
-            let glyphCount = textView.layoutManager.numberOfGlyphs
-            if glyphCount > 0 {
-                textView.layoutManager.ensureGlyphs(forGlyphRange: NSRange(location: 0, length: glyphCount))
-                let glyphIndex = max(0, min(glyphCount - 1, cursorOffset))
-                _ = textView.layoutManager.lineFragmentRect(forGlyphAt: glyphIndex,
-                                                           effectiveRange: nil,
-                                                           withoutAdditionalLayout: false)
-            }
         }
         let length = textView.attributedText.length
         let safeOffset = max(0, min(cursorOffset, length))
-        let beginning = textView.beginningOfDocument
-        guard let position = textView.position(from: beginning, offset: safeOffset) else {
-            let fallbackRange = NSRange(location: max(0, min(safeOffset, max(length - 1, 0))), length: 0)
-            textView.scrollRangeToVisible(fallbackRange)
-            return
-        }
-        let caret = textView.caretRect(for: position)
-        var newOffset = textView.contentOffset
-        let topVisible = newOffset.y + textView.textContainerInset.top
-        let bottomVisible = newOffset.y + textView.bounds.height - textView.textContainerInset.bottom
-        var needsUpdate = false
-        if caret.minY < topVisible {
-            newOffset.y = caret.minY - textView.textContainerInset.top - preferBottomInset
-            needsUpdate = true
-        } else if caret.maxY > (bottomVisible - preferBottomInset) {
-            newOffset.y = caret.maxY - textView.bounds.height + textView.textContainerInset.bottom + preferBottomInset
-            needsUpdate = true
-        }
-        let minOffsetY = -textView.contentInset.top
-        let maxOffsetY = max(minOffsetY, textView.contentSize.height - textView.bounds.height + textView.contentInset.bottom)
-        newOffset.y = min(max(newOffset.y, minOffsetY), maxOffsetY)
-        if needsUpdate {
-            textView.setContentOffset(newOffset, animated: false)
-        }
+        let range = NSRange(location: safeOffset, length: 0)
+        textView.scrollRangeToVisible(range)
     }
 
     private func remapFontsIfNeeded(in text: NSAttributedString) -> NSAttributedString {
