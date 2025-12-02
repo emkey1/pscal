@@ -922,7 +922,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             lastElvisCursorOffset = nil
             selectionOverlay.clearSelection()
             let displayText = remapFontsIfNeeded(in: text)
-            if bounds.width < 1 || bounds.height < 1 {
+            if window == nil || bounds.width < 1 || bounds.height < 1 {
                 pendingUpdate = (text, cursor, backgroundColor, isElvisMode, elvisSnapshot)
                 return
             }
@@ -961,7 +961,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
         if let offset = resolvedCursor?.textOffset {
             if offset != lastElvisCursorOffset {
-                if bounds.width < 1 || bounds.height < 1 {
+                if window == nil || bounds.width < 1 || bounds.height < 1 {
                     pendingUpdate = (snapshot.attributedText, resolvedCursor, backgroundColor, true, snapshot)
                     return
                 }
