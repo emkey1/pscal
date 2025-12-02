@@ -822,19 +822,13 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
     private func characterIndex(at point: CGPoint) -> Int? {
         guard let text = terminalView.attributedText else { return nil }
-        let layout = terminalView.layoutManager
-        let container = terminalView.textContainer
-        var adjusted = point
-        adjusted.x -= terminalView.textContainerInset.left
-        adjusted.y -= terminalView.textContainerInset.top
-        adjusted.x += terminalView.contentOffset.x
-        adjusted.y += terminalView.contentOffset.y
-        let glyphIndex = layout.glyphIndex(for: adjusted, in: container)
-        let charIndex = layout.characterIndexForGlyph(at: glyphIndex)
-        if charIndex >= text.length {
-            return text.length
-        }
-        return charIndex
+        let location = CGPoint(x: point.x + terminalView.contentOffset.x - terminalView.textContainerInset.left,
+                               y: point.y + terminalView.contentOffset.y - terminalView.textContainerInset.top)
+        let characterIndex = terminalView.closestPosition(to: location).flatMap { pos in
+            terminalView.offset(from: terminalView.beginningOfDocument, to: pos)
+        } ?? 0
+        let clamped = max(0, min(characterIndex, text.length))
+        return clamped
     }
 
     @objc private func copySelectionAction() {
