@@ -664,6 +664,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private var selectionStartIndex: Int?
     private var selectionEndIndex: Int?
     private var selectionAnchorPoint: CGPoint?
+    private var pendingUpdate: (text: NSAttributedString,
+                                cursor: TerminalCursorInfo?,
+                                backgroundColor: UIColor,
+                                isElvisMode: Bool,
+                                elvisSnapshot: ElvisSnapshot?)?
     private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleSelectionPress(_:)))
         recognizer.minimumPressDuration = 0.25
@@ -679,6 +684,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
+        translatesAutoresizingMaskIntoConstraints = false
         terminalView.isEditable = false
         terminalView.isSelectable = false
         terminalView.isScrollEnabled = true
@@ -699,6 +705,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionOverlay.textView = terminalView
         addSubview(selectionOverlay)
         addGestureRecognizer(longPressRecognizer)
+        selectionMenu.translatesAutoresizingMaskIntoConstraints = false
         selectionMenu.isHidden = true
         selectionMenu.copyHandler = { [weak self] in self?.copySelectionAction() }
         selectionMenu.copyAllHandler = { [weak self] in self?.copyAllAction() }
@@ -728,6 +735,14 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         super.layoutSubviews()
         terminalView.frame = bounds
         selectionOverlay.frame = bounds
+        if bounds.width > 1, bounds.height > 1, let pending = pendingUpdate {
+            pendingUpdate = nil
+            update(text: pending.text,
+                   cursor: pending.cursor,
+                   backgroundColor: pending.backgroundColor,
+                   isElvisMode: pending.isElvisMode,
+                   elvisSnapshot: pending.elvisSnapshot)
+        }
     }
 
     func configure(backgroundColor: UIColor, foregroundColor: UIColor) {
@@ -907,6 +922,10 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             lastElvisCursorOffset = nil
             selectionOverlay.clearSelection()
             let displayText = remapFontsIfNeeded(in: text)
+            if bounds.width < 1 || bounds.height < 1 {
+                pendingUpdate = (text, cursor, backgroundColor, isElvisMode, elvisSnapshot)
+                return
+            }
             terminalView.attributedText = displayText
             terminalView.cursorTextOffset = cursor?.textOffset
             terminalView.cursorInfo = cursor
