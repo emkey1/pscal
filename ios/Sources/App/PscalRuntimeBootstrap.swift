@@ -395,8 +395,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         guard length > 0 else { return }
         let dataCopy = Data(bytes: buffer, count: length)
         free(UnsafeMutableRawPointer(mutating: buffer))
-        terminalBuffer.append(data: dataCopy)
-        scheduleRender()
+        DispatchQueue.main.async {
+            self.terminalBuffer.append(data: dataCopy)
+            self.scheduleRender()
+        }
     }
 
     private func handleExit(status: Int32) {
