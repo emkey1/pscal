@@ -257,6 +257,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
         send(wrapped)
     }
 
+    private func purgeTransientState() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let logDir = docs.appendingPathComponent("var", isDirectory: true)
+            .appendingPathComponent("log", isDirectory: true)
+        if fm.fileExists(atPath: logDir.path) {
+            try? fm.removeItem(at: logDir)
+        }
+        let tmpDir = docs.appendingPathComponent("tmp", isDirectory: true)
+        if fm.fileExists(atPath: tmpDir.path) {
+            try? fm.removeItem(at: tmpDir)
+        }
+        try? fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+    }
+
     func start() {
         let shouldStart = stateQueue.sync { () -> Bool in
             guard !started else { return false }
@@ -266,6 +282,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         guard shouldStart else { return }
 
         RuntimeLogger.runtime.resetSession()
+        purgeTransientState()
         RuntimeAssetInstaller.shared.prepareWorkspace()
         if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
