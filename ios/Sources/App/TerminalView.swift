@@ -982,10 +982,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             let glyphCount = textView.layoutManager.numberOfGlyphs
             if glyphCount > 0 {
                 textView.layoutManager.ensureGlyphs(forGlyphRange: NSRange(location: 0, length: glyphCount))
+                let glyphIndex = max(0, min(glyphCount - 1, cursorOffset))
+                _ = textView.layoutManager.lineFragmentRect(forGlyphAt: glyphIndex,
+                                                           effectiveRange: nil,
+                                                           withoutAdditionalLayout: false)
             }
-            textView.layoutManager.ensureLineFragmentRect(
-                forGlyphAt: max(0, min(storageLength - 1, cursorOffset)),
-                effectiveRange: nil)
         }
         let length = textView.attributedText.length
         let safeOffset = max(0, min(cursorOffset, length))
