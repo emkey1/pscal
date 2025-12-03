@@ -261,11 +261,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let fm = FileManager.default
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let logDir = docs.appendingPathComponent("var", isDirectory: true)
-            .appendingPathComponent("log", isDirectory: true)
-        if fm.fileExists(atPath: logDir.path) {
-            try? fm.removeItem(at: logDir)
-        }
+        // Do not purge var/log; it must persist for post-crash debugging.
         let tmpDir = docs.appendingPathComponent("tmp", isDirectory: true)
         if fm.fileExists(atPath: tmpDir.path) {
             try? fm.removeItem(at: tmpDir)

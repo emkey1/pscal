@@ -467,6 +467,42 @@ void sink_sftp(int, char *, const char *, struct sftp_conn *);
 void throughlocal_sftp(struct sftp_conn *, struct sftp_conn *,
     char *, char *);
 
+static void
+scp_reset(void)
+{
+	freeargs(&args);
+	freeargs(&remote_remote_args);
+	limit_kbps = 0;
+	memset(&bwlimit, 0, sizeof(bwlimit));
+	curfile = NULL;
+	verbose_mode = 0;
+	log_level = SYSLOG_LEVEL_INFO;
+#ifndef PSCAL_TARGET_IOS
+	showprogress = 1;
+#endif
+	throughlocal = 1;
+	sshport = -1;
+	if (ssh_program != _PATH_SSH_PROGRAM) {
+		free(ssh_program);
+		ssh_program = _PATH_SSH_PROGRAM;
+	}
+	do_cmd_pid = -1;
+	do_cmd_pid2 = -1;
+	sftp_copy_buflen = 0;
+	sftp_nrequests = 0;
+	errs = 0;
+	remin = -1;
+	remout = -1;
+	remin2 = -1;
+	remout2 = -1;
+	Tflag = 0;
+	pflag = 0;
+	iamremote = 0;
+	iamrecursive = 0;
+	targetshouldbedirectory = 0;
+	memset(cmd, 0, sizeof(cmd));
+}
+
 int
 main(int argc, char **argv)
 {
@@ -474,13 +510,17 @@ main(int argc, char **argv)
 	char **newargv, *argv0;
 	const char *errstr;
 	extern char *optarg;
-	extern int optind;
+	extern int optind, optreset;
 	enum scp_mode_e mode = MODE_SFTP;
 	char *sftp_direct = NULL;
 	long long llv;
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
+
+	scp_reset();
+	optreset = 1;
+	optind = 1;
 
 	msetlocale();
 
