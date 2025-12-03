@@ -76,6 +76,16 @@ restart:
 	 * Read and write to /dev/tty if available.  If not, read from
 	 * stdin and write to stderr unless a tty is required.
 	 */
+#ifdef PSCAL_TARGET_IOS
+	/*
+	 * On iOS (PSCAL), /dev/tty does not exist or is not accessible.
+	 * We force usage of STDIN/STDERR which are shimmed to act as TTYs if needed.
+	 */
+	if (1) {
+		input = STDIN_FILENO;
+		output = STDERR_FILENO;
+	}
+#else
 	if ((flags & RPP_STDIN) ||
 	    (input = output = open(_PATH_TTY, O_RDWR)) == -1) {
 		if (flags & RPP_REQUIRE_TTY) {
@@ -85,13 +95,18 @@ restart:
 		input = STDIN_FILENO;
 		output = STDERR_FILENO;
 	}
+#endif
 
 	/*
 	 * Turn off echo if possible.
 	 * If we are using a tty but are not the foreground pgrp this will
 	 * generate SIGTTOU, so do it *before* installing the signal handlers.
 	 */
+#ifdef PSCAL_TARGET_IOS
+	if ((input != STDIN_FILENO || isatty(input)) && tcgetattr(input, &oterm) == 0) {
+#else
 	if (input != STDIN_FILENO && tcgetattr(input, &oterm) == 0) {
+#endif
 		memcpy(&term, &oterm, sizeof(term));
 		if (!(flags & RPP_ECHO_ON))
 			term.c_lflag &= ~(ECHO | ECHONL);

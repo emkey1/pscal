@@ -32,7 +32,7 @@ typedef struct {
 } pscal_ios_virtual_tty;
 
 static pthread_mutex_t g_pscal_ios_tty_lock = PTHREAD_MUTEX_INITIALIZER;
-static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[4];
+static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[8];
 
 static bool pscal_ios_path_is_devtty(const char *path) {
     if (path == NULL) {
@@ -235,6 +235,59 @@ static int pscal_ios_register_virtual_tty(void) {
     return -1;
 }
 
+static void pscal_ios_ensure_std_virtual_tty(int fd) {
+    if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+        return;
+    }
+
+    bool interactive = false;
+    if (fd == STDIN_FILENO) {
+        interactive = pscalRuntimeStdinIsInteractive();
+    } else if (fd == STDOUT_FILENO) {
+        interactive = pscalRuntimeStdoutIsInteractive();
+    } else if (fd == STDERR_FILENO) {
+        interactive = pscalRuntimeStderrIsInteractive();
+    }
+
+    if (!interactive) {
+        return;
+    }
+
+    if (pscal_ios_virtual_tty_exists(fd)) {
+        return;
+    }
+
+    struct termios defaults;
+    pscal_ios_init_termios(&defaults);
+
+    pthread_mutex_lock(&g_pscal_ios_tty_lock);
+    // Double check active status under lock
+    for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
+         sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
+        if (g_pscal_ios_virtual_ttys[i].active &&
+            g_pscal_ios_virtual_ttys[i].fd == fd) {
+            pthread_mutex_unlock(&g_pscal_ios_tty_lock);
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
+         sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
+        pscal_ios_virtual_tty *entry = &g_pscal_ios_virtual_ttys[i];
+        if (!entry->active) {
+            entry->fd = fd;
+            // For std streams, we map the writer to the fd itself
+            // (or -1 for stdin to indicate no writing).
+            // This ensures pscal_ios_write writes to the correct fd.
+            entry->writer = (fd == STDIN_FILENO) ? -1 : fd;
+            entry->active = true;
+            entry->term = defaults;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_pscal_ios_tty_lock);
+}
+
 int pscal_ios_open(const char *path, int oflag, ...) {
     mode_t mode = 0;
     bool has_mode = false;
@@ -322,13 +375,15 @@ ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte) {
 
 int pscal_ios_close(int fd) {
     int writer = -1;
-    if (pscal_ios_virtual_tty_release(fd, &writer) && writer >= 0) {
+    if (pscal_ios_virtual_tty_release(fd, &writer) && writer >= 0 &&
+        writer != fd) {
         close(writer);
     }
     return close(fd);
 }
 
 int pscal_ios_tcgetattr(int fd, struct termios *termios_p) {
+    pscal_ios_ensure_std_virtual_tty(fd);
     pscal_ios_virtual_tty entry;
     if (pscal_ios_virtual_tty_snapshot(fd, &entry)) {
         if (termios_p) {
@@ -342,6 +397,7 @@ int pscal_ios_tcgetattr(int fd, struct termios *termios_p) {
 int pscal_ios_tcsetattr(int fd, int optional_actions,
     const struct termios *termios_p) {
     (void)optional_actions;
+    pscal_ios_ensure_std_virtual_tty(fd);
     if (pscal_ios_virtual_tty_update_termios(fd, termios_p)) {
         return 0;
     }
@@ -349,6 +405,7 @@ int pscal_ios_tcsetattr(int fd, int optional_actions,
 }
 
 int pscal_ios_isatty(int fd) {
+    pscal_ios_ensure_std_virtual_tty(fd);
     if (pscal_ios_virtual_tty_exists(fd)) {
         return 1;
     }
@@ -363,6 +420,8 @@ int pscal_ios_ioctl(int fd, unsigned long request, ...) {
         arg = va_arg(ap, void *);
     }
     va_end(ap);
+
+    pscal_ios_ensure_std_virtual_tty(fd);
 
     if (pscal_ios_virtual_tty_exists(fd) &&
         request == (unsigned long)TIOCGWINSZ && arg != NULL) {
@@ -465,6 +524,46 @@ DIR *pscal_ios_opendir(const char *path) {
         return NULL;
     }
     return opendir(target);
+}
+
+pid_t pscal_ios_fork(void) {
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execv(const char *path, char *const argv[]) {
+    (void)path;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execvp(const char *file, char *const argv[]) {
+    (void)file;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execl(const char *path, const char *arg, ...) {
+    (void)path;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execle(const char *path, const char *arg, ...) {
+    (void)path;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execlp(const char *file, const char *arg, ...) {
+    (void)file;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
 }
 
 #endif /* PSCAL_TARGET_IOS */
