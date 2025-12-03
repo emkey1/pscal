@@ -9,6 +9,11 @@ extern int clike_main(int argc, char **argv);
 extern int rea_main(int argc, char **argv);
 extern int pscalvm_main(int argc, char **argv);
 extern int pscaljson2bc_main(int argc, char **argv);
+#ifdef PSCAL_TARGET_IOS
+int pscal_openssh_ssh_main(int argc, char **argv);
+int pscal_openssh_scp_main(int argc, char **argv);
+int pscal_openssh_sftp_main(int argc, char **argv);
+#endif
 #ifdef BUILD_DASCAL
 extern int dascal_main(int argc, char **argv);
 #endif
@@ -35,6 +40,11 @@ static const ToolDescriptor kToolDescriptors[] = {
 #endif
 #ifdef BUILD_PSCALD
     {"pscald", pscald_main, FRONTEND_KIND_PASCAL},
+#endif
+#ifdef PSCAL_TARGET_IOS
+    {"ssh", pscal_openssh_ssh_main, FRONTEND_KIND_PASCAL},
+    {"scp", pscal_openssh_scp_main, FRONTEND_KIND_PASCAL},
+    {"sftp", pscal_openssh_sftp_main, FRONTEND_KIND_PASCAL},
 #endif
 };
 
