@@ -308,6 +308,11 @@ static int smallclueDmesgCommand(int argc, char **argv);
 static int smallclueHelpCommand(int argc, char **argv);
 #endif
 
+typedef struct SmallclueAppletHelp {
+    const char *name;
+    const char *usage;
+} SmallclueAppletHelp;
+
 static const SmallclueApplet kSmallclueApplets[] = {
     {"[", smallclueBracketCommand, "Evaluate expressions"},
     {"basename", smallclueBasenameCommand, "Strip directory prefix"},
@@ -382,7 +387,29 @@ static const SmallclueApplet kSmallclueApplets[] = {
 #endif
 };
 
+static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
+    {"ls", "ls [-a] [-l] [-t] [-h] [-d] [--color[=auto|always|never]] [path ...]\n"
+           "  -a  show entries starting with '.'\n"
+           "  -l  long format with permissions, ownership, size, time\n"
+           "  -t  sort by modification time\n"
+           "  -h  human-readable sizes (with -l)\n"
+           "  -d  list directories themselves, not their contents"},
+    {"smallclue-help", "smallclue-help [command]\n"
+                       "  Without arguments: list all applets\n"
+                       "  With a command: show usage if available"},
+    {NULL, NULL}
+};
+
 static size_t kSmallclueAppletCount = sizeof(kSmallclueApplets) / sizeof(kSmallclueApplets[0]);
+
+static const char *smallclueLookupHelp(const char *name) {
+    for (const SmallclueAppletHelp *h = kSmallclueAppletHelp; h && h->name; ++h) {
+        if (strcmp(h->name, name) == 0) {
+            return h->usage;
+        }
+    }
+    return NULL;
+}
 
 static const char *pager_command_name(const char *name);
 static int pager_read_key(void);
@@ -2841,10 +2868,28 @@ static int smallclueFalseCommand(int argc, char **argv) {
 
 #if defined(PSCAL_TARGET_IOS)
 static int smallclueHelpCommand(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    smallcluePrintAppletList(stdout, "Available smallclue applets:");
-    return 0;
+    if (argc <= 1) {
+        smallcluePrintAppletList(stdout, "Available smallclue applets:");
+        return 0;
+    }
+    int status = 0;
+    for (int i = 1; i < argc; ++i) {
+        const char *target = argv[i];
+        const SmallclueApplet *applet = smallclueFindApplet(target);
+        if (!applet) {
+            fprintf(stderr, "smallclue-help: '%s' not found\n", target);
+            status = 1;
+            continue;
+        }
+        const char *usage = smallclueLookupHelp(applet->name);
+        printf("%s - %s\n", applet->name, applet->description ? applet->description : "");
+        if (usage) {
+            printf("Usage:\n%s\n", usage);
+        } else {
+            printf("(No detailed help available for this applet)\n\n");
+        }
+    }
+    return status;
 }
 #endif
 

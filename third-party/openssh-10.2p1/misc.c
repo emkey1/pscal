@@ -77,6 +77,23 @@
 #include "ssherr.h"
 #include "platform.h"
 
+#ifdef PSCAL_TARGET_IOS
+static void
+pscal_debug_logf(const char *fmt, ...) {
+	char buf[256];
+	va_list ap;
+	if (!pscalRuntimeDebugLog)
+		return;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	buf[sizeof(buf) - 1] = '\0';
+	pscalRuntimeDebugLog(buf);
+}
+#else
+#define pscal_debug_logf(...) do {} while (0)
+#endif
+
 /* remove newline at end of string */
 char *
 chop(char *s)
@@ -417,8 +434,10 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #endif
 
 	/* No timeout: just do a blocking connect() */
+#ifndef PSCAL_TARGET_IOS
 	if (timeoutp == NULL || *timeoutp <= 0)
 		return connect(sockfd, serv_addr, addrlen);
+#endif
 
 	set_nonblock(sockfd);
 	for (;;) {
