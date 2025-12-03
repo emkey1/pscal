@@ -1140,30 +1140,44 @@ final class TerminalDisplayTextView: UITextView {
         }
         let clampedOffset = max(0, min(offset, attributedText.length))
         let beginning = beginningOfDocument
-        guard let position = self.position(from: beginning, offset: clampedOffset) else {
-            cursorLayer.opacity = 0
-            return
-        }
-        let caret = caretRect(for: position)
-        var rect = caret
-        rect.origin.x -= contentOffset.x
-        rect.origin.y -= contentOffset.y
-        rect.size.width = max(1, rect.size.width)
-        rect.size.height = max(rect.size.height, TerminalFontMetrics.lineHeight)
-        cursorLayer.frame = rect
+        // Defer caret update to allow layout to settle, avoiding "outstanding changes" error
+        // and avoiding explicit layoutManager access (TextKit 1 warning).
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
 
-        if !blinkAnimationAdded {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = 1
-            animation.toValue = 0
-            animation.duration = 0.8
-            animation.autoreverses = true
-            animation.repeatCount = .infinity
-            cursorLayer.add(animation, forKey: "blink")
-            blinkAnimationAdded = true
-        }
+            // Re-validate offset in case it changed pending dispatch
+            guard let currentOffset = self.cursorTextOffset, currentOffset == offset else { return }
 
-        cursorLayer.opacity = 1
+            let clamped = max(0, min(offset, self.attributedText.length))
+            guard let pos = self.position(from: self.beginningOfDocument, offset: clamped) else {
+                return
+            }
+
+            let caret = self.caretRect(for: pos)
+            var rect = caret
+            rect.origin.x -= self.contentOffset.x
+            rect.origin.y -= self.contentOffset.y
+            rect.size.width = max(1, rect.size.width)
+            rect.size.height = max(rect.size.height, TerminalFontMetrics.lineHeight)
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.cursorLayer.frame = rect
+            CATransaction.commit()
+
+            if !self.blinkAnimationAdded {
+                let animation = CABasicAnimation(keyPath: "opacity")
+                animation.fromValue = 1
+                animation.toValue = 0
+                animation.duration = 0.8
+                animation.autoreverses = true
+                animation.repeatCount = .infinity
+                self.cursorLayer.add(animation, forKey: "blink")
+                self.blinkAnimationAdded = true
+            }
+
+            self.cursorLayer.opacity = 1
+        }
     }
 
     private func pruneGestures() {
