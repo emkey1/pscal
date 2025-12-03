@@ -374,6 +374,11 @@ ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte) {
 }
 
 int pscal_ios_close(int fd) {
+    if (fd >= 0 && fd <= 2) {
+        int writer = -1;
+        pscal_ios_virtual_tty_release(fd, &writer);
+        return 0;
+    }
     int writer = -1;
     if (pscal_ios_virtual_tty_release(fd, &writer) && writer >= 0 &&
         writer != fd) {
