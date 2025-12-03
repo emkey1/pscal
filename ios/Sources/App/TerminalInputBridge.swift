@@ -79,7 +79,10 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: "j", output: "j")
         makeCommand(input: "k", output: "k")
         makeCommand(input: "l", output: "l")
-        /* Arrow keys disabled for nextvi for now; avoid emitting escape sequences. */
+        makeCommand(input: UIKeyCommand.inputUpArrow, output: "\u{1B}[A")
+        makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
+        makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
+        makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
         makeCommand(input: "\r", output: "\n")
         return commands
     }()
@@ -157,6 +160,14 @@ final class TerminalKeyInputView: UITextView {
         }
         guard let input = command.input else { return }
         switch input {
+        case UIKeyCommand.inputUpArrow:
+            onInput?("\u{1B}[A")
+        case UIKeyCommand.inputDownArrow:
+            onInput?("\u{1B}[B")
+        case UIKeyCommand.inputLeftArrow:
+            onInput?("\u{1B}[D")
+        case UIKeyCommand.inputRightArrow:
+            onInput?("\u{1B}[C")
         case "\r":
             onInput?("\n")
         default:
