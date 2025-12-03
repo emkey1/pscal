@@ -57,6 +57,14 @@
 
 #ifdef PSCAL_TARGET_IOS
 #include "pscal_runtime_hooks.h"
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+#if __has_attribute(weak)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+#else
+extern void pscalRuntimeDebugLog(const char *message);
+#endif
 #endif
 
 static LogLevel log_level = SYSLOG_LEVEL_INFO;
@@ -404,8 +412,9 @@ do_log(LogLevel level, int force, const char *suffix, const char *fmt,
 	strnvis(fmtbuf, msgbuf, sizeof(fmtbuf),
 	    log_on_stderr ? LOG_STDERR_VIS : LOG_SYSLOG_VIS);
 #ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog(fmtbuf);
-	fprintf(stderr, "%s\n", fmtbuf);
+	if (pscalRuntimeDebugLog) {
+		pscalRuntimeDebugLog(fmtbuf);
+	}
 #endif
 	if (log_handler != NULL) {
 		/* Avoid recursion */

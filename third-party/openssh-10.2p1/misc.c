@@ -77,6 +77,22 @@
 #include "ssherr.h"
 #include "platform.h"
 
+#ifdef PSCAL_TARGET_IOS
+static void
+pscal_debug_logf(const char *fmt, ...) {
+	char buf[256];
+	va_list ap;
+	if (!pscalRuntimeDebugLog)
+		return;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	pscalRuntimeDebugLog(buf);
+}
+#else
+#define pscal_debug_logf(...) do {} while (0)
+#endif
+
 /* remove newline at end of string */
 char *
 chop(char *s)
@@ -410,8 +426,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	int optval = 0;
 	socklen_t optlen = sizeof(optval);
 #ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
-	fprintf(stderr, "timeout_connect: start fd=%d timeout=%d\n", sockfd, timeoutp ? *timeoutp : -1);
+	pscal_debug_logf("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
 	__block volatile sig_atomic_t cancelled = 0;
 	dispatch_block_t watchdog = NULL;
 #endif
@@ -428,24 +443,21 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 			/* Succeeded already? */
 			unset_nonblock(sockfd);
 #ifdef PSCAL_TARGET_IOS
-			pscalRuntimeDebugLog("timeout_connect: connect immediate success");
-			fprintf(stderr, "timeout_connect: connect immediate success\n");
+			pscal_debug_logf("timeout_connect: connect immediate success");
 #endif
 			return 0;
 		} else if (errno == EINTR)
 			continue;
 		else if (errno != EINPROGRESS) {
 #ifdef PSCAL_TARGET_IOS
-			pscalRuntimeDebugLog("timeout_connect: connect failed errno=%d", errno);
-			fprintf(stderr, "timeout_connect: connect failed errno=%d\n", errno);
+		pscal_debug_logf("timeout_connect: connect failed errno=%d", errno);
 #endif
 			return -1;
 		}
 		break;
 	}
 #ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog("timeout_connect: connect EINPROGRESS");
-	fprintf(stderr, "timeout_connect: connect EINPROGRESS\n");
+	pscal_debug_logf("timeout_connect: connect EINPROGRESS");
 #endif
 
 #ifdef PSCAL_TARGET_IOS
@@ -469,8 +481,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #endif
 	    )) == -1) {
 #ifdef PSCAL_TARGET_IOS
-		pscalRuntimeDebugLog("timeout_connect: waitfd failed errno=%d", errno);
-		fprintf(stderr, "timeout_connect: waitfd failed errno=%d\n", errno);
+		pscal_debug_logf("timeout_connect: waitfd failed errno=%d", errno);
 		if (watchdog) {
 			dispatch_block_cancel(watchdog);
 			Block_release(watchdog);
@@ -479,8 +490,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		return -1;
 	}
 #ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog("timeout_connect: waitfd success");
-	fprintf(stderr, "timeout_connect: waitfd success\n");
+	pscal_debug_logf("timeout_connect: waitfd success");
 #endif
 #ifdef PSCAL_TARGET_IOS
 	if (watchdog) {
