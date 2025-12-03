@@ -25,7 +25,21 @@ int pscal_ios_faccessat(int fd, const char *path, int mode, int flag);
 FILE *pscal_ios_fopen(const char *path, const char *mode);
 DIR *pscal_ios_opendir(const char *path);
 
+pid_t pscal_ios_fork(void);
+int pscal_ios_execv(const char *path, char *const argv[]);
+int pscal_ios_execvp(const char *file, char *const argv[]);
+int pscal_ios_execl(const char *path, const char *arg, ...);
+int pscal_ios_execle(const char *path, const char *arg, ...);
+int pscal_ios_execlp(const char *file, const char *arg, ...);
+
 #ifndef PSCAL_IOS_SHIM_IMPLEMENTATION
+# define fork() pscal_ios_fork()
+# define execv(...) pscal_ios_execv(__VA_ARGS__)
+# define execvp(...) pscal_ios_execvp(__VA_ARGS__)
+# define execl(...) pscal_ios_execl(__VA_ARGS__)
+# define execle(...) pscal_ios_execle(__VA_ARGS__)
+# define execlp(...) pscal_ios_execlp(__VA_ARGS__)
+
 # define open(...) pscal_ios_open(__VA_ARGS__)
 # define openat(...) pscal_ios_openat(__VA_ARGS__)
 # define write(...) pscal_ios_write(__VA_ARGS__)

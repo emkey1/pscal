@@ -16,6 +16,9 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include "vi.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 #include "conf.c"
 #include "ex.c"
 #include "lbuf.c"
@@ -52,14 +55,9 @@ static int vi_nlword;			/* new line mode for eEwWbB */
 
 void nextvi_reset_state(void)
 {
-	if (term_sbuf) {
-		sbuf_free(term_sbuf);
-		term_sbuf = NULL;
-	}
-	if (ibuf) {
-		free(ibuf);
-		ibuf = NULL;
-	}
+	/* Avoid double-free across repeated invocations; just reset pointers. */
+	term_sbuf = NULL;
+	ibuf = NULL;
 	ibuf_sz = 128;
 	ibuf_pos = 0;
 	ibuf_cnt = 0;
@@ -130,29 +128,10 @@ void nextvi_reset_state(void)
 	xkwdcnt = 0;
 	xgdep = 0;
 	xrerr = NULL;
-	if (xkwdrs) {
-		rset_free(xkwdrs);
-		xkwdrs = NULL;
-	}
-	if (xacreg) {
-		sbuf_free(xacreg);
-		xacreg = NULL;
-	}
-	for (int i = 0; i < 256; i++) {
-		if (xregs[i]) {
-			sbuf_free(xregs[i]);
-			xregs[i] = NULL;
-		}
-	}
-	if (bufs) {
-		int max = xbufsmax > 0 ? xbufsmax : xbufcur;
-		for (int i = 0; i < max; i++) {
-			free(bufs[i].path);
-			if (bufs[i].lb)
-				lbuf_free(bufs[i].lb);
-		}
-		free(bufs);
-	}
+	xkwdrs = NULL;
+	xacreg = NULL;
+	for (int i = 0; i < 256; i++)
+		xregs[i] = NULL;
 	bufs = NULL;
 	ex_buf = NULL;
 	ex_pbuf = NULL;
@@ -161,9 +140,6 @@ void nextvi_reset_state(void)
 	xbufsmax = 0;
 	xbufsalloc = 10;
 	for (int i = 0; i < 2; i++) {
-		if (tempbufs[i].lb)
-			lbuf_free(tempbufs[i].lb);
-		free(tempbufs[i].path);
 		tempbufs[i].path = NULL;
 		tempbufs[i].lb = NULL;
 		tempbufs[i].row = 0;

@@ -7,6 +7,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 
 extern int nextvi_main_entry(int argc, char **argv);
 void nextvi_reset_state(void);
@@ -40,7 +43,7 @@ static void smallclueRestoreEnv(const char *name, char *saved) {
 }
 
 static void smallclueResetNextviGlobals(void) {
-    nextvi_reset_state();
+    /* nextvi_reset_state() is called inside nextvi_main_entry; avoid double-free */
 }
 
 #if defined(PSCAL_TARGET_IOS)

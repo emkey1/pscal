@@ -3280,12 +3280,58 @@ usage(void)
 	exit(1);
 }
 
+static void
+ssh_keygen_reset(void)
+{
+	size_t i;
+
+	quiet = 0;
+	print_fingerprint = 0;
+	print_bubblebabble = 0;
+	fingerprint_hash = SSH_FP_HASH_DEFAULT;
+	memset(identity_file, 0, sizeof(identity_file));
+	have_identity = 0;
+	free(identity_passphrase);
+	identity_passphrase = NULL;
+	free(identity_new_passphrase);
+	identity_new_passphrase = NULL;
+	cert_key_type = SSH2_CERT_TYPE_USER;
+	free(cert_key_id);
+	cert_key_id = NULL;
+	free(cert_principals);
+	cert_principals = NULL;
+	cert_valid_from = 0;
+	cert_valid_to = ~0ULL;
+	certflags_flags = CERTOPT_DEFAULT;
+	free(certflags_command);
+	certflags_command = NULL;
+	free(certflags_src_addr);
+	certflags_src_addr = NULL;
+	if (cert_ext != NULL) {
+		for (i = 0; i < ncert_ext; i++) {
+			free(cert_ext[i].key);
+			free(cert_ext[i].val);
+		}
+		free(cert_ext);
+		cert_ext = NULL;
+	}
+	ncert_ext = 0;
+	convert_format = FMT_RFC4716;
+	key_type_name = NULL;
+	pkcs11provider = NULL;
+	sk_provider = NULL;
+	private_key_format = SSHKEY_PRIVATE_OPENSSH;
+	openssh_format_cipher = NULL;
+	rounds = 0;
+}
+
 /*
  * Main program for key management.
  */
 int
 main(int argc, char **argv)
 {
+	extern int optreset;
 	char comment[1024], *passphrase = NULL;
 	char *rr_hostname = NULL, *ep, *fp, *ra;
 	struct sshkey *private = NULL, *public = NULL;
@@ -3311,6 +3357,10 @@ main(int argc, char **argv)
 
 	extern int optind;
 	extern char *optarg;
+
+	ssh_keygen_reset();
+	optreset = 1;
+	optind = 1;
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
