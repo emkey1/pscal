@@ -416,8 +416,10 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #endif
 
 	/* No timeout: just do a blocking connect() */
+#ifndef PSCAL_TARGET_IOS
 	if (timeoutp == NULL || *timeoutp <= 0)
 		return connect(sockfd, serv_addr, addrlen);
+#endif
 
 	set_nonblock(sockfd);
 	for (;;) {

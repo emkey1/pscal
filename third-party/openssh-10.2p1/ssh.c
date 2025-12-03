@@ -1366,6 +1366,11 @@ main(int ac, char **av)
 	if (fill_default_options(&options) != 0)
 		cleanup_exit(255);
 
+#ifdef PSCAL_TARGET_IOS
+	if (options.connection_timeout <= 0)
+		options.connection_timeout = 30;
+#endif
+
 	if (options.user == NULL) {
 		user_was_default = 1;
 		options.user = xstrdup(pw->pw_name);
