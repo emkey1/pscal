@@ -526,4 +526,44 @@ DIR *pscal_ios_opendir(const char *path) {
     return opendir(target);
 }
 
+pid_t pscal_ios_fork(void) {
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execv(const char *path, char *const argv[]) {
+    (void)path;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execvp(const char *file, char *const argv[]) {
+    (void)file;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execl(const char *path, const char *arg, ...) {
+    (void)path;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execle(const char *path, const char *arg, ...) {
+    (void)path;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
+}
+
+int pscal_ios_execlp(const char *file, const char *arg, ...) {
+    (void)file;
+    (void)arg;
+    errno = ENOSYS;
+    return -1;
+}
+
 #endif /* PSCAL_TARGET_IOS */
