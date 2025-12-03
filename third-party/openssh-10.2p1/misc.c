@@ -77,6 +77,22 @@
 #include "ssherr.h"
 #include "platform.h"
 
+#ifdef PSCAL_TARGET_IOS
+static void
+pscal_debug_logf(const char *fmt, ...) {
+	char buf[256];
+	va_list ap;
+	if (!pscalRuntimeDebugLog)
+		return;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	pscalRuntimeDebugLog(buf);
+}
+#else
+#define pscal_debug_logf(...) do {} while (0)
+#endif
+
 /* remove newline at end of string */
 char *
 chop(char *s)
