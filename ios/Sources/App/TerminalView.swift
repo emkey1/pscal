@@ -1146,6 +1146,12 @@ final class TerminalDisplayTextView: UITextView {
 
             // Re-validate offset in case it changed pending dispatch
             guard let currentOffset = self.cursorTextOffset, currentOffset == offset else { return }
+            
+            // Skip caret work when there is no text
+            guard self.attributedText.length > 0 else {
+                self.cursorLayer.opacity = 0
+                return
+            }
 
             let clamped = max(0, min(offset, self.attributedText.length))
             guard let pos = self.position(from: self.beginningOfDocument, offset: clamped) else {
@@ -1178,31 +1184,7 @@ final class TerminalDisplayTextView: UITextView {
             self.cursorLayer.opacity = 1
         }
 
-        // Ensure layout is fully updated before requesting caret geometry to avoid
-        // "requesting caretRectForPosition: while the NSTextStorage has oustanding changes"
-        layoutManager.ensureLayout(for: textContainer)
-        
-        let caret = caretRect(for: position)
-        var rect = caret
-        rect.origin.x -= contentOffset.x
-        rect.origin.y -= contentOffset.y
-        rect.size.width = max(1, rect.size.width)
-        rect.size.height = max(rect.size.height, TerminalFontMetrics.lineHeight)
-        cursorLayer.frame = rect
-
-        if !blinkAnimationAdded {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = 1
-            animation.toValue = 0
-            animation.duration = 0.8
-            animation.autoreverses = true
-            animation.repeatCount = .infinity
-            cursorLayer.add(animation, forKey: "blink")
-            blinkAnimationAdded = true
-        }
-
-        cursorLayer.opacity = 1
-
+        // Removed the synchronous caret update block here as per instructions.
     }
 
     private func pruneGestures() {
@@ -1633,3 +1615,4 @@ private extension UIColor {
         }
     }
 }
+
