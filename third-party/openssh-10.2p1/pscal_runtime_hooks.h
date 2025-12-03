@@ -18,4 +18,9 @@ void pscal_openssh_register_cleanup(pscal_openssh_cleanup_fn cleanup);
 void pscal_openssh_reset_progress_state(void);
 void cleanup_exit(int code);
 
+#ifdef PSCAL_TARGET_IOS
+/* Optional runtime logger provided by the host app. */
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+#endif
+
 #endif /* PSCAL_OPENSSH_RUNTIME_HOOKS_H */
