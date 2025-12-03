@@ -195,6 +195,32 @@ final class RuntimeAssetInstaller {
         } else {
             rewritePlaceholders(in: workspaceDocs, installRoot: bundleRoot.path)
         }
+
+        ensureLicensesFromBundle(bundleRoot: bundleRoot, workspaceDocs: workspaceDocs)
+    }
+
+    private func ensureLicensesFromBundle(bundleRoot: URL, workspaceDocs: URL) {
+        let bundledLicenses = bundleRoot.appendingPathComponent("Docs/Licenses", isDirectory: true)
+        let destLicenses = workspaceDocs.appendingPathComponent("Licenses", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledLicenses.path) else {
+            NSLog("PSCAL iOS: bundle missing Docs/Licenses; skipping license install.")
+            return
+        }
+        do {
+            if !fileManager.fileExists(atPath: destLicenses.path) || isSymbolicLink(at: destLicenses) {
+                try fileManager.createDirectory(at: destLicenses, withIntermediateDirectories: true)
+            }
+            let contents = try fileManager.contentsOfDirectory(atPath: bundledLicenses.path)
+            for entry in contents {
+                let src = bundledLicenses.appendingPathComponent(entry)
+                let dst = destLicenses.appendingPathComponent(entry)
+                if !fileManager.fileExists(atPath: dst.path) {
+                    try fileManager.copyItem(at: src, to: dst)
+                }
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to install license files: %@", error.localizedDescription)
+        }
     }
 
     private func installWorkspaceEtcIfNeeded(bundleRoot: URL) {

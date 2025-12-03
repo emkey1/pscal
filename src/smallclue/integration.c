@@ -164,6 +164,7 @@ DEFINE_SMALLCLUE_WRAPPER("ln", ln)
 DEFINE_SMALLCLUE_WRAPPER("ping", ping)
 DEFINE_SMALLCLUE_WRAPPER("env", env)
 DEFINE_SMALLCLUE_WRAPPER("dmesg", dmesg)
+DEFINE_SMALLCLUE_WRAPPER("licenses", licenses)
 #endif
 #if defined(PSCAL_TARGET_IOS)
 DEFINE_SMALLCLUE_WRAPPER("nextvi", nextvi)
@@ -248,6 +249,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("nextvi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "nextvi");
     registerVmBuiltin("vi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "vi");
     registerVmBuiltin("dmesg", vmBuiltinSmallclue_dmesg, BUILTIN_TYPE_PROCEDURE, "dmesg");
+    registerVmBuiltin("licenses", vmBuiltinSmallclue_licenses, BUILTIN_TYPE_PROCEDURE, "licenses");
 #endif
     registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
     registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");

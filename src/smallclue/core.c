@@ -276,6 +276,7 @@ static int smallclueRmdirCommand(int argc, char **argv);
 static int smallclueLnCommand(int argc, char **argv);
 static int smallclueTypeCommand(int argc, char **argv);
 static int smallclueFileCommand(int argc, char **argv);
+static int smallclueLicensesCommand(int argc, char **argv);
 static const char *smallclueLeafName(const char *path);
 static int smallclueBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static void smallclueTrimTrailingSlashes(char *path);
@@ -383,6 +384,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"df", smallclueDfCommand, "Report filesystem usage"},
 #if defined(PSCAL_TARGET_IOS)
     {"smallclue-help", smallclueHelpCommand, "List available smallclue applets"},
+    {"licenses", smallclueLicensesCommand, "View third-party licenses"},
     {"dmesg", smallclueDmesgCommand, "Show PSCAL runtime log for this session"},
 #endif
 };
@@ -397,6 +399,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"smallclue-help", "smallclue-help [command]\n"
                        "  Without arguments: list all applets\n"
                        "  With a command: show usage if available"},
+    {"licenses", "licenses\n"
+                 "  Browse PSCAL and third-party licenses; use arrows/enter to view"},
     {NULL, NULL}
 };
 
@@ -2867,6 +2871,89 @@ static int smallclueFalseCommand(int argc, char **argv) {
 }
 
 #if defined(PSCAL_TARGET_IOS)
+
+typedef struct {
+    const char *name;
+    const char *path;
+} SmallclueLicense;
+
+static const SmallclueLicense kSmallclueLicenses[] = {
+    {"PSCAL", "/home/Docs/Licenses/pscal.txt"},
+    {"OpenSSH", "/home/Docs/Licenses/openssh.txt"},
+    {"curl", "/home/Docs/Licenses/curl.txt"},
+    {"OpenSSL", "/home/Docs/Licenses/openssl.txt"},
+    {"SDL2", "/home/Docs/Licenses/sdl2.txt"},
+    {"Nextvi", "/home/Docs/Licenses/nextvi.txt"},
+    {"yyjson", "/home/Docs/Licenses/yyjson.txt"},
+};
+
+static size_t smallclueLicensesCount(void) {
+    return sizeof(kSmallclueLicenses) / sizeof(kSmallclueLicenses[0]);
+}
+
+static void smallclueLicensesRenderMenu(size_t selected) {
+    printf("\033[2J\033[H");
+    printf("PSCAL & Third-Party Licenses\n");
+    printf("Use arrows to navigate, Enter to view, q to quit.\n\n");
+    size_t total = smallclueLicensesCount();
+    for (size_t i = 0; i < total; ++i) {
+        const char *marker = (i == selected) ? ">" : " ";
+        printf("%s %s\n", marker, kSmallclueLicenses[i].name);
+    }
+    fflush(stdout);
+}
+
+static int smallclueLicensesCommand(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    size_t total = smallclueLicensesCount();
+    if (total == 0) {
+        fprintf(stderr, "licenses: no entries available\n");
+        return 1;
+    }
+    size_t selected = 0;
+    bool running = true;
+    while (running) {
+        smallclueLicensesRenderMenu(selected);
+        int key = pager_read_key();
+        switch (key) {
+            case PAGER_KEY_ARROW_UP:
+                selected = (selected == 0) ? (total - 1) : (selected - 1);
+                break;
+            case PAGER_KEY_ARROW_DOWN:
+                selected = (selected + 1) % total;
+                break;
+            case '\r':
+            case '\n': {
+                const SmallclueLicense *entry = &kSmallclueLicenses[selected];
+                FILE *probe = fopen(entry->path, "r");
+                if (!probe) {
+                    fprintf(stderr, "licenses: %s: %s\n", entry->path, strerror(errno));
+                    break;
+                }
+                fclose(probe);
+                char *argv_lic[3];
+                argv_lic[0] = "less";
+                argv_lic[1] = (char *)entry->path;
+                argv_lic[2] = NULL;
+                smallclueLicensesRenderMenu(selected);
+                (void)smallcluePagerCommand(2, argv_lic);
+                break;
+            }
+            case 'q':
+            case 'Q':
+            case 0x1b:
+                running = false;
+                break;
+            default:
+                break;
+        }
+    }
+    printf("\033[2J\033[H");
+    fflush(stdout);
+    return 0;
+}
+
 static int smallclueHelpCommand(int argc, char **argv) {
     if (argc <= 1) {
         smallcluePrintAppletList(stdout, "Available smallclue applets:");
