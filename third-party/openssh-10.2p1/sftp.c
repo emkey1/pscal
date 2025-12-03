@@ -2621,21 +2621,6 @@ main(int argc, char **argv)
 	optreset = 1;
 	optind = 1;
 
-#ifdef PSCAL_TARGET_IOS
-	{
-		char *runner = pscal_tool_runner_path();
-		if (runner != NULL && access(runner, X_OK) == 0) {
-			ssh_program = runner;
-			fprintf(stderr, "sftp: using ssh transport via tool runner: %s\n",
-			    ssh_program);
-		} else {
-			free(runner);
-			fprintf(stderr, "sftp: no executable tool runner found\n");
-			exit(1);
-		}
-	}
-#endif
-
 	__progname = ssh_get_progname(argv[0]);
 	memset(&args, '\0', sizeof(args));
 	args.list = NULL;
