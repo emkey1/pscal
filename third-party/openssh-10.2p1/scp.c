@@ -103,6 +103,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <spawn.h>
+#include <crt_externs.h>
+#ifdef PSCAL_TARGET_IOS
+#include <mach-o/dyld.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 #if defined(HAVE_STRNVIS) && defined(HAVE_VIS_H) && !defined(BROKEN_STRNVIS)
@@ -129,12 +134,91 @@ int fnmatch(const char *, const char *, int);
 static void pscal_scp_cleanup_handler(int);
 #endif
 
+#ifdef PSCAL_TARGET_IOS
+static char *
+pscal_own_executable_path(void)
+{
+	uint32_t size = PATH_MAX;
+	char *buf = xmalloc(size);
+	if (_NSGetExecutablePath(buf, &size) != 0) {
+		buf = xreallocarray(buf, 1, size);
+		if (_NSGetExecutablePath(buf, &size) != 0) {
+			free(buf);
+			return NULL;
+		}
+	}
+	char resolved[PATH_MAX];
+	if (realpath(buf, resolved) != NULL) {
+		free(buf);
+		return xstrdup(resolved);
+	}
+	/* Fall back to the unresolved path if realpath fails. */
+	return buf;
+}
+
+static char *
+pscal_tool_runner_path(void)
+{
+	const char *env = getenv("PSCALI_TOOL_RUNNER_PATH");
+	if (env != NULL && *env != '\0' && access(env, X_OK) == 0)
+		return xstrdup(env);
+
+	const char *workspace = getenv("PSCALI_WORKSPACE_ROOT");
+	if (workspace != NULL && *workspace != '\0') {
+		char *candidate;
+		if (xasprintf(&candidate, "%s/pscal_tool_runner", workspace) != -1) {
+			if (access(candidate, X_OK) == 0)
+				return candidate;
+			free(candidate);
+		}
+	}
+
+	char *self = pscal_own_executable_path();
+	if (self != NULL) {
+		char *dir = xstrdup(self);
+		free(self);
+		if (dir != NULL) {
+			char *slash = strrchr(dir, '/');
+			if (slash != NULL) {
+				*(slash + 1) = '\0';
+				char *candidate;
+				if (xasprintf(&candidate, "%spscal_tool_runner", dir) != -1) {
+					if (access(candidate, X_OK) == 0) {
+						free(dir);
+						return candidate;
+					}
+					free(candidate);
+				}
+			}
+			free(dir);
+		}
+	}
+
+	const char *home = getenv("HOME");
+	if (home == NULL || *home == '\0')
+		return NULL;
+	char *p;
+	if (xasprintf(&p, "%s/pscal_tool_runner", home) == -1)
+		return NULL;
+	if (access(p, X_OK) == 0)
+		return p;
+	free(p);
+	return NULL;
+}
+
+#endif
+
 extern char *__progname;
 
 #define COPY_BUFLEN	16384
 
 int do_cmd(char *, char *, char *, int, int, char *, int *, int *, pid_t *);
 int do_cmd2(char *, char *, int, char *, int, int);
+extern char **environ;
+#ifdef __APPLE__
+#undef environ
+#define environ (*_NSGetEnviron())
+#endif
 
 /* Struct for addargs */
 arglist args;
@@ -285,7 +369,8 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #else
 	int sv[2];
 #endif
-
+	posix_spawn_file_actions_t actions;
+	pid_t child = -1;
 	if (verbose_mode)
 		fmprintf(stderr,
 		    "Executing: program %s host %s, user %s, command %s\n",
@@ -308,67 +393,84 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 
-	/* Fork a child to execute the command on the remote host using ssh. */
-	*pid = fork();
-	switch (*pid) {
-	case -1:
-		fatal("fork: %s", strerror(errno));
-	case 0:
-		/* Child. */
+	if (posix_spawn_file_actions_init(&actions) != 0)
+		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES
-		if (dup2(pin[0], STDIN_FILENO) == -1 ||
-		    dup2(pout[1], STDOUT_FILENO) == -1) {
-			error("dup2: %s", strerror(errno));
-			_exit(1);
-		}
-		close(pin[0]);
-		close(pin[1]);
-		close(pout[0]);
-		close(pout[1]);
+	posix_spawn_file_actions_adddup2(&actions, pin[0], STDIN_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, pout[1], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, pout[1], STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&actions, pin[1]);
+	posix_spawn_file_actions_addclose(&actions, pout[0]);
+	posix_spawn_file_actions_addclose(&actions, pin[0]);
+	posix_spawn_file_actions_addclose(&actions, pout[1]);
 #else
-		if (dup2(sv[0], STDIN_FILENO) == -1 ||
-		    dup2(sv[0], STDOUT_FILENO) == -1) {
-			error("dup2: %s", strerror(errno));
-			_exit(1);
-		}
-		close(sv[0]);
-		close(sv[1]);
+	posix_spawn_file_actions_adddup2(&actions, sv[0], STDIN_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, sv[0], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, sv[0], STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&actions, sv[1]);
+	posix_spawn_file_actions_addclose(&actions, sv[0]);
 #endif
-		replacearg(&args, 0, "%s", program);
-		if (port != -1) {
-			addargs(&args, "-p");
-			addargs(&args, "%d", port);
-		}
-		if (remuser != NULL) {
-			addargs(&args, "-l");
-			addargs(&args, "%s", remuser);
-		}
-		if (subsystem)
-			addargs(&args, "-s");
-		addargs(&args, "--");
-		addargs(&args, "%s", host);
-		addargs(&args, "%s", cmd);
 
-		execvp(program, args.list);
-		perror(program);
-		_exit(1);
-	default:
-		/* Parent.  Close the other side, and return the local side. */
-#ifdef USE_PIPES
-		close(pin[0]);
-		close(pout[1]);
-		*fdout = pin[1];
-		*fdin = pout[0];
-#else
-		close(sv[0]);
-		*fdin = sv[1];
-		*fdout = sv[1];
-#endif
-		ssh_signal(SIGTERM, killchild);
-		ssh_signal(SIGINT, killchild);
-		ssh_signal(SIGHUP, killchild);
-		return 0;
+	replacearg(&args, 0, "%s", program);
+	if (port != -1) {
+		addargs(&args, "-p");
+		addargs(&args, "%d", port);
 	}
+	if (remuser != NULL) {
+		addargs(&args, "-l");
+		addargs(&args, "%s", remuser);
+	}
+	if (subsystem)
+		addargs(&args, "-s");
+	addargs(&args, "--");
+	addargs(&args, "%s", host);
+	addargs(&args, "%s", cmd);
+
+	posix_spawnattr_t attr;
+	sigset_t emptyset, sigdef;
+	posix_spawnattr_init(&attr);
+	sigemptyset(&emptyset);
+	posix_spawnattr_setsigmask(&attr, &emptyset);
+	sigemptyset(&sigdef);
+	posix_spawnattr_setsigdefault(&attr, &sigdef);
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
+	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
+
+	if (access(program, X_OK) != 0) {
+		fprintf(stderr, "scp: transport '%s' not executable: %s\n",
+		    program, strerror(errno));
+		posix_spawn_file_actions_destroy(&actions);
+		posix_spawnattr_destroy(&attr);
+		return -1;
+	}
+
+	if (posix_spawn(&child, program, &actions, &attr, args.list, environ) != 0) {
+		int spawn_err = errno;
+		posix_spawn_file_actions_destroy(&actions);
+		posix_spawnattr_destroy(&attr);
+		fprintf(stderr, "scp: posix_spawn failed for '%s' (%s)\n",
+		    program, strerror(spawn_err));
+		return -1;
+	}
+	posix_spawn_file_actions_destroy(&actions);
+	posix_spawnattr_destroy(&attr);
+	*pid = child;
+
+	/* Parent.  Close the other side, and return the local side. */
+#ifdef USE_PIPES
+	close(pin[0]);
+	close(pout[1]);
+	*fdout = pin[1];
+	*fdin = pout[0];
+#else
+	close(sv[0]);
+	*fdin = sv[1];
+	*fdout = sv[1];
+#endif
+	ssh_signal(SIGTERM, killchild);
+	ssh_signal(SIGINT, killchild);
+	ssh_signal(SIGHUP, killchild);
+	return 0;
 }
 
 /*
@@ -467,14 +569,60 @@ void sink_sftp(int, char *, const char *, struct sftp_conn *);
 void throughlocal_sftp(struct sftp_conn *, struct sftp_conn *,
     char *, char *);
 
+static void
+scp_reset(void)
+{
+	freeargs(&args);
+	freeargs(&remote_remote_args);
+	limit_kbps = 0;
+	memset(&bwlimit, 0, sizeof(bwlimit));
+	curfile = NULL;
+	verbose_mode = 0;
+	log_level = SYSLOG_LEVEL_INFO;
+#ifndef PSCAL_TARGET_IOS
+	showprogress = 1;
+#endif
+	throughlocal = 1;
+	sshport = -1;
+	if (ssh_program != _PATH_SSH_PROGRAM) {
+		free(ssh_program);
+		ssh_program = _PATH_SSH_PROGRAM;
+	}
+	do_cmd_pid = -1;
+	do_cmd_pid2 = -1;
+	sftp_copy_buflen = 0;
+	sftp_nrequests = 0;
+	errs = 0;
+	remin = -1;
+	remout = -1;
+	remin2 = -1;
+	remout2 = -1;
+	Tflag = 0;
+	pflag = 0;
+	iamremote = 0;
+	iamrecursive = 0;
+	targetshouldbedirectory = 0;
+	memset(cmd, 0, sizeof(cmd));
+}
+
 int
 main(int argc, char **argv)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_exit_context ctx;
+	if (setjmp(ctx.env) != 0) {
+		int exit_code = ctx.exit_code;
+		pscal_openssh_pop_exit_context(&ctx);
+		return exit_code;
+	}
+	pscal_openssh_push_exit_context(&ctx);
+#endif
+
 	int ch, fflag, tflag, status, r, n;
 	char **newargv, *argv0;
 	const char *errstr;
 	extern char *optarg;
-	extern int optind;
+	extern int optind, optreset;
 	enum scp_mode_e mode = MODE_SFTP;
 	char *sftp_direct = NULL;
 	long long llv;
@@ -482,9 +630,25 @@ main(int argc, char **argv)
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
 
+	scp_reset();
+	optreset = 1;
+	optind = 1;
+
 	msetlocale();
 
 #ifdef PSCAL_TARGET_IOS
+	{
+		char *runner = pscal_tool_runner_path();
+		if (runner != NULL && access(runner, X_OK) == 0) {
+			ssh_program = runner;
+			fprintf(stderr, "scp: using ssh transport via tool runner: %s\n",
+			    ssh_program);
+		} else {
+			free(runner);
+			fprintf(stderr, "scp: no executable tool runner found\n");
+			return 1;
+		}
+	}
 	pscal_openssh_register_cleanup(pscal_scp_cleanup_handler);
 #endif
 
@@ -503,6 +667,9 @@ main(int argc, char **argv)
 	memset(&remote_remote_args, '\0', sizeof(remote_remote_args));
 	args.list = remote_remote_args.list = NULL;
 	addargs(&args, "%s", ssh_program);
+#ifdef PSCAL_TARGET_IOS
+	addargs(&args, "ssh");
+#endif
 	addargs(&args, "-x");
 	addargs(&args, "-oPermitLocalCommand=no");
 	addargs(&args, "-oClearAllForwardings=yes");
@@ -720,6 +887,9 @@ main(int argc, char **argv)
 				errs = 1;
 		}
 	}
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_pop_exit_context(&ctx);
+#endif
 	exit(errs != 0);
 }
 
