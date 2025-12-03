@@ -411,14 +411,18 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	socklen_t optlen = sizeof(optval);
 #ifdef PSCAL_TARGET_IOS
 	pscalRuntimeDebugLog("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
+
 	fprintf(stderr, "timeout_connect: start fd=%d timeout=%d\n", sockfd, timeoutp ? *timeoutp : -1);
+
 	__block volatile sig_atomic_t cancelled = 0;
 	dispatch_block_t watchdog = NULL;
 #endif
 
 	/* No timeout: just do a blocking connect() */
+#ifndef PSCAL_TARGET_IOS
 	if (timeoutp == NULL || *timeoutp <= 0)
 		return connect(sockfd, serv_addr, addrlen);
+#endif
 
 	set_nonblock(sockfd);
 	for (;;) {
@@ -427,6 +431,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 			unset_nonblock(sockfd);
 #ifdef PSCAL_TARGET_IOS
 			pscalRuntimeDebugLog("timeout_connect: connect immediate success");
+
 			fprintf(stderr, "timeout_connect: connect immediate success\n");
 #endif
 			return 0;
