@@ -25,6 +25,7 @@
 # undef HAVE_NLIST
 # include <dispatch/dispatch.h>
 # include <Block.h>
+# include "pscal_runtime_hooks.h"
 #endif
 
 #include <sys/types.h>
@@ -409,6 +410,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	int optval = 0;
 	socklen_t optlen = sizeof(optval);
 #ifdef PSCAL_TARGET_IOS
+	pscalRuntimeDebugLog("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
 	__block volatile sig_atomic_t cancelled = 0;
 	dispatch_block_t watchdog = NULL;
 #endif
@@ -424,13 +426,23 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		if (connect(sockfd, serv_addr, addrlen) == 0) {
 			/* Succeeded already? */
 			unset_nonblock(sockfd);
+#ifdef PSCAL_TARGET_IOS
+			pscalRuntimeDebugLog("timeout_connect: connect immediate success");
+#endif
 			return 0;
 		} else if (errno == EINTR)
 			continue;
-		else if (errno != EINPROGRESS)
+		else if (errno != EINPROGRESS) {
+#ifdef PSCAL_TARGET_IOS
+			pscalRuntimeDebugLog("timeout_connect: connect failed errno=%d", errno);
+#endif
 			return -1;
+		}
 		break;
 	}
+#ifdef PSCAL_TARGET_IOS
+	pscalRuntimeDebugLog("timeout_connect: connect EINPROGRESS");
+#endif
 
 #ifdef PSCAL_TARGET_IOS
 	if (timeoutp != NULL && *timeoutp > 0) {
@@ -444,14 +456,16 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	}
 #endif
 
-	if (waitfd(sockfd, timeoutp, POLLIN | POLLOUT,
+	int ret;
+	if ((ret = waitfd(sockfd, timeoutp, POLLIN | POLLOUT,
 #ifdef PSCAL_TARGET_IOS
 	    (volatile sig_atomic_t *)&cancelled
 #else
 	    NULL
 #endif
-	    ) == -1) {
+	    )) == -1) {
 #ifdef PSCAL_TARGET_IOS
+		pscalRuntimeDebugLog("timeout_connect: waitfd failed errno=%d", errno);
 		if (watchdog) {
 			dispatch_block_cancel(watchdog);
 			Block_release(watchdog);
@@ -459,6 +473,9 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #endif
 		return -1;
 	}
+#ifdef PSCAL_TARGET_IOS
+	pscalRuntimeDebugLog("timeout_connect: waitfd success");
+#endif
 #ifdef PSCAL_TARGET_IOS
 	if (watchdog) {
 		dispatch_block_cancel(watchdog);
