@@ -98,13 +98,9 @@ final class RuntimeAssetInstaller {
 
     func ensureToolRunnerExecutable() -> String? {
         if let cached = cachedToolRunnerPath {
-#if targetEnvironment(simulator)
             if fileManager.isExecutableFile(atPath: cached) {
                 return cached
             }
-#else
-            return cached
-#endif
         }
 
         guard let bundledRunner = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: nil),
@@ -114,7 +110,7 @@ final class RuntimeAssetInstaller {
             return nil
         }
 
-#if targetEnvironment(simulator)
+        #if targetEnvironment(simulator)
         let stagedRunner = RuntimePaths.stagedToolRunner
 
         do {
@@ -137,10 +133,16 @@ final class RuntimeAssetInstaller {
             cachedToolRunnerPath = nil
             return nil
         }
-#else
-        cachedToolRunnerPath = bundledRunner.path
-        return bundledRunner.path
-#endif
+        #else
+        // On device, execute directly from the signed bundle location.
+        if fileManager.isExecutableFile(atPath: bundledRunner.path) {
+            cachedToolRunnerPath = bundledRunner.path
+            return bundledRunner.path
+        }
+        NSLog("PSCAL iOS: bundled pscal_tool_runner is not executable at %@", bundledRunner.path)
+        cachedToolRunnerPath = nil
+        return nil
+        #endif
     }
 
     private func installWorkspaceExamplesIfNeeded(bundleRoot: URL) {
