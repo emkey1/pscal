@@ -2436,6 +2436,24 @@ usage(void)
 	exit(1);
 }
 
+static void
+sftp_reset(void)
+{
+	infile = stdin;
+	batchmode = 0;
+	sshpid = -1;
+	quiet = 0;
+#ifndef PSCAL_TARGET_IOS
+	showprogress = 1;
+#endif
+	global_rflag = 0;
+	global_aflag = 0;
+	global_pflag = 0;
+	global_fflag = 0;
+	sort_flag = 0;
+	sort_glob = NULL;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -2447,7 +2465,7 @@ main(int argc, char **argv)
 	const char *errstr;
 	LogLevel ll = SYSLOG_LEVEL_INFO;
 	arglist args;
-	extern int optind;
+	extern int optind, optreset;
 	extern char *optarg;
 	struct sftp_conn *conn;
 	size_t copy_buffer_len = 0;
@@ -2457,6 +2475,10 @@ main(int argc, char **argv)
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
 	msetlocale();
+
+	sftp_reset();
+	optreset = 1;
+	optind = 1;
 
 	__progname = ssh_get_progname(argv[0]);
 	memset(&args, '\0', sizeof(args));
