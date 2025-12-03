@@ -55,6 +55,10 @@
 #include "log.h"
 #include "match.h"
 
+#ifdef PSCAL_TARGET_IOS
+#include "pscal_runtime_hooks.h"
+#endif
+
 static LogLevel log_level = SYSLOG_LEVEL_INFO;
 static int log_on_stderr = 1;
 static int log_stderr_fd = STDERR_FILENO;
@@ -399,6 +403,9 @@ do_log(LogLevel level, int force, const char *suffix, const char *fmt,
 	}
 	strnvis(fmtbuf, msgbuf, sizeof(fmtbuf),
 	    log_on_stderr ? LOG_STDERR_VIS : LOG_SYSLOG_VIS);
+#ifdef PSCAL_TARGET_IOS
+	pscalRuntimeDebugLog(fmtbuf);
+#endif
 	if (log_handler != NULL) {
 		/* Avoid recursion */
 		tmp_handler = log_handler;
