@@ -1144,6 +1144,11 @@ final class TerminalDisplayTextView: UITextView {
             cursorLayer.opacity = 0
             return
         }
+
+        // Ensure layout is fully updated before requesting caret geometry to avoid
+        // "requesting caretRectForPosition: while the NSTextStorage has oustanding changes"
+        layoutManager.ensureLayout(for: textContainer)
+
         let caret = caretRect(for: position)
         var rect = caret
         rect.origin.x -= contentOffset.x
