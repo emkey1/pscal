@@ -414,8 +414,10 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #endif
 
 	/* No timeout: just do a blocking connect() */
+#ifndef PSCAL_TARGET_IOS
 	if (timeoutp == NULL || *timeoutp <= 0)
 		return connect(sockfd, serv_addr, addrlen);
+#endif
 
 	set_nonblock(sockfd);
 	for (;;) {
@@ -431,13 +433,15 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	}
 
 #ifdef PSCAL_TARGET_IOS
-	watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
-		cancelled = 1;
-		shutdown(sockfd, SHUT_RDWR);
-	});
-	dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW,
-	    (int64_t)(*timeoutp) * NSEC_PER_MSEC);
-	dispatch_after(delay, dispatch_get_main_queue(), watchdog);
+	if (timeoutp != NULL && *timeoutp > 0) {
+		watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
+			cancelled = 1;
+			shutdown(sockfd, SHUT_RDWR);
+		});
+		dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW,
+		    (int64_t)(*timeoutp) * NSEC_PER_MSEC);
+		dispatch_after(delay, dispatch_get_main_queue(), watchdog);
+	}
 #endif
 
 	if (waitfd(sockfd, timeoutp, POLLIN | POLLOUT,
