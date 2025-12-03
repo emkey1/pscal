@@ -2952,30 +2952,6 @@ static int smallclueLicensesCommand(int argc, char **argv) {
     printf("\033[2J\033[H");
     fflush(stdout);
     return 0;
-static int smallclueHelpCommand(int argc, char **argv) {
-    if (argc <= 1) {
-        smallcluePrintAppletList(stdout, "Available smallclue applets:");
-        return 0;
-    }
-    int status = 0;
-    for (int i = 1; i < argc; ++i) {
-        const char *target = argv[i];
-        const SmallclueApplet *applet = smallclueFindApplet(target);
-        if (!applet) {
-            fprintf(stderr, "smallclue-help: '%s' not found\n", target);
-            status = 1;
-            continue;
-        }
-        const char *usage = smallclueLookupHelp(applet->name);
-        printf("%s - %s\n", applet->name, applet->description ? applet->description : "");
-        if (usage) {
-            printf("Usage:\n%s\n", usage);
-        } else {
-            printf("(No detailed help available for this applet)\n\n");
-        }
-    }
-    return status;
->>>>>>> origin/fix-openssh-crash-final-v2-1
 }
 
 static int smallclueHelpCommand(int argc, char **argv) {
