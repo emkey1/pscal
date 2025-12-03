@@ -2598,6 +2598,16 @@ sftp_reset(void)
 int
 main(int argc, char **argv)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_exit_context ctx;
+	if (setjmp(ctx.env) != 0) {
+		int exit_code = ctx.exit_code;
+		pscal_openssh_pop_exit_context(&ctx);
+		return exit_code;
+	}
+	pscal_openssh_push_exit_context(&ctx);
+#endif
+
 	int r, in, out, ch, err, tmp, port = -1, noisy = 0;
 	char *host = NULL, *user, *cp, **cpp, *file2 = NULL;
 	int debug_level = 0;
@@ -2865,5 +2875,8 @@ main(int argc, char **argv)
 			fatal("Couldn't wait for ssh process: %s",
 			    strerror(errno));
 
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_pop_exit_context(&ctx);
+#endif
 	exit(err == 0 ? 0 : 1);
 }

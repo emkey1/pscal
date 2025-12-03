@@ -110,6 +110,10 @@
 #include "ssh-pkcs11.h"
 #endif
 
+#ifdef PSCAL_TARGET_IOS
+#include "pscal_runtime_hooks.h"
+#endif
+
 extern char *__progname;
 
 /* Saves a copy of argv for setproctitle emulation */
@@ -724,6 +728,16 @@ ssh_reset(void)
 int
 main(int ac, char **av)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_exit_context ctx;
+	if (setjmp(ctx.env) != 0) {
+		int exit_code = ctx.exit_code;
+		pscal_openssh_pop_exit_context(&ctx);
+		return exit_code;
+	}
+	pscal_openssh_push_exit_context(&ctx);
+#endif
+
 	extern int optreset;
 	struct ssh *ssh = NULL;
 	int i, r, opt, exit_status, use_syslog, direct, timeout_ms;
@@ -1933,6 +1947,9 @@ main(int ac, char **av)
 	/* Kill ProxyCommand if it is running. */
 	ssh_kill_proxy_command();
 
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_pop_exit_context(&ctx);
+#endif
 	return exit_status;
 }
 

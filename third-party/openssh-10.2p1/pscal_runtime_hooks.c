@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 #ifdef PSCAL_TARGET_IOS
 extern void pscalRuntimeDebugLog(const char *);
 #endif
@@ -70,7 +71,8 @@ cleanup_exit(int code)
 		longjmp(g_pscal_openssh_ctx->env, 1);
 	}
 #ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog("cleanup_exit without PSCAL context, aborting process");
+	pscalRuntimeDebugLog("cleanup_exit without PSCAL context, terminating thread");
+	pthread_exit((void*)(intptr_t)code);
 #endif
 	_exit(code);
 }

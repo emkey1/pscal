@@ -608,6 +608,16 @@ scp_reset(void)
 int
 main(int argc, char **argv)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_exit_context ctx;
+	if (setjmp(ctx.env) != 0) {
+		int exit_code = ctx.exit_code;
+		pscal_openssh_pop_exit_context(&ctx);
+		return exit_code;
+	}
+	pscal_openssh_push_exit_context(&ctx);
+#endif
+
 	int ch, fflag, tflag, status, r, n;
 	char **newargv, *argv0;
 	const char *errstr;
@@ -877,6 +887,9 @@ main(int argc, char **argv)
 				errs = 1;
 		}
 	}
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_pop_exit_context(&ctx);
+#endif
 	exit(errs != 0);
 }
 
