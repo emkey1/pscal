@@ -300,6 +300,7 @@ static int smallcluePingCommand(int argc, char **argv);
 static int smallclueMarkdownCommand(int argc, char **argv);
 static int smallclueCurlCommand(int argc, char **argv);
 static int smallclueWgetCommand(int argc, char **argv);
+static int smallclueTelnetCommand(int argc, char **argv);
 #if SMALLCLUE_HAS_IFADDRS
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
@@ -369,6 +370,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"ssh-keygen", smallclueSshKeygenCommand, "Generate SSH key pairs"},
     {"tail", smallclueTailCommand, "Print the last lines of files"},
     {"tee", smallclueTeeCommand, "Copy stdin to files and stdout"},
+    {"telnet", smallclueTelnetCommand, "Simple TCP telnet client"},
     {"test", smallclueTestCommand, "Evaluate expressions"},
     {"touch", smallclueTouchCommand, "Update file timestamps"},
     {"tr", smallclueTrCommand, "Translate or delete characters"},
@@ -498,6 +500,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
              "  Default N=10"},
     {"tee", "tee [-a] FILE...\n"
             "  -a append"},
+    {"telnet", "telnet [-p PORT] HOST\n"
+               "  Connect to HOST over TCP (default port 23) and relay stdin/stdout"},
     {"test", "test EXPRESSION\n"
              "  File: -f -d -e; String: = != -z; Int: -eq -ne -lt -le -gt -ge"},
     {"touch", "touch FILE...\n"
@@ -3921,6 +3925,122 @@ static int smallcluePingCommand(int argc, char **argv) {
     }
     freeaddrinfo(res);
     return (successes > 0) ? 0 : 1;
+}
+
+#define TELNET_DEFAULT_PORT 23
+#define TELNET_BUF_SIZE 4096
+
+static int smallclueTelnetCommand(int argc, char **argv) {
+    smallclueResetGetopt();
+    int port = TELNET_DEFAULT_PORT;
+    int opt;
+    while ((opt = getopt(argc, argv, "p:")) != -1) {
+        switch (opt) {
+            case 'p':
+                port = atoi(optarg);
+                if (port <= 0 || port > 65535) {
+                    fprintf(stderr, "telnet: invalid port '%s'\n", optarg);
+                    return 1;
+                }
+                break;
+            default:
+                fprintf(stderr, "usage: telnet [-p PORT] HOST\n");
+                return 1;
+        }
+    }
+    if (optind >= argc) {
+        fprintf(stderr, "usage: telnet [-p PORT] HOST\n");
+        return 1;
+    }
+    const char *host = argv[optind];
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_UNSPEC;
+
+    struct addrinfo *res = NULL;
+    int gai = getaddrinfo(host, port_str, &hints, &res);
+    if (gai != 0 || !res) {
+        fprintf(stderr, "telnet: %s: %s\n", host, gai_strerror(gai));
+        return 1;
+    }
+
+    int sock = -1;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (sock < 0) {
+            continue;
+        }
+        if (connect(sock, ai->ai_addr, ai->ai_addrlen) == 0) {
+            break;
+        }
+        close(sock);
+        sock = -1;
+    }
+    freeaddrinfo(res);
+    if (sock < 0) {
+        fprintf(stderr, "telnet: unable to connect to %s:%d\n", host, port);
+        return 1;
+    }
+
+    int status = 0;
+    bool running = true;
+    while (running) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(sock, &rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        int maxfd = (sock > STDIN_FILENO) ? sock : STDIN_FILENO;
+        int rv = select(maxfd + 1, &rfds, NULL, NULL, NULL);
+        if (rv < 0) {
+            if (errno == EINTR) continue;
+            status = 1;
+            break;
+        }
+        if (FD_ISSET(sock, &rfds)) {
+            char buf[TELNET_BUF_SIZE];
+            ssize_t n = read(sock, buf, sizeof(buf));
+            if (n <= 0) {
+                running = false;
+            } else {
+                ssize_t off = 0;
+                while (off < n) {
+                    ssize_t w = write(STDOUT_FILENO, buf + off, (size_t)(n - off));
+                    if (w < 0) {
+                        if (errno == EINTR) continue;
+                        running = false;
+                        status = 1;
+                        break;
+                    }
+                    off += w;
+                }
+            }
+        }
+        if (FD_ISSET(STDIN_FILENO, &rfds)) {
+            char buf[TELNET_BUF_SIZE];
+            ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+            if (n <= 0) {
+                shutdown(sock, SHUT_WR);
+            } else {
+                ssize_t off = 0;
+                while (off < n) {
+                    ssize_t w = write(sock, buf + off, (size_t)(n - off));
+                    if (w < 0) {
+                        if (errno == EINTR) continue;
+                        running = false;
+                        status = 1;
+                        break;
+                    }
+                    off += w;
+                }
+            }
+        }
+    }
+    close(sock);
+    return status;
 }
 
 #if defined(PSCAL_TARGET_IOS)

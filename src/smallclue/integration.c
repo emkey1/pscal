@@ -163,6 +163,7 @@ DEFINE_SMALLCLUE_WRAPPER("rmdir", rmdir)
 DEFINE_SMALLCLUE_WRAPPER("ln", ln)
 DEFINE_SMALLCLUE_WRAPPER("ping", ping)
 DEFINE_SMALLCLUE_WRAPPER("env", env)
+DEFINE_SMALLCLUE_WRAPPER("telnet", telnet)
 DEFINE_SMALLCLUE_WRAPPER("dmesg", dmesg)
 DEFINE_SMALLCLUE_WRAPPER("licenses", licenses)
 #endif
@@ -246,6 +247,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerVmBuiltin("ln", vmBuiltinSmallclue_ln, BUILTIN_TYPE_PROCEDURE, "ln");
     registerVmBuiltin("ping", vmBuiltinSmallclue_ping, BUILTIN_TYPE_PROCEDURE, "ping");
     registerVmBuiltin("env", vmBuiltinSmallclue_env, BUILTIN_TYPE_PROCEDURE, "env");
+    registerVmBuiltin("telnet", vmBuiltinSmallclue_telnet, BUILTIN_TYPE_PROCEDURE, "telnet");
     registerVmBuiltin("nextvi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "nextvi");
     registerVmBuiltin("vi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "vi");
     registerVmBuiltin("dmesg", vmBuiltinSmallclue_dmesg, BUILTIN_TYPE_PROCEDURE, "dmesg");
