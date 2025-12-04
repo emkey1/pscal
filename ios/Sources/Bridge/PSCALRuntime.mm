@@ -49,7 +49,7 @@ static void PSCALRuntimeEnsureSDLReady(void);
 #if __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
 #define PSCAL_HAS_ASAN_INTERFACE 1
 #include <sanitizer/asan_interface.h>
-extern "C" void __asan_unregister_thread(void);
+extern "C" void __asan_unregister_thread(void) __attribute__((weak_import));
 #else
 #define PSCAL_HAS_ASAN_INTERFACE 0
 #endif
@@ -209,7 +209,9 @@ static void *PSCALRuntimeOutputPump(void *_) {
         PSCALRuntimeDispatchOutput(buffer, (size_t)nread);
     }
 #if PSCAL_HAS_ASAN_INTERFACE
-    __asan_unregister_thread();
+    if (&__asan_unregister_thread != NULL) {
+        __asan_unregister_thread();
+    }
 #endif
     return NULL;
 }
@@ -438,7 +440,9 @@ static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
     context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
 #if PSCAL_HAS_ASAN_INTERFACE
-    __asan_unregister_thread();
+    if (&__asan_unregister_thread != NULL) {
+        __asan_unregister_thread();
+    }
 #endif
     return NULL;
 }
