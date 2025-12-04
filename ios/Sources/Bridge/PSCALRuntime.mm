@@ -349,7 +349,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 
     pthread_attr_t pumpAttr;
     pthread_attr_init(&pumpAttr);
-    const size_t pumpStack = 1ull * 1024ull * 1024ull; // 1 MiB for the pump thread
+    const size_t pumpStack = 2ull * 1024ull * 1024ull; // 2 MiB for the pump thread
     pthread_attr_setstacksize(&pumpAttr, pumpStack);
     pthread_create(&s_output_thread, &pumpAttr, PSCALRuntimeOutputPump, NULL);
     pthread_attr_destroy(&pumpAttr);
@@ -410,7 +410,7 @@ static void *PSCALRuntimeThreadMain(void *arg) {
 }
 
 int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSizeBytes) {
-    const size_t defaultStack = 8ull * 1024ull * 1024ull; // 8 MiB
+    const size_t defaultStack = 16ull * 1024ull * 1024ull; // 16 MiB
     const size_t minStack = (size_t)PTHREAD_STACK_MIN;
     size_t requestedStack = stackSizeBytes > 0 ? stackSizeBytes : defaultStack;
     if (requestedStack < minStack) {
