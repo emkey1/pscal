@@ -31,6 +31,15 @@
 #include <pty.h>
 #endif
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+extern "C" const char *__asan_default_options(void) {
+    // Prevent ASan from manipulating alternate signal stacks; avoids abort on thread teardown.
+    return "use_sigaltstack=0";
+}
+#endif
+#endif
+
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
 extern "C" void SDL_SetMainReady(void);
 static void PSCALRuntimeEnsureSDLReady(void);
