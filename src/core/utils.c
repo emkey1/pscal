@@ -849,8 +849,8 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
 
     // Calculate total size and copy bounds
     size_t total_size = 1;
-    const size_t MAX_ARRAY_ELEMENTS = 1 * 1000 * 1000; // hard cap to avoid runaway allocations
-    const size_t MAX_ARRAY_BYTES = 128 * 1024 * 1024;  // 128 MB soft ceiling
+    const size_t MAX_ARRAY_ELEMENTS = 250 * 1000; // hard cap to avoid runaway allocations
+    const size_t MAX_ARRAY_BYTES = 32 * 1024 * 1024;  // 32 MB ceiling
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];
@@ -889,9 +889,23 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     }
 
     // Initialize each element with its default value
-    for (int i = 0; i < total_size; i++) {
-        // Pass the element type definition node for complex types like records
-        v.array_val[i] = makeValueForType(element_type, type_def, NULL);
+    bool isSimple = (element_type == TYPE_INT32 || element_type == TYPE_DOUBLE ||
+                     element_type == TYPE_BOOLEAN || element_type == TYPE_CHAR ||
+                     element_type == TYPE_BYTE || element_type == TYPE_INT8 ||
+                     element_type == TYPE_UINT8 || element_type == TYPE_INT16 ||
+                     element_type == TYPE_UINT16 || element_type == TYPE_UINT32 ||
+                     element_type == TYPE_INT64 || element_type == TYPE_UINT64 ||
+                     element_type == TYPE_FLOAT || element_type == TYPE_LONG_DOUBLE);
+    if (isSimple && total_size > 0) {
+        memset(v.array_val, 0, sizeof(Value) * total_size);
+        for (size_t i = 0; i < total_size; i++) {
+            v.array_val[i].type = element_type;
+        }
+    } else {
+        for (size_t i = 0; i < total_size; i++) {
+            // Pass the element type definition node for complex types like records
+            v.array_val[i] = makeValueForType(element_type, type_def, NULL);
+        }
     }
 
     return v;
