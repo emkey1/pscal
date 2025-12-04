@@ -3787,7 +3787,7 @@ static int smallclueDfCommand(int argc, char **argv) {
     }
     return status;
 }
-static int smallcluePingAttempt(const struct sockaddr *addr, socklen_t addrlen, int family, int timeout_ms, double *out_ms) {
+static int smallcluePingAttempt(const struct sockaddr *addr, socklen_t addrlen, int family, int timeout_ms, double *out_ms, int probe_port) {
     int sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         return -1;
@@ -3798,7 +3798,24 @@ static int smallcluePingAttempt(const struct sockaddr *addr, socklen_t addrlen, 
     }
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    int rc = connect(sock, addr, addrlen);
+    // If a specific port was provided, override it in the sockaddr.
+    if (probe_port > 0) {
+        if (addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
+            struct sockaddr_in tmp;
+            memcpy(&tmp, addr, sizeof(tmp));
+            tmp.sin_port = htons((uint16_t)probe_port);
+            rc = connect(sock, (struct sockaddr *)&tmp, sizeof(tmp));
+        } else if (addr->sa_family == AF_INET6 && addrlen >= sizeof(struct sockaddr_in6)) {
+            struct sockaddr_in6 tmp6;
+            memcpy(&tmp6, addr, sizeof(tmp6));
+            tmp6.sin6_port = htons((uint16_t)probe_port);
+            rc = connect(sock, (struct sockaddr *)&tmp6, sizeof(tmp6));
+        } else {
+            rc = connect(sock, addr, addrlen);
+        }
+    } else {
+        rc = connect(sock, addr, addrlen);
+    }
     if (rc < 0 && errno == EINPROGRESS) {
         fd_set wfds;
         FD_ZERO(&wfds);
@@ -3844,7 +3861,7 @@ static int smallcluePingCommand(int argc, char **argv) {
     smallclueResetGetopt();
     int count = 4;
     int timeout_ms = 3000;
-    const char *port = "80";
+    int probe_port = 80;
     int opt;
     while ((opt = getopt(argc, argv, "c:p:t:")) != -1) {
         switch (opt) {
@@ -3853,7 +3870,11 @@ static int smallcluePingCommand(int argc, char **argv) {
                 if (count <= 0) count = 4;
                 break;
             case 'p':
-                port = optarg;
+                probe_port = atoi(optarg);
+                if (probe_port <= 0 || probe_port > 65535) {
+                    fprintf(stderr, "ping: invalid port '%s'\n", optarg);
+                    return 1;
+                }
                 break;
             case 't':
                 timeout_ms = atoi(optarg);
@@ -3874,7 +3895,9 @@ static int smallcluePingCommand(int argc, char **argv) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     struct addrinfo *res = NULL;
-    int gai = getaddrinfo(host, port, &hints, &res);
+    char portbuf[16];
+    snprintf(portbuf, sizeof(portbuf), "%d", probe_port);
+    int gai = getaddrinfo(host, portbuf, &hints, &res);
     if (gai != 0) {
         fprintf(stderr, "ping: %s: %s\n", host, gai_strerror(gai));
         return 1;
@@ -3894,14 +3917,14 @@ static int smallcluePingCommand(int argc, char **argv) {
         strncpy(addrbuf, "unknown", sizeof(addrbuf));
         addrbuf[sizeof(addrbuf) - 1] = '\0';
     }
-    printf("PING %s (%s) TCP port %s, %d probes, timeout %d ms\n",
-        host, addrbuf, port, count, timeout_ms);
+    printf("PING %s (%s) TCP port %d, %d probes, timeout %d ms\n",
+        host, addrbuf, probe_port, count, timeout_ms);
     int successes = 0;
     double min_ms = 0.0, max_ms = 0.0, total_ms = 0.0;
     for (int i = 0; i < count; ++i) {
         double elapsed = 0.0;
         int rc = smallcluePingAttempt((struct sockaddr *)&target_addr, target_len,
-            selected->ai_family, timeout_ms, &elapsed);
+            selected->ai_family, timeout_ms, &elapsed, probe_port);
         if (rc == 0) {
             successes++;
             if (successes == 1 || elapsed < min_ms) min_ms = elapsed;
