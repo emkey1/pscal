@@ -159,6 +159,8 @@ private static let fontCacheNotificationToken: NSObjectProtocol = {
 }()
     private let inputQueue = DispatchQueue(label: "com.pscal.terminal.input", attributes: .concurrent)
     private var bufferedInput: [UInt8] = []
+    private var pendingCompletions: [() -> Void] = []
+    private var drainScheduled = false
 
 struct TerminalSnapshot {
     struct Cursor {
@@ -244,23 +246,55 @@ struct TerminalSnapshot {
         return syncQueue.sync { (columns, rows) }
     }
 
-    func append(data: Data) {
+    func append(data: Data, onProcessed: (() -> Void)? = nil) {
         inputQueue.async(flags: .barrier) {
             self.bufferedInput.append(contentsOf: data)
+            if let onProcessed {
+                self.pendingCompletions.append(onProcessed)
+            }
+            if !self.drainScheduled {
+                self.drainScheduled = true
+                self.syncQueue.async {
+                    self.drainInputBufferLocked()
+                }
+            }
         }
-        drainInputBuffer()
     }
 
-    private func drainInputBuffer() {
-        var pending: [UInt8] = []
-        inputQueue.sync {
-            pending = bufferedInput
-            bufferedInput.removeAll()
-        }
-        guard !pending.isEmpty else { return }
-        syncQueue.sync {
+    private func drainInputBufferLocked() {
+        while true {
+            var pending: [UInt8] = []
+            var completions: [() -> Void] = []
+            inputQueue.sync {
+                pending = bufferedInput
+                bufferedInput.removeAll()
+                completions = pendingCompletions
+                pendingCompletions.removeAll()
+            }
+            guard !pending.isEmpty else {
+                for completion in completions {
+                    DispatchQueue.main.async { completion() }
+                }
+                break
+            }
             for byte in pending {
                 process(byte: byte)
+            }
+            for completion in completions {
+                DispatchQueue.main.async { completion() }
+            }
+        }
+        var needsAnotherDrain = false
+        inputQueue.sync {
+            if bufferedInput.isEmpty {
+                drainScheduled = false
+            } else {
+                needsAnotherDrain = true
+            }
+        }
+        if needsAnotherDrain {
+            syncQueue.async {
+                self.drainInputBufferLocked()
             }
         }
     }
