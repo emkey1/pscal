@@ -561,20 +561,16 @@ enum TerminalGeometryCalculator {
     }
 
     private static func measureMetrics(for font: UIFont) -> (CGFloat, CGFloat) {
-        // Use TextKit measurement to match actual layout behaviour.
-        let sample = String(repeating: "W", count: 8)
-        let storage = NSTextStorage(string: sample, attributes: [.font: font])
-        let layoutManager = NSLayoutManager()
-        let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude,
-                                                     height: CGFloat.greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        layoutManager.addTextContainer(container)
-        storage.addLayoutManager(layoutManager)
-        _ = layoutManager.glyphRange(for: container)
-        let used = layoutManager.usedRect(for: container)
-        let widthPerChar = max(1.0, used.width / CGFloat(sample.count))
-        let height = max(font.pointSize, used.height + verticalRowPadding)
-        return (widthPerChar, height)
+        // Measure via CoreText glyph advances to avoid hidden padding/kerning drift.
+        let ctFont: CTFont = font as CTFont
+        let character: UniChar = ("M" as NSString).character(at: 0)
+        var glyph: CGGlyph = 0
+        CTFontGetGlyphsForCharacters(ctFont, [character], &glyph, 1)
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(ctFont, .horizontal, [glyph], &advance, 1)
+        let width = max(1.0, advance.width)
+        let height = max(font.lineHeight, font.pointSize)
+        return (width, height)
     }
 
     static func usableDimensions(for size: CGSize,
