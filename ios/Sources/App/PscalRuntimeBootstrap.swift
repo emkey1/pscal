@@ -320,13 +320,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private func configureSanitizerEnv() {
         let key = "ASAN_OPTIONS"
         var options = ProcessInfo.processInfo.environment[key] ?? ""
-        if !options.contains("use_sigaltstack=0") {
+        func appendOption(_ opt: String) {
             if !options.isEmpty && !options.hasSuffix(" ") {
                 options.append(" ")
             }
-            options.append("use_sigaltstack=0")
-            setenv(key, options, 1)
+            options.append(opt)
         }
+        if !options.contains("use_sigaltstack=0") {
+            appendOption("use_sigaltstack=0")
+        }
+        if !options.contains("detect_stack_use_after_return=0") {
+            appendOption("detect_stack_use_after_return=0")
+        }
+        setenv(key, options, 1)
     }
 
     func send(_ text: String) {

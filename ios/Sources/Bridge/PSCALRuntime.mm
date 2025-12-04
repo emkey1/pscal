@@ -34,8 +34,9 @@
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 extern "C" const char *__asan_default_options(void) {
-    // Prevent ASan from manipulating alternate signal stacks; avoids abort on thread teardown.
-    return "use_sigaltstack=0";
+    // Prevent ASan from manipulating alternate signal stacks and from using
+    // a fake stack that can trigger teardown aborts on thread exit.
+    return "use_sigaltstack=0 detect_stack_use_after_return=0";
 }
 #endif
 #endif
