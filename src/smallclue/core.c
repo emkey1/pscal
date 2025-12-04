@@ -390,17 +390,149 @@ static const SmallclueApplet kSmallclueApplets[] = {
 };
 
 static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
+    {"[", "[ expression ]\n"
+          "  Alias for test; see 'test' for operators"},
+    {"basename", "basename PATH [SUFFIX]\n"
+                 "  Strip directory prefix and optional suffix"},
+    {"cal", "cal [month] [year]\n"
+            "  Show a simple calendar"},
+    {"cat", "cat [FILE ...]\n"
+            "  Concatenate files to stdout"},
+    {"chmod", "chmod MODE FILE ...\n"
+              "  MODE forms: u+rwx,g-w,o=r, a-wx, 755, 0644"},
+    {"clear", "clear\n"
+              "  Clear the terminal"},
+    {"cls", "cls\n"
+            "  Clear the terminal (alias)"},
+    {"cp", "cp [-r] SRC... DEST\n"
+           "  -r  recursive copy"},
+    {"curl", "curl [options] URL...\n"
+             "  Common: -o FILE, -O (remote name), -L (follow), -d DATA, -H HEADER"},
+    {"cut", "cut -d DELIM -f LIST [FILE...]\n"
+            "  -d delimiter (default tab)  -f fields (e.g. 1,3-5)"},
+    {"date", "date [+FORMAT]\n"
+             "  Show date/time"},
+    {"dirname", "dirname PATH\n"
+                "  Strip last path component"},
+    {"du", "du [-h] [PATH...]\n"
+           "  -h human-readable sizes"},
+    {"echo", "echo [args...]\n"
+             "  Print arguments"},
+    {"env", "env [-i] [NAME=VALUE ...] [command]\n"
+            "  -i start with empty environment"},
+    {"false", "false\n"
+              "  Exit with status 1"},
+    {"file", "file FILE...\n"
+             "  Identify file types"},
+    {"find", "find PATH... [expression]\n"
+             "  Common: -name PATTERN -type f|d"},
+    {"grep", "grep [-i] [-n] [-v] PATTERN [FILE...]\n"
+             "  -i ignore case  -n line numbers  -v invert match"},
+    {"head", "head [-n N] [FILE...]\n"
+             "  Default N=10"},
+    {"id", "id\n"
+           "  Show uid/gid info"},
+#if SMALLCLUE_HAS_IFADDRS
+    {"ipaddr", "ipaddr\n"
+               "  Show interface IP addresses"},
+#endif
+    {"kill", "kill [-SIGNAL] PID...\n"
+             "  Signals: HUP INT TERM KILL etc."},
+    {"less", "less [FILE...]\n"
+             "  Pager; navigation: j/k, /, n, g/G, q"},
+    {"ln", "ln [-s] TARGET LINK\n"
+           "  -s symbolic link"},
     {"ls", "ls [-a] [-l] [-t] [-h] [-d] [--color[=auto|always|never]] [path ...]\n"
-           "  -a  show entries starting with '.'\n"
-           "  -l  long format with permissions, ownership, size, time\n"
-           "  -t  sort by modification time\n"
-           "  -h  human-readable sizes (with -l)\n"
-           "  -d  list directories themselves, not their contents"},
+           "  -a show entries starting with '.'\n"
+           "  -l long format with permissions, ownership, size, time\n"
+           "  -t sort by modification time\n"
+           "  -h human-readable sizes (with -l)\n"
+           "  -d list directories themselves, not their contents"},
+    {"md", "md [FILE]\n"
+           "  View Markdown document"},
+    {"mkdir", "mkdir [-p] DIR...\n"
+              "  -p create parents as needed"},
+    {"more", "more [FILE...]\n"
+             "  Pager (alias of less)"},
+    {"mv", "mv SRC... DEST\n"
+           "  Move or rename files"},
+    {"nextvi", "nextvi [FILE]\n"
+               "  Full-screen text editor"},
+    {"pbcopy", "pbcopy\n"
+               "  Copy stdin to system clipboard"},
+    {"pbpaste", "pbpaste\n"
+                "  Paste system clipboard to stdout"},
+    {"ping", "ping HOST [PORT]\n"
+             "  TCP ping (default port 80)"},
+    {"ps", "ps\n"
+           "  Show simple process list"},
+    {"pwd", "pwd\n"
+            "  Print working directory"},
+    {"resize", "resize [COLUMNS ROWS]\n"
+               "  Report or set terminal size"},
+    {"rm", "rm [-r] [-f] FILE...\n"
+           "  -r recursive  -f force"},
+    {"rmdir", "rmdir DIR...\n"
+              "  Remove empty directories"},
+    {"sed", "sed 's/old/new/g' [FILE...]\n"
+            "  Simple substitution support"},
+    {"sleep", "sleep SECONDS\n"
+              "  Pause execution"},
+    {"sort", "sort [-r] [-n]\n"
+             "  -r reverse  -n numeric"},
+    {"stty", "stty [-a] [rows N] [cols N]\n"
+             "  Adjust/report terminal size"},
+#if defined(SMALLCLUE_WITH_EXSH)
+    {"sh", "sh\n"
+           "  Launch PSCAL shell front end"},
+#endif
+    {"scp", "scp [-P PORT] SRC... DEST\n"
+            "  Uses OpenSSH scp"},
+    {"sftp", "sftp [-P PORT] [USER@]HOST\n"
+             "  Interactive SFTP client"},
+    {"ssh", "ssh [-p PORT] [USER@]HOST [command]\n"
+            "  OpenSSH client"},
+    {"ssh-keygen", "ssh-keygen [-t TYPE] [-f FILE] [-C COMMENT]\n"
+                   "  Generate SSH key pairs"},
+    {"tail", "tail [-n N] [FILE...]\n"
+             "  Default N=10"},
+    {"tee", "tee [-a] FILE...\n"
+            "  -a append"},
+    {"test", "test EXPRESSION\n"
+             "  File: -f -d -e; String: = != -z; Int: -eq -ne -lt -le -gt -ge"},
+    {"touch", "touch FILE...\n"
+              "  Update timestamps or create empty file"},
+    {"tr", "tr SET1 SET2\n"
+           "  Translate/delete characters"},
+    {"true", "true\n"
+             "  Exit status 0"},
+    {"type", "type NAME...\n"
+             "  Describe how a name is resolved"},
+    {"uniq", "uniq [-c] [-d] [-u] [FILE]\n"
+             "  -c count  -d duplicates only  -u unique only"},
+    {"uptime", "uptime\n"
+               "  Show system uptime"},
+    {"vi", "vi [FILE]\n"
+           "  Alias for nextvi"},
+    {"watch", "watch [-n SECONDS] command...\n"
+              "  Periodically run a command"},
+    {"wc", "wc [-l] [-w] [-c] [FILE...]\n"
+           "  Count lines/words/bytes"},
+    {"wget", "wget [options] URL...\n"
+             "  Common: -O FILE, --header, --post-data, -q, -nv"},
+    {"xargs", "xargs [-n N] [-0]\n"
+              "  Build command lines from stdin"},
+    {"df", "df [-h]\n"
+           "  -h human-readable sizes"},
+#if defined(PSCAL_TARGET_IOS)
     {"smallclue-help", "smallclue-help [command]\n"
                        "  Without arguments: list all applets\n"
                        "  With a command: show usage if available"},
     {"licenses", "licenses\n"
                  "  Browse PSCAL and third-party licenses; use arrows/enter to view"},
+    {"dmesg", "dmesg\n"
+              "  Show PSCAL runtime log for this session"},
+#endif
     {NULL, NULL}
 };
 
