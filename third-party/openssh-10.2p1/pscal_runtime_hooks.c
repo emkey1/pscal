@@ -69,6 +69,21 @@ pscal_openssh_hostkey_path(const char *default_path)
 	return default_path;
 }
 
+const char *
+pscal_openssh_hostkey_dir(void)
+{
+	const char *root = getenv("PSCALI_CONTAINER_ROOT");
+	if (!root || root[0] == '\0') {
+		root = getenv("HOME");
+	}
+	if (!root || root[0] == '\0') {
+		return NULL;
+	}
+	static char dirbuf[PATH_MAX];
+	snprintf(dirbuf, sizeof(dirbuf), "%s/etc/ssh", root);
+	return dirbuf;
+}
+
 void
 pscal_openssh_register_cleanup(pscal_openssh_cleanup_fn cleanup)
 {

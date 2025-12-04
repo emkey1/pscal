@@ -1028,9 +1028,14 @@ do_gen_all_hostkeys(struct passwd *pw)
 	for (i = 0; key_types[i].key_type; i++) {
 		public = private = NULL;
 		prv_tmp = pub_tmp = prv_file = pub_file = NULL;
+		const char *base_path = pscal_openssh_hostkey_path(key_types[i].path);
+		const char *key_dir = pscal_openssh_hostkey_dir();
+		if (key_dir && key_dir[0] != '\0') {
+			mkdir(key_dir, 0700);
+		}
 
 		xasprintf(&prv_file, "%s%s",
-		    identity_file, key_types[i].path);
+		    identity_file, base_path ? base_path : key_types[i].path);
 
 		/* Check whether private key exists and is not zero-length */
 		if (stat(prv_file, &st) == 0) {
@@ -1047,11 +1052,11 @@ do_gen_all_hostkeys(struct passwd *pw)
 		 * key generation.
 		 */
 		xasprintf(&prv_tmp, "%s%s.XXXXXXXXXX",
-		    identity_file, key_types[i].path);
+		    identity_file, base_path ? base_path : key_types[i].path);
 		xasprintf(&pub_tmp, "%s%s.pub.XXXXXXXXXX",
-		    identity_file, key_types[i].path);
+		    identity_file, base_path ? base_path : key_types[i].path);
 		xasprintf(&pub_file, "%s%s.pub",
-		    identity_file, key_types[i].path);
+		    identity_file, base_path ? base_path : key_types[i].path);
 
 		if (first == 0) {
 			first = 1;
