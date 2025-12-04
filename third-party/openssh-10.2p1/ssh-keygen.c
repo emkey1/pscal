@@ -1052,11 +1052,14 @@ do_gen_all_hostkeys(struct passwd *pw)
 		 * key generation.
 		 */
 		xasprintf(&prv_tmp, "%s%s.XXXXXXXXXX",
-		    identity_file, base_path ? base_path : key_types[i].path);
+		    base_path ? "" : identity_file,
+		    base_path ? base_path : key_types[i].path);
 		xasprintf(&pub_tmp, "%s%s.pub.XXXXXXXXXX",
-		    identity_file, base_path ? base_path : key_types[i].path);
+		    base_path ? "" : identity_file,
+		    base_path ? base_path : key_types[i].path);
 		xasprintf(&pub_file, "%s%s.pub",
-		    identity_file, base_path ? base_path : key_types[i].path);
+		    base_path ? "" : identity_file,
+		    base_path ? base_path : key_types[i].path);
 
 		if (first == 0) {
 			first = 1;
