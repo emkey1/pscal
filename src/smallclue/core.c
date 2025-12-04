@@ -3184,27 +3184,56 @@ static int smallclueLicensesCommand(int argc, char **argv) {
 }
 
 static int smallclueHelpCommand(int argc, char **argv) {
-    if (argc <= 1) {
-        smallcluePrintAppletList(stdout, "Available smallclue applets:");
-        return 0;
-    }
     int status = 0;
-    for (int i = 1; i < argc; ++i) {
-        const char *target = argv[i];
-        const SmallclueApplet *applet = smallclueFindApplet(target);
-        if (!applet) {
-            fprintf(stderr, "smallclue-help: '%s' not found\n", target);
-            status = 1;
-            continue;
-        }
-        const char *usage = smallclueLookupHelp(applet->name);
-        printf("%s - %s\n", applet->name, applet->description ? applet->description : "");
-        if (usage) {
-            printf("Usage:\n%s\n", usage);
-        } else {
-            printf("(No detailed help available for this applet)\n\n");
+    char *buffer = NULL;
+    size_t buflen = 0;
+    FILE *mem = open_memstream(&buffer, &buflen);
+    if (!mem) {
+        fprintf(stderr, "smallclue-help: unable to allocate buffer\n");
+        return 1;
+    }
+
+    if (argc <= 1) {
+        smallcluePrintAppletList(mem, "Available smallclue applets:");
+    } else {
+        for (int i = 1; i < argc; ++i) {
+            const char *target = argv[i];
+            const SmallclueApplet *applet = smallclueFindApplet(target);
+            if (!applet) {
+                fprintf(mem, "smallclue-help: '%s' not found\n", target);
+                status = 1;
+                continue;
+            }
+            const char *usage = smallclueLookupHelp(applet->name);
+            fprintf(mem, "%s - %s\n", applet->name, applet->description ? applet->description : "");
+            if (usage) {
+                fprintf(mem, "Usage:\n%s\n", usage);
+            } else {
+                fprintf(mem, "(No detailed help available for this applet)\n\n");
+            }
         }
     }
+    fflush(mem);
+    fclose(mem);
+
+    if (!buffer) {
+        return status;
+    }
+
+    bool interactive_out = pscalRuntimeStdoutIsInteractive();
+    if (interactive_out) {
+        FILE *r = fmemopen(buffer, buflen, "r");
+        if (!r) {
+            interactive_out = false;
+        } else {
+            pager_file("smallclue-help", "(internal)", r);
+            fclose(r);
+        }
+    }
+    if (!interactive_out) {
+        fwrite(buffer, 1, buflen, stdout);
+    }
+    free(buffer);
     return status;
 }
 #endif
