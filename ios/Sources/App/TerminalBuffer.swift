@@ -1041,9 +1041,6 @@ struct TerminalSnapshot {
             }
         }
         flush()
-        if onlySpaces {
-            return NSAttributedString(string: "")
-        }
         return mutable.copy() as? NSAttributedString ?? NSAttributedString(string: "")
     }
 
