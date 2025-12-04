@@ -72,6 +72,11 @@ cleanup_exit(int code)
 	}
 #ifdef PSCAL_TARGET_IOS
 	pscalRuntimeDebugLog("cleanup_exit without PSCAL context, terminating thread");
+  	stack_t ss;
+	ss.ss_sp = NULL;
+	ss.ss_size = 0;
+	ss.ss_flags = SS_DISABLE;
+	sigaltstack(&ss, NULL);
 	pthread_exit((void*)(intptr_t)code);
 #endif
 	_exit(code);
