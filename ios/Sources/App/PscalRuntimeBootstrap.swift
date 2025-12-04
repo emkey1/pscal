@@ -194,7 +194,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
     // Dedicated pthread stack for the runtime (libdispatch workers are ~512KB).
-    private let runtimeStackSizeBytes = 4 * 1024 * 1024
+    // Use a larger stack to reduce overflow risk when running heavy programs.
+    private let runtimeStackSizeBytes = 16 * 1024 * 1024
     private var handlerContext: UnsafeMutableRawPointer?
     private let terminalBuffer: TerminalBuffer
     private enum GeometrySource: Hashable {
