@@ -120,17 +120,17 @@ final class TerminalFontSettings: ObservableObject {
     func font(forPointSize size: CGFloat, weight: UIFont.Weight, italic: Bool = false) -> UIFont {
         let base = font(forPointSize: size)
         var traits = base.fontDescriptor.symbolicTraits
-        if weight == .bold {
-            traits.insert(.traitBold)
-        } else {
-            traits.remove(.traitBold)
+        let wantsBold = weight == .bold
+        let hasBold = traits.contains(.traitBold)
+        let hasItalic = traits.contains(.traitItalic)
+        if wantsBold != hasBold {
+            if wantsBold { traits.insert(.traitBold) } else { traits.remove(.traitBold) }
         }
-        if italic {
-            traits.insert(.traitItalic)
-        } else {
-            traits.remove(.traitItalic)
+        if italic != hasItalic {
+            if italic { traits.insert(.traitItalic) } else { traits.remove(.traitItalic) }
         }
-        if let descriptor = base.fontDescriptor.withSymbolicTraits(traits) {
+        if traits != base.fontDescriptor.symbolicTraits,
+           let descriptor = base.fontDescriptor.withSymbolicTraits(traits) {
             return UIFont(descriptor: descriptor, size: size)
         }
         return base
@@ -1178,15 +1178,30 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
     private func remapFontsIfNeeded(in text: NSAttributedString) -> NSAttributedString {
         guard text.length > 0 else { return text }
-        let mutable = NSMutableAttributedString(attributedString: text)
         let baseFont = currentFont()
-        let fullRange = NSRange(location: 0, length: mutable.length)
+
+        // Fast path: if everything already uses the same family, skip remapping.
+        var needsRemap = false
+        let fullRange = NSRange(location: 0, length: text.length)
+        text.enumerateAttribute(.font, in: fullRange, options: []) { value, _, stop in
+            if let existing = value as? UIFont {
+                if existing.familyName != baseFont.familyName {
+                    needsRemap = true;
+                    stop.pointee = true;
+                }
+            }
+        }
+        if !needsRemap {
+            return text
+        }
+
+        let mutable = NSMutableAttributedString(attributedString: text)
         mutable.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
             let existing = (value as? UIFont) ?? baseFont
             let traits = existing.fontDescriptor.symbolicTraits
             let weight: UIFont.Weight = traits.contains(.traitBold) ? .bold : .regular
             let italic = traits.contains(.traitItalic)
-            let replacement = TerminalFontSettings.shared.font(forPointSize: existing.pointSize,
+            let replacement = TerminalFontSettings.shared.font(forPointSize: baseFont.pointSize,
                                                                weight: weight,
                                                                italic: italic)
             mutable.addAttribute(.font, value: replacement, range: range)
