@@ -3798,6 +3798,7 @@ static int smallcluePingAttempt(const struct sockaddr *addr, socklen_t addrlen, 
     }
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
+    int rc = -1;
     // If a specific port was provided, override it in the sockaddr.
     if (probe_port > 0) {
         if (addr->sa_family == AF_INET && addrlen >= sizeof(struct sockaddr_in)) {
@@ -3943,8 +3944,8 @@ static int smallcluePingCommand(int argc, char **argv) {
     printf("%d probes sent, %d successful, %d failed\n",
         count, successes, count - successes);
     if (successes > 0) {
-        printf("round-trip min/avg/max = %.2f/%.2f/%.2f ms (TCP port %s)\n",
-            min_ms, total_ms / successes, max_ms, port);
+        printf("round-trip min/avg/max = %.2f/%.2f/%.2f ms (TCP port %d)\n",
+            min_ms, total_ms / successes, max_ms, probe_port);
     }
     freeaddrinfo(res);
     return (successes > 0) ? 0 : 1;
