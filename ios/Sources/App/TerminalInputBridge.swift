@@ -4,6 +4,10 @@ import UIKit
 @_silgen_name("pscalRuntimeRequestSigint")
 func pscalRuntimeRequestSigint()
 
+extension Notification.Name {
+    static let terminalModifierStateChanged = Notification.Name("terminalModifierStateChanged")
+}
+
 struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
@@ -91,6 +95,15 @@ final class TerminalKeyInputView: UITextView {
 
     override var keyCommands: [UIKeyCommand]? {
         var commands = repeatKeyCommands.map { $0.command }
+        let increase1 = UIKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFont))
+        let increase2 = UIKeyCommand(input: "=", modifierFlags: [.command], action: #selector(handleIncreaseFont))
+        let decrease = UIKeyCommand(input: "-", modifierFlags: [.command], action: #selector(handleDecreaseFont))
+        if #available(iOS 15.0, *) {
+            increase1.wantsPriorityOverSystemBehavior = true
+            increase2.wantsPriorityOverSystemBehavior = true
+            decrease.wantsPriorityOverSystemBehavior = true
+        }
+        commands.append(contentsOf: [increase1, increase2, decrease])
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
@@ -130,6 +143,11 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let event {
+            NotificationCenter.default.post(name: .terminalModifierStateChanged,
+                                            object: nil,
+                                            userInfo: ["command": event.modifierFlags.contains(.command)])
+        }
         var unhandled: Set<UIPress> = []
         for press in presses {
             if !handle(press: press) {
@@ -142,6 +160,11 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let event {
+            NotificationCenter.default.post(name: .terminalModifierStateChanged,
+                                            object: nil,
+                                            userInfo: ["command": event.modifierFlags.contains(.command)])
+        }
         var unhandled: Set<UIPress> = []
         for press in presses {
             if !handle(press: press) {
@@ -151,6 +174,20 @@ final class TerminalKeyInputView: UITextView {
         if !unhandled.isEmpty {
             super.pressesChanged(unhandled, with: event)
         }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        NotificationCenter.default.post(name: .terminalModifierStateChanged,
+                                        object: nil,
+                                        userInfo: ["command": false])
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        NotificationCenter.default.post(name: .terminalModifierStateChanged,
+                                        object: nil,
+                                        userInfo: ["command": false])
+        super.pressesCancelled(presses, with: event)
     }
 
     @objc private func handleRepeatCommand(_ command: UIKeyCommand) {
@@ -206,5 +243,15 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         onPaste?(text)
+    }
+
+    @objc private func handleIncreaseFont() {
+        let current = TerminalFontSettings.shared.pointSize
+        TerminalFontSettings.shared.updatePointSize(current + 1.0)
+    }
+
+    @objc private func handleDecreaseFont() {
+        let current = TerminalFontSettings.shared.pointSize
+        TerminalFontSettings.shared.updatePointSize(current - 1.0)
     }
 }

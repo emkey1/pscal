@@ -2523,11 +2523,31 @@ static void vmCreateThreadKey(void) {
     pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static struct termios vm_virtual_termios;
+static int vm_virtual_termios_inited = 0;
+#endif
+
 static int vmTcgetattr(int fd, struct termios *term) {
     int res;
     do {
         res = tcgetattr(fd, term);
     } while (res < 0 && errno == EINTR);
+#if defined(PSCAL_TARGET_IOS)
+    if (res < 0 && errno == ENOTTY && pscalRuntimeVirtualTTYEnabled()) {
+        if (!vm_virtual_termios_inited) {
+            memset(&vm_virtual_termios, 0, sizeof(vm_virtual_termios));
+            vm_virtual_termios.c_lflag = ICANON | ECHO;
+            vm_virtual_termios.c_cc[VMIN] = 1;
+            vm_virtual_termios.c_cc[VTIME] = 0;
+            vm_virtual_termios_inited = 1;
+        }
+        if (term) {
+            *term = vm_virtual_termios;
+        }
+        return 0;
+    }
+#endif
     return res;
 }
 
@@ -2536,6 +2556,15 @@ static int vmTcsetattr(int fd, int optional_actions, const struct termios *term)
     do {
         res = tcsetattr(fd, optional_actions, term);
     } while (res < 0 && errno == EINTR);
+#if defined(PSCAL_TARGET_IOS)
+    if (res < 0 && errno == ENOTTY && pscalRuntimeVirtualTTYEnabled()) {
+        if (term) {
+            vm_virtual_termios = *term;
+            vm_virtual_termios_inited = 1;
+        }
+        return 0;
+    }
+#endif
     return res;
 }
 

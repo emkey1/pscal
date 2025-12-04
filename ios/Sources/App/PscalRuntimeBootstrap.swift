@@ -425,15 +425,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    private var renderQueued = false
     private func scheduleRender(preserveBackground: Bool = false) {
         if isElvisModeActive() {
             refreshElvisDisplay()
             return
         }
-        let snapshot = terminalBuffer.snapshot()
-        let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
-        let backgroundColor = snapshot.defaultBackground
+        if renderQueued {
+            return
+        }
+        renderQueued = true
         DispatchQueue.main.async {
+            self.renderQueued = false
+            let snapshot = self.terminalBuffer.snapshot()
+            let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
+            let backgroundColor = snapshot.defaultBackground
             self.screenText = renderResult.text
             self.cursorInfo = renderResult.cursor
             if !preserveBackground {
@@ -521,8 +527,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func updateGeometry(from source: GeometrySource, columns: Int, rows: Int) {
-        let clampedColumns = max(10, columns)
-        let clampedRows = max(4, rows)
+        // Clamp to avoid runaway geometry that can overwhelm rendering when raw mode misreports.
+        let clampedColumns = max(10, min(columns, 400))
+        let clampedRows = max(4, min(rows, 400))
         let metrics = TerminalGeometryMetrics(columns: clampedColumns, rows: clampedRows)
         geometryBySource[source] = metrics
         refreshActiveGeometry()
@@ -574,8 +581,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let screenSize = UIScreen.main.bounds.size
         let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
         let lineHeight = max(1.0, font.lineHeight)
-        let columns = max(10, Int(floor(screenSize.width / charWidth)))
-        let rows = max(4, Int(floor(screenSize.height / lineHeight)))
+        let columns = max(10, min(Int(floor(screenSize.width / charWidth)), 400))
+        let rows = max(4, min(Int(floor(screenSize.height / lineHeight)), 400))
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
 

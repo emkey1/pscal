@@ -657,10 +657,12 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let terminalView = TerminalDisplayTextView()
     private let selectionOverlay = TerminalSelectionOverlay()
     private let selectionMenu = TerminalSelectionMenuView()
+    private let commandIndicator = UILabel()
     private var lastElvisSnapshotText: String?
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
     private var appearanceObserver: NSObjectProtocol?
+    private var modifierObserver: NSObjectProtocol?
     private var selectionStartIndex: Int?
     private var selectionEndIndex: Int?
     private var selectionAnchorPoint: CGPoint?
@@ -669,6 +671,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                                 backgroundColor: UIColor,
                                 isElvisMode: Bool,
                                 elvisSnapshot: ElvisSnapshot?)?
+    private var customKeyCommands: [UIKeyCommand] = []
     private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleSelectionPress(_:)))
         recognizer.minimumPressDuration = 0.25
@@ -699,6 +702,24 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
         addSubview(terminalView)
+        configureKeyCommands()
+
+        commandIndicator.text = "⌘"
+        commandIndicator.font = UIFont.systemFont(ofSize: 14, weight: .bold)
+        commandIndicator.textColor = .white
+        commandIndicator.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        commandIndicator.textAlignment = .center
+        commandIndicator.layer.cornerRadius = 4
+        commandIndicator.layer.masksToBounds = true
+        commandIndicator.isHidden = true
+        commandIndicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(commandIndicator)
+        NSLayoutConstraint.activate([
+            commandIndicator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            commandIndicator.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            commandIndicator.widthAnchor.constraint(equalToConstant: 22),
+            commandIndicator.heightAnchor.constraint(equalToConstant: 22)
+        ])
 
         selectionOverlay.isUserInteractionEnabled = false
         selectionOverlay.backgroundColor = .clear
@@ -719,14 +740,92 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             self.configure(backgroundColor: TerminalFontSettings.shared.backgroundColor,
                            foregroundColor: TerminalFontSettings.shared.foregroundColor)
         }
+        modifierObserver = NotificationCenter.default.addObserver(forName: .terminalModifierStateChanged,
+                                                                  object: nil,
+                                                                  queue: .main) { [weak self] notification in
+            guard let commandDown = notification.userInfo?["command"] as? Bool else { return }
+            self?.commandIndicator.isHidden = !commandDown
+        }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override var canBecomeFirstResponder: Bool { true }
+    override var keyCommands: [UIKeyCommand]? { customKeyCommands }
+
+    private func configureKeyCommands() {
+        let increase1 = UIKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFont))
+        let increase2 = UIKeyCommand(input: "=", modifierFlags: [.command], action: #selector(handleIncreaseFont))
+        let decrease = UIKeyCommand(input: "-", modifierFlags: [.command], action: #selector(handleDecreaseFont))
+        increase1.wantsPriorityOverSystemBehavior = true
+        increase2.wantsPriorityOverSystemBehavior = true
+        decrease.wantsPriorityOverSystemBehavior = true
+        customKeyCommands = [increase1, increase2, decrease]
+    }
+
+    @objc
+    private func handleIncreaseFont() {
+        let current = TerminalFontSettings.shared.pointSize
+        TerminalFontSettings.shared.updatePointSize(current + 1.0)
+    }
+
+    @objc
+    private func handleDecreaseFont() {
+        let current = TerminalFontSettings.shared.pointSize
+        TerminalFontSettings.shared.updatePointSize(current - 1.0)
+    }
+
+    private func updateCommandIndicator(from event: UIPressesEvent) {
+        let commandDown = event.modifierFlags.contains(.command)
+        commandIndicator.isHidden = !commandDown
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let event = event {
+            updateCommandIndicator(from: event)
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let event = event {
+            updateCommandIndicator(from: event)
+        }
+        super.pressesChanged(presses, with: event)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let event = event {
+            updateCommandIndicator(from: event)
+        } else {
+            commandIndicator.isHidden = true
+        }
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        commandIndicator.isHidden = true
+        super.pressesCancelled(presses, with: event)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        return super.becomeFirstResponder()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            DispatchQueue.main.async { [weak self] in _ = self?.becomeFirstResponder() }
+        }
+    }
+
     deinit {
         if let observer = appearanceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = modifierObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -1615,4 +1714,3 @@ private extension UIColor {
         }
     }
 }
-

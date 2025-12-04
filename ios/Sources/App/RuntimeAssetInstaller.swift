@@ -372,6 +372,13 @@ final class RuntimeAssetInstaller {
                 setenv("PSCALI_ETC_ROOT", bundledEtc.path, 1)
             }
         }
+        if let etcRootCString = getenv("PSCALI_ETC_ROOT"),
+           let etcRoot = String(validatingUTF8: etcRootCString), !etcRoot.isEmpty {
+            let termcapPath = (etcRoot as NSString).appendingPathComponent("termcap")
+            setenv("TERMCAP", termcapPath, 1)
+            let terminfoPath = (etcRoot as NSString).appendingPathComponent("terminfo")
+            setenv("TERMINFO", terminfoPath, 1)
+        }
 
         let runtimeRoot = RuntimePaths.runtimeRootDirectory.path
         setenv("PSCALI_SYSFILES_ROOT", runtimeRoot, 1)

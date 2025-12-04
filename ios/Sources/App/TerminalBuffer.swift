@@ -219,8 +219,9 @@ struct TerminalSnapshot {
     @discardableResult
     func resize(columns newColumns: Int, rows newRows: Int) -> Bool {
         var didChange = false
-        let clampedColumns = max(10, newColumns)
-        let clampedRows = max(4, newRows)
+        // Guard against pathological geometry reports that can explode memory/render time.
+        let clampedColumns = max(10, min(newColumns, 400))
+        let clampedRows = max(4, min(newRows, 400))
         syncQueue.sync {
             var mutated = false
             if clampedColumns != columns {

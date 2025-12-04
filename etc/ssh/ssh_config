@@ -7,7 +7,6 @@
 
 Host *
     SendEnv LANG LC_*
-    GSSAPIAuthentication no
     ServerAliveInterval 60
     ServerAliveCountMax 3
     StrictHostKeyChecking ask
