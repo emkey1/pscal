@@ -49,7 +49,7 @@ static void PSCALRuntimeEnsureSDLReady(void);
 #if __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
 #define PSCAL_HAS_ASAN_INTERFACE 1
 #include <sanitizer/asan_interface.h>
-extern "C" void __asan_unregister_thread(void) __attribute__((weak_import));
+__attribute__((weak_import)) extern "C" void __asan_unregister_thread(void);
 #else
 #define PSCAL_HAS_ASAN_INTERFACE 0
 #endif
