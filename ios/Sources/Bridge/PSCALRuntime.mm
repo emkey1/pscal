@@ -46,9 +46,7 @@ extern "C" void SDL_SetMainReady(void);
 static void PSCALRuntimeEnsureSDLReady(void);
 #endif
 
-#if defined(PSCAL_TARGET_IOS)
-#define PSCAL_HAS_ASAN_INTERFACE 0
-#elif __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
+#if __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
 #define PSCAL_HAS_ASAN_INTERFACE 1
 #include <sanitizer/asan_interface.h>
 #else
@@ -209,6 +207,9 @@ static void *PSCALRuntimeOutputPump(void *_) {
         }
         PSCALRuntimeDispatchOutput(buffer, (size_t)nread);
     }
+#if PSCAL_HAS_ASAN_INTERFACE
+    __asan_unregister_thread();
+#endif
     return NULL;
 }
 
@@ -435,6 +436,9 @@ typedef struct {
 static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
     context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
+#if PSCAL_HAS_ASAN_INTERFACE
+    __asan_unregister_thread();
+#endif
     return NULL;
 }
 
