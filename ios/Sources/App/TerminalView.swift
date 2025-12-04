@@ -489,7 +489,10 @@ private struct TerminalContentView: View {
         if lastLoggedMetrics != metrics {
             let grid = TerminalGeometryCalculator.calculateGrid(for: availableSize,
                                                                 font: font,
-                                                                safeAreaInsets: safeAreaInsets,
+                                                                safeAreaInsets: UIEdgeInsets(top: safeAreaInsets.top,
+                                                                                             left: safeAreaInsets.leading,
+                                                                                             bottom: safeAreaInsets.bottom,
+                                                                                             right: safeAreaInsets.trailing),
                                                                 topPadding: Self.topPadding,
                                                                 horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
                                                                 showingStatus: showingStatus)
@@ -581,9 +584,14 @@ enum TerminalGeometryCalculator {
         return (width, height)
     }
 
+    private static func pixelCeil(_ value: CGFloat) -> CGFloat {
+        let scale = UIScreen.main.scale
+        return ceil(value * scale) / scale
+    }
+
     static func calculateGrid(for size: CGSize,
                               font: UIFont,
-                              safeAreaInsets: EdgeInsets,
+                              safeAreaInsets: UIEdgeInsets,
                               topPadding: CGFloat,
                               horizontalPadding: CGFloat,
                               showingStatus: Bool) -> TerminalGridCapacity {
@@ -596,15 +604,21 @@ enum TerminalGeometryCalculator {
         availableHeight -= safeAreaInsets.bottom
         availableHeight = max(0, availableHeight)
 
+        // Snap line height to physical pixels to match rendering.
+        let adjustedLineHeight = pixelCeil(font.lineHeight)
+
         // Horizontal space (padding is per-side)
         var availableWidth = size.width
         availableWidth -= (horizontalPadding * 2)
         availableWidth = max(0, availableWidth)
 
-        let lineHeight = font.lineHeight
-        let charWidth = ("M" as NSString).size(withAttributes: [.font: font]).width
-        let rows = Int(floor(availableHeight / lineHeight))
-        let cols = Int(floor(availableWidth / charWidth))
+        // Measure a block of text to reduce per-character rounding error.
+        let sample = "MMMMMMMMMM" // 10 chars
+        let sampleWidth = (sample as NSString).size(withAttributes: [.font: font]).width
+        let avgCharWidth = max(1.0, sampleWidth / CGFloat(sample.count))
+
+        let rows = Int(floor(availableHeight / adjustedLineHeight))
+        let cols = Int(floor(availableWidth / avgCharWidth))
 
         return TerminalGridCapacity(rows: rows, columns: cols, width: availableWidth, height: availableHeight)
     }
@@ -616,9 +630,13 @@ enum TerminalGeometryCalculator {
                         font: UIFont) -> TerminalGeometryMetrics? {
         guard size.width > 0, size.height > 0 else { return nil }
 
+        let uiInsets = UIEdgeInsets(top: safeAreaInsets.top,
+                                    left: safeAreaInsets.leading,
+                                    bottom: safeAreaInsets.bottom,
+                                    right: safeAreaInsets.trailing)
         let grid = calculateGrid(for: size,
                                  font: font,
-                                 safeAreaInsets: safeAreaInsets,
+                                 safeAreaInsets: uiInsets,
                                  topPadding: topPadding,
                                  horizontalPadding: horizontalPadding,
                                  showingStatus: showingStatus)
@@ -748,6 +766,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         terminalView.isScrollEnabled = true
         terminalView.textContainerInset = .zero
         terminalView.textContainer.lineFragmentPadding = 0
+        terminalView.contentInset = .zero
         terminalView.alwaysBounceVertical = true
         terminalView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         terminalView.adjustsFontForContentSizeCategory = false
