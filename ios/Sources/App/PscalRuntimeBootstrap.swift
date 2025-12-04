@@ -278,6 +278,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         guard shouldStart else { return }
 
+        configureSanitizerEnv()
+
         RuntimeLogger.runtime.resetSession()
         purgeTransientState()
         RuntimeAssetInstaller.shared.prepareWorkspace()
@@ -310,6 +312,20 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
                 _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
             }
+        }
+    }
+
+    // When running with AddressSanitizer, disable alternate signal stacks to avoid
+    // ASan aborts when helper threads exit (seen after ssh failures).
+    private func configureSanitizerEnv() {
+        let key = "ASAN_OPTIONS"
+        var options = ProcessInfo.processInfo.environment[key] ?? ""
+        if !options.contains("use_sigaltstack=0") {
+            if !options.isEmpty && !options.hasSuffix(" ") {
+                options.append(" ")
+            }
+            options.append("use_sigaltstack=0")
+            setenv(key, options, 1)
         }
     }
 
