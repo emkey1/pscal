@@ -849,7 +849,8 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
 
     // Calculate total size and copy bounds
     size_t total_size = 1;
-    const size_t MAX_ARRAY_ELEMENTS = 50 * 1000 * 1000; // hard cap to avoid runaway allocations
+    const size_t MAX_ARRAY_ELEMENTS = 1 * 1000 * 1000; // hard cap to avoid runaway allocations
+    const size_t MAX_ARRAY_BYTES = 128 * 1024 * 1024;  // 128 MB soft ceiling
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];
@@ -866,9 +867,14 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
             free(v.lower_bounds); free(v.upper_bounds);
             EXIT_FAILURE_HANDLER();
         }
-        if (total_size > MAX_ARRAY_ELEMENTS) {
-            fprintf(stderr, "Error: Array size %zu exceeds safety cap (%zu elements) in makeArrayND.\n",
-                    total_size, MAX_ARRAY_ELEMENTS);
+        size_t max_by_bytes = MAX_ARRAY_BYTES / sizeof(Value);
+        size_t absolute_cap = MAX_ARRAY_ELEMENTS < max_by_bytes ? MAX_ARRAY_ELEMENTS : max_by_bytes;
+        if (absolute_cap == 0) {
+            absolute_cap = MAX_ARRAY_ELEMENTS;
+        }
+        if (total_size > absolute_cap) {
+            fprintf(stderr, "Error: Array size %zu exceeds safety cap (%zu elements / %zu bytes) in makeArrayND.\n",
+                    total_size, absolute_cap, MAX_ARRAY_BYTES);
             free(v.lower_bounds); free(v.upper_bounds);
             EXIT_FAILURE_HANDLER();
         }
