@@ -200,9 +200,9 @@ main(int argc, char **argv)
 
 	i = 0;
 	/* XXX This really needs to read sshd_config for the paths */
-	key_fd[i++] = open(_PATH_HOST_ECDSA_KEY_FILE, O_RDONLY);
-	key_fd[i++] = open(_PATH_HOST_ED25519_KEY_FILE, O_RDONLY);
-	key_fd[i++] = open(_PATH_HOST_RSA_KEY_FILE, O_RDONLY);
+	key_fd[i++] = open(pscal_openssh_hostkey_path(_PATH_HOST_ECDSA_KEY_FILE), O_RDONLY);
+	key_fd[i++] = open(pscal_openssh_hostkey_path(_PATH_HOST_ED25519_KEY_FILE), O_RDONLY);
+	key_fd[i++] = open(pscal_openssh_hostkey_path(_PATH_HOST_RSA_KEY_FILE), O_RDONLY);
 
 	if ((pw = getpwuid(getuid())) == NULL)
 		fatal("getpwuid failed");

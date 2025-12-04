@@ -286,6 +286,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
         }
+        // Make the container root available to native helpers (OpenSSH host keys).
+        let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
+        setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
 
         EditorTerminalBridge.shared.deactivate()
 

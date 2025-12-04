@@ -1815,23 +1815,27 @@ main(int ac, char **av)
 		    sizeof(*sensitive_data.keys));
 
 		/* XXX check errors? */
+#define HOSTKEY_PATH(p) pscal_openssh_hostkey_path(p)
+
 #define L_PUBKEY(p,o) do { \
 	if ((o) >= sensitive_data.nkeys) \
 		fatal_f("pubkey out of array bounds"); \
-	check_load(sshkey_load_public(p, &(sensitive_data.keys[o]), NULL), \
-	    &(sensitive_data.keys[o]), p, "hostbased pubkey"); \
+	const char *resolved = HOSTKEY_PATH(p); \
+	check_load(sshkey_load_public(resolved, &(sensitive_data.keys[o]), NULL), \
+	    &(sensitive_data.keys[o]), resolved, "hostbased pubkey"); \
 	if (sensitive_data.keys[o] != NULL) { \
-		debug2("hostbased pubkey \"%s\" in slot %d", p, o); \
+		debug2("hostbased pubkey \"%s\" in slot %d", resolved, o); \
 		loaded++; \
 	} \
 } while (0)
 #define L_CERT(p,o) do { \
 	if ((o) >= sensitive_data.nkeys) \
 		fatal_f("cert out of array bounds"); \
-	check_load(sshkey_load_cert(p, &(sensitive_data.keys[o])), \
-	    &(sensitive_data.keys[o]), p, "hostbased cert"); \
+	const char *resolved = HOSTKEY_PATH(p); \
+	check_load(sshkey_load_cert(resolved, &(sensitive_data.keys[o])), \
+	    &(sensitive_data.keys[o]), resolved, "hostbased cert"); \
 	if (sensitive_data.keys[o] != NULL) { \
-		debug2("hostbased cert \"%s\" in slot %d", p, o); \
+		debug2("hostbased cert \"%s\" in slot %d", resolved, o); \
 		loaded++; \
 	} \
 } while (0)

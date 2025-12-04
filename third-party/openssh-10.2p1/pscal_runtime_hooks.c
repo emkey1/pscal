@@ -50,6 +50,25 @@ pscal_openssh_reset_progress_state(void)
 #endif
 }
 
+const char *
+pscal_openssh_hostkey_path(const char *default_path)
+{
+	static char pathbuf[PATH_MAX];
+#ifdef PSCAL_TARGET_IOS
+	const char *root = getenv("PSCALI_CONTAINER_ROOT");
+	if (!root || root[0] == '\0') {
+		root = getenv("HOME");
+	}
+	if (root && root[0] != '\0' && default_path && default_path[0] != '\0') {
+		const char *base = strrchr(default_path, '/');
+		base = base ? base + 1 : default_path;
+		snprintf(pathbuf, sizeof(pathbuf), "%s/etc/ssh/%s", root, base);
+		return pathbuf;
+	}
+#endif
+	return default_path;
+}
+
 void
 pscal_openssh_register_cleanup(pscal_openssh_cleanup_fn cleanup)
 {
