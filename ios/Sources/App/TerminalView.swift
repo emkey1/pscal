@@ -529,7 +529,6 @@ enum TerminalGeometryCalculator {
     private static let horizontalPadding: CGFloat = 0.0
     private static let verticalRowPadding: CGFloat = 0.0
     private static let statusOverlayHeight: CGFloat = 32.0
-    private static let dividerHeight: CGFloat = 1.0 / UIScreen.main.scale
     private struct FontMetricKey: Hashable {
         let name: String
         let pointSize: CGFloat
@@ -577,17 +576,13 @@ enum TerminalGeometryCalculator {
                                  safeAreaInsets: EdgeInsets,
                                  topPadding: CGFloat,
                                  showingStatus: Bool) -> (width: CGFloat, height: CGFloat) {
-        let leadingInset = max(0, safeAreaInsets.leading)
-        let trailingInset = max(0, safeAreaInsets.trailing)
-        let topInset = max(0, safeAreaInsets.top) + max(0, topPadding)
-        let bottomInset = max(0, safeAreaInsets.bottom)
-
-        let width = max(0, size.width - horizontalPadding - leadingInset - trailingInset)
-        var height = max(0, size.height - topInset - bottomInset)
+        // The container is already laid out respecting safe areas, so we avoid
+        // subtracting insets again to prevent double-counting at small sizes.
+        let width = max(0, size.width - horizontalPadding)
+        var height = max(0, size.height - topPadding)
         if showingStatus {
             height -= statusOverlayHeight
         }
-        height -= dividerHeight
         return (width, height)
     }
 
