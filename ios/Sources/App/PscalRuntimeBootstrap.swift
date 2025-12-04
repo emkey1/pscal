@@ -529,9 +529,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func updateGeometry(from source: GeometrySource, columns: Int, rows: Int) {
-        // Clamp to avoid runaway geometry that can overwhelm rendering when raw mode misreports.
-        let clampedColumns = max(10, min(columns, 400))
-        let clampedRows = max(4, min(rows, 400))
+        // Clamp to avoid runaway geometry that can overwhelm rendering when raw mode misreports,
+        // but allow wide grids for tiny fonts.
+        let clampedColumns = max(10, min(columns, 2000))
+        let clampedRows = max(4, min(rows, 2000))
         let metrics = TerminalGeometryMetrics(columns: clampedColumns, rows: clampedRows)
         geometryBySource[source] = metrics
         refreshActiveGeometry()
@@ -583,8 +584,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let screenSize = UIScreen.main.bounds.size
         let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
         let lineHeight = max(1.0, font.lineHeight)
-        let columns = max(10, min(Int(floor(screenSize.width / charWidth)), 400))
-        let rows = max(4, min(Int(floor(screenSize.height / lineHeight)), 400))
+        let columns = max(10, min(Int(floor(screenSize.width / charWidth)), 2000))
+        let rows = max(4, min(Int(floor(screenSize.height / lineHeight)), 2000))
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
 
