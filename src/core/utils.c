@@ -848,21 +848,29 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     }
 
     // Calculate total size and copy bounds
-    int total_size = 1;
+    size_t total_size = 1;
+    const size_t MAX_ARRAY_ELEMENTS = 50 * 1000 * 1000; // hard cap to avoid runaway allocations
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];
         int size_i = (upper_bounds[i] - lower_bounds[i] + 1);
         if (size_i <= 0) {
-             fprintf(stderr, "Error: Invalid array dimension size (%d..%d) in makeArrayND.\n", lower_bounds[i], upper_bounds[i]);
-             free(v.lower_bounds); free(v.upper_bounds);
-             EXIT_FAILURE_HANDLER();
+            fprintf(stderr, "Error: Invalid array dimension size (%d..%d) in makeArrayND.\n", lower_bounds[i], upper_bounds[i]);
+            free(v.lower_bounds); free(v.upper_bounds);
+            EXIT_FAILURE_HANDLER();
         }
+        size_t dim_size = (size_t)size_i;
         // Check for potential integer overflow when calculating total_size
-        if (__builtin_mul_overflow(total_size, size_i, &total_size)) {
-             fprintf(stderr, "Error: Array size exceeds limits in makeArrayND.\n");
-             free(v.lower_bounds); free(v.upper_bounds);
-             EXIT_FAILURE_HANDLER();
+        if (__builtin_mul_overflow(total_size, dim_size, &total_size)) {
+            fprintf(stderr, "Error: Array size exceeds limits in makeArrayND.\n");
+            free(v.lower_bounds); free(v.upper_bounds);
+            EXIT_FAILURE_HANDLER();
+        }
+        if (total_size > MAX_ARRAY_ELEMENTS) {
+            fprintf(stderr, "Error: Array size %zu exceeds safety cap (%zu elements) in makeArrayND.\n",
+                    total_size, MAX_ARRAY_ELEMENTS);
+            free(v.lower_bounds); free(v.upper_bounds);
+            EXIT_FAILURE_HANDLER();
         }
     }
 
