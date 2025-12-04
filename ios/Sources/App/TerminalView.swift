@@ -487,11 +487,13 @@ private struct TerminalContentView: View {
             return
         }
         if lastLoggedMetrics != metrics {
+            let grid = TerminalGeometryCalculator.calculateGrid(for: availableSize,
+                                                                font: font,
+                                                                safeAreaInsets: safeAreaInsets,
+                                                                topPadding: Self.topPadding,
+                                                                horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
+                                                                showingStatus: showingStatus)
             let char = TerminalGeometryCalculator.characterMetrics(for: font)
-            let usable = TerminalGeometryCalculator.usableDimensions(for: availableSize,
-                                                                     safeAreaInsets: safeAreaInsets,
-                                                                     topPadding: Self.topPadding,
-                                                                     showingStatus: showingStatus)
             terminalViewLog(String(format: "[TerminalView] available %.1fx%.1f safe(top=%.1f bottom=%.1f leading=%.1f trailing=%.1f) usable %.1fx%.1f font=%@ %.2fpt char(%.2f x %.2f) -> rows=%d cols=%d",
                                    availableSize.width,
                                    availableSize.height,
@@ -499,8 +501,8 @@ private struct TerminalContentView: View {
                                    safeAreaInsets.bottom,
                                    safeAreaInsets.leading,
                                    safeAreaInsets.trailing,
-                                   usable.width,
-                                   usable.height,
+                                   grid.width,
+                                   grid.height,
                                    font.fontName,
                                    font.pointSize,
                                    char.width,
@@ -533,7 +535,7 @@ struct TerminalGridCapacity {
 }
 
 enum TerminalGeometryCalculator {
-    private static let horizontalPadding: CGFloat = 0.0
+    static let horizontalPadding: CGFloat = 0.0
     private static let verticalRowPadding: CGFloat = 0.0
     private static let statusOverlayHeight: CGFloat = 32.0
     private struct FontMetricKey: Hashable {
