@@ -289,6 +289,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         // Make the container root available to native helpers (OpenSSH host keys).
         let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
         setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
+        // Also expose the working directory (Documents/home) as PSCALI_WORKDIR.
+        let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
+        setenv("PSCALI_WORKDIR", workdir, 1)
 
         EditorTerminalBridge.shared.deactivate()
 

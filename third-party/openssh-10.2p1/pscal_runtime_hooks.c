@@ -76,6 +76,10 @@ pscal_openssh_hostkey_dir(void)
 	if (!root || root[0] == '\0') {
 		root = getenv("HOME");
 	}
+	const char *workdir = getenv("PSCALI_WORKDIR");
+	if (workdir && workdir[0] != '\0') {
+		root = workdir;
+	}
 	if (!root || root[0] == '\0') {
 		return NULL;
 	}
