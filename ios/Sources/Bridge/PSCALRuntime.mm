@@ -267,6 +267,25 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 #ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
 #endif
+    // Ensure ASan does not manipulate alt/fake stacks when present.
+#if __has_feature(address_sanitizer)
+    {
+        const char *asan_opts = getenv("ASAN_OPTIONS");
+        std::string merged = asan_opts ? std::string(asan_opts) : std::string();
+        auto appendOpt = [&merged](const char *opt) {
+            if (merged.find(opt) != std::string::npos) {
+                return;
+            }
+            if (!merged.empty() && merged.back() != ' ') {
+                merged.push_back(' ');
+            }
+            merged += opt;
+        };
+        appendOpt("use_sigaltstack=0");
+        appendOpt("detect_stack_use_after_return=0");
+        setenv("ASAN_OPTIONS", merged.c_str(), 1);
+    }
+#endif
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active) {
         pthread_mutex_unlock(&s_runtime_mutex);
