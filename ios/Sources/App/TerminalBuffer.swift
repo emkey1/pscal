@@ -1007,10 +1007,14 @@ struct TerminalSnapshot {
         guard !row.isEmpty else {
             return NSAttributedString(string: "")
         }
-        let onlySpaces = row.allSatisfy { $0.character == " " }
+        if row.allSatisfy({ $0.character == " " }) {
+            return NSAttributedString(string: "")
+        }
+
         let mutable = NSMutableAttributedString()
         var currentAttributes = row.first!.attributes
         var buffer = ""
+        buffer.reserveCapacity(row.count)
 
         func flush() {
             guard !buffer.isEmpty else { return }
