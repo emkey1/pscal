@@ -175,7 +175,12 @@ restart:
 	 */
 	for (i = 0; i < _NSIG; i++) {
 		if (signo[i]) {
+#ifdef PSCAL_TARGET_IOS
+			/* In shared process model, do not kill the process. Just continue/fail. */
+			errno = EINTR;
+#else
 			kill(getpid(), i);
+#endif
 			switch (i) {
 			case SIGTSTP:
 			case SIGTTIN:

@@ -110,6 +110,10 @@
 #include "ssh-pkcs11.h"
 #endif
 
+#ifdef PSCAL_TARGET_IOS
+#include "pscal_runtime_hooks.h"
+#endif
+
 extern char *__progname;
 
 /* Saves a copy of argv for setproctitle emulation */
@@ -678,12 +682,63 @@ valid_ruser(const char *s)
 	return 1;
 }
 
+static void
+ssh_reset(void)
+{
+	int i;
+
+	debug_flag = 0;
+	tty_flag = 0;
+	need_controlpersist_detach = 0;
+	ostdin_null_flag = 0;
+	osession_type = 0;
+	otty_flag = 0;
+	orequest_tty = 0;
+	ofork_after_authentication = 0;
+	memset(&options, 0, sizeof(options));
+	config = NULL;
+	free(host);
+	host = NULL;
+	free(forward_agent_sock_path);
+	forward_agent_sock_path = NULL;
+	memset(&hostaddr, 0, sizeof(hostaddr));
+	if (sensitive_data.nkeys != 0) {
+		for (i = 0; i < sensitive_data.nkeys; i++) {
+			if (sensitive_data.keys[i] != NULL)
+				sshkey_free(sensitive_data.keys[i]);
+		}
+		free(sensitive_data.keys);
+	}
+	memset(&sensitive_data, 0, sizeof(sensitive_data));
+	if (command) {
+		sshbuf_free(command);
+		command = NULL;
+	}
+	forward_confirms_pending = -1;
+	muxserver_sock = -1;
+	muxclient_command = 0;
+#ifndef HAVE_SETPROCTITLE
+	saved_av = NULL;
+#endif
+}
+
 /*
  * Main program for the ssh client.
  */
 int
 main(int ac, char **av)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_exit_context ctx;
+	if (setjmp(ctx.env) != 0) {
+		int exit_code = ctx.exit_code;
+		pscal_openssh_pop_exit_context(&ctx);
+		return exit_code;
+	}
+	pscal_openssh_push_exit_context(&ctx);
+#endif
+
+	extern int optreset;
 	struct ssh *ssh = NULL;
 	int i, r, opt, exit_status, use_syslog, direct, timeout_ms;
 	int was_addr, config_test = 0, opt_terminated = 0, want_final_pass = 0;
@@ -692,9 +747,13 @@ main(int ac, char **av)
 	char cname[NI_MAXHOST], thishost[NI_MAXHOST];
 	struct stat st;
 	struct passwd *pw;
-	extern int optind, optreset;
+	extern int optind;
 	extern char *optarg;
 	struct Forward fwd;
+
+	ssh_reset();
+	optreset = 1;
+	optind = 1;
 	struct addrinfo *addrs = NULL;
 	size_t n, len;
 	u_int j;
@@ -1321,6 +1380,11 @@ main(int ac, char **av)
 	if (fill_default_options(&options) != 0)
 		cleanup_exit(255);
 
+#ifdef PSCAL_TARGET_IOS
+	if (options.connection_timeout <= 0)
+		options.connection_timeout = 30;
+#endif
+
 	if (options.user == NULL) {
 		user_was_default = 1;
 		options.user = xstrdup(pw->pw_name);
@@ -1883,6 +1947,9 @@ main(int ac, char **av)
 	/* Kill ProxyCommand if it is running. */
 	ssh_kill_proxy_command();
 
+#ifdef PSCAL_TARGET_IOS
+	pscal_openssh_pop_exit_context(&ctx);
+#endif
 	return exit_status;
 }
 
