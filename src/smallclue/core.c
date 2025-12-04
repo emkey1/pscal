@@ -1096,8 +1096,20 @@ static int pager_control_fd(void) {
     pager_control_fd_value = -1;
 #else
     int fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
+    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+        const char *tty = ttyname(STDOUT_FILENO);
+        if (tty && *tty) {
+            fd = open(tty, O_RDONLY | O_CLOEXEC);
+        }
+    }
     if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
-        fd = pagerDupForRead(STDIN_FILENO);
+        const char *tty = ttyname(STDIN_FILENO);
+        if (tty && *tty) {
+            fd = open(tty, O_RDONLY | O_CLOEXEC);
+        }
+        if (fd < 0) {
+            fd = pagerDupForRead(STDIN_FILENO);
+        }
     }
     if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
         fd = pagerDupForRead(STDOUT_FILENO);
