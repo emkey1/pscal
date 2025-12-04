@@ -530,11 +530,51 @@ enum TerminalGeometryCalculator {
     private static let verticalRowPadding: CGFloat = 0.0
     private static let statusOverlayHeight: CGFloat = 32.0
     private static let dividerHeight: CGFloat = 1.0 / UIScreen.main.scale
+    private struct FontMetricKey: Hashable {
+        let name: String
+        let pointSize: CGFloat
+    }
+    private static var metricCache: [FontMetricKey: (CGFloat, CGFloat)] = [:]
+    private static let metricLock = NSLock()
 
     static func characterMetrics(for font: UIFont) -> (width: CGFloat, lineHeight: CGFloat) {
-        let width = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
-        let height = font.lineHeight + verticalRowPadding
-        return (width, height)
+        let key = FontMetricKey(name: font.fontName, pointSize: font.pointSize)
+        if let cached = cachedMetrics(for: key) {
+            return cached
+        }
+        let measured = measureMetrics(for: font)
+        storeMetrics(measured, for: key)
+        return measured
+    }
+
+    private static func cachedMetrics(for key: FontMetricKey) -> (CGFloat, CGFloat)? {
+        metricLock.lock()
+        let value = metricCache[key]
+        metricLock.unlock()
+        return value
+    }
+
+    private static func storeMetrics(_ metrics: (CGFloat, CGFloat), for key: FontMetricKey) {
+        metricLock.lock()
+        metricCache[key] = metrics
+        metricLock.unlock()
+    }
+
+    private static func measureMetrics(for font: UIFont) -> (CGFloat, CGFloat) {
+        // Use TextKit measurement to match actual layout behaviour.
+        let sample = String(repeating: "W", count: 8)
+        let storage = NSTextStorage(string: sample, attributes: [.font: font])
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude,
+                                                     height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        _ = layoutManager.glyphRange(for: container)
+        let used = layoutManager.usedRect(for: container)
+        let widthPerChar = max(1.0, used.width / CGFloat(sample.count))
+        let height = max(font.pointSize, used.height + verticalRowPadding)
+        return (widthPerChar, height)
     }
 
     static func usableDimensions(for size: CGSize,
