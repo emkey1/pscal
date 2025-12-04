@@ -532,8 +532,11 @@ enum TerminalGeometryCalculator {
     private static let dividerHeight: CGFloat = 1.0 / UIScreen.main.scale
 
     static func characterMetrics(for font: UIFont) -> (width: CGFloat, lineHeight: CGFloat) {
-        let width = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
-        let height = font.lineHeight + verticalRowPadding
+        let scale = UIScreen.main.scale
+        let rawWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
+        let width = ceil(rawWidth * scale) / scale
+        let rawHeight = font.lineHeight + verticalRowPadding
+        let height = ceil(rawHeight * scale) / scale
         return (width, height)
     }
 
