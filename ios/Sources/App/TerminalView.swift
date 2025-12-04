@@ -525,6 +525,13 @@ struct TerminalGeometryMetrics: Equatable {
     let rows: Int
 }
 
+struct TerminalGridCapacity {
+    let rows: Int
+    let columns: Int
+    let width: CGFloat
+    let height: CGFloat
+}
+
 enum TerminalGeometryCalculator {
     private static let horizontalPadding: CGFloat = 0.0
     private static let verticalRowPadding: CGFloat = 0.0
@@ -572,31 +579,32 @@ enum TerminalGeometryCalculator {
         return (width, height)
     }
 
-    static func usableDimensions(for size: CGSize,
-                                 safeAreaInsets: EdgeInsets,
-                                 topPadding: CGFloat,
-                                 showingStatus: Bool) -> (width: CGFloat, height: CGFloat) {
-        let uiInsets = UIEdgeInsets(top: safeAreaInsets.top,
-                                    left: safeAreaInsets.leading,
-                                    bottom: safeAreaInsets.bottom,
-                                    right: safeAreaInsets.trailing)
-
+    static func calculateGrid(for size: CGSize,
+                              font: UIFont,
+                              safeAreaInsets: EdgeInsets,
+                              topPadding: CGFloat,
+                              horizontalPadding: CGFloat,
+                              showingStatus: Bool) -> TerminalGridCapacity {
+        // Vertical space
         var availableHeight = size.height
         availableHeight -= topPadding
         if showingStatus {
             availableHeight -= statusOverlayHeight
         }
-        // If the view is laid out full-screen, subtract bottom inset so we don't draw under home bar.
-        availableHeight -= uiInsets.bottom
+        availableHeight -= safeAreaInsets.bottom
         availableHeight = max(0, availableHeight)
 
+        // Horizontal space (padding is per-side)
         var availableWidth = size.width
-        // Horizontal padding applies to both sides.
         availableWidth -= (horizontalPadding * 2)
-        // We already set textContainer padding to zero in the view setup, so no extra subtraction.
         availableWidth = max(0, availableWidth)
 
-        return (availableWidth, availableHeight)
+        let lineHeight = font.lineHeight
+        let charWidth = ("M" as NSString).size(withAttributes: [.font: font]).width
+        let rows = Int(floor(availableHeight / lineHeight))
+        let cols = Int(floor(availableWidth / charWidth))
+
+        return TerminalGridCapacity(rows: rows, columns: cols, width: availableWidth, height: availableHeight)
     }
 
     static func metrics(for size: CGSize,
@@ -606,14 +614,15 @@ enum TerminalGeometryCalculator {
                         font: UIFont) -> TerminalGeometryMetrics? {
         guard size.width > 0, size.height > 0 else { return nil }
 
-        let char = characterMetrics(for: font)
-        let usable = usableDimensions(for: size,
-                                      safeAreaInsets: safeAreaInsets,
-                                      topPadding: topPadding,
-                                      showingStatus: showingStatus)
+        let grid = calculateGrid(for: size,
+                                 font: font,
+                                 safeAreaInsets: safeAreaInsets,
+                                 topPadding: topPadding,
+                                 horizontalPadding: horizontalPadding,
+                                 showingStatus: showingStatus)
 
-        let rawColumns = Int(floor(usable.width / char.width))
-        let rawRows = Int(floor(usable.height / char.lineHeight))
+        let rawColumns = grid.columns
+        let rawRows = grid.rows
         guard rawColumns > 0, rawRows > 0 else { return nil }
 
         return TerminalGeometryMetrics(
