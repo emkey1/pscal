@@ -542,14 +542,15 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let desiredSource = determineDesiredGeometrySource()
         let desiredMetrics = geometryBySource[desiredSource] ?? geometryBySource[.main] ?? activeGeometry
         let geometryChanged = desiredMetrics != activeGeometry || desiredSource != activeGeometrySource
+        let sourceLabel: String = (desiredSource == .main) ? "main" : "elvis"
         if geometryChanged {
-            runtimeDebugLog("[Geometry] switching to \(desiredSource) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
+            runtimeDebugLog("[Geometry] switching to \(sourceLabel) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
             activeGeometry = desiredMetrics
             activeGeometrySource = desiredSource
             let shouldResize = (desiredSource == .main)
             applyActiveGeometry(resizeTerminalBuffer: shouldResize, forceRuntimeUpdate: true)
         } else if forceRuntimeUpdate {
-            runtimeDebugLog("[Geometry] refreshing existing geometry source=\(desiredSource) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
+            runtimeDebugLog("[Geometry] refreshing existing geometry source=\(sourceLabel) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
             applyActiveGeometry(resizeTerminalBuffer: false, forceRuntimeUpdate: true)
         } else {
             activeGeometrySource = desiredSource
