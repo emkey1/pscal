@@ -46,13 +46,7 @@ extern "C" void SDL_SetMainReady(void);
 static void PSCALRuntimeEnsureSDLReady(void);
 #endif
 
-#if __has_include(<sanitizer/asan_interface.h>) && __has_feature(address_sanitizer)
-#define PSCAL_HAS_ASAN_INTERFACE 1
-#include <sanitizer/asan_interface.h>
-__attribute__((weak_import)) extern "C" void __asan_unregister_thread(void);
-#else
 #define PSCAL_HAS_ASAN_INTERFACE 0
-#endif
 
 extern "C" {
     // Forward declare exsh entrypoint exposed by the existing CLI target.
@@ -208,11 +202,6 @@ static void *PSCALRuntimeOutputPump(void *_) {
         }
         PSCALRuntimeDispatchOutput(buffer, (size_t)nread);
     }
-#if PSCAL_HAS_ASAN_INTERFACE
-    if (&__asan_unregister_thread != NULL) {
-        __asan_unregister_thread();
-    }
-#endif
     return NULL;
 }
 
@@ -439,11 +428,6 @@ typedef struct {
 static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
     context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
-#if PSCAL_HAS_ASAN_INTERFACE
-    if (&__asan_unregister_thread != NULL) {
-        __asan_unregister_thread();
-    }
-#endif
     return NULL;
 }
 
