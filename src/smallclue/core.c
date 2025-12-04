@@ -2260,7 +2260,12 @@ static int markdownInteractiveSelectDocument(void) {
     if (!has_selection) {
         return 0;
     }
-    return smallclueMarkdownDisplayPath(selected);
+    int status = smallclueMarkdownDisplayPath(selected);
+    if (status == 0) {
+        // After viewing a document, return to the list.
+        return markdownInteractiveSelectDocument();
+    }
+    return status;
 }
 
 #if defined(PSCAL_HAS_LIBCURL)
