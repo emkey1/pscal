@@ -576,14 +576,27 @@ enum TerminalGeometryCalculator {
                                  safeAreaInsets: EdgeInsets,
                                  topPadding: CGFloat,
                                  showingStatus: Bool) -> (width: CGFloat, height: CGFloat) {
-        // The container is already laid out respecting safe areas, so we avoid
-        // subtracting insets again to prevent double-counting at small sizes.
-        let width = max(0, size.width - horizontalPadding)
-        var height = max(0, size.height - topPadding)
+        let uiInsets = UIEdgeInsets(top: safeAreaInsets.top,
+                                    left: safeAreaInsets.leading,
+                                    bottom: safeAreaInsets.bottom,
+                                    right: safeAreaInsets.trailing)
+
+        var availableHeight = size.height
+        availableHeight -= topPadding
         if showingStatus {
-            height -= statusOverlayHeight
+            availableHeight -= statusOverlayHeight
         }
-        return (width, height)
+        // If the view is laid out full-screen, subtract bottom inset so we don't draw under home bar.
+        availableHeight -= uiInsets.bottom
+        availableHeight = max(0, availableHeight)
+
+        var availableWidth = size.width
+        // Horizontal padding applies to both sides.
+        availableWidth -= (horizontalPadding * 2)
+        // We already set textContainer padding to zero in the view setup, so no extra subtraction.
+        availableWidth = max(0, availableWidth)
+
+        return (availableWidth, availableHeight)
     }
 
     static func metrics(for size: CGSize,
