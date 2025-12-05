@@ -353,8 +353,8 @@ struct TerminalView: View {
                     focusAnchor &+= 1
                 }) {
                     Text("R")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .frame(width: 30, height: 30)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .padding(8)
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 .accessibilityLabel("Reset Terminal")
