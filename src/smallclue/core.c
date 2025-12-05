@@ -44,6 +44,7 @@
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include "common/path_truncate.h"
+#include "common/path_virtualization.h"
 void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
 #endif
 #include <termios.h>
@@ -61,6 +62,20 @@ void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
 #include <ifaddrs.h>
 #include <net/if.h>
 #endif
+
+static const char *smallclueResolvePath(const char *path, char *buffer, size_t buflen) {
+    if (!path) {
+        return NULL;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (pathTruncateExpand(path, buffer, buflen)) {
+        return buffer;
+    }
+#endif
+    (void)buffer;
+    (void)buflen;
+    return path;
+}
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -6145,7 +6160,12 @@ static int smallclueRemovePathWithLabel(const char *label, const char *path, boo
 }
 
 static int smallclueCopyFile(const char *label, const char *src, const char *dst) {
-    int in_fd = open(src, O_RDONLY);
+    char resolved_src[PATH_MAX];
+    char resolved_dst[PATH_MAX];
+    const char *src_path = smallclueResolvePath(src, resolved_src, sizeof(resolved_src));
+    const char *dst_path = smallclueResolvePath(dst, resolved_dst, sizeof(resolved_dst));
+
+    int in_fd = open(src_path, O_RDONLY);
     if (in_fd < 0) {
         fprintf(stderr, "%s: %s: %s\n", label, src, strerror(errno));
         return -1;
@@ -6162,7 +6182,7 @@ static int smallclueCopyFile(const char *label, const char *src, const char *dst
         return -1;
     }
     mode_t mode = st.st_mode & 0777;
-    int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, mode);
+    int out_fd = open(dst_path, O_WRONLY | O_CREAT | O_TRUNC, mode);
     if (out_fd < 0) {
         fprintf(stderr, "%s: %s: %s\n", label, dst, strerror(errno));
         close(in_fd);
@@ -6569,8 +6589,10 @@ static int smallclueCpCommand(int argc, char **argv) {
         return 1;
     }
     const char *dest = argv[argc - 1];
+    char resolved_dest_root[PATH_MAX];
+    const char *dest_real = smallclueResolvePath(dest, resolved_dest_root, sizeof(resolved_dest_root));
     struct stat dest_stat;
-    int dest_exists = (stat(dest, &dest_stat) == 0);
+    int dest_exists = (stat(dest_real, &dest_stat) == 0);
     bool dest_is_dir = dest_exists && S_ISDIR(dest_stat.st_mode);
     int source_count = argc - 2;
     if (source_count > 1 && !dest_is_dir) {
@@ -6579,7 +6601,8 @@ static int smallclueCpCommand(int argc, char **argv) {
     }
     int status = 0;
     for (int i = 1; i <= source_count; ++i) {
-        const char *src = argv[i];
+        char resolved_src[PATH_MAX];
+        const char *src = smallclueResolvePath(argv[i], resolved_src, sizeof(resolved_src));
         struct stat src_stat;
         if (stat(src, &src_stat) != 0) {
             fprintf(stderr, "cp: %s: %s\n", src, strerror(errno));
@@ -6592,9 +6615,10 @@ static int smallclueCpCommand(int argc, char **argv) {
             continue;
         }
         char target_path[PATH_MAX];
-        const char *target = dest;
+        char resolved_dest[PATH_MAX];
+        const char *target = smallclueResolvePath(dest, resolved_dest, sizeof(resolved_dest));
         if (dest_is_dir) {
-            if (smallclueBuildPath(target_path, sizeof(target_path), dest, smallclueLeafName(src)) != 0) {
+            if (smallclueBuildPath(target_path, sizeof(target_path), dest_real, smallclueLeafName(src)) != 0) {
                 fprintf(stderr, "cp: %s/%s: %s\n", dest, smallclueLeafName(src), strerror(errno));
                 status = 1;
                 continue;
@@ -6622,8 +6646,10 @@ static int smallclueMvCommand(int argc, char **argv) {
         return 1;
     }
     const char *dest = argv[argc - 1];
+    char resolved_dest_root[PATH_MAX];
+    const char *dest_real = smallclueResolvePath(dest, resolved_dest_root, sizeof(resolved_dest_root));
     struct stat dest_stat;
-    int dest_exists = (stat(dest, &dest_stat) == 0);
+    int dest_exists = (stat(dest_real, &dest_stat) == 0);
     bool dest_is_dir = dest_exists && S_ISDIR(dest_stat.st_mode);
     int source_count = argc - 2;
     if (source_count > 1 && !dest_is_dir) {
@@ -6632,12 +6658,19 @@ static int smallclueMvCommand(int argc, char **argv) {
     }
     int status = 0;
     for (int i = 1; i <= source_count; ++i) {
-        const char *src = argv[i];
+        char resolved_src[PATH_MAX];
+        const char *src = smallclueResolvePath(argv[i], resolved_src, sizeof(resolved_src));
         char target_path[PATH_MAX];
-        const char *target = dest;
+        char resolved_dest_dir[PATH_MAX];
+        const char *dest_base = dest;
+        if (!dest_is_dir) {
+            dest_base = smallclueResolvePath(dest, resolved_dest_dir, sizeof(resolved_dest_dir));
+        }
+        const char *target = dest_base;
         if (dest_is_dir) {
-            if (smallclueBuildPath(target_path, sizeof(target_path), dest, smallclueLeafName(src)) != 0) {
-                fprintf(stderr, "mv: %s/%s: %s\n", dest, smallclueLeafName(src), strerror(errno));
+            const char *dir_root = smallclueResolvePath(dest, resolved_dest_dir, sizeof(resolved_dest_dir));
+            if (smallclueBuildPath(target_path, sizeof(target_path), dir_root, smallclueLeafName(src)) != 0) {
+                fprintf(stderr, "mv: %s/%s: %s\n", dir_root, smallclueLeafName(src), strerror(errno));
                 status = 1;
                 continue;
             }
