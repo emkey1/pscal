@@ -296,6 +296,36 @@ void pathTruncateApplyEnvironment(const char *prefix) {
     pathTruncateResetCaches();
 }
 
+void pathTruncateProvisionDev(const char *prefix) {
+    if (!prefix || *prefix != '/') {
+        return;
+    }
+    char devdir[PATH_MAX];
+    int written = snprintf(devdir, sizeof(devdir), "%s/dev", prefix);
+    if (written <= 0 || (size_t)written >= sizeof(devdir)) {
+        return;
+    }
+    pathTruncateEnsureDir(devdir);
+    const struct {
+        const char *name;
+        const char *target;
+    } links[] = {
+        { "null", "/dev/null" },
+        { "zero", "/dev/zero" }
+    };
+    for (size_t i = 0; i < sizeof(links) / sizeof(links[0]); ++i) {
+        char link_path[PATH_MAX];
+        if (snprintf(link_path, sizeof(link_path), "%s/%s", devdir, links[i].name) >= (int)sizeof(link_path)) {
+            continue;
+        }
+        struct stat st;
+        if (lstat(link_path, &st) == 0) {
+            continue; // already exists
+        }
+        symlink(links[i].target, link_path);
+    }
+}
+
 static const char *pathTruncateSkipLeadingSlashes(const char *input) {
     const char *cursor = input;
     while (*cursor == '/') {
