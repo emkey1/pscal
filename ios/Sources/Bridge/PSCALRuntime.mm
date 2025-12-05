@@ -453,6 +453,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     const char *pt_prefix = getenv("PATH_TRUNCATE");
     if (pt_prefix && pt_prefix[0] == '/') {
         pathTruncateProvisionDev(pt_prefix);
+        pathTruncateProvisionProc(pt_prefix);
     }
     PSCALRuntimeEnsurePendingWindowSizeLocked();
 
@@ -716,6 +717,7 @@ void PSCALRuntimeApplyPathTruncation(const char *path) {
     if (path && path[0] != '\0') {
         setenv("PATH_TRUNCATE", path, 1);
         pathTruncateProvisionDev(path);
+        pathTruncateProvisionProc(path);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
