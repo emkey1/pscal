@@ -10,7 +10,10 @@
 #include <sys/types.h>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#include <sys/utsname.h>
+#include <sys/mount.h>
 #endif
+#include <time.h>
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -345,45 +348,135 @@ void pathTruncateProvisionProc(const char *prefix) {
 
     char cpuinfo_path[PATH_MAX];
     written = snprintf(cpuinfo_path, sizeof(cpuinfo_path), "%s/cpuinfo", procdir);
-    if (written <= 0 || (size_t)written >= sizeof(cpuinfo_path)) {
-        return;
-    }
-
-    FILE *f = fopen(cpuinfo_path, "w");
-    if (!f) {
-        return;
-    }
-
-    /* Gather a few hardware facts if available. */
-    int ncpu = 1;
-    uint64_t freq = 0;
-    char machine[128] = {0};
-    char model[128] = {0};
-#if defined(__APPLE__)
-    size_t sz = sizeof(ncpu);
-    sysctlbyname("hw.ncpu", &ncpu, &sz, NULL, 0);
-    sz = sizeof(freq);
-    sysctlbyname("hw.cpufrequency", &freq, &sz, NULL, 0);
-    sz = sizeof(machine);
-    sysctlbyname("hw.machine", machine, &sz, NULL, 0);
-    sz = sizeof(model);
-    sysctlbyname("hw.model", model, &sz, NULL, 0);
-#endif
-
-    if (ncpu <= 0) ncpu = 1;
-    for (int i = 0; i < ncpu; ++i) {
-        fprintf(f, "processor\t: %d\n", i);
-        fprintf(f, "model name\t: PSCAL virtual CPU\n");
-        if (freq > 0) {
-            double mhz = (double)freq / 1e6;
-            fprintf(f, "cpu MHz\t\t: %.0f\n", mhz);
+    if (written > 0 && (size_t)written < sizeof(cpuinfo_path)) {
+        FILE *f = fopen(cpuinfo_path, "w");
+        if (f) {
+            int ncpu = 1;
+            uint64_t freq = 0;
+            char machine[128] = {0};
+            char model[128] = {0};
+    #if defined(__APPLE__)
+            size_t sz = sizeof(ncpu);
+            sysctlbyname("hw.ncpu", &ncpu, &sz, NULL, 0);
+            sz = sizeof(freq);
+            sysctlbyname("hw.cpufrequency", &freq, &sz, NULL, 0);
+            sz = sizeof(machine);
+            sysctlbyname("hw.machine", machine, &sz, NULL, 0);
+            sz = sizeof(model);
+            sysctlbyname("hw.model", model, &sz, NULL, 0);
+    #endif
+            if (ncpu <= 0) ncpu = 1;
+            for (int i = 0; i < ncpu; ++i) {
+                fprintf(f, "processor\t: %d\n", i);
+                fprintf(f, "model name\t: PSCAL virtual CPU\n");
+                if (freq > 0) {
+                    double mhz = (double)freq / 1e6;
+                    fprintf(f, "cpu MHz\t\t: %.0f\n", mhz);
+                }
+                fprintf(f, "Hardware\t: %s %s\n",
+                        machine[0] ? machine : "arm64",
+                        model[0] ? model : "");
+                fprintf(f, "\n");
+            }
+            fclose(f);
         }
-        fprintf(f, "Features\t: %s\n", "fp asimd evtstrm aes pmull sha1 sha2 crc32");
-        fprintf(f, "Hardware\t: %s %s\n\n",
-                machine[0] ? machine : "arm64",
-                model[0] ? model : "");
     }
-    fclose(f);
+
+    /* /proc/meminfo */
+    char meminfo_path[PATH_MAX];
+    written = snprintf(meminfo_path, sizeof(meminfo_path), "%s/meminfo", procdir);
+    if (written > 0 && (size_t)written < sizeof(meminfo_path)) {
+        FILE *f = fopen(meminfo_path, "w");
+        if (f) {
+            uint64_t mem_bytes = 0;
+    #if defined(__APPLE__)
+            size_t sz = sizeof(mem_bytes);
+            sysctlbyname("hw.memsize", &mem_bytes, &sz, NULL, 0);
+    #endif
+            unsigned long mem_kb = (unsigned long)(mem_bytes / 1024);
+            fprintf(f, "MemTotal:       %lu kB\n", mem_kb);
+            fprintf(f, "MemFree:        %lu kB\n", mem_kb / 4);   /* placeholder */
+            fprintf(f, "MemAvailable:   %lu kB\n", mem_kb / 2);   /* placeholder */
+            fprintf(f, "Buffers:        0 kB\n");
+            fprintf(f, "Cached:         0 kB\n");
+            fprintf(f, "SwapCached:     0 kB\n");
+            fprintf(f, "SwapTotal:      0 kB\n");
+            fprintf(f, "SwapFree:       0 kB\n");
+            fclose(f);
+        }
+    }
+
+    /* /proc/uptime */
+    char uptime_path[PATH_MAX];
+    written = snprintf(uptime_path, sizeof(uptime_path), "%s/uptime", procdir);
+    if (written > 0 && (size_t)written < sizeof(uptime_path)) {
+        FILE *f = fopen(uptime_path, "w");
+        if (f) {
+            struct timespec ts;
+            double secs = 0.0;
+            if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+                secs = ts.tv_sec + ts.tv_nsec / 1e9;
+            }
+            fprintf(f, "%.2f %.2f\n", secs, secs); /* idle time placeholder */
+            fclose(f);
+        }
+    }
+
+    /* /proc/version */
+    char version_path[PATH_MAX];
+    written = snprintf(version_path, sizeof(version_path), "%s/version", procdir);
+    if (written > 0 && (size_t)written < sizeof(version_path)) {
+        FILE *f = fopen(version_path, "w");
+        if (f) {
+            struct utsname un;
+            uname(&un);
+            fprintf(f, "PSCALI %s %s %s\n", un.sysname, un.release, un.version);
+            fclose(f);
+        }
+    }
+
+    /* /proc/stat */
+    char stat_path[PATH_MAX];
+    written = snprintf(stat_path, sizeof(stat_path), "%s/stat", procdir);
+    if (written > 0 && (size_t)written < sizeof(stat_path)) {
+        FILE *f = fopen(stat_path, "w");
+        if (f) {
+            fprintf(f, "cpu  1 1 1 1 0 0 0 0 0 0\n");
+            fprintf(f, "intr 0\n");
+            fprintf(f, "ctxt 0\n");
+            fprintf(f, "btime %ld\n", (long)time(NULL));
+            fprintf(f, "processes 0\n");
+            fprintf(f, "procs_running 0\n");
+            fprintf(f, "procs_blocked 0\n");
+            fclose(f);
+        }
+    }
+
+    /* /proc/mounts */
+    char mounts_path[PATH_MAX];
+    written = snprintf(mounts_path, sizeof(mounts_path), "%s/mounts", procdir);
+    if (written > 0 && (size_t)written < sizeof(mounts_path)) {
+        FILE *f = fopen(mounts_path, "w");
+        if (f) {
+            struct statfs sfs;
+            if (statfs("/", &sfs) == 0) {
+                fprintf(f, "%s / %s rw 0 0\n",
+                        sfs.f_mntfromname[0] ? sfs.f_mntfromname : "rootfs",
+                        sfs.f_fstypename[0] ? sfs.f_fstypename : "ext4");
+            } else {
+                fprintf(f, "rootfs / ext4 rw 0 0\n");
+            }
+            fclose(f);
+        }
+    }
+
+    /* /proc/self -> pid 1 placeholder */
+    char self_path[PATH_MAX];
+    written = snprintf(self_path, sizeof(self_path), "%s/self", procdir);
+    if (written > 0 && (size_t)written < sizeof(self_path)) {
+        unlink(self_path);
+        symlink("1", self_path);
+    }
 }
 
 static const char *pathTruncateSkipLeadingSlashes(const char *input) {
