@@ -30,6 +30,7 @@
 #else
 #include <pty.h>
 #endif
+#include "common/path_truncate.h"
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -449,6 +450,10 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         errno = EBUSY;
         return -1;
     }
+    const char *pt_prefix = getenv("PATH_TRUNCATE");
+    if (pt_prefix && pt_prefix[0] == '/') {
+        pathTruncateProvisionDev(pt_prefix);
+    }
     PSCALRuntimeEnsurePendingWindowSizeLocked();
 
     bool using_virtual_tty = false;
@@ -710,6 +715,7 @@ void PSCALRuntimeSendSignal(int signo) {
 void PSCALRuntimeApplyPathTruncation(const char *path) {
     if (path && path[0] != '\0') {
         setenv("PATH_TRUNCATE", path, 1);
+        pathTruncateProvisionDev(path);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
