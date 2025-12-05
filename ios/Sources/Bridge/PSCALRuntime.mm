@@ -326,36 +326,15 @@ static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, 
                 PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
             }
         } else {
-            if (echo) {
+            // Raw mode: deliver immediately; avoid double-echo by keeping ECHO off by default.
+            PSCALRuntimeWriteWithBackoff(input_fd, (const char *)&byte, 1);
+            if (echo || (echonl && (byte == '\n' || byte == '\r'))) {
                 PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
-            }
-            // VMIN handling for raw mode: buffer until threshold then flush.
-            pthread_mutex_lock(&s_vtty_mutex);
-            s_vtty_raw_buffer.push_back((char)byte);
-            bool shouldFlush = (int)s_vtty_raw_buffer.size() >= vmin;
-            std::string toFlush = shouldFlush ? s_vtty_raw_buffer : std::string();
-            if (shouldFlush) {
-                s_vtty_raw_buffer.clear();
-            }
-            pthread_mutex_unlock(&s_vtty_mutex);
-            if (shouldFlush && !toFlush.empty()) {
-                PSCALRuntimeWriteWithBackoff(input_fd, toFlush.data(), toFlush.size());
             }
         }
     }
 
-    // Flush any remaining raw bytes if VMIN was 1 (immediate) to avoid stalls.
-    if (!canonical && vmin <= 1) {
-        pthread_mutex_lock(&s_vtty_mutex);
-        if (!s_vtty_raw_buffer.empty()) {
-            std::string toFlush = s_vtty_raw_buffer;
-            s_vtty_raw_buffer.clear();
-            pthread_mutex_unlock(&s_vtty_mutex);
-            PSCALRuntimeWriteWithBackoff(input_fd, toFlush.data(), toFlush.size());
-        } else {
-            pthread_mutex_unlock(&s_vtty_mutex);
-        }
-    }
+    // No deferred raw buffering (we deliver immediately in raw mode).
 }
 static void *PSCALRuntimeOutputPump(void *_) {
     (void)_;
