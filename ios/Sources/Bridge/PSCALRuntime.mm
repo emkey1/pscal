@@ -198,8 +198,9 @@ static void PSCALRuntimeInitVirtualTermiosLocked(void) {
     s_vtty_termios.c_oflag = OPOST | ONLCR;
     s_vtty_termios.c_cflag = CS8 | CREAD;
     // Default to a “raw-ish” mode so interactive editors get keystrokes
-    // immediately (no line buffering). Keep signals and echo enabled.
-    s_vtty_termios.c_lflag = ISIG | ECHO;
+    // immediately (no line buffering). Keep signals enabled; leave ECHO off
+    // to avoid double-echo (the shell/editor will render output).
+    s_vtty_termios.c_lflag = ISIG;
     s_vtty_termios.c_cc[VINTR] = 0x03;   // Ctrl+C
     s_vtty_termios.c_cc[VQUIT] = 0x1c;   // Ctrl+\
     s_vtty_termios.c_cc[VSUSP] = 0x1a;   // Ctrl+Z
@@ -325,11 +326,7 @@ static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, 
                 PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
             }
         } else {
-            // Raw mode: emit immediately
-            PSCALRuntimeWriteWithBackoff(input_fd, (const char *)&byte, 1);
             if (echo) {
-                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
-            } else if (echonl && (byte == '\n' || byte == '\r')) {
                 PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
             }
             // VMIN handling for raw mode: buffer until threshold then flush.
