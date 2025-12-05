@@ -1636,23 +1636,6 @@ struct TerminalSettingsView: View {
                         settings.updateForegroundColor(UIColor(swiftUIColor: newValue))
                     }))
                 }
-                Section(header: Text("nextvi/vi")) {
-                    if TerminalFontSettings.elvisWindowBuildEnabled {
-                        Toggle("nextvi/vi",
-                               isOn: Binding(get: {
-                            settings.elvisWindowEnabled
-                        }, set: { newValue in
-                            settings.updateElvisWindowEnabled(newValue)
-                        }))
-                        Text("Show the nextvi/vi editor in a floating window.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    } else {
-                        Text("Floating nextvi/vi window is disabled in this build.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    }
-                }
                 Section(header: Text("Filesystem Paths")) {
                     Toggle("Present sandbox as /",
                            isOn: Binding(get: {
