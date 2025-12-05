@@ -33,6 +33,11 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size);
  */
 void pathTruncateApplyEnvironment(const char *prefix);
 
+/* Ensures the emulated /dev directory under the truncated prefix exists and
+ * populates symlinks for /dev/null and /dev/zero that point to the real
+ * system devices. */
+void pathTruncateProvisionDev(const char *prefix);
+
 #ifdef __cplusplus
 }
 #endif

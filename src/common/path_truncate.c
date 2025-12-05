@@ -288,6 +288,8 @@ void pathTruncateApplyEnvironment(const char *prefix) {
         if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
             pathTruncateEnsureDir(tmpbuf);
         }
+        /* Seed emulated /dev with symlinks to system devices. */
+        pathTruncateProvisionDev(prefix);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
@@ -310,14 +312,20 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (!input_path) {
         return pathTruncateCopyString("", out, out_size);
     }
-    if (strncmp(input_path, "/dev/", 5) == 0 || strcmp(input_path, "/dev") == 0) {
-        /* Device nodes should not be remapped. */
-        return pathTruncateCopyString(input_path, out, out_size);
-    }
     const char *prefix = NULL;
     size_t prefix_len = 0;
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len) || input_path[0] != '/') {
         return pathTruncateCopyString(input_path, out, out_size);
+    }
+    /* Map /dev/null and /dev/zero into the sandboxed /dev so they always exist. */
+    if (strcmp(input_path, "/dev/null") == 0 || strcmp(input_path, "/dev/zero") == 0) {
+        const char *leaf = input_path + 5; // skip "/dev/"
+        int written = snprintf(out, out_size, "%s/dev/%s", prefix, leaf);
+        if (written < 0 || (size_t)written >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        return true;
     }
 
     const char *source_path = input_path;
