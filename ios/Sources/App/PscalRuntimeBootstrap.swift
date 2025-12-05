@@ -387,10 +387,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func resetTerminalState() {
-        let cols = terminalBuffer.columns
-        let rows = terminalBuffer.rows
+        let cols = activeGeometry.columns
+        let rows = activeGeometry.rows
         if cols > 0 && rows > 0 {
             PSCALRuntimeUpdateWindowSize(Int32(cols), Int32(rows))
+            if EditorTerminalBridge.shared.isActive {
+                EditorTerminalBridge.shared.reset(columns: cols, rows: rows)
+            }
         }
         terminalBuffer.reset()
         DispatchQueue.main.async {
@@ -770,16 +773,17 @@ final class EditorTerminalBridge {
     func activate(columns: Int, rows: Int) {
         stateQueue.sync(flags: .barrier) {
             state.active = true
-            state.columns = max(1, columns)
-            state.rows = max(1, rows)
-            let blankRow = Array(repeating: Character(" "), count: state.columns)
-            let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
-            state.grid = Array(repeating: blankRow, count: state.rows)
-            state.attrs = Array(repeating: blankAttr, count: state.rows)
-            state.cursorRow = 0
-            state.cursorCol = 0
-            state.cursorVisible = true
-            altScreenState = nil
+            rebuildState(columns: columns, rows: rows)
+        }
+        inputCondition.lock()
+        pendingInput.removeAll()
+        inputCondition.unlock()
+    }
+
+    func reset(columns: Int, rows: Int) {
+        stateQueue.sync(flags: .barrier) {
+            guard state.active else { return }
+            rebuildState(columns: columns, rows: rows)
         }
         inputCondition.lock()
         pendingInput.removeAll()
@@ -840,6 +844,19 @@ final class EditorTerminalBridge {
             state.cursorRow = 0
             state.cursorCol = 0
         }
+    }
+
+    private func rebuildState(columns: Int, rows: Int) {
+        state.columns = max(1, columns)
+        state.rows = max(1, rows)
+        let blankRow = Array(repeating: Character(" "), count: state.columns)
+        let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
+        state.grid = Array(repeating: blankRow, count: state.rows)
+        state.attrs = Array(repeating: blankAttr, count: state.rows)
+        state.cursorRow = 0
+        state.cursorCol = 0
+        state.cursorVisible = true
+        altScreenState = nil
     }
 
     private func clearLineSegment(row: Int, start: Int, end: Int) {
