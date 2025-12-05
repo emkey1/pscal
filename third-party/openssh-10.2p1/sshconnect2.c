@@ -429,6 +429,44 @@ ssh_userauth2(struct ssh *ssh, const char *local_user,
 	if (options.preferred_authentications == NULL)
 		options.preferred_authentications = authmethods_get();
 
+	debug("PSCALI auth prefs: preferred=%s batch=%d "
+	    "pwd_auth=%d kbdint=%d pubkey=%d hostbased=%d prompts=%d",
+	    options.preferred_authentications,
+	    options.batch_mode,
+	    options.password_authentication,
+	    options.kbd_interactive_authentication,
+	    options.pubkey_authentication,
+	    options.hostbased_authentication,
+	    options.number_of_password_prompts);
+
+	/* Force interactive auth to stay available in pipe-backed shells. */
+	if (options.batch_mode != 0) {
+		debug("PSCALI forcing BatchMode off to allow password prompts");
+		options.batch_mode = 0;
+	}
+	if (options.password_authentication == 0) {
+		debug("PSCALI enabling password authentication");
+		options.password_authentication = 1;
+	}
+	if (options.kbd_interactive_authentication == 0) {
+		debug("PSCALI enabling keyboard-interactive authentication");
+		options.kbd_interactive_authentication = 1;
+	}
+	if (options.number_of_password_prompts <= 0)
+		options.number_of_password_prompts = 3;
+	/* Ensure preferred list still contains password. */
+	if (options.preferred_authentications != NULL &&
+	    strstr(options.preferred_authentications, "password") == NULL) {
+		char *tmp;
+		if (asprintf(&tmp, "%s,password",
+		    options.preferred_authentications) != -1) {
+			free(options.preferred_authentications);
+			options.preferred_authentications = tmp;
+			debug("PSCALI adjusted preferred auth list to %s",
+			    options.preferred_authentications);
+		}
+	}
+
 	/* setup authentication context */
 	memset(&authctxt, 0, sizeof(authctxt));
 	authctxt.server_user = server_user;
@@ -2352,7 +2390,12 @@ authmethods_get(void)
 	if ((b = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 	for (method = authmethods; method->name != NULL; method++) {
-		if (authmethod_is_enabled(method)) {
+		int enabled = authmethod_is_enabled(method);
+		debug3_f("authmethod '%s' enabled=%d batch_flag=%s value=%d",
+		    method->name, enabled,
+		    method->batch_flag ? "set" : "unset",
+		    method->batch_flag ? *method->batch_flag : -1);
+		if (enabled) {
 			if ((r = sshbuf_putf(b, "%s%s",
 			    sshbuf_len(b) ? "," : "", method->name)) != 0)
 				fatal_fr(r, "buffer error");

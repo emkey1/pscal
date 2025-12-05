@@ -42,8 +42,8 @@ if [ -z "${EDITOR:-}" ]; then
 fi
 
 # Edit to your preference
-USER="mke"
-HOST="iPad"
+USER="user"
+HOST="iDevice"
 
 # Provide coloured prompts when attached to a terminal.  The prompt tokens are
 # the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
@@ -55,9 +55,9 @@ else
 fi
 
 # Keep the terminal safe for pagers that consult $LESS.
-if [ -z "${LESS:-}" ]; then
-    export LESS=FRX
-fi
+#if [ -z "${LESS:-}" ]; then
+#    export LESS=FRX
+#fi
 
 # ---------------------------------------------------------------------------
 # Handy aliases

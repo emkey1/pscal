@@ -606,6 +606,19 @@ pwcopy(struct passwd *pw)
 #endif
 	copy->pw_dir = xstrdup(pw->pw_dir == NULL ? "" : pw->pw_dir);
 	copy->pw_shell = xstrdup(pw->pw_shell == NULL ? "" : pw->pw_shell);
+
+	/*
+	 * Respect an override from PSCALI_HOME or HOME so tools like ssh/ssh-keygen
+	 * use the sandbox home for identities/config instead of the system home.
+	 */
+	const char *override_home = getenv("PSCALI_HOME");
+	if (override_home == NULL || override_home[0] == '\0')
+		override_home = getenv("HOME");
+	if (override_home != NULL && override_home[0] != '\0') {
+		free(copy->pw_dir);
+		copy->pw_dir = xstrdup(override_home);
+	}
+
 	return copy;
 }
 
