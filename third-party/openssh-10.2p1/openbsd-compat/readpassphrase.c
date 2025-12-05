@@ -55,6 +55,7 @@ readpassphrase(const char *prompt, char *buf, size_t bufsiz, int flags)
 {
 	ssize_t nr;
 	int input, output, save_errno, i, need_restart;
+	int save_flags = -1;
 	char ch, *p, *end;
 	struct termios term, oterm;
 	struct sigaction sa, savealrm, saveint, savehup, savequit, saveterm;
@@ -127,6 +128,14 @@ restart:
 	 * up with echo turned off in the shell.  Don't worry about
 	 * things like SIGXCPU and SIGVTALRM for now.
 	 */
+#ifdef PSCAL_TARGET_IOS
+	if (save_flags == -1) {
+		save_flags = fcntl(input, F_GETFL);
+		if (save_flags != -1 && (save_flags & O_NONBLOCK))
+			fcntl(input, F_SETFL, save_flags & ~O_NONBLOCK);
+	}
+#endif
+
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = 0;		/* don't restart system calls */
 	sa.sa_handler = handler;
@@ -181,6 +190,13 @@ restart:
 	(void)sigaction(SIGTSTP, &savetstp, NULL);
 	(void)sigaction(SIGTTIN, &savettin, NULL);
 	(void)sigaction(SIGTTOU, &savettou, NULL);
+#ifdef PSCAL_TARGET_IOS
+	if (save_flags != -1 && (save_flags & O_NONBLOCK)) {
+		fcntl(input, F_SETFL, save_flags);
+		save_flags = -1;
+	}
+#endif
+
 	if (input != STDIN_FILENO)
 		(void)close(input);
 
