@@ -445,6 +445,21 @@ int pscal_ios_ioctl(int fd, unsigned long request, ...) {
         return 0;
     }
 
+    if (pscal_ios_virtual_tty_exists(fd) &&
+        request == (unsigned long)TIOCSWINSZ && arg != NULL) {
+        struct winsize *wsz = (struct winsize *)arg;
+        char buffer[16];
+        if (wsz->ws_col > 0) {
+            snprintf(buffer, sizeof(buffer), "%u", (unsigned)wsz->ws_col);
+            setenv("COLUMNS", buffer, 1);
+        }
+        if (wsz->ws_row > 0) {
+            snprintf(buffer, sizeof(buffer), "%u", (unsigned)wsz->ws_row);
+            setenv("LINES", buffer, 1);
+        }
+        return 0;
+    }
+
     if (arg != NULL) {
         return ioctl(fd, request, arg);
     }
