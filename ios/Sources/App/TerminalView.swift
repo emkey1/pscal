@@ -346,7 +346,7 @@ struct TerminalView: View {
             }
         )
         .edgesIgnoringSafeArea(.bottom)
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .bottomTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
                 Button(action: {
                     PscalRuntimeBootstrap.shared.resetTerminalState()
@@ -367,7 +367,7 @@ struct TerminalView: View {
                 }
                 .accessibilityLabel("Adjust Font Size")
             }
-            .padding(.top, 12)
+            .padding(.bottom, 14)
             .padding(.trailing, 10)
         }
         .sheet(isPresented: $showingSettings) {
