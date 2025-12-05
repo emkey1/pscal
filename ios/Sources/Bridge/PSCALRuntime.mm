@@ -200,7 +200,10 @@ static void PSCALRuntimeInitVirtualTermiosLocked(void) {
     // Default to a “raw-ish” mode so interactive editors get keystrokes
     // immediately (no line buffering). Keep signals enabled; leave ECHO off
     // to avoid double-echo (the shell/editor will render output).
-    s_vtty_termios.c_lflag = ISIG;
+    // Keep raw-ish default (no ICANON), but enable ECHO by default so shells
+    // that expect terminal echo (including readline/tab completion) see what
+    // they expect. ISIG stays on so VINTR/VQUIT/VSUSP still work.
+    s_vtty_termios.c_lflag = ISIG | ECHO;
     s_vtty_termios.c_cc[VINTR] = 0x03;   // Ctrl+C
     s_vtty_termios.c_cc[VQUIT] = 0x1c;   // Ctrl+\
     s_vtty_termios.c_cc[VSUSP] = 0x1a;   // Ctrl+Z
