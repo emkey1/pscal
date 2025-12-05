@@ -311,7 +311,8 @@ void pathTruncateProvisionDev(const char *prefix) {
         const char *target;
     } links[] = {
         { "null", "/dev/null" },
-        { "zero", "/dev/zero" }
+        { "zero", "/dev/zero" },
+        { "random", "/dev/random" }
     };
     for (size_t i = 0; i < sizeof(links) / sizeof(links[0]); ++i) {
         char link_path[PATH_MAX];
@@ -347,8 +348,10 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len) || input_path[0] != '/') {
         return pathTruncateCopyString(input_path, out, out_size);
     }
-    /* Map /dev/null and /dev/zero into the sandboxed /dev so they always exist. */
-    if (strcmp(input_path, "/dev/null") == 0 || strcmp(input_path, "/dev/zero") == 0) {
+    /* Map device nodes into the sandboxed /dev so they always exist. */
+    if (strcmp(input_path, "/dev/null") == 0 ||
+        strcmp(input_path, "/dev/zero") == 0 ||
+        strcmp(input_path, "/dev/random") == 0) {
         const char *leaf = input_path + 5; // skip "/dev/"
         int written = snprintf(out, out_size, "%s/dev/%s", prefix, leaf);
         if (written < 0 || (size_t)written >= out_size) {
