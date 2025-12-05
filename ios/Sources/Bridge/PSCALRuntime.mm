@@ -70,6 +70,10 @@ static pthread_t s_output_thread;
 static pthread_t s_runtime_thread;
 static int s_pending_columns = 0;
 static int s_pending_rows = 0;
+static pthread_mutex_t s_vtty_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool s_vtty_initialized = false;
+static struct termios s_vtty_termios;
+static std::string s_vtty_canonical_buffer;
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -181,6 +185,152 @@ static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
     return false;
 }
 
+static void PSCALRuntimeInitVirtualTermiosLocked(void) {
+    if (s_vtty_initialized) {
+        return;
+    }
+    memset(&s_vtty_termios, 0, sizeof(s_vtty_termios));
+    s_vtty_termios.c_iflag = ICRNL | IXON;
+#ifdef IUTF8
+    s_vtty_termios.c_iflag |= IUTF8;
+#endif
+    s_vtty_termios.c_oflag = OPOST | ONLCR;
+    s_vtty_termios.c_cflag = CS8 | CREAD;
+    s_vtty_termios.c_lflag = ICANON | ECHO | ECHOE | ECHOK | ECHONL | ISIG;
+    s_vtty_termios.c_cc[VINTR] = 0x03;   // Ctrl+C
+    s_vtty_termios.c_cc[VQUIT] = 0x1c;   // Ctrl+\
+    s_vtty_termios.c_cc[VSUSP] = 0x1a;   // Ctrl+Z
+    s_vtty_termios.c_cc[VEOF] = 0x04;    // Ctrl+D
+    s_vtty_termios.c_cc[VEOL] = '\n';
+    s_vtty_termios.c_cc[VEOL2] = '\r';
+    s_vtty_initialized = true;
+}
+
+static void PSCALRuntimeWriteWithBackoff(int fd, const char *data, size_t length) {
+    if (fd < 0 || !data || length == 0) {
+        return;
+    }
+    size_t written = 0;
+    int backoffMicros = 1000;
+    while (written < length) {
+        ssize_t chunk = write(fd, data + written, length - written);
+        if (chunk < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep((useconds_t)backoffMicros);
+                if (backoffMicros < 16000) {
+                    backoffMicros *= 2;
+                }
+                continue;
+            }
+            break;
+        }
+        backoffMicros = 1000;
+        written += (size_t)chunk;
+    }
+}
+
+static void PSCALRuntimeEchoToTerminal(const char *data, size_t length) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    int fd = s_master_fd;
+    pthread_mutex_unlock(&s_runtime_mutex);
+    if (fd >= 0) {
+        PSCALRuntimeWriteWithBackoff(fd, data, length);
+    }
+}
+
+static void PSCALRuntimeHandleSignalsForByte(uint8_t byte) {
+    pthread_mutex_lock(&s_vtty_mutex);
+    if (!s_vtty_initialized) {
+        PSCALRuntimeInitVirtualTermiosLocked();
+    }
+    struct termios t = s_vtty_termios;
+    pthread_mutex_unlock(&s_vtty_mutex);
+
+    if ((t.c_lflag & ISIG) == 0) {
+        return;
+    }
+    if (byte == t.c_cc[VINTR]) {
+        PSCALRuntimeSendSignal(SIGINT);
+    } else if (byte == t.c_cc[VQUIT]) {
+        PSCALRuntimeSendSignal(SIGQUIT);
+    } else if (byte == t.c_cc[VSUSP]) {
+        PSCALRuntimeSendSignal(SIGTSTP);
+    }
+}
+
+static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, int input_fd) {
+    pthread_mutex_lock(&s_vtty_mutex);
+    if (!s_vtty_initialized) {
+        PSCALRuntimeInitVirtualTermiosLocked();
+    }
+    struct termios t = s_vtty_termios;
+    pthread_mutex_unlock(&s_vtty_mutex);
+
+    const bool canonical = (t.c_lflag & ICANON) != 0;
+    const bool echo = (t.c_lflag & ECHO) != 0;
+    const bool echonl = (t.c_lflag & ECHONL) != 0;
+
+    auto flushCanonical = [&](bool appendNewline) {
+        pthread_mutex_lock(&s_vtty_mutex);
+        std::string buf = s_vtty_canonical_buffer;
+        s_vtty_canonical_buffer.clear();
+        pthread_mutex_unlock(&s_vtty_mutex);
+        if (buf.empty() && !appendNewline) {
+            return;
+        }
+        if (appendNewline) {
+            buf.push_back('\n');
+        }
+        PSCALRuntimeWriteWithBackoff(input_fd, buf.data(), buf.size());
+        if (echo) {
+            PSCALRuntimeEchoToTerminal(buf.data(), buf.size());
+        }
+    };
+
+    for (size_t i = 0; i < length; ++i) {
+        uint8_t byte = (uint8_t)utf8[i];
+        PSCALRuntimeHandleSignalsForByte(byte);
+        if (canonical) {
+            if (byte == t.c_cc[VEOF]) {
+                flushCanonical(false);
+                continue;
+            }
+            if (byte == '\n' || byte == t.c_cc[VEOL] || byte == t.c_cc[VEOL2]) {
+                flushCanonical(true);
+                if (echonl && !echo) {
+                    char nl = '\n';
+                    PSCALRuntimeEchoToTerminal(&nl, 1);
+                }
+                continue;
+            }
+            if ((t.c_lflag & ECHOE) && byte == 0x7f) { // DEL erase
+                pthread_mutex_lock(&s_vtty_mutex);
+                if (!s_vtty_canonical_buffer.empty()) {
+                    s_vtty_canonical_buffer.pop_back();
+                }
+                pthread_mutex_unlock(&s_vtty_mutex);
+                continue;
+            }
+            pthread_mutex_lock(&s_vtty_mutex);
+            s_vtty_canonical_buffer.push_back((char)byte);
+            pthread_mutex_unlock(&s_vtty_mutex);
+            if (echo) {
+                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
+            }
+        } else {
+            // Raw mode: emit immediately
+            PSCALRuntimeWriteWithBackoff(input_fd, (const char *)&byte, 1);
+            if (echo) {
+                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
+            } else if (echonl && (byte == '\n' || byte == '\r')) {
+                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
+            }
+        }
+    }
+}
 static void *PSCALRuntimeOutputPump(void *_) {
     (void)_;
     const int fd = s_master_fd;
@@ -252,6 +402,11 @@ static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd)
 
     *out_master_fd = stdout_pipe[0];
     *out_input_fd = stdin_pipe[1];
+
+    pthread_mutex_lock(&s_vtty_mutex);
+    s_vtty_initialized = false;
+    s_vtty_canonical_buffer.clear();
+    pthread_mutex_unlock(&s_vtty_mutex);
     return true;
 }
 
@@ -471,29 +626,15 @@ void PSCALRuntimeSendInput(const char *utf8, size_t length) {
     }
     pthread_mutex_lock(&s_runtime_mutex);
     const int fd = s_input_fd;
+    const bool virtual_tty = s_using_virtual_tty;
     pthread_mutex_unlock(&s_runtime_mutex);
     if (fd < 0) {
         return;
     }
-    size_t written = 0;
-    int backoffMicros = 1000; // 1ms
-    while (written < length) {
-        ssize_t chunk = write(fd, utf8 + written, length - written);
-        if (chunk < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep((useconds_t)backoffMicros);
-                if (backoffMicros < 16000) {
-                    backoffMicros *= 2; // modest backoff to avoid hot loop
-                }
-                continue;
-            }
-            break;
-        }
-        backoffMicros = 1000;
-        written += (size_t)chunk;
+    if (virtual_tty) {
+        PSCALRuntimeProcessVirtualTTYInput(utf8, length, fd);
+    } else {
+        PSCALRuntimeWriteWithBackoff(fd, utf8, length);
     }
 }
 
