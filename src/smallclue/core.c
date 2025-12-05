@@ -12,6 +12,9 @@
 #if defined(PSCAL_HAS_LIBCURL)
 #include <curl/curl.h>
 #endif
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
