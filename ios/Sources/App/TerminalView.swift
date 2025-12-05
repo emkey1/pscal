@@ -347,7 +347,7 @@ struct TerminalView: View {
         )
         .edgesIgnoringSafeArea(.bottom)
         .overlay(alignment: .bottomTrailing) {
-            VStack(alignment: .trailing, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 Button(action: {
                     PscalRuntimeBootstrap.shared.resetTerminalState()
                     focusAnchor &+= 1
