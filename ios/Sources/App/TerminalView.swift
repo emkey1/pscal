@@ -30,6 +30,13 @@ final class TerminalFontSettings: ObservableObject {
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
     private let elvisWindowKey = "com.pscal.terminal.nextviWindow"
+    static let elvisWindowBuildEnabled: Bool = {
+#if ELVIS_FLOATING_WINDOW
+        return true
+#else
+        return false
+#endif
+    }()
     let minimumPointSize: CGFloat = TerminalFontSettings.minPointSizeValue
     let maximumPointSize: CGFloat = TerminalFontSettings.maxPointSizeValue
     static let defaultBackgroundColor = UIColor.black
@@ -73,8 +80,9 @@ final class TerminalFontSettings: ObservableObject {
 
         let storedElvisPref = UserDefaults.standard.object(forKey: elvisWindowKey) as? Bool
         let envWindowMode = ProcessInfo.processInfo.environment["PSCALI_ELVIS_WINDOW_MODE"]
-        elvisWindowEnabled = TerminalFontSettings.resolveInitialElvisWindowSetting(stored: storedElvisPref,
-                                                                                   envValue: envWindowMode)
+        elvisWindowEnabled = TerminalFontSettings.elvisWindowBuildEnabled ?
+            TerminalFontSettings.resolveInitialElvisWindowSetting(stored: storedElvisPref,
+                                                                  envValue: envWindowMode) : false
 
         let storedTruncationPath = UserDefaults.standard.string(forKey: PathTruncationPreferences.pathDefaultsKey)
         let normalizedStored = PathTruncationManager.shared.normalize(storedTruncationPath ?? "")
@@ -306,12 +314,15 @@ final class TerminalFontSettings: ObservableObject {
     }
 
     private static func resolveInitialElvisWindowSetting(stored: Bool?, envValue: String?) -> Bool {
+        if !TerminalFontSettings.elvisWindowBuildEnabled {
+            return false;
+        }
         if let stored = stored {
             return stored
         }
         guard let env = envValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !env.isEmpty else {
-            return true
+            return false
         }
         if ["inline", "main", "primary", "embedded", "0", "false", "no"].contains(env) {
             return false
@@ -319,10 +330,11 @@ final class TerminalFontSettings: ObservableObject {
         if ["window", "external", "secondary", "1", "true", "yes"].contains(env) {
             return true
         }
-        return true
+        return false
     }
 
     func updateElvisWindowEnabled(_ enabled: Bool) {
+        guard TerminalFontSettings.elvisWindowBuildEnabled else { return }
         guard enabled != elvisWindowEnabled else { return }
         elvisWindowEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: elvisWindowKey)
@@ -1625,15 +1637,21 @@ struct TerminalSettingsView: View {
                     }))
                 }
                 Section(header: Text("nextvi/vi")) {
-                    Toggle("nextvi/vi",
-                           isOn: Binding(get: {
-                        settings.elvisWindowEnabled
-                    }, set: { newValue in
-                        settings.updateElvisWindowEnabled(newValue)
-                    }))
-                    Text("Show the nextvi/vi editor in a floating window.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                    if TerminalFontSettings.elvisWindowBuildEnabled {
+                        Toggle("nextvi/vi",
+                               isOn: Binding(get: {
+                            settings.elvisWindowEnabled
+                        }, set: { newValue in
+                            settings.updateElvisWindowEnabled(newValue)
+                        }))
+                        Text("Show the nextvi/vi editor in a floating window.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Floating nextvi/vi window is disabled in this build.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 Section(header: Text("Filesystem Paths")) {
                     Toggle("Present sandbox as /",

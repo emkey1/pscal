@@ -1229,31 +1229,43 @@ final class EditorTerminalBridge {
 
 @_cdecl("pscalTerminalBegin")
 func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
+#if ELVIS_FLOATING_WINDOW
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalBegin cols=\(columns) rows=\(rows)")
     }
     EditorTerminalBridge.shared.activate(columns: Int(columns), rows: Int(rows))
     PscalRuntimeBootstrap.shared.setElvisModeActive(true)
     EditorWindowManager.shared.showWindow()
+#else
+    runtimeDebugLog("[Elvis] floating window disabled in this build")
+#endif
 }
 
 @_cdecl("pscalTerminalEnd")
 func pscalTerminalEnd() {
+#if ELVIS_FLOATING_WINDOW
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalEnd")
     }
     EditorTerminalBridge.shared.deactivate()
     PscalRuntimeBootstrap.shared.setElvisModeActive(false)
     EditorWindowManager.shared.hideWindow()
+#else
+    runtimeDebugLog("[Elvis] floating window disabled in this build")
+#endif
 }
 
 @_cdecl("pscalTerminalResize")
 func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
+#if ELVIS_FLOATING_WINDOW
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalResize cols=\(columns) rows=\(rows)")
     }
     EditorTerminalBridge.shared.resize(columns: Int(columns), rows: Int(rows))
     PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+#else
+    runtimeDebugLog("[Elvis] floating window disabled in this build")
+#endif
 }
 
 @_cdecl("pscalTerminalRender")

@@ -14,7 +14,8 @@ final class EditorWindowManager {
     static let activityType = "com.pscal.editor.scene"
 
     static var externalWindowEnabled: Bool {
-        return TerminalFontSettings.shared.elvisWindowEnabled
+        return TerminalFontSettings.elvisWindowBuildEnabled &&
+        TerminalFontSettings.shared.elvisWindowEnabled
     }
 
     private var preferenceObserver: NSObjectProtocol?
