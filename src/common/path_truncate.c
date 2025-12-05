@@ -470,13 +470,6 @@ void pathTruncateProvisionProc(const char *prefix) {
         }
     }
 
-    /* /proc/self -> pid 1 placeholder */
-    char self_path[PATH_MAX];
-    written = snprintf(self_path, sizeof(self_path), "%s/self", procdir);
-    if (written > 0 && (size_t)written < sizeof(self_path)) {
-        unlink(self_path);
-        symlink("1", self_path);
-    }
 }
 
 static const char *pathTruncateSkipLeadingSlashes(const char *input) {
