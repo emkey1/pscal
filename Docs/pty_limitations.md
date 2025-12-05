@@ -5,6 +5,7 @@ This app runs the shell in-process on iOS, falling back to a virtual TTY built o
 ## Current behavior
 - Default termios state (ICANON, ECHO, ISIG, CR->NL, ONLCR) applied to the virtual TTY.
 - Minimal line discipline: canonical buffering, erase handling, echo/echonl, and generation of SIGINT/SIGQUIT/SIGTSTP for VINTR/VQUIT/VSUSP.
+- Raw mode honors VMIN>0 to buffer until the threshold is met before delivering to the runtime.
 - Window size updates propagate to the runtime thread and deliver SIGWINCH.
 
 ## Known limitations

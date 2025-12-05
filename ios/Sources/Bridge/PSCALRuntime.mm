@@ -74,6 +74,7 @@ static pthread_mutex_t s_vtty_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_vtty_initialized = false;
 static struct termios s_vtty_termios;
 static std::string s_vtty_canonical_buffer;
+static std::string s_vtty_raw_buffer;
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -196,7 +197,9 @@ static void PSCALRuntimeInitVirtualTermiosLocked(void) {
 #endif
     s_vtty_termios.c_oflag = OPOST | ONLCR;
     s_vtty_termios.c_cflag = CS8 | CREAD;
-    s_vtty_termios.c_lflag = ICANON | ECHO | ECHOE | ECHOK | ECHONL | ISIG;
+    // Default to a “raw-ish” mode so interactive editors get keystrokes
+    // immediately (no line buffering). Keep signals and echo enabled.
+    s_vtty_termios.c_lflag = ISIG | ECHO;
     s_vtty_termios.c_cc[VINTR] = 0x03;   // Ctrl+C
     s_vtty_termios.c_cc[VQUIT] = 0x1c;   // Ctrl+\
     s_vtty_termios.c_cc[VSUSP] = 0x1a;   // Ctrl+Z
@@ -267,6 +270,7 @@ static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, 
         PSCALRuntimeInitVirtualTermiosLocked();
     }
     struct termios t = s_vtty_termios;
+    int vmin = t.c_cc[VMIN] > 0 ? t.c_cc[VMIN] : 1;
     pthread_mutex_unlock(&s_vtty_mutex);
 
     const bool canonical = (t.c_lflag & ICANON) != 0;
@@ -328,6 +332,31 @@ static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, 
             } else if (echonl && (byte == '\n' || byte == '\r')) {
                 PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
             }
+            // VMIN handling for raw mode: buffer until threshold then flush.
+            pthread_mutex_lock(&s_vtty_mutex);
+            s_vtty_raw_buffer.push_back((char)byte);
+            bool shouldFlush = (int)s_vtty_raw_buffer.size() >= vmin;
+            std::string toFlush = shouldFlush ? s_vtty_raw_buffer : std::string();
+            if (shouldFlush) {
+                s_vtty_raw_buffer.clear();
+            }
+            pthread_mutex_unlock(&s_vtty_mutex);
+            if (shouldFlush && !toFlush.empty()) {
+                PSCALRuntimeWriteWithBackoff(input_fd, toFlush.data(), toFlush.size());
+            }
+        }
+    }
+
+    // Flush any remaining raw bytes if VMIN was 1 (immediate) to avoid stalls.
+    if (!canonical && vmin <= 1) {
+        pthread_mutex_lock(&s_vtty_mutex);
+        if (!s_vtty_raw_buffer.empty()) {
+            std::string toFlush = s_vtty_raw_buffer;
+            s_vtty_raw_buffer.clear();
+            pthread_mutex_unlock(&s_vtty_mutex);
+            PSCALRuntimeWriteWithBackoff(input_fd, toFlush.data(), toFlush.size());
+        } else {
+            pthread_mutex_unlock(&s_vtty_mutex);
         }
     }
 }
