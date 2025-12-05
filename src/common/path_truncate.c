@@ -339,6 +339,15 @@ void pathTruncateProvisionProc(const char *prefix) {
     if (!prefix || *prefix != '/') {
         return;
     }
+    /* Small helper to simplify writing text files. */
+    auto write_text_file = [](const char *path, const char *contents) {
+        if (!path || !contents) return;
+        FILE *f = fopen(path, "w");
+        if (!f) return;
+        fputs(contents, f);
+        fclose(f);
+    };
+
     char procdir[PATH_MAX];
     int written = snprintf(procdir, sizeof(procdir), "%s/proc", prefix);
     if (written <= 0 || (size_t)written >= sizeof(procdir)) {
@@ -426,11 +435,61 @@ void pathTruncateProvisionProc(const char *prefix) {
     char version_path[PATH_MAX];
     written = snprintf(version_path, sizeof(version_path), "%s/version", procdir);
     if (written > 0 && (size_t)written < sizeof(version_path)) {
-        FILE *f = fopen(version_path, "w");
+        struct utsname un;
+        uname(&un);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "PSCALI %s %s %s\n", un.sysname, un.release, un.version);
+        write_text_file(version_path, buf);
+    }
+
+    /* /proc/cmdline */
+    char cmdline_path[PATH_MAX];
+    written = snprintf(cmdline_path, sizeof(cmdline_path), "%s/cmdline", procdir);
+    if (written > 0 && (size_t)written < sizeof(cmdline_path)) {
+        write_text_file(cmdline_path, "pscal sandbox\n");
+    }
+
+    /* /proc/sys/kernel/hostname (best-effort) */
+    char sysdir[PATH_MAX];
+    written = snprintf(sysdir, sizeof(sysdir), "%s/sys/kernel", procdir);
+    if (written > 0 && (size_t)written < sizeof(sysdir)) {
+        pathTruncateEnsureDir(sysdir);
+        char hostbuf[256] = "pscal";
+        if (gethostname(hostbuf, sizeof(hostbuf) - 1) != 0 || hostbuf[0] == '\0') {
+            strcpy(hostbuf, "pscal");
+        }
+        char hostname_path[PATH_MAX];
+        if (snprintf(hostname_path, sizeof(hostname_path), "%s/hostname", sysdir) > 0) {
+            write_text_file(hostname_path, hostbuf);
+        }
+    }
+
+    /* /proc/device-tree/model (best-effort) */
+    char dtree_dir[PATH_MAX];
+    written = snprintf(dtree_dir, sizeof(dtree_dir), "%s/device-tree", procdir);
+    if (written > 0 && (size_t)written < sizeof(dtree_dir)) {
+        pathTruncateEnsureDir(dtree_dir);
+        char model_path[PATH_MAX];
+        if (snprintf(model_path, sizeof(model_path), "%s/model", dtree_dir) > 0) {
+            char model[128] = "pscal";
+#if defined(__APPLE__)
+            size_t sz = sizeof(model);
+            sysctlbyname("hw.model", model, &sz, NULL, 0);
+#endif
+            write_text_file(model_path, model);
+        }
+    }
+
+    /* /proc/pscal_env: sandbox info */
+    char info_path[PATH_MAX];
+    written = snprintf(info_path, sizeof(info_path), "%s/pscal_env", procdir);
+    if (written > 0 && (size_t)written < sizeof(info_path)) {
+        FILE *f = fopen(info_path, "w");
         if (f) {
-            struct utsname un;
-            uname(&un);
-            fprintf(f, "PSCALI %s %s %s\n", un.sysname, un.release, un.version);
+            const char *pth = getenv("PATH_TRUNCATE");
+            const char *home = getenv("HOME");
+            fprintf(f, "PATH_TRUNCATE=%s\n", pth ? pth : "");
+            fprintf(f, "HOME=%s\n", home ? home : "");
             fclose(f);
         }
     }
