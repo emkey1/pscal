@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -290,6 +293,8 @@ void pathTruncateApplyEnvironment(const char *prefix) {
         }
         /* Seed emulated /dev with symlinks to system devices. */
         pathTruncateProvisionDev(prefix);
+        /* Seed a minimal /proc tree with cpuinfo. */
+        pathTruncateProvisionProc(prefix);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
@@ -325,6 +330,60 @@ void pathTruncateProvisionDev(const char *prefix) {
         }
         symlink(links[i].target, link_path);
     }
+}
+
+void pathTruncateProvisionProc(const char *prefix) {
+    if (!prefix || *prefix != '/') {
+        return;
+    }
+    char procdir[PATH_MAX];
+    int written = snprintf(procdir, sizeof(procdir), "%s/proc", prefix);
+    if (written <= 0 || (size_t)written >= sizeof(procdir)) {
+        return;
+    }
+    pathTruncateEnsureDir(procdir);
+
+    char cpuinfo_path[PATH_MAX];
+    written = snprintf(cpuinfo_path, sizeof(cpuinfo_path), "%s/cpuinfo", procdir);
+    if (written <= 0 || (size_t)written >= sizeof(cpuinfo_path)) {
+        return;
+    }
+
+    FILE *f = fopen(cpuinfo_path, "w");
+    if (!f) {
+        return;
+    }
+
+    /* Gather a few hardware facts if available. */
+    int ncpu = 1;
+    uint64_t freq = 0;
+    char machine[128] = {0};
+    char model[128] = {0};
+#if defined(__APPLE__)
+    size_t sz = sizeof(ncpu);
+    sysctlbyname("hw.ncpu", &ncpu, &sz, NULL, 0);
+    sz = sizeof(freq);
+    sysctlbyname("hw.cpufrequency", &freq, &sz, NULL, 0);
+    sz = sizeof(machine);
+    sysctlbyname("hw.machine", machine, &sz, NULL, 0);
+    sz = sizeof(model);
+    sysctlbyname("hw.model", model, &sz, NULL, 0);
+#endif
+
+    if (ncpu <= 0) ncpu = 1;
+    for (int i = 0; i < ncpu; ++i) {
+        fprintf(f, "processor\t: %d\n", i);
+        fprintf(f, "model name\t: PSCAL virtual CPU\n");
+        if (freq > 0) {
+            double mhz = (double)freq / 1e6;
+            fprintf(f, "cpu MHz\t\t: %.0f\n", mhz);
+        }
+        fprintf(f, "Features\t: %s\n", "fp asimd evtstrm aes pmull sha1 sha2 crc32");
+        fprintf(f, "Hardware\t: %s %s\n\n",
+                machine[0] ? machine : "arm64",
+                model[0] ? model : "");
+    }
+    fclose(f);
 }
 
 static const char *pathTruncateSkipLeadingSlashes(const char *input) {

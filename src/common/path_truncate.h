@@ -38,6 +38,10 @@ void pathTruncateApplyEnvironment(const char *prefix);
  * system devices. */
 void pathTruncateProvisionDev(const char *prefix);
 
+/* Ensures a minimal /proc tree under the truncated prefix and generates
+ * a lightweight cpuinfo file for compatibility. */
+void pathTruncateProvisionProc(const char *prefix);
+
 #ifdef __cplusplus
 }
 #endif
