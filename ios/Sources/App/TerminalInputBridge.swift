@@ -116,14 +116,14 @@ final class TerminalKeyInputView: UITextView {
 
         let esc = makeButton("Esc", action: #selector(handleEsc))
         let ctrl = makeButton("Ctrl", action: #selector(handleCtrlToggle))
-        let tab = makeButton("Tab", action: #selector(handleTab))
         let up = makeButton("↑", action: #selector(handleUp))
         let down = makeButton("↓", action: #selector(handleDown))
         let left = makeButton("←", action: #selector(handleLeft))
         let right = makeButton("→", action: #selector(handleRight))
         let fslash = makeButton("/", action: #selector(handleFSlash))
+        let dot = makeButton(".", action: #selector(handleDot))
 
-        [esc, ctrl, tab, fslash, up, down, left, right].forEach(stack.addArrangedSubview)
+        [esc, ctrl, dot, fslash, up, down, left, right].forEach(stack.addArrangedSubview)
 
         bar.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -368,10 +368,6 @@ final class TerminalKeyInputView: UITextView {
         : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
     }
 
-    @objc private func handleTab() {
-        onInput?("\t")
-    }
-
     @objc private func handleUp() {
         onInput?("\u{1B}[A")
     }
@@ -392,6 +388,10 @@ final class TerminalKeyInputView: UITextView {
         onInput?("/")
     }
 
+    @objc private func handleDot() {
+        onInput?(".")
+    }
+    
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         onPaste?(text)
