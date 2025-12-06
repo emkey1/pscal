@@ -806,19 +806,22 @@ struct TerminalSnapshot {
     }
 
     private func parseExtendedColor(from params: [Int]) -> (TerminalColor?, Int) {
-        guard !params.isEmpty else { return (nil, 0) }
-        let mode = params[0]
-        switch mode {
-        case 5:
-            guard params.count >= 2 else { return (nil, 1) }
-            return (.extended(params[1]), 1)
-        case 2:
-            guard params.count >= 4 else { return (nil, params.count - 1) }
-            return (.rgb(params[1], params[2], params[3]), 3)
-        default:
-            return (nil, 0)
+            guard !params.isEmpty else { return (nil, 0) }
+            let mode = params[0]
+            switch mode {
+            case 5:
+                // 256-Color Mode: Consumes '5' and 'Index' (2 parameters)
+                guard params.count >= 2 else { return (nil, 1) }
+                return (.extended(params[1]), 2)
+            case 2:
+                // True Color Mode: Consumes '2', 'R', 'G', 'B' (4 parameters)
+                guard params.count >= 4 else { return (nil, params.count - 1) }
+                return (.rgb(params[1], params[2], params[3]), 4)
+            default:
+                // Unknown mode, consume just the mode identifier to avoid infinite loops
+                return (nil, 1)
+            }
         }
-    }
 
     private func clampRow(_ value: Int) -> Int {
         if originModeEnabled {

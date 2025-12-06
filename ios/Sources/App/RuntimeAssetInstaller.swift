@@ -440,6 +440,7 @@ final class RuntimeAssetInstaller {
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
         setenv("HOME", RuntimePaths.homeDirectory.path, 1)
         setenv("TERM", "xterm-256color", 1)
+        setenv("COLORTERM", "truecolor", 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {
