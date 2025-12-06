@@ -105,12 +105,15 @@ final class TerminalKeyInputView: UITextView {
 
         func makeButton(_ title: String, action: Selector) -> UIButton {
             let button = UIButton(type: .system)
-            button.setTitle(title, for: .normal)
+            var config = UIButton.Configuration.filled()
+            config.cornerStyle = .medium
+            config.baseBackgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+            config.baseForegroundColor = .label
+            config.title = title
+            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
+            button.configuration = config
             button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
             button.addTarget(self, action: action, for: .touchUpInside)
-            button.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
-            button.layer.cornerRadius = 8
-            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
             return button
         }
 

@@ -275,7 +275,6 @@ static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, 
         PSCALRuntimeInitVirtualTermiosLocked();
     }
     struct termios t = s_vtty_termios;
-    int vmin = t.c_cc[VMIN] > 0 ? t.c_cc[VMIN] : 1;
     pthread_mutex_unlock(&s_vtty_mutex);
 
     const bool canonical = (t.c_lflag & ICANON) != 0;

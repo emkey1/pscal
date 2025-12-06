@@ -264,6 +264,7 @@ final class TerminalEditorViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        applyTerminalGeometry(to: view, keyboardHeight: 0)
         reportGeometryIfNeeded()
     }
 

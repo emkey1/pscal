@@ -1270,7 +1270,7 @@ func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
 
 @_cdecl("pscalTerminalRender")
 func pscalTerminalRender(_ utf8: UnsafePointer<CChar>?, _ len: Int32, _ row: Int32, _ col: Int32, _ fg: Int64, _ bg: Int64, _ attr: Int32) {
-    if let logUrl = terminalLogURL() {
+    if terminalLogURL() != nil {
         let previewLen = min(Int(len), 8)
         let bytes = (0..<previewLen).compactMap { idx in utf8?[idx] }.map { String(format: "%02X", $0) }.joined(separator: " ")
         terminalLog("RENDER row=\(row) col=\(col) len=\(len) fg=\(fg) bg=\(bg) attr=\(attr) bytes=\(bytes)")

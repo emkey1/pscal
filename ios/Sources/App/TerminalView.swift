@@ -352,10 +352,15 @@ final class TerminalFontSettings: ObservableObject {
 }
 
 struct TerminalView: View {
+    let showsOverlay: Bool
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
     @State private var focusAnchor: Int = 0
     @State private var keyboardOverlap: CGFloat = 0
+
+    init(showsOverlay: Bool = true) {
+        self.showsOverlay = showsOverlay
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -371,33 +376,35 @@ struct TerminalView: View {
             )
             .edgesIgnoringSafeArea(.bottom)
 
-            HStack(alignment: .center, spacing: 10) {
-                Button(action: {
-                    PscalRuntimeBootstrap.shared.resetTerminalState()
-                    focusAnchor &+= 1
-                }) {
-                    Text("R")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .padding(11)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .accessibilityLabel("Reset Terminal")
+            if showsOverlay {
+                HStack(alignment: .center, spacing: 10) {
+                    Button(action: {
+                        PscalRuntimeBootstrap.shared.resetTerminalState()
+                        focusAnchor &+= 1
+                    }) {
+                        Text("R")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .padding(11)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Reset Terminal")
 
-                Button(action: { showingSettings = true }) {
-                    Image(systemName: "textformat.size")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
+                    Button(action: { showingSettings = true }) {
+                        Image(systemName: "textformat.size")
+                            .font(.system(size: 16, weight: .semibold))
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Adjust Font Size")
                 }
-                .accessibilityLabel("Adjust Font Size")
+                .padding(.bottom, {
+                    // Anchor buttons just above accessory bar + soft keyboard when visible.
+                    let accessoryHeight: CGFloat = 3
+                    let stackHeight = keyboardOverlap + accessoryHeight + currentSafeBottomInset()
+                    return max(16, stackHeight)
+                }())
+                .padding(.trailing, 10)
             }
-            .padding(.bottom, {
-                // Anchor buttons just above accessory bar + soft keyboard when visible.
-                let accessoryHeight: CGFloat = 3
-                let stackHeight = keyboardOverlap + accessoryHeight + currentSafeBottomInset()
-                return max(16, stackHeight)
-            }())
-            .padding(.trailing, 10)
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()

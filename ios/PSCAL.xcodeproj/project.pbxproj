@@ -109,6 +109,7 @@
 				<string>145F4FC92BE071D600603B3F</string>
 				<string>14B7F7E12BE5F46B00E6D40B</string>
 				<string>145F4FCB2BE071F400603B3F</string>
+				<string>145F4FCB2BE071F400603B4E</string>
 				<string>14E9F2212BE2B9A300A1E3C0</string>
 			</array>
 			<key>isa</key>
@@ -254,10 +255,30 @@
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
 		</dict>
+		<key>5F73F4C32FCA700000EFC123</key>
+		<dict>
+			<key>fileEncoding</key>
+			<string>4</string>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalGeometryHelper.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
 		<key>145F4FCB2BE071F400603B3F</key>
 		<dict>
 			<key>fileRef</key>
 			<string>145F4FCA2BE071F400603B3F</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>145F4FCB2BE071F400603B4E</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5F73F4C32FCA700000EFC123</string>
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
@@ -826,6 +847,7 @@
 				<string>145F4FC62BE071D600603B3F</string>
 				<string>145F4FC82BE071D600603B3F</string>
 				<string>145F4FCA2BE071F400603B3F</string>
+				<string>5F73F4C32FCA700000EFC123</string>
 				<string>14B7F7E02BE5F46B00E6D40B</string>
 				<string>14CF02B32BE1481D0037FB7E</string>
 				<string>14F2C4F72BE1B12300DE9FD9</string>
@@ -1062,7 +1084,9 @@ fi
 			<key>name</key>
 			<string>Fix Tool Runner Permissions</string>
 			<key>outputPaths</key>
-			<array/>
+			<array>
+				<string>$(TARGET_BUILD_DIR)/fix_tool_runner_permissions.stamp</string>
+			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
 			<key>shellPath</key>
@@ -1074,6 +1098,7 @@ runner="${CONFIGURATION_BUILD_DIR}/${FULL_PRODUCT_NAME}/pscal_tool_runner"
 if [ -f "${runner}" ]; then
     /bin/rm -f "${runner}" || true
 fi
+touch "${TARGET_BUILD_DIR}/fix_tool_runner_permissions.stamp"
 </string>
 		</dict>
 		<key>5F1AA0012EC6F00100000001</key>
