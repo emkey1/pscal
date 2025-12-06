@@ -22,7 +22,9 @@ static const char *shellResolvePathForIOS(const char *input, char *buffer, size_
 #endif
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include <setjmp.h>
 #ifdef PSCAL_TARGET_IOS
+#include <signal.h>
 #include <dirent.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -3454,12 +3456,43 @@ typedef struct {
     int status;
 } ShellToolThreadContext;
 
+static __thread sigjmp_buf gShellThreadJumpBuf;
+
+static void shellThreadSigintHandler(int signo) {
+    (void)signo;
+    siglongjmp(gShellThreadJumpBuf, 1);
+}
+
 static void *shellToolThreadMain(void *arg) {
     ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
     if (!ctx || !ctx->entry) {
         return NULL;
     }
-    ctx->status = ctx->entry(ctx->argc, ctx->argv);
+
+    /* Unblock SIGINT for this thread */
+    sigset_t unblock_mask;
+    sigemptyset(&unblock_mask);
+    sigaddset(&unblock_mask, SIGINT);
+    pthread_sigmask(SIG_UNBLOCK, &unblock_mask, NULL);
+
+    /* Install safe termination handler */
+    struct sigaction sa, old_sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = shellThreadSigintHandler;
+    sigemptyset(&sa.sa_mask);
+    /* SA_RESTART is purposely omitted so we interrupt blocking calls */
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, &old_sa);
+
+    if (sigsetjmp(gShellThreadJumpBuf, 1) == 0) {
+        ctx->status = ctx->entry(ctx->argc, ctx->argv);
+    } else {
+        /* Interrupted */
+        ctx->status = 130;
+    }
+
+    /* Restore signal handler */
+    sigaction(SIGINT, &old_sa, NULL);
     return NULL;
 }
 
@@ -3473,6 +3506,12 @@ static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
     context.argv = argv;
     context.status = 127;
 
+    /* Block SIGINT on the main thread so it is delivered to the worker */
+    sigset_t new_mask, old_mask;
+    sigemptyset(&new_mask);
+    sigaddset(&new_mask, SIGINT);
+    pthread_sigmask(SIG_BLOCK, &new_mask, &old_mask);
+
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
@@ -3480,9 +3519,14 @@ static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
     int create_rc = pthread_create(&thread, &attr, shellToolThreadMain, &context);
     pthread_attr_destroy(&attr);
     if (create_rc != 0) {
+        /* Restore mask if creation failed */
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
         return entry(argc, argv);
     }
     (void)pthread_join(thread, NULL);
+
+    /* Restore mask */
+    pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
     return context.status;
 }
 
