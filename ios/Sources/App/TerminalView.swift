@@ -21,6 +21,8 @@ private func terminalViewLog(_ message: String) {
     withCStringPointer(message) { c_terminalDebugLog($0) }
 }
 
+// MARK: - Font Settings (Restored)
+
 final class TerminalFontSettings: ObservableObject {
     struct FontOption: Identifiable, Equatable {
         let id: String
@@ -351,12 +353,15 @@ final class TerminalFontSettings: ObservableObject {
     }
 }
 
+// MARK: - Main Terminal View
+
 struct TerminalView: View {
     let showsOverlay: Bool
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
     @State private var focusAnchor: Int = 0
-    @State private var keyboardOverlap: CGFloat = 0
+    
+    // FIX: Removed keyboardOverlap state. We trust the parent view's frame now.
 
     init(showsOverlay: Bool = true) {
         self.showsOverlay = showsOverlay
@@ -364,16 +369,17 @@ struct TerminalView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            KeyboardAwareContainer(
-                content: GeometryReader { proxy in
-                    TerminalContentView(availableSize: proxy.size,
-                                        safeAreaInsets: proxy.safeAreaInsets,
-                                        keyboardOverlap: keyboardOverlap,
-                                        fontSettings: fontSettings,
-                                        focusAnchor: $focusAnchor)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                }
-            )
+            // FIX: Removed KeyboardAwareContainer.
+            // We use GeometryReader directly. The size provided here is ALREADY
+            // adjusted for the keyboard by TerminalRootViewController constraints.
+            GeometryReader { proxy in
+                TerminalContentView(availableSize: proxy.size,
+                                    safeAreaInsets: proxy.safeAreaInsets,
+                                    keyboardOverlap: 0, // Force 0. Don't subtract twice.
+                                    fontSettings: fontSettings,
+                                    focusAnchor: $focusAnchor)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
             .edgesIgnoringSafeArea(.bottom)
 
             if showsOverlay {
@@ -398,10 +404,10 @@ struct TerminalView: View {
                     .accessibilityLabel("Adjust Font Size")
                 }
                 .padding(.bottom, {
-                    // Anchor buttons just above accessory bar + soft keyboard when visible.
-                    let accessoryHeight: CGFloat = 3
-                    let stackHeight = keyboardOverlap + accessoryHeight + currentSafeBottomInset()
-                    return max(16, stackHeight)
+                    // Anchor buttons relative to the view bottom.
+                    // Since the view bottom is now the "Keyboard Top",
+                    // we just need a small padding (16) to float above the keys.
+                    return 16
                 }())
                 .padding(.trailing, 10)
             }
@@ -410,18 +416,6 @@ struct TerminalView: View {
             TerminalSettingsView()
         }
         .background(Color(.systemBackground))
-        .onReceive(NotificationCenter.default.publisher(for: keyboardOverlapNotification)) { note in
-            if let val = note.userInfo?["overlap"] as? CGFloat {
-                keyboardOverlap = val
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            guard let height = Self.computeKeyboardHeight(from: note) else { return }
-            keyboardOverlap = height
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardOverlap = 0
-        }
     }
 }
 
@@ -454,6 +448,8 @@ extension TerminalView {
     }
 }
 
+// MARK: - Terminal Content View
+
 private struct TerminalContentView: View {
     private static let topPadding: CGFloat = 32.0
     let availableSize: CGSize
@@ -462,7 +458,9 @@ private struct TerminalContentView: View {
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
     @Binding private var focusAnchor: Int
     @State private var lastLoggedMetrics: TerminalGeometryMetrics?
-    @State private var keyboardOverlap: CGFloat = 0
+    
+    // We keep this parameter signature to match existing inits, but we ignore it or pass 0
+    let keyboardOverlap: CGFloat
 
     init(availableSize: CGSize,
          safeAreaInsets: EdgeInsets,
@@ -471,9 +469,9 @@ private struct TerminalContentView: View {
          focusAnchor: Binding<Int>) {
         self.availableSize = availableSize
         self.safeAreaInsets = safeAreaInsets
+        self.keyboardOverlap = keyboardOverlap
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
         _focusAnchor = focusAnchor
-        _keyboardOverlap = State(initialValue: keyboardOverlap)
     }
 
     var body: some View {
@@ -539,12 +537,6 @@ private struct TerminalContentView: View {
         .onChange(of: safeAreaInsets) { _ in
             updateTerminalGeometry()
         }
-        .onReceive(NotificationCenter.default.publisher(for: keyboardOverlapNotification)) { note in
-            if let val = note.userInfo?["overlap"] as? CGFloat {
-                keyboardOverlap = val
-                updateTerminalGeometry()
-            }
-        }
         .onChange(of: fontSettings.pointSize) { _ in
             updateTerminalGeometry()
         }
@@ -564,8 +556,13 @@ private struct TerminalContentView: View {
     private func updateTerminalGeometry() {
         let showingStatus = runtime.exitStatus != nil
         let font = fontSettings.currentFont
-        let effectiveHeight = max(1, availableSize.height - keyboardOverlap)
+        
+        // FIX: Don't subtract keyboardOverlap here. The `availableSize` passed in
+        // by GeometryReader is already the correct, keyboard-avoiding size.
+        let effectiveHeight = max(1, availableSize.height)
+        
         let sizeForMetrics = CGSize(width: availableSize.width, height: effectiveHeight)
+        
         guard let candidate = TerminalGeometryCalculator.metrics(for: sizeForMetrics,
                                                                  safeAreaInsets: safeAreaInsets,
                                                                  topPadding: Self.topPadding,
@@ -587,19 +584,11 @@ private struct TerminalContentView: View {
                                                                 horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
                                                                 showingStatus: showingStatus)
             let char = TerminalGeometryCalculator.characterMetrics(for: font)
-            terminalViewLog(String(format: "[TerminalView] available %.1fx%.1f safe(top=%.1f bottom=%.1f leading=%.1f trailing=%.1f) usable %.1fx%.1f font=%@ %.2fpt char(%.2f x %.2f) -> rows=%d cols=%d",
+            terminalViewLog(String(format: "[TerminalView] available %.1fx%.1f usable %.1fx%.1f -> rows=%d cols=%d",
                                    availableSize.width,
                                    availableSize.height,
-                                   safeAreaInsets.top,
-                                   safeAreaInsets.bottom,
-                                   safeAreaInsets.leading,
-                                   safeAreaInsets.trailing,
                                    grid.width,
                                    grid.height,
-                                   font.fontName,
-                                   font.pointSize,
-                                   char.width,
-                                   char.lineHeight,
                                    metrics.rows,
                                    metrics.columns))
             lastLoggedMetrics = metrics
@@ -627,6 +616,8 @@ struct TerminalGridCapacity {
     let width: CGFloat
     let height: CGFloat
 }
+
+// MARK: - Geometry Calculator (Fixed)
 
 enum TerminalGeometryCalculator {
     static let horizontalPadding: CGFloat = 0.0
@@ -663,7 +654,6 @@ enum TerminalGeometryCalculator {
     }
 
     private static func measureMetrics(for font: UIFont) -> (CGFloat, CGFloat) {
-        // Measure via CoreText glyph advances to avoid hidden padding/kerning drift.
         let ctFont: CTFont = font as CTFont
         let character: UniChar = ("M" as NSString).character(at: 0)
         var glyph: CGGlyph = 0
@@ -686,25 +676,29 @@ enum TerminalGeometryCalculator {
                               topPadding: CGFloat,
                               horizontalPadding: CGFloat,
                               showingStatus: Bool) -> TerminalGridCapacity {
-        // Vertical space
         var availableHeight = size.height
         availableHeight -= topPadding
         if showingStatus {
             availableHeight -= statusOverlayHeight
         }
-        availableHeight -= safeAreaInsets.bottom
+        
+        // --- FIX: Heuristic to avoid double subtraction ---
+        let screenHeight = UIScreen.main.bounds.height
+        let isKeyboardUp = size.height < (screenHeight * 0.6)
+        
+        if !isKeyboardUp {
+            availableHeight -= safeAreaInsets.bottom
+        }
+        
         availableHeight = max(0, availableHeight)
 
-        // Snap line height to physical pixels to match rendering.
         let adjustedLineHeight = pixelCeil(font.lineHeight)
 
-        // Horizontal space (padding is per-side)
         var availableWidth = size.width
         availableWidth -= (horizontalPadding * 2)
         availableWidth = max(0, availableWidth)
 
-        // Measure a block of text to reduce per-character rounding error.
-        let sample = "MMMMMMMMMM" // 10 chars
+        let sample = "MMMMMMMMMM"
         let sampleWidth = (sample as NSString).size(withAttributes: [.font: font]).width
         let avgCharWidth = max(1.0, sampleWidth / CGFloat(sample.count))
 
@@ -719,7 +713,7 @@ enum TerminalGeometryCalculator {
                         topPadding: CGFloat,
                         showingStatus: Bool,
                         font: UIFont) -> TerminalGeometryMetrics? {
-        guard size.width > 0, size.height > 0 else { return nil }
+        guard size.width > 10, size.height > 10 else { return nil }
 
         let uiInsets = UIEdgeInsets(top: safeAreaInsets.top,
                                     left: safeAreaInsets.leading,
@@ -734,6 +728,7 @@ enum TerminalGeometryCalculator {
 
         let rawColumns = grid.columns
         let rawRows = grid.rows
+        
         guard rawColumns > 0, rawRows > 0 else { return nil }
 
         return TerminalGeometryMetrics(
@@ -750,6 +745,8 @@ enum TerminalGeometryCalculator {
                        font: font)
     }
 }
+
+// MARK: - Renderer Views
 
 struct TerminalRendererView: UIViewRepresentable {
     let text: NSAttributedString
@@ -1257,7 +1254,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         textView.layoutIfNeeded()
         let storageLength = textView.attributedText.length
         if storageLength > 0 {
-            // Make sure pending text storage edits are flushed before asking for caret geometry.
             textView.layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storageLength))
             textView.layoutManager.ensureLayout(for: textView.textContainer)
         }
@@ -1271,7 +1267,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         guard text.length > 0 else { return text }
         let baseFont = currentFont()
 
-        // Fast path: if everything already uses the same family, skip remapping.
         var needsRemap = false
         let fullRange = NSRange(location: 0, length: text.length)
         text.enumerateAttribute(.font, in: fullRange, options: []) { value, _, stop in
@@ -1418,15 +1413,10 @@ final class TerminalDisplayTextView: UITextView {
             return
         }
 
-        // Defer caret update to allow layout to settle, avoiding "outstanding changes" error
-        // and avoiding explicit layoutManager access (TextKit 1 warning).
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-
-            // Re-validate offset in case it changed pending dispatch
             guard let currentOffset = self.cursorTextOffset, currentOffset == offset else { return }
             
-            // Skip caret work when there is no text
             guard self.attributedText.length > 0 else {
                 self.cursorLayer.opacity = 0
                 return
@@ -1462,8 +1452,6 @@ final class TerminalDisplayTextView: UITextView {
 
             self.cursorLayer.opacity = 1
         }
-
-        // Removed the synchronous caret update block here as per instructions.
     }
 
     private func pruneGestures() {
@@ -1741,9 +1729,9 @@ struct TerminalSettingsView: View {
                     .disabled(!settings.pathTruncationEnabled)
                     Text(settings.pathTruncationEnabled ?
                          "Absolute paths map to \(settings.pathTruncationPath.isEmpty ? "Documents" : settings.pathTruncationPath)." :
-                         "PATH_TRUNCATE is disabled; absolute paths reflect the full sandbox path.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                            "PATH_TRUNCATE is disabled; absolute paths reflect the full sandbox path.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Terminal Settings")

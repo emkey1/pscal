@@ -386,7 +386,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func updateTerminalSize(columns: Int, rows: Int) {
         runtimeDebugLog("[Geometry] main update request columns=\(columns) rows=\(rows)")
+
+        // 1. Update the Main UI geometry records
         updateGeometry(from: .main, columns: columns, rows: rows)
+
+        // 2. CRITICAL FIX: If we are in Elvis/Full-Screen mode, the "Main" geometry
+        // represents the physical screen limits. We must force the Elvis geometry
+        // to match this reality immediately, otherwise rotation is ignored.
+        if isElvisModeActive() {
+            runtimeDebugLog("[Geometry] Propagating main resize to Elvis state")
+            updateGeometry(from: .elvis, columns: columns, rows: rows)
+
+            // Force the active geometry to update immediately so the C-layer gets the signal
+            activeGeometry = TerminalGeometryMetrics(columns: columns, rows: rows)
+            PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
+        }
     }
 
     func updateElvisWindowSize(columns: Int, rows: Int) {
@@ -621,11 +635,23 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     private static func defaultGeometryMetrics() -> TerminalGeometryMetrics {
         let font = TerminalFontSettings.shared.currentFont
-        let screenSize = UIScreen.main.bounds.size
+
+        // Get the actual window size if possible, fallback to main screen
+        let size: CGSize
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            size = window.bounds.size
+        } else {
+            size = UIScreen.main.bounds.size
+        }
+
         let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
         let lineHeight = max(1.0, font.lineHeight)
-        let columns = max(10, min(Int(floor(screenSize.width / charWidth)), 2000))
-        let rows = max(4, min(Int(floor(screenSize.height / lineHeight)), 2000))
+
+        // Sanity clamp to prevent 0-column crashes on startup
+        let columns = max(10, min(Int(floor(size.width / charWidth)), 2000))
+        let rows = max(4, min(Int(floor(size.height / lineHeight)), 2000))
+
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
 

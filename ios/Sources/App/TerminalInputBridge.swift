@@ -34,8 +34,11 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.onInput = onInput
         view.onPaste = onPaste
         context.coordinator.view = view
+        
+        // Remove the default "Assistant" shortcuts (copy/paste/undo) to save space
         view.inputAssistantItem.leadingBarButtonGroups = []
         view.inputAssistantItem.trailingBarButtonGroups = []
+        
         DispatchQueue.main.async {
             view.becomeFirstResponder()
         }
@@ -64,6 +67,7 @@ final class TerminalKeyInputView: UITextView {
     var onPaste: ((String) -> Void)?
     private var hardwareKeyboardConnected: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
+    
     private struct RepeatCommand {
         let command: UIKeyCommand
         let output: String
@@ -86,15 +90,16 @@ final class TerminalKeyInputView: UITextView {
 
     private var controlLatch: Bool = false
 
-    // Toolbar with terminal-only keys missing from the soft keyboard.
+    // MARK: - FIXED ACCESSORY BAR
     private lazy var accessoryBar: UIInputView = {
-        let bar = UIInputView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 60),
-                              inputViewStyle: .keyboard)
+        // 1. Init with .zero. The system manages the frame.
+        let bar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        
+        // 2. Enable Auto Layout internal sizing
         bar.allowsSelfSizing = true
-        bar.clipsToBounds = true
-        bar.layer.cornerRadius = 12
         bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        
+        // 3. REMOVED: bar.autoresizingMask (This causes conflicts during rotation)
 
         let stack = UIStackView()
         stack.axis = .horizontal
@@ -110,9 +115,11 @@ final class TerminalKeyInputView: UITextView {
             config.baseBackgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
             config.baseForegroundColor = .label
             config.title = title
-            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
+            // Reduced insets slightly to fit better on smaller screens (iPad mini)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)
             button.configuration = config
-            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+            // Dynamic type support for accessibility
+            button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
             return button
         }
@@ -129,18 +136,23 @@ final class TerminalKeyInputView: UITextView {
         [esc, ctrl, dot, fslash, up, down, left, right].forEach(stack.addArrangedSubview)
 
         bar.addSubview(stack)
+        
+        // 4. Use safeAreaLayoutGuide. This keeps buttons accessible on all device orientations.
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            stack.leadingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.trailingAnchor, constant: -8),
             stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 6),
             stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -6),
-            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)
+            // Ensure the bar has a minimum height, but allow it to grow if font size is huge
+            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 50)
         ])
         return bar
     }()
 
     override var inputAccessoryView: UIView? {
         get {
+            // NOTE: If you want the Esc/Ctrl keys to be available even when a
+            // hardware keyboard is attached (common for Vim usage), remove this check.
             hardwareKeyboardConnected ? nil : accessoryBar
         }
         set { /* ignore external setters */ }
@@ -150,8 +162,8 @@ final class TerminalKeyInputView: UITextView {
         var commands: [RepeatCommand] = []
         func makeCommand(input: String, output: String, modifiers: UIKeyModifierFlags = []) {
             let command = UIKeyCommand(input: input,
-                                       modifierFlags: modifiers,
-                                       action: #selector(handleRepeatCommand(_:)))
+                                     modifierFlags: modifiers,
+                                     action: #selector(handleRepeatCommand(_:)))
             if #available(iOS 15.0, *) {
                 command.wantsPriorityOverSystemBehavior = true
             }
@@ -353,7 +365,6 @@ final class TerminalKeyInputView: UITextView {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            // no-op; we only flip to hardware on key presses
             _ = self
         }
         keyboardObservers = [willShow, willHide]
