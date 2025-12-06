@@ -4,6 +4,8 @@ import Darwin
 import CoreLocation
 import UIKit
 
+// MARK: - C Bridge Helpers
+
 private func withCStringPointerRuntime<T>(_ string: String, _ body: (UnsafePointer<CChar>) -> T) -> T? {
     let utf8 = string.utf8CString
     return utf8.withUnsafeBufferPointer { buffer in
@@ -13,8 +15,7 @@ private func withCStringPointerRuntime<T>(_ string: String, _ body: (UnsafePoint
 }
 
 func traceLog(_ msg: String) {
-    // print("[BRIDGE-TRACE] \(msg)") // <--- COMMENT THIS OUT
-    pscalRuntimeDebugLogBridge("[BRIDGE-TRACE] \(msg)") // Use your existing safe logger
+    pscalRuntimeDebugLogBridge("[BRIDGE-TRACE] \(msg)")
 }
 
 private let runtimeLogMirrorsToConsole: Bool = {
@@ -188,23 +189,24 @@ func pscalRuntimeResetSessionLogBridge() {
     RuntimeLogger.runtime.resetSession()
 }
 
+// MARK: - Runtime Bootstrap
+
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
-    
-    @Published private(set) var mouseMode: TerminalBuffer.MouseMode = .none
-    @Published private(set) var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
 
     @Published private(set) var screenText: NSAttributedString = NSAttributedString(string: "Launching exsh...")
     @Published private(set) var exitStatus: Int32?
     @Published private(set) var cursorInfo: TerminalCursorInfo?
     @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
     @Published private(set) var elvisRenderToken: UInt64 = 0
+    
+    // Mouse State Publishing
+    @Published private(set) var mouseMode: TerminalBuffer.MouseMode = .none
+    @Published private(set) var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
 
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
-    // Dedicated pthread stack for the runtime (libdispatch workers are ~512KB).
-    // Use a larger stack to reduce overflow risk when running heavy programs.
     private let runtimeStackSizeBytes = 32 * 1024 * 1024
     private var handlerContext: UnsafeMutableRawPointer?
     private let terminalBuffer: TerminalBuffer
@@ -219,6 +221,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var elvisModeActive: Bool = false
     private var elvisRefreshPending: Bool = false
     private var appearanceObserver: NSObjectProtocol?
+    
+    // THROTTLING VARS
+    private var renderQueued = false
+    private var lastRenderTime: TimeInterval = 0
+    // 0.016 = ~60 FPS. This prevents the UI thread from locking up during massive paste operations.
+    private let minRenderInterval: TimeInterval = 0.016 
+    
     private lazy var outputHandler: PSCALRuntimeOutputHandler = { data, length, context in
         guard let context, let base = data else { return }
         let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context).takeUnretainedValue()
@@ -246,19 +255,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 PSCALRuntimeSendInput(pointer, buffer.count)
             }
         })
+        
         self.terminalBuffer.setResizeHandler { [weak self] columns, rows in
             self?.handleTerminalResizeRequest(columns: columns, rows: rows)
         }
-        PSCALRuntimeUpdateWindowSize(Int32(initialMetrics.columns), Int32(initialMetrics.rows))
-        appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
-                                                                     object: nil,
-                                                                     queue: .main) { [weak self] _ in
-            self?.scheduleRender()
-        }
         
+        // Listen for mouse mode changes from the buffer
         self.terminalBuffer.onMouseModeChange = { [weak self] mode, encoding in
             self?.mouseMode = mode
             self?.mouseEncoding = encoding
+        }
+        
+        PSCALRuntimeUpdateWindowSize(Int32(initialMetrics.columns), Int32(initialMetrics.rows))
+        appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
+                                                                    object: nil,
+                                                                    queue: .main) { [weak self] _ in
+            self?.scheduleRender()
         }
     }
 
@@ -277,7 +289,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let fm = FileManager.default
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        // Do not purge var/log; it must persist for post-crash debugging.
         let tmpDir = docs.appendingPathComponent("tmp", isDirectory: true)
         if fm.fileExists(atPath: tmpDir.path) {
             try? fm.removeItem(at: tmpDir)
@@ -301,10 +312,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
             setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
         }
-        // Make the container root available to native helpers (OpenSSH host keys).
         let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
         setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
-        // Also expose the working directory (Documents/home) as PSCALI_WORKDIR.
         let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
         setenv("PSCALI_WORKDIR", workdir, 1)
         GPSDeviceProvider.shared.start()
@@ -337,8 +346,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    // When running with AddressSanitizer, disable alternate signal stacks to avoid
-    // ASan aborts when helper threads exit (seen after ssh failures).
     private func configureSanitizerEnv() {
         let key = "ASAN_OPTIONS"
         var options = ProcessInfo.processInfo.environment[key] ?? ""
@@ -374,7 +381,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             return
         }
         echoLocallyIfNeeded(text)
-        let bytes = [UInt8](data) // copy for async safety
+        let bytes = [UInt8](data)
         inputQueue.async {
             let chunkSize = 512
             var offset = 0
@@ -386,7 +393,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 }
                 offset += len
                 if offset < bytes.count {
-                    usleep(2000) // allow the PTY to drain
+                    usleep(2000)
                 }
             }
         }
@@ -394,18 +401,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func updateTerminalSize(columns: Int, rows: Int) {
         runtimeDebugLog("[Geometry] main update request columns=\(columns) rows=\(rows)")
-
-        // 1. Update the Main UI geometry records
+        
         updateGeometry(from: .main, columns: columns, rows: rows)
-
-        // 2. CRITICAL FIX: If we are in Elvis/Full-Screen mode, the "Main" geometry
-        // represents the physical screen limits. We must force the Elvis geometry
-        // to match this reality immediately, otherwise rotation is ignored.
+        
+        // CRITICAL FIX: If full-screen mode (Elvis) is active, force the new geometry
+        // down to the C-layer immediately, otherwise rotation is ignored.
         if isElvisModeActive() {
             runtimeDebugLog("[Geometry] Propagating main resize to Elvis state")
             updateGeometry(from: .elvis, columns: columns, rows: rows)
-
-            // Force the active geometry to update immediately so the C-layer gets the signal
             activeGeometry = TerminalGeometryMetrics(columns: columns, rows: rows)
             PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
         }
@@ -488,28 +491,54 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    private var renderQueued = false
+    // --- RENDER SCHEDULING (THROTTLED) ---
     private func scheduleRender(preserveBackground: Bool = false) {
         if isElvisModeActive() {
             refreshElvisDisplay()
             return
         }
+        
+        // If a render is already pending, do nothing (coalesce updates)
         if renderQueued {
             return
         }
-        renderQueued = true
-        DispatchQueue.main.async {
-            self.renderQueued = false
-            let snapshot = self.terminalBuffer.snapshot()
-            let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
-            let backgroundColor = snapshot.defaultBackground
-            self.screenText = renderResult.text
-            self.cursorInfo = renderResult.cursor
-            if !preserveBackground {
-                self.terminalBackgroundColor = backgroundColor
+        
+        let now = Date().timeIntervalSince1970
+        let timeSinceLast = now - lastRenderTime
+        
+        // If we are under the throttle limit, delay the render.
+        // This ensures massive I/O bursts (like pasting) don't lock the UI thread.
+        if timeSinceLast < minRenderInterval {
+            renderQueued = true
+            let delay = minRenderInterval - timeSinceLast
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.performRender(preserveBackground: preserveBackground)
+            }
+        } else {
+            // Otherwise, render on the next runloop cycle
+            renderQueued = true
+            DispatchQueue.main.async { [weak self] in
+                self?.performRender(preserveBackground: preserveBackground)
             }
         }
     }
+    
+    private func performRender(preserveBackground: Bool) {
+        // Reset flags
+        renderQueued = false
+        lastRenderTime = Date().timeIntervalSince1970
+        
+        // Actual expensive rendering logic
+        let snapshot = self.terminalBuffer.snapshot()
+        let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
+        let backgroundColor = snapshot.defaultBackground
+        self.screenText = renderResult.text
+        self.cursorInfo = renderResult.cursor
+        if !preserveBackground {
+            self.terminalBackgroundColor = backgroundColor
+        }
+    }
+    // -------------------------------------
 
     func isElvisModeActive() -> Bool {
         return stateQueue.sync { elvisModeActive }
@@ -521,23 +550,18 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
 
             if active {
-                // 1. CRITICAL FIX: Force the C-Runtime to match the Main UI size.
-                // Do not rely on 'geometryBySource[.elvis]' because it contains
-                // the stale/wrong size (e.g., 94 or 64 rows).
+                // Force the C-Runtime to match the Main UI size.
                 let validMetrics = geometryBySource[.main] ?? activeGeometry
                 
                 runtimeDebugLog("[Geometry] Forcing C-Runtime to sync with Main UI: \(validMetrics.columns)x\(validMetrics.rows)")
                 
-                // Tell the C-side: "No, you are actually THIS big."
                 PSCALRuntimeUpdateWindowSize(Int32(validMetrics.columns), Int32(validMetrics.rows))
                 
-                // 2. Update the internal tracker to match
                 activeGeometry = validMetrics
-                activeGeometrySource = .main // Force source to main to prevent reverting to stale elvis metrics
+                activeGeometrySource = .main 
                 
                 refreshElvisDisplay()
             } else {
-                // Exiting editor mode
                 refreshActiveGeometry(forceRuntimeUpdate: true)
                 scheduleRender()
             }
@@ -565,9 +589,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
 
     private func shouldEchoLocally() -> Bool {
-        // Local echo is only needed in virtual TTY fallback mode; avoid it when
-        // full-screen editors (Elvis/Nextvi) are active to prevent double-rendered
-        // newlines and ghost lines during insert mode.
         if isElvisModeActive() {
             return false
         }
@@ -590,8 +611,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func updateGeometry(from source: GeometrySource, columns: Int, rows: Int) {
-        // Clamp to avoid runaway geometry that can overwhelm rendering when raw mode misreports,
-        // but allow wide grids for tiny fonts.
         let clampedColumns = max(10, min(columns, 2000))
         let clampedRows = max(4, min(rows, 2000))
         let metrics = TerminalGeometryMetrics(columns: clampedColumns, rows: clampedRows)
@@ -643,8 +662,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     private static func defaultGeometryMetrics() -> TerminalGeometryMetrics {
         let font = TerminalFontSettings.shared.currentFont
-
-        // Get the actual window size if possible, fallback to main screen
         let size: CGSize
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first {
@@ -652,14 +669,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         } else {
             size = UIScreen.main.bounds.size
         }
-
         let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
         let lineHeight = max(1.0, font.lineHeight)
-
-        // Sanity clamp to prevent 0-column crashes on startup
         let columns = max(10, min(Int(floor(size.width / charWidth)), 2000))
         let rows = max(4, min(Int(floor(size.height / lineHeight)), 2000))
-
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
 

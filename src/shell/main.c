@@ -1538,8 +1538,8 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     const char *glob_base = word;
     size_t glob_base_len = word_len;
     bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
-    bool glob_used_virtual = false;
 #if defined(PSCAL_TARGET_IOS)
+    bool glob_used_virtual = false;
     if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
         char word_copy[PATH_MAX];
         if (word_len < sizeof(word_copy)) {

@@ -296,7 +296,7 @@ static int smallclueRmdirCommand(int argc, char **argv);
 static int smallclueLnCommand(int argc, char **argv);
 static int smallclueTypeCommand(int argc, char **argv);
 static int smallclueFileCommand(int argc, char **argv);
-static int smallclueLicensesCommand(int argc, char **argv);
+static int __attribute__((unused)) smallclueLicensesCommand(int argc, char **argv);
 static const char *smallclueLeafName(const char *path);
 static int smallclueBuildPath(char *buf, size_t buf_size, const char *dir, const char *leaf);
 static void smallclueTrimTrailingSlashes(char *path);
@@ -566,7 +566,7 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
 
 static size_t kSmallclueAppletCount = sizeof(kSmallclueApplets) / sizeof(kSmallclueApplets[0]);
 
-static const char *smallclueLookupHelp(const char *name) {
+static const char * __attribute__((unused)) smallclueLookupHelp(const char *name) {
     for (const SmallclueAppletHelp *h = kSmallclueAppletHelp; h && h->name; ++h) {
         if (strcmp(h->name, name) == 0) {
             return h->usage;

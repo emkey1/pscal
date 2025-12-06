@@ -525,7 +525,13 @@ private struct TerminalContentView: View {
         .onAppear {
             updateTerminalGeometry()
             runtime.start()
-            focusAnchor &+= 1
+                    
+            // FIX: Delay the initial focus request by 0.5s.
+            // This gives the UIWindow time to settle so it accepts the First Responder
+            // request (hardware keyboard capture) reliably on cold boot.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusAnchor &+= 1
+            }
         }
         .onChange(of: availableSize) { _ in
             updateTerminalGeometry()
