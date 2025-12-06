@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+// Global notification for keyboard overlap changes.
+let keyboardOverlapNotification = Notification.Name("KeyboardOverlapDidChange")
+
 final class KeyboardHostingController<Content: View>: UIHostingController<Content> {
     private var bottomConstraint: NSLayoutConstraint?
 
@@ -77,6 +80,9 @@ final class KeyboardHostingController<Content: View>: UIHostingController<Conten
         let curve = UIView.AnimationOptions(rawValue: curveRaw << 16)
 
         bottomConstraint?.constant = -overlap
+        NotificationCenter.default.post(name: keyboardOverlapNotification,
+                                        object: nil,
+                                        userInfo: ["overlap": overlap])
         UIView.animate(withDuration: duration, delay: 0, options: curve, animations: {
             self.view.layoutIfNeeded()
         })

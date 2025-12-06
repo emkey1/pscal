@@ -25,6 +25,7 @@
 #include <limits.h>
 #include <libgen.h>
 #include <pwd.h>
+#include <sys/wait.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,7 @@
 #include <strings.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/ip_icmp.h>
 #include <arpa/inet.h>
 #include <inttypes.h>
 #include <sys/ioctl.h>
@@ -319,6 +321,7 @@ static int smallclueMarkdownCommand(int argc, char **argv);
 static int smallclueCurlCommand(int argc, char **argv);
 static int smallclueWgetCommand(int argc, char **argv);
 static int smallclueTelnetCommand(int argc, char **argv);
+static int smallclueTracerouteCommand(int argc, char **argv);
 #if SMALLCLUE_HAS_IFADDRS
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
@@ -391,6 +394,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"telnet", smallclueTelnetCommand, "Simple TCP telnet client"},
     {"test", smallclueTestCommand, "Evaluate expressions"},
     {"touch", smallclueTouchCommand, "Update file timestamps"},
+    {"traceroute", smallclueTracerouteCommand, "Trace network path to a host"},
     {"tr", smallclueTrCommand, "Translate or delete characters"},
     {"true", smallclueTrueCommand, "Do nothing, successfully"},
     {"type", smallclueTypeCommand, "Describe command names"},
@@ -520,6 +524,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
             "  -a append"},
     {"telnet", "telnet [-p PORT] HOST\n"
                "  Connect to HOST over TCP (default port 23) and relay stdin/stdout"},
+    {"traceroute", "traceroute HOST [PORT]\n"
+                   "  Trace network path using the system traceroute command"},
     {"test", "test EXPRESSION\n"
              "  File: -f -d -e; String: = != -z; Int: -eq -ne -lt -le -gt -ge"},
     {"touch", "touch FILE...\n"
@@ -4083,6 +4089,125 @@ static int smallclueTelnetCommand(int argc, char **argv) {
     }
     close(sock);
     return status;
+}
+
+static int smallclueTracerouteCommand(int argc, char **argv) {
+    // Simple, in-process traceroute using UDP probes and ICMP replies (IPv4 only).
+    smallclueResetGetopt();
+    int max_hops = 30;
+    int probes = 3;
+    int timeout_ms = 1500;
+    int dest_port = 33434;
+
+    int opt;
+    while ((opt = getopt(argc, argv, "m:q:w:p:")) != -1) {
+        switch (opt) {
+            case 'm': max_hops = atoi(optarg); break;
+            case 'q': probes = atoi(optarg); break;
+            case 'w': timeout_ms = atoi(optarg); break;
+            case 'p': dest_port = atoi(optarg); break;
+            default:
+                fprintf(stderr, "usage: traceroute [-m max_hops] [-q probes] [-w timeout_ms] [-p port] HOST\n");
+                return 1;
+        }
+    }
+    if (optind >= argc) {
+        fprintf(stderr, "usage: traceroute [-m max_hops] [-q probes] [-w timeout_ms] [-p port] HOST\n");
+        return 1;
+    }
+    const char *host = argv[optind];
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    struct addrinfo *res = NULL;
+    char portbuf[16];
+    snprintf(portbuf, sizeof(portbuf), "%d", dest_port);
+    int gai = getaddrinfo(host, portbuf, &hints, &res);
+    if (gai != 0 || !res) {
+        fprintf(stderr, "traceroute: %s: %s\n", host, gai_strerror(gai));
+        return 1;
+    }
+
+    int recv_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+    if (recv_sock < 0) {
+        fprintf(stderr, "traceroute: unable to open ICMP socket: %s\n", strerror(errno));
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    int send_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (send_sock < 0) {
+        fprintf(stderr, "traceroute: unable to open UDP socket: %s\n", strerror(errno));
+        close(recv_sock);
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(recv_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    printf("traceroute to %s (%s), %d hops max\n", host,
+           inet_ntoa(((struct sockaddr_in *)res->ai_addr)->sin_addr), max_hops);
+
+    bool reached = false;
+    for (int ttl = 1; ttl <= max_hops && !reached; ttl++) {
+        if (setsockopt(send_sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0) {
+            fprintf(stderr, "traceroute: setsockopt(IP_TTL) failed: %s\n", strerror(errno));
+            break;
+        }
+
+        printf("%2d ", ttl);
+        fflush(stdout);
+        bool got_reply = false;
+
+        for (int p = 0; p < probes; p++) {
+            struct sockaddr_in dest;
+            memcpy(&dest, res->ai_addr, sizeof(dest));
+            dest.sin_port = htons((uint16_t)(dest_port + ttl + p));
+
+            struct timeval start, end;
+            gettimeofday(&start, NULL);
+            sendto(send_sock, "", 0, 0, (struct sockaddr *)&dest, sizeof(dest));
+
+            unsigned char buf[1500];
+            struct sockaddr_in reply_addr;
+            socklen_t rlen = sizeof(reply_addr);
+            ssize_t n = recvfrom(recv_sock, buf, sizeof(buf), 0, (struct sockaddr *)&reply_addr, &rlen);
+            if (n < (ssize_t)(sizeof(struct ip) + sizeof(struct icmp))) {
+                printf(" *");
+                fflush(stdout);
+                continue;
+            }
+
+            gettimeofday(&end, NULL);
+            double rtt = (end.tv_sec - start.tv_sec) * 1000.0 + (end.tv_usec - start.tv_usec) / 1000.0;
+
+            struct ip *ip_hdr = (struct ip *)buf;
+            int ip_hdr_len = ip_hdr->ip_hl << 2;
+            struct icmp *icmp_hdr = (struct icmp *)(buf + ip_hdr_len);
+
+            printf(" %s  %.3f ms", inet_ntoa(reply_addr.sin_addr), rtt);
+            got_reply = true;
+
+            if (icmp_hdr->icmp_type == ICMP_UNREACH && icmp_hdr->icmp_code == ICMP_UNREACH_PORT) {
+                reached = true;
+            }
+        }
+
+        if (!got_reply) {
+            printf(" *");
+        }
+        printf("\n");
+    }
+
+    close(send_sock);
+    close(recv_sock);
+    freeaddrinfo(res);
+    return reached ? 0 : 1;
 }
 
 #if defined(PSCAL_TARGET_IOS)

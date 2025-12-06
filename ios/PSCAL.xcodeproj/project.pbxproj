@@ -1024,55 +1024,29 @@ case "${PLATFORM_NAME:-}" in
         ;;
 esac
 
-runner_source="${PROJECT_DIR}/../build/${platform_dir}/pscal_tool_runner"
-if [ -d "${PROJECT_DIR}/../build/${platform_dir}/bin" ]; then
-    runner_source="${PROJECT_DIR}/../build/${platform_dir}/bin/pscal_tool_runner"
-fi
-if [ -d "${PROJECT_DIR}/../build/${platform_dir}/bin/pscal_tool_runner.app" ]; then
-    runner_source="${PROJECT_DIR}/../build/${platform_dir}/bin/pscal_tool_runner.app/pscal_tool_runner"
-fi
-if [ ! -f "${runner_source}" ]; then
-    echo "[pscal_tool_runner] warning: missing ${runner_source}. Build the helper target first."
-    exit 0
-fi
+fallback_deflate="${PROJECT_DIR}/Tools/pscal_tool_runner.deflate"
 
 bundle_root="${CONFIGURATION_BUILD_DIR}/${FULL_PRODUCT_NAME}"
 raw_dest="${bundle_root}/pscal_tool_runner"
 compressed_dest="${bundle_root}/pscal_tool_runner.deflate"
+license_dest="${bundle_root}/Docs/Licenses"
 
-# Copy the raw runner into the bundle so iOS will execute it.
-/bin/cp -f "${runner_source}" "${raw_dest}"
-/bin/chmod 755 "${raw_dest}"
-if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] &amp;&amp; [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-    /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none "${raw_dest}" &gt;/dev/null
+# Do not bundle the raw runner executable (App Store rejects extra binaries).
+/bin/rm -f "${raw_dest}"
+
+# Bundle license texts for the in-app viewer.
+/bin/mkdir -p "${license_dest}"
+/bin/cp -f "${PROJECT_DIR}/../LICENSE" "${license_dest}/pscal_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt" "${license_dest}/openssl_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING" "${license_dest}/curl_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/SDL/LICENSE.txt" "${license_dest}/sdl_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/nextvi/LICENSE" "${license_dest}/nextvi_LICENSE.txt" || true
+
+if [ -f "${fallback_deflate}" ]; then
+    /bin/cp -f "${fallback_deflate}" "${compressed_dest}"
+else
+    echo "[pscal_tool_runner] warning: missing runner payload (no fallback deflate)." 1>&amp;2
 fi
-/bin/chmod 755 "${raw_dest}" || true
-/bin/ls -l "${raw_dest}" || true
-
-RUNNER_SOURCE="${runner_source}" COMPRESSED_DEST="${compressed_dest}" /usr/bin/python3 &lt;&lt;'PYRUN'
-import os
-import pathlib
-import zlib
-import sys
-
-src = pathlib.Path(os.environ["RUNNER_SOURCE"])
-dst = pathlib.Path(os.environ["COMPRESSED_DEST"])
-try:
-    data = src.read_bytes()
-except Exception as exc:
-    print(f"[pscal_tool_runner] failed to read {src}: {exc}", file=sys.stderr)
-    sys.exit(1)
-try:
-    compressed = zlib.compress(data, 9)
-except Exception as exc:
-    print(f"[pscal_tool_runner] failed to compress {src}: {exc}", file=sys.stderr)
-    sys.exit(1)
-try:
-    dst.write_bytes(compressed)
-except Exception as exc:
-    print(f"[pscal_tool_runner] failed to write {dst}: {exc}", file=sys.stderr)
-    sys.exit(1)
-PYRUN
 </string>
 		</dict>
 		<key>5DFF9BA02EC3E8CC004DFE5B</key>
@@ -1098,11 +1072,7 @@ PYRUN
 
 runner="${CONFIGURATION_BUILD_DIR}/${FULL_PRODUCT_NAME}/pscal_tool_runner"
 if [ -f "${runner}" ]; then
-    /bin/chmod 755 "${runner}" || true
-    if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] &amp;&amp; [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-        /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none "${runner}" &gt;/dev/null || true
-    fi
-    /bin/ls -l "${runner}" || true
+    /bin/rm -f "${runner}" || true
 fi
 </string>
 		</dict>

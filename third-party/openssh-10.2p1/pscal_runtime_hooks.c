@@ -20,8 +20,10 @@ static PSCAL_THREAD_LOCAL pscal_openssh_exit_context *g_pscal_openssh_ctx = NULL
 #ifdef PSCAL_TARGET_IOS
 volatile sig_atomic_t interrupted = 0;
 int showprogress = 1;
+#else
+volatile sig_atomic_t interrupted = 0;
+int showprogress = 1;
 #endif
-
 void
 pscal_openssh_push_exit_context(pscal_openssh_exit_context *ctx)
 {
@@ -44,10 +46,6 @@ pscal_openssh_pop_exit_context(pscal_openssh_exit_context *ctx)
 void
 pscal_openssh_reset_progress_state(void)
 {
-#ifdef PSCAL_TARGET_IOS
-	interrupted = 0;
-	showprogress = 1;
-#endif
 }
 
 const char *
@@ -96,6 +94,7 @@ pscal_openssh_register_cleanup(pscal_openssh_cleanup_fn cleanup)
 	}
 }
 
+#ifdef PSCAL_TARGET_IOS
 void
 cleanup_exit(int code)
 {
@@ -115,3 +114,4 @@ cleanup_exit(int code)
 #endif
 	_exit(code);
 }
+#endif /* PSCAL_TARGET_IOS */

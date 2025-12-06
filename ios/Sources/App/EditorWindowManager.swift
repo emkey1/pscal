@@ -6,7 +6,16 @@ import Darwin
 private func c_pscalRuntimeDebugLog(_ message: UnsafePointer<CChar>) -> Void
 
 private func editorRuntimeLog(_ message: String) {
-    message.withCString { c_pscalRuntimeDebugLog($0) }
+    #if DEBUG
+    let cString = message.utf8CString
+    cString.withUnsafeBufferPointer { ptr in
+        if let base = ptr.baseAddress {
+            c_pscalRuntimeDebugLog(base)
+        }
+    }
+    #else
+    _ = message
+    #endif
 }
 
 final class EditorWindowManager {

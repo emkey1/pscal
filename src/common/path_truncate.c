@@ -20,6 +20,18 @@ static size_t g_pathTruncatePrimaryLen = 0;
 static char g_pathTruncateAlias[PATH_MAX];
 static size_t g_pathTruncateAliasLen = 0;
 
+static void write_text_file(const char *path, const char *contents) {
+    if (!path || !contents) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fputs(contents, f);
+    fclose(f);
+}
+
 static void pathTruncateResetCaches(void) {
     g_pathTruncatePrimary[0] = '\0';
     g_pathTruncatePrimaryLen = 0;
@@ -339,15 +351,6 @@ void pathTruncateProvisionProc(const char *prefix) {
     if (!prefix || *prefix != '/') {
         return;
     }
-    /* Small helper to simplify writing text files. */
-    auto write_text_file = [](const char *path, const char *contents) {
-        if (!path || !contents) return;
-        FILE *f = fopen(path, "w");
-        if (!f) return;
-        fputs(contents, f);
-        fclose(f);
-    };
-
     char procdir[PATH_MAX];
     int written = snprintf(procdir, sizeof(procdir), "%s/proc", prefix);
     if (written <= 0 || (size_t)written >= sizeof(procdir)) {

@@ -27,6 +27,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access is required for SSH/telnet/ping connections to LAN hosts.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bluetooth is used for optional external keyboard and accessory connectivity.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

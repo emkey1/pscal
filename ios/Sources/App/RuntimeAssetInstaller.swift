@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Compression
 
 private enum RuntimePaths {
     static var documentsDirectory: URL {
@@ -68,6 +69,40 @@ final class RuntimeAssetInstaller {
 
     private init() {}
 
+    private func decompressDeflate(_ data: Data) -> Data? {
+        var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 0)!,
+                                        dst_size: 0,
+                                        src_ptr: UnsafePointer<UInt8>(bitPattern: 0)!,
+                                        src_size: 0,
+                                        state: nil)
+        var status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
+        guard status != COMPRESSION_STATUS_ERROR else { return nil }
+        defer { compression_stream_destroy(&stream) }
+
+        let bufferSize = 64 * 1024
+        let dstBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { dstBuffer.deallocate() }
+
+        var output = Data()
+        data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else { return }
+            stream.src_ptr = base
+            stream.src_size = data.count
+
+            repeat {
+                stream.dst_ptr = dstBuffer
+                stream.dst_size = bufferSize
+                status = compression_stream_process(&stream, 0)
+                let produced = bufferSize - stream.dst_size
+                if produced > 0 {
+                    output.append(dstBuffer, count: produced)
+                }
+            } while status == COMPRESSION_STATUS_OK
+        }
+
+        return status == COMPRESSION_STATUS_END ? output : nil
+    }
+
     func prepareWorkspace() {
         guard let bundleRoot = Bundle.main.resourceURL else {
             NSLog("PSCAL iOS: missing bundle resource root; cannot configure runtime paths.")
@@ -110,39 +145,45 @@ final class RuntimeAssetInstaller {
             return nil
         }
 
-        #if targetEnvironment(simulator)
+        let deflated = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: "deflate")
         let stagedRunner = RuntimePaths.stagedToolRunner
 
-        do {
-            try ensureDocumentsDirectoryExists()
-            if fileManager.fileExists(atPath: stagedRunner.path) {
-                if fileManager.contentsEqual(atPath: stagedRunner.path, andPath: bundledRunner.path) {
-                    try markExecutable(at: stagedRunner)
-                    cachedToolRunnerPath = stagedRunner.path
-                    return stagedRunner.path
-                }
-                try fileManager.removeItem(at: stagedRunner)
+        let stageRunner: (Data) -> String? = { data in
+            guard let decompressed = self.decompressDeflate(data) else {
+                NSLog("PSCAL iOS: failed to decompress tool runner payload.")
+                return nil
             }
+            do {
+                try self.ensureDocumentsDirectoryExists()
+                if self.fileManager.fileExists(atPath: stagedRunner.path) {
+                    try self.fileManager.removeItem(at: stagedRunner)
+                }
+                try decompressed.write(to: stagedRunner, options: .atomic)
+                try self.markExecutable(at: stagedRunner)
+                self.cachedToolRunnerPath = stagedRunner.path
+                return stagedRunner.path
+            } catch {
+                NSLog("PSCAL iOS: failed to stage tool runner: %@", error.localizedDescription)
+                self.cachedToolRunnerPath = nil
+                return nil
+            }
+        }
 
-            try fileManager.copyItem(at: bundledRunner, to: stagedRunner)
-            try markExecutable(at: stagedRunner)
-            cachedToolRunnerPath = stagedRunner.path
-            return stagedRunner.path
-        } catch {
-            NSLog("PSCAL iOS: failed to stage tool runner: %@", error.localizedDescription)
-            cachedToolRunnerPath = nil
-            return nil
+        if let deflated, let data = try? Data(contentsOf: deflated) {
+            if let path = stageRunner(data) {
+                return path
+            }
         }
-        #else
-        // On device, execute directly from the signed bundle location.
-        if fileManager.isExecutableFile(atPath: bundledRunner.path) {
-            cachedToolRunnerPath = bundledRunner.path
-            return bundledRunner.path
+
+        // Fallback: if an old-style raw runner is present in the bundle, stage it.
+        if fileManager.isExecutableFile(atPath: bundledRunner.path),
+           let rawData = try? Data(contentsOf: bundledRunner) {
+            return stageRunner(rawData)
         }
-        NSLog("PSCAL iOS: bundled pscal_tool_runner is not executable at %@", bundledRunner.path)
+
+        NSLog("PSCAL iOS: missing pscal_tool_runner payload in bundle.")
         cachedToolRunnerPath = nil
         return nil
-        #endif
     }
 
     private func installWorkspaceExamplesIfNeeded(bundleRoot: URL) {
@@ -202,18 +243,30 @@ final class RuntimeAssetInstaller {
     private func ensureLicensesFromBundle(bundleRoot: URL, workspaceDocs: URL) {
         let bundledLicenses = bundleRoot.appendingPathComponent("Docs/Licenses", isDirectory: true)
         let destLicenses = workspaceDocs.appendingPathComponent("Licenses", isDirectory: true)
-        guard fileManager.fileExists(atPath: bundledLicenses.path) else {
-            NSLog("PSCAL iOS: bundle missing Docs/Licenses; skipping license install.")
-            return
+        var sources: [URL] = []
+        if fileManager.fileExists(atPath: bundledLicenses.path) {
+            sources.append(contentsOf: (try? fileManager.contentsOfDirectory(at: bundledLicenses, includingPropertiesForKeys: nil)) ?? [])
+        } else {
+            // Fallback: look for flat license files in the bundle root.
+            let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt"]
+            for name in fallbackNames {
+                let candidate = bundleRoot.appendingPathComponent(name)
+                if fileManager.fileExists(atPath: candidate.path) {
+                    sources.append(candidate)
+                }
+            }
+            if sources.isEmpty {
+                // Last resort: create the directory so the help command has a place to look, but avoid noisy logs.
+                try? fileManager.createDirectory(at: destLicenses, withIntermediateDirectories: true)
+                return
+            }
         }
         do {
             if !fileManager.fileExists(atPath: destLicenses.path) || isSymbolicLink(at: destLicenses) {
                 try fileManager.createDirectory(at: destLicenses, withIntermediateDirectories: true)
             }
-            let contents = try fileManager.contentsOfDirectory(atPath: bundledLicenses.path)
-            for entry in contents {
-                let src = bundledLicenses.appendingPathComponent(entry)
-                let dst = destLicenses.appendingPathComponent(entry)
+            for src in sources {
+                let dst = destLicenses.appendingPathComponent(src.lastPathComponent)
                 if !fileManager.fileExists(atPath: dst.path) {
                     try fileManager.copyItem(at: src, to: dst)
                 }

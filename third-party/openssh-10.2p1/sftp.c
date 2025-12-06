@@ -86,7 +86,7 @@ extern char **environ;
 #undef environ
 #define environ (*_NSGetEnviron())
 #else
-int showprogress = 1;
+extern int showprogress;
 #endif
 
 /* When this option is set, we always recursively download/upload directories */
@@ -105,7 +105,7 @@ int global_fflag = 0;
 #if defined(PSCAL_TARGET_IOS)
 extern volatile sig_atomic_t interrupted;
 #else
-volatile sig_atomic_t interrupted = 0;
+extern volatile sig_atomic_t interrupted;
 #endif
 
 /* I wish qsort() took a separate ctx for the comparison function...*/

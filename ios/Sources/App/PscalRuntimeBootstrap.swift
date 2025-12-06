@@ -3,6 +3,14 @@ import Foundation
 import Darwin
 import UIKit
 
+private func withCStringPointerRuntime<T>(_ string: String, _ body: (UnsafePointer<CChar>) -> T) -> T? {
+    let utf8 = string.utf8CString
+    return utf8.withUnsafeBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return nil }
+        return body(base)
+    }
+}
+
 func traceLog(_ msg: String) {
     // print("[BRIDGE-TRACE] \(msg)") // <--- COMMENT THIS OUT
     pscalRuntimeDebugLogBridge("[BRIDGE-TRACE] \(msg)") // Use your existing safe logger
@@ -126,9 +134,7 @@ private final class RuntimeLogger {
 
     func copySessionSnapshotCString() -> UnsafeMutablePointer<CChar>? {
         let snapshot = sessionSnapshot()
-        return snapshot.withCString { ptr in
-            strdup(ptr)
-        }
+        return withCStringPointerRuntime(snapshot) { strdup($0) }
     }
 
     func append(_ message: String) {
@@ -1386,17 +1392,21 @@ func pscalTerminalRead(_ buffer: UnsafeMutablePointer<UInt8>?, _ maxlen: Int32, 
 @_cdecl("pscalElvisDump")
 func pscalElvisDump() {
     let snapshot = EditorTerminalBridge.shared.snapshot()
-    snapshot.text.withCString { cstr in
-        fputs(cstr, stdout)
+    if let ptr = withCStringPointerRuntime(snapshot.text, { $0 }) {
+        fputs(ptr, stdout)
         fputc(0x0A, stdout)
     }
     let debugState = EditorTerminalBridge.shared.debugState()
     if let cursor = snapshot.cursor {
         let cursorLine = "[elvisdump] cursor row=\(cursor.row) col=\(cursor.column)\n"
-        cursorLine.withCString { fputs($0, stderr) }
+        if let ptr = withCStringPointerRuntime(cursorLine, { $0 }) {
+            fputs(ptr, stderr)
+        }
     } else {
         fputs("[elvisdump] cursor unavailable\n", stderr)
     }
     let stateLine = "[elvisdump] active=\(debugState.active) rows=\(debugState.rows) cols=\(debugState.columns)\n"
-    stateLine.withCString { fputs($0, stderr) }
+    if let ptr = withCStringPointerRuntime(stateLine, { $0 }) {
+        fputs(ptr, stderr)
+    }
 }

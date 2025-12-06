@@ -62,6 +62,7 @@
 #include "ssh-sk.h"
 #include "sk-api.h" /* XXX for SSH_SK_USER_PRESENCE_REQD; remove */
 #include "cipher.h"
+#include "pscal_runtime_hooks.h"
 
 #ifdef ENABLE_PKCS11
 #include "ssh-pkcs11.h"

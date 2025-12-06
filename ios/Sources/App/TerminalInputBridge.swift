@@ -62,9 +62,85 @@ struct TerminalInputBridge: UIViewRepresentable {
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
+    private var hardwareKeyboardConnected: Bool = false
+    private var keyboardObservers: [NSObjectProtocol] = []
     private struct RepeatCommand {
         let command: UIKeyCommand
         let output: String
+    }
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        installKeyboardObservers()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installKeyboardObservers()
+    }
+
+    deinit {
+        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    private var controlLatch: Bool = false
+
+    // Toolbar with terminal-only keys missing from the soft keyboard.
+    private lazy var accessoryBar: UIInputView = {
+        let bar = UIInputView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 60),
+                              inputViewStyle: .keyboard)
+        bar.allowsSelfSizing = true
+        bar.clipsToBounds = true
+        bar.layer.cornerRadius = 12
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.distribution = .fillEqually
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        func makeButton(_ title: String, action: Selector) -> UIButton {
+            let button = UIButton(type: .system)
+            button.setTitle(title, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+            button.addTarget(self, action: action, for: .touchUpInside)
+            button.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+            button.layer.cornerRadius = 8
+            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+            return button
+        }
+
+        let esc = makeButton("Esc", action: #selector(handleEsc))
+        let ctrl = makeButton("Ctrl", action: #selector(handleCtrlToggle))
+        let tab = makeButton("Tab", action: #selector(handleTab))
+        let up = makeButton("↑", action: #selector(handleUp))
+        let down = makeButton("↓", action: #selector(handleDown))
+        let left = makeButton("←", action: #selector(handleLeft))
+        let right = makeButton("→", action: #selector(handleRight))
+        let fslash = makeButton("/", action: #selector(handleFSlash))
+
+        [esc, ctrl, tab, fslash, up, down, left, right].forEach(stack.addArrangedSubview)
+
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -6),
+            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)
+        ])
+        return bar
+    }()
+
+    override var inputAccessoryView: UIView? {
+        get {
+            hardwareKeyboardConnected ? nil : accessoryBar
+        }
+        set { /* ignore external setters */ }
     }
 
     private lazy var repeatKeyCommands: [RepeatCommand] = {
@@ -111,6 +187,19 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func insertText(_ text: String) {
+        if controlLatch, let scalar = text.unicodeScalars.first {
+            controlLatch = false
+            let value = scalar.value
+            if scalar == "c" {
+                pscalRuntimeRequestSigint()
+                return
+            }
+            if value >= 0x40, value <= 0x7F,
+               let ctrlScalar = UnicodeScalar(value & 0x1F) {
+                onInput?(String(ctrlScalar))
+                return
+            }
+        }
         onInput?(text)
     }
 
@@ -143,6 +232,10 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if !hardwareKeyboardConnected {
+            hardwareKeyboardConnected = true
+            reloadInputViews()
+        }
         if let event {
             NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                             object: nil,
@@ -238,6 +331,65 @@ final class TerminalKeyInputView: UITextView {
             break
         }
         return false
+    }
+
+    private func installKeyboardObservers() {
+        let willShow = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.hardwareKeyboardConnected {
+                self.hardwareKeyboardConnected = false
+                self.reloadInputViews()
+            }
+        }
+        let willHide = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // no-op; we only flip to hardware on key presses
+            _ = self
+        }
+        keyboardObservers = [willShow, willHide]
+    }
+
+    // MARK: - Accessory button actions
+    @objc private func handleEsc() {
+        onInput?("\u{1B}")
+    }
+
+    @objc private func handleCtrlToggle(_ sender: UIButton) {
+        controlLatch.toggle()
+        sender.backgroundColor = controlLatch
+        ? UIColor.systemBlue.withAlphaComponent(0.8)
+        : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+    }
+
+    @objc private func handleTab() {
+        onInput?("\t")
+    }
+
+    @objc private func handleUp() {
+        onInput?("\u{1B}[A")
+    }
+
+    @objc private func handleDown() {
+        onInput?("\u{1B}[B")
+    }
+
+    @objc private func handleLeft() {
+        onInput?("\u{1B}[D")
+    }
+
+    @objc private func handleRight() {
+        onInput?("\u{1B}[C")
+    }
+
+    @objc private func handleFSlash() {
+        onInput?("/")
     }
 
     @objc private func handlePasteCommand() {

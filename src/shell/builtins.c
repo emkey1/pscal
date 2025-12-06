@@ -72,6 +72,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"sleep", "sleep", -1},
     {"tee", "tee", -1},
     {"xargs", "xargs", -1},
+    {"traceroute", "traceroute", -1},
     {"ps", "ps", -1},
     {"kill", "kill", -1},
     {"file", "file", -1},

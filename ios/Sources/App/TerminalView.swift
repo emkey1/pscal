@@ -8,8 +8,17 @@ import Darwin
 @_silgen_name("pscalRuntimeDebugLog")
 private func c_terminalDebugLog(_ message: UnsafePointer<CChar>) -> Void
 
+private func withCStringPointer(_ string: String, _ body: (UnsafePointer<CChar>) -> Void) {
+    let utf8 = string.utf8CString
+    utf8.withUnsafeBufferPointer { buffer in
+        if let base = buffer.baseAddress {
+            body(base)
+        }
+    }
+}
+
 private func terminalViewLog(_ message: String) {
-    message.withCString { c_terminalDebugLog($0) }
+    withCStringPointer(message) { c_terminalDebugLog($0) }
 }
 
 final class TerminalFontSettings: ObservableObject {
@@ -346,19 +355,22 @@ struct TerminalView: View {
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
     @State private var focusAnchor: Int = 0
+    @State private var keyboardOverlap: CGFloat = 0
 
     var body: some View {
-        KeyboardAwareContainer(
-            content: GeometryReader { proxy in
-                TerminalContentView(availableSize: proxy.size,
-                                    safeAreaInsets: proxy.safeAreaInsets,
-                                    fontSettings: fontSettings,
-                                    focusAnchor: $focusAnchor)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-            }
-        )
-        .edgesIgnoringSafeArea(.bottom)
-        .overlay(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottomTrailing) {
+            KeyboardAwareContainer(
+                content: GeometryReader { proxy in
+                    TerminalContentView(availableSize: proxy.size,
+                                        safeAreaInsets: proxy.safeAreaInsets,
+                                        keyboardOverlap: keyboardOverlap,
+                                        fontSettings: fontSettings,
+                                        focusAnchor: $focusAnchor)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+            )
+            .edgesIgnoringSafeArea(.bottom)
+
             HStack(alignment: .center, spacing: 10) {
                 Button(action: {
                     PscalRuntimeBootstrap.shared.resetTerminalState()
@@ -379,13 +391,59 @@ struct TerminalView: View {
                 }
                 .accessibilityLabel("Adjust Font Size")
             }
-            .padding(.bottom, 14)
+            .padding(.bottom, {
+                // Anchor buttons just above accessory bar + soft keyboard when visible.
+                let accessoryHeight: CGFloat = 3
+                let stackHeight = keyboardOverlap + accessoryHeight + currentSafeBottomInset()
+                return max(16, stackHeight)
+            }())
             .padding(.trailing, 10)
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
         }
         .background(Color(.systemBackground))
+        .onReceive(NotificationCenter.default.publisher(for: keyboardOverlapNotification)) { note in
+            if let val = note.userInfo?["overlap"] as? CGFloat {
+                keyboardOverlap = val
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let height = Self.computeKeyboardHeight(from: note) else { return }
+            keyboardOverlap = height
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardOverlap = 0
+        }
+    }
+}
+
+private func currentSafeBottomInset() -> CGFloat {
+    #if os(iOS)
+    let scene = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first
+    let window = scene?.windows.first { $0.isKeyWindow }
+    return window?.safeAreaInsets.bottom ?? 0
+    #else
+    return 0
+    #endif
+}
+
+extension TerminalView {
+    fileprivate static func computeKeyboardHeight(from note: Notification) -> CGFloat? {
+        guard let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else {
+            return nil
+        }
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow }) else {
+            return nil
+        }
+        let converted = window.convert(frame, from: nil)
+        let overlap = max(0, window.bounds.maxY - converted.minY)
+        return min(overlap, window.bounds.height)
     }
 }
 
@@ -397,15 +455,18 @@ private struct TerminalContentView: View {
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
     @Binding private var focusAnchor: Int
     @State private var lastLoggedMetrics: TerminalGeometryMetrics?
+    @State private var keyboardOverlap: CGFloat = 0
 
     init(availableSize: CGSize,
          safeAreaInsets: EdgeInsets,
+         keyboardOverlap: CGFloat,
          fontSettings: TerminalFontSettings,
          focusAnchor: Binding<Int>) {
         self.availableSize = availableSize
         self.safeAreaInsets = safeAreaInsets
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
         _focusAnchor = focusAnchor
+        _keyboardOverlap = State(initialValue: keyboardOverlap)
     }
 
     var body: some View {
@@ -471,6 +532,12 @@ private struct TerminalContentView: View {
         .onChange(of: safeAreaInsets) { _ in
             updateTerminalGeometry()
         }
+        .onReceive(NotificationCenter.default.publisher(for: keyboardOverlapNotification)) { note in
+            if let val = note.userInfo?["overlap"] as? CGFloat {
+                keyboardOverlap = val
+                updateTerminalGeometry()
+            }
+        }
         .onChange(of: fontSettings.pointSize) { _ in
             updateTerminalGeometry()
         }
@@ -490,16 +557,20 @@ private struct TerminalContentView: View {
     private func updateTerminalGeometry() {
         let showingStatus = runtime.exitStatus != nil
         let font = fontSettings.currentFont
-        guard let metrics = TerminalGeometryCalculator.metrics(for: availableSize,
-                                                               safeAreaInsets: safeAreaInsets,
-                                                               topPadding: Self.topPadding,
-                                                               showingStatus: showingStatus,
-                                                               font: font)
+        let effectiveHeight = max(1, availableSize.height - keyboardOverlap)
+        let sizeForMetrics = CGSize(width: availableSize.width, height: effectiveHeight)
+        guard let candidate = TerminalGeometryCalculator.metrics(for: sizeForMetrics,
+                                                                 safeAreaInsets: safeAreaInsets,
+                                                                 topPadding: Self.topPadding,
+                                                                 showingStatus: showingStatus,
+                                                                 font: font)
                 ?? TerminalGeometryCalculator.fallbackMetrics(showingStatus: showingStatus, font: font) else {
             return
         }
+        let metrics = candidate
+        #if DEBUG
         if lastLoggedMetrics != metrics {
-            let grid = TerminalGeometryCalculator.calculateGrid(for: availableSize,
+            let grid = TerminalGeometryCalculator.calculateGrid(for: sizeForMetrics,
                                                                 font: font,
                                                                 safeAreaInsets: UIEdgeInsets(top: safeAreaInsets.top,
                                                                                              left: safeAreaInsets.leading,
@@ -526,6 +597,7 @@ private struct TerminalContentView: View {
                                    metrics.columns))
             lastLoggedMetrics = metrics
         }
+        #endif
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }
@@ -1717,9 +1789,7 @@ final class PathTruncationManager {
         if enabled {
             let normalized = normalize(path)
             if !normalized.isEmpty {
-                normalized.withCString { cString in
-                    PSCALRuntimeApplyPathTruncation(cString)
-                }
+                withCStringPointer(normalized) { PSCALRuntimeApplyPathTruncation($0) }
                 let tmpURL = URL(fileURLWithPath: normalized, isDirectory: true)
                     .appendingPathComponent("tmp", isDirectory: true)
                 try? FileManager.default.createDirectory(at: tmpURL,

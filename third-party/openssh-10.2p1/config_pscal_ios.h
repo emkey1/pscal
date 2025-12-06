@@ -7,6 +7,12 @@
  * our static, client-only integration.
  */
 
+/* Avoid pulling the private libc symbol __progname on iOS. */
+#if defined(PSCAL_TARGET_IOS)
+#define __progname pscal_progname
+#define __progname_full pscal_progname_full
+#endif
+
 /* Define if building universal (internal helper macro) */
 /* #undef AC_APPLE_UNIVERSAL_BUILD */
 

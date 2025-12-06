@@ -239,7 +239,7 @@ LogLevel log_level = SYSLOG_LEVEL_INFO;
 #if defined(PSCAL_TARGET_IOS)
 extern int showprogress;
 #else
-int showprogress = 1;
+extern int showprogress;
 #endif
 
 /*
@@ -266,7 +266,7 @@ size_t sftp_nrequests;
 #if defined(PSCAL_TARGET_IOS)
 extern volatile sig_atomic_t interrupted;
 #else
-volatile sig_atomic_t interrupted = 0;
+extern volatile sig_atomic_t interrupted;
 #endif
 
 int sftp_glob(struct sftp_conn *, const char *, int,
@@ -2439,16 +2439,11 @@ lostconn(int signo)
 }
 
 #if defined(PSCAL_TARGET_IOS)
+#define cleanup_exit pscal_scp_cleanup_handler
 static void
-pscal_scp_cleanup_handler(int i)
-#else
-void
 cleanup_exit(int i)
-#endif
 {
-#if defined(PSCAL_TARGET_IOS)
 	(void)i;
-#endif
 	if (remin > 0)
 		close(remin);
 	if (remout > 0)
@@ -2461,7 +2456,5 @@ cleanup_exit(int i)
 		(void)waitpid(do_cmd_pid, NULL, 0);
 	if (do_cmd_pid2 > 0)
 		(void)waitpid(do_cmd_pid2, NULL, 0);
-#if !defined(PSCAL_TARGET_IOS)
-	exit(i);
-#endif
 }
+#endif /* PSCAL_TARGET_IOS */

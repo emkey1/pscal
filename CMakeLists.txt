@@ -17,7 +17,7 @@ else()
     set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
 endif()
 if(PSCAL_PLATFORM_IOS)
-    add_compile_definitions(PSCAL_TARGET_IOS)
+    add_compile_definitions(PSCAL_TARGET_IOS __progname=pscal_progname __progname_full=pscal_progname_full)
 endif()
 
 if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
@@ -989,8 +989,13 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat}")
-set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
-    APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS)
+if(PSCAL_PLATFORM_IOS)
+    set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname)
+else()
+    set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H)
+endif()
 set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/ssh.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_ssh_main)
 set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/scp.c
@@ -1021,6 +1026,10 @@ endif()
 set(NEXTVI_CORE_SOURCES third-party/nextvi/vi.c)
 list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
+
+if(PSCAL_PLATFORM_IOS)
+    list(APPEND PSCAL_CORE_SOURCES src/ios/progname_stub.c)
+endif()
 
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
@@ -1098,6 +1107,7 @@ target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
     z resolv)
 if(PSCAL_PLATFORM_IOS)
+    target_compile_definitions(pscal_core_static PRIVATE __progname=pscal_progname __progname_full=pscal_progname_full)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
         "${PSCAL_OPENSSL_INSTALL_DIR}/include")

@@ -90,6 +90,7 @@
 #include "authfd.h"
 #include "authfile.h"
 #include "pathnames.h"
+#include "pscal_runtime_hooks.h"
 #include "dispatch.h"
 #include "clientloop.h"
 #include "log.h"
