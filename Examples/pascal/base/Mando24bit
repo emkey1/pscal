@@ -1,0 +1,85 @@
+#!/usr/bin/env pascal
+PROGRAM MandelbrotDeepColor;
+
+CONST
+  MaxIter        = 100;
+  EscapeRadiusSq = 4.0;
+  MinX = -2.0;
+  MaxX = 1.0;
+  MinY = -1.0;
+  MaxY = 1.0;
+
+VAR
+  Row, Col       : Integer;
+  Width, Height  : Integer;
+  iter           : Integer;
+  cx, cy, zx, zy : Real;
+  xTemp          : Real;
+  ScaleX, ScaleY : Real;
+  
+  R, G, B        : Integer;
+  Freq           : Real;
+
+BEGIN
+  // 1. Setup
+  Width := ScreenCols;
+  Height := ScreenRows - 1;
+  Freq := 0.1; // Frequency of color cycling
+
+  WriteLn('Calculating Deep Contrast Mandelbrot...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+
+  FOR Row := 1 TO Height DO
+  BEGIN
+    cy := MinY + Row * ScaleY;
+    GotoXY(1, Row);
+
+    FOR Col := 1 TO Width DO
+    BEGIN
+      cx := MinX + Col * ScaleX;
+      zx := 0.0;
+      zy := 0.0;
+      iter := 0;
+
+      WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+      BEGIN
+        xTemp := zx*zx - zy*zy + cx;
+        zy := 2.0 * zx * zy + cy;
+        zx := xTemp;
+        iter := iter + 1;
+      END;
+
+      IF iter = MaxIter THEN
+      BEGIN
+        // Interior is pitch black
+        Write(#27'[38;2;0;0;0m#');
+      END
+      ELSE
+      BEGIN
+        // *** DARKER, VIBRANT ALGORITHM ***
+        // Range: 0 to 255 (Full darkness to Full brightness)
+        // We use different phases (0, 2, 4) to separate colors.
+        
+        R := Trunc((Sin(Freq * iter + 0.0) + 1.0) * 227.5);
+        G := Trunc((Sin(Freq * iter + 2.0) + 1.0) * 227.5);
+        B := Trunc((Sin(Freq * iter + 4.0) + 1.0) * 227.5);
+
+        // Optional: Gamma correction approximation (squaring makes darks darker)
+        // Uncomment these lines for even HIGHER contrast:
+        // R := (R * R) DIV 255;
+        // G := (G * G) DIV 255;
+        // B := (B * B) DIV 255;
+
+        Write(#27'[38;2;', R, ';', G, ';', B, 'm#');
+      END;
+    END;
+  END;
+
+  // Reset
+  Write(#27'[0m');
+  GotoXY(1, Height + 1);
+  Write('Done. Press key to exit.');
+  ReadKey;
+END.

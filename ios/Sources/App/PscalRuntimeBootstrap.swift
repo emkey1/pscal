@@ -190,6 +190,9 @@ func pscalRuntimeResetSessionLogBridge() {
 
 final class PscalRuntimeBootstrap: ObservableObject {
     static let shared = PscalRuntimeBootstrap()
+    
+    @Published private(set) var mouseMode: TerminalBuffer.MouseMode = .none
+    @Published private(set) var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
 
     @Published private(set) var screenText: NSAttributedString = NSAttributedString(string: "Launching exsh...")
     @Published private(set) var exitStatus: Int32?
@@ -251,6 +254,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
                                                                      object: nil,
                                                                      queue: .main) { [weak self] _ in
             self?.scheduleRender()
+        }
+        
+        self.terminalBuffer.onMouseModeChange = { [weak self] mode, encoding in
+            self?.mouseMode = mode
+            self?.mouseEncoding = encoding
         }
     }
 

@@ -490,7 +490,9 @@ private struct TerminalContentView: View {
                                  font: currentFont,
                                  fontPointSize: fontSettings.pointSize,
                                  elvisSnapshot: nil,
-                                 onPaste: handlePaste)
+                                 onPaste: handlePaste,
+                                 mouseMode: runtime.mouseMode,
+                                 mouseEncoding: runtime.mouseEncoding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground))
 
@@ -760,12 +762,15 @@ struct TerminalRendererView: UIViewRepresentable {
     let fontPointSize: CGFloat
     let elvisSnapshot: ElvisSnapshot?
     var onPaste: ((String) -> Void)? = nil
+    let mouseMode: TerminalBuffer.MouseMode
+    let mouseEncoding: TerminalBuffer.MouseEncoding
 
     func makeUIView(context: Context) -> TerminalRendererContainerView {
         let container = TerminalRendererContainerView()
         container.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
         container.applyFont(font: font)
         container.onPaste = onPaste
+        container.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
         return container
     }
 
@@ -774,6 +779,7 @@ struct TerminalRendererView: UIViewRepresentable {
         uiView.configure(backgroundColor: backgroundColor, foregroundColor: foregroundColor)
         uiView.applyFont(font: font)
         uiView.onPaste = onPaste
+        uiView.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
         let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
         if shouldBlankMain {
@@ -819,6 +825,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let selectionOverlay = TerminalSelectionOverlay()
     private let selectionMenu = TerminalSelectionMenuView()
     private let commandIndicator = UILabel()
+ 
+    // --- MOUSE TRACKING STATE ---
+    private var mouseMode: TerminalBuffer.MouseMode = .none
+    private var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
+    private var lastMouseLocation: (row: Int, col: Int)?
     private var lastElvisSnapshotText: String?
     private var lastElvisCursorOffset: Int?
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
@@ -1037,6 +1048,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleSelectionPress(_ recognizer: UILongPressGestureRecognizer) {
+        if mouseMode != .none { return }
+        
         let location = recognizer.location(in: terminalView)
         let anchor = recognizer.location(in: self)
         switch recognizer.state {
@@ -1294,6 +1307,15 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         }
         return mutable
     }
+    
+    func updateMouseState(mode: TerminalBuffer.MouseMode, encoding: TerminalBuffer.MouseEncoding) {
+        self.mouseMode = mode
+        self.mouseEncoding = encoding
+        
+        // If mouse is active, we might want to disable native scrolling so Drag works for Vim.
+        // If mouse is .none, native scrolling (history) is allowed.
+        terminalView.isScrollEnabled = (mode == .none)
+    }
 
     private func elvisCommandLineCursor(from snapshot: ElvisSnapshot) -> TerminalCursorInfo? {
         let lines = snapshot.text.components(separatedBy: "\n")
@@ -1331,6 +1353,72 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             return TerminalCursorInfo(row: rowIndex, column: columnUTF16, textOffset: textOffset)
         }
         return nil
+    }
+    
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard mouseMode != .none, let touch = touches.first else {
+            super.touchesBegan(touches, with: event)
+            return
+        }
+        let (col, row) = bufferCoordinate(from: touch.location(in: terminalView))
+        lastMouseLocation = (row, col)
+            
+        // Button 0 (Left), Action 'M' (Press)
+        sendSGRMouse(button: 0, x: col + 1, y: row + 1, pressed: true)
+    }
+    
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard mouseMode == .drag, let touch = touches.first else {
+            super.touchesMoved(touches, with: event)
+            return
+        }
+        let (col, row) = bufferCoordinate(from: touch.location(in: terminalView))
+            
+        // Filter noise: only send if cell changed
+        if let last = lastMouseLocation, last.row == row, last.col == col {
+            return
+        }
+        lastMouseLocation = (row, col)
+            
+        // Button 32 (Drag/Motion) + 0 (Left), Action 'M' (Press/Move)
+        sendSGRMouse(button: 32, x: col + 1, y: row + 1, pressed: true)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard mouseMode != .none, let touch = touches.first else {
+            super.touchesEnded(touches, with: event)
+            return
+        }
+        let (col, row) = bufferCoordinate(from: touch.location(in: terminalView))
+        lastMouseLocation = nil
+            
+        // Button 0 (Left), Action 'm' (Release)
+        sendSGRMouse(button: 0, x: col + 1, y: row + 1, pressed: false)
+    }
+
+    private func bufferCoordinate(from point: CGPoint) -> (col: Int, row: Int) {
+        let charWidth = TerminalFontMetrics.characterWidth
+        let lineHeight = TerminalFontMetrics.lineHeight
+            
+        // Adjust for insets if any
+        let x = point.x - terminalView.textContainerInset.left
+        let y = point.y - terminalView.textContainerInset.top
+            
+        let col = Int(floor(x / charWidth))
+        let row = Int(floor(y / lineHeight))
+            
+        return (max(0, col), max(0, row))
+    }
+
+    private func sendSGRMouse(button: Int, x: Int, y: Int, pressed: Bool) {
+        guard mouseEncoding == .sgr else { return }
+            
+        // SGR Format: CSI < button ; x ; y M (or m)
+        // M = Press/Move, m = Release
+        let suffix = pressed ? "M" : "m"
+        let sequence = "\u{1B}[<\(button);\(x);\(y)\(suffix)"
+            
+        PscalRuntimeBootstrap.shared.send(sequence)
     }
 
     private static let commandLinePrefixes: Set<Character> = [":", "/", "?"]
@@ -1825,6 +1913,7 @@ struct EditorFloatingRendererView: View {
         let token = runtime.elvisRenderToken
         _ = token
         let snapshot = EditorTerminalBridge.shared.snapshot()
+        
         return TerminalRendererView(text: snapshot.attributedText,
                                     cursor: snapshot.cursor,
                                     backgroundColor: fontSettings.backgroundColor,
@@ -1834,7 +1923,10 @@ struct EditorFloatingRendererView: View {
                                     elvisRenderToken: token,
                                     font: fontSettings.currentFont,
                                     fontPointSize: fontSettings.pointSize,
-                                    elvisSnapshot: snapshot)
+                                    elvisSnapshot: snapshot,
+                                    // ADDED: Pass mouse state from runtime
+                                    mouseMode: runtime.mouseMode,
+                                    mouseEncoding: runtime.mouseEncoding)
             .background(Color(fontSettings.backgroundColor))
     }
 }

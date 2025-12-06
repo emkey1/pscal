@@ -114,6 +114,23 @@ private final class TerminalFontCache {
 }
 
 final class TerminalBuffer {
+    // MARK: - Mouse Definitions
+    enum MouseMode {
+        case none
+        case click // 1000
+        case drag  // 1002
+    }
+
+    enum MouseEncoding {
+        case normal
+        case utf8
+        case sgr   // 1006 (This is the modern standard we want)
+    }
+
+    private(set) var mouseMode: MouseMode = .none
+    private(set) var mouseEncoding: MouseEncoding = .normal
+    var onMouseModeChange: ((MouseMode, MouseEncoding) -> Void)?
+    
     private enum ParserState {
         case normal
         case escape
@@ -634,11 +651,29 @@ struct TerminalSnapshot {
             cursorHidden = !on
         case 2004:
             bracketedPasteEnabled = on
+        case 1000:
+            mouseMode = on ? .click : .none
+            notifyMouseChange()
+        case 1002:
+            mouseMode = on ? .drag : .none
+            notifyMouseChange()
+        case 1006:
+            mouseEncoding = on ? .sgr : .normal
+            notifyMouseChange()
         default:
             break
         }
     }
 
+    private func notifyMouseChange() {
+        let mode = mouseMode
+        let enc = mouseEncoding
+        // Notify asynchronously to avoid blocking the parser
+        DispatchQueue.main.async { [weak self] in
+            self?.onMouseModeChange?(mode, enc)
+        }
+    }
+    
     private func handleWindowCommand() {
         guard let command = csiParameters.first else { return }
         switch command {
