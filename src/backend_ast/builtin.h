@@ -354,6 +354,9 @@ void vmInitTerminalState(void);
 // Returns true if SIGINT was requested via pscalRuntimeRequestSigint (e.g. UI)
 // and clears any pending flag/pipe.
 bool pscalRuntimeConsumeSigint(void);
+bool pscalRuntimeSigintPending(void);
+bool pscalRuntimeInterruptFlag(void);
+void pscalRuntimeClearInterruptFlag(void);
 
 /* Pause for ten seconds and require a key press before exit when running
  * interactively. */

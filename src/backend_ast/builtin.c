@@ -17,6 +17,7 @@
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
+#include <stdatomic.h>
 #include <sys/ioctl.h> // For ioctl, FIONREAD (Terminal I/O)
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
@@ -2500,6 +2501,7 @@ static _Thread_local int vm_color_stack_depth = 0;
 static volatile sig_atomic_t g_vm_sigint_seen = 0;
 static int g_vm_sigint_pipe[2] = {-1, -1};
 static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
+static atomic_bool g_vm_interrupt_broadcast = false;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2758,10 +2760,23 @@ static void init_pipe_once(void) {
 // Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
 void pscalRuntimeRequestSigint(void) {
     g_vm_sigint_seen = 1;
+    atomic_store(&g_vm_interrupt_broadcast, true);
     if (g_vm_sigint_pipe[1] >= 0) {
         char c = 'i';
         (void)write(g_vm_sigint_pipe[1], &c, 1);
     }
+}
+
+bool pscalRuntimeSigintPending(void) {
+    return g_vm_sigint_seen != 0;
+}
+
+bool pscalRuntimeInterruptFlag(void) {
+    return atomic_load(&g_vm_interrupt_broadcast);
+}
+
+void pscalRuntimeClearInterruptFlag(void) {
+    atomic_store(&g_vm_interrupt_broadcast, false);
 }
 
 bool pscalRuntimeConsumeSigint(void) {
@@ -6758,6 +6773,11 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
         }
     }
     if (!joined) {
+        bool aborted = (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested)) ||
+                       (vm && (vm->abort_requested || vm->exit_requested));
+        if (aborted) {
+            return makeInt(-1);
+        }
         runtimeError(vm, "WaitForThread received invalid thread id %d.", id);
         return makeInt(-1);
     }
@@ -6839,6 +6859,11 @@ Value vmBuiltinThreadGetResult(VM* vm, int arg_count, Value* args) {
         if (vmThreadTakeResult(vm, thread_id, &result, true, &status, consume_status)) {
             return result;
         }
+    }
+
+    if ((vm && (vm->abort_requested || vm->exit_requested)) ||
+        (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested))) {
+        return makeNil();
     }
 
     runtimeError(vm, "Thread %d has no stored result.", thread_id);
@@ -6949,6 +6974,14 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
             }
             return makeBoolean(status);
         }
+    }
+
+    if ((vm && (vm->abort_requested || vm->exit_requested)) ||
+        (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested))) {
+        if (drop_result) {
+            freeValue(&dropped);
+        }
+        return makeBoolean(false);
     }
 
     runtimeError(vm, "Thread %d has no stored status.", thread_id);

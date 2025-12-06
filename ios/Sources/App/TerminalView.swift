@@ -1790,6 +1790,7 @@ final class PathTruncationManager {
             let normalized = normalize(path)
             if !normalized.isEmpty {
                 withCStringPointer(normalized) { PSCALRuntimeApplyPathTruncation($0) }
+                GPSDeviceProvider.shared.updateTargetRoot(normalized)
                 let tmpURL = URL(fileURLWithPath: normalized, isDirectory: true)
                     .appendingPathComponent("tmp", isDirectory: true)
                 try? FileManager.default.createDirectory(at: tmpURL,
@@ -1799,6 +1800,7 @@ final class PathTruncationManager {
             }
         }
         PSCALRuntimeApplyPathTruncation(nil)
+        GPSDeviceProvider.shared.updateTargetRoot(nil)
     }
 
     func applyStoredPreference() {

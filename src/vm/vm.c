@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <inttypes.h>
+#include <errno.h>
+#include <time.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -28,6 +30,8 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
+
+static bool vmHandleGlobalInterrupt(VM* vm);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_COMPUTED_GOTO 1
@@ -1184,6 +1188,10 @@ static void* threadStart(void* arg) {
     }
 
     while (!atomic_load(&owner->shuttingDownWorkers) && !atomic_load(&thread->killRequested)) {
+        (void)vmHandleGlobalInterrupt(owner);
+        if (atomic_load(&owner->shuttingDownWorkers) || atomic_load(&thread->killRequested)) {
+            break;
+        }
         if (!job) {
             pthread_mutex_lock(&owner->threadRegistryLock);
             owner->availableWorkers++;
@@ -1227,8 +1235,14 @@ static void* threadStart(void* arg) {
             atomic_store(&thread->cancelRequested, true);
         }
 
+        VM* workerVm = thread->vm;
         bool canceled = atomic_load(&thread->cancelRequested);
         bool killed = atomic_load(&thread->killRequested) || atomic_load(&owner->shuttingDownWorkers);
+
+        if (vmHandleGlobalInterrupt(owner) || vmHandleGlobalInterrupt(workerVm)) {
+            canceled = true;
+            killed = true;
+        }
 
         if (!canceled && !killed) {
             clock_gettime(CLOCK_REALTIME, &thread->startedAt);
@@ -1237,7 +1251,6 @@ static void* threadStart(void* arg) {
             pthread_mutex_unlock(&thread->stateMutex);
         }
 
-        VM* workerVm = thread->vm;
         if (!workerVm) {
             canceled = true;
         }
@@ -1644,6 +1657,86 @@ int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int arg
                            handler, builtinId, builtinName, submitOnly, threadName);
 }
 
+static void vmMarkAbortRequested(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    vm->abort_requested = true;
+    vm->exit_requested = true;
+    if (vm->threadOwner) {
+        vm->threadOwner->abort_requested = true;
+        vm->threadOwner->exit_requested = true;
+    }
+}
+
+static bool vmConsumeInterruptRequest(VM* vm) {
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    if (vmHandleGlobalInterrupt(root)) {
+        return true;
+    }
+    if (pscalRuntimeConsumeSigint()) {
+        vmMarkAbortRequested(root ? root : vm);
+        (void)vmHandleGlobalInterrupt(root);
+        return true;
+    }
+    if (root && (root->abort_requested || root->exit_requested)) {
+        return true;
+    }
+    return false;
+}
+
+static bool vmHandleGlobalInterrupt(VM* vm) {
+    bool pending = pscalRuntimeInterruptFlag() || pscalRuntimeSigintPending();
+    if (!pending && vm) {
+        pending = vm->abort_requested || vm->exit_requested;
+    }
+    if (!pending) {
+        return false;
+    }
+
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    if (root) {
+        root->abort_requested = true;
+        root->exit_requested = true;
+        atomic_store(&root->shuttingDownWorkers, true);
+        if (root->jobQueue) {
+            pthread_mutex_lock(&root->jobQueue->mutex);
+            root->jobQueue->shuttingDown = true;
+            pthread_cond_broadcast(&root->jobQueue->cond);
+            pthread_mutex_unlock(&root->jobQueue->mutex);
+        }
+        for (int i = 1; i < VM_MAX_THREADS; ++i) {
+            Thread* thread = &root->threads[i];
+            if (!thread->inPool) {
+                continue;
+            }
+            atomic_store(&thread->cancelRequested, true);
+            atomic_store(&thread->killRequested, true);
+            if (thread->vm) {
+                thread->vm->abort_requested = true;
+                thread->vm->exit_requested = true;
+            }
+            vmThreadWakeStateWaiters(thread);
+            pthread_mutex_lock(&thread->resultMutex);
+            pthread_cond_broadcast(&thread->resultCond);
+            pthread_mutex_unlock(&thread->resultMutex);
+        }
+        vmThreadJobQueueWake(root->jobQueue);
+    }
+    pscalRuntimeClearInterruptFlag();
+    return true;
+}
+
+static void vmComputeDeadline(struct timespec* out, long millis) {
+    if (!out) {
+        return;
+    }
+    clock_gettime(CLOCK_REALTIME, out);
+    out->tv_nsec += millis * 1000000L;
+    out->tv_sec += out->tv_nsec / 1000000000L;
+    out->tv_nsec = out->tv_nsec % 1000000000L;
+}
+
 void vmThreadStoreResult(VM* vm, const Value* result, bool success) {
     if (!vm || !vm->owningThread) {
         return;
@@ -1686,7 +1779,21 @@ bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, 
             pthread_mutex_unlock(&thread->resultMutex);
             return false;
         }
-        pthread_cond_wait(&thread->resultCond, &thread->resultMutex);
+        if (vmConsumeInterruptRequest(vm)) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            vmThreadCancel(vm, threadId);
+            return false;
+        }
+        struct timespec deadline;
+        vmComputeDeadline(&deadline, 100);
+        int wait_status = pthread_cond_timedwait(&thread->resultCond, &thread->resultMutex, &deadline);
+        if (wait_status == ETIMEDOUT || wait_status == EINTR) {
+            continue;
+        }
+        if (wait_status != 0) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            return false;
+        }
     }
 
     if (outStatus) {
@@ -1758,7 +1865,21 @@ static bool joinThreadInternal(VM* vm, int id) {
             pthread_mutex_unlock(&thread->resultMutex);
             return false;
         }
-        pthread_cond_wait(&thread->resultCond, &thread->resultMutex);
+        if (vmConsumeInterruptRequest(vm)) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            vmThreadCancel(vm, id);
+            return false;
+        }
+        struct timespec deadline;
+        vmComputeDeadline(&deadline, 100);
+        int wait_status = pthread_cond_timedwait(&thread->resultCond, &thread->resultMutex, &deadline);
+        if (wait_status == ETIMEDOUT || wait_status == EINTR) {
+            continue;
+        }
+        if (wait_status != 0) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            return false;
+        }
     }
     pthread_mutex_unlock(&thread->resultMutex);
     return true;
