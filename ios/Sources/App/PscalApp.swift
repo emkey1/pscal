@@ -53,8 +53,8 @@ final class TerminalRootViewController: UIViewController {
         super.viewDidLayoutSubviews()
         // This is now safe because constraints (keyboardLayoutGuide)
         // have already done the hard work of resizing the view for us.
-        applyTerminalGeometry(to: terminalHostingController.view)
-        // refreshBackendTerminalSize()
+        //applyTerminalGeometry(to: terminalHostingController.view)
+        refreshBackendTerminalSize()
     }
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {

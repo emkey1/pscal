@@ -166,6 +166,7 @@ DEFINE_SMALLCLUE_WRAPPER("env", env)
 DEFINE_SMALLCLUE_WRAPPER("telnet", telnet)
 DEFINE_SMALLCLUE_WRAPPER("traceroute", traceroute)
 DEFINE_SMALLCLUE_WRAPPER("nslookup", nslookup)
+DEFINE_SMALLCLUE_WRAPPER("host", host)
 DEFINE_SMALLCLUE_WRAPPER("dmesg", dmesg)
 DEFINE_SMALLCLUE_WRAPPER("licenses", licenses)
 #endif
@@ -262,6 +263,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerSmallclueBuiltin("telnet", vmBuiltinSmallclue_telnet, "telnet");
     registerSmallclueBuiltin("traceroute", vmBuiltinSmallclue_traceroute, "traceroute");
     registerSmallclueBuiltin("nslookup", vmBuiltinSmallclue_nslookup, "nslookup");
+    registerSmallclueBuiltin("host", vmBuiltinSmallclue_host, "host");
     registerSmallclueBuiltin("nextvi", vmBuiltinSmallclue_nextvi, "nextvi");
     registerSmallclueBuiltin("vi", vmBuiltinSmallclue_nextvi, "vi");
     registerSmallclueBuiltin("dmesg", vmBuiltinSmallclue_dmesg, "dmesg");

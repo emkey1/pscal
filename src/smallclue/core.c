@@ -305,6 +305,7 @@ static bool smallclueChopParentDirectory(char *path);
 static int smallclueRemovePathWithLabel(const char *label, const char *path, bool recursive, bool force);
 static int smallclueCopyFile(const char *label, const char *src, const char *dst);
 static int smallclueMkdirParents(const char *path, mode_t mode);
+static void smallclueGetTerminalSize(int *rows, int *cols);
 static int smallclueElvisCommand(int argc, char **argv);
 static int smallclueSshCommand(int argc, char **argv);
 static int smallclueScpCommand(int argc, char **argv);
@@ -324,6 +325,7 @@ static int smallclueWgetCommand(int argc, char **argv);
 static int smallclueTelnetCommand(int argc, char **argv);
 static int smallclueTracerouteCommand(int argc, char **argv);
 static int smallclueNslookupCommand(int argc, char **argv);
+static int smallclueHostCommand(int argc, char **argv);
 #if SMALLCLUE_HAS_IFADDRS
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
@@ -389,6 +391,74 @@ static int smallclueNslookupCommand(int argc, char **argv) {
     return 0;
 }
 
+static int smallclueHostCommand(int argc, char **argv) {
+    const char *usage = "usage: host [-4|-6] [-v] [-t TYPE] host [server]\n";
+    int family = AF_UNSPEC;
+    bool verbose = false;
+    smallclueResetGetopt();
+    int opt;
+    while ((opt = getopt(argc, argv, "46vt:")) != -1) {
+        switch (opt) {
+            case '4': family = AF_INET; break;
+            case '6': family = AF_INET6; break;
+            case 'v': verbose = true; break;
+            case 't':
+                if (strcasecmp(optarg, "A") == 0) family = AF_INET;
+                else if (strcasecmp(optarg, "AAAA") == 0) family = AF_INET6;
+                break;
+            default:
+                fputs(usage, stderr);
+                return 1;
+        }
+    }
+    if (verbose) {
+        pscalHostsSetLogEnabled(1);
+    } else {
+        pscalHostsSetLogEnabled(-1);
+    }
+    if (optind >= argc) {
+        fputs(usage, stderr);
+        return 1;
+    }
+    const char *host = argv[optind];
+    if (optind + 1 < argc) {
+        fprintf(stderr, "host: server override not supported; ignoring '%s'\n", argv[optind + 1]);
+    }
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    int gai = pscalHostsGetAddrInfo(host, NULL, &hints, &res);
+    if (gai != 0 || !res) {
+        fprintf(stderr, "%s not found: %s\n", host, gai_strerror(gai));
+        return 1;
+    }
+    bool printed = false;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        if (family == AF_INET && ai->ai_family != AF_INET) continue;
+        if (family == AF_INET6 && ai->ai_family != AF_INET6) continue;
+        char addrbuf[NI_MAXHOST];
+        if (getnameinfo(ai->ai_addr, (socklen_t)ai->ai_addrlen,
+                        addrbuf, sizeof(addrbuf),
+                        NULL, 0, NI_NUMERICHOST) == 0) {
+            if (ai->ai_family == AF_INET6) {
+                printf("%s has IPv6 address %s\n", host, addrbuf);
+            } else {
+                printf("%s has address %s\n", host, addrbuf);
+            }
+            printed = true;
+        }
+    }
+    pscalHostsFreeAddrInfo(res);
+    if (!printed) {
+        fprintf(stderr, "No records found for %s\n", host);
+        return 1;
+    }
+    return 0;
+}
+
 typedef struct SmallclueAppletHelp {
     const char *name;
     const char *usage;
@@ -420,6 +490,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
 #if SMALLCLUE_HAS_IFADDRS
     {"ipaddr", smallclueIpAddrCommand, "Show interface IP addresses"},
 #endif
+    {"host", smallclueHostCommand, "DNS lookup utility"},
     {"kill", smallclueKillCommand, "Send signals to processes"},
     {"less", smallcluePagerCommand, "Paginate file contents"},
     {"ln", smallclueLnCommand, "Create links"},
@@ -490,9 +561,14 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"cp", "cp [-r] SRC... DEST\n"
            "  -r  recursive copy"},
     {"curl", "curl [options] URL...\n"
-             "  Common: -o FILE, -O (remote name), -L (follow), -d DATA, -H HEADER"},
+             "  Common: -o FILE,\n"
+             "  -O (remote name)\n"
+             "  -L (follow)\n"
+             "  -d DATA\n"
+             "  -H HEADER"},
     {"cut", "cut -d DELIM -f LIST [FILE...]\n"
-            "  -d delimiter (default tab)  -f fields (e.g. 1,3-5)"},
+            "  -d delimiter (default tab)\n"
+            "  -f fields (e.g. 1,3-5)"},
     {"date", "date [+FORMAT]\n"
              "  Show date/time"},
     {"dirname", "dirname PATH\n"
@@ -510,7 +586,9 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"find", "find PATH... [expression]\n"
              "  Common: -name PATTERN -type f|d"},
     {"grep", "grep [-i] [-n] [-v] PATTERN [FILE...]\n"
-             "  -i ignore case  -n line numbers  -v invert match"},
+             "  -i ignore case\n"
+             "  -n line numbers\n"
+             "  -v invert match"},
     {"head", "head [-n N] [FILE...]\n"
              "  Default N=10"},
     {"id", "id\n"
@@ -531,16 +609,26 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
            "  -t sort by modification time\n"
            "  -h human-readable sizes (with -l)\n"
            "  -d list directories themselves, not their contents"},
-    {"md", "md [FILE]\n"
-           "  View Markdown document"},
+    {"md", "md [-i] [FILE]\n"
+           "  View Markdown document\n"
+           "  -i interactive mode.  Makes ~/Docs browsable"},
     {"mkdir", "mkdir [-p] DIR...\n"
               "  -p create parents as needed"},
     {"more", "more [FILE...]\n"
              "  Pager (alias of less)"},
     {"mv", "mv SRC... DEST\n"
            "  Move or rename files"},
+    {"nslookup", "nslookup [-v] host [port]\n"
+                 "  DNS lookup utility (UDP port defaults to 53).\n"
+                 "  -v prints hosts lookup debugging."},
     {"nextvi", "nextvi [FILE]\n"
                "  Full-screen text editor"},
+    {"host", "host [-4|-6] [-v] [-t TYPE] host [server]\n"
+             "  -4 IPv4 only\n"
+             "  -6 IPv6 only\n"
+             "  -t A|AAAA select record type\n"
+             "  -v verbose (hosts debug)\n"
+             "Server override is ignored."},
     {"pbcopy", "pbcopy\n"
                "  Copy stdin to system clipboard"},
     {"pbpaste", "pbpaste\n"
@@ -554,7 +642,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"resize", "resize [COLUMNS ROWS]\n"
                "  Report or set terminal size"},
     {"rm", "rm [-r] [-f] FILE...\n"
-           "  -r recursive  -f force"},
+           "  -r recursive\n"
+           "  -f force"},
     {"rmdir", "rmdir DIR...\n"
               "  Remove empty directories"},
     {"sed", "sed 's/old/new/g' [FILE...]\n"
@@ -562,7 +651,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"sleep", "sleep SECONDS\n"
               "  Pause execution"},
     {"sort", "sort [-r] [-n]\n"
-             "  -r reverse  -n numeric"},
+             "  -r reverse\n"
+             "  -n numeric"},
     {"stty", "stty [-a] [rows N] [cols N]\n"
              "  Adjust/report terminal size"},
 #if defined(SMALLCLUE_WITH_EXSH)
@@ -596,7 +686,9 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"type", "type NAME...\n"
              "  Describe how a name is resolved"},
     {"uniq", "uniq [-c] [-d] [-u] [FILE]\n"
-             "  -c count  -d duplicates only  -u unique only"},
+             "  -c count\n"
+             "  -d duplicates only\n"
+             "  -u unique only"},
     {"uptime", "uptime\n"
                "  Show system uptime"},
     {"vi", "vi [FILE]\n"
@@ -606,7 +698,11 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
     {"wc", "wc [-l] [-w] [-c] [FILE...]\n"
            "  Count lines/words/bytes"},
     {"wget", "wget [options] URL...\n"
-             "  Common: -O FILE, --header, --post-data, -q, -nv"},
+             "  Common: -O FILE\n"
+             "  --header\n"
+             "  --post-data\n"
+             "  -q\n"
+             "  -nv"},
     {"xargs", "xargs [-n N] [-0]\n"
               "  Build command lines from stdin"},
     {"df", "df [-h]\n"
@@ -3311,11 +3407,25 @@ static int smallclueHelpCommand(int argc, char **argv) {
         if (!r) {
             interactive_out = false;
         } else {
-            pager_file("smallclue-help", "(internal)", r);
+            int rows = 0;
+            int cols = 0;
+            smallclueGetTerminalSize(&rows, &cols);
+            if (rows <= 0) {
+                rows = INT_MAX;
+            }
+            int line_count = 0;
+            for (char *p = buffer; *p; ++p) {
+                if (*p == '\n') line_count++;
+            }
+            if (line_count >= rows) {
+                pager_file("smallclue-help", "(internal)", r);
+            } else {
+                // Print directly if it fits on one screen
+                fwrite(buffer, 1, buflen, stdout);
+            }
             fclose(r);
         }
-    }
-    if (!interactive_out) {
+    } else {
         fwrite(buffer, 1, buflen, stdout);
     }
     free(buffer);
@@ -4993,6 +5103,35 @@ static void smallclueEmitTerminalSane(void) {
     fflush(stdout);
 }
 
+static void smallclueGetTerminalSize(int *rows, int *cols) {
+    int r = -1;
+    int c = -1;
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        r = ws.ws_row;
+        c = ws.ws_col;
+    } else if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0) {
+        r = ws.ws_row;
+        c = ws.ws_col;
+    }
+    if (r <= 0) {
+        const char *env = getenv("LINES");
+        if (env) {
+            long val = smallclueParseLong(env);
+            if (val > 0) r = (int)val;
+        }
+    }
+    if (c <= 0) {
+        const char *env = getenv("COLUMNS");
+        if (env) {
+            long val = smallclueParseLong(env);
+            if (val > 0) c = (int)val;
+        }
+    }
+    if (rows) *rows = r;
+    if (cols) *cols = c;
+}
+
 static void smallclueApplyWindowSize(int rows, int cols) {
     if (rows > 0 && cols > 0) {
         char buffer[32];
@@ -5000,6 +5139,23 @@ static void smallclueApplyWindowSize(int rows, int cols) {
         setenv("LINES", buffer, 1);
         snprintf(buffer, sizeof(buffer), "%d", cols);
         setenv("COLUMNS", buffer, 1);
+
+        if (isatty(STDOUT_FILENO)) {
+            struct winsize ws;
+            ws.ws_row = (unsigned short)rows;
+            ws.ws_col = (unsigned short)cols;
+            ws.ws_xpixel = 0;
+            ws.ws_ypixel = 0;
+            ioctl(STDOUT_FILENO, TIOCSWINSZ, &ws);
+        }
+        if (isatty(STDIN_FILENO)) {
+            struct winsize ws;
+            ws.ws_row = (unsigned short)rows;
+            ws.ws_col = (unsigned short)cols;
+            ws.ws_xpixel = 0;
+            ws.ws_ypixel = 0;
+            ioctl(STDIN_FILENO, TIOCSWINSZ, &ws);
+        }
         printf("\x1b[8;%d;%dt", rows, cols);
         fflush(stdout);
     }

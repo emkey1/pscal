@@ -82,6 +82,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"head", "head", -1},
     {"id", "id", -1},
     {"ipaddr", "ipaddr", -1},
+    {"host", "host", -1},
     {"ls", "ls", -1},
     {"md", "md", -1},
     {"ln", "ln", -1},
