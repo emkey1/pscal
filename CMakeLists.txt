@@ -989,6 +989,12 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat}")
+set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+    APPEND PROPERTY COMPILE_OPTIONS
+    -Wno-deprecated-declarations
+    -Wno-pointer-sign
+    -Wno-unused-variable
+    -Wno-string-compare)
 if(PSCAL_PLATFORM_IOS)
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
         APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname)
@@ -1026,6 +1032,7 @@ endif()
 set(NEXTVI_CORE_SOURCES third-party/nextvi/vi.c)
 list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
+set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES src/ios/progname_stub.c)
@@ -1531,7 +1538,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_core_static pscal_pascal_static)
+    target_link_libraries(rea PRIVATE pscal_pascal_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)
@@ -1838,7 +1845,7 @@ endif()
 add_executable(smallclue
     src/smallclue/main.c
 )
-set(_SMALLCLUE_LINK_LIBS pscal_core_static)
+set(_SMALLCLUE_LINK_LIBS m Threads::Threads)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
     list(APPEND _SMALLCLUE_LINK_LIBS CURL::libcurl)
 endif()
@@ -1847,11 +1854,12 @@ if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
     target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
 elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
     message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
+else()
+    list(APPEND _SMALLCLUE_LINK_LIBS pscal_core_static)
 endif()
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
     list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SQLITE_LIBS})
 endif()
-list(APPEND _SMALLCLUE_LINK_LIBS m Threads::Threads)
 if(SDL)
     target_link_directories(smallclue PRIVATE
         ${PC_SDL_IMAGE_LIBRARY_DIRS}
@@ -1876,12 +1884,6 @@ if(SDL)
 endif()
 list(REMOVE_DUPLICATES _SMALLCLUE_LINK_LIBS)
 target_link_libraries(smallclue PRIVATE ${_SMALLCLUE_LINK_LIBS})
-if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
-    target_link_libraries(smallclue PRIVATE pscal_exsh_static)
-    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
-elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
-    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
-endif()
 
 if(PSCAL_PLATFORM_IOS)
     add_executable(pscal_tool_runner src/ios/tool_runner_main.c)

@@ -185,80 +185,89 @@ DEFINE_SMALLCLUE_WRAPPER("smallclue-help", smallclue_help)
 
 static pthread_once_t g_smallclue_builtin_once = PTHREAD_ONCE_INIT;
 
+static void registerSmallclueBuiltin(const char *name,
+                                     VmBuiltinFn handler,
+                                     const char *display_name) {
+    if (getVmBuiltinHandler(name)) {
+        return;
+    }
+    registerVmBuiltin(name, handler, BUILTIN_TYPE_PROCEDURE, display_name);
+}
+
 static void smallclueRegisterBuiltinsOnce(void) {
-    registerVmBuiltin("cat", vmBuiltinSmallclue_cat, BUILTIN_TYPE_PROCEDURE, "cat");
-    registerVmBuiltin("ls", vmBuiltinSmallclue_ls, BUILTIN_TYPE_PROCEDURE, "ls");
-    registerVmBuiltin("md", vmBuiltinSmallclue_md, BUILTIN_TYPE_PROCEDURE, "md");
-    registerVmBuiltin("less", vmBuiltinSmallclue_less, BUILTIN_TYPE_PROCEDURE, "less");
-    registerVmBuiltin("more", vmBuiltinSmallclue_more, BUILTIN_TYPE_PROCEDURE, "more");
-    registerVmBuiltin("clear", vmBuiltinSmallclue_clear, BUILTIN_TYPE_PROCEDURE, "clear");
-    registerVmBuiltin("cls", vmBuiltinSmallclue_cls, BUILTIN_TYPE_PROCEDURE, "cls");
-    registerVmBuiltin("date", vmBuiltinSmallclue_date, BUILTIN_TYPE_PROCEDURE, "date");
-    registerVmBuiltin("cal", vmBuiltinSmallclue_cal, BUILTIN_TYPE_PROCEDURE, "cal");
-    registerVmBuiltin("head", vmBuiltinSmallclue_head, BUILTIN_TYPE_PROCEDURE, "head");
-    registerVmBuiltin("tail", vmBuiltinSmallclue_tail, BUILTIN_TYPE_PROCEDURE, "tail");
-    registerVmBuiltin("touch", vmBuiltinSmallclue_touch, BUILTIN_TYPE_PROCEDURE, "touch");
-    registerVmBuiltin("grep", vmBuiltinSmallclue_grep, BUILTIN_TYPE_PROCEDURE, "grep");
-    registerVmBuiltin("wc", vmBuiltinSmallclue_wc, BUILTIN_TYPE_PROCEDURE, "wc");
-    registerVmBuiltin("du", vmBuiltinSmallclue_du, BUILTIN_TYPE_PROCEDURE, "du");
-    registerVmBuiltin("find", vmBuiltinSmallclue_find, BUILTIN_TYPE_PROCEDURE, "find");
-    registerVmBuiltin("stty", vmBuiltinSmallclue_stty, BUILTIN_TYPE_PROCEDURE, "stty");
-    registerVmBuiltin("resize", vmBuiltinSmallclue_resize, BUILTIN_TYPE_PROCEDURE, "resize");
-    registerVmBuiltin("sort", vmBuiltinSmallclue_sort, BUILTIN_TYPE_PROCEDURE, "sort");
-    registerVmBuiltin("uniq", vmBuiltinSmallclue_uniq, BUILTIN_TYPE_PROCEDURE, "uniq");
-    registerVmBuiltin("sed", vmBuiltinSmallclue_sed, BUILTIN_TYPE_PROCEDURE, "sed");
-    registerVmBuiltin("cut", vmBuiltinSmallclue_cut, BUILTIN_TYPE_PROCEDURE, "cut");
-    registerVmBuiltin("curl", vmBuiltinSmallclue_curl, BUILTIN_TYPE_PROCEDURE, "curl");
-    registerVmBuiltin("tr", vmBuiltinSmallclue_tr, BUILTIN_TYPE_PROCEDURE, "tr");
-    registerVmBuiltin("id", vmBuiltinSmallclue_id, BUILTIN_TYPE_PROCEDURE, "id");
-    registerVmBuiltin("pbcopy", vmBuiltinSmallclue_pbcopy, BUILTIN_TYPE_PROCEDURE, "pbcopy");
-    registerVmBuiltin("pbpaste", vmBuiltinSmallclue_pbpaste, BUILTIN_TYPE_PROCEDURE, "pbpaste");
+    registerSmallclueBuiltin("cat", vmBuiltinSmallclue_cat, "cat");
+    registerSmallclueBuiltin("ls", vmBuiltinSmallclue_ls, "ls");
+    registerSmallclueBuiltin("md", vmBuiltinSmallclue_md, "md");
+    registerSmallclueBuiltin("less", vmBuiltinSmallclue_less, "less");
+    registerSmallclueBuiltin("more", vmBuiltinSmallclue_more, "more");
+    registerSmallclueBuiltin("clear", vmBuiltinSmallclue_clear, "clear");
+    registerSmallclueBuiltin("cls", vmBuiltinSmallclue_cls, "cls");
+    registerSmallclueBuiltin("date", vmBuiltinSmallclue_date, "date");
+    registerSmallclueBuiltin("cal", vmBuiltinSmallclue_cal, "cal");
+    registerSmallclueBuiltin("head", vmBuiltinSmallclue_head, "head");
+    registerSmallclueBuiltin("tail", vmBuiltinSmallclue_tail, "tail");
+    registerSmallclueBuiltin("touch", vmBuiltinSmallclue_touch, "touch");
+    registerSmallclueBuiltin("grep", vmBuiltinSmallclue_grep, "grep");
+    registerSmallclueBuiltin("wc", vmBuiltinSmallclue_wc, "wc");
+    registerSmallclueBuiltin("du", vmBuiltinSmallclue_du, "du");
+    registerSmallclueBuiltin("find", vmBuiltinSmallclue_find, "find");
+    registerSmallclueBuiltin("stty", vmBuiltinSmallclue_stty, "stty");
+    registerSmallclueBuiltin("resize", vmBuiltinSmallclue_resize, "resize");
+    registerSmallclueBuiltin("sort", vmBuiltinSmallclue_sort, "sort");
+    registerSmallclueBuiltin("uniq", vmBuiltinSmallclue_uniq, "uniq");
+    registerSmallclueBuiltin("sed", vmBuiltinSmallclue_sed, "sed");
+    registerSmallclueBuiltin("cut", vmBuiltinSmallclue_cut, "cut");
+    registerSmallclueBuiltin("curl", vmBuiltinSmallclue_curl, "curl");
+    registerSmallclueBuiltin("tr", vmBuiltinSmallclue_tr, "tr");
+    registerSmallclueBuiltin("id", vmBuiltinSmallclue_id, "id");
+    registerSmallclueBuiltin("pbcopy", vmBuiltinSmallclue_pbcopy, "pbcopy");
+    registerSmallclueBuiltin("pbpaste", vmBuiltinSmallclue_pbpaste, "pbpaste");
 #if SMALLCLUE_HAS_IFADDRS
-    registerVmBuiltin("ipaddr", vmBuiltinSmallclue_ipaddr, BUILTIN_TYPE_PROCEDURE, "ipaddr");
+    registerSmallclueBuiltin("ipaddr", vmBuiltinSmallclue_ipaddr, "ipaddr");
 #endif
-    registerVmBuiltin("df", vmBuiltinSmallclue_df, BUILTIN_TYPE_PROCEDURE, "df");
-    registerVmBuiltin("file", vmBuiltinSmallclue_file, BUILTIN_TYPE_PROCEDURE, "file");
-    registerVmBuiltin("pwd", vmBuiltinSmallclue_pwd, BUILTIN_TYPE_PROCEDURE, "pwd");
-    registerVmBuiltin("chmod", vmBuiltinSmallclue_chmod, BUILTIN_TYPE_PROCEDURE, "chmod");
-    registerVmBuiltin("true", vmBuiltinSmallclue_truecmd, BUILTIN_TYPE_PROCEDURE, "true");
-    registerVmBuiltin("false", vmBuiltinSmallclue_falsecmd, BUILTIN_TYPE_PROCEDURE, "false");
-    registerVmBuiltin("sleep", vmBuiltinSmallclue_sleepcmd, BUILTIN_TYPE_PROCEDURE, "sleep");
-    registerVmBuiltin("basename", vmBuiltinSmallclue_basename, BUILTIN_TYPE_PROCEDURE, "basename");
-    registerVmBuiltin("dirname", vmBuiltinSmallclue_dirname, BUILTIN_TYPE_PROCEDURE, "dirname");
-    registerVmBuiltin("tee", vmBuiltinSmallclue_tee, BUILTIN_TYPE_PROCEDURE, "tee");
-    registerVmBuiltin("test", vmBuiltinSmallclue_testcmd, BUILTIN_TYPE_PROCEDURE, "test");
-    registerVmBuiltin("[", vmBuiltinSmallclue_bracket, BUILTIN_TYPE_PROCEDURE, "[");
-    registerVmBuiltin("xargs", vmBuiltinSmallclue_xargs, BUILTIN_TYPE_PROCEDURE, "xargs");
-    registerVmBuiltin("ps", vmBuiltinSmallclue_ps, BUILTIN_TYPE_PROCEDURE, "ps");
-    registerVmBuiltin("kill", vmBuiltinSmallclue_kill, BUILTIN_TYPE_PROCEDURE, "kill");
+    registerSmallclueBuiltin("df", vmBuiltinSmallclue_df, "df");
+    registerSmallclueBuiltin("file", vmBuiltinSmallclue_file, "file");
+    registerSmallclueBuiltin("pwd", vmBuiltinSmallclue_pwd, "pwd");
+    registerSmallclueBuiltin("chmod", vmBuiltinSmallclue_chmod, "chmod");
+    registerSmallclueBuiltin("true", vmBuiltinSmallclue_truecmd, "true");
+    registerSmallclueBuiltin("false", vmBuiltinSmallclue_falsecmd, "false");
+    registerSmallclueBuiltin("sleep", vmBuiltinSmallclue_sleepcmd, "sleep");
+    registerSmallclueBuiltin("basename", vmBuiltinSmallclue_basename, "basename");
+    registerSmallclueBuiltin("dirname", vmBuiltinSmallclue_dirname, "dirname");
+    registerSmallclueBuiltin("tee", vmBuiltinSmallclue_tee, "tee");
+    registerSmallclueBuiltin("test", vmBuiltinSmallclue_testcmd, "test");
+    registerSmallclueBuiltin("[", vmBuiltinSmallclue_bracket, "[");
+    registerSmallclueBuiltin("xargs", vmBuiltinSmallclue_xargs, "xargs");
+    registerSmallclueBuiltin("ps", vmBuiltinSmallclue_ps, "ps");
+    registerSmallclueBuiltin("kill", vmBuiltinSmallclue_kill, "kill");
 #if defined(SMALLCLUE_WITH_EXSH)
-    registerVmBuiltin("sh", vmBuiltinSmallclue_sh, BUILTIN_TYPE_PROCEDURE, "sh");
+    registerSmallclueBuiltin("sh", vmBuiltinSmallclue_sh, "sh");
 #endif
-    registerVmBuiltin("uptime", vmBuiltinSmallclue_uptime, BUILTIN_TYPE_PROCEDURE, "uptime");
-    registerVmBuiltin("scp", vmBuiltinSmallclue_scp, BUILTIN_TYPE_PROCEDURE, "scp");
-    registerVmBuiltin("sftp", vmBuiltinSmallclue_sftp, BUILTIN_TYPE_PROCEDURE, "sftp");
-    registerVmBuiltin("ssh", vmBuiltinSmallclue_ssh, BUILTIN_TYPE_PROCEDURE, "ssh");
-    registerVmBuiltin("ssh-keygen", vmBuiltinSmallclue_sshkeygen, BUILTIN_TYPE_PROCEDURE, "ssh-keygen");
+    registerSmallclueBuiltin("uptime", vmBuiltinSmallclue_uptime, "uptime");
+    registerSmallclueBuiltin("scp", vmBuiltinSmallclue_scp, "scp");
+    registerSmallclueBuiltin("sftp", vmBuiltinSmallclue_sftp, "sftp");
+    registerSmallclueBuiltin("ssh", vmBuiltinSmallclue_ssh, "ssh");
+    registerSmallclueBuiltin("ssh-keygen", vmBuiltinSmallclue_sshkeygen, "ssh-keygen");
 #if defined(PSCAL_TARGET_IOS)
-    registerVmBuiltin("mkdir", vmBuiltinSmallclue_mkdir, BUILTIN_TYPE_PROCEDURE, "mkdir");
-    registerVmBuiltin("cp", vmBuiltinSmallclue_cp, BUILTIN_TYPE_PROCEDURE, "cp");
-    registerVmBuiltin("mv", vmBuiltinSmallclue_mv, BUILTIN_TYPE_PROCEDURE, "mv");
-    registerVmBuiltin("rm", vmBuiltinSmallclue_rm, BUILTIN_TYPE_PROCEDURE, "rm");
-    registerVmBuiltin("rmdir", vmBuiltinSmallclue_rmdir, BUILTIN_TYPE_PROCEDURE, "rmdir");
-    registerVmBuiltin("ln", vmBuiltinSmallclue_ln, BUILTIN_TYPE_PROCEDURE, "ln");
-    registerVmBuiltin("ping", vmBuiltinSmallclue_ping, BUILTIN_TYPE_PROCEDURE, "ping");
-    registerVmBuiltin("env", vmBuiltinSmallclue_env, BUILTIN_TYPE_PROCEDURE, "env");
-    registerVmBuiltin("telnet", vmBuiltinSmallclue_telnet, BUILTIN_TYPE_PROCEDURE, "telnet");
-    registerVmBuiltin("traceroute", vmBuiltinSmallclue_traceroute, BUILTIN_TYPE_PROCEDURE, "traceroute");
-    registerVmBuiltin("nextvi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "nextvi");
-    registerVmBuiltin("vi", vmBuiltinSmallclue_nextvi, BUILTIN_TYPE_PROCEDURE, "vi");
-    registerVmBuiltin("dmesg", vmBuiltinSmallclue_dmesg, BUILTIN_TYPE_PROCEDURE, "dmesg");
-    registerVmBuiltin("licenses", vmBuiltinSmallclue_licenses, BUILTIN_TYPE_PROCEDURE, "licenses");
+    registerSmallclueBuiltin("mkdir", vmBuiltinSmallclue_mkdir, "mkdir");
+    registerSmallclueBuiltin("cp", vmBuiltinSmallclue_cp, "cp");
+    registerSmallclueBuiltin("mv", vmBuiltinSmallclue_mv, "mv");
+    registerSmallclueBuiltin("rm", vmBuiltinSmallclue_rm, "rm");
+    registerSmallclueBuiltin("rmdir", vmBuiltinSmallclue_rmdir, "rmdir");
+    registerSmallclueBuiltin("ln", vmBuiltinSmallclue_ln, "ln");
+    registerSmallclueBuiltin("ping", vmBuiltinSmallclue_ping, "ping");
+    registerSmallclueBuiltin("env", vmBuiltinSmallclue_env, "env");
+    registerSmallclueBuiltin("telnet", vmBuiltinSmallclue_telnet, "telnet");
+    registerSmallclueBuiltin("traceroute", vmBuiltinSmallclue_traceroute, "traceroute");
+    registerSmallclueBuiltin("nextvi", vmBuiltinSmallclue_nextvi, "nextvi");
+    registerSmallclueBuiltin("vi", vmBuiltinSmallclue_nextvi, "vi");
+    registerSmallclueBuiltin("dmesg", vmBuiltinSmallclue_dmesg, "dmesg");
+    registerSmallclueBuiltin("licenses", vmBuiltinSmallclue_licenses, "licenses");
 #endif
-    registerVmBuiltin("wget", vmBuiltinSmallclue_wget, BUILTIN_TYPE_PROCEDURE, "wget");
-    registerVmBuiltin("watch", vmBuiltinSmallclue_watch, BUILTIN_TYPE_PROCEDURE, "watch");
+    registerSmallclueBuiltin("wget", vmBuiltinSmallclue_wget, "wget");
+    registerSmallclueBuiltin("watch", vmBuiltinSmallclue_watch, "watch");
 #if defined(PSCAL_TARGET_IOS)
-    registerVmBuiltin("smallclue-help", vmBuiltinSmallclue_smallclue_help, BUILTIN_TYPE_PROCEDURE, "smallclue-help");
+    registerSmallclueBuiltin("smallclue-help", vmBuiltinSmallclue_smallclue_help, "smallclue-help");
 #endif
 }
 

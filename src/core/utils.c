@@ -849,8 +849,8 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
 
     // Calculate total size and copy bounds
     size_t total_size = 1;
-    const size_t MAX_ARRAY_ELEMENTS = 250 * 1000; // hard cap to avoid runaway allocations
-    const size_t MAX_ARRAY_BYTES = 32 * 1024 * 1024;  // 32 MB ceiling
+    const size_t MAX_ARRAY_ELEMENTS = 2 * 1000 * 1000; // hard cap to avoid runaway allocations
+    const size_t MAX_ARRAY_BYTES = 256 * 1024 * 1024;  // 256 MB ceiling
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];

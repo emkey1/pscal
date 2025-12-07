@@ -3454,6 +3454,9 @@ typedef struct {
     int argc;
     char **argv;
     int status;
+    volatile int finished;
+    pthread_t worker_thread;
+    pthread_t main_thread;
 } ShellToolThreadContext;
 
 static __thread sigjmp_buf gShellThreadJumpBuf;
@@ -3496,36 +3499,70 @@ static void *shellToolThreadMain(void *arg) {
     return NULL;
 }
 
+static void *shellToolWaiterMain(void *arg) {
+    ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
+    pthread_join(ctx->worker_thread, NULL);
+    ctx->finished = 1;
+    pthread_kill(ctx->main_thread, SIGURG);
+    return NULL;
+}
+
 static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
     if (!entry) {
         return 127;
     }
     ShellToolThreadContext context;
+    memset(&context, 0, sizeof(context));
     context.entry = entry;
     context.argc = argc;
     context.argv = argv;
     context.status = 127;
+    context.finished = 0;
+    context.main_thread = pthread_self();
 
-    /* Block SIGINT on the main thread so it is delivered to the worker */
+    /* Block SIGINT and SIGURG on Main */
     sigset_t new_mask, old_mask;
     sigemptyset(&new_mask);
     sigaddset(&new_mask, SIGINT);
+    sigaddset(&new_mask, SIGURG);
     pthread_sigmask(SIG_BLOCK, &new_mask, &old_mask);
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-    pthread_t thread;
-    int create_rc = pthread_create(&thread, &attr, shellToolThreadMain, &context);
+    int create_rc = pthread_create(&context.worker_thread, &attr, shellToolThreadMain, &context);
     pthread_attr_destroy(&attr);
     if (create_rc != 0) {
-        /* Restore mask if creation failed */
         pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
         return entry(argc, argv);
     }
-    (void)pthread_join(thread, NULL);
 
-    /* Restore mask */
+    /* Spawn waiter */
+    pthread_t waiter_thread;
+    if (pthread_create(&waiter_thread, NULL, shellToolWaiterMain, &context) != 0) {
+        /* If waiter fails, just join worker directly (SIGINT won't work properly but we can't do much) */
+        pthread_join(context.worker_thread, NULL);
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+        return context.status;
+    }
+
+    /* Main Loop */
+    sigset_t wait_mask;
+    sigemptyset(&wait_mask);
+    sigaddset(&wait_mask, SIGINT);
+    sigaddset(&wait_mask, SIGURG);
+
+    while (!context.finished) {
+        int sig = 0;
+        if (sigwait(&wait_mask, &sig) == 0) {
+            if (sig == SIGINT) {
+                pthread_kill(context.worker_thread, SIGINT);
+            }
+            /* SIGURG wakes us up to check context.finished */
+        }
+    }
+
+    pthread_join(waiter_thread, NULL);
     pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
     return context.status;
 }

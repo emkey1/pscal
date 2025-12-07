@@ -3160,11 +3160,18 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
         gShellRuntime.dir_stack_initialised = true;
         return true;
     }
-    const char *home = shellSafeGetenv("PSCALI_REAL_HOME");
-    if (!home || !*home) {
-        home = shellSafeGetenv("HOME");
+    char cwd[PATH_MAX];
+    const char *initial_path = NULL;
+    if (getcwd(cwd, sizeof(cwd))) {
+        initial_path = cwd;
     }
-    const char *initial_path = home && *home ? home : ".";
+    if (!initial_path || *initial_path == '\0') {
+        const char *home = shellSafeGetenv("PSCALI_REAL_HOME");
+        if (!home || !*home) {
+            home = shellSafeGetenv("HOME");
+        }
+        initial_path = (home && *home) ? home : ".";
+    }
     char resolved[PATH_MAX];
     const char *expanded_path = initial_path;
 #if defined(PSCAL_TARGET_IOS)
