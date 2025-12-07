@@ -86,6 +86,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"md", "md", -1},
     {"ln", "ln", -1},
     {"mkdir", "mkdir", -1},
+    {"nslookup", "nslookup", -1},
     {"rmdir", "rmdir", -1},
     {"mv", "mv", -1},
     {"pbcopy", "pbcopy", -1},

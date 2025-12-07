@@ -106,6 +106,9 @@ alias hist='history'
 
 alias reset='stty reset'
 
+alias man='smallclue-elp'
+alias host='nslookup'
+
 # ---------------------------------------------------------------------------
 # Thread pool tuning & metrics
 # ---------------------------------------------------------------------------

@@ -165,6 +165,7 @@ DEFINE_SMALLCLUE_WRAPPER("ping", ping)
 DEFINE_SMALLCLUE_WRAPPER("env", env)
 DEFINE_SMALLCLUE_WRAPPER("telnet", telnet)
 DEFINE_SMALLCLUE_WRAPPER("traceroute", traceroute)
+DEFINE_SMALLCLUE_WRAPPER("nslookup", nslookup)
 DEFINE_SMALLCLUE_WRAPPER("dmesg", dmesg)
 DEFINE_SMALLCLUE_WRAPPER("licenses", licenses)
 #endif
@@ -188,7 +189,8 @@ static pthread_once_t g_smallclue_builtin_once = PTHREAD_ONCE_INIT;
 static void registerSmallclueBuiltin(const char *name,
                                      VmBuiltinFn handler,
                                      const char *display_name) {
-    if (getVmBuiltinHandler(name)) {
+    VmBuiltinFn existing = getVmBuiltinHandler(name);
+    if (existing == handler) {
         return;
     }
     registerVmBuiltin(name, handler, BUILTIN_TYPE_PROCEDURE, display_name);
@@ -259,6 +261,7 @@ static void smallclueRegisterBuiltinsOnce(void) {
     registerSmallclueBuiltin("env", vmBuiltinSmallclue_env, "env");
     registerSmallclueBuiltin("telnet", vmBuiltinSmallclue_telnet, "telnet");
     registerSmallclueBuiltin("traceroute", vmBuiltinSmallclue_traceroute, "traceroute");
+    registerSmallclueBuiltin("nslookup", vmBuiltinSmallclue_nslookup, "nslookup");
     registerSmallclueBuiltin("nextvi", vmBuiltinSmallclue_nextvi, "nextvi");
     registerSmallclueBuiltin("vi", vmBuiltinSmallclue_nextvi, "vi");
     registerSmallclueBuiltin("dmesg", vmBuiltinSmallclue_dmesg, "dmesg");

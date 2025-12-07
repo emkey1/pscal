@@ -765,6 +765,7 @@ set(PSCAL_CORE_SOURCES
     src/common/runtime_params.c
     src/common/runtime_tty.c
     src/common/runtime_clipboard.c
+    src/common/pscal_hosts.c
     src/common/path_truncate.c
     src/common/path_virtualization.c
     src/common/pscal_terminal_host.c
@@ -1036,7 +1037,9 @@ set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS 
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 if(PSCAL_PLATFORM_IOS)
-    list(APPEND PSCAL_CORE_SOURCES src/ios/progname_stub.c)
+    list(APPEND PSCAL_CORE_SOURCES
+        src/ios/progname_stub.c
+        src/ios/hosts_override.c)
 endif()
 
 # ---- Extended builtins ----

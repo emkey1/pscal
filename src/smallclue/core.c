@@ -43,6 +43,7 @@
 #include <signal.h>
 #include <sys/select.h>
 #include <glob.h>
+#include "common/pscal_hosts.h"
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include "common/path_truncate.h"
@@ -322,6 +323,7 @@ static int smallclueCurlCommand(int argc, char **argv);
 static int smallclueWgetCommand(int argc, char **argv);
 static int smallclueTelnetCommand(int argc, char **argv);
 static int smallclueTracerouteCommand(int argc, char **argv);
+static int smallclueNslookupCommand(int argc, char **argv);
 #if SMALLCLUE_HAS_IFADDRS
 static int smallclueIpAddrCommand(int argc, char **argv);
 #endif
@@ -330,6 +332,62 @@ static int smallclueDfCommand(int argc, char **argv);
 static int smallclueDmesgCommand(int argc, char **argv);
 static int smallclueHelpCommand(int argc, char **argv);
 #endif
+
+static int smallclueNslookupCommand(int argc, char **argv) {
+    const char *usage = "usage: nslookup [-v] host [port]\n";
+    bool verbose = false;
+    smallclueResetGetopt();
+    int opt;
+    while ((opt = getopt(argc, argv, "v")) != -1) {
+        switch (opt) {
+            case 'v':
+                verbose = true;
+                break;
+            default:
+            fputs(usage, stderr);
+            return 1;
+        }
+    }
+    if (verbose) {
+        pscalHostsSetLogEnabled(1);
+    } else {
+        pscalHostsSetLogEnabled(-1);
+    }
+    if (optind >= argc) {
+        fputs(usage, stderr);
+        return 1;
+    }
+    const char *host = argv[optind];
+    const char *service = (optind + 1 < argc) ? argv[optind + 1] : "53";
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_family = AF_UNSPEC;
+    struct addrinfo *res = NULL;
+    int gai = pscalHostsGetAddrInfo(host, service, &hints, &res);
+    if (gai != 0 || !res) {
+#if defined(PSCAL_TARGET_IOS)
+        fprintf(stderr, "nslookup: hosts lookup paths: %s first, then /etc/hosts\n",
+                getenv("PSCALI_CONTAINER_ROOT") ? pscalHostsGetContainerPath() : "(no PSCALI_CONTAINER_ROOT)");
+#endif
+        fprintf(stderr, "nslookup: %s: %s\n", host, gai_strerror(gai));
+        return 1;
+    }
+    printf("Non-authoritative answer for %s:\n", host);
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        char hostbuf[NI_MAXHOST];
+        char servbuf[NI_MAXSERV];
+        if (getnameinfo(ai->ai_addr, (socklen_t)ai->ai_addrlen,
+                        hostbuf, sizeof(hostbuf),
+                        servbuf, sizeof(servbuf),
+                        NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+            printf("  %s (port %s) family %d\n", hostbuf, servbuf, ai->ai_family);
+        }
+    }
+    pscalHostsFreeAddrInfo(res);
+    return 0;
+}
 
 typedef struct SmallclueAppletHelp {
     const char *name;
@@ -370,6 +428,7 @@ static const SmallclueApplet kSmallclueApplets[] = {
     {"mkdir", smallclueMkdirCommand, "Create directories"},
     {"more", smallcluePagerCommand, "Paginate file contents"},
     {"mv", smallclueMvCommand, "Move or rename files"},
+    {"nslookup", smallclueNslookupCommand, "DNS lookup utility"},
     {"pbcopy", smallcluePbcopyCommand, "Copy stdin to the system clipboard"},
     {"pbpaste", smallcluePbpasteCommand, "Paste the system clipboard to stdout"},
     {"ping", smallcluePingCommand, "TCP ping utility"},
@@ -552,6 +611,8 @@ static const SmallclueAppletHelp kSmallclueAppletHelp[] = {
               "  Build command lines from stdin"},
     {"df", "df [-h]\n"
            "  -h human-readable sizes"},
+    {"nslookup", "nslookup [-v] host [port]\n"
+                 "  DNS lookup utility (UDP port defaults to 53). -v prints hosts lookup debugging."},
 #if defined(PSCAL_TARGET_IOS)
     {"smallclue-help", "smallclue-help [command]\n"
                        "  Without arguments: list all applets\n"
@@ -3913,7 +3974,7 @@ static int smallcluePingCommand(int argc, char **argv) {
     struct addrinfo *res = NULL;
     char portbuf[16];
     snprintf(portbuf, sizeof(portbuf), "%d", probe_port);
-    int gai = getaddrinfo(host, portbuf, &hints, &res);
+    int gai = pscalHostsGetAddrInfo(host, portbuf, &hints, &res);
     if (gai != 0) {
         fprintf(stderr, "ping: %s: %s\n", host, gai_strerror(gai));
         return 1;
@@ -3962,7 +4023,7 @@ static int smallcluePingCommand(int argc, char **argv) {
         printf("round-trip min/avg/max = %.2f/%.2f/%.2f ms (TCP port %d)\n",
             min_ms, total_ms / successes, max_ms, probe_port);
     }
-    freeaddrinfo(res);
+    pscalHostsFreeAddrInfo(res);
     return (successes > 0) ? 0 : 1;
 }
 
@@ -4001,7 +4062,7 @@ static int smallclueTelnetCommand(int argc, char **argv) {
     hints.ai_family = AF_UNSPEC;
 
     struct addrinfo *res = NULL;
-    int gai = getaddrinfo(host, port_str, &hints, &res);
+    int gai = pscalHostsGetAddrInfo(host, port_str, &hints, &res);
     if (gai != 0 || !res) {
         fprintf(stderr, "telnet: %s: %s\n", host, gai_strerror(gai));
         return 1;
@@ -4019,7 +4080,7 @@ static int smallclueTelnetCommand(int argc, char **argv) {
         close(sock);
         sock = -1;
     }
-    freeaddrinfo(res);
+    pscalHostsFreeAddrInfo(res);
     if (sock < 0) {
         fprintf(stderr, "telnet: unable to connect to %s:%d\n", host, port);
         return 1;
@@ -4115,7 +4176,7 @@ static int smallclueTracerouteCommand(int argc, char **argv) {
     struct addrinfo *res = NULL;
     char portbuf[16];
     snprintf(portbuf, sizeof(portbuf), "%d", dest_port);
-    int gai = getaddrinfo(host, portbuf, &hints, &res);
+    int gai = pscalHostsGetAddrInfo(host, portbuf, &hints, &res);
     if (gai != 0 || !res) {
         fprintf(stderr, "traceroute: %s: %s\n", host, gai_strerror(gai));
         return 1;
@@ -4124,7 +4185,7 @@ static int smallclueTracerouteCommand(int argc, char **argv) {
     int recv_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
     if (recv_sock < 0) {
         fprintf(stderr, "traceroute: unable to open ICMP socket: %s\n", strerror(errno));
-        freeaddrinfo(res);
+        pscalHostsFreeAddrInfo(res);
         return 1;
     }
 
@@ -4132,7 +4193,7 @@ static int smallclueTracerouteCommand(int argc, char **argv) {
     if (send_sock < 0) {
         fprintf(stderr, "traceroute: unable to open UDP socket: %s\n", strerror(errno));
         close(recv_sock);
-        freeaddrinfo(res);
+        pscalHostsFreeAddrInfo(res);
         return 1;
     }
 

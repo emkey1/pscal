@@ -26,6 +26,7 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"
+#include "common/pscal_hosts.h"
 
 #ifdef _WIN32
 static void ensure_winsock(void) {
@@ -1981,9 +1982,9 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
         hints.ai_flags |= AI_ADDRCONFIG;
     }
 #endif
-    int gai_err = getaddrinfo(host, portstr, &hints, &res);
+    int gai_err = pscalHostsGetAddrInfo(host, portstr, &hints, &res);
     if (gai_err != 0) {
-        if (res) freeaddrinfo(res);
+        if (res) pscalHostsFreeAddrInfo(res);
         setSocketAddrInfoError(gai_err);
         return makeInt(-1);
     }
@@ -2059,7 +2060,7 @@ Value vmBuiltinSocketConnect(VM* vm, int arg_count, Value* args) {
         last_err = errno;
 #endif
     }
-    freeaddrinfo(res);
+    pscalHostsFreeAddrInfo(res);
     if (!connected) {
         if (!attempted) {
 #if defined(EAI_NONAME)
@@ -2398,16 +2399,16 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     int e = 0;
     do {
         if (res) {
-            freeaddrinfo(res);
+            pscalHostsFreeAddrInfo(res);
             res = NULL;
         }
-        e = getaddrinfo(host, NULL, &hints, &res);
+        e = pscalHostsGetAddrInfo(host, NULL, &hints, &res);
         if (e == 0) {
             break;
         }
 
         if (isLocalhostName(host)) {
-            if (res) freeaddrinfo(res);
+            if (res) pscalHostsFreeAddrInfo(res);
             return makeLocalhostFallbackResult();
         }
 
@@ -2435,7 +2436,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
     } while (attempt < max_attempts);
 
     if (e != 0) {
-        if (res) freeaddrinfo(res);
+        if (res) pscalHostsFreeAddrInfo(res);
         setSocketAddrInfoError(e);
         markDnsLookupFailure(vm);
         return makeString("");
@@ -2473,7 +2474,7 @@ Value vmBuiltinDnsLookup(VM* vm, int arg_count, Value* args) {
         ip = inet_ntop(AF_INET6, &addr6->sin6_addr, buf, sizeof(buf));
     }
 #endif
-    freeaddrinfo(res);
+    pscalHostsFreeAddrInfo(res);
     if (!ip) {
         if (isLocalhostName(host)) {
             return makeLocalhostFallbackResult();
