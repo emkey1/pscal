@@ -1345,7 +1345,7 @@ static bool shellPipelineWriteBufferToPipe(const char *data, size_t len, int fd)
     return true;
 }
 
-static bool shellPipelineReadPipeToBuffer(int fd, char **out_data, size_t *out_size) {
+static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char **out_data, size_t *out_size) {
     const size_t kChunk = 4096;
     size_t capacity = 0;
     size_t size = 0;
@@ -1580,6 +1580,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     bool pushed_virtual_tty = false;
 #endif
+    bool need_spool = !pipeline_tail;
 
     if (!pipeline_head) {
         if (!ctx->spool_buffer) {
@@ -1640,7 +1641,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         }
     }
 
-    bool need_spool = !pipeline_tail;
     if (need_spool) {
         if (pipe(output_pipe) != 0) {
             runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));

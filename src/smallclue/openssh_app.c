@@ -74,7 +74,7 @@ static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char
     pscal_openssh_reset_progress_state();
     pscal_openssh_push_exit_context(&exitContext);
     int status;
-    if (setjmp(exitContext.env) == 0) {
+    if (sigsetjmp(exitContext.env, 0) == 0) {
         status = entry(argc, argv);
     } else {
         status = exitContext.exit_code;

@@ -6,7 +6,7 @@
 typedef void (*pscal_openssh_cleanup_fn)(int);
 
 typedef struct pscal_openssh_exit_context {
-    jmp_buf env;
+    sigjmp_buf env;
     int exit_code;
     pscal_openssh_cleanup_fn cleanup;
     struct pscal_openssh_exit_context *prev;

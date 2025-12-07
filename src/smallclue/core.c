@@ -813,18 +813,9 @@ static int smallclueKillCommandOriginal(int argc, char **argv) {
     return status;
 }
 
-#if defined(PSCAL_TARGET_IOS)
-static int smallclueKillCommand(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    fprintf(stderr, "kill: not implemented on iOS/iPadOS\n");
-    return 1;
-}
-#else
 static int smallclueKillCommand(int argc, char **argv) {
     return smallclueKillCommandOriginal(argc, argv);
 }
-#endif
 
 static int smallclueXargsCommand(int argc, char **argv) {
     smallclueResetGetopt();

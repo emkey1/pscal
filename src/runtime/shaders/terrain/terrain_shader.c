@@ -10,16 +10,6 @@
 #include <string.h>
 #include <ctype.h>
 
-#if defined(PSCAL_TARGET_IOS)
-static void terrainSetIdentity(float m[16]) {
-    if (!m) return;
-    for (int i = 0; i < 16; ++i) {
-        m[i] = 0.0f;
-    }
-    m[0] = m[5] = m[10] = m[15] = 1.0f;
-}
-#endif
-
 static float clampf(float value, float minValue, float maxValue) {
     if (value < minValue) return minValue;
     if (value > maxValue) return maxValue;

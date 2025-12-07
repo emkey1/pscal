@@ -105,7 +105,7 @@ cleanup_exit(int code)
 			handler(code);
 		}
 		g_pscal_openssh_ctx->exit_code = code;
-		longjmp(g_pscal_openssh_ctx->env, 1);
+		siglongjmp(g_pscal_openssh_ctx->env, 1);
 	}
 #ifdef PSCAL_TARGET_IOS
 	pscalRuntimeDebugLog("cleanup_exit without PSCAL context, terminating thread");

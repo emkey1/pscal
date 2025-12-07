@@ -994,6 +994,7 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     -Wno-deprecated-declarations
     -Wno-pointer-sign
     -Wno-unused-variable
+    -Wno-unused-function
     -Wno-string-compare)
 if(PSCAL_PLATFORM_IOS)
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
