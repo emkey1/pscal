@@ -104,7 +104,7 @@ final class TerminalKeyInputView: UITextView {
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.alignment = .center
-        stack.distribution = .fillEqually
+        stack.distribution = .fillProportionally
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -132,8 +132,9 @@ final class TerminalKeyInputView: UITextView {
         let right = makeButton("→", action: #selector(handleRight))
         let fslash = makeButton("/", action: #selector(handleFSlash))
         let dot = makeButton(".", action: #selector(handleDot))
+        let minus = makeButton("-", action: #selector(handleMinus))
 
-        [esc, ctrl, dot, fslash, up, down, left, right].forEach(stack.addArrangedSubview)
+        [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
 
         bar.addSubview(stack)
         
@@ -404,6 +405,10 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleDot() {
         onInput?(".")
+    }
+
+    @objc private func handleMinus() {
+        onInput?("-")
     }
     
     @objc private func handlePasteCommand() {

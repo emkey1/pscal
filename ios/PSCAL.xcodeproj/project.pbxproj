@@ -1085,7 +1085,7 @@ fi
 			<string>Fix Tool Runner Permissions</string>
 			<key>outputPaths</key>
 			<array>
-				<string>$(TARGET_BUILD_DIR)/fix_tool_runner_permissions.stamp</string>
+				<string>$(DERIVED_FILE_DIR)/fix_tool_runner_permissions.stamp</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -1098,7 +1098,9 @@ runner="${CONFIGURATION_BUILD_DIR}/${FULL_PRODUCT_NAME}/pscal_tool_runner"
 if [ -f "${runner}" ]; then
     /bin/rm -f "${runner}" || true
 fi
-touch "${TARGET_BUILD_DIR}/fix_tool_runner_permissions.stamp"
+stamp="${DERIVED_FILE_DIR}/fix_tool_runner_permissions.stamp"
+/bin/mkdir -p "${DERIVED_FILE_DIR}"
+touch "${stamp}"
 </string>
 		</dict>
 		<key>5F1AA0012EC6F00100000001</key>
