@@ -24,6 +24,7 @@ struct TerminalView: View {
                     fontSettings: fontSettings,
                     focusAnchor: $focusAnchor
                 )
+                // We must frame the content view to the available size to ensure it fills the space
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
 
@@ -130,6 +131,8 @@ struct TerminalContentView: View {
                     .background(Color(.secondarySystemBackground))
             }
         }
+        // Align to top so that if we have extra vertical space (e.g. fractional line height)
+        // it appears at the bottom.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, Self.topPadding)
         .background(Color(fontSettings.backgroundColor))
@@ -182,7 +185,12 @@ struct TerminalContentView: View {
         let showingStatus = runtime.exitStatus != nil
         let font = fontSettings.currentFont
 
-        // Size from GeometryReader is already keyboard-safe (UIKit host enforces it).
+        // GeometryReader reports the size of the view.
+        // If the view is respecting safe area (default), this size is the safe area size.
+        // In that case, proxy.safeAreaInsets will be zero (relative to the view).
+        // If the view was ignoring safe area, proxy.size would be full screen and insets non-zero.
+        // In either case, passing both to calculateGrid handles it correctly (size - insets).
+
         let effectiveHeight = max(1, availableSize.height)
         let sizeForMetrics = CGSize(width: availableSize.width, height: effectiveHeight)
 
@@ -192,42 +200,16 @@ struct TerminalContentView: View {
             topPadding: Self.topPadding,
             showingStatus: showingStatus,
             font: font
-        ) ?? TerminalGeometryCalculator.fallbackMetrics(
-            showingStatus: showingStatus,
-            font: font
         ) else {
+            // If calculation failed (e.g. 0 size), use fallback.
+            let fallback = TerminalGeometryCalculator.fallbackMetrics(showingStatus: showingStatus, font: font)
+            runtime.updateTerminalSize(columns: fallback.columns, rows: fallback.rows)
             return
         }
 
         #if DEBUG
         if lastLoggedMetrics != metrics {
-            let grid = TerminalGeometryCalculator.calculateGrid(
-                for: sizeForMetrics,
-                font: font,
-                safeAreaInsets: UIEdgeInsets(
-                    top: safeAreaInsets.top,
-                    left: safeAreaInsets.leading,
-                    bottom: safeAreaInsets.bottom,
-                    right: safeAreaInsets.trailing
-                ),
-                topPadding: Self.topPadding,
-                horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
-                showingStatus: showingStatus
-            )
-            let char = TerminalGeometryCalculator.characterMetrics(for: font)
-            terminalViewLog(
-                String(
-                    format: "[TerminalView] available %.1fx%.1f usable %.1fx%.1f -> rows=%d cols=%d char=%.1fx%.1f",
-                    availableSize.width,
-                    availableSize.height,
-                    grid.width,
-                    grid.height,
-                    metrics.rows,
-                    metrics.columns,
-                    char.width,
-                    char.lineHeight
-                )
-            )
+            print("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
             lastLoggedMetrics = metrics
         }
         #endif
